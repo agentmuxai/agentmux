@@ -502,12 +502,23 @@ impl SubagentWatcher {
     /// RPC firing and resolving) — the caller should treat that as a no-op,
     /// not an error.
     pub fn set_display_name(&self, agent_id: &str, display_name: &str) -> bool {
+        // Captured alongside the mutation itself (not re-looked-up after
+        // unlocking) — this is the exact moment a NAME-based grouping key is
+        // born, so the fields that decide which group it lands in
+        // (workflow_id, parent_block_id) need to be logged from the same
+        // locked read that set it, not a racy re-fetch.
+        let mut found_context: Option<(String, String, Option<String>)> = None;
         let found = {
             let mut sessions = self.sessions.lock().unwrap();
             let mut found = false;
             for session in sessions.values_mut() {
                 if let Some(state) = session.subagents.get_mut(agent_id) {
                     state.info.display_name = Some(display_name.to_string());
+                    found_context = Some((
+                        state.info.parent_block_id.clone(),
+                        state.info.session_id.clone(),
+                        state.info.workflow_id.clone(),
+                    ));
                     found = true;
                     break;
                 }
@@ -515,6 +526,17 @@ impl SubagentWatcher {
             found
         };
         // Mutex released here — broadcast outside the lock
+
+        if let Some((parent_block_id, session_id, workflow_id)) = &found_context {
+            tracing::info!(
+                agent_id = %agent_id,
+                display_name = %display_name,
+                parent_block_id = %parent_block_id,
+                session_id = %session_id,
+                workflow_id = ?workflow_id,
+                "subagent display_name resolved"
+            );
+        }
 
         if found {
             let named_event = WSEventType {
@@ -568,6 +590,25 @@ impl SubagentWatcher {
             let session_dir = entry.path().join(session_id);
             let subagents_dir = session_dir.join("subagents");
             if subagents_dir.is_dir() {
+                // Correlates a pane (re)open with the session it's backfilling —
+                // needed to tell "this session was backfilled once" apart from
+                // "this session was backfilled repeatedly under different
+                // parent_block_ids" (a subagent's parent_block_id is fixed at
+                // first discovery, see process_jsonl_change; a mismatch here is
+                // the mechanism a NAME/grouping-dedup bug would leave a trail in).
+                //
+                // reagent (PR #2143 round 1): info!, not debug! — the default
+                // production EnvFilter (agentmux-srv/src/main.rs, "agentmuxsrv=
+                // info,info") drops debug-level lines unless RUST_LOG=debug is
+                // already set, which would make this diagnostic invisible in a
+                // normally-running srv, defeating the point of adding it.
+                tracing::info!(
+                    agent = %parent_agent,
+                    parent_block_id = %parent_block_id,
+                    session_id = %session_id,
+                    dir = %subagents_dir.display(),
+                    "backfilling session subagents on pane (re)open"
+                );
                 self.scan_subagents_dir(parent_agent, parent_block_id, &subagents_dir);
                 self.reconcile_stale_subagents(parent_block_id, session_id);
                 return; // session ids are unique — no need to keep scanning
@@ -603,6 +644,15 @@ impl SubagentWatcher {
                 .map(|s| s.turn_active)
                 .unwrap_or(true);
         if parent_turn_active {
+            // reagent (PR #2143 round 1): info!, not debug! — see the note on
+            // the backfill log above; the default production filter drops
+            // debug-level lines, which would make this and the pass-summary
+            // log below invisible in a normally-running srv.
+            tracing::info!(
+                parent_block_id = %parent_block_id,
+                session_id = %session_id,
+                "reconcile_stale_subagents: parent turn active (or unknown) — nothing to reconcile"
+            );
             return;
         }
 
@@ -618,13 +668,36 @@ impl SubagentWatcher {
         // be genuinely active, so only reconcile entries this block itself
         // owns (mirrors unwatch_agent's own parent-scoped filter). Reagent
         // P1 on PR #2131.
+        let mut reconciled = 0usize;
         for state in session.subagents.values_mut() {
             if state.info.parent_block_id != parent_block_id {
                 continue;
             }
             if state.info.status == SubagentStatus::Active {
                 state.info.status = SubagentStatus::Abandoned;
+                reconciled += 1;
+                // Every field a NAME-based grouping/dedup bug needs to
+                // reconstruct offline: which subagent, which workflow (if
+                // any), which display_name it had already resolved (grouping
+                // is keyed on this), and which block/session it's bound to.
+                tracing::info!(
+                    agent_id = %state.info.agent_id,
+                    parent_block_id = %parent_block_id,
+                    session_id = %session_id,
+                    workflow_id = ?state.info.workflow_id,
+                    display_name = ?state.info.display_name,
+                    slug = %state.info.slug,
+                    "subagent reconciled: active -> abandoned (parent turn ended)"
+                );
             }
+        }
+        if reconciled > 0 {
+            tracing::info!(
+                parent_block_id = %parent_block_id,
+                session_id = %session_id,
+                reconciled,
+                "reconcile_stale_subagents: pass complete"
+            );
         }
     }
 
@@ -716,6 +789,32 @@ impl SubagentWatcher {
                 });
 
             let is_new = !session.subagents.contains_key(&agent_id);
+            // A subagent's parent_block_id is stamped once, at first
+            // discovery (below), and never updated on later re-scans of the
+            // same session — see the entry's doc comment. If this session is
+            // being (re)scanned under a DIFFERENT block_id than the one this
+            // subagent was originally bound to (e.g. the pane was reopened
+            // under a new block), the subagent stays attributed to its
+            // original, now possibly-stale parent_block_id. That's a direct
+            // candidate mechanism for a subagent silently falling outside
+            // the block reconcile_stale_subagents/buildTree() expect it
+            // under — log it so it's visible without needing to reproduce.
+            if let Some(existing) = session.subagents.get(&agent_id) {
+                if existing.info.parent_block_id != parent_block_id {
+                    // reagent (PR #2143 round 1, P1): info!, not debug! — this
+                    // is the single most likely diagnostic trail for the
+                    // duplication bug this PR exists to help find; at debug!
+                    // it would be silently dropped by the default production
+                    // filter and never actually appear when it matters.
+                    tracing::info!(
+                        agent_id = %agent_id,
+                        session_id = %session_id,
+                        existing_parent_block_id = %existing.info.parent_block_id,
+                        rescanned_parent_block_id = %parent_block_id,
+                        "subagent re-observed under a different parent_block_id than its original — parent_block_id NOT updated"
+                    );
+                }
+            }
             let state = session.subagents.entry(agent_id.clone()).or_insert_with(|| {
                 SubagentState {
                     info: SubagentInfo {
@@ -812,6 +911,9 @@ impl SubagentWatcher {
                 agent_id = %agent_id,
                 slug = %info_snapshot.slug,
                 parent = %parent_agent,
+                parent_block_id = %parent_block_id,
+                session_id = %session_id,
+                workflow_id = ?info_snapshot.workflow_id,
                 "subagent spawned"
             );
         }
@@ -861,6 +963,9 @@ impl SubagentWatcher {
             tracing::info!(
                 agent_id = %agent_id,
                 total_events = info_snapshot.event_count,
+                parent_block_id = %parent_block_id,
+                session_id = %session_id,
+                workflow_id = ?info_snapshot.workflow_id,
                 "subagent completed"
             );
         }

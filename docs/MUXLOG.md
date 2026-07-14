@@ -19,6 +19,7 @@ muxlog              # follow the most-recently-active host log
 muxlog srv          # follow the active sidecar log
 muxlog bridge       # startup-handshake trace — debug "Can't reconnect" loops
 muxlog errors       # just the ERROR/WARN lines across host + sidecar
+muxlog swarm        # subagent/swarm lifecycle trace — spawn/name/status, debug duplicate groups
 muxlog help         # full usage
 ```
 
@@ -80,6 +81,7 @@ muxlog srv --since 2026-06-15T23:30 cat        # a time window
 | `muxlog mem` (alias `doctor`) | system **commit-free** + derived pressure level (the OOM-relevant ceiling, not physical RAM) + the count and footprint of live AgentMux processes — makes multi-instance commit pressure visible before the cliff (`SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16` §5.G) |
 | `muxlog errors` | ERROR + WARN across the active host and sidecar |
 | `muxlog bridge` | the startup handshake — `Loading URL`, `Injected IPC …`, `backend-ready`, `window.api`, `Bootstrap failed` — correlated in time, so a reconnect loop is obvious at a glance |
+| `muxlog swarm` | subagent/swarm lifecycle — spawn, `display_name` resolution (`subagent.GenerateName`), status transitions (`reconcile_stale_subagents`' active→abandoned pass), and the `parent_block_id`/`session_id`/`workflow_id` each event carries — filters the sidecar log to `subagent_watcher.rs`'s tracing target so a duplicate-group or stuck-status report is diagnosable from logs alone (srv-side only; there's no host-side subagent logging to combine in) |
 
 ---
 
