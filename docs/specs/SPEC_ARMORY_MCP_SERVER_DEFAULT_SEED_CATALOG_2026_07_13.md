@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-13
 **Author:** AgentX
-**Type:** Research + proposal. No code shipped yet.
+**Type:** Research + proposal. Phase 1 (Tier A backend seed) implemented in this PR — see §5/§8 status note.
 **Purpose:** The Armory's **MCP Servers** tab is empty on every fresh install and stays empty until a user hand-types a server or clicks through the one-entry "Browse catalog" picker. This spec researches the current seeding gap, surveys the external MCP server ecosystem for what's worth seeding, and proposes a two-tier architecture — real DB-seeded rows for safe/local servers, catalog-picker entries for anything needing a credential — driven by a hard constraint discovered during this research: **every `is_global` MCP server is auto-injected into every agent's `.mcp.json` at launch, with no per-agent opt-in and no "disabled" flag.**
 
 ---
@@ -67,7 +67,6 @@ Because §2 established that global = auto-on-for-everyone, Tier A is deliberate
 
 | Server | Purpose | Command | Transport | Why safe to auto-enable |
 |---|---|---|---|---|
-| **Filesystem** | Sandboxed read/write/search within allowed dirs | `npx -y @modelcontextprotocol/server-filesystem <dir>` | stdio | No creds; dir allowlist is the only config, defaults to the agent's own working directory |
 | **Git** | Local repo read/search/diff/log operations | `uvx mcp-server-git` | stdio | No creds; operates on whatever repo the agent's cwd is in |
 | **Fetch** | Fetch + convert a web page to markdown | `npx -y @modelcontextprotocol/server-fetch` | stdio | No creds; outbound-only, no stored state |
 | **Sequential Thinking** | Structured, revisable step-by-step reasoning scratchpad | `npx -y @modelcontextprotocol/server-sequential-thinking` | stdio | No creds, no I/O outside the process itself |
@@ -75,9 +74,12 @@ Because §2 established that global = auto-on-for-everyone, Tier A is deliberate
 | **Playwright** | Browser automation via accessibility-tree snapshots (Microsoft-official) | `npx @playwright/mcp@latest` | stdio | No creds; downloads a browser binary on first use but needs no secret |
 | **Context7** | Live, version-specific library docs — reduces hallucinated APIs (Upstash) | `npx -y @upstash/context7-mcp` | stdio | No key required for the free tier; the closest thing to a de-facto standard for coding-agent doc lookup found in this research |
 
-All seven are `npx`/`uvx`-launched, meaning the *seed row* itself needs no network call — only the first real invocation triggers a package fetch, same cold-start cost every hand-typed stdio server already has today.
+All six are `npx`/`uvx`-launched, meaning the *seed row* itself needs no network call — only the first real invocation triggers a package fetch, same cold-start cost every hand-typed stdio server already has today.
+
+**Implemented in this PR:** `agentmux-srv/src/config/starter-mcp-servers.json` (the six-entry manifest above), `agentmux-srv/src/backend/mcp_seed.rs` (seed logic, mirrors `skill_seed.rs`), `agentmux-srv/src/migrations/m0016_seed_starter_mcp_servers.rs` (run-once-per-channel gating via the migration framework, mirrors `m0015_seed_starter_skills.rs`) — see §5 for why this shape was chosen over the schema-migration design this section originally proposed.
 
 **Explicitly excluded from Tier A, with reasons:**
+- **Filesystem** — credential-free, but requires an allowlisted directory as a CLI arg with no environment-agnostic default (§9 open question 3, still open) — deferred rather than shipped with a broken or overly-permissive default.
 - **SQLite** (reference server) — has a known, unpatched SQL-injection / prompt-injection vector; Anthropic declined to fix it and archived the server rather than patch it. Never seed this by default.
 - **Puppeteer** — archived/no-security-fixes; superseded by Playwright above. Don't seed a deprecated server when a maintained equivalent exists.
 - **Everything** / **Time** (reference servers) — real, maintained, but demo/utility-grade rather than "every coding session benefits from this." Left as easy manual adds, not seeded.
@@ -101,25 +103,25 @@ Six entries, matching the scale of Tier A. `Postgres` uses the actively-maintain
 
 ---
 
-## 5. Seed mechanism — revised to match the sibling Skills-seeding convention
+## 5. Seed mechanism — implemented, mirroring the shipped Skills-seeding precedent exactly
 
-**This section's first draft proposed a schema migration** (`is_seeded`/`user_hidden` columns on `db_mcp_servers`) plus a `reseed_if_needed`-style engine mirroring `agent_seed.rs` exactly. Revised after reading `SPEC_ARMORY_PHASE5_CONSOLIDATION_AND_SKILL_SEEDING_2026_07_13.md` §4.3, which independently solved the identical "empty global Armory catalog" problem for Skills the same day and landed on something lighter — two independent research passes converging on avoiding the heavier design is itself a signal worth taking. This spec adopts that shape rather than the original draft:
+**This section's first draft proposed a schema migration** (`is_seeded`/`user_hidden` columns on `db_mcp_servers`) plus a `reseed_if_needed`-style engine mirroring `agent_seed.rs` exactly. By the time this spec's Phase 1 was implemented, `SPEC_ARMORY_PHASE5_CONSOLIDATION_AND_SKILL_SEEDING_2026_07_13.md`'s own Skills-seeding PR had already shipped (`skill_seed.rs`, `migrations/m0015_seed_starter_skills.rs`) — through two rounds of reagent findings that settled on a specific, battle-tested shape. This spec's implementation mirrors that shape exactly rather than the original draft above:
 
-- **No schema migration.** No new columns on `db_mcp_servers`. A seeded row is, after the one-time seed runs, indistinguishable from a user-created one — same as the Skills design. This sidesteps the entire "don't resurrect a user-deleted seeded row" problem `agent_seed.rs`'s `is_seeded`/`user_hidden` pair exists to solve (§3): if there's no recurring reseed trigger, there's nothing that could resurrect anything.
-- **A one-time seed, not a recurring reseed.** Gate on the same condition the Skills spec proposes: seed only if `db_mcp_servers WHERE is_global = 1` is empty **and** this is a fresh install (reuse whatever "fresh install" signal already exists elsewhere in the codebase — e.g. however first-run/default-channel state is detected today — rather than inventing a second one). A user who deletes a seeded server later just has one fewer server; nothing ever tries to put it back. This is a real behavior tradeoff versus the original draft's reseed-on-manifest-change (a future AgentMux release that improves the seeded `filesystem` command, say, won't retroactively reach existing installs) — accepted here for consistency with the sibling spec and because it's simpler and strictly safer; §9 keeps a path open to add versioned reseeding later if that tradeoff turns out to matter in practice.
-- **Reuse the `config/*.json` static-file convention**, not a Rust-`include_str!` manifest: new `agentmux-srv/src/config/starter-mcp-servers.json`, an array of `{name, transport, config}` objects (no `id`/`is_global`/timestamps — assigned at insert time, mirroring the Skills spec's §4.3 point 1 exactly).
-- **Insert via the existing validated path**, not hand-rolled SQL: `mcp_server_upsert_unique_global` (`mcp_servers.rs:255-282`) already enforces catalog-wide name uniqueness and sets `is_global = 1` — call it once per manifest entry, warn-and-skip on a name collision (the `seed_memories` precedent, `agent_seed.rs:278-291`) rather than aborting the whole batch, so a user who already hand-created a server named `filesystem` doesn't get it silently clobbered.
+- **No new columns on `db_mcp_servers`.** Run-once gating uses the migration framework's *existing* generic `db_migrations` tracking table (already used by every migration for exactly this purpose), not a bespoke `is_seeded` flag on this table. A seeded row is, after the seed runs, indistinguishable from a user-created one.
+- **A migration, not a "gate on empty" runtime check.** `agentmux-srv/src/migrations/m0016_seed_starter_mcp_servers.rs` — `MigrationScope::Channel`, runs at most once per channel, ever, tracked in `db_migrations`. This is *stronger* than "gate on `is_global` count == 0": that check can't distinguish "never seeded" from "seeded, then the user deleted every starter server on purpose" and would silently resurrect the defaults on a later restart — exactly the bug the Skills-seeding PR hit and fixed (reagent P2, PR #2141 round 2, documented in `skill_seed.rs`'s own doc comment). Once `0016_seed_starter_mcp_servers` is marked applied, it never runs again for that channel regardless of what the user does to the catalog afterward.
+- **Self-heals against a name collision instead of hard-failing.** `up()` calls `any_starter_mcp_server_name_exists` first (`mcp_seed.rs`) and treats a collision as "already seeded" rather than attempting an insert that would hit `mcp_server_upsert_unique_global`'s uniqueness check and permanently fail the migration on every subsequent boot (mirrors reagent P1, PR #2144, on the Skills equivalent).
+- **All-or-nothing insert with compensating rollback.** `mcp_server_upsert_unique_global` commits each row in its own transaction (not `StoreTx`-composable), so a mid-loop failure can't be rolled back by the database itself; `seed_starter_mcp_servers` deletes every row it inserted so far before propagating the error, so a failed migration (never marked applied, retried next boot) doesn't leave stranded rows that would then collide with themselves on retry (mirrors reagent P2, PR #2141 round 1).
+- **Reuses the `config/*.json` static-file convention**: `agentmux-srv/src/config/starter-mcp-servers.json`, an array of `{name, transport, config}` objects (no `id`/`is_global`/timestamps — assigned at insert time by `mcp_seed.rs`).
+- **Inserts via the existing validated path**, not hand-rolled SQL: `mcp_server_upsert_unique_global` (`mcp_servers.rs:255-282`).
 
 ```json
-[
-  { "name": "filesystem", "transport": "stdio",
-    "config": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem"] } }
-]
+{ "name": "git", "transport": "stdio",
+  "config": { "command": "uvx", "args": ["mcp-server-git"] } }
 ```
 
-**Open question, shared verbatim with the sibling spec's §4.3:** should this seed run unconditionally on every fresh install, or be opt-in (e.g. a "load starter servers" action in the Armory MCP tab's empty state)? Unconditional matches "pre-populate" and is simpler; an unconditional silent DB write on first launch is a bigger behavioral change than a button click. Flagging as a real product decision rather than assuming either default — and note this decision should almost certainly be made **once, for both catalogs together** (Skills and MCP servers), not independently per spec, since a user's expectation of "does the Armory auto-populate itself or not" should be consistent across tabs.
+This resolves the sibling spec's own open question ("unconditional on fresh install, or opt-in?") on the MCP side: **unconditional**, via the migration framework, consistent with whatever the Skills-seeding PR ultimately shipped for that same question — a user's expectation of "does the Armory auto-populate itself" is consistent across both tabs.
 
-**Frontend:** no new fields needed on `McpServer`/`McpServerListItem`/`McpServerCatalogItem` under this revised design — a seeded row uses the exact same edit/delete affordances `mcp-manager.tsx` already has for any global row.
+**Frontend:** no changes needed. A seeded row uses the exact same edit/delete affordances `mcp-manager.tsx` already has for any global row.
 
 ---
 
@@ -128,7 +130,7 @@ Six entries, matching the scale of Tier A. `Postgres` uses the actively-maintain
 - **No live catalog sync from an external registry.** The official MCP Registry (`registry.modelcontextprotocol.io`) is metadata-only and still preview/API-frozen; directories like Smithery/Glama/mcp.so trade curation for coverage and, in Smithery's case, add a hosting-infra trust surface (a real path-traversal incident occurred there in 2025, patched within days). A hardcoded, human-curated manifest — reviewed the same way `agent-seed.json` already is — is the right v1 shape; revisit only if the manifest becomes a maintenance burden at meaningfully larger scale.
 - **No cross-provider `.mcp.json` translation.** `build_mcp_config_from_refs` (`agentmux-srv/src/backend/agent_config.rs:320-395`) writes exactly one `.mcp.json` per agent regardless of `agent.provider` — this is Claude Code's native config format. `cli-catalog.ts` claims `mcpSupport` for Codex/Gemini/Qwen/etc., but those CLIs' real MCP config lives elsewhere (e.g. Codex CLI reads `~/.codex/config.toml`, not a project `.mcp.json`) and nothing in this codebase special-cases that today. Seeding more servers into `.mcp.json` doesn't make this gap worse, but it doesn't fix it either — flagged here so it isn't mistaken for in-scope.
 - **No secret-templating in `McpServer.config`.** Tier B staying catalog-only (§4) is a direct consequence of this — there is no mechanism today for a seeded row's `config` to reference an identity account's stored credential rather than a literal string. Building one is a real, separable feature (and would upgrade Tier B from "picker, user pastes a token" to "picker, user picks an already-connected account") but is out of scope for making the list non-empty.
-- **Version pinning is out of scope for Tier A.** Unlike the creative-connector spec's `uvx ableton-mcp@1.2.0`-style pinning recommendation (relevant there because those servers carry real code-exec risk against a user's creative-app state), Tier A's seven servers are Anthropic/Microsoft/Upstash-maintained references with a low-risk, well-scoped tool surface; `npx -y <pkg>@latest`-style resolution is consistent with how every other hand-typed stdio server in this codebase already works. Worth revisiting only if a Tier A server ever ships a breaking change that surprises users.
+- **Version pinning is out of scope for Tier A.** Unlike the creative-connector spec's `uvx ableton-mcp@1.2.0`-style pinning recommendation (relevant there because those servers carry real code-exec risk against a user's creative-app state), Tier A's servers are Anthropic/Microsoft/Upstash-maintained references with a low-risk, well-scoped tool surface; `npx -y <pkg>@latest`-style resolution is consistent with how every other hand-typed stdio server in this codebase already works. Worth revisiting only if a Tier A server ever ships a breaking change that surprises users.
 
 ---
 
@@ -146,7 +148,7 @@ Researched mid-2026 state of the MCP ecosystem, for anyone extending either tier
 
 ## 8. Phased plan
 
-**Phase 1 — Tier A backend seed.** `agentmux-srv/src/config/starter-mcp-servers.json` with the 7 Tier A entries, a one-time seed step gated on "no global MCP servers exist yet + fresh install" per §5, inserting via `mcp_server_upsert_unique_global`. No schema change, no new frontend fields. This alone makes the Armory non-empty by default and every new agent launch immediately capable of local file/git/fetch/reasoning/memory/browser/doc-lookup tool use with zero user setup. Should land alongside (or immediately after) the sibling spec's Skills-seeding PR B, sharing whatever "fresh install" gate and unconditional-vs-opt-in decision (§5) that PR settles on, rather than each spec answering it independently.
+**Phase 1 — Tier A backend seed. Implemented in this PR.** `agentmux-srv/src/config/starter-mcp-servers.json` with the 6 Tier A entries, a migration (`m0016_seed_starter_mcp_servers`, run-once-per-channel via `db_migrations`) inserting via `mcp_server_upsert_unique_global`. No schema change, no new frontend fields — see §5. This alone makes the Armory non-empty by default and every new agent launch immediately capable of local git/fetch/reasoning/memory/browser/doc-lookup tool use with zero user setup.
 
 **Phase 2 — Tier B catalog expansion.** Add the six §4 entries to `MCP_PRELOAD_CATALOG`, following the exact shape the Ableton entry already established (`prereqNote` explaining what credential is needed and where to get it, `docsUrl` pointing at the upstream project). No schema change needed for this phase — it's purely additive to an existing, already-shipped mechanism.
 
@@ -156,7 +158,7 @@ Researched mid-2026 state of the MCP ecosystem, for anyone extending either tier
 
 ## 9. Open questions
 
-1. **Is one-time-only seeding (§5) the right call long-term?** It's simpler and strictly safer than reseed-on-manifest-change today, but it also means a future fix to a Tier A entry's command/args never reaches an install that seeded before the fix shipped. If that turns out to matter in practice, the `is_seeded`/`user_hidden` + versioned-reseed design in §3 is still there to adopt later — not proposed for v1, but not thrown away either.
+1. **Is run-once-forever seeding (§5) the right call long-term?** It's simpler and strictly safer than reseed-on-manifest-change, but it also means a future fix to a Tier A entry's command/args never reaches a channel that already ran `m0016`. If that turns out to matter in practice, the `is_seeded`/`user_hidden` + versioned-reseed design in §3 is still there to adopt later as a new migration — not proposed for v1, but not thrown away either.
 2. **Should Tier A's seed be skippable at first-run** (e.g. for a locked-down/offline environment where even `npx -y <pkg>` package resolution on first invocation is undesirable)? `agent_seed.rs` has no such escape hatch for agent templates today, so the precedent is "no," but MCP servers do outbound network I/O on first real use in a way agent templates don't — worth a explicit product decision rather than silently inheriting the agent-seed precedent.
 3. **Filesystem server's default allowed-directory.** `@modelcontextprotocol/server-filesystem` takes an allowlisted directory as a CLI arg (§4's table shows `<dir>` unfilled) — seeding a literal path is environment-specific and can't be baked into a static manifest the way the other six Tier A commands can. Needs either a per-agent-cwd default computed at config-build time (extending `build_mcp_config_from_refs` to substitute a placeholder) or shipping this one entry with an empty/unset arg and a `prereqNote`-equivalent nudging the user to fill it in — decide before Phase 1 ships this specific entry.
 4. **Filesystem's directory arg is the one Tier A entry that can't ship as a static manifest value without answering question 3 first** — the other six need no per-install customization, this one does. If question 3 lands on "ship it anyway with an empty arg," confirm the resulting server fails safely (a probe error the user can see, not a silent no-op) rather than, worse, defaulting to some unexpectedly broad directory.
