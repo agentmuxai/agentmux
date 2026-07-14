@@ -1,5 +1,16 @@
 # AgentMux Version History
 
+## 0.53.5 — 2026-07-14
+
+- feat(srv): swarm/subagent lifecycle diagnostics (muxlog swarm)
+- fix(srv): move starter Skills seeding into migrations to stop resurrecting deleted skills
+- fix(swarm): disambiguate subagent row labels when slug is shared across a batch
+- fix(tabbar): tab reorder drag never initiates — nested draggable=false blocked pragmatic-dnd
+- fix(browser-pane): clip the pane-wrapper HWND too so overlay menus over panes accept hover/click on Windows
+- feat(mcp): seed a curated set of credential-free MCP servers into the Armory catalog
+- fix(linux): gate startup window-show/splash-dismiss on real first paint, not load-complete
+
+
 ## 0.53.4 — 2026-07-13
 
 - fix(pane): hole-punch mask click-through — CALayer masking doesn't affect AppKit hit testing
