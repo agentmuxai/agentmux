@@ -251,7 +251,6 @@ function Tab(props: TabProps): JSX.Element {
                     "tab-colored": !!tabColor(),
                 })}
                 style={tabColor() ? ({ "--tab-color": tabColor() } as JSX.CSSProperties) : undefined}
-                draggable={false}
                 onClick={props.onSelect}
                 onContextMenu={handleContextMenu}
                 data-tab-id={props.id}
