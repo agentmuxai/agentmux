@@ -349,6 +349,7 @@ const HELP = `muxlog — AgentMux log viewer
   muxlog mem                         system commit-free + pressure + live AgentMux procs
   muxlog errors                      ERROR/WARN across host+srv (active instance)
   muxlog bridge                      startup-handshake trace (debug reconnect loops)
+  muxlog swarm                       subagent/swarm lifecycle trace (spawn/name/status, debug duplicate groups)
 
 Options (any position):
   -i <substr>   pick the instance whose log path/branch/version matches <substr>
@@ -374,6 +375,23 @@ function main() {
             const f = discover(tgt).filter((e) => !opt.instance || e.file.toLowerCase().includes(opt.instance.toLowerCase()))[0];
             if (f) { console.log(`\n=== ${tgt}: ${f.file} ===`); printLastLines(f.file, opt.n, opt, true); }
         }
+        return;
+    }
+    if (cmd === "swarm") {
+        // Subagent/swarm lifecycle trace: spawn, display_name resolution
+        // (subagent.GenerateName), status transitions (including
+        // reconcile_stale_subagents' active->abandoned pass), and the
+        // parent_block_id a subagent is bound to on backfill — the fields a
+        // NAME-based grouping/dedup bug in the Swarm view needs, without
+        // wading through the (usually much larger) agent-transcript log.
+        // All emitted srv-side from subagent_watcher.rs's tracing target
+        // (`agentmux_srv::backend::subagent_watcher`, rendered as
+        // `srv:subagent_watcher` by shortTarget) — there is no host-side
+        // subagent logging to combine in (checked: agentmux-cef has none).
+        opt.target = opt.target || "subagent_watcher";
+        const f = resolveFile("srv", opt);
+        console.log(`=== swarm trace: ${f} ===`);
+        printLastLines(f, opt.n, opt, true);
         return;
     }
     if (cmd === "bridge") {
