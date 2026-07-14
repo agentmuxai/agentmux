@@ -53,7 +53,7 @@ mod handlers;
 pub(crate) mod helpers;
 mod lifecycle;
 mod display;
-mod navigation;
+pub(crate) mod navigation;
 mod crash_recovery;
 mod recovery_pages;
 #[cfg(target_os = "windows")]

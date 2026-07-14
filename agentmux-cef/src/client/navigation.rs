@@ -9,6 +9,160 @@ use cef::*;
 
 use super::AgentMuxHandler;
 
+#[cfg(target_os = "linux")]
+use std::sync::Arc;
+#[cfg(target_os = "linux")]
+use crate::state::AppState;
+
+/// Linux startup white-flash fix (docs/specs/SPEC_LINUX_STARTUP_PAINT_GATING_2026_07_13.md).
+///
+/// Bound on how long the real window + native splash can stay hidden/up
+/// waiting for the frontend's first-paint signal before we show anyway.
+///
+/// Empirically (2026-07-14, verification run on the dev machine, a
+/// resource-shared sandbox running several concurrent CEF instances) the real
+/// double-rAF signal for the main window landed ~2.08s after `on_load_end`,
+/// and pool-window prewarms (unaffected by this gate, so this is a baseline
+/// reading of the environment's compositor-first-frame latency, not an
+/// artifact of the gate itself) landed 1.36-1.84s out. An earlier 1500ms cap
+/// fired *before* that real signal, silently degrading this fix to "always
+/// show after a fixed 1.5s delay" — strictly better than the original
+/// immediate-show bug, but not the intended "wait for real paint" behavior.
+/// Set well above the observed worst case so the real signal wins in
+/// practice; this only matters as a backstop against a genuinely stalled
+/// renderer (crashed JS, rAF never firing at all).
+#[cfg(target_os = "linux")]
+const PAINT_GATE_SAFETY_TIMEOUT_MS: i64 = 4000;
+
+/// Monotonic arm counter for the Linux paint gate. Each `on_load_end` call
+/// that (re-)arms a label's gate gets a fresh epoch; its safety-net timeout
+/// task captures that epoch and only acts if it's still current when the
+/// timeout fires (see `reveal_gated_window`). Mirrors the identical
+/// stale-timeout guard in `browser_pane::auth` (`NEXT_EPOCH`/`Entry::epoch`).
+#[cfg(target_os = "linux")]
+static PAINT_GATE_NEXT_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Reveal (show + focus the real window, dismiss the native splash) once —
+/// whichever of the real `report_first_paint` IPC signal or the safety-net
+/// timeout fires first wins; the other becomes a no-op via the
+/// `linux_paint_gate_pending` membership check.
+///
+/// `expected_epoch`: `None` for the real-signal path (always reveal whatever
+/// is currently armed for `label` — a stale signal from a torn-down document
+/// can't fire; CEF cancels pending rAF/timers on navigation). `Some(epoch)`
+/// for the safety-timeout path — reveals only if `label`'s current arm is
+/// still the one this specific timeout was scheduled for; if `on_load_end`
+/// re-armed the gate since (reload/retry mid-startup), this stale timeout is
+/// a no-op instead of revealing the window ahead of the *current*
+/// navigation's real paint (docs/specs/SPEC_LINUX_STARTUP_PAINT_GATING_2026_07_13.md,
+/// reagent PR #2151 review).
+///
+/// Must run on the CEF UI thread.
+#[cfg(target_os = "linux")]
+pub(crate) fn reveal_gated_window(
+    state: &Arc<AppState>,
+    label: &str,
+    reason: &'static str,
+    expected_epoch: Option<u64>,
+) {
+    let armed_at = {
+        let mut pending = state.linux_paint_gate_pending.lock();
+        match pending.get(label) {
+            Some(&(armed_at, epoch)) => {
+                if expected_epoch.is_some_and(|expected| expected != epoch) {
+                    // A newer on_load_end call re-armed this label after this
+                    // timeout was scheduled — the newer arm's own timeout (or
+                    // the real signal) owns the reveal now.
+                    return;
+                }
+                pending.remove(label);
+                armed_at
+            }
+            // Already revealed by the other path, or never armed (e.g. a pool
+            // window — those don't go through this gate at all).
+            None => return,
+        }
+    };
+    tracing::info!(
+        target: "startup-paint",
+        label = %label,
+        reason,
+        elapsed_ms = armed_at.elapsed().as_millis() as u64,
+        "[startup-paint] revealing gated window"
+    );
+    if let Ok(path) = std::env::var("AGENTMUX_SPLASH_READY_FILE") {
+        if !path.is_empty() {
+            let _ = std::fs::write(&path, b"ready");
+        }
+    }
+    let Some(mut browser) = state.get_browser(label) else { return };
+    if let Some(bv) = browser_view_get_for_browser(Some(&mut browser)) {
+        if let Some(window) = bv.window() {
+            if window.is_visible() == 0 {
+                window.show();
+                if let Some(host) = browser.host() {
+                    host.set_focus(1);
+                }
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+wrap_task! {
+    struct PaintGateRevealTask {
+        state: Arc<AppState>,
+        label: String,
+        reason: &'static str,
+        expected_epoch: Option<u64>,
+    }
+    impl Task { fn execute(&self) {
+        reveal_gated_window(&self.state, &self.label, self.reason, self.expected_epoch);
+    }}
+}
+
+/// Handle the real `report_first_paint` signal on the UI thread. Two possible
+/// orderings against `on_load_end`, both handled:
+///
+/// - `on_load_end` already armed the gate (the common case) — reveal now.
+/// - `on_load_end` hasn't run yet for this label — CEF's main-frame
+///   load-complete isn't guaranteed to fire after first paint (render-blocking
+///   stylesheets can resolve, and a frame can be presented, before other
+///   load-blocking resources finish). Record the label in
+///   `linux_first_paint_seen` so `on_load_end` reveals immediately when it
+///   does arm, instead of silently dropping this signal and falling through
+///   to the slower safety timeout. Reagent PR #2151 second-round review.
+///
+/// Must run on the CEF UI thread.
+#[cfg(target_os = "linux")]
+pub(crate) fn handle_first_paint_signal(state: &Arc<AppState>, label: &str) {
+    let already_armed = state.linux_paint_gate_pending.lock().contains_key(label);
+    if already_armed {
+        reveal_gated_window(state, label, "signal", None);
+    } else {
+        state.linux_first_paint_seen.lock().insert(label.to_string());
+    }
+}
+
+#[cfg(target_os = "linux")]
+wrap_task! {
+    struct FirstPaintSignalTask { state: Arc<AppState>, label: String }
+    impl Task { fn execute(&self) {
+        handle_first_paint_signal(&self.state, &self.label);
+    }}
+}
+
+/// Called off the UI thread (IPC handler for `report_first_paint`) once the
+/// frontend's double-`requestAnimationFrame` confirms the compositor actually
+/// presented a frame. Posts to the UI thread to reveal the window if
+/// `on_load_end` already deferred it, or to record the signal for `on_load_end`
+/// to consume if it hasn't run yet (see `handle_first_paint_signal`).
+#[cfg(target_os = "linux")]
+pub(crate) fn on_frontend_first_paint(state: Arc<AppState>, label: String) {
+    let mut task = FirstPaintSignalTask::new(state, label);
+    post_task(ThreadId::UI, Some(&mut task));
+}
+
 impl AgentMuxHandler {
     /// CEF fires this whenever the browser's loading/history state changes
     /// (navigation started, navigation committed, back/forward enabled).
@@ -107,13 +261,21 @@ impl AgentMuxHandler {
             }
         }
 
-        // macOS/Linux analogue of the Win32 splash signal: the launcher owns the
-        // native splash (see agentmux-launcher/src/splash_mac.rs and splash_linux/)
-        // and passes a ready-file path via AGENTMUX_SPLASH_READY_FILE. Creating the
-        // file is the cross-process "first frame painted" signal the launcher polls
-        // for before tearing the splash down. Fire-and-forget; absent var => no
-        // launcher splash (e.g. dev:standalone), so this is a no-op.
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        // macOS analogue of the Win32 splash signal: the launcher owns the native
+        // splash (see agentmux-launcher/src/splash_mac.rs) and passes a ready-file
+        // path via AGENTMUX_SPLASH_READY_FILE. Creating the file is the
+        // cross-process "first frame painted" signal the launcher polls for before
+        // tearing the splash down. Fire-and-forget; absent var => no launcher
+        // splash (e.g. dev:standalone), so this is a no-op.
+        //
+        // Linux does NOT write it here. `on_load_end` fires per-browser on
+        // main-frame load-complete, including hidden pool-window prewarms — on
+        // Linux that could dismiss the splash before the real (visible) window
+        // has painted anything (the white-flash bug this gate fixes). Linux
+        // writes the ready-file from `reveal_gated_window` instead, gated on the
+        // same first-paint confirmation that unblocks the real window's show()
+        // below. See docs/specs/SPEC_LINUX_STARTUP_PAINT_GATING_2026_07_13.md.
+        #[cfg(target_os = "macos")]
         {
             if let Ok(path) = std::env::var("AGENTMUX_SPLASH_READY_FILE") {
                 if !path.is_empty() {
@@ -142,10 +304,69 @@ impl AgentMuxHandler {
             if let Some(bv) = browser_view_get_for_browser(browser_cloned.as_mut()) {
                 if let Some(window) = bv.window() {
                     if window.is_visible() == 0 {
-                        window.show();
-                        if let Some(ref mut b) = browser_cloned {
-                            if let Some(host) = b.host() {
-                                host.set_focus(1);
+                        // Linux: defer the actual show()/focus (and the splash
+                        // dismiss above) until the frontend confirms a real
+                        // compositor paint, instead of doing it here on mere
+                        // load-complete — see reveal_gated_window and
+                        // docs/specs/SPEC_LINUX_STARTUP_PAINT_GATING_2026_07_13.md.
+                        // Falls back to the old immediate-show behavior if the
+                        // window label can't be resolved (can't gate safely on
+                        // an unknown label).
+                        #[cfg(target_os = "linux")]
+                        let gate_label = browser_label.clone();
+                        #[cfg(target_os = "linux")]
+                        let gated = gate_label.is_some();
+                        #[cfg(target_os = "linux")]
+                        if let Some(label) = gate_label {
+                            // The real paint signal can race ahead of this
+                            // on_load_end call (see handle_first_paint_signal)
+                            // — if it already arrived, reveal immediately
+                            // instead of arming a gate + safety timeout for a
+                            // paint that already happened.
+                            let already_painted =
+                                self.state.linux_first_paint_seen.lock().remove(&label);
+                            // Fresh epoch per arm — see PAINT_GATE_NEXT_EPOCH
+                            // and reveal_gated_window's doc comment. Guards
+                            // against a reload/retry re-arming this same
+                            // label before a timeout fires.
+                            let epoch = PAINT_GATE_NEXT_EPOCH
+                                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            self.state
+                                .linux_paint_gate_pending
+                                .lock()
+                                .insert(label.clone(), (std::time::Instant::now(), epoch));
+                            if already_painted {
+                                reveal_gated_window(&self.state, &label, "signal-early", None);
+                            } else {
+                                let mut timeout_task = PaintGateRevealTask::new(
+                                    self.state.clone(),
+                                    label,
+                                    "timeout",
+                                    Some(epoch),
+                                );
+                                post_delayed_task(
+                                    ThreadId::UI,
+                                    Some(&mut timeout_task),
+                                    PAINT_GATE_SAFETY_TIMEOUT_MS,
+                                );
+                            }
+                        }
+                        #[cfg(target_os = "linux")]
+                        if !gated {
+                            window.show();
+                            if let Some(ref mut b) = browser_cloned {
+                                if let Some(host) = b.host() {
+                                    host.set_focus(1);
+                                }
+                            }
+                        }
+                        #[cfg(not(target_os = "linux"))]
+                        {
+                            window.show();
+                            if let Some(ref mut b) = browser_cloned {
+                                if let Some(host) = b.host() {
+                                    host.set_focus(1);
+                                }
                             }
                         }
                     }
