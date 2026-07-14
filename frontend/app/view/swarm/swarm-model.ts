@@ -215,6 +215,45 @@ export function groupSubagentsByWorkflow(subagents: ActiveSubagent[]): SwarmChil
     return [...stillLoose, ...groups, ...nameGroups].sort((a, b) => lastEventOf(b) - lastEventOf(a));
 }
 
+/**
+ * Compute the label `SubagentRow`/`SubagentDetailPane` show for a subagent,
+ * in the same priority order both call sites use: `display_name` (once
+ * Haiku resolves it) > `slug` > a short prefix of `agent_id`.
+ *
+ * `slug` is NOT a per-subagent-unique identifier — it's read straight
+ * through from whatever the Claude Code CLI happened to write into the
+ * first line of the subagent's own JSONL file (`subagent_watcher.rs`'s
+ * `read_jsonl_from_offset`), which in practice is that CLI's own
+ * per-session/per-batch codename. A whole Task/Workflow-tool batch of
+ * genuinely distinct, unrelated subagents legitimately shares one slug —
+ * already established as an expected, non-buggy signature in
+ * docs/specs/REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md Finding 3
+ * ("one shared slug = one legitimate concurrent spawn") and relied on by
+ * `groupSubagentsByWorkflow`'s `WorkflowGroup.name` derivation above.
+ *
+ * Falling back to a bare `slug` as a ROW LABEL, though, silently assumed
+ * the opposite — that it WAS subagent-unique — so every member of such a
+ * batch rendered as a visually identical `SubagentRow` until its own
+ * `display_name` resolved. Live-reproduced in task #44: 17 structurally
+ * distinct `agent_id`s, one shared literal slug, spawned within ~50ms of
+ * each other under one parent, rendered as 17 apparently-duplicate rows —
+ * not a slug-generation bug or a spawn-dedup bug (all 17 were genuinely
+ * separate, correctly-ungrouped subagents; `workflow_id`/`display_name`
+ * grouping never entered the picture since neither had resolved yet).
+ * Appending a short, always-unique `agent_id` suffix keeps same-slug
+ * siblings visually distinct without claiming a uniqueness `slug` never
+ * had — mirrors the existing pattern in `SubagentDetailPane`, which
+ * already shows `agent_id.substring(0, 7)` as a separate meta chip next to
+ * the name for exactly this reason.
+ */
+export function subagentDisplayLabel(
+    sub: Pick<ActiveSubagent, "display_name" | "slug" | "agent_id">
+): string {
+    if (sub.display_name) return sub.display_name;
+    const shortId = sub.agent_id.substring(0, 7);
+    return sub.slug ? `${sub.slug} · ${shortId}` : shortId;
+}
+
 function shallowEqualSubagent(a: ActiveSubagent, b: ActiveSubagent): boolean {
     return (
         a.slug === b.slug &&
