@@ -12,10 +12,38 @@ import { initApp } from "./app-init";
 import { tryAutoRecover, clearStartupReloadCount } from "./app/init/error-display";
 import { benchMark } from "@/util/startup-bench";
 import { initPerf } from "@/perf";
+import { invokeCommand } from "@/app/platform/ipc";
 
 // Pipe all console.log/warn/error to the Rust host log file.
 // Must run before any other code so early messages are captured.
 initLogPipe();
+
+// ── First-paint signal (Linux startup white-flash fix) ──────────────────────
+// docs/specs/SPEC_LINUX_STARTUP_PAINT_GATING_2026_07_13.md.
+//
+// Tell the host the moment the browser has actually composited a frame — not
+// "main-frame load complete" (CEF's `on_load_end`, which can fire before
+// anything has visually painted and is what the host used to gate the native
+// window's show() on). Double rAF is the standard proxy for "a frame was
+// presented": the first callback runs before this frame is drawn, the second
+// only after it has been.
+//
+// Fired directly via invokeCommand() rather than getApi() — getApi() isn't
+// installed until setupCefApi()'s full IPC batch resolves, which can take
+// seconds on a slow start (see the spec's profiling numbers) and would be far
+// too late to gate the window's first show(). invokeCommand() only needs
+// `window.__AGENTMUX_IPC_PORT__`/`__AGENTMUX_IPC_TOKEN__`, which on a normal
+// (non-reload) launch are already present from the boot URL's query params —
+// no wait required. Harmless no-op outside CEF (invokeCommand rejects; caught
+// and ignored) and on platforms that don't gate on this signal (Windows/macOS
+// currently just log it).
+requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+        benchMark("frontend-painted");
+        const label = new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
+        invokeCommand("report_first_paint", { label }).catch(() => {});
+    });
+});
 
 // Capture uncaught errors + unhandled promise rejections and forward
 // them via the same fe_log_structured IPC channel as the console pipe.

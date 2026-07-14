@@ -209,6 +209,7 @@ async fn route_command(
         "get_backend_endpoints" => commands::backend::get_backend_endpoints(state),
         "get_wave_init_opts" => commands::backend::get_wave_init_opts(state),
         "set_window_init_status" => Ok(commands::backend::set_window_init_status(state, args)),
+        "report_first_paint" => Ok(commands::backend::report_first_paint(state, args)),
         "fe_log" => Ok(commands::backend::fe_log(args)),
         "fe_log_structured" => Ok(commands::backend::fe_log_structured(args)),
 
