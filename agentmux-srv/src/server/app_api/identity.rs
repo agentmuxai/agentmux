@@ -274,9 +274,13 @@ fn register_identity_self_unlink(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // is part of the `muxlog auth` vocabulary — keep it stable.
                 // `unlinked == false` (no link row matched) is logged too:
                 // a silent no-op unlink is exactly what an auth stress run
-                // needs to see.
+                // needs to see. Both ids logged: link rows are keyed on
+                // def_id, not the S1 slug (the historical silent-no-op bug
+                // noted above) — a bad slug→def_id resolution is only
+                // visible if the log carries both.
                 tracing::info!(
                     agent_id = %req.agent_id,
+                    def_id = %def_id,
                     provider = %req.provider,
                     unlinked,
                     "identity.unlink: self-service provider unlink (identity.self.unlink)"
