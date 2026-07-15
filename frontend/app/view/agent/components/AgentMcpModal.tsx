@@ -9,6 +9,7 @@
  */
 
 import { onCleanup, For, Show, type JSX } from "solid-js";
+import { PrimitiveListDetail } from "@/app/element/primitive-list-detail";
 import { openOrFocusPaneByView } from "@/app/store/global";
 import { AgentMcpModel } from "../agent-mcp-model";
 import "./AgentPrimitiveModal.scss";
@@ -21,66 +22,67 @@ export const AgentMcpModal = (props: AgentMcpModalProps): JSX.Element => {
     const model = new AgentMcpModel(props.agentId);
     onCleanup(() => model.dispose());
 
-    return (
-        <div class="agent-primitive-modal">
+    // Single-pane — see docs/specs/SPEC_ARMORY_RESPONSIVE_SINGLE_PANE_LAYOUT_2026_07_15.md §5.
+    const inDetail = () => model.selectedIdAtom() !== null || model.draftAtom() !== null;
+    const handleBack = () => {
+        model.setError(null);
+        model.setSelectedId(null);
+        model.setDraft(null);
+    };
+
+    const listView = (
+        <div class="agent-primitive-modal-list">
             <Show when={model.errorAtom()}>
                 <div class="agent-primitive-modal-error">{model.errorAtom()}</div>
             </Show>
-
-            <div class="agent-primitive-modal-body">
-                <div class="agent-primitive-modal-list">
-                    <Show
-                        when={model.serversAtom().length > 0}
-                        fallback={<div class="agent-primitive-modal-list-empty">No MCP servers yet</div>}
-                    >
-                        <For each={model.serversAtom()}>
-                            {(server) => (
-                                <button
-                                    class="agent-primitive-modal-list-item"
-                                    classList={{ "is-selected": model.selectedIdAtom() === server.id }}
-                                    onClick={() => model.handleSelect(server)}
+            <Show
+                when={model.serversAtom().length > 0}
+                fallback={<div class="agent-primitive-modal-list-empty">No MCP servers yet</div>}
+            >
+                <For each={model.serversAtom()}>
+                    {(server) => (
+                        <button
+                            class="agent-primitive-modal-list-item"
+                            classList={{ "is-selected": model.selectedIdAtom() === server.id }}
+                            onClick={() => model.handleSelect(server)}
+                        >
+                            <span class="agent-primitive-modal-list-item-name">{server.name}</span>
+                            <Show when={server.is_global}>
+                                <span class="agent-primitive-modal-list-item-badge">global</span>
+                                <span
+                                    class="agent-primitive-modal-list-item-badge"
+                                    classList={{ "is-bound": server.bound_to_agent }}
                                 >
-                                    <span class="agent-primitive-modal-list-item-name">{server.name}</span>
-                                    <Show when={server.is_global}>
-                                        <span class="agent-primitive-modal-list-item-badge">global</span>
-                                        <span
-                                            class="agent-primitive-modal-list-item-badge"
-                                            classList={{ "is-bound": server.bound_to_agent }}
-                                        >
-                                            {server.bound_to_agent ? "bound" : "not bound"}
-                                        </span>
-                                    </Show>
-                                </button>
-                            )}
-                        </For>
-                    </Show>
+                                    {server.bound_to_agent ? "bound" : "not bound"}
+                                </span>
+                            </Show>
+                        </button>
+                    )}
+                </For>
+            </Show>
 
-                    <button class="agent-primitive-modal-new-btn" onClick={() => model.startNew()}>
-                        + New MCP server
-                    </button>
-                    <button
-                        class="agent-primitive-modal-new-btn"
-                        onClick={() => void openOrFocusPaneByView("armory")}
-                    >
-                        Browse the Armory catalog →
-                    </button>
-                </div>
+            <button class="agent-primitive-modal-new-btn" onClick={() => model.startNew()}>
+                + New MCP server
+            </button>
+            <button
+                class="agent-primitive-modal-new-btn"
+                onClick={() => void openOrFocusPaneByView("armory")}
+            >
+                Browse the Armory catalog →
+            </button>
+        </div>
+    );
 
-                <div class="agent-primitive-modal-detail">
-                    <Show
-                        when={model.draftAtom()}
-                        fallback={
-                            <Show
-                                when={model.selectedAtom()}
-                                fallback={
-                                    <div class="agent-primitive-modal-empty">
-                                        Select a server from the list, or create a new one. Servers
-                                        created here are private to this agent — for one shared across
-                                        every agent, create it in the Armory catalog instead.
-                                    </div>
-                                }
-                            >
-                                {(server) => (
+    const detailView = (
+        <div class="agent-primitive-modal-detail">
+            <Show when={model.errorAtom()}>
+                <div class="agent-primitive-modal-error">{model.errorAtom()}</div>
+            </Show>
+            <Show
+                when={model.draftAtom()}
+                fallback={
+                    <Show when={model.selectedAtom()}>
+                        {(server) => (
                                     <div class="agent-primitive-modal-readonly">
                                         <h3 class="agent-primitive-modal-name">{server().name}</h3>
                                         <Show when={server().is_global}>
@@ -193,10 +195,18 @@ export const AgentMcpModal = (props: AgentMcpModalProps): JSX.Element => {
                                 </div>
                             </form>
                         )}
-                    </Show>
-                </div>
-            </div>
+            </Show>
         </div>
+    );
+
+    return (
+        <PrimitiveListDetail
+            showDetail={inDetail()}
+            backLabel="MCP Servers"
+            onBack={handleBack}
+            list={listView}
+            detail={detailView}
+        />
     );
 };
 
