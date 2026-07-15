@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-15
 **Status:** Proposed — investigation and live verification complete, design
-not yet implemented
+not yet implemented. Implementation tracked as agent task #50.
 **Governing incident:** `docs/retro/retro-identity-gate-bypassed-by-missing-instance-binding-2026-07-15.md`
 **Related:** `docs/retro/retro-auth-isolation-invariant-silently-orphaned-2026-07-14.md`,
 `SPEC_PROVIDER_ISOLATION_2026_06_20.md` (INV-A), `SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md`
