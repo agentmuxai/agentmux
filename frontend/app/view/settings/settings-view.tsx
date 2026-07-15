@@ -136,61 +136,6 @@ function KeyValueEditor(p: { value: Record<string, string>; onChange: (v: Record
     );
 }
 
-function StringArrayEditor(p: { value: string[]; onChange: (v: string[]) => void }): JSX.Element {
-    const items = () => p.value ?? [];
-    const [draft, setDraft] = createSignal("");
-
-    const updateItem = (i: number, val: string) => {
-        const next = items().slice();
-        next[i] = val;
-        p.onChange(next);
-    };
-    const removeItem = (i: number) => {
-        const next = items().slice();
-        next.splice(i, 1);
-        p.onChange(next);
-    };
-    const addItem = () => {
-        const v = draft().trim();
-        if (!v) return;
-        p.onChange([...items(), v]);
-        setDraft("");
-    };
-
-    return (
-        <div class="setting-kv-editor">
-            <For each={items()}>
-                {(item, i) => (
-                    <div class="setting-kv-row">
-                        <input
-                            class="setting-text setting-kv-val"
-                            type="text"
-                            value={item}
-                            onBlur={(e) => updateItem(i(), e.currentTarget.value)}
-                        />
-                        <button type="button" class="setting-kv-remove" onClick={() => removeItem(i())}>
-                            <i class="fa-solid fa-xmark" />
-                        </button>
-                    </div>
-                )}
-            </For>
-            <div class="setting-kv-row setting-kv-row--new">
-                <input
-                    class="setting-text setting-kv-val"
-                    type="text"
-                    placeholder="--flag value"
-                    value={draft()}
-                    onInput={(e) => setDraft(e.currentTarget.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") addItem(); }}
-                />
-                <button type="button" class="setting-kv-remove setting-kv-add" onClick={addItem}>
-                    <i class="fa-solid fa-plus" />
-                </button>
-            </div>
-        </div>
-    );
-}
-
 // ── Config error banner ───────────────────────────────────────────────────────
 
 function ConfigErrorsBanner(): JSX.Element {
@@ -720,30 +665,6 @@ function AdvancedSection(): JSX.Element {
                     <ToggleControl
                         checked={!!(s()["term:disablewebgl"] as boolean)}
                         onChange={(v) => set("term:disablewebgl", v)}
-                    />
-                }
-            />
-            <SettingRow
-                label="Local shell path"
-                description="Override the executable used for local terminal panes (restart required)"
-                control={
-                    <input
-                        class="setting-text"
-                        type="text"
-                        value={(s()["term:localshellpath"] as string) ?? ""}
-                        placeholder="/bin/zsh"
-                        onBlur={(e) => set("term:localshellpath", e.currentTarget.value || null)}
-                    />
-                }
-            />
-            <SettingRow
-                stacked
-                label="Local shell arguments"
-                description="Extra arguments passed to the local shell on launch"
-                control={
-                    <StringArrayEditor
-                        value={(s()["term:localshellopts"] as string[]) ?? []}
-                        onChange={(v) => set("term:localshellopts", v)}
                     />
                 }
             />
