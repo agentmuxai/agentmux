@@ -387,18 +387,16 @@ pub fn set_window_init_status(state: &Arc<AppState>, args: &serde_json::Value) -
     serde_json::Value::Null
 }
 
-/// First-paint signal from the frontend (originally the Linux startup
-/// white-flash fix, docs/specs/SPEC_LINUX_STARTUP_PAINT_GATING_2026_07_13.md,
-/// extended to Windows —
-/// docs/specs/REPORT_NEW_WINDOW_STARTUP_COLOR_FLASH_2026_07_14.md §4.2). Sent
-/// via a double-`requestAnimationFrame` at the very top of `bootstrap.ts` —
-/// the earliest reliable proxy for "the compositor actually presented a
-/// frame", as opposed to CEF's `on_load_end` which only means "main-frame
-/// HTML finished loading" and can fire before anything has visually painted.
+/// First-paint signal from the frontend (Linux startup white-flash fix, see
+/// docs/specs/SPEC_LINUX_STARTUP_PAINT_GATING_2026_07_13.md). Sent via a
+/// double-`requestAnimationFrame` at the very top of `bootstrap.ts` — the
+/// earliest reliable proxy for "the compositor actually presented a frame",
+/// as opposed to CEF's `on_load_end` which only means "main-frame HTML
+/// finished loading" and can fire before anything has visually painted.
 ///
-/// On Linux and Windows this unblocks the window `on_load_end` deferred (see
-/// `client::navigation::reveal_gated_window`). On macOS it's currently just
-/// logged for telemetry — no report of the white-flash symptom there yet.
+/// On Linux this unblocks the window `on_load_end` deferred (see
+/// `client::navigation::reveal_gated_window`). On other platforms it's
+/// currently just logged for telemetry — Windows/macOS aren't gated on it.
 pub fn report_first_paint(state: &Arc<AppState>, args: &serde_json::Value) -> serde_json::Value {
     let label = args
         .get("label")
@@ -410,7 +408,7 @@ pub fn report_first_paint(state: &Arc<AppState>, args: &serde_json::Value) -> se
         label = %label,
         "[startup-paint] frontend reported first paint"
     );
-    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[cfg(target_os = "linux")]
     crate::client::navigation::on_frontend_first_paint(state.clone(), label);
     serde_json::Value::Null
 }
