@@ -139,10 +139,17 @@ fn idle_kill_timeout() -> Duration {
 fn kill_process_tree(pid: u32) {
     #[cfg(windows)]
     {
-        match std::process::Command::new("taskkill")
-            .args(["/T", "/F", "/PID", &pid.to_string()])
-            .output()
+        let mut cmd = std::process::Command::new("taskkill");
+        cmd.args(["/T", "/F", "/PID", &pid.to_string()]);
         {
+            // CREATE_NO_WINDOW: console-flash suppression — bashwrap is a
+            // GUI-subsystem parent, so spawning taskkill without this pops a
+            // visible console window. std::process::Command needs CommandExt.
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+        match cmd.output() {
             Ok(out) if out.status.success() => {
                 tracing::info!(target: "bashwrap", pid, "kill_process_tree: taskkill succeeded");
             }
