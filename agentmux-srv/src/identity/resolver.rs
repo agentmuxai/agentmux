@@ -20,6 +20,18 @@
 //! and it was never restored — today's gate only chooses between "block"
 //! and "true ambient" (`use_ambient_login=true`, zero isolation), not the
 //! isolated-auto-provision option that used to exist implicitly.
+//!
+//! **Second, read this too:** `inject_identity_env_with_broker`'s Steps 1/2
+//! (`instance_get_active_for_block` returning `None`; `identity_id` empty
+//! or `"blank"`) are UNCONDITIONAL early-returns that skip the Step 3/4
+//! gate entirely — and live verification on 2026-07-15 found this is not a
+//! rare edge case: every real running agent inspected hit one of these two
+//! paths. See `docs/retro/retro-identity-gate-bypassed-by-missing-instance-binding-2026-07-15.md`
+//! and `docs/specs/SPEC_UNIVERSAL_IDENTITY_GATEWAY_2026_07_15.md` before
+//! assuming the Step 3/4 gate actually runs for the agent you're testing
+//! with — check whether its block has a `db_agents`/`db_agent_instances`
+//! row with a non-blank `identity_id` first, or it never reaches Step 3/4
+//! at all.
 
 use std::collections::HashMap;
 use std::path::Path;
