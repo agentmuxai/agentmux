@@ -20,6 +20,29 @@ enum ResolvedShim {
 /// extract the real entry point and invoke it directly (either `node <script>`
 /// for JS shims or the target `.exe` directly for native-binary shims).
 pub fn make_cli_cmd(cli_path: &str) -> tokio::process::Command {
+    let mut cmd = build_cli_cmd(cli_path);
+    // CREATE_NO_WINDOW: the host + launcher are GUI-subsystem and srv is
+    // launched windowless, so a console-subsystem child (node, claude.exe,
+    // cmd.exe) spawned without this flag forces Windows to allocate a fresh
+    // console window — the "terminal flash" seen during dev, most visibly
+    // from the ambient Haiku calls that fire as the user types
+    // (server/app_api/session.rs) and the per-check `--version`/auth probes.
+    // Applied at this single chokepoint so every `make_cli_cmd` caller is
+    // covered; idempotent for the agent-CLI callers (persistent/subprocess/
+    // acp) that already set it manually. `tokio::process::Command` exposes
+    // `creation_flags` as an inherent method on Windows — no `CommandExt`
+    // import needed (see agentmux-bashwrap/src/bash_wrap.rs's note).
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
+/// Resolve `cli_path` to a runnable `Command` (the `.cmd`/`.bat` shim parsing
+/// on Windows). `make_cli_cmd` wraps this to apply `CREATE_NO_WINDOW`.
+fn build_cli_cmd(cli_path: &str) -> tokio::process::Command {
     #[cfg(windows)]
     if cli_path.ends_with(".cmd") || cli_path.ends_with(".bat") {
         match parse_cmd_wrapper(cli_path) {
