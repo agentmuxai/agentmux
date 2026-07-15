@@ -96,6 +96,9 @@ export const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element =>
 
     const listView = (
         <div class="memory-view-rail">
+            <Show when={model.errorAtom()}>
+                <div class="memory-view-error">{model.errorAtom()}</div>
+            </Show>
             <div class="memory-view-rail-header">
                 <button class="memory-view-new-btn" onClick={handleNew}>
                     + New Preset
