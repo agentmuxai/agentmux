@@ -420,11 +420,18 @@ fn detect_branch(exe_dir: &Path) -> String {
 }
 
 fn run_git_branch(repo_dir: &Path) -> Option<String> {
-    let output = Command::new("git")
-        .args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .current_dir(repo_dir)
-        .output()
-        .ok()?;
+    let mut cmd = Command::new("git");
+    cmd.args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(repo_dir);
+    #[cfg(windows)]
+    {
+        // CREATE_NO_WINDOW: console-flash suppression — std::process::Command
+        // needs the CommandExt trait to call creation_flags.
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let output = cmd.output().ok()?;
     if !output.status.success() {
         return None;
     }
