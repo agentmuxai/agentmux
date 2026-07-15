@@ -155,11 +155,16 @@ fn provider_install_dir(provider_id: &str) -> Option<std::path::PathBuf> {
 /// See SPEC_PROVIDER_SYSTEM_PREREQS_2026_05_18.md.
 async fn resolve_tool_path(tool: &str) -> Option<String> {
     let cmd = if cfg!(windows) { "where" } else { "which" };
-    let output = tokio::process::Command::new(cmd)
-        .arg(tool)
-        .output()
-        .await
-        .ok()?;
+    let mut c = tokio::process::Command::new(cmd);
+    c.arg(tool);
+    // CREATE_NO_WINDOW: `where` is console-subsystem; without this it flashes
+    // a console window on every pre-launch prereq check. See cli.rs's note.
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        c.creation_flags(CREATE_NO_WINDOW);
+    }
+    let output = c.output().await.ok()?;
     if !output.status.success() {
         return None;
     }
