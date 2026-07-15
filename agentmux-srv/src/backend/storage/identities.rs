@@ -121,14 +121,23 @@ pub struct AgentIdentityLink {
 
 /// What [`Store::identity_delete`] removed — the account row plus the
 /// cascaded `db_agent_identity_links` junction rows. Consumed by the
-/// `deleteidentityaccount` handler for `identity.delete:` logging.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// `deleteidentityaccount` handler for `identity.delete:` logging and
+/// the layer-2/4 affected-agent disclosure
+/// (`SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md` §3/§4).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IdentityDeleteOutcome {
     /// True iff the `db_accounts` row existed and was deleted.
     pub deleted: bool,
     /// Number of `db_agent_identity_links` rows removed in the same
     /// transaction.
     pub links_cascaded: usize,
+    /// The `agent_id`s whose links were cascaded — captured by SELECT
+    /// inside the same transaction, BEFORE the delete, so the set is
+    /// exact even though the rows are gone by the time this returns.
+    /// Any of these agents that has a live process still holds working
+    /// tokens until restarted; the handler publishes a per-agent
+    /// revocation event so the UI can disclose that (spec §3).
+    pub affected_agents: Vec<String>,
 }
 
 impl Store {
@@ -287,6 +296,22 @@ impl Store {
     pub fn identity_delete(&self, id: &str) -> Result<IdentityDeleteOutcome, StoreError> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction()?;
+        // Capture the affected agent ids BEFORE the cascade delete, in
+        // the same transaction, so the set can't race a concurrent
+        // link/unlink (spec §3 — the handler publishes per-agent
+        // revocation events off this list).
+        let affected_agents: Vec<String> = {
+            let mut stmt = tx.prepare(
+                "SELECT agent_id FROM db_agent_identity_links
+                 WHERE account_id = ?1 ORDER BY agent_id",
+            )?;
+            let iter = stmt.query_map(params![id], |row| row.get::<_, String>(0))?;
+            let mut out = Vec::new();
+            for r in iter {
+                out.push(r?);
+            }
+            out
+        };
         // Links first, so the count is exact even on fresh databases
         // where the FK cascade would otherwise race this delete.
         let links_cascaded = tx.execute(
@@ -298,6 +323,7 @@ impl Store {
         Ok(IdentityDeleteOutcome {
             deleted: rows > 0,
             links_cascaded,
+            affected_agents,
         })
     }
 
@@ -521,11 +547,17 @@ mod tests {
         );
         assert!(out.deleted);
         assert_eq!(out.links_cascaded, 1, "explicit cascade must report the link row");
+        assert_eq!(
+            out.affected_agents,
+            vec!["ag1".to_string()],
+            "agent ids must be captured before the cascade delete (spec §3)"
+        );
 
         // Second delete is a no-op on both tables.
         let again = store.identity_delete("acct-1").unwrap();
         assert!(!again.deleted);
         assert_eq!(again.links_cascaded, 0);
+        assert!(again.affected_agents.is_empty());
     }
 
     #[test]
@@ -550,6 +582,63 @@ mod tests {
         assert_eq!(
             out.links_cascaded, 1,
             "explicit cascade runs before the FK cascade, so the count is exact"
+        );
+        assert_eq!(
+            out.affected_agents,
+            vec!["ag1".to_string()],
+            "capture must run before both the explicit and the FK cascade"
+        );
+    }
+
+    /// Multiple linked agents → all captured, in deterministic (sorted)
+    /// order. Account with NO links → empty set (the delete-time
+    /// disclosure must not fire).
+    #[test]
+    fn identity_delete_captures_all_affected_agents() {
+        let store = Store::open_in_memory().unwrap();
+        // Fresh schema enforces the links FK on agent_id, so the agent
+        // definitions must exist before linking.
+        for (id, slug) in [("ag-b", "agent-b"), ("ag-a", "agent-a"), ("ag-other", "agent-o")] {
+            let mut agent = sample_agent(id, slug);
+            store.agent_def_insert(&mut agent).unwrap();
+        }
+        store
+            .identity_upsert(&sample_account("acct-1", "anthropic"))
+            .unwrap();
+        store
+            .identity_upsert(&sample_account("acct-2", "anthropic"))
+            .unwrap();
+        store
+            .agent_identity_link("ag-b", "acct-1", "anthropic")
+            .unwrap();
+        store
+            .agent_identity_link("ag-a", "acct-1", "anthropic")
+            .unwrap();
+        // A link on a DIFFERENT account must not leak into the set.
+        store
+            .agent_identity_link("ag-other", "acct-2", "anthropic")
+            .unwrap();
+
+        let out = store.identity_delete("acct-1").unwrap();
+        assert!(out.deleted);
+        assert_eq!(out.links_cascaded, 2);
+        assert_eq!(
+            out.affected_agents,
+            vec!["ag-a".to_string(), "ag-b".to_string()],
+            "all linked agents captured, sorted, and scoped to the deleted account"
+        );
+
+        // Account with NO links → empty affected set (disclosure must
+        // not fire for it).
+        store
+            .identity_upsert(&sample_account("acct-3", "anthropic"))
+            .unwrap();
+        let out3 = store.identity_delete("acct-3").unwrap();
+        assert!(out3.deleted);
+        assert_eq!(out3.links_cascaded, 0);
+        assert!(
+            out3.affected_agents.is_empty(),
+            "linkless account delete must report an empty affected set"
         );
     }
 

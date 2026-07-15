@@ -39,7 +39,16 @@ export const IdentityApi = {
         client: RpcClient,
         data: { id: string },
         opts?: RpcOpts,
-    ): Promise<{ deleted: boolean }> {
+    ): Promise<{
+        deleted: boolean;
+        /** Agent (definition) ids whose `db_agent_identity_links` rows were
+         *  cascaded by this delete. Any of them with a live process still
+         *  holds the account's tokens until restarted — drives the Armory
+         *  delete-time disclosure (SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4
+         *  §4). Optional so older backends' `{ deleted }` shape stays
+         *  assignable. */
+        affectedAgents?: string[];
+    }> {
         return client.rpcCall("deleteidentityaccount", data, opts);
     },
 
