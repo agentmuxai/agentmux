@@ -148,21 +148,48 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                 };
                 // Identity injection: look up the active AgentInstance for
                 // this block, resolve its identity_id's bindings, and merge
-                // each per-provider env var into the spawn map. Failures
-                // are logged and skipped — the agent CLI launches with
-                // whatever resolved cleanly plus the static cmd:env block.
+                // each per-provider env var into the spawn map. Api-key-class
+                // failures are logged and skipped — the agent CLI launches
+                // with whatever resolved cleanly plus the static cmd:env
+                // block. Oauth-class resolution failures are BLOCKING unless
+                // the agent opted into ambient login (layer-3 spawn gate,
+                // SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md §2.2):
+                // surface the error in the agent pane (same
+                // `error_during_execution` frame the container spawn-failure
+                // path uses below) and abort before the CLI is created.
                 // See agentmux-srv/src/identity/resolver.rs. Broker
                 // hand-in lets the OAuth expiry probe (PR D, spec §4.4)
                 // publish `identitybundlebindings:changed:<bundle_id>`
                 // when it flips a token's status valid→expired etc.
-                env_vars = crate::identity::resolver::inject_identity_env_async(
+                env_vars = match crate::identity::resolver::inject_identity_env_async(
                     wstore.clone(),
                     id_store.clone(),
                     Some(broker.clone()),
                     cmd.blockid.clone(),
                     env_vars,
                 )
-                .await;
+                .await
+                {
+                    Ok(env) => env,
+                    Err(gate) => {
+                        let error_frame = serde_json::json!({
+                            "type": "result",
+                            "is_error": true,
+                            "subtype": "error_during_execution",
+                            "error": {"message": format!("[AgentMux] {gate}")}
+                        })
+                        .to_string();
+                        crate::backend::blockcontroller::shell::handle_append_block_file(
+                            &broker,
+                            &cmd.blockid,
+                            crate::backend::blockcontroller::subprocess::SUBPROCESS_OUTPUT_SUBJECT,
+                            format!("{error_frame}\n").as_bytes(),
+                            None,
+                            None,
+                        );
+                        return Err(format!("identity spawn gate: {gate}"));
+                    }
+                };
                 // MuxBus cloud token — injects MUXBUS_TOKEN + MUXBUS_COGNITO_DOMAIN
                 // if the user has authenticated via muxbus.login. No-op if no
                 // credentials are stored. Auto-refreshes if token is nearly expired.

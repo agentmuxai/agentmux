@@ -105,6 +105,18 @@ pub struct AgentDefinition {
     /// empty for host agents. Schema v6.
     #[serde(default)]
     pub container_name: String,
+    /// Explicit per-agent opt-in to the CLI's global (ambient) login when no
+    /// oauth-class account resolves at spawn time. `0` (default) = spawn
+    /// FAILS when an oauth-class provider the agent is supposed to have
+    /// credentials for is missing/unresolvable ("fail by default"); `1` =
+    /// the spawn proceeds WITHOUT injecting a config dir so the CLI reads
+    /// the user's global login (e.g. `~/.claude`) — surfaced via the
+    /// `identity.spawn.ambient:` log line, never silent. Toggled from the
+    /// Agent setup modal's Accounts tab. Schema v12; the m0017 migration
+    /// grandfathers pre-existing linkless agents to `1`. Layer 3 of
+    /// SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md (§2.2-§2.4).
+    #[serde(default)]
+    pub use_ambient_login: i64,
 }
 
 /// Derive a filesystem-safe slug from a display name. Lowercase,
@@ -302,7 +314,8 @@ impl Store {
                     restart_on_crash, idle_timeout_minutes, created_at,
                     agent_type, environment, agent_bus_id, is_seeded,
                     accounts, parent_id, branch_label, updated_at,
-                    user_hidden, container_image, container_volumes, container_name
+                    user_hidden, container_image, container_volumes, container_name,
+                    use_ambient_login
              FROM db_agent_definitions
              WHERE is_seeded = 0 AND parent_id = ?1
              ORDER BY updated_at DESC, created_at DESC",
@@ -336,7 +349,8 @@ impl Store {
                         restart_on_crash, idle_timeout_minutes, created_at,
                         agent_type, environment, agent_bus_id, is_seeded,
                         accounts, parent_id, branch_label, updated_at,
-                        user_hidden, container_image, container_volumes, container_name
+                        user_hidden, container_image, container_volumes, container_name,
+                        use_ambient_login
                  FROM db_agent_definitions
                  WHERE id = ?1",
             )?;
@@ -374,7 +388,8 @@ impl Store {
                         restart_on_crash, idle_timeout_minutes, created_at,
                         agent_type, environment, agent_bus_id, is_seeded,
                         accounts, parent_template_id, branch_label, updated_at,
-                        user_hidden, container_image, container_volumes, container_name
+                        user_hidden, container_image, container_volumes, container_name,
+                        use_ambient_login
                  FROM db_agents
                  ORDER BY updated_at DESC, created_at ASC",
             )?;
@@ -514,9 +529,9 @@ impl Store {
              working_directory, shell, provider_flags, auto_start, restart_on_crash,
              idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id,
              is_seeded, accounts, parent_id, branch_label, updated_at, user_hidden,
-             container_image, container_volumes, container_name)
+             container_image, container_volumes, container_name, use_ambient_login)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                     ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
+                     ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
             params![
                 agent.id,
                 agent.slug,
@@ -550,6 +565,7 @@ impl Store {
                 agent.container_image,
                 agent.container_volumes,
                 agent.container_name,
+                agent.use_ambient_login,
             ],
         )?;
         // Persist the stamped updated_at before we leave the lock so the
@@ -604,7 +620,8 @@ impl Store {
                         restart_on_crash, idle_timeout_minutes, created_at,
                         agent_type, environment, agent_bus_id, is_seeded,
                         accounts, parent_id, branch_label, updated_at,
-                        user_hidden, container_image, container_volumes, container_name
+                        user_hidden, container_image, container_volumes, container_name,
+                        use_ambient_login
                  FROM db_agent_definitions
                  WHERE (lower(trim(name)) = ?1 OR slug = ?2)
                    AND is_seeded = 0
@@ -653,10 +670,10 @@ impl Store {
                     working_directory, shell, provider_flags, auto_start, restart_on_crash,
                     idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id,
                     is_seeded, accounts, parent_id, branch_label, updated_at, user_hidden,
-                    container_image, container_volumes, container_name)
+                    container_image, container_volumes, container_name, use_ambient_login)
                  VALUES
                    (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                    ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
+                    ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
                 params![
                     agent.id, agent.slug, agent.name, agent.icon, agent.provider,
                     agent.description, agent.working_directory, agent.shell,
@@ -667,6 +684,7 @@ impl Store {
                     agent.created_at, // updated_at = created_at for new rows
                     agent.user_hidden,
                     agent.container_image, agent.container_volumes, agent.container_name,
+                    agent.use_ambient_login,
                 ],
             )?;
             agent.created_at
@@ -764,7 +782,8 @@ impl Store {
                  working_directory=?5, shell=?6, provider_flags=?7, auto_start=?8,
                  restart_on_crash=?9, idle_timeout_minutes=?10,
                  agent_type=?11, environment=?12, agent_bus_id=?13, accounts=?14, updated_at=?15,
-                 container_image=?17, container_volumes=?18, container_name=?19
+                 container_image=?17, container_volumes=?18, container_name=?19,
+                 use_ambient_login=?20
                  WHERE id=?16",
                 params![
                     agent.name,
@@ -786,6 +805,7 @@ impl Store {
                     agent.container_image,
                     agent.container_volumes,
                     agent.container_name,
+                    agent.use_ambient_login,
                 ],
             )?
         };
@@ -860,6 +880,43 @@ impl Store {
         // on the next agent_def_list. (P0.2b + codex P1 on #1385.)
         let global_retired = self.registry_def_retire(id);
         Ok(rows > 0 || global_retired)
+    }
+
+    /// One-shot grandfather pass for the layer-3 ambient-login opt-in
+    /// (m0017, spec §2.4 of SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md).
+    ///
+    /// Agents WITHOUT any `db_agent_identity_links` row at migration time
+    /// were de-facto ambient users → `use_ambient_login = 1`; agents WITH
+    /// links opted into managed accounts → `0` (honest failure is the new
+    /// behavior for them). `linked_agent_ids` comes from the SHARED store
+    /// (the live links table); this method writes both the legacy
+    /// `db_agent_definitions` and the consolidated `db_agents` projections
+    /// of the CURRENT channel store. Returns (rows set to 1, rows set to 0)
+    /// across `db_agent_definitions`.
+    pub fn agents_grandfather_ambient_login(
+        &self,
+        linked_agent_ids: &std::collections::HashSet<String>,
+    ) -> Result<(usize, usize), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        // Set everyone ambient first, then flip the linked set back to the
+        // fail-by-default 0 — two passes instead of a dynamic IN() list.
+        let ambient_defs = conn.execute(
+            "UPDATE db_agent_definitions SET use_ambient_login = 1",
+            [],
+        )?;
+        conn.execute("UPDATE db_agents SET use_ambient_login = 1", [])?;
+        let mut linked_rows = 0usize;
+        for id in linked_agent_ids {
+            linked_rows += conn.execute(
+                "UPDATE db_agent_definitions SET use_ambient_login = 0 WHERE id = ?1",
+                params![id],
+            )?;
+            conn.execute(
+                "UPDATE db_agents SET use_ambient_login = 0 WHERE id = ?1",
+                params![id],
+            )?;
+        }
+        Ok((ambient_defs.saturating_sub(linked_rows), linked_rows))
     }
 
     // AgentContent / AgentSkill / AgentHistory CRUD live in
@@ -1806,5 +1863,6 @@ fn map_agent_definition_row(row: &rusqlite::Row) -> rusqlite::Result<AgentDefini
         container_image: row.get(22)?,
         container_volumes: row.get(23)?,
         container_name: row.get(24)?,
+        use_ambient_login: row.get(25)?,
     })
 }

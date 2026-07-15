@@ -398,6 +398,7 @@ mod recent_sessions_tests {
             container_image: String::new(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
+            use_ambient_login: 0,
         };
         let mut def_mut = def.clone();
         wstore.agent_def_insert(&mut def_mut).unwrap();
@@ -695,6 +696,7 @@ mod recent_sessions_tests {
             container_image: String::new(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
+            use_ambient_login: 0,
         };
         wstore.agent_def_insert(&mut tpl).unwrap();
 
@@ -724,6 +726,7 @@ mod recent_sessions_tests {
             container_image: String::new(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
+            use_ambient_login: 0,
         };
         wstore.agent_def_insert(&mut user_a).unwrap();
 

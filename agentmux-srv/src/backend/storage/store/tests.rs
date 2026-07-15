@@ -317,6 +317,7 @@
             container_image: String::new(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
+            use_ambient_login: 0,
         };
         store.agent_def_insert(&mut a1).unwrap();
         // "Agent X" → "agent-x"
@@ -383,6 +384,7 @@
             container_image: String::new(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
+            use_ambient_login: 0,
         };
         store.agent_def_insert(&mut a1).unwrap();
         assert_eq!(a1.slug, "explicit");
@@ -444,6 +446,7 @@
             container_image: String::new(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
+            use_ambient_login: 0,
         }
     }
 
@@ -2291,6 +2294,7 @@
             container_image: String::new(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
+            use_ambient_login: 0,
         };
         store.agent_def_insert(&mut def).unwrap();
         // db_agents row exists, projected as template.
@@ -2330,6 +2334,7 @@
             container_image: String::new(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
+            use_ambient_login: 0,
         };
         store.agent_def_insert(&mut tpl).unwrap();
         // User-cloned def has is_seeded=0 + parent_id pointing at template.
@@ -2375,6 +2380,7 @@
             container_image: String::new(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
+            use_ambient_login: 0,
         };
         store.agent_def_insert(&mut def).unwrap();
         def.name = "New Name".to_string();
@@ -2414,6 +2420,7 @@
             container_image: String::new(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
+            use_ambient_login: 0,
         };
         store.agent_def_insert(&mut def).unwrap();
         assert_eq!(count_agents(&store, "id = 'tpl-del'"), 1);
@@ -2451,6 +2458,7 @@
             container_image: String::new(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
+            use_ambient_login: 0,
         };
         store.agent_def_insert(&mut tpl).unwrap();
 
@@ -2536,6 +2544,7 @@
             container_image: String::new(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
+            use_ambient_login: 0,
         };
         store.agent_def_insert(&mut tpl).unwrap();
 
@@ -2630,6 +2639,7 @@
             container_image: String::new(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
+            use_ambient_login: 0,
         };
         store.agent_def_insert(&mut tpl).unwrap();
         let inst = AgentInstance {
@@ -2686,6 +2696,7 @@
             container_image: String::new(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
+            use_ambient_login: 0,
         };
         store.agent_def_insert(&mut tpl).unwrap();
         let inst = AgentInstance {
@@ -2740,6 +2751,7 @@
             container_image: String::new(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
+            use_ambient_login: 0,
         };
         store.agent_def_insert(&mut tpl_a).unwrap();
         let mut tpl_b = tpl_a.clone();
@@ -2806,6 +2818,7 @@
             container_image: String::new(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
+            use_ambient_login: 0,
             };
             store.agent_def_insert(&mut d).unwrap();
         }
@@ -2847,6 +2860,7 @@
             container_image: String::new(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
+            use_ambient_login: 0,
         };
         store.agent_def_insert(&mut tpl).unwrap();
         // User-clone DEF of that template (Phase 1 created this).
@@ -2920,6 +2934,7 @@
             container_image: String::new(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
+            use_ambient_login: 0,
         };
         store.agent_def_insert(&mut tpl).unwrap();
         let mut clone = AgentDefinition {

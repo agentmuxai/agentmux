@@ -149,20 +149,46 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         .collect(),
                     _ => std::collections::HashMap::new(),
                 };
-                // Identity injection — same path as websocket.rs's
-                // AgentInputCommand. See identity/resolver.rs. Passes
+                // Identity injection — same path as the `agentinput`
+                // handler. See identity/resolver.rs. Passes
                 // the broker so the OAuth-class branch can publish a
                 // `identitybundlebindings:changed:<bundle_id>` event
                 // when the expiry probe updates an account's status
-                // (PR D — spec §4.4).
-                env_vars = crate::identity::resolver::inject_identity_env_async(
+                // (PR D — spec §4.4). Oauth-class resolution failures are
+                // BLOCKING unless the agent opted into ambient login
+                // (layer-3 spawn gate, SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4
+                // _2026_07_14.md §2.2): surface the error in the agent pane
+                // via the `error_during_execution` frame (rendered as an
+                // agent_error node) and abort before the CLI is created.
+                env_vars = match crate::identity::resolver::inject_identity_env_async(
                     wstore.clone(),
                     id_store.clone(),
                     Some(broker.clone()),
                     cmd.block_id.clone(),
                     env_vars,
                 )
-                .await;
+                .await
+                {
+                    Ok(env) => env,
+                    Err(gate) => {
+                        let error_frame = serde_json::json!({
+                            "type": "result",
+                            "is_error": true,
+                            "subtype": "error_during_execution",
+                            "error": {"message": format!("[AgentMux] {gate}")}
+                        })
+                        .to_string();
+                        crate::backend::blockcontroller::shell::handle_append_block_file(
+                            &broker,
+                            &cmd.block_id,
+                            crate::backend::blockcontroller::subprocess::SUBPROCESS_OUTPUT_SUBJECT,
+                            format!("{error_frame}\n").as_bytes(),
+                            None,
+                            None,
+                        );
+                        return Err(format!("identity spawn gate: {gate}"));
+                    }
+                };
                 let session_id_field = obj::meta_get_string(
                     &block.meta, "agent:session_id_field", "session_id",
                 );
