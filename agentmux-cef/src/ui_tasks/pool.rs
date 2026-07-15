@@ -34,20 +34,6 @@ wrap_task! {
         y: i32,
         width: i32,
         height: i32,
-        // Signaled once execute() finishes (success or not) so the IPC-thread
-        // caller can block until CEF's own compositor visibility has actually
-        // flipped, instead of firing this task and immediately moving on to
-        // emit `pool:promote` to the frontend / start a pool refill — both of
-        // which used to race ahead of the real show with no ordering
-        // guarantee at all. See post_promote_pool_window_views_show below and
-        // docs/specs/REPORT_NEW_WINDOW_STARTUP_COLOR_FLASH_2026_07_14.md §4.3.
-        // Does NOT change the underlying Win32-then-CEF-Views show order
-        // (that ordering exists for its own documented reason above and this
-        // report did not find a safe way to verify a reorder without a real
-        // Windows GUI test session) — only makes the existing gap
-        // deterministic and measurable rather than leaving it to whatever the
-        // caller happened to do next.
-        done_tx: std::sync::mpsc::SyncSender<()>,
     }
 
     impl Task {
@@ -91,23 +77,10 @@ wrap_task! {
                     );
                 }
             }
-            let _ = self.done_tx.try_send(());
         }
     }
 }
 
-/// Blocking (bounded-wait) version of the previous fire-and-forget post — see
-/// `PromotePoolWindowViewsShowTask.done_tx`'s doc comment for why. Logs the
-/// actual IPC-thread-to-UI-thread elapsed time so a real run can measure this
-/// gap the same way the Linux paint-gate PR (#2151) measured its own
-/// first-paint latency before picking a safety timeout; 500ms here is a
-/// deliberately generous placeholder pending that measurement, not a tuned
-/// value — this is a same-process, same-machine cross-thread post with no
-/// GPU/EGL init or network I/O involved, so it should normally complete in
-/// low single-digit milliseconds. If the timeout is ever actually hit, the
-/// caller proceeds anyway (never blocks `promote_pool_window` — and by
-/// extension "New Window" — indefinitely on a wedged UI thread) and the
-/// warning log is the signal that something upstream is unexpectedly slow.
 #[cfg(target_os = "windows")]
 pub(crate) fn post_promote_pool_window_views_show(
     state: &Arc<AppState>,
@@ -117,7 +90,6 @@ pub(crate) fn post_promote_pool_window_views_show(
     width: i32,
     height: i32,
 ) {
-    let (done_tx, done_rx) = std::sync::mpsc::sync_channel::<()>(1);
     let mut task = PromotePoolWindowViewsShowTask::new(
         state.clone(),
         label.to_string(),
@@ -125,24 +97,8 @@ pub(crate) fn post_promote_pool_window_views_show(
         y,
         width,
         height,
-        done_tx,
     );
-    let posted_at = std::time::Instant::now();
     post_task(ThreadId::UI, Some(&mut task));
-    match done_rx.recv_timeout(std::time::Duration::from_millis(500)) {
-        Ok(()) => tracing::info!(
-            target: "pool:new-window",
-            label = %label,
-            elapsed_ms = posted_at.elapsed().as_millis() as u64,
-            "[pool] CEF Views show completed — safe to proceed"
-        ),
-        Err(_) => tracing::warn!(
-            target: "pool:new-window",
-            label = %label,
-            "[pool] CEF Views show did not complete within 500ms — proceeding anyway; \
-             pool:promote/frontend bootstrap may race ahead of the real compositor show"
-        ),
-    }
 }
 
 // ── Pool window promote (macOS / Linux) — Phase 7 ─────────────────────────
