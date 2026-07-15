@@ -40,13 +40,14 @@ impl Migration for M0018AmbientLoginRegistry {
         let def_store = registry::DefinitionStore::open(def_dir)
             .map_err(|e| MigrationError(format!("ambient_login_registry: open def store: {}", e)))?;
 
+        // Same oauth-class-only rule as m0017 (shared helper — the two
+        // passes must never disagree): api-key links don't forfeit
+        // grandfathering.
         let linked: HashSet<String> = if ctx.shared_store_path.exists() {
-            Store::open_shared(&ctx.shared_store_path)
-                .map_err(|e| MigrationError(format!("ambient_login_registry: open shared store: {}", e)))?
-                .agent_ids_with_identity_links()
+            let shared = Store::open_shared(&ctx.shared_store_path)
+                .map_err(|e| MigrationError(format!("ambient_login_registry: open shared store: {}", e)))?;
+            super::m0017_ambient_login_grandfather::oauth_linked_agent_ids(&shared)
                 .map_err(|e| MigrationError(format!("ambient_login_registry: read links: {}", e)))?
-                .into_iter()
-                .collect()
         } else {
             HashSet::new()
         };
