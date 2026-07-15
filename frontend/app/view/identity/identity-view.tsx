@@ -200,10 +200,38 @@ function AccountRow(props: { account: Account; selected: boolean; onClick: () =>
 
 function AccountDetail({ model, account }: { model: IdentityViewModel; account: Account }): JSX.Element {
     // Pre-delete disclosure (spec §4): how many agents reference this
-    // account, from the existing agent-side reverse index. Count is by
-    // *link*, not process liveness — see deleteDisclosureNotice's note.
+    // account. Count is by *link*, not process liveness — see
+    // deleteDisclosureNotice's note.
+    //
+    // Source of truth is db_agent_identity_links (the table the modern
+    // launch flow writes exclusively, per
+    // SPEC_IDENTITY_DIRECT_LINKS_PHASE3_PRC and what the backend's own
+    // affected_agents disclosure reads) — the deprecated agent.accounts
+    // reverse index alone misses every modern-linked agent, which made the
+    // pre-delete warning never fire for exactly the agents that matter
+    // (reagent P1, PR #2161 round 1). The legacy index is kept as a union
+    // for agents that predate direct links.
     const agents = useAgentDefinitions();
-    const assignedAgents = () => agentsAssignedToAccount(account.id, agents());
+    const [linkedAgentIds, setLinkedAgentIds] = createSignal<string[]>([]);
+    RpcApi.ListAllAgentIdentitiesCommand(TabRpcClient)
+        .then((links) => {
+            setLinkedAgentIds(
+                [...new Set(links.filter((l) => l.account_id === account.id).map((l) => l.agent_id))]
+            );
+        })
+        .catch(() => {
+            // Best-effort: the legacy index below still contributes, and a
+            // failed lookup must not block the delete flow itself — the
+            // post-delete disclosure (backend-sourced) remains accurate.
+        });
+    const assignedAgents = () => {
+        const byId = new Map(agents().map((a) => [a.id, a.name] as const));
+        const names = new Set(agentsAssignedToAccount(account.id, agents()));
+        for (const id of linkedAgentIds()) {
+            names.add(byId.get(id) ?? id);
+        }
+        return [...names];
+    };
     return (
         <>
             <ModalHeader title={account.name} />
