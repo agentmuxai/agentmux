@@ -10,7 +10,8 @@ import type {
     IdentityViewModel,
     SecretRef,
 } from "./identity-model";
-import { KIND_LABELS, PROVIDER_LABELS, refreshAccountCache } from "./identity-model";
+import { agentsAssignedToAccount, KIND_LABELS, PROVIDER_LABELS, refreshAccountCache } from "./identity-model";
+import { useAgentDefinitions } from "@/app/view/agent/components/AgentPicker";
 import { ProviderLogo } from "@/element/ProviderLogo";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -103,6 +104,28 @@ export function AccountsTab({ model }: { model: IdentityViewModel }): JSX.Elemen
 
     return (
         <>
+            {/* Delete-time disclosure (layer 4 —
+                SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md §4).
+                Transient, dismissable; only fires when the deleted account
+                had linked agents. Honest wording: running processes keep
+                their tokens until restarted — we disclose, not revoke. */}
+            <Show when={model.deleteNoticeAtom()}>
+                {(notice) => (
+                    <div class="identity-delete-notice" role="status" aria-live="polite">
+                        <span class="identity-delete-notice-icon" aria-hidden="true">⚠</span>
+                        <span class="identity-delete-notice-text">{notice()}</span>
+                        <button
+                            type="button"
+                            class="identity-delete-notice-dismiss"
+                            title="Dismiss"
+                            aria-label="Dismiss"
+                            onClick={() => model.dismissDeleteNotice()}
+                        >
+                            ×
+                        </button>
+                    </div>
+                )}
+            </Show>
             <div class="identity-accounts-layout">
                 <div class="identity-accounts-list">
                     <Show
@@ -176,6 +199,11 @@ function AccountRow(props: { account: Account; selected: boolean; onClick: () =>
 // ── Account detail panel (rendered inside <Modal>) ───────────────────────────
 
 function AccountDetail({ model, account }: { model: IdentityViewModel; account: Account }): JSX.Element {
+    // Pre-delete disclosure (spec §4): how many agents reference this
+    // account, from the existing agent-side reverse index. Count is by
+    // *link*, not process liveness — see deleteDisclosureNotice's note.
+    const agents = useAgentDefinitions();
+    const assignedAgents = () => agentsAssignedToAccount(account.id, agents());
     return (
         <>
             <ModalHeader title={account.name} />
@@ -280,7 +308,15 @@ function AccountDetail({ model, account }: { model: IdentityViewModel; account: 
                 <button
                     class="identity-btn identity-btn-danger"
                     onClick={() => {
-                        if (confirm(`Delete account "${account.name}"?`)) {
+                        // Pre-delete affected-agent disclosure (spec §4):
+                        // surface the linked-agent count BEFORE the delete.
+                        const used = assignedAgents();
+                        const usage =
+                            used.length > 0
+                                ? `\n\n${used.length} agent(s) use this account: ${used.join(", ")}.` +
+                                  ` Any that are running keep its tokens until restarted.`
+                                : "";
+                        if (confirm(`Delete account "${account.name}"?${usage}`)) {
                             model.deleteAccount(account.id);
                         }
                     }}

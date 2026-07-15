@@ -64,6 +64,7 @@ import { ActivityLogPanel } from "./components/ActivityLogPanel";
 import { AgentDecisionPanel } from "./components/AgentDecisionPanel";
 import { AgentQuestionPanel } from "./components/AgentQuestionPanel";
 import { AgentDisconnectedBanner } from "./components/AgentDisconnectedBanner";
+import { AgentCredentialsRevokedChip } from "./components/AgentCredentialsRevokedChip";
 import { AgentDocumentView } from "./components/AgentDocumentView";
 import { AgentFooter, AgentWorkingRow } from "./components/AgentFooter";
 import { AgentComposerStrip } from "./components/AgentComposerStrip";
@@ -1033,6 +1034,13 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     accent={block()?.meta?.["agentMode"] === "container" ? "done" : "idle"}
                 />
             </Show>
+            {/* Credentials-revoked disclosure chip — appears when an identity
+                account this agent was linked to is deleted (or unlinked)
+                while the pane is live. Honest wording: the running process
+                still holds working tokens until restarted; enforcement lands
+                at the next spawn (layer 3).
+                SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md §3. */}
+            <AgentCredentialsRevokedChip agentId={agentId} />
             {/* Failure-recovery row — per-error-class actions + auto-retry,
                 rendered through the shared PaneRow accessory primitive.
                 SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16. */}
