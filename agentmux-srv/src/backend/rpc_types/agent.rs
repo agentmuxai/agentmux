@@ -415,6 +415,12 @@ pub struct CommandUpdateAgentDefinitionData {
     /// JSON array of volume mount specs. Empty array (`"[]"`) for host agents.
     #[serde(default = "default_container_volumes")]
     pub container_volumes: String,
+    /// Explicit per-agent opt-in to the CLI's global (ambient) login when no
+    /// oauth-class account resolves at spawn (0/1). `None` (omitted) preserves
+    /// the stored value — callers that only edit name/icon/accounts don't
+    /// carry it. SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md §2.3.
+    #[serde(default)]
+    pub use_ambient_login: Option<i64>,
 }
 
 /// Input for deleteagent

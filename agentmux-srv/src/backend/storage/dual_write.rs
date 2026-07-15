@@ -66,7 +66,8 @@ impl Store {
                 auto_start, restart_on_crash, idle_timeout_minutes,
                 slug, branch_label, working_directory,
                 created_at, updated_at, is_seeded, user_hidden,
-                container_image, container_volumes, container_name
+                container_image, container_volumes, container_name,
+                use_ambient_login
              ) VALUES (
                 ?1, ?2, ?3, ?4,
                 ?5, ?6,
@@ -75,7 +76,8 @@ impl Store {
                 ?14, ?15, ?16,
                 ?17, ?18, ?19,
                 ?20, ?21, ?22, ?23,
-                ?24, ?25, ?26
+                ?24, ?25, ?26,
+                ?27
              )
              ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
@@ -100,7 +102,8 @@ impl Store {
                 is_seeded = excluded.is_seeded,
                 container_image = excluded.container_image,
                 container_volumes = excluded.container_volumes,
-                container_name = excluded.container_name",
+                container_name = excluded.container_name,
+                use_ambient_login = excluded.use_ambient_login",
             params![
                 def.id,
                 def.name,
@@ -128,6 +131,7 @@ impl Store {
                 def.container_image,
                 def.container_volumes,
                 def.container_name,
+                def.use_ambient_login,
             ],
         )?;
         Ok(())
@@ -350,7 +354,8 @@ impl Store {
                     instance_name,
                     created_at, updated_at, is_seeded, user_hidden,
                     last_block_id,
-                    container_image, container_volumes, container_name
+                    container_image, container_volumes, container_name,
+                    use_ambient_login
                  ) VALUES (
                     ?1, ?2, ?3, ?4,
                     0, ?5,
@@ -362,7 +367,8 @@ impl Store {
                     ?22,
                     ?23, ?24, 0, ?25,
                     ?26,
-                    ?27, ?28, ?29
+                    ?27, ?28, ?29,
+                    ?30
                  )
                  ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
@@ -404,6 +410,7 @@ impl Store {
                     def.container_image,
                     def.container_volumes,
                     def.container_name,
+                    def.use_ambient_login,
                 ],
             )
         };
@@ -621,7 +628,8 @@ impl Store {
                     restart_on_crash, idle_timeout_minutes, created_at,
                     agent_type, environment, agent_bus_id, is_seeded,
                     accounts, parent_id, branch_label, updated_at,
-                    user_hidden, container_image, container_volumes, container_name
+                    user_hidden, container_image, container_volumes, container_name,
+                    use_ambient_login
              FROM db_agent_definitions WHERE id = ?1",
         )?;
         let result = stmt.query_row(params![id], |row| {
@@ -651,6 +659,7 @@ impl Store {
                 container_image: row.get(22)?,
                 container_volumes: row.get(23)?,
                 container_name: row.get(24)?,
+                use_ambient_login: row.get(25)?,
             })
         });
         match result {

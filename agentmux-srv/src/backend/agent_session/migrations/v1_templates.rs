@@ -283,6 +283,7 @@ pub fn migrate_promote_template_sessions_v1(
                 container_image: template.container_image.clone(),
                 container_volumes: template.container_volumes.clone(),
                 container_name: String::new(),
+                use_ambient_login: 0,
             };
             if let Err(e) = wstore.agent_def_insert(&mut new_def) {
                 tracing::warn!(

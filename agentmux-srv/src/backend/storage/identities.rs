@@ -384,6 +384,24 @@ impl Store {
         Ok(out)
     }
 
+    /// Distinct agent ids that have at least one `db_agent_identity_links`
+    /// row. Used by the m0017 ambient-login grandfather migration to decide
+    /// which agents "opted into managed accounts" (flag stays 0) versus
+    /// de-facto ambient users (flag set to 1) — spec §2.4 of
+    /// SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md.
+    pub fn agent_ids_with_identity_links(&self) -> Result<Vec<String>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT DISTINCT agent_id FROM db_agent_identity_links",
+        )?;
+        let iter = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        let mut out = Vec::new();
+        for r in iter {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
 }
 
 #[cfg(test)]
@@ -437,6 +455,7 @@ mod tests {
             container_image: String::new(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
+            use_ambient_login: 0,
         }
     }
 

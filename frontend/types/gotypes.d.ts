@@ -305,6 +305,15 @@ declare global {
          * Empty string for host-only agents.
          */
         container_image?: string;
+        /**
+         * Explicit per-agent opt-in (0/1) to the CLI's global (ambient)
+         * login when no oauth-class account resolves at spawn. 0 (default)
+         * = spawn fails with a visible error instead of silently falling
+         * back to ~/.claude. Toggled from the Agent setup modal's Accounts
+         * tab. Schema v12 — layer 3 of
+         * SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md §2.3.
+         */
+        use_ambient_login?: number;
     };
 
     // ── v6: identity, instance, junction ────────────────────────────────────
@@ -688,6 +697,12 @@ declare global {
         agent_bus_id?: string;
         /** JSON-encoded per-provider account refs. See AgentDefinition.accounts. */
         accounts?: string;
+        /**
+         * Explicit ambient-login opt-in (0/1). Omit to preserve the stored
+         * value — the backend treats absence as "no change". See
+         * AgentDefinition.use_ambient_login.
+         */
+        use_ambient_login?: number;
     };
 
     // CommandDeleteAgentDefinitionData

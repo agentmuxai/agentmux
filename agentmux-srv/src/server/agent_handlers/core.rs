@@ -123,6 +123,10 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     container_image: String::new(),
                     container_volumes: "[]".to_string(),
                     container_name: String::new(),
+                    // New agents fail-by-default on missing oauth creds; the
+                    // ambient opt-in is an explicit per-agent toggle (spec
+                    // §2.2 edge case — no implicit ambient for fresh agents).
+                    use_ambient_login: 0,
                 };
                 wstore.agent_def_insert(&mut agent).map_err(|e| format!("createagent: {e}"))?;
                 broker.publish(crate::backend::wps::WaveEvent {
@@ -203,6 +207,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     container_volumes: if cmd.container_volumes == "[]" { old.container_volumes.clone() } else { cmd.container_volumes },
                     // container_name is server-managed; preserve the existing value.
                     container_name: old.container_name.clone(),
+                    // Preserve the ambient-login opt-in when the caller omits
+                    // the field (Option — most callers only edit name/icon/
+                    // accounts). The Agent setup modal's Accounts tab sends
+                    // Some(0|1) to flip it. Spec §2.3.
+                    use_ambient_login: cmd.use_ambient_login.unwrap_or(old.use_ambient_login),
                 };
                 let found = wstore.agent_def_update(&mut agent).map_err(|e| format!("updateagent: {e}"))?;
                 if !found {
@@ -398,6 +407,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     container_image: String::new(),
                     container_volumes: "[]".to_string(),
                     container_name: String::new(),
+                    use_ambient_login: 0,
                 };
                 wstore.agent_def_insert(&mut agent).map_err(|e| format!("importagentfromclaw: {e}"))?;
 
@@ -533,6 +543,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         container_image: String::new(),
                         container_volumes: "[]".to_string(),
                         container_name: String::new(),
+                        use_ambient_login: 0,
                     };
 
                     if let Err(e) = wstore.agent_def_insert(&mut agent) {
