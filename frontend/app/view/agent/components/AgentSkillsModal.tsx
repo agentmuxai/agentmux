@@ -12,6 +12,7 @@
  */
 
 import { onCleanup, For, Show, type JSX } from "solid-js";
+import { PrimitiveListDetail } from "@/app/element/primitive-list-detail";
 import { openOrFocusPaneByView } from "@/app/store/global";
 import { AgentSkillModel } from "../agent-skill-model";
 import "./AgentPrimitiveModal.scss";
@@ -24,66 +25,69 @@ export const AgentSkillsModal = (props: AgentSkillsModalProps): JSX.Element => {
     const model = new AgentSkillModel(props.agentId);
     onCleanup(() => model.dispose());
 
-    return (
-        <div class="agent-primitive-modal">
+    // Single-pane — see docs/specs/SPEC_ARMORY_RESPONSIVE_SINGLE_PANE_LAYOUT_2026_07_15.md
+    // §5 (shared with Armory's Skills/MCP Servers tabs; applied here too since
+    // there's no evidence the split was intentional in this modal specifically).
+    const inDetail = () => model.selectedIdAtom() !== null || model.draftAtom() !== null;
+    const handleBack = () => {
+        model.setError(null);
+        model.setSelectedId(null);
+        model.setDraft(null);
+    };
+
+    const listView = (
+        <div class="agent-primitive-modal-list">
             <Show when={model.errorAtom()}>
                 <div class="agent-primitive-modal-error">{model.errorAtom()}</div>
             </Show>
-
-            <div class="agent-primitive-modal-body">
-                <div class="agent-primitive-modal-list">
-                    <Show
-                        when={model.skillsAtom().length > 0}
-                        fallback={<div class="agent-primitive-modal-list-empty">No skills yet</div>}
-                    >
-                        <For each={model.skillsAtom()}>
-                            {(skill) => (
-                                <button
-                                    class="agent-primitive-modal-list-item"
-                                    classList={{ "is-selected": model.selectedIdAtom() === skill.id }}
-                                    onClick={() => model.handleSelect(skill)}
+            <Show
+                when={model.skillsAtom().length > 0}
+                fallback={<div class="agent-primitive-modal-list-empty">No skills yet</div>}
+            >
+                <For each={model.skillsAtom()}>
+                    {(skill) => (
+                        <button
+                            class="agent-primitive-modal-list-item"
+                            classList={{ "is-selected": model.selectedIdAtom() === skill.id }}
+                            onClick={() => model.handleSelect(skill)}
+                        >
+                            <span class="agent-primitive-modal-list-item-name">{skill.name}</span>
+                            <Show when={skill.is_global}>
+                                <span class="agent-primitive-modal-list-item-badge">global</span>
+                                <span
+                                    class="agent-primitive-modal-list-item-badge"
+                                    classList={{ "is-bound": skill.bound_to_agent }}
                                 >
-                                    <span class="agent-primitive-modal-list-item-name">{skill.name}</span>
-                                    <Show when={skill.is_global}>
-                                        <span class="agent-primitive-modal-list-item-badge">global</span>
-                                        <span
-                                            class="agent-primitive-modal-list-item-badge"
-                                            classList={{ "is-bound": skill.bound_to_agent }}
-                                        >
-                                            {skill.bound_to_agent ? "bound" : "not bound"}
-                                        </span>
-                                    </Show>
-                                </button>
-                            )}
-                        </For>
-                    </Show>
+                                    {skill.bound_to_agent ? "bound" : "not bound"}
+                                </span>
+                            </Show>
+                        </button>
+                    )}
+                </For>
+            </Show>
 
-                    <button class="agent-primitive-modal-new-btn" onClick={() => model.startNew()}>
-                        + New skill
-                    </button>
-                    <button
-                        class="agent-primitive-modal-new-btn"
-                        onClick={() => void openOrFocusPaneByView("armory")}
-                    >
-                        Browse the Armory catalog →
-                    </button>
-                </div>
+            <button class="agent-primitive-modal-new-btn" onClick={() => model.startNew()}>
+                + New skill
+            </button>
+            <button
+                class="agent-primitive-modal-new-btn"
+                onClick={() => void openOrFocusPaneByView("armory")}
+            >
+                Browse the Armory catalog →
+            </button>
+        </div>
+    );
 
-                <div class="agent-primitive-modal-detail">
-                    <Show
-                        when={model.draftAtom()}
-                        fallback={
-                            <Show
-                                when={model.selectedAtom()}
-                                fallback={
-                                    <div class="agent-primitive-modal-empty">
-                                        Select a skill from the list, or create a new one. Skills
-                                        created here are private to this agent — for one shared across
-                                        every agent, create it in the Armory catalog instead.
-                                    </div>
-                                }
-                            >
-                                {(skill) => (
+    const detailView = (
+        <div class="agent-primitive-modal-detail">
+            <Show when={model.errorAtom()}>
+                <div class="agent-primitive-modal-error">{model.errorAtom()}</div>
+            </Show>
+            <Show
+                when={model.draftAtom()}
+                fallback={
+                    <Show when={model.selectedAtom()}>
+                        {(skill) => (
                                     <div class="agent-primitive-modal-readonly">
                                         <h3 class="agent-primitive-modal-name">{skill().name}</h3>
                                         <Show when={skill().is_global}>
@@ -209,10 +213,18 @@ export const AgentSkillsModal = (props: AgentSkillsModalProps): JSX.Element => {
                                 </div>
                             </form>
                         )}
-                    </Show>
-                </div>
-            </div>
+            </Show>
         </div>
+    );
+
+    return (
+        <PrimitiveListDetail
+            showDetail={inDetail()}
+            backLabel="Skills"
+            onBack={handleBack}
+            list={listView}
+            detail={detailView}
+        />
     );
 };
 

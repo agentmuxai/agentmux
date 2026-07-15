@@ -64,7 +64,7 @@ export function ArmoryView(_props: ViewComponentProps<ArmoryViewModel>): JSX.Ele
                     <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "mcp" }}>
                         <McpManager />
                     </div>
-                    <div class="bundle-manager-pane bundle-manager-pane--memories" classList={{ "is-hidden": section() !== "memories" }}>
+                    <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "memories" }}>
                         <MemoryManager />
                     </div>
                 </div>
