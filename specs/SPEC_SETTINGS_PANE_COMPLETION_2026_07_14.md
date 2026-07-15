@@ -2,10 +2,28 @@
 
 **Date:** 2026-07-14
 **Author:** Agent2
-**Status:** Draft
+**Status:** Implemented (PR #2162), revised post-review — see correction note below
 **Scope:** `frontend/app/view/settings/` (the pane itself), `schema/settings.json` (audit only, no schema changes proposed), `CLAUDE.md` (one stale line).
 **Related (must-read first):**
-`specs/SPEC_SETTINGS_PANE_2026_06_25.md` — the original spec this one completes. Phases 1–2 of that spec are **done and live**; this spec covers Phases 3–5, and **corrects the settings catalog**, which has drifted significantly since 2026-06-25 (see §2).
+- `specs/SPEC_SETTINGS_PANE_2026_06_25.md` — the original spec this one completes. Phases 1–2 of that spec are **done and live**; this spec covers Phases 3–5, and **corrects the settings catalog**, which had drifted significantly since 2026-06-25 (see §2).
+- `specs/settings-cleanup.md` — a pre-existing (2026-05-11) dead-key audit of the same schema that this spec's first draft failed to cross-reference. It is authoritative on which keys have real read sites; see the correction note.
+
+## Correction note (post-review, 2026-07-15)
+
+The first draft of this spec (and the PR built from it) checked keys for **frontend** consumers only and assumed a `0 frontend consumers` key was legitimately "host-consumed" by Rust/launcher code. That assumption was wrong for most of them. `specs/settings-cleanup.md` had already done the harder audit — checking Rust struct **field reads**, not just struct **field declarations** — and found that most of these keys deserialize into a struct field that is never subsequently read anywhere. A serde field exists only to round-trip the JSON; nothing acts on the value. An automated PR review caught this (confirmed independently against the Rust source: `#[allow(dead_code)]` annotations on the `term:localshellpath`/`term:localshellopts` constants were the give-away that not everything with a struct field is actually wired, and grepping for the snake_case field names beyond `wconfig/types.rs` turned up zero hits for the flagged keys).
+
+**Reclassified from "NEW, needs UI" to DEAD (zero reads beyond struct declaration) — removed from the shipped UI:**
+`window:showmenubar`, `window:nativetitlebar`, `window:disablehardwareacceleration`, `window:maxtabcachesize`, `window:confirmclose`, `window:savelastwindow`, `window:zoom`, `app:globalhotkey`, `widget:showhelp`, `telemetry:enabled`, `preview:showhiddenfiles`.
+
+**Reclassified as wrong-file (schema/settings.json declares them but `SettingsType` has no matching Rust struct field; the real, live versions are per-connection fields in `schema/connections.json`) — removed:**
+`conn:wshenabled`, `conn:askbeforewshinstall`.
+
+**Reclassified as UX duplicate (real and live, but already has an established home) — removed from Settings, left in place at its existing location:**
+`network:lan_discovery` — already toggleable from `frontend/app/statusbar/HostPopover.tsx`. Adding a second, disconnected control for the same key in Settings was flagged by review as confusing rather than helpful; deferred rather than shipped.
+
+Losing `network:lan_discovery` and both `conn:*` keys left the **Network** section with nothing in it, so it was dropped entirely — same reasoning §3 already used to drop the old spec's **Files** section for being down to one key. The pane now has **5** sections, not 6. `telemetry:interval`/`telemetry:numpoints` survived (real consumers — see `specs/settings-cleanup.md` §A — they drive the sysinfo widget's polling rate, not literal telemetry transmission, hence the relabel to "Sysinfo widget" in the UI to stop implying data leaves the machine).
+
+The rest of this document is left as originally written for the historical record of the (partially wrong) research; §2/§3/§5/§7 below carry inline strikethrough-style corrections rather than being silently rewritten.
 
 ---
 
@@ -42,36 +60,36 @@ This spec does two things:
 | `window:magnifiedblocksize` | NEW | same feature |
 | `window:magnifiedblockblurprimarypx` | NEW | same feature |
 | `window:magnifiedblockblursecondarypx` | NEW | same feature |
-| `window:showmenubar` | NEW | 0 frontend consumers — launcher/host-consumed |
-| `window:nativetitlebar` | NEW | 0 frontend consumers — restart-required, host-consumed |
-| `window:disablehardwareacceleration` | NEW | 0 frontend consumers — restart-required, host-consumed; **was** in old spec's Advanced |
-| `window:maxtabcachesize` | NEW | 0 frontend consumers — host-consumed |
-| `window:confirmclose` | NEW | 0 frontend consumers — host-consumed |
-| `window:savelastwindow` | NEW | 0 frontend consumers — host-consumed |
-| `window:dimensions` | NEW | 0 frontend consumers — host-consumed, likely not user-facing (window geometry string, probably write-only from the app itself) — **candidate to exclude from UI entirely**, see §6 |
-| `window:zoom` | NEW | 0 frontend consumers — host-consumed |
-| `term:disablewebgl` | ✅ old spec (Advanced) | 1 consumer |
-| `term:localshellpath` | ✅ old spec (Advanced) | 0 frontend consumers — host-consumed |
-| `term:localshellopts` | NEW | 0 frontend consumers — host-consumed, array-of-strings (shell args) |
-| `term:predictiveecho` | NEW | 1 consumer — local predictive echo for laggy/remote shells |
-| `term:predictiveecho:thresholdms` | NEW | companion to above |
-| `app:globalhotkey` | ✅ old spec (Advanced) | 0 frontend consumers — host-consumed (global show/hide hotkey) |
-| `app:dismissarchitecturewarning` | NEW | 0 frontend consumers — one-shot dismiss flag, **exclude from UI**, see §6 |
-| `app:defaultnewblock` | NEW | 1 consumer — which pane type a new tab/block defaults to |
-| `app:showoverlayblocknums` | NEW | 1 consumer — numbered-overlay pane-jump feature (like tmux prefix-number) |
-| `cmd:env` | ✅ old spec (Advanced) | 8 consumers — global env vars injected into every shell; key-value editor control needed |
-| `blockheader:showblockids` | NEW | 1 consumer — debug aid, show block/pane IDs in headers |
-| `preview:showhiddenfiles` | ✅ old spec (Files) | file picker |
-| `tab:preset` | **DEAD** | 0 frontend consumers anywhere (Rust type + generated TS type only) — **do not build UI for this**, see §6 |
-| `tab:skipcloseconfirm` | NEW | 1 consumer |
-| `widget:showhelp` | NEW | 0 frontend consumers — host/widget-bar-consumed |
-| `widget:icononly` | NEW | 2 consumers — forces icon-only widget-bar labels (CLAUDE.md's widget table references this) |
-| `telemetry:enabled` | ✅ old spec (Advanced) | 1 consumer |
-| `telemetry:interval` | NEW | 1 consumer |
-| `telemetry:numpoints` | NEW | 1 consumer, has schema `min/max/default` (30–1024, default 120) |
-| `conn:askbeforewshinstall` | GONE from old spec's catalog, but real | old spec excluded `conn:*` assuming a separate "Connections (WSH)" panel exists. **It doesn't** — confirmed no such surface exists anywhere in the current frontend. These are homeless; bring them into Settings. |
-| `conn:wshenabled` | same as above | |
-| `network:lan_discovery` | ✅ live in old spec's catalog, not yet wired | Network section, still stubbed |
+| `window:showmenubar` | **DEAD** (corrected post-review) | Rust struct field exists in `types.rs`, never read anywhere else. Not shipped. |
+| `window:nativetitlebar` | **DEAD** (corrected post-review) | same — not shipped |
+| `window:disablehardwareacceleration` | **DEAD** (corrected post-review) | same — not shipped |
+| `window:maxtabcachesize` | **DEAD** (corrected post-review) | same — not shipped |
+| `window:confirmclose` | **DEAD** (corrected post-review) | same — not shipped |
+| `window:savelastwindow` | **DEAD** (corrected post-review) | same — not shipped |
+| `window:dimensions` | NEW | 0 frontend consumers — host-consumed, likely not user-facing (window geometry string, probably write-only from the app itself) — **excluded from UI**, see §6 |
+| `window:zoom` | **DEAD** (corrected post-review) | Rust struct field exists, never read — not shipped |
+| `term:disablewebgl` | ✅ old spec (Advanced) | 1 consumer — shipped in Advanced |
+| `term:localshellpath` | ✅ old spec (Advanced) | real consumer (`blockcontroller/mod.rs` const) — shipped in Advanced |
+| `term:localshellopts` | NEW | real consumer (`blockcontroller/mod.rs` const) — shipped in Advanced with a string-array editor |
+| `term:predictiveecho` | NEW | confirmed live (`termwrap.ts`, `predictive-echo.ts`) — shipped in Terminal |
+| `term:predictiveecho:thresholdms` | NEW | companion to above — shipped |
+| `app:globalhotkey` | **DEAD** (corrected post-review) | Rust struct field exists, never read — not shipped |
+| `app:dismissarchitecturewarning` | NEW | 0 frontend consumers — one-shot dismiss flag, **excluded from UI**, see §6 |
+| `app:defaultnewblock` | NEW | confirmed live (`keymodel.ts:296`) — shipped in Window & Panes |
+| `app:showoverlayblocknums` | NEW | confirmed live (`blockframe.tsx:539`) — shipped in Window & Panes |
+| `cmd:env` | ✅ old spec (Advanced) | confirmed live (`blockframe.tsx`, `shell.rs`) — shipped in Advanced with a key-value editor |
+| `blockheader:showblockids` | NEW | confirmed live (`blockframe.tsx:221`) — shipped in Window & Panes |
+| `preview:showhiddenfiles` | **DEAD** (corrected post-review) | Rust struct field exists, never read — not shipped |
+| `tab:preset` | **DEAD** | 0 frontend consumers anywhere (Rust type + generated TS type only) — **excluded from UI**, see §6 |
+| `tab:skipcloseconfirm` | NEW | confirmed live (`tabbar.tsx:135,1088`) — shipped in Window & Panes |
+| `widget:showhelp` | **DEAD** (corrected post-review) | only appears in generated `gotypes.d.ts`, zero reads — not shipped |
+| `widget:icononly` | NEW | confirmed live (`action-widgets.tsx`, `base-menus.ts`) — shipped in Advanced |
+| `telemetry:enabled` | **DEAD** (corrected post-review) | not shipped; `telemetry:interval`/`telemetry:numpoints` below are real, this toggle isn't |
+| `telemetry:interval` | NEW | real consumer — drives the sysinfo widget's polling rate (not literal telemetry transmission; see `specs/settings-cleanup.md` §C4). Shipped, relabeled "Sysinfo widget" in the UI to avoid implying data collection. |
+| `telemetry:numpoints` | NEW | same as above, has schema `min/max/default` (30–1024, default 120) — shipped |
+| `conn:askbeforewshinstall` | **wrong file** (corrected post-review) | Declared in `schema/settings.json` but `SettingsType` has no matching Rust struct field — the live version is per-connection in `schema/connections.json`. Not shipped in global Settings. |
+| `conn:wshenabled` | same as above | not shipped |
+| `network:lan_discovery` | ✅ live, but duplicate (corrected post-review) | Already has a working toggle in `frontend/app/statusbar/HostPopover.tsx`. Not duplicated into Settings — see correction note. |
 | `notify:sounds:enabled` | ✅ old spec (Sounds) | still stubbed |
 | `notify:sounds:volume` | ✅ old spec (Sounds) | still stubbed |
 | `notify:sounds:suppresswhenfocused` | ✅ old spec (Sounds) | still stubbed |
@@ -93,18 +111,19 @@ This means the old spec's entire **Section 3 (Agent)** and most of **Section 6 (
 
 The original 7-section plan (`Appearance, Terminal, Agent, Sounds, Network, Files, Advanced`) doesn't fit the corrected catalog well: `Agent` has nothing left to put in it, `Files` would have exactly one key (`preview:showhiddenfiles`), and `Advanced` would end up holding ~25 keys in one flat list — including a dozen `window:*` behavior keys that have nothing to do with "advanced/power-user" as a concept, they're just window behavior that never got its own home.
 
-**Proposed: 6 sections**, dropping `Agent` and `Files` as standalone rail items, adding `Window & Panes`:
+**As shipped: 5 sections** (originally planned as 6, including a `Network` section — cut post-review, see correction note), dropping `Agent`, `Files`, and `Network` as standalone rail items, adding `Window & Panes`:
 
 1. **Appearance** (unchanged, already live) — `window:theme`, `window:transparent`, `window:opacity`, `window:blur`, `window:tilegapsize`, `window:reducedmotion`. **Add:** `window:bgcolor`, the 4 `window:magnifiedblock*` keys — all visual, all fit naturally here.
-2. **Window & Panes** *(new section)* — `window:showmenubar`, `window:nativetitlebar`, `window:disablehardwareacceleration`, `window:maxtabcachesize`, `window:confirmclose`, `window:savelastwindow`, `window:zoom`, `blockheader:showblockids`, `app:defaultnewblock`, `app:showoverlayblocknums`, `tab:skipcloseconfirm`. Window/pane *behavior*, distinct from Appearance's pure visuals. (`window:dimensions` excluded — see §6.)
+2. **Window & Panes** *(new section)* — as shipped, just 4 keys: `blockheader:showblockids`, `app:defaultnewblock`, `app:showoverlayblocknums`, `tab:skipcloseconfirm`. (The original plan for this section had 11 keys; 7 turned out dead — see correction note. `window:dimensions` also excluded — see §6.)
 3. **Terminal** (unchanged, already live) — existing 8 keys. **Add:** `term:predictiveecho`, `term:predictiveecho:thresholdms` (a normal terminal-feel setting, not power-user-only).
 4. **Sounds & Notifications** — all 11 `notify:*` keys, including the 2 the old spec missed.
-5. **Network** — `network:lan_discovery`, `conn:askbeforewshinstall`, `conn:wshenabled`. (Old spec's reason for excluding `conn:*` — a separate Connections/WSH panel — doesn't exist; confirmed via search.)
-6. **Advanced** — the true power-user/restart-required catch-all: `app:globalhotkey`, `term:disablewebgl`, `term:localshellpath`, `term:localshellopts`, `widget:showhelp`, `widget:icononly`, `telemetry:enabled`, `telemetry:interval`, `telemetry:numpoints`, `cmd:env` (key-value editor), `preview:showhiddenfiles` (folded in from the old spec's now-empty "Files" section — a single file-picker toggle doesn't warrant its own rail item).
+5. **Advanced** — the real power-user/restart-required catch-all, as shipped: `term:disablewebgl`, `term:localshellpath`, `term:localshellopts`, `widget:icononly`, `telemetry:interval`, `telemetry:numpoints` (relabeled "Sysinfo widget" in the UI), `cmd:env` (key-value editor). (`app:globalhotkey`, `widget:showhelp`, `telemetry:enabled`, `preview:showhiddenfiles` dropped — dead, see correction note.)
+
+~~**Network**~~ — cut. `network:lan_discovery` stays at its existing home (`HostPopover.tsx`) rather than being duplicated; `conn:askbeforewshinstall`/`conn:wshenabled` turned out to have no global-settings backing at all (wrong-file, see correction note).
 
 `app:dismissarchitecturewarning`, `window:dimensions`, `tab:preset` are deliberately **not surfaced anywhere** — see §6 for why each.
 
-**Rail becomes:** Appearance · Window & Panes · Terminal · Sounds · Network · Advanced (6 items, was 7 — `RAIL` array in `settings-view.tsx` and `SettingsSection` union in `settings-model.ts` both need the rename/restructure).
+**Rail, as shipped:** Appearance · Window & Panes · Terminal · Sounds · Advanced (5 items, was 7 in the original spec — `RAIL` array in `settings-view.tsx` and `SettingsSection` union in `settings-model.ts` both updated accordingly).
 
 ## 4. Component work needed
 
@@ -119,18 +138,18 @@ Everything needed for sections 1–5 above (Appearance additions, Window & Panes
 
 Numbering continues from the original spec's Phase 1–2 (already shipped):
 
-**Phase 3 — Window & Panes, Sounds, Network sections** (all straight `SettingRow` application, no new components)
-- Update `SettingsSection` union (`settings-model.ts`) and `RAIL` array (`settings-view.tsx`): drop `agent`/`files`, add `window` (or similar id).
+**Phase 3 — Window & Panes, Sounds sections, as shipped** (all straight `SettingRow` application, no new components)
+- Update `SettingsSection` union (`settings-model.ts`) and `RAIL` array (`settings-view.tsx`): drop `agent`/`files`/`network`, add `window`.
 - Wire `window:bgcolor` + 4 `magnifiedblock*` keys into `AppearanceSection`.
-- New `WindowPanesSection` component: 11 keys from §3.2.
+- New `WindowPanesSection` component: 4 keys, not the originally planned 11 — see correction note.
 - New `SoundsSection` component: 11 `notify:*` keys. `notify:sounds:volume`/`notify:tooltones:volume` use `SliderControl` (0–1, matching `term:transparency`'s existing usage); `notify:sounds:enabled` gates the rest of the section visible/disabled the same way `AppearanceSection` gates opacity/blur behind `window:transparent` today (established pattern, reuse it). `notify:tooltones:scope` is the first `enum`-as-`<select>` outside `window:theme`/`term:theme` — same `<select>` pattern.
-- New `NetworkSection` component: 3 keys.
 - Add `term:predictiveecho` + `term:predictiveecho:thresholdms` to the existing `TerminalSection` (indent the threshold row under the toggle, same pattern already used for opacity/blur under `window:transparent`).
+- No `NetworkSection` — cut post-review, see correction note.
 
-**Phase 4 — Advanced section**
-- Key-value editor control for `cmd:env`.
+**Phase 4 — Advanced section, as shipped**
+- Key-value editor control for `cmd:env` — keyed by `Object.keys()`, not `Object.entries()`, so SolidJS's `<For>` can match rows by stable string identity across edits instead of remounting every row on every keystroke.
 - String-array editor for `term:localshellopts`.
-- Remaining flat `SettingRow` keys: `app:globalhotkey`, `term:disablewebgl`, `term:localshellpath`, `widget:showhelp`, `widget:icononly`, `telemetry:enabled`/`interval`/`numpoints`, `preview:showhiddenfiles`.
+- Remaining flat `SettingRow` keys, as shipped: `term:disablewebgl`, `term:localshellpath`, `widget:icononly`, `telemetry:interval`/`numpoints` (relabeled "Sysinfo widget"). Dropped: `app:globalhotkey`, `widget:showhelp`, `telemetry:enabled`, `preview:showhiddenfiles` — all dead, see correction note.
 - `telemetry:numpoints` should respect the schema's declared `minimum: 30, maximum: 1024` bounds in its `<input type="number">`, same as how `term:scrollback`/`term:fontsize` already clamp to their schema ranges today.
 
 **Phase 5 — Polish** (from the original spec, still valid, still not started)
@@ -151,8 +170,8 @@ These three are the exceptions; every other key in the schema gets a home somewh
 
 | File | Change |
 |---|---|
-| `frontend/app/view/settings/settings-model.ts` | `SettingsSection` union: drop `"agent"`/`"files"`, add `"window"` (Window & Panes) |
-| `frontend/app/view/settings/settings-view.tsx` | `RAIL` array update; new `WindowPanesSection`, `SoundsSection`, `NetworkSection`, `AdvancedSection` components (replacing their `StubSection` placeholders); `AppearanceSection`/`TerminalSection` extended with the new keys from §3; new key-value/string-array editor controls |
+| `frontend/app/view/settings/settings-model.ts` | `SettingsSection` union: drop `"agent"`/`"files"`/`"network"`, add `"window"` (Window & Panes) |
+| `frontend/app/view/settings/settings-view.tsx` | `RAIL` array update; new `WindowPanesSection`, `SoundsSection`, `AdvancedSection` components (replacing their `StubSection` placeholders — no `NetworkSection`, cut post-review); `AppearanceSection`/`TerminalSection` extended with the new keys from §3; new key-value/string-array editor controls |
 | `frontend/app/view/settings/settings-controls.tsx` | **New, optional** — split out of `settings-view.tsx` once it grows past ~600 lines with the new controls, to keep the file navigable (judgment call at implementation time, not a hard requirement) |
 | `frontend/app/view/settings/settings.scss` | New styles for key-value editor rows, string-array editor rows |
 | `CLAUDE.md` | "Settings" row in the "Not widgets" table still says "Opens `settings.json` in the user's default editor" — stale since Phase 1 shipped; the raw-JSON open is now a footer link inside the pane, not the primary action. One-line fix, unrelated to the rest of this spec's scope but should be corrected whenever this work lands. |

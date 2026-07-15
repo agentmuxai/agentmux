@@ -76,7 +76,7 @@ function SliderControl(p: { min: number; max: number; step: number; value: numbe
 }
 
 function KeyValueEditor(p: { value: Record<string, string>; onChange: (v: Record<string, string>) => void }): JSX.Element {
-    const entries = () => Object.entries(p.value ?? {});
+    const keys = () => Object.keys(p.value ?? {});
     const [newKey, setNewKey] = createSignal("");
     const [newVal, setNewVal] = createSignal("");
 
@@ -96,14 +96,14 @@ function KeyValueEditor(p: { value: Record<string, string>; onChange: (v: Record
 
     return (
         <div class="setting-kv-editor">
-            <For each={entries()}>
-                {([k, v]) => (
+            <For each={keys()}>
+                {(k) => (
                     <div class="setting-kv-row">
                         <input class="setting-text setting-kv-key" type="text" value={k} disabled />
                         <input
                             class="setting-text setting-kv-val"
                             type="text"
-                            value={v}
+                            value={p.value[k] ?? ""}
                             onBlur={(e) => updateEntry(k, e.currentTarget.value)}
                         />
                         <button type="button" class="setting-kv-remove" onClick={() => removeEntry(k)}>
@@ -385,87 +385,6 @@ function WindowPanesSection(): JSX.Element {
 
     return (
         <div class="settings-section-body">
-            <SettingRow
-                label="Show menu bar"
-                description="Show the native application menu bar (restart required)"
-                control={
-                    <ToggleControl
-                        checked={s()["window:showmenubar"] !== false}
-                        onChange={(v) => set("window:showmenubar", v)}
-                    />
-                }
-            />
-            <SettingRow
-                label="Native title bar"
-                description="Use the OS-native window title bar instead of the custom one (restart required)"
-                control={
-                    <ToggleControl
-                        checked={!!(s()["window:nativetitlebar"] as boolean)}
-                        onChange={(v) => set("window:nativetitlebar", v)}
-                    />
-                }
-            />
-            <SettingRow
-                label="Disable hardware acceleration"
-                description="Force software rendering (restart required)"
-                control={
-                    <ToggleControl
-                        checked={!!(s()["window:disablehardwareacceleration"] as boolean)}
-                        onChange={(v) => set("window:disablehardwareacceleration", v)}
-                    />
-                }
-            />
-            <SettingRow
-                label="Max tab cache size"
-                description="Maximum number of tabs kept warm in memory"
-                control={
-                    <input
-                        class="setting-number setting-number--wide"
-                        type="number" min={1}
-                        value={(s()["window:maxtabcachesize"] as number) ?? 10}
-                        onBlur={(e) => {
-                            const v = parseInt(e.currentTarget.value, 10);
-                            if (!isNaN(v) && v >= 1) set("window:maxtabcachesize", v);
-                        }}
-                    />
-                }
-            />
-            <SettingRow
-                label="Confirm before closing"
-                description="Prompt for confirmation when closing a window with running blocks"
-                control={
-                    <ToggleControl
-                        checked={!!(s()["window:confirmclose"] as boolean)}
-                        onChange={(v) => set("window:confirmclose", v)}
-                    />
-                }
-            />
-            <SettingRow
-                label="Reopen last window"
-                description="Restore the last window's layout on launch"
-                control={
-                    <ToggleControl
-                        checked={!!(s()["window:savelastwindow"] as boolean)}
-                        onChange={(v) => set("window:savelastwindow", v)}
-                    />
-                }
-            />
-            <SettingRow
-                label="Window zoom"
-                description="UI zoom level (1.0 = 100%)"
-                control={
-                    <input
-                        class="setting-number setting-number--wide"
-                        type="number" min={0.5} max={3} step={0.1}
-                        value={(s()["window:zoom"] as number) ?? 1}
-                        onBlur={(e) => {
-                            const v = parseFloat(e.currentTarget.value);
-                            if (!isNaN(v) && v >= 0.5 && v <= 3) set("window:zoom", v);
-                        }}
-                    />
-                }
-            />
-            <SectionHeader label="Panes & tabs" />
             <SettingRow
                 label="Show block IDs"
                 description="Show each pane's internal block ID in its header (debugging aid)"
@@ -786,47 +705,6 @@ function SoundsSection(): JSX.Element {
     );
 }
 
-// ── Section: Network ──────────────────────────────────────────────────────────
-
-function NetworkSection(): JSX.Element {
-    const s = () => settingsAtom() ?? ({} as any);
-
-    return (
-        <div class="settings-section-body">
-            <SettingRow
-                label="LAN discovery"
-                description="Discover other AgentMux instances on this host and LAN via mDNS"
-                control={
-                    <ToggleControl
-                        checked={!!(s()["network:lan_discovery"] as boolean)}
-                        onChange={(v) => set("network:lan_discovery", v)}
-                    />
-                }
-            />
-            <SettingRow
-                label="WSH connections"
-                description="Enable the WSH remote-shell helper connection protocol"
-                control={
-                    <ToggleControl
-                        checked={s()["conn:wshenabled"] !== false}
-                        onChange={(v) => set("conn:wshenabled", v)}
-                    />
-                }
-            />
-            <SettingRow
-                label="Confirm WSH install"
-                description="Ask before installing the WSH helper on a remote host"
-                control={
-                    <ToggleControl
-                        checked={s()["conn:askbeforewshinstall"] !== false}
-                        onChange={(v) => set("conn:askbeforewshinstall", v)}
-                    />
-                }
-            />
-        </div>
-    );
-}
-
 // ── Section: Advanced ─────────────────────────────────────────────────────────
 
 function AdvancedSection(): JSX.Element {
@@ -834,19 +712,6 @@ function AdvancedSection(): JSX.Element {
 
     return (
         <div class="settings-section-body">
-            <SettingRow
-                label="Global hotkey"
-                description="Keyboard shortcut to show/hide the app from anywhere (restart required)"
-                control={
-                    <input
-                        class="setting-text"
-                        type="text"
-                        value={(s()["app:globalhotkey"] as string) ?? ""}
-                        placeholder="e.g. Cmd+Shift+Space"
-                        onBlur={(e) => set("app:globalhotkey", e.currentTarget.value || null)}
-                    />
-                }
-            />
             <SectionHeader label="Terminal (power user)" />
             <SettingRow
                 label="Disable WebGL rendering"
@@ -884,16 +749,6 @@ function AdvancedSection(): JSX.Element {
             />
             <SectionHeader label="Widgets" />
             <SettingRow
-                label="Show widget help"
-                description="Show inline help hints in the widget bar"
-                control={
-                    <ToggleControl
-                        checked={!!(s()["widget:showhelp"] as boolean)}
-                        onChange={(v) => set("widget:showhelp", v)}
-                    />
-                }
-            />
-            <SettingRow
                 label="Icon-only widget labels"
                 description="Force the widget bar to show icons without text labels"
                 control={
@@ -903,21 +758,10 @@ function AdvancedSection(): JSX.Element {
                     />
                 }
             />
-            <SectionHeader label="Telemetry" />
+            <SectionHeader label="Sysinfo widget" />
             <SettingRow
-                label="Telemetry"
-                description="Collect local performance telemetry (CPU/memory graphs)"
-                control={
-                    <ToggleControl
-                        checked={s()["telemetry:enabled"] !== false}
-                        onChange={(v) => set("telemetry:enabled", v)}
-                    />
-                }
-            />
-            <SettingRow
-                indent
                 label="Sample interval"
-                description="Seconds between telemetry samples"
+                description="Seconds between sysinfo widget samples"
                 control={
                     <input
                         class="setting-number setting-number--wide"
@@ -931,9 +775,8 @@ function AdvancedSection(): JSX.Element {
                 }
             />
             <SettingRow
-                indent
                 label="History length"
-                description="Number of telemetry samples retained (30–1024)"
+                description="Number of sysinfo widget samples retained (30–1024)"
                 control={
                     <input
                         class="setting-number setting-number--wide"
@@ -958,17 +801,6 @@ function AdvancedSection(): JSX.Element {
                     />
                 }
             />
-            <SectionHeader label="Files" />
-            <SettingRow
-                label="Show hidden files"
-                description="Show dotfiles and other hidden files in the file preview picker"
-                control={
-                    <ToggleControl
-                        checked={!!(s()["preview:showhiddenfiles"] as boolean)}
-                        onChange={(v) => set("preview:showhiddenfiles", v)}
-                    />
-                }
-            />
         </div>
     );
 }
@@ -980,7 +812,6 @@ const RAIL: { id: SettingsSection; label: string; icon: string }[] = [
     { id: "window",     label: "Window & Panes", icon: "table-cells" },
     { id: "terminal",   label: "Terminal",       icon: "square-terminal" },
     { id: "sounds",     label: "Sounds",         icon: "volume-high" },
-    { id: "network",    label: "Network",        icon: "wifi" },
     { id: "advanced",   label: "Advanced",       icon: "sliders" },
 ];
 
@@ -1028,9 +859,6 @@ export function SettingsView(props: ViewComponentProps<SettingsViewModel>): JSX.
                     </Match>
                     <Match when={section() === "sounds"}>
                         <SoundsSection />
-                    </Match>
-                    <Match when={section() === "network"}>
-                        <NetworkSection />
                     </Match>
                     <Match when={section() === "advanced"}>
                         <AdvancedSection />
