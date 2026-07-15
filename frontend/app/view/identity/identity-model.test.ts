@@ -119,3 +119,24 @@ describe("identity-model SecretRef field-name translation", () => {
         expect(typeof identityModel.serializeAgentAccounts).toBe("function");
     });
 });
+
+// ── Delete-time disclosure (layer 4 — SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4 §4)
+
+describe("deleteDisclosureNotice", () => {
+    it("returns null when the delete cascaded no agent links", () => {
+        expect(identityModel.deleteDisclosureNotice([])).toBeNull();
+        expect(identityModel.deleteDisclosureNotice(undefined)).toBeNull();
+    });
+
+    it("returns the honest linked-agent notice when agents were using the account", () => {
+        const one = identityModel.deleteDisclosureNotice(["ag-1"]);
+        expect(one).toContain("Account deleted.");
+        expect(one).toContain("1 agent(s) were using it");
+        // Honest wording: we disclose that tokens survive, we do NOT
+        // pretend the running process was deauthenticated (spec §3).
+        expect(one).toContain("until restarted");
+
+        const three = identityModel.deleteDisclosureNotice(["a", "b", "c"]);
+        expect(three).toContain("3 agent(s)");
+    });
+});
