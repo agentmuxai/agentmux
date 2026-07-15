@@ -556,7 +556,6 @@ pub struct AppState {
     /// Window initialization status ("ready" or "wave-ready")
     pub window_init_status: Mutex<String>,
 
-    /// Linux startup white-flash fix (docs/specs/SPEC_LINUX_STARTUP_PAINT_GATING_2026_07_13.md).
     /// Startup white-flash fix, originally Linux-only
     /// (docs/specs/SPEC_LINUX_STARTUP_PAINT_GATING_2026_07_13.md), extended to
     /// Windows (docs/specs/REPORT_NEW_WINDOW_STARTUP_COLOR_FLASH_2026_07_14.md).
