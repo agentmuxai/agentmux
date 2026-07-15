@@ -3,6 +3,48 @@
 
 // Accounts list layout + group + row.
 
+// ── Delete-time disclosure notice ────────────────────────────────────────────
+// Layer-4 Armory truthfulness (SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4 §4):
+// transient, dismissable row shown after deleting an account that had
+// linked agents. Sits above the accounts list.
+
+.identity-delete-notice {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: var(--space-2) var(--space-2) 0;
+    padding: var(--space-2);
+    border: 1px solid var(--warning-color);
+    border-left-width: 3px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--warning-color) 10%, transparent);
+
+    .identity-delete-notice-icon {
+        color: var(--warning-color);
+        flex: none;
+    }
+
+    .identity-delete-notice-text {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .identity-delete-notice-dismiss {
+        flex: none;
+        border: none;
+        background: transparent;
+        color: var(--secondary-text-color);
+        font-size: 14px;
+        line-height: 1;
+        cursor: pointer;
+        padding: 2px 4px;
+
+        &:hover {
+            color: var(--main-text-color);
+        }
+    }
+}
+
 // ── Accounts layout (list + detail) ──────────────────────────────────────────
 
 .identity-accounts-layout {

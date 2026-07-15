@@ -461,8 +461,52 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         persist: 0,
                         data: None,
                     });
+                    // Layer 2 — running-agent reconciliation (spec
+                    // SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md §3):
+                    // the cascaded links name agents that may have a LIVE
+                    // process still holding this account's tokens. We
+                    // surface, not hard-kill — a per-agent revocation event
+                    // drives the pane chip; enforcement lands at the next
+                    // spawn (layer 3). Also poke the per-agent link-changed
+                    // event so link tables refresh.
+                    if !outcome.affected_agents.is_empty() {
+                        // info!, not debug!: the production filter is
+                        // "agentmuxsrv=info,info". "identity.delete:" is
+                        // `muxlog auth` vocabulary.
+                        tracing::info!(
+                            account_id = %cmd.id,
+                            provider = %provider,
+                            count = outcome.affected_agents.len(),
+                            agent_ids = %outcome.affected_agents.join(","),
+                            "identity.delete: running agent(s) affected"
+                        );
+                        for agent_id in &outcome.affected_agents {
+                            broker.publish(crate::backend::wps::WaveEvent {
+                                event: format!("agentidentities:changed:{agent_id}"),
+                                scopes: vec![],
+                                sender: String::new(),
+                                persist: 0,
+                                data: None,
+                            });
+                            broker.publish(crate::backend::wps::WaveEvent {
+                                event: format!("agentcredentials:revoked:{agent_id}"),
+                                scopes: vec![],
+                                sender: String::new(),
+                                persist: 0,
+                                data: Some(json!({
+                                    "credentialsRevoked": true,
+                                    "provider": provider,
+                                    "accountId": cmd.id,
+                                })),
+                            });
+                        }
+                    }
                 }
-                Ok(Some(json!({ "deleted": deleted })))
+                Ok(Some(json!({
+                    "deleted": deleted,
+                    // Layer 4 — Armory delete-time disclosure (spec §4).
+                    "affectedAgents": outcome.affected_agents,
+                })))
             })
         }),
     );
@@ -523,6 +567,19 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         sender: String::new(),
                         persist: 0,
                         data: None,
+                    });
+                    // Spec §3 names unlink alongside delete: a live process
+                    // for this agent still holds the unlinked account's
+                    // tokens until restarted — same disclosure chip.
+                    broker.publish(crate::backend::wps::WaveEvent {
+                        event: format!("agentcredentials:revoked:{}", cmd.agent_id),
+                        scopes: vec![],
+                        sender: String::new(),
+                        persist: 0,
+                        data: Some(json!({
+                            "credentialsRevoked": true,
+                            "provider": cmd.provider,
+                        })),
                     });
                 }
                 Ok(Some(json!({ "unlinked": removed })))
