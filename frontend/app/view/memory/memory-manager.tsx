@@ -19,6 +19,7 @@
 
 import { For, onCleanup, Show, type JSX } from "solid-js";
 
+import { PrimitiveListDetail } from "@/app/element/primitive-list-detail";
 import { type MemoryDraft, MemoryViewModel } from "./memory-model";
 
 import "./memory-view.scss";
@@ -77,111 +78,115 @@ export const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element =>
         model.setDraft({ ...current, [key]: value });
     };
 
-    return (
-        <div class="memory-view">
-            <div class="memory-view-rail">
-                <div class="memory-view-rail-header">
-                    <button class="memory-view-new-btn" onClick={handleNew}>
-                        + New Preset
-                    </button>
-                </div>
-                <ul class="memory-view-list">
-                    <For each={model.memoriesAtom()}>
-                        {(memory) => (
-                            <li
-                                class="memory-view-list-item"
-                                classList={{
-                                    "is-selected": model.selectedIdAtom() === memory.id,
-                                    "is-blank": !!memory.is_blank,
-                                    "is-global": !!memory.is_global,
-                                }}
-                                onClick={() => handleSelect(memory)}
-                            >
-                                <div class="memory-view-list-item-name">
-                                    <span class="memory-view-list-item-name-text">
-                                        {memory.is_blank ? "— Blank (vanilla CLI) —" : memory.name}
-                                    </span>
-                                    <Show when={memory.is_global}>
-                                        <span class="memory-view-global-badge" title="Injected into all agents at launch">Global</span>
-                                    </Show>
+    // Single-pane: the detail view (read-only or edit form) shows instead of
+    // the list, never alongside it — see
+    // docs/specs/SPEC_ARMORY_RESPONSIVE_SINGLE_PANE_LAYOUT_2026_07_15.md.
+    // "In detail" whenever something is selected OR a draft (new or
+    // editing-existing) is open; otherwise the list shows. The old
+    // no-selection empty-state message ("Select a preset...") is gone — with
+    // nothing selected you're just looking at the list, there's no third
+    // empty detail state to explain.
+    const inDetail = () => model.selectedIdAtom() !== null || model.draftAtom() !== null;
+
+    const handleBack = () => {
+        model.setError(null);
+        model.setSelectedId(null);
+        model.setDraft(null);
+    };
+
+    const listView = (
+        <div class="memory-view-rail">
+            <div class="memory-view-rail-header">
+                <button class="memory-view-new-btn" onClick={handleNew}>
+                    + New Preset
+                </button>
+            </div>
+            <ul class="memory-view-list">
+                <For each={model.memoriesAtom()}>
+                    {(memory) => (
+                        <li
+                            class="memory-view-list-item"
+                            classList={{
+                                "is-selected": model.selectedIdAtom() === memory.id,
+                                "is-blank": !!memory.is_blank,
+                                "is-global": !!memory.is_global,
+                            }}
+                            onClick={() => handleSelect(memory)}
+                        >
+                            <div class="memory-view-list-item-name">
+                                <span class="memory-view-list-item-name-text">
+                                    {memory.is_blank ? "— Blank (vanilla CLI) —" : memory.name}
+                                </span>
+                                <Show when={memory.is_global}>
+                                    <span class="memory-view-global-badge" title="Injected into all agents at launch">Global</span>
+                                </Show>
+                            </div>
+                            {/* Subtitle shows the description now that presets
+                                are provider-agnostic (§4.1a). Class name kept
+                                to avoid CSS churn. */}
+                            <Show when={!memory.is_blank && memory.description}>
+                                <div class="memory-view-list-item-provider">
+                                    {memory.description}
                                 </div>
-                                {/* Subtitle shows the description now that presets
-                                    are provider-agnostic (§4.1a). Class name kept
-                                    to avoid CSS churn. */}
-                                <Show when={!memory.is_blank && memory.description}>
-                                    <div class="memory-view-list-item-provider">
-                                        {memory.description}
+                            </Show>
+                        </li>
+                    )}
+                </For>
+            </ul>
+        </div>
+    );
+
+    const detailView = (
+        <div class="memory-view-detail">
+            <Show when={model.errorAtom()}>
+                <div class="memory-view-error">{model.errorAtom()}</div>
+            </Show>
+
+            <Show
+                when={model.draftAtom()}
+                fallback={
+                    <Show when={model.selectedAtom()}>
+                        {(memory) => (
+                            <div class="memory-view-readonly">
+                                <h2 class="memory-view-name">{memory().name}</h2>
+                                <Show when={memory().description}>
+                                    <p class="memory-view-description">{memory().description}</p>
+                                </Show>
+                                <dl class="memory-view-fields">
+                                    <Show when={memory().is_global}>
+                                        <dt>Scope</dt>
+                                        <dd>
+                                            <span class="memory-view-global-badge" title="Injected into all agents at launch">Global</span>
+                                            {" "}— injected into every agent at launch
+                                        </dd>
+                                    </Show>
+                                    <dt>Instructions</dt>
+                                    <dd class="memory-view-instructions-readonly">
+                                        <pre>{memory().instructions || "(none)"}</pre>
+                                    </dd>
+                                </dl>
+                                <Show when={!memory().is_blank}>
+                                    <div class="memory-view-actions">
+                                        <button
+                                            class="memory-view-edit-btn"
+                                            onClick={() => model.startEdit(memory())}
+                                        >
+                                            Edit
+                                        </button>
+                                        <button
+                                            class="memory-view-delete-btn"
+                                            onClick={() => handleDelete(memory().id)}
+                                        >
+                                            Delete
+                                        </button>
                                     </div>
                                 </Show>
-                            </li>
+                            </div>
                         )}
-                    </For>
-                </ul>
-            </div>
-
-            <div class="memory-view-detail">
-                <Show when={model.errorAtom()}>
-                    <div class="memory-view-error">{model.errorAtom()}</div>
-                </Show>
-
-                <Show
-                    when={model.draftAtom()}
-                    fallback={
-                        <Show
-                            when={model.selectedAtom()}
-                            fallback={
-                                <div class="memory-view-empty">
-                                    <p>Select a preset from the list, or create a new one.</p>
-                                    <p class="memory-view-empty-hint">
-                                        A preset holds an agent's system instructions, context
-                                        files, MCP servers, and skills. It is provider-agnostic —
-                                        the CLI and model belong to the agent. Pick one at launch
-                                        time alongside an Identity to compose an agent instance.
-                                    </p>
-                                </div>
-                            }
-                        >
-                            {(memory) => (
-                                <div class="memory-view-readonly">
-                                    <h2 class="memory-view-name">{memory().name}</h2>
-                                    <Show when={memory().description}>
-                                        <p class="memory-view-description">{memory().description}</p>
-                                    </Show>
-                                    <dl class="memory-view-fields">
-                                        <Show when={memory().is_global}>
-                                            <dt>Scope</dt>
-                                            <dd>
-                                                <span class="memory-view-global-badge" title="Injected into all agents at launch">Global</span>
-                                                {" "}— injected into every agent at launch
-                                            </dd>
-                                        </Show>
-                                        <dt>Instructions</dt>
-                                        <dd class="memory-view-instructions-readonly">
-                                            <pre>{memory().instructions || "(none)"}</pre>
-                                        </dd>
-                                    </dl>
-                                    <Show when={!memory().is_blank}>
-                                        <div class="memory-view-actions">
-                                            <button
-                                                class="memory-view-edit-btn"
-                                                onClick={() => model.startEdit(memory())}
-                                            >
-                                                Edit
-                                            </button>
-                                            <button
-                                                class="memory-view-delete-btn"
-                                                onClick={() => handleDelete(memory().id)}
-                                            >
-                                                Delete
-                                            </button>
-                                        </div>
-                                    </Show>
-                                </div>
-                            )}
-                        </Show>
-                    }
-                >
-                    {(draft) => (
+                    </Show>
+                }
+            >
+                {(draft) => (
                         <form
                             class="memory-view-form"
                             onSubmit={(e) => {
@@ -259,9 +264,18 @@ export const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element =>
                             </p>
                         </form>
                     )}
-                </Show>
-            </div>
+            </Show>
         </div>
+    );
+
+    return (
+        <PrimitiveListDetail
+            showDetail={inDetail()}
+            backLabel="Bundles"
+            onBack={handleBack}
+            list={listView}
+            detail={detailView}
+        />
     );
 };
 

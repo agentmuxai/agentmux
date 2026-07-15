@@ -2,17 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Shared styles for the agent-scoped primitive list/detail tabs (MCP
-// Servers, Skills) hosted inside AgentSetupModal. Same list+detail shape as
-// AgentNativeMemoryModal.scss, generalized to a form-editor detail pane
-// instead of a file browser — see AgentMcpModal.tsx / AgentSkillsModal.tsx.
-
-.agent-primitive-modal {
-    display: flex;
-    flex-direction: column;
-    width: 100%;
-    height: 100%;
-    min-height: 0;
-}
+// Servers, Skills) hosted inside AgentSetupModal, and reused by Armory's
+// own Skills/MCP Servers tabs (skill-manager.tsx / mcp-manager.tsx). Content
+// styling only — the outer list/detail layout and the list-vs-detail toggle
+// live in PrimitiveListDetail (frontend/app/element/primitive-list-detail.tsx).
+// This used to be a fixed-width side-by-side split with no narrow-pane
+// fallback; see docs/specs/SPEC_ARMORY_RESPONSIVE_SINGLE_PANE_LAYOUT_2026_07_15.md.
 
 .agent-primitive-modal-error {
     flex-shrink: 0;
@@ -24,19 +19,11 @@
     font-size: var(--text-sm);
 }
 
-.agent-primitive-modal-body {
-    flex: 1;
-    min-height: 0;
-    display: flex;
-    border: 1px solid var(--border-color);
-}
-
 .agent-primitive-modal-list {
-    flex-shrink: 0;
-    width: 220px;
+    width: 100%;
+    height: 100%;
     display: flex;
     flex-direction: column;
-    border-right: 1px solid var(--border-color);
     overflow-y: auto;
 }
 
@@ -110,22 +97,11 @@
 }
 
 .agent-primitive-modal-detail {
-    flex: 1;
-    min-width: 0;
+    width: 100%;
+    height: 100%;
     display: flex;
     flex-direction: column;
     overflow-y: auto;
-}
-
-.agent-primitive-modal-empty {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: var(--space-4);
-    text-align: center;
-    color: var(--secondary-text-color);
-    font-size: var(--text-sm);
 }
 
 .agent-primitive-modal-readonly {

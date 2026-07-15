@@ -10,6 +10,7 @@
  */
 
 import { onCleanup, For, Show, type JSX } from "solid-js";
+import { PrimitiveListDetail } from "@/app/element/primitive-list-detail";
 import { McpCatalogModel } from "./mcp-model";
 import { McpCatalogPicker } from "./McpCatalogPicker";
 import { findPreloadEntryByName } from "./mcp-preload-catalog";
@@ -57,56 +58,58 @@ export const McpManager = (): JSX.Element => {
     const model = new McpCatalogModel();
     onCleanup(() => model.dispose());
 
-    return (
-        <div class="agent-primitive-modal">
+    // Single-pane — see docs/specs/SPEC_ARMORY_RESPONSIVE_SINGLE_PANE_LAYOUT_2026_07_15.md.
+    const inDetail = () => model.selectedIdAtom() !== null || model.draftAtom() !== null;
+    const handleBack = () => {
+        model.setError(null);
+        model.setSelectedId(null);
+        model.setDraft(null);
+    };
+
+    const listView = (
+        <div class="agent-primitive-modal-list">
             <Show when={model.errorAtom()}>
                 <div class="agent-primitive-modal-error">{model.errorAtom()}</div>
             </Show>
+            <Show
+                when={model.serversAtom().length > 0}
+                fallback={<div class="agent-primitive-modal-list-empty">No MCP servers yet</div>}
+            >
+                <For each={model.serversAtom()}>
+                    {(server) => (
+                        <button
+                            class="agent-primitive-modal-list-item"
+                            classList={{ "is-selected": model.selectedIdAtom() === server.id }}
+                            onClick={() => model.handleSelect(server)}
+                        >
+                            <span class="agent-primitive-modal-list-item-name">{server.name}</span>
+                            <span class="agent-primitive-modal-list-item-badge">
+                                {server.bound_count} {server.bound_count === 1 ? "agent" : "agents"}
+                            </span>
+                        </button>
+                    )}
+                </For>
+            </Show>
 
-            <div class="agent-primitive-modal-body">
-                <div class="agent-primitive-modal-list">
-                    <Show
-                        when={model.serversAtom().length > 0}
-                        fallback={<div class="agent-primitive-modal-list-empty">No MCP servers yet</div>}
-                    >
-                        <For each={model.serversAtom()}>
-                            {(server) => (
-                                <button
-                                    class="agent-primitive-modal-list-item"
-                                    classList={{ "is-selected": model.selectedIdAtom() === server.id }}
-                                    onClick={() => model.handleSelect(server)}
-                                >
-                                    <span class="agent-primitive-modal-list-item-name">{server.name}</span>
-                                    <span class="agent-primitive-modal-list-item-badge">
-                                        {server.bound_count} {server.bound_count === 1 ? "agent" : "agents"}
-                                    </span>
-                                </button>
-                            )}
-                        </For>
-                    </Show>
+            <button class="agent-primitive-modal-new-btn" onClick={() => model.openCatalogPicker()}>
+                + Browse catalog
+            </button>
+            <button class="agent-primitive-modal-new-btn" onClick={() => model.startNew()}>
+                + New MCP server
+            </button>
+        </div>
+    );
 
-                    <button class="agent-primitive-modal-new-btn" onClick={() => model.openCatalogPicker()}>
-                        + Browse catalog
-                    </button>
-                    <button class="agent-primitive-modal-new-btn" onClick={() => model.startNew()}>
-                        + New MCP server
-                    </button>
-                </div>
-
-                <div class="agent-primitive-modal-detail">
-                    <Show
-                        when={model.draftAtom()}
-                        fallback={
-                            <Show
-                                when={model.selectedAtom()}
-                                fallback={
-                                    <div class="agent-primitive-modal-empty">
-                                        Select a server from the list, or create a new one. Servers
-                                        created here are global — visible to every agent.
-                                    </div>
-                                }
-                            >
-                                {(server) => (
+    const detailView = (
+        <div class="agent-primitive-modal-detail">
+            <Show when={model.errorAtom()}>
+                <div class="agent-primitive-modal-error">{model.errorAtom()}</div>
+            </Show>
+            <Show
+                when={model.draftAtom()}
+                fallback={
+                    <Show when={model.selectedAtom()}>
+                        {(server) => (
                                     <div class="agent-primitive-modal-readonly">
                                         <h3 class="agent-primitive-modal-name">{server().name}</h3>
                                         <p class="agent-primitive-modal-global-note">
@@ -212,14 +215,23 @@ export const McpManager = (): JSX.Element => {
                                 </div>
                             </form>
                         )}
-                    </Show>
-                </div>
-            </div>
+            </Show>
+        </div>
+    );
 
+    return (
+        <>
+            <PrimitiveListDetail
+                showDetail={inDetail()}
+                backLabel="MCP Servers"
+                onBack={handleBack}
+                list={listView}
+                detail={detailView}
+            />
             <Show when={model.catalogPickerOpenAtom()}>
                 <McpCatalogPicker model={model} />
             </Show>
-        </div>
+        </>
     );
 };
 
