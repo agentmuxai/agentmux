@@ -110,6 +110,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let id_store = state.id_store.clone();
     let broker = state.broker.clone();
     let container_manager = state.container_manager.clone();
+    let filestore = state.filestore.clone();
 
     engine.register_handler(
         COMMAND_AGENT_SEND,
@@ -118,6 +119,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let id_store = id_store.clone();
             let broker = broker.clone();
             let container_manager = container_manager.clone();
+            let filestore = filestore.clone();
             Box::pin(async move {
                 let cmd: CommandAgentSendData = serde_json::from_value(data)
                     .map_err(|e| format!("agent.send: {e}"))?;
@@ -178,12 +180,16 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             "error": {"message": format!("[AgentMux] {gate}")}
                         })
                         .to_string();
+                        // Some(filestore): the frame must be PERSISTED to the
+                        // block file, not just live-broadcast — otherwise the
+                        // error vanishes on pane reload/reconnect (reagent P1,
+                        // PR #2164 round 2).
                         crate::backend::blockcontroller::shell::handle_append_block_file(
                             &broker,
                             &cmd.block_id,
                             crate::backend::blockcontroller::subprocess::SUBPROCESS_OUTPUT_SUBJECT,
                             format!("{error_frame}\n").as_bytes(),
-                            None,
+                            Some(&filestore),
                             None,
                         );
                         return Err(format!("identity spawn gate: {gate}"));

@@ -213,11 +213,15 @@ pub enum SpawnGateError {
 impl std::fmt::Display for SpawnGateError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            // The quoted toggle name must match AgentIdentityModal.tsx's
+            // label VERBATIM so users can find it (reagent P2, PR #2164
+            // round 2).
             SpawnGateError::MissingCredentials { provider } => write!(
                 f,
                 "no credentials for {}: the bound account was deleted or is \
                  unresolvable. Bind an account in the Armory, or enable \
-                 \"Use global login\" in this agent's settings.",
+                 \"Use global CLI login when no account is bound\" in this \
+                 agent's settings.",
                 provider,
             ),
             SpawnGateError::InjectionUnavailable { detail } => write!(
@@ -452,12 +456,13 @@ pub fn inject_identity_env(
 /// `keyring` (D-Bus Secret Service on Linux) read — so it runs on a blocking
 /// thread via `spawn_blocking` rather than stalling an async runtime worker.
 /// Takes ownership of `env_vars` and returns it with identity vars merged in.
-/// On the rare task-join failure the original map is returned unchanged so
-/// the static `cmd:env` vars are never lost. See spec §12.2.
 ///
 /// `Err(SpawnGateError)` is the layer-3 spawn gate (see
 /// [`inject_identity_env`]): the caller must NOT spawn the CLI and must
-/// surface the error on the agent pane like any other spawn failure.
+/// surface the error on the agent pane like any other spawn failure. A
+/// task-join failure also fails CLOSED (`InjectionUnavailable`, blocking
+/// the spawn) — see that variant's doc for why an open fallback would
+/// systemically bypass the gate after any store panic.
 pub async fn inject_identity_env_async(
     wstore: Arc<Store>,
     id_store: Arc<Store>,
@@ -1257,7 +1262,7 @@ mod tests {
         let msg = res.unwrap_err().to_string();
         assert!(msg.contains("no credentials for claude"), "got: {msg}");
         assert!(msg.contains("Armory"), "got: {msg}");
-        assert!(msg.contains("Use global login"), "got: {msg}");
+        assert!(msg.contains("Use global CLI login when no account is bound"), "got: {msg}");
     }
 
     #[test]
