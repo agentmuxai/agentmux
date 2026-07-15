@@ -7,6 +7,20 @@
    reference these tokens instead of their own hex. */
 
 :root {
+    // Tells the browser/CEF which palette to use for NATIVE form controls —
+    // <select> option popups, date pickers, etc. Without this, Chromium
+    // defaults every native popup to a light palette regardless of the
+    // app's own theme; a dark theme's `color: var(--main-text-color)`
+    // (near-white) then renders as white text on that default-white popup
+    // background — white-on-white, invisible. `color-scheme` is the one
+    // property Chromium actually honors for this (unlike arbitrary CSS on
+    // <option>, which it ignores). Default here is dark since 9 of 13
+    // themes are dark-family; the light-family override lives right below,
+    // gated on the same `[data-theme-polarity]` marker app.tsx already sets
+    // for exactly this dark/light branching (see base-menus.ts's
+    // LIGHT_THEME_IDS doc comment).
+    color-scheme: dark;
+
     --main-text-color: #f7f7f7;
     --title-font-size: 18px;
     // Default to a translucent value so the FIRST paint after page load has
@@ -380,4 +394,10 @@
     --z-modal:         9000;
     --z-flyout-menu:   9500;
     --z-context-menu:  10000;
+}
+
+// Light-family override for the `color-scheme` fix above — same marker
+// window-controls.win32.scss already uses for dark/light chrome decisions.
+[data-theme-polarity="light"] {
+    color-scheme: light;
 }
