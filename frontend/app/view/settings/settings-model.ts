@@ -8,7 +8,6 @@ export type SettingsSection =
     | "window"
     | "terminal"
     | "sounds"
-    | "network"
     | "advanced";
 
 export class SettingsViewModel implements ViewModel {
