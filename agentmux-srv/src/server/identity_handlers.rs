@@ -1308,16 +1308,21 @@ async fn confirm_authenticated(
 ) -> bool {
     use std::process::Stdio;
     use tokio::process::Command;
-    match Command::new(cli_path)
-        .args(args)
+    let mut c = Command::new(cli_path);
+    c.args(args)
         .envs(env)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .kill_on_drop(true)
-        .status()
-        .await
+        .kill_on_drop(true);
+    // CREATE_NO_WINDOW: this status probe is polled in a drain loop during an
+    // auth flow — without the flag each poll flashes a console. See cli.rs.
+    #[cfg(windows)]
     {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        c.creation_flags(CREATE_NO_WINDOW);
+    }
+    match c.status().await {
         Ok(s) => s.success(),
         Err(_) => false,
     }
