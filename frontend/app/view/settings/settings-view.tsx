@@ -19,9 +19,9 @@ function set(key: string, value: unknown): void {
 
 // ── SettingRow primitive ──────────────────────────────────────────────────────
 
-function SettingRow(p: { label: string; description?: string; control: JSX.Element; indent?: boolean }): JSX.Element {
+function SettingRow(p: { label: string; description?: string; control: JSX.Element; indent?: boolean; stacked?: boolean }): JSX.Element {
     return (
-        <div class="setting-row" classList={{ "setting-row--indent": p.indent }}>
+        <div class="setting-row" classList={{ "setting-row--indent": p.indent, "setting-row--stacked": p.stacked }}>
             <div class="setting-row-label">
                 <span class="setting-row-name">{p.label}</span>
                 <Show when={p.description}>
@@ -31,6 +31,10 @@ function SettingRow(p: { label: string; description?: string; control: JSX.Eleme
             <div class="setting-row-control">{p.control}</div>
         </div>
     );
+}
+
+function SectionHeader(p: { label: string }): JSX.Element {
+    return <div class="settings-subheader">{p.label}</div>;
 }
 
 function ToggleControl(p: { checked: boolean; onChange: (v: boolean) => void }): JSX.Element {
@@ -67,6 +71,122 @@ function SliderControl(p: { min: number; max: number; step: number; value: numbe
                 }}
             />
             <span class="setting-slider-val">{Math.round(local() * 100) / 100}</span>
+        </div>
+    );
+}
+
+function KeyValueEditor(p: { value: Record<string, string>; onChange: (v: Record<string, string>) => void }): JSX.Element {
+    const entries = () => Object.entries(p.value ?? {});
+    const [newKey, setNewKey] = createSignal("");
+    const [newVal, setNewVal] = createSignal("");
+
+    const updateEntry = (key: string, val: string) => p.onChange({ ...p.value, [key]: val });
+    const removeEntry = (key: string) => {
+        const next = { ...p.value };
+        delete next[key];
+        p.onChange(next);
+    };
+    const addEntry = () => {
+        const k = newKey().trim();
+        if (!k) return;
+        p.onChange({ ...p.value, [k]: newVal() });
+        setNewKey("");
+        setNewVal("");
+    };
+
+    return (
+        <div class="setting-kv-editor">
+            <For each={entries()}>
+                {([k, v]) => (
+                    <div class="setting-kv-row">
+                        <input class="setting-text setting-kv-key" type="text" value={k} disabled />
+                        <input
+                            class="setting-text setting-kv-val"
+                            type="text"
+                            value={v}
+                            onBlur={(e) => updateEntry(k, e.currentTarget.value)}
+                        />
+                        <button type="button" class="setting-kv-remove" onClick={() => removeEntry(k)}>
+                            <i class="fa-solid fa-xmark" />
+                        </button>
+                    </div>
+                )}
+            </For>
+            <div class="setting-kv-row setting-kv-row--new">
+                <input
+                    class="setting-text setting-kv-key"
+                    type="text"
+                    placeholder="KEY"
+                    value={newKey()}
+                    onInput={(e) => setNewKey(e.currentTarget.value)}
+                />
+                <input
+                    class="setting-text setting-kv-val"
+                    type="text"
+                    placeholder="value"
+                    value={newVal()}
+                    onInput={(e) => setNewVal(e.currentTarget.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") addEntry(); }}
+                />
+                <button type="button" class="setting-kv-remove setting-kv-add" onClick={addEntry}>
+                    <i class="fa-solid fa-plus" />
+                </button>
+            </div>
+        </div>
+    );
+}
+
+function StringArrayEditor(p: { value: string[]; onChange: (v: string[]) => void }): JSX.Element {
+    const items = () => p.value ?? [];
+    const [draft, setDraft] = createSignal("");
+
+    const updateItem = (i: number, val: string) => {
+        const next = items().slice();
+        next[i] = val;
+        p.onChange(next);
+    };
+    const removeItem = (i: number) => {
+        const next = items().slice();
+        next.splice(i, 1);
+        p.onChange(next);
+    };
+    const addItem = () => {
+        const v = draft().trim();
+        if (!v) return;
+        p.onChange([...items(), v]);
+        setDraft("");
+    };
+
+    return (
+        <div class="setting-kv-editor">
+            <For each={items()}>
+                {(item, i) => (
+                    <div class="setting-kv-row">
+                        <input
+                            class="setting-text setting-kv-val"
+                            type="text"
+                            value={item}
+                            onBlur={(e) => updateItem(i(), e.currentTarget.value)}
+                        />
+                        <button type="button" class="setting-kv-remove" onClick={() => removeItem(i())}>
+                            <i class="fa-solid fa-xmark" />
+                        </button>
+                    </div>
+                )}
+            </For>
+            <div class="setting-kv-row setting-kv-row--new">
+                <input
+                    class="setting-text setting-kv-val"
+                    type="text"
+                    placeholder="--flag value"
+                    value={draft()}
+                    onInput={(e) => setDraft(e.currentTarget.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") addItem(); }}
+                />
+                <button type="button" class="setting-kv-remove setting-kv-add" onClick={addItem}>
+                    <i class="fa-solid fa-plus" />
+                </button>
+            </div>
         </div>
     );
 }
@@ -184,6 +304,211 @@ function AppearanceSection(): JSX.Element {
                     />
                 }
             />
+            <SettingRow
+                label="Background color"
+                description="Custom background color override (hex). Leave blank to use the theme default."
+                control={
+                    <input
+                        class="setting-text"
+                        type="text"
+                        value={(s()["window:bgcolor"] as string) ?? ""}
+                        placeholder="#1a1a1a"
+                        onBlur={(e) => set("window:bgcolor", e.currentTarget.value || null)}
+                    />
+                }
+            />
+            <SectionHeader label="Pane hover-magnify" />
+            <SettingRow
+                label="Magnified opacity"
+                description="Background opacity of a pane while magnified (0–1)"
+                control={
+                    <SliderControl
+                        min={0} max={1} step={0.05}
+                        value={(s()["window:magnifiedblockopacity"] as number) ?? 1}
+                        onChange={(v) => set("window:magnifiedblockopacity", v)}
+                    />
+                }
+            />
+            <SettingRow
+                label="Magnified size"
+                description="Scale factor applied to a pane while magnified"
+                control={
+                    <input
+                        class="setting-number setting-number--wide"
+                        type="number" min={1} step={0.1}
+                        value={(s()["window:magnifiedblocksize"] as number) ?? 1.5}
+                        onBlur={(e) => {
+                            const v = parseFloat(e.currentTarget.value);
+                            if (!isNaN(v) && v >= 1) set("window:magnifiedblocksize", v);
+                        }}
+                    />
+                }
+            />
+            <SettingRow
+                label="Magnified blur (primary)"
+                description="Backdrop blur, in pixels, applied to the magnified pane itself"
+                control={
+                    <input
+                        class="setting-number"
+                        type="number" min={0}
+                        value={(s()["window:magnifiedblockblurprimarypx"] as number) ?? 0}
+                        onBlur={(e) => {
+                            const v = parseInt(e.currentTarget.value, 10);
+                            if (!isNaN(v) && v >= 0) set("window:magnifiedblockblurprimarypx", v);
+                        }}
+                    />
+                }
+            />
+            <SettingRow
+                label="Magnified blur (secondary)"
+                description="Backdrop blur, in pixels, applied to the other panes behind it"
+                control={
+                    <input
+                        class="setting-number"
+                        type="number" min={0}
+                        value={(s()["window:magnifiedblockblursecondarypx"] as number) ?? 0}
+                        onBlur={(e) => {
+                            const v = parseInt(e.currentTarget.value, 10);
+                            if (!isNaN(v) && v >= 0) set("window:magnifiedblockblursecondarypx", v);
+                        }}
+                    />
+                }
+            />
+        </div>
+    );
+}
+
+// ── Section: Window & Panes ───────────────────────────────────────────────────
+
+function WindowPanesSection(): JSX.Element {
+    const s = () => settingsAtom() ?? ({} as any);
+
+    return (
+        <div class="settings-section-body">
+            <SettingRow
+                label="Show menu bar"
+                description="Show the native application menu bar (restart required)"
+                control={
+                    <ToggleControl
+                        checked={s()["window:showmenubar"] !== false}
+                        onChange={(v) => set("window:showmenubar", v)}
+                    />
+                }
+            />
+            <SettingRow
+                label="Native title bar"
+                description="Use the OS-native window title bar instead of the custom one (restart required)"
+                control={
+                    <ToggleControl
+                        checked={!!(s()["window:nativetitlebar"] as boolean)}
+                        onChange={(v) => set("window:nativetitlebar", v)}
+                    />
+                }
+            />
+            <SettingRow
+                label="Disable hardware acceleration"
+                description="Force software rendering (restart required)"
+                control={
+                    <ToggleControl
+                        checked={!!(s()["window:disablehardwareacceleration"] as boolean)}
+                        onChange={(v) => set("window:disablehardwareacceleration", v)}
+                    />
+                }
+            />
+            <SettingRow
+                label="Max tab cache size"
+                description="Maximum number of tabs kept warm in memory"
+                control={
+                    <input
+                        class="setting-number setting-number--wide"
+                        type="number" min={1}
+                        value={(s()["window:maxtabcachesize"] as number) ?? 10}
+                        onBlur={(e) => {
+                            const v = parseInt(e.currentTarget.value, 10);
+                            if (!isNaN(v) && v >= 1) set("window:maxtabcachesize", v);
+                        }}
+                    />
+                }
+            />
+            <SettingRow
+                label="Confirm before closing"
+                description="Prompt for confirmation when closing a window with running blocks"
+                control={
+                    <ToggleControl
+                        checked={!!(s()["window:confirmclose"] as boolean)}
+                        onChange={(v) => set("window:confirmclose", v)}
+                    />
+                }
+            />
+            <SettingRow
+                label="Reopen last window"
+                description="Restore the last window's layout on launch"
+                control={
+                    <ToggleControl
+                        checked={!!(s()["window:savelastwindow"] as boolean)}
+                        onChange={(v) => set("window:savelastwindow", v)}
+                    />
+                }
+            />
+            <SettingRow
+                label="Window zoom"
+                description="UI zoom level (1.0 = 100%)"
+                control={
+                    <input
+                        class="setting-number setting-number--wide"
+                        type="number" min={0.5} max={3} step={0.1}
+                        value={(s()["window:zoom"] as number) ?? 1}
+                        onBlur={(e) => {
+                            const v = parseFloat(e.currentTarget.value);
+                            if (!isNaN(v) && v >= 0.5 && v <= 3) set("window:zoom", v);
+                        }}
+                    />
+                }
+            />
+            <SectionHeader label="Panes & tabs" />
+            <SettingRow
+                label="Show block IDs"
+                description="Show each pane's internal block ID in its header (debugging aid)"
+                control={
+                    <ToggleControl
+                        checked={!!(s()["blockheader:showblockids"] as boolean)}
+                        onChange={(v) => set("blockheader:showblockids", v)}
+                    />
+                }
+            />
+            <SettingRow
+                label="Default new block"
+                description="View type opened by default for new tabs/panes (e.g. term, agent)"
+                control={
+                    <input
+                        class="setting-text"
+                        type="text"
+                        value={(s()["app:defaultnewblock"] as string) ?? ""}
+                        placeholder="term"
+                        onBlur={(e) => set("app:defaultnewblock", e.currentTarget.value || null)}
+                    />
+                }
+            />
+            <SettingRow
+                label="Show pane number overlay"
+                description="Show numbered overlays for quick pane-jump shortcuts"
+                control={
+                    <ToggleControl
+                        checked={!!(s()["app:showoverlayblocknums"] as boolean)}
+                        onChange={(v) => set("app:showoverlayblocknums", v)}
+                    />
+                }
+            />
+            <SettingRow
+                label="Skip tab close confirmation"
+                description="Don't prompt for confirmation when closing a tab"
+                control={
+                    <ToggleControl
+                        checked={!!(s()["tab:skipcloseconfirm"] as boolean)}
+                        onChange={(v) => set("tab:skipcloseconfirm", v)}
+                    />
+                }
+            />
         </div>
     );
 }
@@ -298,17 +623,352 @@ function TerminalSection(): JSX.Element {
                     />
                 }
             />
+            <SettingRow
+                label="Predictive echo"
+                description="Show local predictive echo of typed characters while waiting on a slow/remote shell"
+                control={
+                    <ToggleControl
+                        checked={!!(s()["term:predictiveecho"] as boolean)}
+                        onChange={(v) => set("term:predictiveecho", v)}
+                    />
+                }
+            />
+            <Show when={!!(s()["term:predictiveecho"] as boolean)}>
+                <SettingRow
+                    indent
+                    label="Predictive echo threshold"
+                    description="Round-trip latency (ms) above which predictive echo kicks in"
+                    control={
+                        <input
+                            class="setting-number setting-number--wide"
+                            type="number" min={0}
+                            value={(s()["term:predictiveecho:thresholdms"] as number) ?? 100}
+                            onBlur={(e) => {
+                                const v = parseFloat(e.currentTarget.value);
+                                if (!isNaN(v) && v >= 0) set("term:predictiveecho:thresholdms", v);
+                            }}
+                        />
+                    }
+                />
+            </Show>
         </div>
     );
 }
 
-// ── Section stubs (Phases 3–4) ────────────────────────────────────────────────
+// ── Section: Sounds & Notifications ───────────────────────────────────────────
 
-function StubSection(p: { label: string }): JSX.Element {
+function SoundsSection(): JSX.Element {
+    const s = () => settingsAtom() ?? ({} as any);
+    const soundsEnabled = () => s()["notify:sounds:enabled"] !== false;
+    const toolTonesEnabled = () => s()["notify:tooltones:enabled"] !== false;
+
     return (
-        <div class="settings-section-body settings-section-stub">
-            <i class="fa-solid fa-screwdriver-wrench" />
-            <span>{p.label} settings coming soon.</span>
+        <div class="settings-section-body">
+            <SettingRow
+                label="Notification sounds"
+                description="Master enable for notification sounds"
+                control={<ToggleControl checked={soundsEnabled()} onChange={(v) => set("notify:sounds:enabled", v)} />}
+            />
+            <Show when={soundsEnabled()}>
+                <SettingRow
+                    indent
+                    label="Volume"
+                    control={
+                        <SliderControl
+                            min={0} max={1} step={0.05}
+                            value={(s()["notify:sounds:volume"] as number) ?? 0.6}
+                            onChange={(v) => set("notify:sounds:volume", v)}
+                        />
+                    }
+                />
+                <SettingRow
+                    indent
+                    label="Suppress when focused"
+                    description="Don't play a pane's sound when it's already focused and visible"
+                    control={
+                        <ToggleControl
+                            checked={s()["notify:sounds:suppresswhenfocused"] !== false}
+                            onChange={(v) => set("notify:sounds:suppresswhenfocused", v)}
+                        />
+                    }
+                />
+                <SettingRow
+                    indent
+                    label="Turn complete"
+                    description="Play a sound when an agent turn completes normally"
+                    control={
+                        <ToggleControl
+                            checked={s()["notify:sound:agent.turn.complete"] !== false}
+                            onChange={(v) => set("notify:sound:agent.turn.complete", v)}
+                        />
+                    }
+                />
+                <SettingRow
+                    indent
+                    label="Turn error"
+                    description="Play a sound when an agent turn ends with an error"
+                    control={
+                        <ToggleControl
+                            checked={s()["notify:sound:agent.turn.error"] !== false}
+                            onChange={(v) => set("notify:sound:agent.turn.error", v)}
+                        />
+                    }
+                />
+                <SettingRow
+                    indent
+                    label="Turn interrupted"
+                    description="Play a sound when an agent turn is stopped or interrupted"
+                    control={
+                        <ToggleControl
+                            checked={s()["notify:sound:agent.turn.interrupted"] !== false}
+                            onChange={(v) => set("notify:sound:agent.turn.interrupted", v)}
+                        />
+                    }
+                />
+                <SettingRow
+                    indent
+                    label="Message accepted"
+                    description="Play a sound when a queued pending message is accepted"
+                    control={
+                        <ToggleControl
+                            checked={s()["notify:sound:agent.message.accepted"] !== false}
+                            onChange={(v) => set("notify:sound:agent.message.accepted", v)}
+                        />
+                    }
+                />
+                <SettingRow
+                    indent
+                    label="Message rejected"
+                    description="Play a sound when a queued pending message is rejected"
+                    control={
+                        <ToggleControl
+                            checked={s()["notify:sound:agent.message.rejected"] !== false}
+                            onChange={(v) => set("notify:sound:agent.message.rejected", v)}
+                        />
+                    }
+                />
+            </Show>
+            <SectionHeader label="Tool-call tones" />
+            <SettingRow
+                label="Tool-call tones"
+                description="Play a subliminal synth tone for every agent tool call"
+                control={<ToggleControl checked={toolTonesEnabled()} onChange={(v) => set("notify:tooltones:enabled", v)} />}
+            />
+            <Show when={toolTonesEnabled()}>
+                <SettingRow
+                    indent
+                    label="Volume"
+                    control={
+                        <SliderControl
+                            min={0} max={1} step={0.05}
+                            value={(s()["notify:tooltones:volume"] as number) ?? 0.15}
+                            onChange={(v) => set("notify:tooltones:volume", v)}
+                        />
+                    }
+                />
+                <SettingRow
+                    indent
+                    label="Scope"
+                    description="Which panes play tool-call tones"
+                    control={
+                        <select
+                            class="setting-select"
+                            value={(s()["notify:tooltones:scope"] as string) ?? "all"}
+                            onChange={(e) => set("notify:tooltones:scope", e.currentTarget.value)}
+                        >
+                            <option value="all">All panes</option>
+                            <option value="focused">Focused pane only</option>
+                        </select>
+                    }
+                />
+            </Show>
+        </div>
+    );
+}
+
+// ── Section: Network ──────────────────────────────────────────────────────────
+
+function NetworkSection(): JSX.Element {
+    const s = () => settingsAtom() ?? ({} as any);
+
+    return (
+        <div class="settings-section-body">
+            <SettingRow
+                label="LAN discovery"
+                description="Discover other AgentMux instances on this host and LAN via mDNS"
+                control={
+                    <ToggleControl
+                        checked={!!(s()["network:lan_discovery"] as boolean)}
+                        onChange={(v) => set("network:lan_discovery", v)}
+                    />
+                }
+            />
+            <SettingRow
+                label="WSH connections"
+                description="Enable the WSH remote-shell helper connection protocol"
+                control={
+                    <ToggleControl
+                        checked={s()["conn:wshenabled"] !== false}
+                        onChange={(v) => set("conn:wshenabled", v)}
+                    />
+                }
+            />
+            <SettingRow
+                label="Confirm WSH install"
+                description="Ask before installing the WSH helper on a remote host"
+                control={
+                    <ToggleControl
+                        checked={s()["conn:askbeforewshinstall"] !== false}
+                        onChange={(v) => set("conn:askbeforewshinstall", v)}
+                    />
+                }
+            />
+        </div>
+    );
+}
+
+// ── Section: Advanced ─────────────────────────────────────────────────────────
+
+function AdvancedSection(): JSX.Element {
+    const s = () => settingsAtom() ?? ({} as any);
+
+    return (
+        <div class="settings-section-body">
+            <SettingRow
+                label="Global hotkey"
+                description="Keyboard shortcut to show/hide the app from anywhere (restart required)"
+                control={
+                    <input
+                        class="setting-text"
+                        type="text"
+                        value={(s()["app:globalhotkey"] as string) ?? ""}
+                        placeholder="e.g. Cmd+Shift+Space"
+                        onBlur={(e) => set("app:globalhotkey", e.currentTarget.value || null)}
+                    />
+                }
+            />
+            <SectionHeader label="Terminal (power user)" />
+            <SettingRow
+                label="Disable WebGL rendering"
+                description="Fall back to canvas-based terminal rendering (restart required)"
+                control={
+                    <ToggleControl
+                        checked={!!(s()["term:disablewebgl"] as boolean)}
+                        onChange={(v) => set("term:disablewebgl", v)}
+                    />
+                }
+            />
+            <SettingRow
+                label="Local shell path"
+                description="Override the executable used for local terminal panes (restart required)"
+                control={
+                    <input
+                        class="setting-text"
+                        type="text"
+                        value={(s()["term:localshellpath"] as string) ?? ""}
+                        placeholder="/bin/zsh"
+                        onBlur={(e) => set("term:localshellpath", e.currentTarget.value || null)}
+                    />
+                }
+            />
+            <SettingRow
+                stacked
+                label="Local shell arguments"
+                description="Extra arguments passed to the local shell on launch"
+                control={
+                    <StringArrayEditor
+                        value={(s()["term:localshellopts"] as string[]) ?? []}
+                        onChange={(v) => set("term:localshellopts", v)}
+                    />
+                }
+            />
+            <SectionHeader label="Widgets" />
+            <SettingRow
+                label="Show widget help"
+                description="Show inline help hints in the widget bar"
+                control={
+                    <ToggleControl
+                        checked={!!(s()["widget:showhelp"] as boolean)}
+                        onChange={(v) => set("widget:showhelp", v)}
+                    />
+                }
+            />
+            <SettingRow
+                label="Icon-only widget labels"
+                description="Force the widget bar to show icons without text labels"
+                control={
+                    <ToggleControl
+                        checked={!!(s()["widget:icononly"] as boolean)}
+                        onChange={(v) => set("widget:icononly", v)}
+                    />
+                }
+            />
+            <SectionHeader label="Telemetry" />
+            <SettingRow
+                label="Telemetry"
+                description="Collect local performance telemetry (CPU/memory graphs)"
+                control={
+                    <ToggleControl
+                        checked={s()["telemetry:enabled"] !== false}
+                        onChange={(v) => set("telemetry:enabled", v)}
+                    />
+                }
+            />
+            <SettingRow
+                indent
+                label="Sample interval"
+                description="Seconds between telemetry samples"
+                control={
+                    <input
+                        class="setting-number setting-number--wide"
+                        type="number" min={1}
+                        value={(s()["telemetry:interval"] as number) ?? 1}
+                        onBlur={(e) => {
+                            const v = parseFloat(e.currentTarget.value);
+                            if (!isNaN(v) && v >= 1) set("telemetry:interval", v);
+                        }}
+                    />
+                }
+            />
+            <SettingRow
+                indent
+                label="History length"
+                description="Number of telemetry samples retained (30–1024)"
+                control={
+                    <input
+                        class="setting-number setting-number--wide"
+                        type="number" min={30} max={1024}
+                        value={(s()["telemetry:numpoints"] as number) ?? 120}
+                        onBlur={(e) => {
+                            const v = parseInt(e.currentTarget.value, 10);
+                            if (!isNaN(v) && v >= 30 && v <= 1024) set("telemetry:numpoints", v);
+                        }}
+                    />
+                }
+            />
+            <SectionHeader label="Environment" />
+            <SettingRow
+                stacked
+                label="Global environment variables"
+                description="Environment variables injected into every shell"
+                control={
+                    <KeyValueEditor
+                        value={(s()["cmd:env"] as Record<string, string>) ?? {}}
+                        onChange={(v) => set("cmd:env", v)}
+                    />
+                }
+            />
+            <SectionHeader label="Files" />
+            <SettingRow
+                label="Show hidden files"
+                description="Show dotfiles and other hidden files in the file preview picker"
+                control={
+                    <ToggleControl
+                        checked={!!(s()["preview:showhiddenfiles"] as boolean)}
+                        onChange={(v) => set("preview:showhiddenfiles", v)}
+                    />
+                }
+            />
         </div>
     );
 }
@@ -316,13 +976,12 @@ function StubSection(p: { label: string }): JSX.Element {
 // ── Rail ──────────────────────────────────────────────────────────────────────
 
 const RAIL: { id: SettingsSection; label: string; icon: string }[] = [
-    { id: "appearance", label: "Appearance",    icon: "palette" },
-    { id: "terminal",   label: "Terminal",      icon: "square-terminal" },
-    { id: "agent",      label: "Agent",         icon: "sparkles" },
-    { id: "sounds",     label: "Sounds",        icon: "volume-high" },
-    { id: "network",    label: "Network",       icon: "wifi" },
-    { id: "files",      label: "Files",         icon: "folder-open" },
-    { id: "advanced",   label: "Advanced",      icon: "sliders" },
+    { id: "appearance", label: "Appearance",     icon: "palette" },
+    { id: "window",     label: "Window & Panes", icon: "table-cells" },
+    { id: "terminal",   label: "Terminal",       icon: "square-terminal" },
+    { id: "sounds",     label: "Sounds",         icon: "volume-high" },
+    { id: "network",    label: "Network",        icon: "wifi" },
+    { id: "advanced",   label: "Advanced",       icon: "sliders" },
 ];
 
 // ── Main view ─────────────────────────────────────────────────────────────────
@@ -361,23 +1020,20 @@ export function SettingsView(props: ViewComponentProps<SettingsViewModel>): JSX.
                     <Match when={section() === "appearance"}>
                         <AppearanceSection />
                     </Match>
+                    <Match when={section() === "window"}>
+                        <WindowPanesSection />
+                    </Match>
                     <Match when={section() === "terminal"}>
                         <TerminalSection />
                     </Match>
-                    <Match when={section() === "agent"}>
-                        <StubSection label="Agent" />
-                    </Match>
                     <Match when={section() === "sounds"}>
-                        <StubSection label="Sounds & Notifications" />
+                        <SoundsSection />
                     </Match>
                     <Match when={section() === "network"}>
-                        <StubSection label="Network" />
-                    </Match>
-                    <Match when={section() === "files"}>
-                        <StubSection label="Files & Drag-Drop" />
+                        <NetworkSection />
                     </Match>
                     <Match when={section() === "advanced"}>
-                        <StubSection label="Advanced" />
+                        <AdvancedSection />
                     </Match>
                 </Switch>
                 <footer class="settings-footer">

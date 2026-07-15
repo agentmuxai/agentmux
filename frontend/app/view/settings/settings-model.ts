@@ -5,11 +5,10 @@ import { createSignal } from "solid-js";
 
 export type SettingsSection =
     | "appearance"
+    | "window"
     | "terminal"
-    | "agent"
     | "sounds"
     | "network"
-    | "files"
     | "advanced";
 
 export class SettingsViewModel implements ViewModel {

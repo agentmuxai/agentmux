@@ -81,13 +81,17 @@
     gap: 2px;
 }
 
-.settings-section-stub {
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    flex-direction: row;
-    opacity: 0.5;
-    font-size: 0.9rem;
+.settings-subheader {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    opacity: 0.45;
+    padding: 14px 4px 4px;
+
+    &:first-child {
+        padding-top: 4px;
+    }
 }
 
 // ── Config error banner ───────────────────────────────────────────────────────
@@ -148,6 +152,16 @@
     &--indent {
         padding-left: 24px;
         opacity: 0.9;
+    }
+
+    &--stacked {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 6px;
+
+        .setting-row-control {
+            align-self: stretch;
+        }
     }
 }
 
@@ -225,6 +239,66 @@
     &:focus {
         outline: none;
         border-color: var(--accent-color, rgba(88, 166, 255, 0.6));
+    }
+}
+
+// ── Key-value / string-array editors ─────────────────────────────────────────
+
+.setting-kv-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 100%;
+}
+
+.setting-kv-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+
+    &--new {
+        opacity: 0.8;
+    }
+}
+
+.setting-kv-key {
+    flex: 0 0 160px;
+    width: auto;
+    font-family: monospace;
+
+    &:disabled {
+        opacity: 0.6;
+    }
+}
+
+.setting-kv-val {
+    flex: 1 1 auto;
+    width: auto;
+}
+
+.setting-kv-remove {
+    flex: 0 0 auto;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border-color, rgba(127, 127, 127, 0.3));
+    border-radius: 4px;
+    background: transparent;
+    color: var(--main-text-color);
+    cursor: default;
+    opacity: 0.6;
+    font-size: 0.7rem;
+
+    &:hover {
+        opacity: 1;
+        background: var(--panel-bg-alt, rgba(127, 127, 127, 0.08));
+    }
+
+    &.setting-kv-add {
+        color: var(--accent-color);
+        opacity: 0.9;
     }
 }
 
