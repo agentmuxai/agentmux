@@ -23,6 +23,10 @@ The first draft of this spec (and the PR built from it) checked keys for **front
 
 Losing `network:lan_discovery` and both `conn:*` keys left the **Network** section with nothing in it, so it was dropped entirely — same reasoning §3 already used to drop the old spec's **Files** section for being down to one key. The pane now has **5** sections, not 6. `telemetry:interval`/`telemetry:numpoints` survived (real consumers — see `specs/settings-cleanup.md` §A — they drive the sysinfo widget's polling rate, not literal telemetry transmission, hence the relabel to "Sysinfo widget" in the UI to stop implying data leaves the machine).
 
+**Second correction (same review cycle):** `term:localshellpath`/`term:localshellopts` were initially kept as "real" because `agentmux-srv/src/backend/blockcontroller/mod.rs` declares matching `META_KEY_TERM_LOCAL_SHELL_PATH`/`META_KEY_TERM_LOCAL_SHELL_OPTS` constants — but a constant existing is not the same as it being read. Both are annotated `#[allow(dead_code)]`, and the actual shell-spawn path (`blockcontroller/shell/lifecycle.rs:252`) calls `detect_local_shell_path_windows()` unconditionally on Windows (or reads `$SHELL` on Unix) — neither setting is ever consulted. Removed both from the UI, which also removed `StringArrayEditor`'s only caller; deleted the component entirely (as dead code) rather than leaving it unused, which incidentally also resolved a real bug review caught in it: keying `<For>` by primitive string value meant duplicate array entries (e.g. two identical shell flags) would collide and misdirect edit/remove.
+
+**Standing lesson for future settings-pane work:** a Rust `pub const META_KEY_*` or a `#[serde(rename = "...")]` struct field is evidence a key **deserializes**, not evidence it's **read**. Always grep for the field/const's *usage* site beyond its own declaration before wiring UI for it, and check for `#[allow(dead_code)]` as a hard signal.
+
 The rest of this document is left as originally written for the historical record of the (partially wrong) research; §2/§3/§5/§7 below carry inline strikethrough-style corrections rather than being silently rewritten.
 
 ---
@@ -69,8 +73,8 @@ This spec does two things:
 | `window:dimensions` | NEW | 0 frontend consumers — host-consumed, likely not user-facing (window geometry string, probably write-only from the app itself) — **excluded from UI**, see §6 |
 | `window:zoom` | **DEAD** (corrected post-review) | Rust struct field exists, never read — not shipped |
 | `term:disablewebgl` | ✅ old spec (Advanced) | 1 consumer — shipped in Advanced |
-| `term:localshellpath` | ✅ old spec (Advanced) | real consumer (`blockcontroller/mod.rs` const) — shipped in Advanced |
-| `term:localshellopts` | NEW | real consumer (`blockcontroller/mod.rs` const) — shipped in Advanced with a string-array editor |
+| `term:localshellpath` | **DEAD** (corrected post-review, round 2) | const is declared `#[allow(dead_code)]` in `blockcontroller/mod.rs`; the Windows shell-spawn path ignores it entirely (`detect_local_shell_path_windows()`, unconditional). Not shipped. |
+| `term:localshellopts` | **DEAD** (corrected post-review, round 2) | same finding as above. Not shipped; `StringArrayEditor` (its only caller) deleted as dead code. |
 | `term:predictiveecho` | NEW | confirmed live (`termwrap.ts`, `predictive-echo.ts`) — shipped in Terminal |
 | `term:predictiveecho:thresholdms` | NEW | companion to above — shipped |
 | `app:globalhotkey` | **DEAD** (corrected post-review) | Rust struct field exists, never read — not shipped |
@@ -117,7 +121,7 @@ The original 7-section plan (`Appearance, Terminal, Agent, Sounds, Network, File
 2. **Window & Panes** *(new section)* — as shipped, just 4 keys: `blockheader:showblockids`, `app:defaultnewblock`, `app:showoverlayblocknums`, `tab:skipcloseconfirm`. (The original plan for this section had 11 keys; 7 turned out dead — see correction note. `window:dimensions` also excluded — see §6.)
 3. **Terminal** (unchanged, already live) — existing 8 keys. **Add:** `term:predictiveecho`, `term:predictiveecho:thresholdms` (a normal terminal-feel setting, not power-user-only).
 4. **Sounds & Notifications** — all 11 `notify:*` keys, including the 2 the old spec missed.
-5. **Advanced** — the real power-user/restart-required catch-all, as shipped: `term:disablewebgl`, `term:localshellpath`, `term:localshellopts`, `widget:icononly`, `telemetry:interval`, `telemetry:numpoints` (relabeled "Sysinfo widget" in the UI), `cmd:env` (key-value editor). (`app:globalhotkey`, `widget:showhelp`, `telemetry:enabled`, `preview:showhiddenfiles` dropped — dead, see correction note.)
+5. **Advanced** — the real power-user/restart-required catch-all, as shipped: `term:disablewebgl`, `widget:icononly`, `telemetry:interval`, `telemetry:numpoints` (relabeled "Sysinfo widget" in the UI), `cmd:env` (key-value editor). (`app:globalhotkey`, `widget:showhelp`, `telemetry:enabled`, `preview:showhiddenfiles`, `term:localshellpath`, `term:localshellopts` all dropped — dead, see correction note.)
 
 ~~**Network**~~ — cut. `network:lan_discovery` stays at its existing home (`HostPopover.tsx`) rather than being duplicated; `conn:askbeforewshinstall`/`conn:wshenabled` turned out to have no global-settings backing at all (wrong-file, see correction note).
 
@@ -148,8 +152,8 @@ Numbering continues from the original spec's Phase 1–2 (already shipped):
 
 **Phase 4 — Advanced section, as shipped**
 - Key-value editor control for `cmd:env` — keyed by `Object.keys()`, not `Object.entries()`, so SolidJS's `<For>` can match rows by stable string identity across edits instead of remounting every row on every keystroke.
-- String-array editor for `term:localshellopts`.
-- Remaining flat `SettingRow` keys, as shipped: `term:disablewebgl`, `term:localshellpath`, `widget:icononly`, `telemetry:interval`/`numpoints` (relabeled "Sysinfo widget"). Dropped: `app:globalhotkey`, `widget:showhelp`, `telemetry:enabled`, `preview:showhiddenfiles` — all dead, see correction note.
+- No string-array editor — `term:localshellopts` (its only planned use) turned out dead; `StringArrayEditor` was deleted as unused code rather than shipped with an unfixed duplicate-key bug review also caught in it.
+- Remaining flat `SettingRow` keys, as shipped: `term:disablewebgl`, `widget:icononly`, `telemetry:interval`/`numpoints` (relabeled "Sysinfo widget"). Dropped: `app:globalhotkey`, `widget:showhelp`, `telemetry:enabled`, `preview:showhiddenfiles`, `term:localshellpath`, `term:localshellopts` — all dead, see correction note.
 - `telemetry:numpoints` should respect the schema's declared `minimum: 30, maximum: 1024` bounds in its `<input type="number">`, same as how `term:scrollback`/`term:fontsize` already clamp to their schema ranges today.
 
 **Phase 5 — Polish** (from the original spec, still valid, still not started)
