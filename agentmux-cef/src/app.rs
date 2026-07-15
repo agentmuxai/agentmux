@@ -13,6 +13,21 @@ use std::sync::Arc;
 use crate::client::*;
 use crate::state::AppState;
 
+/// CEF's own compositor backstop color for an opaque (non-transparent)
+/// window/browser — whatever paints before the page's own stylesheet has
+/// taken over. Must match `index.html`'s `#startup-loading`/`html` splash
+/// background (`rgb(34, 34, 34)`) so there is no visible color transition
+/// during the gap between "native window shown" and "page content painted."
+/// Previously `0xFF000000` (pure black), which didn't match the splash and
+/// produced a black-to-gray flash on every window open — see
+/// docs/specs/REPORT_NEW_WINDOW_STARTUP_COLOR_FLASH_2026_07_14.md §4.1.
+/// Alpha stays `0xFF` (fully opaque) for the same reason the prior literal
+/// did: Chromium's compositor treats opaque layers more cheaply and enables
+/// subpixel LCD text. Shared with `ui_tasks::window::CreateWindowTask`
+/// (secondary/cold-path windows) so every non-transparent window/browser
+/// backstop agrees.
+pub(crate) const OPAQUE_BG_ARGB: u32 = 0xFF222222;
+
 // ---------------------------------------------------------------------------
 // Window & BrowserView delegates (CEF Views framework)
 // ---------------------------------------------------------------------------
@@ -1182,9 +1197,13 @@ wrap_browser_process_handler! {
                 windowless_frame_rate: 60,
                 // ARGB: alpha=0 → SK_AlphaTRANSPARENT → enables Views-framework
                 // transparency. Only set when window:transparent=true; opaque
-                // windows use 0xFF000000 so Chromium's compositor treats layers as
-                // opaque (better performance, subpixel LCD text, no opacity flash).
-                background_color: if is_transparent { 0x00000000 } else { 0xFF000000 },
+                // windows use OPAQUE_BG_ARGB (matches the startup splash's own
+                // background, see its doc comment) so Chromium's compositor
+                // treats layers as opaque (better performance, subpixel LCD
+                // text, no opacity flash) AND the color the compositor shows
+                // before real content paints agrees with the splash on top of
+                // it, instead of flashing black-to-gray.
+                background_color: if is_transparent { 0x00000000 } else { OPAQUE_BG_ARGB },
                 ..Default::default()
             };
 

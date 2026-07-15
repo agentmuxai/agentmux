@@ -9,12 +9,25 @@ use cef::*;
 
 use super::AgentMuxHandler;
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 use std::sync::Arc;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 use crate::state::AppState;
 
-/// Linux startup white-flash fix (docs/specs/SPEC_LINUX_STARTUP_PAINT_GATING_2026_07_13.md).
+/// Startup white-flash fix, originally Linux-only
+/// (docs/specs/SPEC_LINUX_STARTUP_PAINT_GATING_2026_07_13.md), extended to
+/// Windows (docs/specs/REPORT_NEW_WINDOW_STARTUP_COLOR_FLASH_2026_07_14.md
+/// §4.2) — the same underlying bug (`on_load_end` firing before the
+/// compositor has actually presented a frame) is unproven-but-structurally
+/// identical on Windows, and CEF's own `on_load_end` contract doesn't
+/// distinguish platforms. macOS is left ungated for now — no report of the
+/// symptom there yet; revisit if one surfaces. NOTE this gate only covers
+/// the cold-start/cold-path window-creation flow (main window's very first
+/// show, and secondary windows created via `CreateWindowTask` when the pool
+/// is empty) — pool windows skip this whole block (`is_pool_window` below)
+/// and are shown for the first time at promote, a separate, non-atomic
+/// sequence tracked in `window_pool.rs`/`ui_tasks::pool` (see the report's
+/// §4.3, the more common "New Window" case on a warm app).
 ///
 /// Bound on how long the real window + native splash can stay hidden/up
 /// waiting for the frontend's first-paint signal before we show anyway.
@@ -30,16 +43,18 @@ use crate::state::AppState;
 /// immediate-show bug, but not the intended "wait for real paint" behavior.
 /// Set well above the observed worst case so the real signal wins in
 /// practice; this only matters as a backstop against a genuinely stalled
-/// renderer (crashed JS, rAF never firing at all).
-#[cfg(target_os = "linux")]
+/// renderer (crashed JS, rAF never firing at all). Kept the same value for
+/// Windows pending real measurements there — revisit if telemetry shows a
+/// different worst case.
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 const PAINT_GATE_SAFETY_TIMEOUT_MS: i64 = 4000;
 
-/// Monotonic arm counter for the Linux paint gate. Each `on_load_end` call
+/// Monotonic arm counter for the paint gate. Each `on_load_end` call
 /// that (re-)arms a label's gate gets a fresh epoch; its safety-net timeout
 /// task captures that epoch and only acts if it's still current when the
 /// timeout fires (see `reveal_gated_window`). Mirrors the identical
 /// stale-timeout guard in `browser_pane::auth` (`NEXT_EPOCH`/`Entry::epoch`).
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 static PAINT_GATE_NEXT_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Reveal (show + focus the real window, dismiss the native splash) once —
@@ -58,7 +73,7 @@ static PAINT_GATE_NEXT_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::
 /// reagent PR #2151 review).
 ///
 /// Must run on the CEF UI thread.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) fn reveal_gated_window(
     state: &Arc<AppState>,
     label: &str,
@@ -95,6 +110,12 @@ pub(crate) fn reveal_gated_window(
             let _ = std::fs::write(&path, b"ready");
         }
     }
+    // Windows analogue of the ready-file write above — see
+    // signal_windows_splash_dismiss's doc comment for why this must fire
+    // here (gated on real paint) rather than unconditionally in
+    // `on_load_end` now that Windows's own window.show() is gated too.
+    #[cfg(target_os = "windows")]
+    signal_windows_splash_dismiss();
     let Some(mut browser) = state.get_browser(label) else { return };
     if let Some(bv) = browser_view_get_for_browser(Some(&mut browser)) {
         if let Some(window) = bv.window() {
@@ -108,7 +129,7 @@ pub(crate) fn reveal_gated_window(
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 wrap_task! {
     struct PaintGateRevealTask {
         state: Arc<AppState>,
@@ -134,7 +155,7 @@ wrap_task! {
 ///   to the slower safety timeout. Reagent PR #2151 second-round review.
 ///
 /// Must run on the CEF UI thread.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) fn handle_first_paint_signal(state: &Arc<AppState>, label: &str) {
     let already_armed = state.linux_paint_gate_pending.lock().contains_key(label);
     if already_armed {
@@ -144,7 +165,7 @@ pub(crate) fn handle_first_paint_signal(state: &Arc<AppState>, label: &str) {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 wrap_task! {
     struct FirstPaintSignalTask { state: Arc<AppState>, label: String }
     impl Task { fn execute(&self) {
@@ -157,10 +178,41 @@ wrap_task! {
 /// presented a frame. Posts to the UI thread to reveal the window if
 /// `on_load_end` already deferred it, or to record the signal for `on_load_end`
 /// to consume if it hasn't run yet (see `handle_first_paint_signal`).
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) fn on_frontend_first_paint(state: Arc<AppState>, label: String) {
     let mut task = FirstPaintSignalTask::new(state, label);
     post_task(ThreadId::UI, Some(&mut task));
+}
+
+/// Signal the launcher's native pre-splash to fade out. The launcher owns
+/// this splash and passes its event name via `AGENTMUX_SPLASH_EVENT`;
+/// `OpenEventW` + `SetEvent` is fire-and-forget — a missing env var means no
+/// launcher splash was running (e.g. `dev:standalone`).
+///
+/// Called from `reveal_gated_window` rather than unconditionally at the top
+/// of `on_load_end` (where this used to live) now that Windows's own
+/// `window.show()` is gated on real first paint (see this module's top-level
+/// doc comment) — firing it any earlier would dismiss the native splash
+/// before the CEF window it's meant to be masking has anything to show,
+/// which is a worse visible gap than the flash this whole gate exists to
+/// fix. Mirrors why the macOS/Linux ready-file write already only happens
+/// from `reveal_gated_window`, not from every `on_load_end` (including
+/// hidden pool-window prewarms) — see
+/// docs/specs/REPORT_NEW_WINDOW_STARTUP_COLOR_FLASH_2026_07_14.md §4.2.
+#[cfg(target_os = "windows")]
+fn signal_windows_splash_dismiss() {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenEventW, SetEvent, EVENT_MODIFY_STATE};
+    if let Ok(event_name) = std::env::var("AGENTMUX_SPLASH_EVENT") {
+        let nul: Vec<u16> = format!("{}\0", event_name).encode_utf16().collect();
+        unsafe {
+            let ev = OpenEventW(EVENT_MODIFY_STATE, 0, nul.as_ptr());
+            if !ev.is_null() {
+                SetEvent(ev);
+                CloseHandle(ev);
+            }
+        }
+    }
 }
 
 impl AgentMuxHandler {
@@ -239,27 +291,10 @@ impl AgentMuxHandler {
             url_str
         );
 
-        // Signal the pre-splash to fade out the moment CEF's first frame
-        // is ready. The launcher created this named event and forwarded
-        // its name via AGENTMUX_SPLASH_EVENT. OpenEventW + SetEvent is
-        // fire-and-forget; missing env var means no splash was running.
-        #[cfg(target_os = "windows")]
-        {
-            use windows_sys::Win32::Foundation::CloseHandle;
-            use windows_sys::Win32::System::Threading::{
-                OpenEventW, SetEvent, EVENT_MODIFY_STATE,
-            };
-            if let Ok(event_name) = std::env::var("AGENTMUX_SPLASH_EVENT") {
-                let nul: Vec<u16> = format!("{}\0", event_name).encode_utf16().collect();
-                unsafe {
-                    let ev = OpenEventW(EVENT_MODIFY_STATE, 0, nul.as_ptr());
-                    if !ev.is_null() {
-                        SetEvent(ev);
-                        CloseHandle(ev);
-                    }
-                }
-            }
-        }
+        // Windows splash-dismiss signal used to fire unconditionally here —
+        // moved to `signal_windows_splash_dismiss`, called from
+        // `reveal_gated_window` instead, now that Windows's window.show() is
+        // gated on real first paint below. See that function's doc comment.
 
         // macOS analogue of the Win32 splash signal: the launcher owns the native
         // splash (see agentmux-launcher/src/splash_mac.rs) and passes a ready-file
@@ -268,13 +303,15 @@ impl AgentMuxHandler {
         // tearing the splash down. Fire-and-forget; absent var => no launcher
         // splash (e.g. dev:standalone), so this is a no-op.
         //
-        // Linux does NOT write it here. `on_load_end` fires per-browser on
-        // main-frame load-complete, including hidden pool-window prewarms — on
-        // Linux that could dismiss the splash before the real (visible) window
-        // has painted anything (the white-flash bug this gate fixes). Linux
-        // writes the ready-file from `reveal_gated_window` instead, gated on the
-        // same first-paint confirmation that unblocks the real window's show()
-        // below. See docs/specs/SPEC_LINUX_STARTUP_PAINT_GATING_2026_07_13.md.
+        // Linux and Windows do NOT write/signal it here. `on_load_end` fires
+        // per-browser on main-frame load-complete, including hidden
+        // pool-window prewarms — on either platform that could dismiss the
+        // splash before the real (visible) window has painted anything (the
+        // white-flash bug this gate fixes). Both instead signal from
+        // `reveal_gated_window`, gated on the same first-paint confirmation
+        // that unblocks the real window's show() below. See
+        // docs/specs/SPEC_LINUX_STARTUP_PAINT_GATING_2026_07_13.md and
+        // docs/specs/REPORT_NEW_WINDOW_STARTUP_COLOR_FLASH_2026_07_14.md §4.2.
         #[cfg(target_os = "macos")]
         {
             if let Ok(path) = std::env::var("AGENTMUX_SPLASH_READY_FILE") {
@@ -312,11 +349,11 @@ impl AgentMuxHandler {
                         // Falls back to the old immediate-show behavior if the
                         // window label can't be resolved (can't gate safely on
                         // an unknown label).
-                        #[cfg(target_os = "linux")]
+                        #[cfg(any(target_os = "linux", target_os = "windows"))]
                         let gate_label = browser_label.clone();
-                        #[cfg(target_os = "linux")]
+                        #[cfg(any(target_os = "linux", target_os = "windows"))]
                         let gated = gate_label.is_some();
-                        #[cfg(target_os = "linux")]
+                        #[cfg(any(target_os = "linux", target_os = "windows"))]
                         if let Some(label) = gate_label {
                             // The real paint signal can race ahead of this
                             // on_load_end call (see handle_first_paint_signal)
@@ -351,7 +388,7 @@ impl AgentMuxHandler {
                                 );
                             }
                         }
-                        #[cfg(target_os = "linux")]
+                        #[cfg(any(target_os = "linux", target_os = "windows"))]
                         if !gated {
                             window.show();
                             if let Some(ref mut b) = browser_cloned {
@@ -360,7 +397,7 @@ impl AgentMuxHandler {
                                 }
                             }
                         }
-                        #[cfg(not(target_os = "linux"))]
+                        #[cfg(not(any(target_os = "linux", target_os = "windows")))]
                         {
                             window.show();
                             if let Some(ref mut b) = browser_cloned {
