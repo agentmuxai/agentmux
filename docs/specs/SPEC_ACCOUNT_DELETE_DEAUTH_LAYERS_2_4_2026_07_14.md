@@ -45,8 +45,8 @@ launched with that provider):
   (default) → **spawn fails** before the CLI process is created. The error
   must reach the agent pane UI (the same surface other spawn failures use),
   wording: `no credentials for <provider>: the bound account was deleted or
-  is unresolvable. Bind an account in the Armory, or enable "Use global
-  login" in this agent's settings.` Log `tracing::warn!` with prefix
+  is unresolvable. Bind an account in the Armory, or enable "Use global CLI
+  login when no account is bound" in this agent's settings.` Log `tracing::warn!` with prefix
   `identity.spawn.blocked:` (extends the `muxlog auth` vocabulary — update
   the muxlog regex to cover `identity\.spawn`).
 - Account missing AND `use_ambient_login = true` → proceed WITHOUT injecting

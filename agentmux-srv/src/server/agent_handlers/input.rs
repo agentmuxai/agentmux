@@ -98,6 +98,9 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
     // Container manager — None on hosts without Docker; container agents
     // return an error to the caller rather than crashing the server.
     let container_manager_ai = state.container_manager.clone();
+    // Filestore — the spawn-gate error frame must be PERSISTED to the
+    // block file, not just live-broadcast (reagent P1, PR #2164 round 2).
+    let filestore_ai = state.filestore.clone();
     engine.register_handler(
         COMMAND_AGENT_INPUT,
         Box::new(move |data, _ctx| {
@@ -106,6 +109,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
             let auth_key = auth_key_ai.clone();
             let broker = broker_ai.clone();
             let container_manager = container_manager_ai.clone();
+            let filestore_gate = filestore_ai.clone();
             Box::pin(async move {
                 let cmd: CommandAgentInputData = serde_json::from_value(data)
                     .map_err(|e| format!("agentinput: {e}"))?;
@@ -179,12 +183,16 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                             "error": {"message": format!("[AgentMux] {gate}")}
                         })
                         .to_string();
+                        // Some(&filestore_gate): the frame must be PERSISTED
+                        // to the block file, not just live-broadcast —
+                        // otherwise the error vanishes on pane
+                        // reload/reconnect (reagent P1, PR #2164 round 2).
                         crate::backend::blockcontroller::shell::handle_append_block_file(
                             &broker,
                             &cmd.blockid,
                             crate::backend::blockcontroller::subprocess::SUBPROCESS_OUTPUT_SUBJECT,
                             format!("{error_frame}\n").as_bytes(),
-                            None,
+                            Some(&filestore_gate),
                             None,
                         );
                         return Err(format!("identity spawn gate: {gate}"));
