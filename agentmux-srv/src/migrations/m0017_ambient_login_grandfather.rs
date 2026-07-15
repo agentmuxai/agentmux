@@ -10,10 +10,15 @@
 //! `use_ambient_login = 1`. Existing agents that relied on the (previously
 //! silent) ambient fallback must not all break on upgrade:
 //!
-//! - agents with NO `db_agent_identity_links` rows at migration time were
-//!   de-facto ambient users → `use_ambient_login = 1`;
-//! - agents WITH links opted into managed accounts → `0` (honest failure
-//!   is the correct new behavior for them).
+//! - agents with NO **oauth-class** `db_agent_identity_links` rows at
+//!   migration time were de-facto ambient users for their CLI login →
+//!   `use_ambient_login = 1`. Api-key-class links (e.g. a github PAT) do
+//!   NOT count: they are never spawn-gated, so an agent whose only link is
+//!   a PAT was still relying on the ambient CLI login and must be
+//!   grandfathered, not broken (spec §2.4's rationale — "grandfather
+//!   de-facto ambient users" — keyed on the spawn-relevant provider class);
+//! - agents WITH an oauth-class link opted into managed CLI accounts →
+//!   `0` (honest failure is the correct new behavior for them).
 //!
 //! Channel-scoped: each pre-existing channel's `db_agent_definitions` /
 //! `db_agents` rows get the pass exactly once (fresh channels have no
@@ -28,6 +33,22 @@ use std::sync::Arc;
 
 use crate::backend::storage::store::Store;
 use super::{Migration, MigrationContext, MigrationError, MigrationScope};
+
+/// Agent ids whose links include at least one **oauth-class** provider —
+/// the only class the layer-3 spawn gate blocks on. Shared by m0017
+/// (channel rows) and m0018 (registry records) so the two passes can never
+/// disagree on the rule.
+pub(crate) fn oauth_linked_agent_ids(
+    shared: &Store,
+) -> Result<HashSet<String>, crate::backend::storage::error::StoreError> {
+    use crate::identity::resolver::{provider_class, ProviderClass};
+    Ok(shared
+        .agent_identity_link_provider_pairs()?
+        .into_iter()
+        .filter(|(_, provider)| matches!(provider_class(provider), Some(ProviderClass::OAuth { .. })))
+        .map(|(agent_id, _)| agent_id)
+        .collect())
+}
 
 pub struct M0017AmbientLoginGrandfather;
 
@@ -50,12 +71,10 @@ impl Migration for M0017AmbientLoginGrandfather {
         // (fresh install racing the bootstrap) means no links exist —
         // every agent row (if any) is a de-facto ambient user.
         let linked: HashSet<String> = if ctx.shared_store_path.exists() {
-            Store::open_shared(&ctx.shared_store_path)
-                .map_err(|e| MigrationError(format!("ambient_login_grandfather: open shared store: {}", e)))?
-                .agent_ids_with_identity_links()
+            let shared = Store::open_shared(&ctx.shared_store_path)
+                .map_err(|e| MigrationError(format!("ambient_login_grandfather: open shared store: {}", e)))?;
+            oauth_linked_agent_ids(&shared)
                 .map_err(|e| MigrationError(format!("ambient_login_grandfather: read links: {}", e)))?
-                .into_iter()
-                .collect()
         } else {
             HashSet::new()
         };
@@ -184,6 +203,56 @@ mod tests {
         assert_eq!(
             listed.iter().find(|a| a.id == "agent-linked").unwrap().use_ambient_login,
             0,
+        );
+    }
+
+    /// Spec §2.4 (as clarified): only OAUTH-CLASS links forfeit
+    /// grandfathering. An agent whose only link is an api-key-class github
+    /// PAT was still a de-facto ambient user for its CLI login — the spawn
+    /// gate never blocks on api-key providers, so counting that link would
+    /// break exactly the users grandfathering exists to protect.
+    #[test]
+    fn api_key_only_links_do_not_forfeit_grandfathering() {
+        let channel = tempfile::NamedTempFile::new().unwrap();
+        let shared = tempfile::NamedTempFile::new().unwrap();
+
+        let wstore = Store::open(channel.path()).unwrap();
+        let mut pat_only = make_def("agent-pat-only");
+        wstore.agent_def_insert(&mut pat_only).unwrap();
+        drop(wstore);
+
+        // Shared store: a github (api-key-class) link and nothing else.
+        let shared_store = Store::open_shared(shared.path()).unwrap();
+        let acct = crate::backend::storage::store::IdentityAccount {
+            id: "acct-gh".to_string(),
+            name: "asaf-github".to_string(),
+            provider: "github".to_string(),
+            kind: "pat".to_string(),
+            display_name: String::new(),
+            secret_ref: crate::backend::storage::store::SecretRef::Keychain {
+                service: "agentmux".to_string(),
+                account: "acct-gh".to_string(),
+            },
+            context: serde_json::json!({}),
+            status: "unknown".to_string(),
+            created_at: 0,
+            updated_at: 0,
+        };
+        shared_store.identity_upsert(&acct).unwrap();
+        shared_store
+            .agent_identity_link("agent-pat-only", "acct-gh", "github")
+            .unwrap();
+        drop(shared_store);
+
+        M0017AmbientLoginGrandfather
+            .up(&ctx_for(channel.path(), shared.path()))
+            .unwrap();
+
+        let wstore = Store::open(channel.path()).unwrap();
+        assert_eq!(
+            wstore.agent_def_get("agent-pat-only").unwrap().unwrap().use_ambient_login,
+            1,
+            "a PAT-only agent is a de-facto ambient CLI user and must be grandfathered"
         );
     }
 

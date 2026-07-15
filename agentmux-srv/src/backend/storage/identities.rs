@@ -384,17 +384,24 @@ impl Store {
         Ok(out)
     }
 
-    /// Distinct agent ids that have at least one `db_agent_identity_links`
-    /// row. Used by the m0017 ambient-login grandfather migration to decide
-    /// which agents "opted into managed accounts" (flag stays 0) versus
-    /// de-facto ambient users (flag set to 1) — spec §2.4 of
-    /// SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md.
-    pub fn agent_ids_with_identity_links(&self) -> Result<Vec<String>, StoreError> {
+    /// Every distinct `(agent_id, provider)` link pair. Used by the
+    /// m0017/m0018 ambient-login grandfather migrations, which must reason
+    /// about provider CLASS: only oauth-class links mean an agent "opted
+    /// into managed CLI login" (flag stays 0) — an api-key link (e.g. a
+    /// github PAT) is never spawn-gated, so it must not forfeit
+    /// grandfathering (spec §2.4 of
+    /// SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md). Class
+    /// filtering happens at the caller via
+    /// `identity::resolver::provider_class`; the storage layer stays
+    /// class-agnostic.
+    pub fn agent_identity_link_provider_pairs(&self) -> Result<Vec<(String, String)>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT DISTINCT agent_id FROM db_agent_identity_links",
+            "SELECT DISTINCT agent_id, provider FROM db_agent_identity_links",
         )?;
-        let iter = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        let iter = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
         let mut out = Vec::new();
         for r in iter {
             out.push(r?);
