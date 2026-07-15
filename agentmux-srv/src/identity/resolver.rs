@@ -196,19 +196,37 @@ pub fn probe_oauth_status(
 /// CLI would read the user's global login (`~/.claude`) after an account
 /// was deleted.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SpawnGateError {
-    pub provider: String,
+pub enum SpawnGateError {
+    /// The gate's credentials verdict: no resolvable account, no opt-in.
+    MissingCredentials { provider: String },
+    /// The injection task itself could not run to completion (task-join
+    /// failure — e.g. a panic inside the blocking closure, which also
+    /// poisons the `Store` mutex for every later call). The gate FAILS
+    /// CLOSED on this: an open fallback would silently convert one panic
+    /// anywhere in the store into a permanent, systemic bypass of
+    /// `use_ambient_login = false` (reagent P1, PR #2164 round 1). A
+    /// blocked spawn is retryable and visible; a silent ambient launch
+    /// is neither.
+    InjectionUnavailable { detail: String },
 }
 
 impl std::fmt::Display for SpawnGateError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "no credentials for {}: the bound account was deleted or is \
-             unresolvable. Bind an account in the Armory, or enable \
-             \"Use global login\" in this agent's settings.",
-            self.provider,
-        )
+        match self {
+            SpawnGateError::MissingCredentials { provider } => write!(
+                f,
+                "no credentials for {}: the bound account was deleted or is \
+                 unresolvable. Bind an account in the Armory, or enable \
+                 \"Use global login\" in this agent's settings.",
+                provider,
+            ),
+            SpawnGateError::InjectionUnavailable { detail } => write!(
+                f,
+                "credential injection could not run ({detail}); the spawn was \
+                 refused rather than falling back to the global CLI login. \
+                 Retry, and check `muxlog auth` if it persists.",
+            ),
+        }
     }
 }
 
@@ -447,7 +465,6 @@ pub async fn inject_identity_env_async(
     block_id: String,
     env_vars: HashMap<String, String>,
 ) -> Result<HashMap<String, String>, SpawnGateError> {
-    let fallback = env_vars.clone();
     match tokio::task::spawn_blocking(move || {
         let mut env = env_vars;
         inject_identity_env_with_broker(wstore, id_store, broker, &block_id, &mut env)
@@ -457,11 +474,18 @@ pub async fn inject_identity_env_async(
     {
         Ok(result) => result,
         Err(e) => {
-            // Join failure is an infrastructure fault, not a credentials
-            // verdict — fail open with the un-merged map (pre-gate
-            // behavior) rather than blocking the spawn on a runtime hiccup.
-            tracing::warn!(target: "identity", "identity injection task join failed: {e}");
-            Ok(fallback)
+            // Fail CLOSED. A join failure means the closure panicked (or
+            // was cancelled) — the gate never rendered a verdict, and the
+            // panic has likely poisoned the Store mutex, so failing open
+            // here would bypass use_ambient_login=false for every later
+            // spawn too (reagent P1, PR #2164 round 1). See
+            // SpawnGateError::InjectionUnavailable.
+            tracing::warn!(
+                target: "identity",
+                error = %e,
+                "identity.spawn.blocked: injection task join failed — failing closed"
+            );
+            Err(SpawnGateError::InjectionUnavailable { detail: e.to_string() })
         }
     }
 }
@@ -666,7 +690,7 @@ pub fn inject_identity_env_with_broker(
                 instance.identity_id,
                 detail,
             );
-            Err(SpawnGateError {
+            Err(SpawnGateError::MissingCredentials {
                 provider: provider.to_string(),
             })
         }
@@ -1134,7 +1158,7 @@ mod tests {
         // Blocking spawn-gate error — and nothing injected.
         assert_eq!(
             res,
-            Err(SpawnGateError { provider: "claude".to_string() }),
+            Err(SpawnGateError::MissingCredentials { provider: "claude".to_string() }),
         );
         assert!(env.get("CLAUDE_CONFIG_DIR").is_none());
         assert!(env.is_empty());
@@ -1224,7 +1248,7 @@ mod tests {
 
         assert_eq!(
             res,
-            Err(SpawnGateError { provider: "claude".to_string() }),
+            Err(SpawnGateError::MissingCredentials { provider: "claude".to_string() }),
         );
         // Nothing was injected — the CLI process must never be created.
         assert!(env.is_empty());
@@ -1294,7 +1318,7 @@ mod tests {
 
         assert_eq!(
             res,
-            Err(SpawnGateError { provider: "claude".to_string() }),
+            Err(SpawnGateError::MissingCredentials { provider: "claude".to_string() }),
         );
         assert!(env.is_empty());
     }
