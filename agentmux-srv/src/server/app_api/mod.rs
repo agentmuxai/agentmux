@@ -334,6 +334,7 @@ pub(crate) async fn agent_define_core(
         container_image: cmd.container_image.clone(),
         container_volumes: cmd.container_volumes.clone(),
         container_name: String::new(), // assigned by ContainerManager on first spawn
+        use_ambient_login: 0,
     };
 
     // Atomic check-then-insert.

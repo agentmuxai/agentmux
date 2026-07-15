@@ -404,11 +404,13 @@ function main() {
         // credential seeding), identity/auth_session.rs (cancel_session,
         // session timeout), identity/resolver.rs ("oauth probe"), and the
         // logout side in server/app_api/identity.rs + agent_handlers/
-        // identity.rs ("identity.unlink:", "identity.delete:") — so filter on
-        // the MESSAGE vocabulary, not a target (opt.grep matches the message
-        // field only, exactly what we want). A user --grep overrides the
-        // recipe's regex; --target/--level/--since/-n still combine.
-        opt.grep = opt.grep || /\bauth\.\w+|auth success|auth session|cancel_session|claude auth|CheckCliAuth|OAuth config dir|oauth probe|identity_upsert|identity\.(unlink|delete|self\.|account)|account\.oauth|keychain delete/i;
+        // identity.rs ("identity.unlink:", "identity.delete:"), plus the
+        // layer-3 spawn gate in identity/resolver.rs
+        // ("identity.spawn.blocked:", "identity.spawn.ambient:") — so filter
+        // on the MESSAGE vocabulary, not a target (opt.grep matches the
+        // message field only, exactly what we want). A user --grep overrides
+        // the recipe's regex; --target/--level/--since/-n still combine.
+        opt.grep = opt.grep || /\bauth\.\w+|auth success|auth session|cancel_session|claude auth|CheckCliAuth|OAuth config dir|oauth probe|identity_upsert|identity\.(unlink|delete|self\.|account|spawn)|account\.oauth|keychain delete/i;
         const f = resolveFile("srv", opt);
         console.log(`=== auth trace: ${f} ===`);
         printLastLines(f, opt.n, opt, true);
