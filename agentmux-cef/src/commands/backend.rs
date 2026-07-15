@@ -237,12 +237,21 @@ async fn run_migrations_inner(
     use tokio::process::Command;
     use tokio::io::BufReader;
 
-    let mut child = Command::new(&srv_path)
+    let mut command = Command::new(&srv_path);
+    command
         .arg("--wavedata")
         .arg(&data_dir)
         .arg("migrate")
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    #[cfg(windows)]
+    {
+        // CREATE_NO_WINDOW: console-flash suppression — host (GUI) spawning the
+        // srv migrate child; tokio::process::Command has creation_flags inherent.
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut child = command
         .spawn()
         .map_err(|e| format!("Failed to spawn agentmux-srv migrate: {}", e))?;
 

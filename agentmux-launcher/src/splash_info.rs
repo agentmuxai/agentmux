@@ -95,7 +95,17 @@ fn dev_label() -> Option<String> {
 
 /// First non-empty stdout line of `cmd args`, trimmed. `None` on any failure.
 fn cmd_first_line(cmd: &str, args: &[&str]) -> Option<String> {
-    let out = Command::new(cmd).args(args).output().ok()?;
+    let mut command = Command::new(cmd);
+    command.args(args);
+    #[cfg(windows)]
+    {
+        // CREATE_NO_WINDOW: console-flash suppression — std::process::Command
+        // needs the CommandExt trait to call creation_flags.
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let out = command.output().ok()?;
     if !out.status.success() {
         return None;
     }
