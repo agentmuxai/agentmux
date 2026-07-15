@@ -111,6 +111,25 @@ export function agentsAssignedToAccount(accountId: string, agents: AgentDefiniti
         .map((a) => a.name);
 }
 
+/**
+ * Layer-4 Armory truthfulness (SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4
+ * §4): the delete-time notice text, derived from the RPC response's
+ * `affectedAgents` (the agent ids whose links were cascaded by the
+ * delete). Returns null when no agent was using the account — the
+ * notice must not fire for a linkless delete.
+ *
+ * Wording is deliberately phrased around *linked* agents ("were using
+ * this account"), not process liveness — the backend captures the link
+ * set, not which of those agents currently has a live CLI process. Any
+ * that ARE running still hold working tokens until restarted; we
+ * disclose that, we do not pretend to revoke (spec §3).
+ */
+export function deleteDisclosureNotice(affectedAgents: string[] | undefined): string | null {
+    const n = affectedAgents?.length ?? 0;
+    if (n === 0) return null;
+    return `Account deleted. ${n} agent(s) were using it — any still running hold its tokens until restarted.`;
+}
+
 export const PROVIDER_LABELS: Record<AccountProvider, string> = {
     github: "GitHub",
     openai: "OpenAI",
@@ -351,6 +370,18 @@ export class IdentityViewModel implements ViewModel {
     formErrorAtom: Accessor<string | null> = this._formError[0];
     private setFormError: Setter<string | null> = this._formError[1];
 
+    // Delete-time disclosure notice (layer 4, spec §4). Transient —
+    // set from the delete RPC's `affectedAgents`, cleared by the user
+    // (dismiss) or the next delete. No persistent state: the account
+    // row is gone (correct); this is disclosure at delete time only.
+    private _deleteNotice = createSignal<string | null>(null);
+    deleteNoticeAtom: Accessor<string | null> = this._deleteNotice[0];
+    private setDeleteNotice: Setter<string | null> = this._deleteNotice[1];
+
+    dismissDeleteNotice = (): void => {
+        this.setDeleteNotice(null);
+    };
+
     /** Unsubscribe from the account cache; assigned in the constructor,
      *  invoked in dispose() so direct callers don't leak a listener. */
     private _unsubAccounts: (() => void) | null = null;
@@ -449,7 +480,12 @@ export class IdentityViewModel implements ViewModel {
 
     deleteAccount = async (id: string): Promise<void> => {
         try {
-            await RpcApi.DeleteIdentityAccountCommand(TabRpcClient, { id });
+            const result = await RpcApi.DeleteIdentityAccountCommand(TabRpcClient, { id });
+            // Layer-4 disclosure (spec §4): agents that were using the
+            // account may still hold its tokens in a live process.
+            // null (no affected agents) also clears any stale notice
+            // from a previous delete.
+            this.setDeleteNotice(deleteDisclosureNotice(result?.affectedAgents));
             await refreshAccountCache();
             if (this.selectedAccountAtom()?.id === id) {
                 this.setSelectedAccount(null);
