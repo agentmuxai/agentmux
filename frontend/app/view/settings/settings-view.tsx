@@ -106,7 +106,7 @@ function KeyValueEditor(p: { value: Record<string, string>; onChange: (v: Record
                             value={p.value[k] ?? ""}
                             onBlur={(e) => updateEntry(k, e.currentTarget.value)}
                         />
-                        <button type="button" class="setting-kv-remove" onClick={() => removeEntry(k)}>
+                        <button type="button" class="setting-kv-remove" aria-label={`Remove ${k}`} onClick={() => removeEntry(k)}>
                             <i class="fa-solid fa-xmark" />
                         </button>
                     </div>
@@ -128,7 +128,7 @@ function KeyValueEditor(p: { value: Record<string, string>; onChange: (v: Record
                     onInput={(e) => setNewVal(e.currentTarget.value)}
                     onKeyDown={(e) => { if (e.key === "Enter") addEntry(); }}
                 />
-                <button type="button" class="setting-kv-remove setting-kv-add" onClick={addEntry}>
+                <button type="button" class="setting-kv-remove setting-kv-add" aria-label="Add environment variable" onClick={addEntry}>
                     <i class="fa-solid fa-plus" />
                 </button>
             </div>
@@ -614,7 +614,7 @@ function SoundsSection(): JSX.Element {
             </Show>
             <SectionHeader label="Tool-call tones" />
             <SettingRow
-                label="Tool-call tones"
+                label="Enable"
                 description="Play a subliminal synth tone for every agent tool call"
                 control={<ToggleControl checked={toolTonesEnabled()} onChange={(v) => set("notify:tooltones:enabled", v)} />}
             />
