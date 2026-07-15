@@ -1,4 +1,25 @@
-# Retro: MSVC C1083 Race in `libcef_dll_wrapper` at High Build Parallelism (2026-07-14)
+# Retro: MSVC C1083 in `libcef_dll_wrapper` — Actual Root Cause: Windows MAX_PATH (2026-07-14)
+
+**TL;DR (added after the fact — read this first):** the title and most of
+this document describe a build-parallelism theory that was thoroughly
+tested and **disproven**. The real, confirmed root cause is Windows'
+260-character `MAX_PATH` limit: this dev machine's agent workspace path
+(`C:\Users\...\agenty-0629j\Usersasafe.agentmuxagentsagenty-0629jagentmux\...`
+— note the unusual duplicated-looking final segment) is long enough that,
+combined with CEF's own deeply-nested `libcef_dll/{cpptoc,ctocpp}/test/`
+source tree and its longest auto-generated filenames, several `.obj` output
+paths exceed 260 characters even with `CMAKE_OBJECT_PATH_MAX=500` already
+set. `LongPathsEnabled` is `0` (disabled) in this machine's registry.
+**Fix that was verified end-to-end: `subst K: "<repo path>"` and build from
+`K:\` instead — a plain drive-letter alias needs no admin rights and
+immediately shortens every path Windows sees for the workspace.** A full
+`agentmux-cef` release build that failed identically at full parallelism,
+reduced parallelism, with a fresh build directory, and with corrected
+`TMP`/`TEMP` all *succeeded cleanly* the moment it ran from `K:\` — see the
+final section below for the actual test sequence and results. Everything
+under "Root cause" and "Mitigation options" below is preserved as-written
+for the record, but should be read as a documented false start, not
+current guidance.
 
 ## What happened
 
@@ -191,6 +212,115 @@ if this keeps recurring across machines/agents.
   running), that would falsify the contention theory and point back at
   something CEF/toolchain-version-specific instead — worth re-opening this
   retro's root-cause section if so.
+  **This item fired: see "Actual root cause" below.**
+
+## Actual root cause, found later (Windows `MAX_PATH`)
+
+Prompted by a direct question ("is there a solution to the CEF build race
+issue?") after this retro had sat unresolved, Option A (parallelism cap)
+was finally tested properly — and every variant of it failed identically,
+which is what led to actually finding the real cause instead of continuing
+to tune around it.
+
+**Testing Option A properly, and disproving it:**
+
+1. `NUM_JOBS=8 <task invocation>` — no effect; log still showed `--parallel
+   32`. Traced to the `cmake` crate's own logic: `NUM_JOBS` in this context
+   is an *output* Cargo sets for build scripts (derived from Cargo's own
+   `-j`/parallelism), not a free-form input — a shell-level `NUM_JOBS=8`
+   gets clobbered by Cargo's own injected value before the build script
+   ever reads it.
+2. The correct lever is `-j 8` passed directly to `cargo build`, or the
+   `CARGO_BUILD_JOBS=8` input env var (which cargo itself reads to decide
+   its own `-j`). Verified both correctly produced `--parallel 8` in the
+   cmake invocation.
+3. Ran a full `agentmux-cef` release build with `--parallel 8` confirmed
+   in the log — **identical C1083 failure**, same file batch. Parallelism
+   was not the cause; the retro's whole root-cause section was wrong.
+4. Deleted the `cef-dll-sys-*` build directory entirely and rebuilt from
+   scratch (ruling out corrupted/stale incremental ninja state from the
+   many earlier interrupted attempts) — **identical failure** on the fresh
+   directory too.
+5. Noticed the error text itself — `Cannot open compiler generated file:
+   ''` (an empty filename) — and checked `TMP`/`TEMP`: this Bash/MSYS
+   shell sets `TMP=/tmp`, `TEMP=/tmp` (POSIX-style), while `cmd.exe`'s
+   native environment correctly shows `C:\Users\asafe\AppData\Local\Temp`.
+   Explicitly set correct Windows-style `TMP`/`TEMP` before the build —
+   **still identical failure.** (This may still be worth fixing separately
+   for hygiene, but it isn't the cause here.)
+6. Measured the actual path length of one of the specific failing object
+   files: the `.cc` source path was 236 characters; the corresponding
+   `.obj` output path was **269 characters** — over Windows' classic
+   260-character `MAX_PATH` limit, *despite* `CMAKE_OBJECT_PATH_MAX=500`
+   already being set in the cmake invocation (evidently insufficient to
+   keep every path component under the limit on this particular directory
+   depth). This pattern fits perfectly: every failing file across every
+   attempt in this whole retro was from the small set of *longest-named*
+   files in `libcef_dll/{cpptoc,ctocpp}/test/`
+   (`api_version_test_scoped_client_child_v2_cpptoc.cc`,
+   `translator_test_ref_ptr_client_child_cpptoc.cc`, etc.) — never the
+   shorter-named files in the same directory.
+7. Checked the registry: `HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem
+   \LongPathsEnabled` → **`0`** (disabled) on this machine. Enabling it
+   requires admin/elevated access — not attempted without explicit
+   authorization, per this session's operating guidelines around
+   system-level changes.
+8. Instead tried a *non-invasive*, non-admin workaround: `subst K:
+   "<repo path>"` — mapping a plain drive letter to the deeply-nested
+   workspace path, which Windows then treats as a short `K:\...` path for
+   everything under it, with zero admin rights needed and instantly
+   reversible (`subst K: /D`).
+9. Rebuilt `agentmux-cef` release from `K:\` (same source, same
+   `--parallel 8`, same corrected `TMP`/`TEMP`, fresh build directory) —
+   **exit 0, zero `C1083` occurrences, finished cleanly in ~2 minutes.**
+   Confirmed the fix.
+
+**Why this matches every earlier observation in this retro:** the
+"contention" theory's evidence (dozens of files failing per run, always
+the same file set, seemingly worse under heavier load) is equally
+consistent with a fixed, deterministic path-length threshold — the same
+handful of longest-named files fail *every single time*, at any
+parallelism level, on any machine load, simply because their absolute
+path is always over 260 characters on this specific workspace layout.
+"Machine load" was never actually the variable; it was coincidental
+correlation from testing during a busy session.
+
+## Solution (verified, actionable today)
+
+**Immediate, no-admin-required:** before running `task dev` / `task
+package` on a machine where the repo lives at a long/deeply-nested path,
+map a short drive-letter alias and build from there:
+
+```powershell
+subst K: "C:\path\to\this\repo"
+```
+
+then `cd K:\` and run the normal `task dev` / `task package` commands from
+that drive. Undo any time with `subst K: /D`.
+
+**Durable fix, requires admin:** enable Windows long-path support once,
+system-wide, and this stops being necessary:
+
+```powershell
+# Run as Administrator
+New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" `
+  -Name "LongPathsEnabled" -Value 1 -PropertyType DWord -Force
+```
+
+(A reboot is not required for most tools, but some processes may need to
+restart to pick up the new registry value.) Not applied during this
+session — flagged for the user/machine owner to decide, since it's a
+system-wide change outside a single build's scope.
+
+**Root fix for the repo itself (not attempted here):** the workspace path
+that triggered this is specific to how this particular agent's working
+directory was provisioned (a duplicated-looking path segment,
+`agenty-0629j\Usersasafe.agentmuxagentsagenty-0629jagentmux`) — shortening
+that provisioning convention, or having `cef-dll-sys`'s fork request even
+shorter object-file names/hashes (Option B from the now-superseded
+mitigation section above would coincidentally have helped here too, by
+shrinking path length rather than parallelism), would reduce how easily
+any deeply-nested checkout hits this limit in the first place.
 
 ## Open questions
 
@@ -215,3 +345,10 @@ if this keeps recurring across machines/agents.
 | 3 | User chose to hold off on further `task dev` retries; PR #2148 merged and released as v0.53.5 without a live in-app smoke test. |
 | 4 | Later, asked to pull latest `main` and produce a fresh portable. `task package` hit the identical C1083 signature a third time, same `libcef_dll/*/test/*.cc` batch. |
 | 5 | Retro written instead of a fourth blind retry, per explicit direction ("lets get a retro written to file..we should be clear for this stuff"). Initial draft incorrectly attributed the contention to "12 other AgentMux instances," based on an `agentmux-0.53*` process-name grep that actually counted one instance's own CEF multi-process fan-out (launcher + srv + host + 9 sub-processes). Corrected after being challenged — confirmed via `Win32_Process` parent-PID inspection that only one real instance was running. |
+| 6 | Unrelated bashwrap pager-hang investigation and fix (PR #2156) completed and merged in between — see `RETRO_BASHWRAP_PAGER_HANG_LEAK_2026_07_14.md`. |
+| 7 | Asked directly "is there a solution to the CEF build race issue?" — prompted actually testing the retro's own long-deferred Option A (parallelism cap) instead of continuing to describe it as untested. |
+| 8 | `NUM_JOBS=8` had no effect (still `--parallel 32` in the log) — traced to `NUM_JOBS` being a Cargo-owned output env var for build scripts, not a usable input; a shell-set value gets overwritten. `-j 8` / `CARGO_BUILD_JOBS=8` correctly produced `--parallel 8` instead. |
+| 9 | Full build with confirmed `--parallel 8` — identical C1083 failure. Fresh `cef-dll-sys` build directory (ruling out stale ninja state) — identical failure. Corrected `TMP`/`TEMP` (Bash's `/tmp` vs. Windows' real temp path) — identical failure. Parallelism theory fully disproven. |
+| 10 | Measured the actual failing `.obj` path length: 269 characters, over Windows' 260-char `MAX_PATH`, despite `CMAKE_OBJECT_PATH_MAX=500` already set. Checked the registry: `LongPathsEnabled` = `0`. This matched every prior observation in the retro (same fixed set of longest-named files failing, every time, regardless of load). |
+| 11 | Verified with a non-admin workaround: `subst K: "<repo path>"`, then rebuilt `agentmux-cef` release from `K:\` — exit 0, zero C1083 occurrences, ~2 minutes. Root cause confirmed. Retro corrected in place; a full `task package` from `K:\` kicked off to actually produce the originally-requested portable. |
+| 12 | `task package` completed successfully from `K:\` — zero C1083 occurrences across the entire build (frontend + all Rust binaries including the full CEF host). Produced `agentmux-0.53.5+g346ace1c.20260714T234617.453541-x64-portable` (402 MB directory, 179 MB ZIP) on the Desktop. This was the original ask from the start of this session ("lets get a fresh portable"), finally delivered after this whole investigation. |
