@@ -147,7 +147,7 @@ come to exist in this system today.
 ## 5. What needs to change (not implemented here — see the companion spec)
 
 This retro documents the finding; `docs/specs/SPEC_UNIVERSAL_IDENTITY_GATEWAY_2026_07_15.md`
-proposes the fix. Summary of the direction: stop asking the gate to trust
+proposes the fix, tracked as agent task #50. Summary of the direction: stop asking the gate to trust
 two disconnected identity signals (`db_agents.identity_id` sentinel vs.
 `db_agent_identity_links` rows) reached through a resolvability chain
 (block → agentId → db_agents-or-db_agent_instances) that real spawn paths
