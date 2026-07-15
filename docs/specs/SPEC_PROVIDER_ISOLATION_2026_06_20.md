@@ -7,6 +7,14 @@
 **Diagnosis:** `docs/reports/REPORT_AGENT_AUTH_DIVERGENCE_2026_06_20.md`
 **Related:** `SPEC_HOST_CLI_LOGIN_CAPTURE_2026_06_20.md` (the login mechanism), retro `retro-provider-auth-isolation-regression-2026-06-05.md`
 
+**⚠ INV-A regressed once already, silently, via an unrelated refactor — read
+`docs/retro/retro-auth-isolation-invariant-silently-orphaned-2026-07-14.md`
+before touching `identity/resolver.rs`'s credential-injection gate. The
+prior enforcement (auto-provisioning an isolated dir for every agent, even
+unbound ones) was cut by commit `e5ab2d09` (2026-07-08) and never restored;
+today's fail-closed spawn gate (PR #2164) is a mitigation for the visible
+symptom, not a restoration of INV-A's original mechanism.**
+
 ---
 
 ## 0. Directive

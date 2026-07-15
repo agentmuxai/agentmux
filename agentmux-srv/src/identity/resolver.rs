@@ -8,6 +8,18 @@
 //! the official `gh` CLI and direct API consumers (curl, oct.js) read
 //! one or the other; emitting both is the lowest-friction way to make
 //! every common workflow Just Work.
+//!
+//! **Before touching `gate_oauth_failure` / `inject_identity_env_with_broker`:**
+//! this module is where `SPEC_PROVIDER_ISOLATION_2026_06_20.md`'s INV-A
+//! ("never the user's global `~/.<P>` dir") is enforced — or, once already,
+//! silently stopped being enforced. Read
+//! `docs/retro/retro-auth-isolation-invariant-silently-orphaned-2026-07-14.md`
+//! first. Short version: an unbound oauth-class provider used to
+//! auto-route to an AgentMux-owned isolated dir (no user action, no global
+//! exposure); a 2026-07-08 refactor orphaned that path without meaning to,
+//! and it was never restored — today's gate only chooses between "block"
+//! and "true ambient" (`use_ambient_login=true`, zero isolation), not the
+//! isolated-auto-provision option that used to exist implicitly.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -1310,6 +1322,17 @@ mod tests {
         // (The m0017 migration grandfathers pre-existing linkless agents
         // to flag=1; `inject_no_direct_links_injects_nothing` covers that
         // side.)
+        //
+        // THIS TEST IS THE INV-A REGRESSION CANARY
+        // (`docs/retro/retro-auth-isolation-invariant-silently-orphaned-2026-07-14.md`):
+        // a completely unconfigured agent (zero bindings, default flag)
+        // is the exact shape that used to fall through to the user's
+        // global `~/.claude` before commit `e5ab2d09` orphaned the
+        // isolated-auto-provision path. If a future refactor makes this
+        // assert start failing (env no longer empty, or `res` becomes
+        // `Ok`), read that retro before "fixing" the test — the failure
+        // is very likely the invariant regressing a second time, not the
+        // test being wrong.
         let store = make_store();
         let mut def = gate_def(0);
         store.agent_def_insert(&mut def).unwrap();
