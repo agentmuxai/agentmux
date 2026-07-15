@@ -1,5 +1,18 @@
 # AgentMux Version History
 
+## 0.53.6 — 2026-07-15
+
+- fix(providers): consolidate Claude CLI pin to 2.1.198 across all four registries + drift-guard test
+- feat(diags): muxlog auth subcommand + logout-path auth logging
+- fix(bashwrap): disable git pager and kill idle-hung children instead of leaking the wrapper process
+- fix(accounts): OAuth accounts crashed the Accounts detail modal (unmapped oauth_config_dir SecretRef)
+- fix(identity): cascade links/bindings + remove OAuth token dir on account delete
+- feat(identity): disclose affected agents on account delete (pane chip + armory notice)
+- feat(identity): fail spawn on missing oauth account, explicit per-agent global-login opt-in
+- feat(settings): fill out Window & Panes, Sounds, and Advanced sections
+- fix(cef): reduce New Window startup color flash on Windows
+
+
 ## 0.53.5 — 2026-07-14
 
 - feat(srv): swarm/subagent lifecycle diagnostics (muxlog swarm)
