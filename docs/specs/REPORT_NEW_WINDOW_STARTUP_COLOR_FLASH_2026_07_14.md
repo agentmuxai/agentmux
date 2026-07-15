@@ -4,6 +4,13 @@
 **Author:** AgentX
 **Type:** Investigation report, with all three findings implemented in this same PR. See §8 for what shipped and what's a partial/lower-confidence mitigation vs. a complete fix.
 **Purpose:** The hamburger menu's "New Window" shows a visible sequence of solid-color changes before settling into the real UI, instead of one solid background with the pulsating brain-logo splash held until the app is truly ready to paint. This report traces exactly where each color in that sequence comes from and why, as a basis for a future ordering fix.
+**2026-07-15 update:** §4.3's gap was live-measured the next day, on a real
+Windows GUI session — see `docs/specs/REPORT_NEW_WINDOW_COLOR_FLASH_LIVE_MEASUREMENT_2026_07_15.md`.
+Confirmed real and confirmed sizeable: 268ms between the native window
+becoming visible and CEF's compositor being told to show anything. The
+reorder needed to close it is not attempted there either — same
+regression-risk reasoning as §8 below, now backed by a live number instead
+of a guess.
 
 ---
 
