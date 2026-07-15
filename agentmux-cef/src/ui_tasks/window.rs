@@ -1368,22 +1368,36 @@ wrap_task! {
             let t0 = std::time::Instant::now();
             tracing::info!(label = %self.label, "[create-window] task entered UI thread");
 
+            // ARGB alpha=0 → transparent, mirroring the MAIN window (app.rs)
+            // and the global CefSettings.background_color (main.rs).
+            // CreateWindowTask builds every secondary window on Linux/macOS —
+            // additional windows AND floating-pane tear-offs
+            // (open_floating_pane_window routes here on non-Windows; the
+            // dedicated post_create_floating_window is Windows-only) — AND,
+            // on every platform including Windows, every pool window
+            // (`window_pool::spawn_pool_window` → `post_create_window` →
+            // this task), which is what a running app's "New Window"/tear-off
+            // actually promotes. Previously hard-coded 0xFF000000 (opaque
+            // black) here, which (a) overrode the transparent global default
+            // and (b) gated OFF the BrowserViewImpl transparency cascade (it
+            // only fires when default_background_color_ is transparent — see
+            // cef/libcef/browser/views/browser_view_impl.cc
+            // WebContentsCreated), making floaters/secondary windows fully
+            // opaque even when window:transparent=true — so it was changed to
+            // unconditional 0x00000000. That fixed the transparent case but
+            // broke the opaque one the other way: every non-transparent
+            // secondary/pool window's compositor backstop no longer matched
+            // the startup splash's background (`app::OPAQUE_BG_ARGB`,
+            // `rgb(34,34,34)`), producing a transparent/black-to-gray flash on
+            // every "New Window" — see
+            // docs/specs/REPORT_NEW_WINDOW_STARTUP_COLOR_FLASH_2026_07_14.md
+            // §4.1. Read the same transparency flag the main window already
+            // reads so both branches are covered: transparent stays
+            // 0x00000000 (preserves the cascade fix above), opaque now
+            // matches the splash instead of reverting to plain black.
+            let is_transparent = self.state.window_transparent.load(std::sync::atomic::Ordering::Relaxed);
             let settings = BrowserSettings {
-                // ARGB alpha=0 → transparent, mirroring the MAIN window
-                // (app.rs:679) and the global CefSettings.background_color
-                // (main.rs). CreateWindowTask builds every secondary window
-                // on Linux/macOS — additional windows AND floating-pane
-                // tear-offs (open_floating_pane_window routes here on
-                // non-Windows; the dedicated post_create_floating_window is
-                // Windows-only). Previously hard-coded 0xFF000000 (opaque
-                // black), which (a) overrode the transparent global default
-                // and (b) gated OFF the BrowserViewImpl transparency cascade
-                // (it only fires when default_background_color_ is
-                // transparent — see cef/libcef/browser/views/browser_view_impl.cc
-                // WebContentsCreated). Result: floaters/secondary windows were
-                // fully opaque even when window:transparent=true. 0x00000000
-                // lets them inherit the same transparency path as main.
-                background_color: 0x00000000,
+                background_color: if is_transparent { 0x00000000 } else { crate::app::OPAQUE_BG_ARGB },
                 ..Default::default()
             };
             let cef_url = CefString::from(self.url.as_str());
