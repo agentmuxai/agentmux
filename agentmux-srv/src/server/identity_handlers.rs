@@ -395,14 +395,20 @@ fn spawn_auth_cli(
 
         // Spawn the CLI. kill_on_drop guarantees cleanup if our
         // task is aborted (cancel path).
-        let mut child = match Command::new(&cli_path)
-            .args(&auth_login_args)
+        let mut cmd = Command::new(&cli_path);
+        cmd.args(&auth_login_args)
             .envs(&auth_env)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
+            .kill_on_drop(true);
+        // CREATE_NO_WINDOW: console-flash suppression, see agentmux-common/src/cli.rs
+        #[cfg(windows)]
+        {
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+        let mut child = match cmd.spawn()
         {
             Ok(c) => {
                 tracing::info!(
