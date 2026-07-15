@@ -180,6 +180,62 @@ pub fn probe_oauth_status(
     }
 }
 
+/// Blocking spawn-gate error — layer 3 of
+/// SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md (§2.2).
+///
+/// Returned by the injection entry points when an **oauth-class** provider
+/// the agent is supposed to have credentials for (a binding exists, or the
+/// provider is the agent definition's own CLI provider) has no resolvable
+/// account AND the agent has not opted into ambient login
+/// (`use_ambient_login = 0`, the default). The spawn callers surface
+/// `Display` verbatim in the agent pane (same `error_during_execution`
+/// frame other spawn failures use) — the wording is the spec's.
+///
+/// Api-key-class bindings keep the historical log-and-skip behavior; this
+/// error exists only for the oauth class, where silent fallback meant the
+/// CLI would read the user's global login (`~/.claude`) after an account
+/// was deleted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SpawnGateError {
+    /// The gate's credentials verdict: no resolvable account, no opt-in.
+    MissingCredentials { provider: String },
+    /// The injection task itself could not run to completion (task-join
+    /// failure — e.g. a panic inside the blocking closure, which also
+    /// poisons the `Store` mutex for every later call). The gate FAILS
+    /// CLOSED on this: an open fallback would silently convert one panic
+    /// anywhere in the store into a permanent, systemic bypass of
+    /// `use_ambient_login = false` (reagent P1, PR #2164 round 1). A
+    /// blocked spawn is retryable and visible; a silent ambient launch
+    /// is neither.
+    InjectionUnavailable { detail: String },
+}
+
+impl std::fmt::Display for SpawnGateError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            // The quoted toggle name must match AgentIdentityModal.tsx's
+            // label VERBATIM so users can find it (reagent P2, PR #2164
+            // round 2).
+            SpawnGateError::MissingCredentials { provider } => write!(
+                f,
+                "no credentials for {}: the bound account was deleted or is \
+                 unresolvable. Bind an account in the Armory, or enable \
+                 \"Use global CLI login when no account is bound\" in this \
+                 agent's settings.",
+                provider,
+            ),
+            SpawnGateError::InjectionUnavailable { detail } => write!(
+                f,
+                "credential injection could not run ({detail}); the spawn was \
+                 refused rather than falling back to the global CLI login. \
+                 Retry, and check `muxlog auth` if it persists.",
+            ),
+        }
+    }
+}
+
+impl std::error::Error for SpawnGateError {}
+
 /// Errors specific to the resolver. Every variant is recoverable
 /// (the spawn proceeds with whatever env vars resolved successfully)
 /// — they exist for tracing visibility, not control flow.
@@ -357,22 +413,33 @@ pub fn resolve_secret(secret_ref: &SecretRef) -> Result<String, ResolverError> {
 /// 3. Read the `db_agent_identity_links` rows for the instance's definition.
 /// 4. For each binding: fetch the account, resolve its `SecretRef`,
 ///    look up the provider's env-var matrix, write each var into
-///    `env_vars`. Any per-binding failure is logged and skipped —
-///    other bindings still inject. The agent CLI launches with
-///    whatever resolved cleanly plus whatever ambient env was already
-///    in the spawn map.
+///    `env_vars`.
+///    - **Api-key-class** per-binding failures are logged and skipped —
+///      other bindings still inject (historical behavior).
+///    - **Oauth-class** failures (account row missing, lookup error,
+///      non-OAuthConfigDir secret_ref) are BLOCKING unless the agent
+///      definition carries `use_ambient_login = 1`: the function returns
+///      [`SpawnGateError`] before the CLI process is created. With the
+///      opt-in set, the binding is skipped WITHOUT injecting a config dir
+///      (the CLI uses its global login) and `identity.spawn.ambient:` is
+///      logged at info — the only sanctioned ambient path (spec §2.2).
+/// 5. If the agent definition's own provider is oauth-class and no binding
+///    for it exists at all (fresh/never-bound or post-delete-cascade), the
+///    same gate applies — implicit ambient fallback is how the
+///    delete-doesn't-deauthenticate gap happened (spec §2.2 edge case).
 ///
-/// This function is intentionally infallible at the top level. It
-/// has no `Result`, just side-effects on `env_vars` and `tracing::warn`
-/// for every per-binding error. The spawn never aborts because a
-/// secret didn't resolve.
+/// Layer 3 of SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md. Before
+/// it, this function was intentionally infallible ("the spawn never aborts
+/// because a secret didn't resolve") — that is still true for api-key-class
+/// bindings, but oauth-class resolution failures now fail the spawn by
+/// default so account deletion is honest at the next spawn.
 pub fn inject_identity_env(
     wstore: Arc<Store>,
     id_store: Arc<Store>,
     block_id: &str,
     env_vars: &mut HashMap<String, String>,
-) {
-    inject_identity_env_with_broker(wstore, id_store, None, block_id, env_vars);
+) -> Result<(), SpawnGateError> {
+    inject_identity_env_with_broker(wstore, id_store, None, block_id, env_vars)
 }
 
 /// `inject_identity_env` + optional broker handle so the OAuth-class
@@ -389,27 +456,41 @@ pub fn inject_identity_env(
 /// `keyring` (D-Bus Secret Service on Linux) read — so it runs on a blocking
 /// thread via `spawn_blocking` rather than stalling an async runtime worker.
 /// Takes ownership of `env_vars` and returns it with identity vars merged in.
-/// On the rare task-join failure the original map is returned unchanged so
-/// the static `cmd:env` vars are never lost. See spec §12.2.
+///
+/// `Err(SpawnGateError)` is the layer-3 spawn gate (see
+/// [`inject_identity_env`]): the caller must NOT spawn the CLI and must
+/// surface the error on the agent pane like any other spawn failure. A
+/// task-join failure also fails CLOSED (`InjectionUnavailable`, blocking
+/// the spawn) — see that variant's doc for why an open fallback would
+/// systemically bypass the gate after any store panic.
 pub async fn inject_identity_env_async(
     wstore: Arc<Store>,
     id_store: Arc<Store>,
     broker: Option<Arc<Broker>>,
     block_id: String,
     env_vars: HashMap<String, String>,
-) -> HashMap<String, String> {
-    let fallback = env_vars.clone();
+) -> Result<HashMap<String, String>, SpawnGateError> {
     match tokio::task::spawn_blocking(move || {
         let mut env = env_vars;
-        inject_identity_env_with_broker(wstore, id_store, broker, &block_id, &mut env);
-        env
+        inject_identity_env_with_broker(wstore, id_store, broker, &block_id, &mut env)
+            .map(|()| env)
     })
     .await
     {
-        Ok(merged) => merged,
+        Ok(result) => result,
         Err(e) => {
-            tracing::warn!(target: "identity", "identity injection task join failed: {e}");
-            fallback
+            // Fail CLOSED. A join failure means the closure panicked (or
+            // was cancelled) — the gate never rendered a verdict, and the
+            // panic has likely poisoned the Store mutex, so failing open
+            // here would bypass use_ambient_login=false for every later
+            // spawn too (reagent P1, PR #2164 round 1). See
+            // SpawnGateError::InjectionUnavailable.
+            tracing::warn!(
+                target: "identity",
+                error = %e,
+                "identity.spawn.blocked: injection task join failed — failing closed"
+            );
+            Err(SpawnGateError::InjectionUnavailable { detail: e.to_string() })
         }
     }
 }
@@ -459,12 +540,12 @@ fn resolve_bindings_for_instance(
         });
 
     if direct.is_empty() {
-        // Non-fatal — the spawn proceeds with no identity env injected,
-        // same as "identity has no accounts bound" below. Distinct log
-        // line + event so a non-sentinel identity resolving to zero
-        // links (e.g. an agent that was never linked to an account) is
-        // visible, not silently indistinguishable from routine
-        // "no accounts configured."
+        // Distinct log line + event so a non-sentinel identity resolving
+        // to zero links (e.g. an agent that was never linked to an
+        // account) is visible, not silently indistinguishable from
+        // routine "no accounts configured." Whether the spawn proceeds
+        // is decided by the caller's layer-3 definition-provider gate
+        // (oauth-class CLI provider + no ambient opt-in → blocked).
         tracing::warn!(
             target: "identity",
             "no direct account links for definition {} (identity {}) — \
@@ -506,17 +587,19 @@ pub fn inject_identity_env_with_broker(
     broker: Option<Arc<Broker>>,
     block_id: &str,
     env_vars: &mut HashMap<String, String>,
-) {
+) -> Result<(), SpawnGateError> {
     // Step 1: instance lookup — per-channel, always reads from wstore.
     let instance = match wstore.instance_get_active_for_block(block_id) {
         Ok(Some(i)) => i,
         Ok(None) => {
-            // Block has no agent instance row — nothing to inject.
-            return;
+            // Block has no agent instance row — nothing to inject, and no
+            // gating either: quick-launch panes that never went through the
+            // launch modal are outside the managed-credentials contract.
+            return Ok(());
         }
         Err(e) => {
             tracing::warn!(target: "identity", "instance lookup failed for block {}: {}", block_id, e);
-            return;
+            return Ok(());
         }
     };
 
@@ -528,25 +611,48 @@ pub fn inject_identity_env_with_broker(
         // SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md), so seeing
         // one here means either a legacy continuation row or a UI
         // regression. Warn so the regression is visible in logs.
+        // Deliberately NOT gated by layer 3: this sentinel predates the
+        // managed-account model and was an explicit "ambient creds"
+        // choice at launch time, not a silent fallback.
         tracing::warn!(
             target: "identity",
             "instance {} has empty/blank identity_id — falling back to ambient creds. \
              Legacy row or UI regression?",
             block_id
         );
-        return;
+        return Ok(());
     }
+
+    // Layer-3 gate inputs: the agent definition's ambient opt-in flag and
+    // its own CLI provider (the oauth-class provider every launch of this
+    // agent uses, whether or not a binding row exists for it). A missing
+    // definition row reads as flag=false / no expected provider — the
+    // per-binding gate still applies to whatever links exist.
+    let (use_ambient, def_provider) = match wstore.agent_def_get(&instance.definition_id) {
+        Ok(Some(d)) => (d.use_ambient_login != 0, Some(d.provider)),
+        Ok(None) => (false, None),
+        Err(e) => {
+            tracing::warn!(
+                target: "identity",
+                "definition lookup failed for {} (layer-3 gate reads use_ambient_login=false): {}",
+                instance.definition_id,
+                e,
+            );
+            (false, None)
+        }
+    };
 
     // Step 3: bindings — global, reads from id_store. Direct-links-only
     // as of Phase 3 slice 2 PR-B (the flip) — see resolve_bindings_for_instance's
     // doc comment for the transitional gap this closes and the one it
     // doesn't (#1624 PR-C).
+    //
+    // NOTE: an empty set no longer short-circuits — it falls through to the
+    // definition-provider gate below (spec §2.2 edge case: an agent whose
+    // oauth-class CLI provider has no binding at all is blocked unless the
+    // ambient opt-in is set; the m0017 migration grandfathers pre-existing
+    // linkless agents).
     let bindings = resolve_bindings_for_instance(&id_store, &instance, broker.as_ref());
-
-    if bindings.is_empty() {
-        // Identity exists but has no accounts bound. Nothing to inject.
-        return;
-    }
 
     // Step 4: per-binding resolution + env injection.
     //
@@ -556,9 +662,45 @@ pub fn inject_identity_env_with_broker(
     //   - OAuth   — expect SecretRef::OAuthConfigDir, inject its dir
     //               as the provider's config-dir env var.
     //
-    // Per-binding failures (unknown provider, account row missing,
-    // mismatched secret_ref, secret resolution failed) are logged and
-    // skipped — other bindings still inject.
+    // Api-key-class per-binding failures (unknown provider, account row
+    // missing, mismatched secret_ref, secret resolution failed) are logged
+    // and skipped — other bindings still inject. Oauth-class failures go
+    // through the layer-3 gate: blocking by default, skip-with-
+    // `identity.spawn.ambient:` when the agent opted in (spec §2.2).
+    let mut injected_oauth: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+
+    // Gate helper for an unresolvable oauth-class binding/provider.
+    // Returns Ok(()) when the agent opted into ambient (caller skips the
+    // binding), Err(SpawnGateError) otherwise (caller aborts the spawn).
+    let gate_oauth_failure = |provider: &str, detail: &str| -> Result<(), SpawnGateError> {
+        if use_ambient {
+            tracing::info!(
+                target: "identity",
+                "identity.spawn.ambient: using global CLI login (per-agent opt-in) — \
+                 provider {}, definition {} ({})",
+                provider,
+                instance.definition_id,
+                detail,
+            );
+            Ok(())
+        } else {
+            tracing::warn!(
+                target: "identity",
+                "identity.spawn.blocked: no credentials for provider {} \
+                 (definition {}, identity {}) — {}; spawn refused \
+                 (use_ambient_login=false)",
+                provider,
+                instance.definition_id,
+                instance.identity_id,
+                detail,
+            );
+            Err(SpawnGateError::MissingCredentials {
+                provider: provider.to_string(),
+            })
+        }
+    };
+
     for binding in &bindings {
         let class = match provider_class(&binding.provider) {
             Some(c) => c,
@@ -572,10 +714,23 @@ pub fn inject_identity_env_with_broker(
                 continue;
             }
         };
+        let is_oauth_class = matches!(class, ProviderClass::OAuth { .. });
 
         let account = match id_store.identity_get(&binding.account_id) {
             Ok(Some(a)) => a,
             Ok(None) => {
+                // The post-delete case (analysis §2.3): the link survived
+                // (or was cascaded and re-created stale) but the account
+                // row is gone. For oauth-class providers this is the
+                // load-bearing layer-3 gate — no more silent fallback to
+                // the user's global login.
+                if is_oauth_class {
+                    gate_oauth_failure(
+                        &binding.provider,
+                        &format!("account {} row not found", binding.account_id),
+                    )?;
+                    continue;
+                }
                 tracing::warn!(
                     target: "identity",
                     "account {} bound to identity {} but row not found — skipping",
@@ -585,6 +740,13 @@ pub fn inject_identity_env_with_broker(
                 continue;
             }
             Err(e) => {
+                if is_oauth_class {
+                    gate_oauth_failure(
+                        &binding.provider,
+                        &format!("account lookup failed for {}: {}", binding.account_id, e),
+                    )?;
+                    continue;
+                }
                 tracing::warn!(
                     target: "identity",
                     "account lookup failed for {}: {}",
@@ -625,23 +787,25 @@ pub fn inject_identity_env_with_broker(
             }
             ProviderClass::OAuth { config_dir_env_var } => {
                 // OAuth-class bindings expect SecretRef::OAuthConfigDir.
-                // Any other variant is a misconfiguration — log and
-                // skip rather than mis-inject the wrong secret.
+                // Any other variant is a misconfiguration — the account is
+                // unresolvable for this provider, so it goes through the
+                // layer-3 gate rather than silently leaving the CLI on the
+                // user's global login.
                 let dir = match &account.secret_ref {
                     SecretRef::OAuthConfigDir { dir } => dir.clone(),
                     other => {
-                        tracing::warn!(
-                            target: "identity",
-                            "oauth-class provider {} has non-OAuthConfigDir secret_ref \
-                             ({:?}) on account {} — skipping",
-                            binding.provider,
-                            other,
-                            binding.account_id,
-                        );
+                        gate_oauth_failure(
+                            &binding.provider,
+                            &format!(
+                                "non-OAuthConfigDir secret_ref ({:?}) on account {}",
+                                other, binding.account_id,
+                            ),
+                        )?;
                         continue;
                     }
                 };
                 env_vars.insert(config_dir_env_var.to_string(), dir.clone());
+                injected_oauth.insert(binding.provider.clone());
                 tracing::info!(
                     target: "identity",
                     "injected {} for oauth provider {} (identity={}, account={})",
@@ -709,6 +873,24 @@ pub fn inject_identity_env_with_broker(
             }
         }
     }
+
+    // Step 5: definition-provider gate (spec §2.2 edge case). The agent's
+    // own CLI provider is an oauth-class provider it is "supposed to have
+    // credentials for" whether or not a binding row exists — an agent with
+    // NO binding for it (never bound, or the link was cascaded away by an
+    // account delete) must not silently launch on the user's global login.
+    // Bindings that existed but failed were already gated inside the loop,
+    // so this only fires for the genuinely-unbound case (no double logs).
+    if let Some(p) = def_provider {
+        if matches!(provider_class(&p), Some(ProviderClass::OAuth { .. }))
+            && !injected_oauth.contains(&p)
+            && !bindings.iter().any(|b| b.provider == p)
+        {
+            gate_oauth_failure(&p, "no account bound for the agent's provider")?;
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -882,6 +1064,7 @@ mod tests {
             container_image: String::new(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
+            use_ambient_login: 0,
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -902,7 +1085,10 @@ mod tests {
         store.instance_create(&inst).unwrap();
 
         let mut env: HashMap<String, String> = HashMap::new();
-        inject_identity_env(store.clone(), store, "block-oauth", &mut env);
+        // Spec §2.5 regression: a resolvable oauth account injects
+        // unchanged — the layer-3 gate never fires (Ok even with
+        // use_ambient_login=0).
+        inject_identity_env(store.clone(), store, "block-oauth", &mut env).unwrap();
 
         // OAuth dispatch sets the provider's config-dir env var.
         assert_eq!(
@@ -916,11 +1102,13 @@ mod tests {
 
     #[cfg(debug_assertions)]
     #[test]
-    fn inject_oauth_class_skips_account_with_non_oauth_secret_ref() {
+    fn inject_oauth_class_blocks_account_with_non_oauth_secret_ref() {
         // An oauth-class provider (claude) bound to an account whose
         // SecretRef is the API-key shape (Env) is a misconfiguration:
-        // the resolver logs + skips rather than mis-injecting the
-        // wrong secret as if it were a config-dir.
+        // the account is unresolvable for the provider, so the layer-3
+        // gate blocks the spawn (use_ambient_login=0) instead of
+        // mis-injecting the wrong secret or silently launching on the
+        // user's global login.
         let store = make_store();
 
         let mut def = crate::backend::storage::store::AgentDefinition {
@@ -949,6 +1137,7 @@ mod tests {
             container_image: String::new(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
+            use_ambient_login: 0,
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -969,10 +1158,173 @@ mod tests {
         store.instance_create(&inst).unwrap();
 
         let mut env: HashMap<String, String> = HashMap::new();
-        inject_identity_env(store.clone(), store, "block-bad", &mut env);
+        let res = inject_identity_env(store.clone(), store, "block-bad", &mut env);
 
-        // Nothing injected — the binding was skipped.
+        // Blocking spawn-gate error — and nothing injected.
+        assert_eq!(
+            res,
+            Err(SpawnGateError::MissingCredentials { provider: "claude".to_string() }),
+        );
         assert!(env.get("CLAUDE_CONFIG_DIR").is_none());
+        assert!(env.is_empty());
+    }
+
+    // ── Layer 3 — spawn gating (SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4
+    //    _2026_07_14.md §2.2/§2.5) ────────────────────────────────────
+
+    /// Fixture def for the gating tests — oauth-class CLI provider
+    /// (claude) with a configurable ambient opt-in.
+    fn gate_def(use_ambient_login: i64) -> crate::backend::storage::store::AgentDefinition {
+        crate::backend::storage::store::AgentDefinition {
+            id: "def-1".to_string(),
+            slug: String::new(),
+            name: "T".to_string(),
+            icon: "✦".to_string(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: String::new(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login,
+        }
+    }
+
+    /// Delete an account row while KEEPING its link — the post-delete
+    /// shape on a legacy DB (analysis §2.4: real installs got the links
+    /// table via ALTER RENAME with no FK cascade clause, so orphan links
+    /// are real). FKs are toggled off for the surgical delete so the
+    /// test store's DDL-level cascade doesn't fire.
+    fn delete_account_row_keep_link(store: &Store, account_id: &str) {
+        let conn = store.conn().lock().unwrap();
+        conn.execute_batch(&format!(
+            "PRAGMA foreign_keys=OFF;
+             DELETE FROM db_accounts WHERE id = '{account_id}';
+             PRAGMA foreign_keys=ON;"
+        ))
+        .unwrap();
+    }
+
+    #[test]
+    fn spawn_blocked_when_bound_oauth_account_missing_and_flag_false() {
+        // Spec §2.5 test 1: binding → missing account → flag false →
+        // spawn-assembly returns the blocking error (not a skip).
+        let store = make_store();
+        let mut def = gate_def(0);
+        store.agent_def_insert(&mut def).unwrap();
+
+        let claude = make_account(
+            "acct-gone",
+            "claude",
+            SecretRef::OAuthConfigDir {
+                dir: "/var/agentmux/identities/id-x/claude".to_string(),
+            },
+        );
+        store.identity_upsert(&claude).unwrap();
+        store
+            .agent_identity_link("def-1", "acct-gone", "claude")
+            .unwrap();
+        // Delete the account row out from under the link — the exact
+        // post-`deleteidentityaccount` shape the resolver used to
+        // log-and-skip ("row not found — skipping", analysis §2.3).
+        delete_account_row_keep_link(&store, "acct-gone");
+
+        insert_block_for_agent(&store, "block-gate-1", "def-1");
+        let inst = make_instance("block-gate-1", "id-x");
+        store.instance_create(&inst).unwrap();
+
+        let mut env: HashMap<String, String> = HashMap::new();
+        let res = inject_identity_env(store.clone(), store, "block-gate-1", &mut env);
+
+        assert_eq!(
+            res,
+            Err(SpawnGateError::MissingCredentials { provider: "claude".to_string() }),
+        );
+        // Nothing was injected — the CLI process must never be created.
+        assert!(env.is_empty());
+        // The error's Display is the user-facing pane message (spec §2.2
+        // wording) — pin the load-bearing pieces.
+        let msg = res.unwrap_err().to_string();
+        assert!(msg.contains("no credentials for claude"), "got: {msg}");
+        assert!(msg.contains("Armory"), "got: {msg}");
+        assert!(msg.contains("Use global CLI login when no account is bound"), "got: {msg}");
+    }
+
+    #[test]
+    fn spawn_proceeds_ambient_when_bound_oauth_account_missing_and_flag_true() {
+        // Spec §2.5 test 2: binding → missing account → flag true → no
+        // injection + spawn proceeds (the sanctioned ambient path; the
+        // `identity.spawn.ambient:` info line is asserted-by-return-value
+        // here since this codebase has no tracing capture).
+        let store = make_store();
+        let mut def = gate_def(1);
+        store.agent_def_insert(&mut def).unwrap();
+
+        let claude = make_account(
+            "acct-gone-2",
+            "claude",
+            SecretRef::OAuthConfigDir {
+                dir: "/var/agentmux/identities/id-y/claude".to_string(),
+            },
+        );
+        store.identity_upsert(&claude).unwrap();
+        store
+            .agent_identity_link("def-1", "acct-gone-2", "claude")
+            .unwrap();
+        delete_account_row_keep_link(&store, "acct-gone-2");
+
+        insert_block_for_agent(&store, "block-gate-2", "def-1");
+        let inst = make_instance("block-gate-2", "id-y");
+        store.instance_create(&inst).unwrap();
+
+        let mut env: HashMap<String, String> = HashMap::new();
+        inject_identity_env(store.clone(), store, "block-gate-2", &mut env).unwrap();
+
+        // No config dir injected — the CLI uses its global login, by
+        // explicit opt-in, never silently.
+        assert!(env.get("CLAUDE_CONFIG_DIR").is_none());
+        assert!(env.is_empty());
+    }
+
+    #[test]
+    fn spawn_blocked_when_oauth_def_provider_has_no_binding_and_flag_false() {
+        // Spec §2.2 edge case: an agent whose oauth-class CLI provider has
+        // NO binding at all (never bound, or the link was cascaded away by
+        // an account delete) is blocked without the opt-in — implicit
+        // ambient is how the delete-doesn't-deauthenticate gap happened.
+        // (The m0017 migration grandfathers pre-existing linkless agents
+        // to flag=1; `inject_no_direct_links_injects_nothing` covers that
+        // side.)
+        let store = make_store();
+        let mut def = gate_def(0);
+        store.agent_def_insert(&mut def).unwrap();
+
+        insert_block_for_agent(&store, "block-gate-3", "def-1");
+        let inst = make_instance("block-gate-3", "id-z");
+        store.instance_create(&inst).unwrap();
+
+        let mut env: HashMap<String, String> = HashMap::new();
+        let res = inject_identity_env(store.clone(), store, "block-gate-3", &mut env);
+
+        assert_eq!(
+            res,
+            Err(SpawnGateError::MissingCredentials { provider: "claude".to_string() }),
+        );
         assert!(env.is_empty());
     }
 
@@ -995,7 +1347,7 @@ mod tests {
     fn inject_no_instance_does_nothing() {
         let store = make_store();
         let mut env: HashMap<String, String> = HashMap::new();
-        inject_identity_env(store.clone(), store, "block-no-instance", &mut env);
+        inject_identity_env(store.clone(), store, "block-no-instance", &mut env).unwrap();
         assert!(env.is_empty());
     }
 
@@ -1029,6 +1381,7 @@ mod tests {
             container_image: String::new(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
+            use_ambient_login: 0,
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1038,7 +1391,10 @@ mod tests {
         let _ = inst; // keep clippy happy
 
         let mut env: HashMap<String, String> = HashMap::new();
-        inject_identity_env(store.clone(), store, "block-blank", &mut env);
+        // The blank sentinel is the pre-managed-accounts explicit "ambient
+        // creds" launch choice — NOT gated by layer 3 (Ok even with
+        // use_ambient_login=0).
+        inject_identity_env(store.clone(), store, "block-blank", &mut env).unwrap();
         assert!(env.is_empty());
     }
 
@@ -1074,6 +1430,11 @@ mod tests {
             container_image: String::new(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
+            // Ambient opt-in: this test exercises api-key / zero-link behavior,
+            // not the layer-3 oauth gate. The def provider (claude) has no
+            // oauth binding here, so without the opt-in the gate would
+            // block the spawn (covered by the spawn_blocked_* tests).
+            use_ambient_login: 1,
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1109,7 +1470,7 @@ mod tests {
         store.instance_create(&inst).unwrap();
 
         let mut env: HashMap<String, String> = HashMap::new();
-        inject_identity_env(store.clone(), store, "block-1", &mut env);
+        inject_identity_env(store.clone(), store, "block-1", &mut env).unwrap();
 
         // GitHub writes both standard env-var names from one secret.
         assert_eq!(env.get("GITHUB_TOKEN").map(String::as_str), Some("ghp_round_trip"));
@@ -1154,6 +1515,11 @@ mod tests {
             container_image: String::new(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
+            // Ambient opt-in: this test exercises api-key / zero-link behavior,
+            // not the layer-3 oauth gate. The def provider (claude) has no
+            // oauth binding here, so without the opt-in the gate would
+            // block the spawn (covered by the spawn_blocked_* tests).
+            use_ambient_login: 1,
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1174,7 +1540,7 @@ mod tests {
         store.instance_create(&inst).unwrap();
 
         let mut env: HashMap<String, String> = HashMap::new();
-        inject_identity_env(store.clone(), store, "block-direct", &mut env);
+        inject_identity_env(store.clone(), store, "block-direct", &mut env).unwrap();
 
         assert_eq!(env.get("GITHUB_TOKEN").map(String::as_str), Some("ghp_direct"));
         assert_eq!(env.get("GH_TOKEN").map(String::as_str), Some("ghp_direct"));
@@ -1214,6 +1580,11 @@ mod tests {
             container_image: String::new(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
+            // Ambient opt-in: this test exercises api-key / zero-link behavior,
+            // not the layer-3 oauth gate. The def provider (claude) has no
+            // oauth binding here, so without the opt-in the gate would
+            // block the spawn (covered by the spawn_blocked_* tests).
+            use_ambient_login: 1,
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1231,7 +1602,7 @@ mod tests {
         store.instance_create(&inst).unwrap();
 
         let mut env: HashMap<String, String> = HashMap::new();
-        inject_identity_env(store.clone(), store, "block-unlinked", &mut env);
+        inject_identity_env(store.clone(), store, "block-unlinked", &mut env).unwrap();
 
         // Nothing injected — an account with no direct link is invisible
         // to the resolver.
@@ -1274,6 +1645,11 @@ mod tests {
             container_image: String::new(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
+            // Ambient opt-in: this test exercises api-key / zero-link behavior,
+            // not the layer-3 oauth gate. The def provider (claude) has no
+            // oauth binding here, so without the opt-in the gate would
+            // block the spawn (covered by the spawn_blocked_* tests).
+            use_ambient_login: 1,
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1298,7 +1674,8 @@ mod tests {
             Some(broker.clone()),
             "block-unlinked-2",
             &mut env,
-        );
+        )
+        .unwrap();
 
         // The event is persisted (see resolve_bindings_for_instance's
         // publish) precisely so it's readable here without needing a live
@@ -1342,6 +1719,11 @@ mod tests {
             container_image: String::new(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
+            // Ambient opt-in: this test exercises api-key / zero-link behavior,
+            // not the layer-3 oauth gate. The def provider (claude) has no
+            // oauth binding here, so without the opt-in the gate would
+            // block the spawn (covered by the spawn_blocked_* tests).
+            use_ambient_login: 1,
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1376,7 +1758,7 @@ mod tests {
         store.instance_create(&inst).unwrap();
 
         let mut env: HashMap<String, String> = HashMap::new();
-        inject_identity_env(store.clone(), store, "block-mixed", &mut env);
+        inject_identity_env(store.clone(), store, "block-mixed", &mut env).unwrap();
 
         // GitHub injection succeeded.
         assert_eq!(env.get("GITHUB_TOKEN").map(String::as_str), Some("ghp_good"));
@@ -1416,6 +1798,11 @@ mod tests {
             container_image: String::new(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
+            // Ambient opt-in: this test exercises api-key / zero-link behavior,
+            // not the layer-3 oauth gate. The def provider (claude) has no
+            // oauth binding here, so without the opt-in the gate would
+            // block the spawn (covered by the spawn_blocked_* tests).
+            use_ambient_login: 1,
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1436,7 +1823,7 @@ mod tests {
         store.instance_create(&inst).unwrap();
 
         let mut env: HashMap<String, String> = HashMap::new();
-        inject_identity_env(store.clone(), store, "block-future", &mut env);
+        inject_identity_env(store.clone(), store, "block-future", &mut env).unwrap();
         // No env-var matrix for "custom" — nothing injected, no panic.
         assert!(env.is_empty());
     }
@@ -1574,6 +1961,7 @@ mod tests {
             container_image: String::new(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
+            use_ambient_login: 0,
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1606,7 +1994,7 @@ mod tests {
         store.instance_create(&inst).unwrap();
 
         let mut env: HashMap<String, String> = HashMap::new();
-        inject_identity_env(store.clone(), store.clone(), "block-probe", &mut env);
+        inject_identity_env(store.clone(), store.clone(), "block-probe", &mut env).unwrap();
 
         // Env injection still happened (resolver doesn't block on
         // probe outcome — the CLI launches with the dir env var set
@@ -1653,6 +2041,7 @@ mod tests {
             container_image: String::new(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
+            use_ambient_login: 0,
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1687,7 +2076,7 @@ mod tests {
         store.instance_create(&inst).unwrap();
 
         let mut env: HashMap<String, String> = HashMap::new();
-        inject_identity_env(store.clone(), store.clone(), "block-ok", &mut env);
+        inject_identity_env(store.clone(), store.clone(), "block-ok", &mut env).unwrap();
 
         let after = store.identity_get("acct-ok").unwrap().unwrap();
         assert_eq!(after.status, oauth_status::VALID);

@@ -32,6 +32,8 @@ mod m0013_agent_direct_bindings;
 mod m0014_agent_direct_bindings_rerun;
 mod m0015_seed_starter_skills;
 mod m0016_seed_starter_mcp_servers;
+mod m0017_ambient_login_grandfather;
+mod m0018_ambient_login_registry;
 mod runner;
 
 pub use runner::count_pending_migrations;
@@ -124,4 +126,6 @@ static REGISTRY: &[&(dyn Migration + Sync)] = &[
     &m0014_agent_direct_bindings_rerun::M0014AgentDirectBindingsRerun,
     &m0015_seed_starter_skills::M0015SeedStarterSkills,
     &m0016_seed_starter_mcp_servers::M0016SeedStarterMcpServers,
+    &m0017_ambient_login_grandfather::M0017AmbientLoginGrandfather,
+    &m0018_ambient_login_registry::M0018AmbientLoginRegistry,
 ];

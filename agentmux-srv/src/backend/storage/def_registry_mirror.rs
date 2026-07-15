@@ -58,6 +58,7 @@ pub(super) fn agent_definition_to_record(
         container_image: def.container_image.clone(),
         container_volumes: def.container_volumes.clone(),
         container_name: def.container_name.clone(),
+        use_ambient_login: def.use_ambient_login,
         content: content
             .iter()
             .map(|c| DefContentBlob {
@@ -116,6 +117,7 @@ pub(super) fn record_to_agent_definition(rec: &DefinitionRecord) -> AgentDefinit
         container_image: d.container_image.clone(),
         container_volumes: d.container_volumes.clone(),
         container_name: d.container_name.clone(),
+        use_ambient_login: d.use_ambient_login,
     }
 }
 
@@ -336,6 +338,7 @@ mod tests {
             container_image: String::new(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
+            use_ambient_login: 0,
         }
     }
 

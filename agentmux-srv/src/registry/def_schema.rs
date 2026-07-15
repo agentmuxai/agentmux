@@ -121,6 +121,14 @@ pub struct DefinitionRecordV1 {
     pub container_volumes: String,
     #[serde(default)]
     pub container_name: String,
+    /// Explicit per-agent opt-in to the CLI's global (ambient) login when
+    /// no oauth-class account resolves at spawn (mirrors the SQLite v12
+    /// column — SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md §2.3).
+    /// Additive under `#[serde(default)]` (older files read as 0 =
+    /// fail-by-default; older binaries ignore the extra field), same as
+    /// the container_* fields — no envelope bump.
+    #[serde(default)]
+    pub use_ambient_login: i64,
     /// System-prompt / mcp / env / soul / startup blobs (db_agent_content),
     /// embedded so a cross-channel agent launches with its instructions.
     #[serde(default)]
@@ -205,6 +213,7 @@ mod tests {
                 container_image: String::new(),
                 container_volumes: "[]".to_string(),
                 container_name: String::new(),
+                use_ambient_login: 0,
                 content: Vec::new(),
                 skills: Vec::new(),
             },

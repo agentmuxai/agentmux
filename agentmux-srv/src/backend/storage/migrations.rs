@@ -60,7 +60,13 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 3;
 ///   v11 — Phase 4a of SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md: rename
 ///        db_identity_accounts -> db_accounts, db_memory_bundles -> db_bundles
 ///        (SPEC_ARMORY_PHASE4_STORAGE_RENAME_COMPLETION_2026_07_12.md).
-pub const OBJECT_SCHEMA_VERSION: i64 = 11;
+///   v12 — use_ambient_login on both db_agent_definitions and db_agents:
+///        explicit per-agent opt-in to the CLI's global (ambient) login when
+///        no oauth-class account resolves at spawn (layer 3 of
+///        SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md §2.3). Defaults
+///        to 0 (fail-by-default); the m0017 data migration grandfathers
+///        pre-existing linkless agents to 1.
+pub const OBJECT_SCHEMA_VERSION: i64 = 12;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -195,7 +201,8 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             user_hidden          INTEGER NOT NULL DEFAULT 0,
             container_image      TEXT NOT NULL DEFAULT '',
             container_volumes    TEXT NOT NULL DEFAULT '[]',
-            container_name       TEXT NOT NULL DEFAULT ''
+            container_name       TEXT NOT NULL DEFAULT '',
+            use_ambient_login    INTEGER NOT NULL DEFAULT 0
         );
         CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_definitions_slug
             ON db_agent_definitions(slug);
@@ -370,7 +377,12 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             -- Empty for host agents; populated by ContainerManager.
             container_image      TEXT NOT NULL DEFAULT '',
             container_volumes    TEXT NOT NULL DEFAULT '[]',
-            container_name       TEXT NOT NULL DEFAULT ''
+            container_name       TEXT NOT NULL DEFAULT '',
+
+            -- Explicit per-agent opt-in to the CLI's global (ambient) login
+            -- when no oauth-class account resolves at spawn (schema v12,
+            -- SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md §2.3).
+            use_ambient_login    INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_agents_is_template
             ON db_agents(is_template);
@@ -516,6 +528,10 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         // rename. See SPEC_ARMORY_PHASE4_STORAGE_RENAME_COMPLETION_2026_07_12.md.
         "ALTER TABLE db_bundles ADD COLUMN is_global INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE db_bundles ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
+        // v12: explicit per-agent ambient-login opt-in (fail-by-default spawn
+        // gating — SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md §2.3).
+        "ALTER TABLE db_agent_definitions ADD COLUMN use_ambient_login INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE db_agents ADD COLUMN use_ambient_login INTEGER NOT NULL DEFAULT 0",
     ] {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();

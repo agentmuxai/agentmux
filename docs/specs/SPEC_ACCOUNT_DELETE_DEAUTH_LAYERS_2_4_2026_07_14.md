@@ -45,8 +45,8 @@ launched with that provider):
   (default) → **spawn fails** before the CLI process is created. The error
   must reach the agent pane UI (the same surface other spawn failures use),
   wording: `no credentials for <provider>: the bound account was deleted or
-  is unresolvable. Bind an account in the Armory, or enable "Use global
-  login" in this agent's settings.` Log `tracing::warn!` with prefix
+  is unresolvable. Bind an account in the Armory, or enable "Use global CLI
+  login when no account is bound" in this agent's settings.` Log `tracing::warn!` with prefix
   `identity.spawn.blocked:` (extends the `muxlog auth` vocabulary — update
   the muxlog regex to cover `identity\.spawn`).
 - Account missing AND `use_ambient_login = true` → proceed WITHOUT injecting
@@ -74,10 +74,17 @@ updates.
 
 Existing agents that currently rely on ambient fallback must not all break
 on upgrade: a migration sets `use_ambient_login = true` for agents that have
-NO identity/account link rows at migration time (they were de-facto ambient
-users), and `false` for agents that have links (they opted into managed
-accounts; honest failure is the correct new behavior for them). This makes
-the honest semantics apply exactly where the user expressed intent.
+NO **oauth-class** identity link rows at migration time (they were de-facto
+ambient users for their CLI login), and `false` for agents that have an
+oauth-class link (they opted into managed CLI accounts; honest failure is
+the correct new behavior for them). Api-key-class links (e.g. a github PAT)
+do NOT count against grandfathering — they are never spawn-gated, so an
+agent whose only link is a PAT was still an ambient CLI user, and blocking
+it would break exactly the users this section exists to protect.
+(Clarified 2026-07-14 during implementation review: the original wording
+said "no link rows" of any kind, which contradicted this section's own
+rationale.) This makes the honest semantics apply exactly where the user
+expressed intent.
 
 ### 2.5 Tests (the resolver test forces the semantics)
 
