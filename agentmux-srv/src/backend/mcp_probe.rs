@@ -135,6 +135,12 @@ async fn probe_stdio(config: &Value) -> ProbeResult {
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .kill_on_drop(true);
+    // CREATE_NO_WINDOW: console-flash suppression, see agentmux-common/src/cli.rs
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
 
     let mut child = match cmd.spawn() {
         Ok(c) => c,

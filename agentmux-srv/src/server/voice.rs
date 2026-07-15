@@ -355,6 +355,12 @@ async fn transcribe_local_whisper(
     // block the HTTP handler forever. kill_on_drop ensures the timed-out child
     // is reaped when the timeout future drops it.
     cmd.kill_on_drop(true);
+    // CREATE_NO_WINDOW: console-flash suppression, see agentmux-common/src/cli.rs
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
     const WHISPER_TIMEOUT_SECS: u64 = 120;
 
     let output = tokio::time::timeout(
