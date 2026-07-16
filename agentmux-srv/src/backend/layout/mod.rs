@@ -255,7 +255,12 @@ pub fn enforce_minimized_locks(root: &mut Option<LayoutNode>) -> usize {
                         .find(|&j| !locked_flags[j])
                         .or_else(|| (0..i).rev().find(|&j| !locked_flags[j]));
                     if let Some(j) = beneficiary {
-                        node.children[j].size += delta;
+                        // Floor at 1 flex unit (same floor as the slip/
+                        // undissolve restore paths): a tampered size BELOW
+                        // the lock makes the delta negative, and the
+                        // repayment must not drive the beneficiary's size
+                        // to zero or negative.
+                        node.children[j].size = (node.children[j].size + delta).max(1.0);
                     }
                     snapped += 1;
                 }
@@ -402,6 +407,12 @@ pub fn insert_node_at_index(
     }
 
     let parent = unsafe { &mut *current };
+    // Minimized is a locked state: an `index_arr` that resolves into a
+    // dissolved column (locked container) or onto a minimized leaf (which
+    // `ensure_group_node` would otherwise promote into a group) is rejected.
+    if is_node_locked(parent) {
+        return Err(LayoutError::NodeLocked { id: parent.id.clone() });
+    }
     ensure_group_node(parent);
     let insert_at = (clamped_idx + 1).min(parent.children.len());
     parent.children.insert(insert_at, node);

@@ -397,6 +397,60 @@ fn enforce_locks_noop_when_sizes_honored() {
 }
 
 #[test]
+fn enforce_locks_clamps_negative_delta_repayment() {
+    // Tampered BELOW the lock: size 5.0 vs locked 33.0 → delta = -28.0. The
+    // beneficiary sibling only has 10.0 units; the repayment must clamp at
+    // the 1.0 floor instead of driving it negative (reagent P2, PR #2180).
+    let mut tampered = locked_leaf("l1", "b1", 33.0);
+    tampered.size = 5.0;
+    let mut root = Some(group(
+        "root",
+        FlexDirection::Column,
+        DEFAULT_NODE_SIZE,
+        vec![tampered, leaf("l2", "b2", 10.0)],
+    ));
+    let snapped = enforce_minimized_locks(&mut root);
+    assert_eq!(snapped, 1);
+    let root = root.unwrap();
+    assert_eq!(root.children[0].size, 33.0);
+    assert_eq!(root.children[1].size, 1.0, "beneficiary clamped at the floor, not negative");
+}
+
+#[test]
+fn insert_node_at_index_rejects_locked_resolution() {
+    // index_arr resolving INTO a dissolved column (locked container) is
+    // rejected (reagent P1, PR #2180).
+    let mut dissolved = group(
+        "colA",
+        FlexDirection::Column,
+        66.0,
+        vec![locked_leaf("l1", "b1", 33.0), locked_leaf("l2", "b2", 33.0)],
+    );
+    dissolved
+        .extra
+        .insert("columnDissolve".into(), serde_json::json!({"targetColumnId": "root"}));
+    let mut root = group(
+        "root",
+        FlexDirection::Column,
+        DEFAULT_NODE_SIZE,
+        vec![dissolved, leaf("content", "b3", 300.0)],
+    );
+    assert!(matches!(
+        insert_node_at_index(&mut root, leaf("new", "b9", 10.0), &[0, 0]),
+        Err(LayoutError::NodeLocked { .. })
+    ));
+    // index_arr resolving ONTO a minimized leaf (which ensure_group_node
+    // would otherwise promote into a group) is rejected too.
+    assert!(matches!(
+        insert_node_at_index(&mut root, leaf("new", "b9", 10.0), &[0, 0, 0]),
+        Err(LayoutError::NodeLocked { .. })
+    ));
+    // Tree untouched by either rejection.
+    assert_eq!(root.children.len(), 2);
+    assert_eq!(root.children[0].children.len(), 2);
+}
+
+#[test]
 fn balance_drops_empty_branch_child() {
     // Row[ leaf1, leaf2, empty-branch ] → empty branch dropped, 2 remain.
     let mut node = group(

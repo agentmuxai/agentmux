@@ -2813,6 +2813,56 @@ mod tests {
         }
     }
 
+    /// Minimize-lock guard on the explicit-parent insert path (reagent P1,
+    /// PR #2180): a dissolved column has `data: None`, so without its own
+    /// locked check it would satisfy the "is a group node" arm and accept
+    /// the insert — letting an agent/API caller seed a full pane inside a
+    /// header strip.
+    #[test]
+    fn layout_insert_node_rejects_minimize_locked_parent() {
+        let (mut state, tab_id) = fresh_tab();
+        seed_block(&mut state, &tab_id, "b1");
+        seed_block(&mut state, &tab_id, "b2");
+        seed_block(&mut state, &tab_id, "b3");
+
+        let mut l1 = leaf_node("l1", "b1");
+        l1.extra.insert("minimizedSize".into(), serde_json::json!(200.0));
+        let mut l2 = leaf_node("l2", "b2");
+        l2.extra.insert("minimizedSize".into(), serde_json::json!(200.0));
+        let mut dissolved = agentmux_common::LayoutNode {
+            id: "colA".into(),
+            children: vec![l1, l2],
+            ..Default::default()
+        };
+        dissolved
+            .extra
+            .insert("columnDissolve".into(), serde_json::json!({"targetColumnId": "root"}));
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(agentmux_common::LayoutNode {
+            id: "root".into(),
+            children: vec![dissolved, leaf_node("content", "b3")],
+            ..Default::default()
+        });
+
+        let events = update(
+            &mut state,
+            Command::LayoutInsertNode {
+                tab_id: tab_id.clone(),
+                node: leaf_node("new", "b3"),
+                parent_id: Some("colA".into()),
+                index: None,
+                focus_after: false,
+                magnify_after: false,
+                correlation_id: "corr-locked".into(),
+            },
+            &ctx(1),
+        );
+
+        assert!(matches!(&events[0], Event::Error { code: ErrorCode::InvalidCommand, .. }));
+        // Dissolved column untouched.
+        let root = state.tabs[&tab_id].rootnode.as_ref().unwrap();
+        assert_eq!(root.children[0].children.len(), 2);
+    }
+
     /// SPEC_864 Phase 2 — a slice-carrying full-row push applies focus/
     /// magnify to the TabRecord (empty = clear) and echoes the slices on
     /// the emitted event for the persist subscriber.
