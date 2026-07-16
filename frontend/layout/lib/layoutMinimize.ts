@@ -11,6 +11,57 @@ import { DefaultNodeSize, FlexDirection, type LayoutNodeAdditionalProps, type La
 export const HeaderHeightPx = 33;
 
 /**
+ * A locked node is one whose size is owned by the minimize subsystem: a minimized
+ * leaf (`minimizedSize`), a slipped header (`slipMinimize`), or a dissolved column
+ * (`columnDissolve`). No other writer may resize, move, swap, or split it, and no
+ * resize handle is rendered on its edges. See
+ * `docs/specs/SPEC_LAYOUT_MINIMIZE_LOCKED_STATE_REDESIGN_2026_07_16.md`.
+ */
+export function isNodeLocked(node: LayoutNode | undefined): boolean {
+    if (!node) return false;
+    return node.minimizedSize !== undefined || node.slipMinimize !== undefined || node.columnDissolve !== undefined;
+}
+
+/**
+ * Write-point enforcement of the minimize lock: snap every locked node's `size`
+ * back to its recorded `minimizedLockedSize`, returning the delta to the nearest
+ * unlocked sibling (next preferred, then previous) so the parent's unit budget is
+ * conserved. Runs on every `updateTree` pass — the same choke point as
+ * `balanceNode` — so a locked size survives any writer that bypasses the reducer
+ * guards (stale tree pushes, direct mutations). Returns the number of snapped nodes.
+ *
+ * If every sibling is locked (inside a dissolved column) the delta is dropped:
+ * flex sizes are relative within the parent, so the locked nodes' shares stay
+ * proportionally correct.
+ */
+export function enforceMinimizedLocks(root: LayoutNode | undefined): number {
+    let snapped = 0;
+    function walk(node: LayoutNode) {
+        if (!node.children) return;
+        node.children.forEach((child, i) => {
+            if (isNodeLocked(child) && child.minimizedLockedSize !== undefined) {
+                const delta = child.size - child.minimizedLockedSize;
+                if (Math.abs(delta) > 1e-4) {
+                    child.size = child.minimizedLockedSize;
+                    const beneficiary =
+                        node.children!.slice(i + 1).find((c) => !isNodeLocked(c)) ??
+                        node.children!.slice(0, i).reverse().find((c) => !isNodeLocked(c));
+                    // Floor at 1 flex unit (same floor as the slip/undissolve
+                    // restore paths): a tampered size BELOW the lock makes the
+                    // delta negative, and the repayment must not drive the
+                    // beneficiary's size to zero or negative.
+                    if (beneficiary) beneficiary.size = Math.max(beneficiary.size + delta, 1);
+                    snapped++;
+                }
+            }
+            walk(child);
+        });
+    }
+    if (root) walk(root);
+    return snapped;
+}
+
+/**
  * Toggle minimize for a given leaf node.
  *
  * There are three minimize paths:
@@ -81,6 +132,7 @@ export function minimizeNodeToggle(model: LayoutModel, nodeId: string) {
             if (rowNode.children) {
                 node.size = originalRowSize;
                 node.slipMinimize = undefined;
+                node.minimizedLockedSize = undefined;
                 rowNode._slipAnchor = undefined;
                 const idx = Math.min(originalRowIndex, rowNode.children.length);
                 rowNode.children.splice(idx, 0, node);
@@ -88,6 +140,7 @@ export function minimizeNodeToggle(model: LayoutModel, nodeId: string) {
         } else {
             console.warn(`[layoutMinimize] slip restore: target column ${targetColumnId} not found; dropping slip state`);
             node.slipMinimize = undefined;
+            node.minimizedLockedSize = undefined;
         }
 
         _finishToggle(model, nodeId, false);
@@ -157,6 +210,7 @@ export function minimizeNodeToggle(model: LayoutModel, nodeId: string) {
             sibling.size = siblingAfterReclaim;
         }
         node.minimizedSize = undefined;
+        node.minimizedLockedSize = undefined;
         _finishToggle(model, nodeId, false);
         return;
     }
@@ -175,6 +229,7 @@ export function minimizeNodeToggle(model: LayoutModel, nodeId: string) {
         if (freedUnits <= 0) return; // already tiny — no-op
         node.minimizedSize = node.size;
         node.size = headerSizeUnits;
+        node.minimizedLockedSize = headerSizeUnits;
         sibling.size += freedUnits;
 
         // If all children of the column are now minimized (leaves via minimizedSize/
@@ -273,6 +328,7 @@ function _slipMinimize(
 
     // Insert at top of the column.
     node.size = headerInColUnits;
+    node.minimizedLockedSize = headerInColUnits;
     sibling.children!.unshift(node);
     return true;
 }
@@ -377,6 +433,7 @@ function _dissolveColumn(
     // Use actualStolen (not totalHeaderUnits) to keep the size budget honest
     // when firstChild.size was clamped to the floor value.
     colNode.size = actualStolen;
+    colNode.minimizedLockedSize = actualStolen;
     sibling.children!.unshift(colNode);
 
     return true;
@@ -417,6 +474,7 @@ function _undissolveColumn(model: LayoutModel, colNode: LayoutNode): void {
     // Clear dissolve context only after confirming targetCol exists — clearing
     // it before the check would permanently lose restore context on a missing target.
     colNode.columnDissolve = undefined;
+    colNode.minimizedLockedSize = undefined;
 
     // Remove colNode from the host column; give its height back to the neighbor.
     const slipIdx = targetCol.children.findIndex((c) => c.id === colNode.id);
