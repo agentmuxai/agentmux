@@ -317,10 +317,11 @@ describe("cascade dissolve — multiple columns collapse into one", () => {
         // colB (inside colC) still contains colA-dissolved
         expect(colB.children!.some(c => c.id === colA.id)).toBe(true);
 
-        // paneC can still be minimized (colB-dissolved is its sibling)
+        // paneC is now the LAST expanded pane — minimizing it is a no-op
+        // (the window must always keep one expanded pane).
         minimizeNodeToggle(model as any, paneC.id);
-        expect(paneC.minimizedSize).toBeDefined();
-        expect(root.children).toHaveLength(1); // dissolve bails (no Row sibling) — correct
+        expect(paneC.minimizedSize).toBeUndefined();
+        expect(root.children).toHaveLength(1);
     });
 
     it("restores pane from 3-deep cascade (A→B→C → restore colA pane)", () => {
@@ -397,7 +398,7 @@ describe("cascade dissolve — multiple columns collapse into one", () => {
 // ── Bail case — no adjacent sibling ─────────────────────────────────────────
 
 describe("dissolve bail cases", () => {
-    it("does not dissolve when the column is the only child in the Row", () => {
+    it("refuses to minimize the last expanded pane (no-op), so a lone column never fully collapses", () => {
         const pane1 = newLayoutNode(FlexDirection.Row, PANE_SIZE, undefined, { blockId: "p1" });
         const pane2 = newLayoutNode(FlexDirection.Row, PANE_SIZE, undefined, { blockId: "p2" });
         const col   = newLayoutNode(FlexDirection.Column, PANE_SIZE, [pane1, pane2]);
@@ -406,14 +407,53 @@ describe("dissolve bail cases", () => {
         const model = makeMockModel(root, { [col.id]: { pixelToSizeRatio: 1 } });
 
         minimizeNodeToggle(model as any, pane1.id);
+        // pane2 is now the LAST expanded pane — this toggle must no-op.
+        // (Previously it minimized and dissolve bailed, leaving an
+        // all-headers window with nothing restorable in view.)
         minimizeNodeToggle(model as any, pane2.id);
 
-        // col stays in root Row — dissolve bailed (no Row sibling)
         expect(root.children).toHaveLength(1);
         expect(col.columnDissolve).toBeUndefined();
-        // Both panes are still individually minimized
         expect(pane1.minimizedSize).toBeDefined();
+        expect(pane2.minimizedSize).toBeUndefined();
+        expect(pane2.size).toBeGreaterThan(HeaderHeightPx);
+
+        // Restoring pane1 re-enables minimizing pane2.
+        minimizeNodeToggle(model as any, pane1.id);
+        expect(pane1.minimizedSize).toBeUndefined();
+        minimizeNodeToggle(model as any, pane2.id);
         expect(pane2.minimizedSize).toBeDefined();
+        expect(pane1.minimizedSize).toBeUndefined();
+    });
+});
+
+// ── Last expanded pane cannot be minimized ───────────────────────────────────
+
+describe("last expanded pane guard", () => {
+    it("no-ops when the only remaining expanded pane (after a dissolve) is toggled", () => {
+        const { root, colA, paneA1, paneA2, colB, paneB } = buildTwoColumnLayout();
+        const model = makeMockModel(root, {
+            [colA.id]: { pixelToSizeRatio: 1 },
+            [colB.id]: { pixelToSizeRatio: 1 },
+        });
+
+        minimizeNodeToggle(model as any, paneA1.id);
+        minimizeNodeToggle(model as any, paneA2.id); // colA dissolves into colB
+        expect(colA.columnDissolve).toBeDefined();
+
+        // paneB is the last expanded pane — toggle must not collapse it.
+        const sizeBefore = paneB.size;
+        minimizeNodeToggle(model as any, paneB.id);
+        expect(paneB.minimizedSize).toBeUndefined();
+        expect(paneB.size).toBe(sizeBefore);
+        expect(model.getMinimizedSet().has(paneB.id)).toBe(false);
+
+        // Restoring one pane (undissolves colA) re-enables minimizing: with
+        // paneA1 and paneB both expanded, paneA1 can collapse again.
+        minimizeNodeToggle(model as any, paneA1.id);
+        expect(paneA1.minimizedSize).toBeUndefined();
+        minimizeNodeToggle(model as any, paneA1.id);
+        expect(paneA1.minimizedSize).toBeDefined();
     });
 });
 

@@ -59,6 +59,14 @@ export function getNodeModel(model: LayoutModel, node: LayoutNode): NodeModel {
                     const minimizedIds = model.minimizedNodeIds();
                     return minimizedIds.has(nodeid);
                 }),
+                canMinimize: createMemo(() => {
+                    const minimizedIds = model.minimizedNodeIds();
+                    // Restoring is always allowed; minimizing requires at
+                    // least one OTHER expanded pane to remain (the window
+                    // must never become all-headers).
+                    if (minimizedIds.has(nodeid)) return true;
+                    return model.numLeafs() - minimizedIds.size > 1;
+                }),
                 isEphemeral: createMemo(() => {
                     const ephemeralNode = model.ephemeralNode();
                     return ephemeralNode?.id === nodeid;
