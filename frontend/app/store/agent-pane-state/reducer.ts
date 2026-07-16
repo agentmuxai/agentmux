@@ -343,28 +343,56 @@ export function update(
         }
 
         case "ReconcileTurnActive": {
-            // Only ever promotes the mount-default Idle — never overrides a
-            // phase a real stream/user event already produced. A `false`
-            // active flag is a no-op: Idle is already correct. Deliberately
-            // does NOT gate on `state.lastEventMs` the way TurnStart /
-            // StreamFlushObserved do — this seed is meant to cover exactly
-            // the window before the live stream has necessarily subscribed
-            // yet, which is the gap this command exists to close. See the
-            // type's doc comment in types.ts.
-            if (!command.active || state.turnPhase.kind !== "Idle") {
+            if (command.active) {
+                // Promote the mount-default Idle — never overrides a phase a
+                // real stream/user event already produced. Deliberately does
+                // NOT gate on `state.lastEventMs` the way TurnStart /
+                // StreamFlushObserved do — this seed is meant to cover exactly
+                // the window before the live stream has necessarily subscribed
+                // yet, which is the gap this command exists to close. See the
+                // type's doc comment in types.ts.
+                if (state.turnPhase.kind !== "Idle") {
+                    return { state, events: [] };
+                }
+                return {
+                    state: {
+                        ...state,
+                        turnPhase: {
+                            kind: "Streaming",
+                            bufferSize: 0,
+                            toolsActive: 0,
+                            lastEventMs: command.at,
+                        },
+                    },
+                    events: [{ type: "turn-active-reconciled-at-mount" }],
+                };
+            }
+            // active === false: the backend's authoritative turn_active (flipped
+            // false only on the CLI's `result` event = genuine turn-end) says
+            // the turn is over. Demote a STUCK Streaming phase to Idle. The
+            // frontend normally reaches Done itself via session_end; this only
+            // matters when it missed that event and would stay Streaming forever
+            // (Agent1 stuck-"Working" / Agent2 stuck-"Queued" — the latter's
+            // held-message flush is gated on the phase reaching Idle/Done, so a
+            // stuck Streaming strands the queue). ONLY Streaming: Submitting is
+            // left to SUBMIT_TIMEOUT (and is where the send-race lives — a local
+            // TurnStart racing a backend that hasn't marked the turn active yet,
+            // which would arrive here as a stale active:false), Interrupting to
+            // INTERRUPT_TIMEOUT, and Done/Idle/Disconnected are already correct.
+            // Clears currentTool/turnTokens exactly like the liveness watchdog's
+            // recovery, but on an authoritative signal rather than a timeout.
+            if (state.turnPhase.kind !== "Streaming") {
                 return { state, events: [] };
             }
             return {
                 state: {
                     ...state,
-                    turnPhase: {
-                        kind: "Streaming",
-                        bufferSize: 0,
-                        toolsActive: 0,
-                        lastEventMs: command.at,
-                    },
+                    currentTool: null,
+                    currentToolArg: null,
+                    turnTokens: null,
+                    turnPhase: { kind: "Idle" },
                 },
-                events: [{ type: "turn-active-reconciled-at-mount" }],
+                events: [{ type: "turn-inactive-reconciled", at: command.at }],
             };
         }
 

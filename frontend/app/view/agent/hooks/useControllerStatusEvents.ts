@@ -18,6 +18,17 @@ import type { LogFn } from "./useAgentControllerStatus";
 export interface UseControllerStatusEventsOptions {
     blockId: string;
     log: LogFn;
+    /**
+     * Live turn-active reconciliation. Called on every controllerstatus event
+     * that carries a boolean `turn_active` (agent panes only), so the pane's
+     * TurnPhase can follow the backend's authoritative turn state in BOTH
+     * directions while mounted — not just the one-shot GetControllerStatus at
+     * mount. This is what lets a stuck `Streaming` phase demote to `Idle` when
+     * the backend reports the turn ended but the frontend missed the terminal
+     * `session_end` (Agent1/Agent2 incidents). Consumer dispatches
+     * `ReconcileTurnActive`. See docs/retro/retro-agent2-stuck-queued-message-2026-07-16.md.
+     */
+    onTurnActive?: (active: boolean) => void;
 }
 
 export function useControllerStatusEvents(opts: UseControllerStatusEventsOptions): void {
@@ -26,16 +37,23 @@ export function useControllerStatusEvents(opts: UseControllerStatusEventsOptions
             eventType: WpsEvent.ControllerStatus,
             scope: WOS.makeORef("block", opts.blockId),
             handler: (event) => {
-                const status = (event as any)?.data?.shellprocstatus;
+                const data = (event as any)?.data;
+                const status = data?.shellprocstatus;
                 if (status === "running") {
                     opts.log("subprocess", "spawned, waiting for response...");
                 } else if (status === "done") {
-                    const exitCode = (event as any)?.data?.shellprocexitcode;
+                    const exitCode = data?.shellprocexitcode;
                     if (exitCode != null && exitCode !== 0) {
                         opts.log("subprocess", `exited with code ${exitCode}`, "error");
                     } else {
                         opts.log("subprocess", "turn complete");
                     }
+                }
+                // `turn_active` is only meaningful for agent panes (shell/PTY
+                // controllers leave it absent); a non-boolean means "no signal",
+                // not "idle", so only forward a real boolean.
+                if (opts.onTurnActive && data?.is_agent_pane && typeof data.turn_active === "boolean") {
+                    opts.onTurnActive(data.turn_active);
                 }
             },
         });
