@@ -70,6 +70,14 @@ The original `on_before_close` fix from §2 was kept: the notify block there was
 - **macOS/Linux were not live-tested** — the `on_before_close` fix (§5) is reasoned from its own doc comments (`window.close()` → `can_close` → `on_before_close` runs the full chain there) but not empirically re-verified on those platforms this session.
 - Shutdown latency: closing the last window now briefly blocks the UI thread on the notify call before the process exits. Bounded (~1s retry + ~2s HTTP timeouts, worst case), judged acceptable for the final moment of an already-closing app.
 
+## 6b. Follow-up (reagent P1, same day) — the notify fix left the launcher's saga stalling
+
+The §4 fix advances the launcher's Phase F.6 `window_cleanup` saga past its `PanesReaped` step (via `report_window_closed`, already firing) but reagent caught that nothing calls `report_pool_drain_decision` — the only source of `Event::PoolDrained`/`Event::PoolNotLast`, which the saga needs to advance past `DrainingPool`. That event was previously emitted only from `on_before_close` (itself dead code for every Windows parking close, not just main's — see §2/§3), so *every* parking close's saga was silently stalling to its 30s timeout, main's now included now that it reaches `PanesReaped` at all.
+
+Fixed in `unregister_after_parking_close` — the shared executor for *every* Windows parking close (main, `window-pool-*`, `window-*`), not just the new main-specific branch — using the exact same `request_drain.is_some()` signal `on_before_close` already had available via its own `UnregisterBrowser` dispatch output. This closes the gap for all parking closes, not only main's.
+
+Live-verified: launcher log shows `[saga] ... Done — emitting SagaCompleted` immediately after closing main, instead of stalling.
+
 ## 7. Verification
 
 - `cargo check -p agentmux-cef` — clean, both fixes.
