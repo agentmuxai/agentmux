@@ -471,6 +471,24 @@ pub(crate) fn unregister_after_parking_close(state: &Arc<AppState>, label: &str)
     // (QuitState finally transitions on this path) instead of the quit
     // resting solely on WRR's OS-signal gate.
     consume_request_drain(state, &out, "unregister_after_parking_close");
+    // 2026-07-16 fix (reagent P1 on PR #2186, docs/retro/retro-last-window-close-quit-race-2026-07-16.md):
+    // report_pool_drain_decision is the ONLY source of Event::PoolDrained /
+    // Event::PoolNotLast — the launcher's Phase F.6 window_cleanup saga
+    // (agentmux-launcher/src/saga/window_cleanup.rs) needs one of those to
+    // advance past its DrainingPool step. `on_before_close` reports this
+    // (lifecycle.rs, same request_drain.is_some() condition), but this
+    // function is the ACTUAL executor for every parking close on Windows —
+    // on_before_close never fires for any of them (this whole function
+    // exists because of that). Missing here meant every parking close's
+    // saga stalled in DrainingPool until its 30s timeout, main's included —
+    // silent because nothing else depended on the saga completing promptly,
+    // just wasted launcher-side saga slots. Same gate as on_before_close's:
+    // skip browser-pane-* (this function isn't reached for those anyway,
+    // but mirrors the source of truth exactly rather than assuming).
+    if !label.starts_with("browser-pane-") {
+        let was_last = out.request_drain.is_some();
+        crate::launcher_ipc::report_pool_drain_decision(label.to_string(), was_last);
+    }
     if label != "main" {
         // Mirror on_before_close's cache eviction (stale entries break
         // WM_CLOSE routing on label reuse). Main keeps its entry — the
