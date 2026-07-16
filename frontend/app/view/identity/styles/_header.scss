@@ -63,12 +63,25 @@
 }
 
 // ── Body ─────────────────────────────────────────────────────────────────────
+//
+// The single scroll boundary for everything under the header — the
+// gallery + connected-accounts list in AccountsManager, and the
+// accounts/assignments lists in IdentityPanel, all flow as one
+// continuous region instead of each owning its own independent
+// scroll area. See docs/specs/SPEC_ARMORY_RESPONSIVE_SINGLE_PANE_LAYOUT_2026_07_15.md's
+// single-pane principle, extended here from list/detail split-screens
+// to nested-scroll-area sprawl — same "one thing, one scroll" idea.
 
 .identity-body {
     flex: 1;
     min-height: 0;
     display: flex;
     flex-direction: column;
-    overflow: hidden;
+    overflow-y: auto;
+
+    &::-webkit-scrollbar-thumb {
+        background: var(--scrollbar-thumb-color);
+        border-radius: 0;
+    }
 }
 

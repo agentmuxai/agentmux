@@ -94,20 +94,17 @@
     color: var(--secondary-text-color);
 }
 
-// ── AccountsManager layout (gallery + scrollable accounts list) ───────────────
-// Makes identity-body a flex column so the gallery takes its natural height
-// and the connected-accounts section fills the remaining space.
+// ── AccountsManager layout (gallery + connected accounts, one scroll) ─────────
+// Both sections flow at their natural height; `.identity-body` (the parent)
+// is the single scroll boundary for the whole tab — see its own comment.
 .accounts-manager-body {
     display: flex;
     flex-direction: column;
 }
 
 .accounts-manager-list-section {
-    flex: 1;
-    min-height: 0;
     display: flex;
     flex-direction: column;
-    overflow: hidden;
 }
 
 // ── Tile-click chooser (OAuth / Key) ──────────────────────────────────────────

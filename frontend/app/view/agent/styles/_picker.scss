@@ -5,12 +5,18 @@
 // the pre-split file (SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24).
 .agent-view {
     // === Agent Picker ===
+    // The single scroll boundary for the whole picker — My Agents and
+    // + New from template used to each own an independent scroll area
+    // (agent-recent-sessions-list and agent-picker-list respectively);
+    // now they flow at their natural height and this is the only thing
+    // that scrolls, so the picker reads as one continuous list.
     .agent-picker {
         display: flex;
         flex-direction: column;
         height: 100%;
         padding: var(--space-4);
         gap: var(--space-3);
+        overflow-y: auto;
         // Min tile width for the My Agents / Templates grids. The grids
         // auto-fill across the full pane width, so column count scales with
         // the pane ("maximize screen room"). Tunable in one place.
@@ -45,8 +51,8 @@
         grid-template-columns: repeat(auto-fill, minmax(min(var(--agent-tile-min), 100%), 1fr));
         gap: var(--space-3);
         align-content: start;
-        flex: 1;
-        overflow-y: auto;
+        // Natural height, no independent scroll — `.agent-picker` (above)
+        // is the single scroll boundary for the whole picker now.
         width: 100%;
     }
 
