@@ -483,8 +483,24 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         status.startLaunchFlow();
     });
 
-    // Log controllerstatus events as they stream in.
-    useControllerStatusEvents({ blockId: model.blockId, log });
+    // Log controllerstatus events as they stream in, and reconcile the pane's
+    // TurnPhase from the backend's live `turn_active` in both directions — the
+    // mount-time GetControllerStatus (onControllerStatus above) is one-shot, so
+    // without this a turn that ends while the pane is mounted but whose
+    // session_end the frontend missed would leave the phase stuck at Streaming
+    // (Agent1 stuck-"Working" / Agent2 stuck-"Queued"). Same dispatch as the
+    // mount reconcile, just fed by every live controllerstatus event.
+    useControllerStatusEvents({
+        blockId: model.blockId,
+        log,
+        onTurnActive: (active) => {
+            dispatchPaneIfRegistered(
+                model.blockId,
+                { type: "ReconcileTurnActive", at: Date.now(), active },
+                "system",
+            );
+        },
+    });
 
     // Subscribe to Claude Code OSC window-title extractions and write them
     // to term:osc_title block metadata (free fallback signal — see

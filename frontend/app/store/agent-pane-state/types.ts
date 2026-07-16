@@ -378,19 +378,30 @@ export type AgentPaneCommand =
     | { type: "StreamWatchdogTick"; nowMs: number }
 
     /**
-     * Mount-time reconciliation: `BlockControllerRuntimeStatus.turn_active`
+     * Reconciliation from `BlockControllerRuntimeStatus.turn_active`
      * (backend-verified, from the health monitor wired to the NDJSON
-     * stream — see `agentmux-srv/src/backend/blockcontroller/health.rs`)
-     * fetched once via `GetControllerStatus` during the launch flow's
-     * Phase 3. `registerPane()` always seeds `turnPhase: Idle` regardless
-     * of whether the agent is actually mid-turn; this command corrects
-     * that ONLY IF still `Idle` when it arrives — it never overrides a
-     * phase a real stream/user event already produced (TurnStart,
-     * StreamFlushObserved, etc. always win if they got there first). A
-     * `false` active flag is a no-op: `Idle` is already the right state
-     * and there is nothing to correct. See
-     * docs/specs/REPORT_AGENT_PANE_STATE_RECONCILIATION_2026_07_07.md
-     * Finding 1.
+     * stream — see `agentmux-srv/src/backend/blockcontroller/health.rs`),
+     * fetched via `GetControllerStatus` at mount AND dispatched on every
+     * live `controllerstatus` WPS event thereafter (useControllerStatusEvents).
+     * Bidirectional:
+     *   - `active: true`  — promote the mount-default `Idle` to `Streaming`
+     *     when the backend reports a turn already in flight. Corrects ONLY
+     *     an `Idle` phase; never overrides a phase a real stream/user event
+     *     already produced (TurnStart, StreamFlushObserved, etc. win if they
+     *     got there first). #2005 Finding 1.
+     *   - `active: false` — demote a stuck `Streaming` phase to `Idle`. The
+     *     backend flips `turn_active` false only on the CLI's `result` event
+     *     (genuine turn-end), so this is authoritative. Normally the frontend
+     *     reaches `Done` on its own via `session_end`; this covers the case
+     *     where it MISSED that event (pane backgrounded/unmounted across the
+     *     transition, or a dropped WPS event) and would otherwise stay
+     *     `Streaming` forever — the Agent1 stuck-"Working" / Agent2
+     *     stuck-"Queued" class. Only `Streaming` is demoted: `Submitting` is
+     *     covered by `SUBMIT_TIMEOUT` (and is where the send-race lives — a
+     *     just-dispatched local `TurnStart` racing a backend that hasn't yet
+     *     marked the turn active), `Interrupting` by `INTERRUPT_TIMEOUT`,
+     *     `Done`/`Idle`/`Disconnected` are already correct.
+     * See docs/retro/retro-agent2-stuck-queued-message-2026-07-16.md.
      */
     | { type: "ReconcileTurnActive"; at: number; active: boolean }
     /**
@@ -571,6 +582,17 @@ export type AgentPaneEvent =
      * user-initiated `turn-started`.
      */
     | { type: "turn-active-reconciled-at-mount" }
+    /**
+     * `ReconcileTurnActive` demoted a stuck `Streaming` phase to `Idle`
+     * because the backend's authoritative `turn_active` reported the turn
+     * has ended (the `result` event fired) but the frontend never observed
+     * the terminal `session_end` — the class behind the Agent1 stuck-"Working"
+     * and Agent2 stuck-"Queued" incidents. Completes #2005's reconciliation
+     * symmetry (which only promoted Idle→Streaming). Surfaced for telemetry;
+     * the phase change is the real effect. See
+     * docs/retro/retro-agent2-stuck-queued-message-2026-07-16.md.
+     */
+    | { type: "turn-inactive-reconciled"; at: number }
     /**
      * `ReconcileContextFromHistory` seeded `lastContextTokens` from a
      * historical `session_end` at mount. Surfaced for diagnostics only.
