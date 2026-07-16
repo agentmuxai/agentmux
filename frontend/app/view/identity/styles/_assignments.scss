@@ -5,9 +5,9 @@
 
 // ── Assignments matrix ────────────────────────────────────────────────────────
 
+// Natural height — `.identity-body` (styles/_header.scss) is the single
+// scroll boundary, not this section on its own.
 .identity-assignments {
-    height: 100%;
-    overflow: auto;
     padding: var(--space-3);
 }
 
