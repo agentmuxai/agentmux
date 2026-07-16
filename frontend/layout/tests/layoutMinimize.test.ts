@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest";
 import { newLayoutNode } from "../lib/layoutNode";
 import { minimizeNodeToggle, rebuildMinimizedSet, HeaderHeightPx } from "../lib/layoutMinimize";
+import { balanceNode } from "../lib/layoutNode";
 import { FlexDirection, type LayoutNode, type LayoutNodeAdditionalProps } from "../lib/types";
 
 // ── Minimal LayoutModel mock ─────────────────────────────────────────────────
@@ -143,6 +144,34 @@ describe("column dissolve — all panes minimized triggers dissolve into adjacen
 
         expect(colA.size).toBe(2 * HeaderHeightPx);
         void colB;
+    });
+
+    // Regression: production calls balanceNode(root) on every geometry pass
+    // (layoutGeometry.ts's updateTree), which this test suite otherwise never
+    // exercises since makeMockModel's updateTree is a no-op stub. A dissolved
+    // column is nested inside a same-direction Column sibling by design, so
+    // balanceNode's direction-alternation rule used to flip colA's own
+    // flexDirection to Row, laying its two minimized headers out side-by-side
+    // ("narrow") instead of stacked ("short").
+    it("keeps the dissolved column's own flexDirection stacked after balanceNode runs", () => {
+        const { root, colA, paneA1, paneA2, colB } = buildTwoColumnLayout();
+        const model = makeMockModel(root, {
+            [colA.id]: { pixelToSizeRatio: 1 },
+            [colB.id]: { pixelToSizeRatio: 1 },
+        });
+
+        minimizeNodeToggle(model as any, paneA1.id);
+        minimizeNodeToggle(model as any, paneA2.id); // triggers dissolve: colA nests inside colB
+
+        expect(colB.children![0].id).toBe(colA.id);
+        expect(colA.flexDirection).toBe(FlexDirection.Column);
+        expect(colB.flexDirection).toBe(FlexDirection.Column);
+
+        balanceNode(root);
+
+        // colA is still nested first inside colB and still stacks vertically.
+        expect(colB.children![0].id).toBe(colA.id);
+        expect(colA.flexDirection).toBe(FlexDirection.Column);
     });
 });
 

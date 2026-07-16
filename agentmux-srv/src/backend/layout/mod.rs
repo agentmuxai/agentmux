@@ -729,6 +729,8 @@ fn validate_node(node: &LayoutNode) -> bool {
 ///   matches the TS `flatMap`.
 /// - `_slipAnchor` (read from the untyped `extra` catch-all, where the
 ///   frontend stores it) suppresses the single-child-branch hoist.
+/// - `columnDissolve` (same `extra` catch-all) suppresses the direction-flip
+///   alternation, so a dissolved column's own children stay stacked.
 /// - The single-leaf collapse copies the child's `data` + `id` only; the node
 ///   keeps its own `size` / `flex_direction` / `extra` — exactly as TS does.
 pub fn balance_node(node: &mut LayoutNode) -> Result<(), LayoutError> {
@@ -739,7 +741,14 @@ pub fn balance_node(node: &mut LayoutNode) -> Result<(), LayoutError> {
     let parent_flex = node.flex_direction;
     let mut rebuilt: Vec<LayoutNode> = Vec::with_capacity(node.children.len());
     for mut child in std::mem::take(&mut node.children) {
-        if child.flex_direction == parent_flex {
+        // A dissolved column (`columnDissolve` set, in `extra`) must keep the
+        // flexDirection it had when its leaf children were minimized — that's
+        // what stacks them vertically inside the header strip. It's nested
+        // under a sibling column of the same direction by design (see
+        // `_dissolveColumn` in layoutMinimize.ts), so the alternation rule
+        // below would otherwise flip it and lay the headers out sideways.
+        let column_dissolve = child.extra.contains_key("columnDissolve");
+        if child.flex_direction == parent_flex && !column_dissolve {
             child.flex_direction = reverse_flex_direction(parent_flex);
         }
         let slip_anchor = child
