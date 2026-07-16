@@ -207,7 +207,13 @@ export function balanceNode(
         (node) => {
             if (!validateNode(node)) throw new Error("Invalid node");
             node.children = node.children?.flatMap((child) => {
-                if (child.flexDirection === node.flexDirection) {
+                // A dissolved column (`columnDissolve` set) must keep the
+                // flexDirection it had when its leaf children were minimized —
+                // that's what stacks them vertically inside the header strip.
+                // It's nested under a sibling column of the same direction by
+                // design (see _dissolveColumn), so the alternation rule below
+                // would otherwise flip it and lay the headers out sideways.
+                if (child.flexDirection === node.flexDirection && child.columnDissolve === undefined) {
                     child.flexDirection = reverseFlexDirection(node.flexDirection);
                 }
                 if (child.children?.length == 1 && child.children[0].children && !child._slipAnchor) {
