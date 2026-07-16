@@ -99,7 +99,7 @@ impl AgentMuxHandler {
                     // memory-pause history untouched and fall through to the
                     // normal path, which has the assets-missing handling.
                     if let Ok(base_url) =
-                        crate::commands::window::resolve_frontend_base_url(self.ipc_port)
+                        crate::commands::window::resolve_frontend_base_url(self.resolved_ipc_port())
                     {
                         let now = Instant::now();
                         let hist = self.memory_pause_history.entry(bid).or_default();
@@ -217,12 +217,12 @@ impl AgentMuxHandler {
         // URL when possible. as_deref().cloned() borrows browser (a clone),
         // leaving the original intact for the load below. (codex P2 #1229.)
         let mut recovery_owned = browser.as_deref().cloned();
-        let app_url = match crate::commands::window::resolve_frontend_base_url(self.ipc_port) {
+        let app_url = match crate::commands::window::resolve_frontend_base_url(self.resolved_ipc_port()) {
             Ok(base_url) => match recovery_owned.as_mut() {
                 Some(owned) => self.recovery_target_url(owned, &base_url),
                 None => recovery_navigation_url(
                     &base_url,
-                    self.ipc_port,
+                    self.resolved_ipc_port(),
                     &self.state.ipc_token,
                     None,
                 ),

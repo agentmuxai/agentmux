@@ -231,16 +231,11 @@ impl AgentMuxHandler {
             .as_ref()
             .and_then(|b| b.main_frame().map(|f| CefString::from(&f.url()).to_string()))
             .unwrap_or_default();
-        // Use the AUTHORITATIVE port from AppState, not `self.ipc_port`.
-        // Floating-pane / pool window handlers are constructed with
-        // `new_with_browser_pane(state, 0, true)` — their `self.ipc_port` is
-        // ZERO. Injecting 0 makes the frontend's invokeCommand reject the
-        // creds (`if (!port)`) and time out on get_backend_endpoints, so the
-        // re-injection must carry the real IPC port that `state.ipc_port`
-        // holds. (The old code only injected for non-pane windows, whose
-        // `self.ipc_port` happens to be correct, which is why this never
-        // surfaced before.)
-        let ipc_port = *self.state.ipc_port.lock();
+        // Authoritative port (self.ipc_port is 0 for floating-pane/pool
+        // handlers — see resolved_ipc_port). Injecting 0 would make the
+        // frontend's invokeCommand reject the creds and time out on
+        // get_backend_endpoints (#52).
+        let ipc_port = self.resolved_ipc_port();
         // Non-pane windows (main + secondary app windows) always load our
         // frontend → inject unconditionally (unchanged behavior; `||`
         // short-circuits so the common path skips the origin resolve). Only
