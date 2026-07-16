@@ -15,6 +15,27 @@ import { WpsEvent } from "@/app/store/wps-events";
 import * as WOS from "@/app/store/wos";
 import type { LogFn } from "./useAgentControllerStatus";
 
+/**
+ * Derive the reconciled `turn_active` from a raw controllerstatus event's
+ * `data`, or `null` when the event carries no turn signal (non-agent panes).
+ *
+ * Encodes the wire contract: `BlockControllerRuntimeStatus.is_agent_pane` and
+ * `.turn_active` are both `#[serde(skip_serializing_if = "is_false")]`
+ * (agentmux-srv/src/backend/blockcontroller/mod.rs), so a `false` value is
+ * OMITTED from the JSON rather than sent as `false`. A turn-END event for an
+ * agent pane therefore looks like `{ is_agent_pane: true }` with `turn_active`
+ * absent — which must read as `false`, not "no signal". Only a present
+ * `is_agent_pane: true` distinguishes an agent pane (idle or busy) from a
+ * shell/PTY pane (`{}`), so it is the gate; the turn state is then
+ * `turn_active === true` (absent → false).
+ */
+export function deriveTurnActive(data: unknown): boolean | null {
+    if (!data || typeof data !== "object") return null;
+    const d = data as { is_agent_pane?: unknown; turn_active?: unknown };
+    if (d.is_agent_pane !== true) return null;
+    return d.turn_active === true;
+}
+
 export interface UseControllerStatusEventsOptions {
     blockId: string;
     log: LogFn;
@@ -49,11 +70,12 @@ export function useControllerStatusEvents(opts: UseControllerStatusEventsOptions
                         opts.log("subprocess", "turn complete");
                     }
                 }
-                // `turn_active` is only meaningful for agent panes (shell/PTY
-                // controllers leave it absent); a non-boolean means "no signal",
-                // not "idle", so only forward a real boolean.
-                if (opts.onTurnActive && data?.is_agent_pane && typeof data.turn_active === "boolean") {
-                    opts.onTurnActive(data.turn_active);
+                // Reconcile turn_active for agent panes only — see
+                // deriveTurnActive for the omitted-false wire contract that
+                // makes a turn-END event's `turn_active` ABSENT (not `false`).
+                const active = deriveTurnActive(data);
+                if (opts.onTurnActive && active !== null) {
+                    opts.onTurnActive(active);
                 }
             },
         });
