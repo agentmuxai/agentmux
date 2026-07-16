@@ -74,6 +74,18 @@ Verification protocol for round 2 (per §4, executed against a fresh isolated bu
 - srv `GET /api/v1/windows` returns to baseline count
 - instance-scoped renderer process count returns to baseline
 
+## 4c. Round 3 (2026-07-16) — "main" never notified srv on close, at all
+
+A third gap in the same close path: closing `"main"` (the app's last/primary window) left its `db_window`/`db_workspace` rows permanently orphaned, resurrected by crash-reproject on every subsequent launch. Found via: a user closed every window in a `task dev` session one at a time (clean UI closes), relaunched, and crash-reproject recreated the last-closed window ("Starter workspace") as a ghost. Tracing that window_id through the full `srv-events.log` found zero events for it, while every other close in the same session showed a complete `tab_deleted → workspace_deleted → saga_completed → srv_window_closed` saga — confirming a skip, not a failed attempt.
+
+Full analysis (including a wrong-location first hypothesis and the logging-sink confusion that caused it — `cef-debug.log` is JS-console-only, not the Rust `tracing::` output `muxlog` finds): `docs/retro/retro-last-window-close-quit-race-2026-07-16.md`.
+
+**Confirmed root cause, live-verified via the actual `tracing::` host log** (not the initial `on_before_close` hypothesis, which turned out to be dead code for this case on Windows — CEF 148 parks the browser on `"main"`'s close, so `on_before_close` never fires for it here, exactly as `SPEC_WRR_QUIT_FALSE_POSITIVE_2026_07_08.md` documents): the real close path, `CloseWindowTask::execute` (`ui_tasks/window.rs`), has an explicit `self.label != "main"` guard around the *entire* block that calls `demote_srv_cleanup` (the actual `backend_close_window` → srv `CloseWindow` → `delete_workspace` cascade trigger) for every `window-*` label — with the documented (and incorrect) assumption that "main's close feeds the tuned wrr last-window quit sequence and process exit reaps everything there." Process exit does not reap anything srv-side; `agentmux-srv` is a separate process.
+
+Fix: added a `self.label == "main"` branch running the same notify logic — but **synchronously** (blocking the UI thread), not on a background thread the way `demote_srv_cleanup` does it for `window-*` labels. A background-thread version was tried first and lost the race every time: the host's own shutdown sequence kills the `agentmux-srv` sidecar (`lib.rs`, "Killing backend sidecar") within ~50ms of the close starting, well before an async notify reliably completes. Blocking works because CEF's message loop is single-threaded — the notify call transitively delays `quit_message_loop()` and everything after it on the same thread. Live-verified: `db_window` count dropped to `0` after closing main with the fix in place (and cleaned up the pre-existing leaked row from before the fix, not just new ones).
+
+Kept alongside as defense-in-depth (real, but not the reported bug): the original `on_before_close` hypothesis — its Stage 2 also skipped the notify call on the last-window branch — was still fixed, since `on_before_close` **does** fire for other browsers in the same handler (e.g. floating-pool closes during the pool-drain cascade) and is the documented *correct* path on macOS/Linux (not re-verified live this session). Its notify logic now runs unconditionally; `quit_message_loop()` is deferred via a new `QuitMessageLoopTask` posted back to the UI thread once the background notify thread completes, instead of racing ahead of it.
+
 ## 5. Follow-ups tracked separately (not this PR)
 
 - Task #7 (this fix)
@@ -81,3 +93,4 @@ Verification protocol for round 2 (per §4, executed against a fresh isolated bu
 - Task #9 — window-level lifecycle test coverage (broader than the one regression test in §4)
 - Task #10 — cross-reference against the pagefile/OOM spec
 - Reconciliation pass / `SystemProcessInfo` (SPEC_AGENT_SYSTEM_MANAGEMENT_API_2026_07_04.md) — still undecided whether/when to implement
+- Round 3 (2026-07-16, this update) — last-window close never attempted the srv notify at all; fixed alongside this doc's update. A genuinely unreachable srv (or one slower than the notify's ~2s bounded timeout) still leaks the row — the reconciliation-pass idea above remains the durable fix for that residual case.
