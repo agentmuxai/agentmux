@@ -101,6 +101,61 @@ describe("agent-pane-state reducer", () => {
             const r = update(start, { type: "ReconcileTurnActive", at: 100, active: true });
             expect(r.state.turnPhase.kind).toBe("Streaming");
         });
+
+        // active: false — downward reconciliation (completes #2005's symmetry).
+        // See docs/retro/retro-agent2-stuck-queued-message-2026-07-16.md.
+        it("demotes a stuck Streaming phase to Idle when the backend reports the turn ended", () => {
+            const s = streaming(100);
+            expect(s.turnPhase.kind).toBe("Streaming");
+            const r = update(s, { type: "ReconcileTurnActive", at: 200, active: false });
+            expect(r.state.turnPhase.kind).toBe("Idle");
+            expect(r.events[0]).toMatchObject({ type: "turn-inactive-reconciled", at: 200 });
+        });
+
+        it("clears currentTool and turnTokens when demoting a stuck Streaming turn", () => {
+            let s = streaming(100);
+            s = update(s, { type: "ToolStart", name: "Bash", arg: "ls" }).state;
+            s = update(s, { type: "TokensIn", input: 500, model: "claude-sonnet-5" }).state;
+            expect(s.currentTool).not.toBe(null);
+            const r = update(s, { type: "ReconcileTurnActive", at: 200, active: false });
+            expect(r.state.turnPhase.kind).toBe("Idle");
+            expect(r.state.currentTool).toBe(null);
+            expect(r.state.currentToolArg).toBe(null);
+            expect(r.state.turnTokens).toBe(null);
+        });
+
+        it("demotes Streaming even with a tool active — backend turn_active=false is authoritative (unlike the timeout watchdog)", () => {
+            let s = streaming(100);
+            s = update(s, { type: "ToolStart", name: "Bash", arg: "sleep 999" }).state;
+            // The liveness watchdog would REFUSE to recover a tool-active turn
+            // (a long tool legitimately keeps it alive); a backend result event
+            // is ground truth, so this demotes regardless.
+            const r = update(s, { type: "ReconcileTurnActive", at: 200, active: false });
+            expect(r.state.turnPhase.kind).toBe("Idle");
+        });
+
+        it("active: false leaves Submitting untouched — that's SUBMIT_TIMEOUT's job (and where the send-race lives)", () => {
+            const s = update(ready(100), { type: "TurnStart", at: 110 }).state;
+            expect(s.turnPhase.kind).toBe("Submitting");
+            const r = update(s, { type: "ReconcileTurnActive", at: 200, active: false });
+            expect(r.state).toBe(s);
+            expect(r.events).toEqual([]);
+        });
+
+        it("active: false leaves Done untouched (already terminal)", () => {
+            const s = update(streaming(100), { type: "TurnEnd", stats: null }).state;
+            expect(s.turnPhase.kind).toBe("Done");
+            const r = update(s, { type: "ReconcileTurnActive", at: 200, active: false });
+            expect(r.state).toBe(s);
+            expect(r.events).toEqual([]);
+        });
+
+        it("active: true still promotes from Idle after a prior demote (round-trip)", () => {
+            const demoted = update(streaming(100), { type: "ReconcileTurnActive", at: 200, active: false }).state;
+            expect(demoted.turnPhase.kind).toBe("Idle");
+            const r = update(demoted, { type: "ReconcileTurnActive", at: 300, active: true });
+            expect(r.state.turnPhase.kind).toBe("Streaming");
+        });
     });
 
     describe("ReconcileContextFromHistory (mount-time reconciliation)", () => {
