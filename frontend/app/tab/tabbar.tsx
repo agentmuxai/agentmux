@@ -4,7 +4,7 @@
 import { atoms, getApi, setActiveTab } from "@/store/global";
 import { settingsAtom } from "@/store/config-signals";
 import { fireAndForget } from "@/util/util";
-import { isMacOS } from "@/util/platformutil";
+import { isMacOS, isWindows } from "@/util/platformutil";
 import { HamburgerMenu } from "@/app/window/hamburger-menu";
 import { getTabGrabOffset } from "./tab-grab-offset";
 import { useWindowDrag } from "@/app/hook/useWindowDrag.platform";
@@ -36,6 +36,7 @@ import {
     tabWrapperRefs,
     setHoveredDropTabId,
     dragActivatedTabIds,
+    globalDragTabId,
 } from "./tabbar-dnd";
 import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
 import { Logger } from "@/util/logger";
@@ -96,9 +97,77 @@ function TabBar(props: TabBarProps): JSX.Element {
     let tabBarRef!: HTMLDivElement;
     let tabBarScrollRef!: HTMLDivElement;
     let tabBarFillRef!: HTMLDivElement;
-    // Latches once per drag — the tear-off handshake should only run a
-    // single time even if the user keeps moving past the threshold.
-    let tearOffFired = false;
+
+    // Commit-on-release tab tear-off. Fired from the drag monitor's onDrop
+    // when the tab is released below the strip. Computes the same tear-off
+    // anchor the old mid-drag path used (so the new window's first tab lands
+    // under the cursor), then calls requestTearOff with skipScMove=true — the
+    // mouse is already up, so the window is simply placed at the release
+    // point instead of entering Windows' SC_MOVE modal move-loop.
+    const tearOffTabAtRelease = (
+        draggedTabId: string,
+        input: { clientX: number; clientY: number },
+    ) => {
+        const wsId = props.workspace?.oid;
+        if (!wsId) return;
+        // Which list the tab lived in + its index there, so a cancel-back
+        // restores it to the right place (backend restores into pinnedtabids
+        // when wasPinned, else tabids — the lists persist separately).
+        const ws = props.workspace;
+        const pinnedIds = ws?.pinnedtabids ?? [];
+        const tabIdsRaw = ws?.tabids ?? [];
+        const pinnedIdx = pinnedIds.indexOf(draggedTabId);
+        const wasPinned = pinnedIdx >= 0;
+        const originalTabIndex = wasPinned
+            ? pinnedIdx
+            : Math.max(0, tabIdsRaw.indexOf(draggedTabId));
+
+        // Window-create APIs expect SCREEN coordinates; input.clientX/Y are
+        // viewport-relative. Convert via window.screenX/Y (both DIP — matches
+        // the DIP grab offset below, so no devicePixelRatio scaling needed).
+        const screenX = window.screenX + input.clientX;
+        const screenY = window.screenY + input.clientY;
+        // Tab anchor: place the new window's outer top-left so its first tab
+        // lands at the same screen pixel as the grabbed source tab (identical
+        // chrome + CSS ⇒ identical first-tab rect). See the removed mid-drag
+        // path for the full derivation.
+        const grabOffset = getTabGrabOffset();
+        const chromeBorderX = Math.max(0, window.outerWidth - window.innerWidth) / 2;
+        const chromeBorderY = Math.max(
+            0,
+            window.outerHeight - window.innerHeight - chromeBorderX,
+        );
+        // First TAB, not firstElementChild — the leading .tab-separator is a
+        // centered sliver whose rect would skew the anchor.
+        const firstTabEl = tabBarScrollRef?.querySelector(
+            ".tab-drop-wrapper",
+        ) as HTMLElement | null;
+        const firstTabRect = firstTabEl?.getBoundingClientRect();
+        const tabAnchorX =
+            grabOffset && firstTabRect
+                ? Math.round(screenX - grabOffset.x - firstTabRect.left - chromeBorderX)
+                : undefined;
+        const tabAnchorY =
+            grabOffset && firstTabRect
+                ? Math.round(screenY - grabOffset.y - firstTabRect.top - chromeBorderY)
+                : undefined;
+        Logger.info("dnd", "tab tear-off on release", {
+            draggedTabId, screenX, screenY, tabAnchorX, tabAnchorY,
+        });
+        fireAndForget(() =>
+            requestTearOff(
+                draggedTabId,
+                wsId,
+                screenX,
+                screenY,
+                originalTabIndex,
+                wasPinned,
+                tabAnchorX,
+                tabAnchorY,
+                true, // skipScMove — commit-on-release, no move-loop
+            ),
+        );
+    };
 
     // Pin feature removed — merge any legacy pinnedtabids into the regular list
     // so existing workspaces don't lose tabs. A one-time UpdateTabIds (below)
@@ -194,165 +263,101 @@ function TabBar(props: TabBarProps): JSX.Element {
     });
 
     onMount(() => {
+        // Tear-off cursor (Windows). During a tab drag, the tear-off zone
+        // (cursor dragged OUTSIDE the strip) has no pragmatic drop target,
+        // and preventUnhandled is gated off on Windows — its SC_MOVE
+        // tear-off relies on the native window-move handshake, not the
+        // HTML5 snapback. pragmatic only calls preventDefault / sets
+        // dropEffect while over a drop target (see lifecycle-manager:
+        // `innerMost != null`), so out in the tear-off zone Chromium falls
+        // back to the no-drop circle-slash cursor — which reads as "you
+        // can't drop this", the opposite of the truth: releasing below the
+        // strip spawns a NEW window.
+        //
+        // Fill that gap ourselves: while a tab drag is in flight and the
+        // cursor is outside the strip, preventDefault + set dropEffect to
+        // "copy" so Chromium paints the "plus" cursor (the universal
+        // "create new" affordance). Over the strip we do nothing, leaving
+        // the move cursor to the strip's own drop target.
+        //
+        // The listener is installed ONCE here (not in the monitor's
+        // onDragStart) and gated on `globalDragTabId` — the module flag
+        // droppable-tab sets for the whole duration of a tab drag. This
+        // keeps it alive across HMR (which does not re-run a monitor's
+        // onDragStart) and independent of pragmatic's monitor dispatch.
+        // macOS/Linux already dodge the circle-slash via preventUnhandled,
+        // so this is Windows-only.
+        if (isWindows()) {
+            const onTearOffDragOver = (e: DragEvent) => {
+                if (globalDragTabId == null) return; // not a tab drag
+                const rect = tabBarScrollRef?.getBoundingClientRect();
+                const overStrip =
+                    rect != null &&
+                    e.clientX >= rect.left && e.clientX <= rect.right &&
+                    e.clientY >= rect.top && e.clientY <= rect.bottom;
+                if (overStrip) return; // strip drop target owns the cursor here
+                e.preventDefault();
+                if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+            };
+            window.addEventListener("dragover", onTearOffDragOver);
+            onCleanup(() => window.removeEventListener("dragover", onTearOffDragOver));
+        }
+
         const cleanup = monitorForElements({
             canMonitor: ({ source }) => source.data.type === tabItemType,
 
             // Always compute insertion point from cursor position — drives the gap animation on all tabs
-            onDrag: ({ source, location }) => {
-                const input = location.current.input;
-                const rect = tabBarScrollRef?.getBoundingClientRect();
-                // tabIds().length > 1: a LONE tab can now be dragged
-                // (remount-only gesture — see DroppableTab.canDrag), but
-                // tearing it off would just trade one single-tab window
-                // for another and strand the empty source. Lone-tab drags
-                // never tear off; their only exit is a cross-window
-                // remount via the host mouse hook.
-                if (rect && !tearOffFired && tabIds().length > 1 && input.clientY > rect.bottom + TEAR_PAST_PX) {
-                    tearOffFired = true;
-                    const draggedTabId = source.data.tabId as string;
-                    const wsId = props.workspace?.oid;
-                    if (wsId) {
-                        // Phase 5: capture the original position so cancel-back
-                        // can restore in place. We need TWO things:
-                        //   * `wasPinned` — which list the tab lived in
-                        //   * `originalTabIndex` — its index inside THAT list
-                        // The backend restores into `pinnedtabids` if
-                        // wasPinned, else `tabids`. Using one combined
-                        // displayed-index won't do: the lists are persisted
-                        // separately. (gemini PR #567 round-6 MEDIUM)
-                        const ws = props.workspace;
-                        const pinnedIds = ws?.pinnedtabids ?? [];
-                        const tabIdsRaw = ws?.tabids ?? [];
-                        const pinnedIdx = pinnedIds.indexOf(draggedTabId);
-                        const wasPinned = pinnedIdx >= 0;
-                        const originalTabIndex = wasPinned
-                            ? pinnedIdx
-                            : Math.max(0, tabIdsRaw.indexOf(draggedTabId));
-                        // openWindowAtPosition + SC_MOVE expect SCREEN
-                        // coordinates, but `input.clientX/Y` are
-                        // viewport-relative. Convert via window.screenX/Y
-                        // (works across multi-monitor setups).
-                        const screenX = window.screenX + input.clientX;
-                        const screenY = window.screenY + input.clientY;
-                        // Tab anchor: position of the NEW window's outer
-                        // top-left such that its first tab lands at the
-                        // same screen pixel as the source tab the user
-                        // grabbed. The new window has identical chrome
-                        // + CSS, so its first-tab-rect equals the source's.
-                        //
-                        // Computation:
-                        //   sourceFirstTabScreenX = (cursor screen X)
-                        //                           - (cursor offset within grabbed tab)
-                        //                           - (first-tab-left in inner viewport)
-                        //   newOuterLeft = sourceFirstTabScreenX
-                        //                  - (chrome border-left, outer→inner)
-                        //
-                        // Total: newOuterLeft = screenX - grabOffset.x
-                        //                       - firstTabRect.left - chromeBorderX
-                        //
-                        // (window.outerWidth - innerWidth) on Windows is
-                        // left+right border; assume symmetric.
-                        // (window.outerHeight - innerHeight) - chromeBorderX
-                        // isolates title bar height.
-                        const grabOffset = getTabGrabOffset();
-                        const chromeBorderX =
-                            Math.max(0, window.outerWidth - window.innerWidth) / 2;
-                        const chromeBorderY = Math.max(
-                            0,
-                            window.outerHeight - window.innerHeight - chromeBorderX,
-                        );
-                        // Select the first TAB, not firstElementChild — the
-                        // leading .tab-separator (non-macOS hamburger boundary)
-                        // is the first child but a centered 18px sliver, so its
-                        // rect would skew the tear-off anchor's top/left.
-                        const firstTabEl = tabBarScrollRef?.querySelector(
-                            ".tab-drop-wrapper",
-                        ) as HTMLElement | null;
-                        const firstTabRect = firstTabEl?.getBoundingClientRect();
-                        const tabAnchorX =
-                            grabOffset && firstTabRect
-                                ? Math.round(
-                                      screenX - grabOffset.x - firstTabRect.left - chromeBorderX,
-                                  )
-                                : undefined;
-                        const tabAnchorY =
-                            grabOffset && firstTabRect
-                                ? Math.round(
-                                      screenY - grabOffset.y - firstTabRect.top - chromeBorderY,
-                                  )
-                                : undefined;
-                        Logger.info("dnd", "tear-off anchor compute", {
-                            screenX, screenY,
-                            grabOffsetX: grabOffset?.x, grabOffsetY: grabOffset?.y,
-                            firstTabLeft: firstTabRect?.left, firstTabTop: firstTabRect?.top,
-                            chromeBorderX, chromeBorderY,
-                            tabAnchorX, tabAnchorY,
-                            windowOuterW: window.outerWidth, windowInnerW: window.innerWidth,
-                            windowOuterH: window.outerHeight, windowInnerH: window.innerHeight,
-                            windowScreenX: window.screenX, windowScreenY: window.screenY,
-                        });
-                        // Phase 2: real tear-off (sidecar TearOffTab +
-                        // host openWindowAtPosition + Win32 SC_MOVE).
-                        // Fire-and-forget — the user is mid-drag and the
-                        // host's SC_MOVE handshake will take over the
-                        // cursor synchronously from Windows' point of view.
-                        fireAndForget(() =>
-                            requestTearOff(
-                                draggedTabId,
-                                wsId,
-                                screenX,
-                                screenY,
-                                originalTabIndex,
-                                wasPinned,
-                                tabAnchorX,
-                                tabAnchorY,
-                            ),
-                        );
-                    }
-                    // Continue updating insertionPoint below — until the
-                    // host's SC_MOVE handshake completes (~150-300ms cold
-                    // path), the user's mouse is still over our window
-                    // and pragmatic-dnd is still firing onDrag. The
-                    // tearOffFired latch ensures requestTearOff doesn't
-                    // re-fire; the gap-tracking is harmless during the
-                    // brief overlap.
-                }
-                setInsertionPoint(computeInsertionPoint(input.clientX));
+            onDrag: ({ location }) => {
+                // Tear-off is committed on RELEASE now (see onDrop), not
+                // mid-drag — dragging down no longer eagerly spawns a
+                // window that follows the cursor. So onDrag only tracks the
+                // insertion point that drives the reorder gap animation.
+                setInsertionPoint(computeInsertionPoint(location.current.input.clientX));
             },
 
             onDrop: ({ source, location }) => {
-                // Reset the tear-off latch for the next drag.
-                // NOTE: even though Phase 2's requestTearOff now does a
-                // real handshake and the SC_MOVE takes over the cursor,
-                // pragmatic-dnd's onDrop still fires for the original
-                // gesture. We don't short-circuit here because a drag
-                // that briefly dipped past the strip's bottom and then
-                // came back to drop on a tab should still reorder
-                // (Chrome treats the threshold as commit-on-cross, but
-                // requestTearOff already snapshotted via a fire-and-
-                // forget, so the data path is settled by the time onDrop
-                // runs). Once Phase 5 (cancel-back) ships, this gate
-                // tightens further.
-                tearOffFired = false;
-
                 const ip = insertionPoint();
                 const draggedTabId = source.data.tabId as string;
 
                 // `insertionPoint` reflects the last cursor X, so it can be
                 // non-null even when the user has dragged BELOW the tab bar
-                // for a tear-off. Gate both the payload-clear and the
-                // reorder on the cursor actually being over the tab strip
-                // at drop time — otherwise we'd suppress tear-offs and
-                // also reorder on out-of-bar drops. Pragmatic-dnd does not
-                // register a drop target for the bar (insertion is purely
-                // X-driven), so we hit-test the cursor against the strip's
-                // bounding rect ourselves.
+                // for a tear-off. Pragmatic-dnd registers no drop target for
+                // the bar (insertion is purely X-driven), so we hit-test the
+                // cursor against the strip's bounding rect ourselves to tell
+                // "reorder inside the bar" from "tear-off below it".
                 const input = location.current.input;
                 const rect = tabBarScrollRef?.getBoundingClientRect();
                 const dropInsideBar =
                     rect != null &&
                     input.clientY >= rect.top && input.clientY <= rect.bottom &&
                     input.clientX >= rect.left && input.clientX <= rect.right;
+
+                // Commit-on-release tear-off: the tab was released BELOW the
+                // strip (dragged down into the window body) and let go.
+                // Spawn the new window at the release point NOW — deliberately
+                // not mid-drag, so nothing detaches until the user releases
+                // (the behaviour they expect). Lone tabs never tear (tearing
+                // the only tab would just trade one single-tab window for
+                // another and strand the source); their cross-window exit is
+                // the host mouse-hook remount.
+                const releasedBelowStrip =
+                    rect != null && input.clientY > rect.bottom + TEAR_PAST_PX;
+                if (
+                    !dropInsideBar &&
+                    releasedBelowStrip &&
+                    draggedTabId != null &&
+                    tabIds().length > 1
+                ) {
+                    // Clear the payload SYNCHRONOUSLY (before the async
+                    // tear-off) so CrossWindowDragMonitor's dragend handler —
+                    // which may fire for the same gesture — sees no payload
+                    // and doesn't double-process this tear.
+                    setCurrentDragPayload(null);
+                    tearOffTabAtRelease(draggedTabId, input);
+                    setInsertionPoint(null);
+                    return;
+                }
+
                 const willReorder = dropInsideBar && ip != null && draggedTabId != null;
 
                 if (willReorder || location.current.dropTargets.length > 0) {
@@ -398,7 +403,22 @@ function TabBar(props: TabBarProps): JSX.Element {
         //    never clears the payload — it fires for out-of-window drops too).
         const cleanupStripDrop = dropTargetForElements({
             element: tabBarScrollRef,
-            canDrop: ({ source }) => source.data.type === tileItemType,
+            // Accept BOTH tile drags (pane→tab) and tab drags (reorder).
+            // For a tab reorder the actual work is done by the
+            // monitorForElements above (X-driven insertion); this drop
+            // target exists only so pragmatic-dnd calls preventDefault on
+            // dragover while the tab is over the strip, which sets
+            // dropEffect="move" and kills the Windows circle-slash/no-drop
+            // cursor. Without a tab-accepting drop target, nothing calls
+            // preventDefault on Windows (preventUnhandled is gated off there
+            // to protect the SC_MOVE tear-off path — see droppable-tab.tsx),
+            // so Chromium showed the not-allowed cursor for every reorder.
+            // Scoped to the strip: dragging a tab OUT of the strip (tear-off)
+            // leaves this target and is unaffected. onDrop clears the payload
+            // for both kinds (harmless double-clear for tabs — the monitor's
+            // onDrop already clears it on a real reorder).
+            canDrop: ({ source }) =>
+                source.data.type === tileItemType || source.data.type === tabItemType,
             onDrop: () => {
                 setCurrentDragPayload(null);
             },
@@ -1132,6 +1152,13 @@ async function requestTearOff(
     wasPinned: boolean,
     tabAnchorX?: number,
     tabAnchorY?: number,
+    // Commit-on-release path (down-drag tear-off fired from onDrop): the
+    // mouse is already up, so there is nothing to follow — skip Step 3's
+    // Win32 SC_MOVE modal move-loop. The window is created + shown at the
+    // anchor by pool-promote / openWindowAtPosition alone (Step 2), which
+    // is exactly what CrossWindowDragMonitor's release-time performTearOff
+    // relies on. When false (legacy mid-drag), SC_MOVE runs as before.
+    skipScMove: boolean = false,
 ): Promise<void> {
     const t0 = performance.now();
     // F1.B — orphan-cleanup state. We only restore the tab when we
@@ -1208,44 +1235,59 @@ async function requestTearOff(
                 throw coldErr;
             }
         }
-        // Step 3 — Win32 SC_MOVE handshake. Host waits for the new
-        // window's HWND to register, then transfers cursor capture
-        // and posts WM_SYSCOMMAND/SC_MOVE so Windows enters its
-        // built-in modal move-loop. Until mouseup, the new window
-        // follows the cursor at full opacity, no ghost.
-        const result = await getApi().tearOffSCMoveHandshake({
-            sourceWindowLabel,
-            destWindowLabel,
-            cursorX,
-            cursorY,
-            // Phase 4 — fields the host hook needs to drive the merge
-            // event on mouseup. Without these the hook is skipped and
-            // the dragged window simply ends as a standalone.
-            tabId,
-            sourceWsId: workspaceId,
-            destWsId: newWsId,
-            // Phase 5 — original tab index so ESC / drop-on-source
-            // can restore at the right position rather than the end.
-            // wasPinned controls which list the index points into
-            // (pinnedtabids vs tabids).
-            originalTabIndex,
-            wasPinned,
-        });
-        // Handshake confirmed the destination window's HWND
-        // registered + Windows now owns the move loop.
-        // Clear the cross-window drag payload so the legacy dragend
-        // pipeline (CrossWindowDragMonitor) doesn't double-process
-        // this gesture when its dragend fires. Cleared HERE rather
-        // than in onDrag so a failure mid-pipeline (TearOffTab,
-        // openWindowAtPosition, or the handshake itself) leaves the
-        // legacy fallback intact.
-        setCurrentDragPayload(null);
-        Logger.info("dnd", "tab tear-off complete", {
-            tabId,
-            destWindowLabel,
-            handshakeMs: result.handshakeMs,
-            totalMs: performance.now() - t0,
-        });
+        if (skipScMove) {
+            // Commit-on-release: the window was already created + shown at
+            // the anchor by Step 2 (pool-promote / cold path). The mouse is
+            // up, so there is no drag to follow — skip the SC_MOVE
+            // move-loop. Clear the cross-window drag payload so the legacy
+            // dragend pipeline (CrossWindowDragMonitor) doesn't
+            // double-process this gesture when its dragend fires.
+            setCurrentDragPayload(null);
+            Logger.info("dnd", "tab tear-off complete (commit-on-release)", {
+                tabId,
+                destWindowLabel,
+                totalMs: performance.now() - t0,
+            });
+        } else {
+            // Step 3 — Win32 SC_MOVE handshake. Host waits for the new
+            // window's HWND to register, then transfers cursor capture
+            // and posts WM_SYSCOMMAND/SC_MOVE so Windows enters its
+            // built-in modal move-loop. Until mouseup, the new window
+            // follows the cursor at full opacity, no ghost.
+            const result = await getApi().tearOffSCMoveHandshake({
+                sourceWindowLabel,
+                destWindowLabel,
+                cursorX,
+                cursorY,
+                // Phase 4 — fields the host hook needs to drive the merge
+                // event on mouseup. Without these the hook is skipped and
+                // the dragged window simply ends as a standalone.
+                tabId,
+                sourceWsId: workspaceId,
+                destWsId: newWsId,
+                // Phase 5 — original tab index so ESC / drop-on-source
+                // can restore at the right position rather than the end.
+                // wasPinned controls which list the index points into
+                // (pinnedtabids vs tabids).
+                originalTabIndex,
+                wasPinned,
+            });
+            // Handshake confirmed the destination window's HWND
+            // registered + Windows now owns the move loop.
+            // Clear the cross-window drag payload so the legacy dragend
+            // pipeline (CrossWindowDragMonitor) doesn't double-process
+            // this gesture when its dragend fires. Cleared HERE rather
+            // than in onDrag so a failure mid-pipeline (TearOffTab,
+            // openWindowAtPosition, or the handshake itself) leaves the
+            // legacy fallback intact.
+            setCurrentDragPayload(null);
+            Logger.info("dnd", "tab tear-off complete", {
+                tabId,
+                destWindowLabel,
+                handshakeMs: result.handshakeMs,
+                totalMs: performance.now() - t0,
+            });
+        }
     } catch (e) {
         Logger.error("dnd", "tab tear-off failed", { tabId, error: String(e) });
         // F1.B — orphan workspace cleanup. Only restore the tab when
