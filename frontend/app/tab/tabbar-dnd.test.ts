@@ -4,6 +4,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "vitest";
 import {
     computeInsertIndex,
+    computeInsertionPoint,
     computeNearestTab,
     insertionPointToIndex,
     markTabMerged,
@@ -238,6 +239,88 @@ describe("computeNearestTab", () => {
         // cursor at 60 — closest to tab-a (mid=50) but it's excluded
         // next closest: tab-b (mid=150, dist=90) over tab-c (mid=250, dist=190)
         expect(computeNearestTab(60, 15)?.tabId).toBe("tab-b");
+    });
+});
+
+// ── computeInsertionPoint ─────────────────────────────────────────────────────
+//
+// Production reorder rule (replaced computeNearestTab in tabbar.tsx). Thresholds
+// on each remaining tab's CENTER, not the inter-tab gap: the dragged tab stays
+// in the strip at opacity 0.35 but is EXCLUDED from the scan, so a gap-midpoint
+// rule measured the cursor against the empty space it still occupied and landed
+// the "cross to move" threshold ~1.5–2 tab-widths away. makeFakeEl(left, width)
+// ⇒ a tab spanning [left, left+width], so center = left + width/2.
+
+describe("computeInsertionPoint", () => {
+    beforeEach(() => {
+        tabWrapperRefs.clear();
+        setGlobalDragTabId(null);
+    });
+    afterEach(() => {
+        tabWrapperRefs.clear();
+        setGlobalDragTabId(null);
+    });
+
+    test("returns null when no tabs are registered", () => {
+        expect(computeInsertionPoint(100)).toBeNull();
+    });
+
+    test("returns null when only the dragged tab is registered", () => {
+        tabWrapperRefs.set("tab-a", makeFakeEl(0, 100));
+        setGlobalDragTabId("tab-a");
+        expect(computeInsertionPoint(50)).toBeNull();
+    });
+
+    test("cursor left of the first tab's center → insert before the first tab", () => {
+        tabWrapperRefs.set("tab-a", makeFakeEl(0, 100));   // center 50
+        tabWrapperRefs.set("tab-b", makeFakeEl(100, 100)); // center 150
+        // 40 < 50 → before tab-a
+        expect(computeInsertionPoint(40)).toEqual({ beforeTabId: null, afterTabId: "tab-a" });
+    });
+
+    test("cursor between two centers → lands in that gap", () => {
+        tabWrapperRefs.set("tab-a", makeFakeEl(0, 100));   // center 50
+        tabWrapperRefs.set("tab-b", makeFakeEl(100, 100)); // center 150
+        tabWrapperRefs.set("tab-c", makeFakeEl(200, 100)); // center 250
+        // 160: past 50 and 150, < 250 → between tab-b and tab-c
+        expect(computeInsertionPoint(160)).toEqual({ beforeTabId: "tab-b", afterTabId: "tab-c" });
+    });
+
+    test("cursor past every center → append after the last tab", () => {
+        tabWrapperRefs.set("tab-a", makeFakeEl(0, 100));   // center 50
+        tabWrapperRefs.set("tab-b", makeFakeEl(100, 100)); // center 150
+        expect(computeInsertionPoint(500)).toEqual({ beforeTabId: "tab-b", afterTabId: null });
+    });
+
+    test("exactly at a center goes to the next gap (clientX < center is exclusive)", () => {
+        tabWrapperRefs.set("tab-a", makeFakeEl(0, 100));   // center 50
+        tabWrapperRefs.set("tab-b", makeFakeEl(100, 100)); // center 150
+        // 50 < 50 is false → move on; 50 < 150 → between tab-a and tab-b
+        expect(computeInsertionPoint(50)).toEqual({ beforeTabId: "tab-a", afterTabId: "tab-b" });
+    });
+
+    test("crossing a neighbour's CENTER commits the move (regression: not the gap midpoint)", () => {
+        // Drag tab-a (excluded from the scan). Remaining: tab-b(center150),
+        // tab-c(center250). The move to after tab-b must commit as soon as the
+        // cursor crosses tab-b's center (150) — NOT the tab-b/tab-c gap
+        // midpoint (200), which was the old "too tight" behaviour.
+        tabWrapperRefs.set("tab-a", makeFakeEl(0, 100));   // dragged, excluded
+        tabWrapperRefs.set("tab-b", makeFakeEl(100, 100)); // center 150
+        tabWrapperRefs.set("tab-c", makeFakeEl(200, 100)); // center 250
+        setGlobalDragTabId("tab-a");
+        // just left of tab-b's center → before tab-b
+        expect(computeInsertionPoint(149)).toEqual({ beforeTabId: null, afterTabId: "tab-b" });
+        // just right of tab-b's center → after tab-b (well short of the gap midpoint)
+        expect(computeInsertionPoint(151)).toEqual({ beforeTabId: "tab-b", afterTabId: "tab-c" });
+    });
+
+    test("scan order is left-to-right regardless of insertion order into the registry", () => {
+        // Registry insertion order is reversed; computeInsertionPoint sorts by left.
+        tabWrapperRefs.set("tab-c", makeFakeEl(200, 100)); // center 250
+        tabWrapperRefs.set("tab-a", makeFakeEl(0, 100));   // center 50
+        tabWrapperRefs.set("tab-b", makeFakeEl(100, 100)); // center 150
+        expect(computeInsertionPoint(40)).toEqual({ beforeTabId: null, afterTabId: "tab-a" });
+        expect(computeInsertionPoint(300)).toEqual({ beforeTabId: "tab-c", afterTabId: null });
     });
 });
 
