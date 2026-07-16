@@ -232,6 +232,8 @@ function AgentRow({
     const displayStatus = createMemo<AgentDisplayStatus>(() =>
         phaseToDisplayStatus(node.blockId, node.agentStatus)
     );
+    const collapsed = createMemo(() => model.isAgentCollapsed(node.blockId));
+    const hasChildren = createMemo(() => node.subagents.length > 0);
 
     const [summaryFlash, setSummaryFlash] = createSignal(false);
     let flashTimer: ReturnType<typeof setTimeout> | undefined;
@@ -259,10 +261,29 @@ function AgentRow({
                 title={node.agentName}
             >
                 <div class="swarm-agent-row">
+                    {/* Chevron only when there's a subtree to collapse; a
+                        fixed-width spacer otherwise so labels stay aligned
+                        across rows with and without children. stopPropagation:
+                        the enclosing card's click focuses the block. */}
+                    <Show
+                        when={hasChildren()}
+                        fallback={<span class="swarm-agent-expand-spacer" />}
+                    >
+                        <i
+                            class={`fa-solid fa-${collapsed() ? "chevron-right" : "chevron-down"} swarm-agent-expand-icon`}
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                model.toggleAgentCollapsed(node.blockId);
+                            }}
+                        />
+                    </Show>
                     <span class="swarm-agent-icon">
                         <ProviderLogo provider={node.agentProvider ?? "agentmux"} size={16} />
                     </span>
                     <span class="swarm-agent-label">{node.agentName}</span>
+                    <Show when={collapsed() && hasChildren()}>
+                        <span class="swarm-agent-collapsed-count">{node.subagents.length}</span>
+                    </Show>
                     <Show when={node.contextTokens != null}>
                         <span class="swarm-ctx-size">{fmtCtx(node.contextTokens!)}</span>
                     </Show>
@@ -274,15 +295,17 @@ function AgentRow({
                     </div>
                 </Show>
             </div>
-            <div class="swarm-children">
-                <For each={node.subagents}>
-                    {(child) => isWorkflowGroup(child)
-                        ? <WorkflowGroupRow group={child} model={model} parentAgentStatus={node.agentStatus} />
-                        : isNameGroup(child)
-                        ? <NameGroupRow group={child} model={model} parentAgentStatus={node.agentStatus} />
-                        : <SubagentRow sub={child} model={model} parentAgentStatus={node.agentStatus} />}
-                </For>
-            </div>
+            <Show when={!collapsed()}>
+                <div class="swarm-children">
+                    <For each={node.subagents}>
+                        {(child) => isWorkflowGroup(child)
+                            ? <WorkflowGroupRow group={child} model={model} parentAgentStatus={node.agentStatus} />
+                            : isNameGroup(child)
+                            ? <NameGroupRow group={child} model={model} parentAgentStatus={node.agentStatus} />
+                            : <SubagentRow sub={child} model={model} parentAgentStatus={node.agentStatus} />}
+                    </For>
+                </div>
+            </Show>
         </div>
     );
 }
