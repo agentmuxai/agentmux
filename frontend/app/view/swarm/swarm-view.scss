@@ -103,6 +103,35 @@
     padding: 0 6px 0 10px;
     gap: 5px;
 
+    .swarm-agent-expand-icon {
+        width: 10px;
+        font-size: 10px;
+        color: var(--secondary-text-color);
+        flex-shrink: 0;
+        cursor: pointer;
+
+        &:hover {
+            color: var(--main-text-color);
+        }
+    }
+
+    // Keeps label alignment consistent between rows with and without a
+    // collapsible subtree (matches .swarm-agent-expand-icon's width).
+    .swarm-agent-expand-spacer {
+        width: 10px;
+        flex-shrink: 0;
+    }
+
+    .swarm-agent-collapsed-count {
+        flex-shrink: 0;
+        font-size: 10px;
+        line-height: 1;
+        padding: 2px 5px;
+        border-radius: 7px;
+        background: var(--highlight-bg);
+        color: var(--secondary-text-color);
+    }
+
     .swarm-agent-icon {
         flex-shrink: 0;
         display: inline-flex;

@@ -526,6 +526,17 @@ export class SwarmViewModel implements ViewModel {
     expandedIdsAtom: Accessor<Set<string>> = this._expandedIds[0];
     private setExpandedIds: Setter<Set<string>> = this._expandedIds[1];
 
+    // Top-level agent rows collapse with the OPPOSITE default from the group/
+    // subagent rows above: agents default EXPANDED, so this tracks the
+    // exception set (collapsed blockIds) rather than reusing expandedIds
+    // (whose absent-means-collapsed semantics would flip every agent shut on
+    // mount). Same ViewModel-residency rationale as _expandedIds: tree()
+    // rebuilds wrapper objects on every status tick, so row-local state would
+    // silently reset on unrelated refreshes.
+    private _collapsedAgentIds = createSignal<Set<string>>(new Set());
+    collapsedAgentIdsAtom: Accessor<Set<string>> = this._collapsedAgentIds[0];
+    private setCollapsedAgentIds: Setter<Set<string>> = this._collapsedAgentIds[1];
+
     // One SubagentDetail per currently-expanded subagent, created lazily on
     // first expand. Same rationale as expandedIds above: if this fetch+
     // subscribe lifecycle lived inside the row component instead, every
@@ -685,6 +696,21 @@ export class SwarmViewModel implements ViewModel {
             const next = new Set(prev);
             if (next.has(id)) next.delete(id);
             else next.add(id);
+            return next;
+        });
+    }
+
+    /** Top-level AgentRow collapse — see _collapsedAgentIds for the
+     *  inverted (default-expanded) semantics vs isExpanded/toggleExpanded. */
+    isAgentCollapsed(blockId: string): boolean {
+        return this.collapsedAgentIdsAtom().has(blockId);
+    }
+
+    toggleAgentCollapsed(blockId: string): void {
+        this.setCollapsedAgentIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(blockId)) next.delete(blockId);
+            else next.add(blockId);
             return next;
         });
     }
