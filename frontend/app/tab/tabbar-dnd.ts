@@ -69,34 +69,33 @@ export function computeInsertionPoint(clientX: number): InsertionPoint | null {
     if (tabs.length === 0) return null;
     tabs.sort((a, b) => a.left - b.left);
 
-    let bestDist = Infinity;
-    let result: InsertionPoint = { beforeTabId: null, afterTabId: tabs[0].tabId };
-
-    // Gap before first tab
-    const d0 = Math.abs(clientX - tabs[0].left);
-    if (d0 < bestDist) {
-        bestDist = d0;
-        result = { beforeTabId: null, afterTabId: tabs[0].tabId };
-    }
-
-    // Gaps between adjacent tabs
-    for (let i = 0; i < tabs.length - 1; i++) {
-        const gapX = (tabs[i].right + tabs[i + 1].left) / 2;
-        const dist = Math.abs(clientX - gapX);
-        if (dist < bestDist) {
-            bestDist = dist;
-            result = { beforeTabId: tabs[i].tabId, afterTabId: tabs[i + 1].tabId };
+    // Threshold on each remaining tab's CENTER, not the inter-tab gap.
+    //
+    // The dragged tab stays in the strip at opacity 0.35 (it is not
+    // collapsed — see tabbar.scss `.tab-dragging`) but is excluded from
+    // `tabs` above. A gap-midpoint approach therefore measured the cursor
+    // against the empty *space the dragged tab still occupies*, which made
+    // the "cross to move" threshold land ~1.5–2 tab-widths away and depend
+    // on where the tab was grabbed — the reported "drag across 1 tab
+    // doesn't move, across 2 moves 1" / "too tight" symptom.
+    //
+    // Center-thresholding is the standard tab-reorder rule: the insertion
+    // lands before the first remaining tab whose center is to the RIGHT of
+    // the cursor; if the cursor is past every center, it appends after the
+    // last tab. Crossing a neighbour's center (~1 tab of travel from an
+    // adjacent grab) commits the move, which matches the natural mental
+    // model.
+    for (let i = 0; i < tabs.length; i++) {
+        const center = (tabs[i].left + tabs[i].right) / 2;
+        if (clientX < center) {
+            return {
+                beforeTabId: i === 0 ? null : tabs[i - 1].tabId,
+                afterTabId: tabs[i].tabId,
+            };
         }
     }
-
-    // Gap after last tab
-    const last = tabs[tabs.length - 1];
-    const dLast = Math.abs(clientX - last.right);
-    if (dLast < bestDist) {
-        result = { beforeTabId: last.tabId, afterTabId: null };
-    }
-
-    return result;
+    // Past every center → after the last tab.
+    return { beforeTabId: tabs[tabs.length - 1].tabId, afterTabId: null };
 }
 
 /**
