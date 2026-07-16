@@ -4,22 +4,36 @@
 
 import { newLayoutNode } from "./layoutNode";
 import { findNode, findParent } from "./layoutNode";
+import { isNodeLocked, reportLayoutViolations } from "./layoutInvariants";
 import type { LayoutModel } from "./layoutModel";
 import { DefaultNodeSize, FlexDirection, type LayoutNodeAdditionalProps, type LayoutNode } from "./types";
 
 /** Height of the block header in CSS pixels (matches --header-height in theme.scss). */
 export const HeaderHeightPx = 33;
 
+// Canonical definition lives in layoutInvariants (the doctor validates lock
+// invariants, and importing from here would be an import cycle); re-exported
+// so existing importers keep working.
+export { isNodeLocked };
+
 /**
- * A locked node is one whose size is owned by the minimize subsystem: a minimized
- * leaf (`minimizedSize`), a slipped header (`slipMinimize`), or a dissolved column
- * (`columnDissolve`). No other writer may resize, move, swap, or split it, and no
- * resize handle is rendered on its edges. See
- * `docs/specs/SPEC_LAYOUT_MINIMIZE_LOCKED_STATE_REDESIGN_2026_07_16.md`.
+ * Count leaves that are NOT minimize-locked — i.e. panes still showing
+ * content. The window must always keep at least one: `minimizeNodeToggle`
+ * no-ops when asked to collapse the last expanded pane, and the header hides
+ * that pane's minimize button (`NodeModel.canMinimize`).
  */
-export function isNodeLocked(node: LayoutNode | undefined): boolean {
-    if (!node) return false;
-    return node.minimizedSize !== undefined || node.slipMinimize !== undefined || node.columnDissolve !== undefined;
+export function countExpandedLeaves(root: LayoutNode | undefined): number {
+    if (!root) return 0;
+    let count = 0;
+    function walk(node: LayoutNode) {
+        if (!node.children?.length) {
+            if (node.data !== undefined && !isNodeLocked(node)) count++;
+            return;
+        }
+        node.children.forEach(walk);
+    }
+    walk(root);
+    return count;
 }
 
 /**
@@ -217,6 +231,13 @@ export function minimizeNodeToggle(model: LayoutModel, nodeId: string) {
 
     // ── Minimize ──────────────────────────────────────────────────────────────
     if (!sibling) return;
+
+    // The last expanded pane cannot be collapsed — the window must always keep
+    // at least one pane showing content (an all-headers window is dead space
+    // with nothing restorable in view). The header already hides the minimize
+    // button in this state (NodeModel.canMinimize); this is the authoritative
+    // guard for programmatic callers.
+    if (countExpandedLeaves(model.treeState.rootNode) <= 1) return;
 
     if (parentNode.flexDirection === FlexDirection.Row) {
         // Slip path: pane occupies a Row slot — slip header into adjacent column instead
@@ -532,6 +553,14 @@ function _finishToggle(model: LayoutModel, nodeId: string, minimized: boolean) {
         return next;
     });
     model.updateTree();
+    // Layout doctor (issue #2179): a minimize/restore toggle is the highest-
+    // risk mutation in the layout system (slip / dissolve / undissolve all
+    // restructure the tree). Validate immediately with toggle attribution —
+    // updateTree above also validates, but this context names the culprit.
+    reportLayoutViolations(
+        model.treeState.rootNode,
+        `minimizeToggle:${minimized ? "minimize" : "restore"}:${nodeId.slice(0, 8)}`
+    );
     model.localTreeStateAtom._set({ ...model.treeState });
     model.persistToBackend();
 }

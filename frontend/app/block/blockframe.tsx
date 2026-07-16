@@ -272,7 +272,14 @@ function EndIcons(props: {
                 />
             </Show>
 
-            <Show when={!ephemeral() && !magnified() && numLeafs() > 1}>
+            {/* canMinimize: the last expanded pane loses its minimize button —
+                the window must always keep at least one expanded pane, so
+                another pane has to be restored before this one can collapse.
+                Optional call: NodeModels are cached on the LayoutModel, so a
+                hot-reload can pair this (new) header with a pre-canMinimize
+                cached model — degrade to showing the button (the toggle's own
+                countExpandedLeaves guard still enforces the policy). */}
+            <Show when={!ephemeral() && !magnified() && numLeafs() > 1 && (props.nodeModel.canMinimize?.() ?? true)}>
                 <OptMinimizeButton
                     minimized={minimized()}
                     toggleMinimize={props.nodeModel.toggleMinimize}
