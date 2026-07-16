@@ -274,6 +274,122 @@ pub fn enforce_minimized_locks(root: &mut Option<LayoutNode>) -> usize {
     root.as_mut().map_or(0, walk)
 }
 
+/// Layout doctor — structural invariant validation, mirroring
+/// `validateLayoutInvariants` in `frontend/layout/lib/layoutInvariants.ts`
+/// (keep the check lists in sync). Returns human-readable violation strings;
+/// empty = healthy. Never mutates. Reducer choke points call this after
+/// prune/enforce and `tracing::error!` any findings, so a corrupted tree is
+/// attributed to the write that produced it instead of being reconstructed
+/// later from db_layout archaeology (issue #2179).
+pub fn validate_layout_invariants(root: &Option<LayoutNode>) -> Vec<String> {
+    let mut violations = Vec::new();
+    fn short(id: &str) -> &str {
+        &id[..id.len().min(8)]
+    }
+    fn walk(node: &LayoutNode, is_root: bool, violations: &mut Vec<String>) {
+        let is_branch = !node.children.is_empty();
+        let is_leaf = node.data.is_some();
+        let has = |k: &str| node.extra.contains_key(k);
+
+        // I1 — leaf XOR branch.
+        if is_branch == is_leaf {
+            violations.push(format!(
+                "LEAF_XOR_BRANCH @ {}: data {}, children {}",
+                short(&node.id),
+                if is_leaf { "present" } else { "absent" },
+                if is_branch { "present" } else { "absent" }
+            ));
+        }
+        // I2 — minimizedSize / slipMinimize are leaf-only markers.
+        if is_branch && (has("minimizedSize") || has("slipMinimize")) {
+            violations.push(format!(
+                "MIN_MARKER_ON_BRANCH @ {}: branch has {}",
+                short(&node.id),
+                if has("minimizedSize") { "minimizedSize" } else { "slipMinimize" }
+            ));
+        }
+        // I3 — columnDissolve is branch-only.
+        if !is_branch && has("columnDissolve") {
+            violations.push(format!("DISSOLVE_ON_LEAF @ {}", short(&node.id)));
+        }
+        // I4 — a dissolved column must stack vertically (#2176 signature).
+        if has("columnDissolve") && node.flex_direction != FlexDirection::Column {
+            violations.push(format!(
+                "DISSOLVED_NOT_COLUMN @ {}: flex_direction={:?}",
+                short(&node.id),
+                node.flex_direction
+            ));
+        }
+        // I5 — every child of a dissolved column is itself locked.
+        if has("columnDissolve") {
+            for c in &node.children {
+                if !is_node_locked(c) {
+                    violations.push(format!(
+                        "DISSOLVED_CHILD_UNLOCKED @ {}: inside dissolved column {}",
+                        short(&c.id),
+                        short(&node.id)
+                    ));
+                }
+            }
+        }
+        let locked_size = node.extra.get("minimizedLockedSize").and_then(|v| v.as_f64());
+        // I6 — a locked node's size honors its recorded lock (#2180).
+        if is_node_locked(node) {
+            if let Some(ls) = locked_size {
+                if (node.size - ls as f32).abs() > 1e-4 {
+                    violations.push(format!(
+                        "LOCK_SIZE_MISMATCH @ {}: size={} locked={}",
+                        short(&node.id),
+                        node.size,
+                        ls
+                    ));
+                }
+            }
+        } else if locked_size.is_some() {
+            // I7 — minimizedLockedSize must not outlive its lock marker.
+            violations.push(format!("ORPHAN_LOCKED_SIZE @ {}", short(&node.id)));
+        }
+        // I8 — sizes are positive.
+        if !is_root && !(node.size > 0.0) {
+            violations.push(format!("NONPOSITIVE_SIZE @ {}: size={}", short(&node.id), node.size));
+        }
+        for c in &node.children {
+            walk(c, false, violations);
+        }
+    }
+    if let Some(tree) = root {
+        walk(tree, true, &mut violations);
+        // I9 — at least one pane stays expanded. A tree whose every leaf is
+        // minimize-locked is an all-headers window with nothing restorable
+        // in view; the frontend's minimize toggle guards against producing
+        // this (`countExpandedLeaves` in layoutMinimize.ts).
+        fn count_leaves(node: &LayoutNode, leaves: &mut usize, expanded: &mut usize) {
+            if node.children.is_empty() {
+                if node.data.is_some() {
+                    *leaves += 1;
+                    if !is_node_locked(node) {
+                        *expanded += 1;
+                    }
+                }
+                return;
+            }
+            for c in &node.children {
+                count_leaves(c, leaves, expanded);
+            }
+        }
+        let (mut leaves, mut expanded) = (0usize, 0usize);
+        count_leaves(tree, &mut leaves, &mut expanded);
+        if leaves > 0 && expanded == 0 {
+            violations.push(format!(
+                "ALL_LEAVES_LOCKED @ {}: all {} leaves are minimize-locked; no expanded pane remains",
+                &tree.id[..tree.id.len().min(8)],
+                leaves
+            ));
+        }
+    }
+    violations
+}
+
 /// First leaf (depth-first) whose `data.block_id` is set but not present in
 /// `live_block_ids`. `data.block_id` is only ever non-empty on leaves —
 /// container/group nodes have `data: None` (see `ensure_group_node`).

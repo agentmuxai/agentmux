@@ -4,6 +4,7 @@
 import { batch } from "solid-js";
 import { balanceNode, walkNodes } from "./layoutNode";
 import { enforceMinimizedLocks, isNodeLocked } from "./layoutMinimize";
+import { reportLayoutViolations } from "./layoutInvariants";
 import {
     FlexDirection,
     LayoutNode,
@@ -54,6 +55,11 @@ export function updateTree(model: LayoutModel, balanceTree = true) {
             // is corrected here rather than trusted to have known about the lock.
             enforceMinimizedLocks(model.treeState.rootNode);
             model.treeState.rootNode = balanceNode(model.treeState.rootNode, callback);
+            // Layout doctor (issue #2179): observe the post-normalization tree
+            // and log loudly if any structural invariant is broken, so a
+            // corruption is attributed at the pass that produced it instead of
+            // reconstructed later from db_layout archaeology.
+            reportLayoutViolations(model.treeState.rootNode, "updateTree");
         } else walkNodes(model.treeState.rootNode, callback);
 
         // Process ephemeral node, if present.
