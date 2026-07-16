@@ -3,7 +3,14 @@
 
 import { describe, expect, it } from "vitest";
 import { newLayoutNode } from "../lib/layoutNode";
-import { minimizeNodeToggle, rebuildMinimizedSet, HeaderHeightPx } from "../lib/layoutMinimize";
+import {
+    minimizeNodeToggle,
+    rebuildMinimizedSet,
+    enforceMinimizedLocks,
+    isNodeLocked,
+    HeaderHeightPx,
+} from "../lib/layoutMinimize";
+import { resizeNode, splitVertical } from "../lib/layoutTree";
 import { balanceNode } from "../lib/layoutNode";
 import { FlexDirection, type LayoutNode, type LayoutNodeAdditionalProps } from "../lib/types";
 
@@ -407,6 +414,104 @@ describe("dissolve bail cases", () => {
         // Both panes are still individually minimized
         expect(pane1.minimizedSize).toBeDefined();
         expect(pane2.minimizedSize).toBeDefined();
+    });
+});
+
+// ── Minimize lock (locked-state spec, 2026-07-16) ───────────────────────────
+
+describe("minimize lock — minimized is a locked state", () => {
+    it("records minimizedLockedSize on minimize and clears it on restore", () => {
+        const { root, colA, paneA1 } = buildTwoColumnLayout();
+        const model = makeMockModel(root, { [colA.id]: { pixelToSizeRatio: 1 } });
+
+        minimizeNodeToggle(model as any, paneA1.id);
+        expect(paneA1.minimizedLockedSize).toBe(HeaderHeightPx);
+        expect(paneA1.size).toBe(HeaderHeightPx);
+        expect(isNodeLocked(paneA1)).toBe(true);
+
+        minimizeNodeToggle(model as any, paneA1.id);
+        expect(paneA1.minimizedLockedSize).toBeUndefined();
+        expect(isNodeLocked(paneA1)).toBe(false);
+    });
+
+    it("records minimizedLockedSize on the dissolved column and clears it on undissolve", () => {
+        const { root, colA, paneA1, paneA2, colB } = buildTwoColumnLayout();
+        const model = makeMockModel(root, {
+            [colA.id]: { pixelToSizeRatio: 1 },
+            [colB.id]: { pixelToSizeRatio: 1 },
+        });
+
+        minimizeNodeToggle(model as any, paneA1.id);
+        minimizeNodeToggle(model as any, paneA2.id); // triggers dissolve
+        expect(colA.minimizedLockedSize).toBe(colA.size);
+        expect(isNodeLocked(colA)).toBe(true);
+
+        minimizeNodeToggle(model as any, paneA2.id); // undissolves + restores
+        expect(colA.minimizedLockedSize).toBeUndefined();
+        expect(isNodeLocked(colA)).toBe(false);
+    });
+
+    it("resizeNode rejects the whole action when any target is locked (the reported bug)", () => {
+        const { root, colA, paneA1, paneA2 } = buildTwoColumnLayout();
+        const model = makeMockModel(root, { [colA.id]: { pixelToSizeRatio: 1 } });
+
+        minimizeNodeToggle(model as any, paneA1.id);
+        const lockedSize = paneA1.size;
+        const siblingSize = paneA2.size;
+
+        resizeNode({ rootNode: root, pendingBackendActions: [] } as any, {
+            type: "resize" as any,
+            resizeOperations: [
+                { nodeId: paneA1.id, size: 90 },
+                { nodeId: paneA2.id, size: 10 },
+            ],
+        } as any);
+
+        // Atomic reject: neither side of the pair applied.
+        expect(paneA1.size).toBe(lockedSize);
+        expect(paneA2.size).toBe(siblingSize);
+    });
+
+    it("splitVertical rejects a locked target", () => {
+        const { root, colA, paneA1 } = buildTwoColumnLayout();
+        const model = makeMockModel(root, { [colA.id]: { pixelToSizeRatio: 1 } });
+
+        minimizeNodeToggle(model as any, paneA1.id);
+        const newNode = newLayoutNode(FlexDirection.Row, PANE_SIZE, undefined, { blockId: "newPane" });
+        splitVertical({ rootNode: root, pendingBackendActions: [] } as any, {
+            type: "splitvertical" as any,
+            targetNodeId: paneA1.id,
+            newNode,
+            position: "after",
+        } as any);
+
+        // Tree unchanged: colA still has exactly its two original panes.
+        expect(colA.children).toHaveLength(2);
+        expect(paneA1.size).toBe(HeaderHeightPx);
+    });
+
+    it("enforceMinimizedLocks snaps a tampered minimized size back and repays the sibling", () => {
+        const { root, colA, paneA1, paneA2 } = buildTwoColumnLayout();
+        const model = makeMockModel(root, { [colA.id]: { pixelToSizeRatio: 1 } });
+
+        minimizeNodeToggle(model as any, paneA1.id);
+        const siblingSize = paneA2.size;
+
+        // Simulate a writer that bypassed the reducer guards (stale tree push).
+        paneA1.size = 120;
+        paneA2.size = siblingSize - (120 - HeaderHeightPx);
+
+        const snapped = enforceMinimizedLocks(root);
+        expect(snapped).toBe(1);
+        expect(paneA1.size).toBe(HeaderHeightPx);
+        expect(paneA2.size).toBe(siblingSize);
+    });
+
+    it("enforceMinimizedLocks is a no-op on a tree that honors its locks", () => {
+        const { root, colA, paneA1 } = buildTwoColumnLayout();
+        const model = makeMockModel(root, { [colA.id]: { pixelToSizeRatio: 1 } });
+        minimizeNodeToggle(model as any, paneA1.id);
+        expect(enforceMinimizedLocks(root)).toBe(0);
     });
 });
 

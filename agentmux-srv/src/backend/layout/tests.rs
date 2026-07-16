@@ -261,6 +261,141 @@ fn balance_column_dissolve_suppresses_direction_flip() {
     );
 }
 
+// ── Minimize lock (locked-state spec, 2026-07-16) ───────────────────────────
+
+/// Leaf carrying the minimize-lock fields the frontend writes (round-tripped
+/// through `extra`): `minimizedSize` (original size) + `minimizedLockedSize`
+/// (the size the node is locked to while minimized).
+fn locked_leaf(id: &str, block_id: &str, locked_size: f32) -> LayoutNode {
+    let mut node = leaf(id, block_id, locked_size);
+    node.extra
+        .insert("minimizedSize".into(), serde_json::json!(200.0));
+    node.extra
+        .insert("minimizedLockedSize".into(), serde_json::json!(locked_size));
+    node
+}
+
+#[test]
+fn resize_nodes_rejects_minimize_locked_target() {
+    let mut root = group(
+        "root",
+        FlexDirection::Column,
+        DEFAULT_NODE_SIZE,
+        vec![locked_leaf("l1", "b1", 33.0), leaf("l2", "b2", 367.0)],
+    );
+    let ops = vec![
+        ResizeOp { node_id: "l1".into(), size: 90.0 },
+        ResizeOp { node_id: "l2".into(), size: 10.0 },
+    ];
+    assert!(matches!(
+        resize_nodes(&mut root, &ops),
+        Err(LayoutError::NodeLocked { .. })
+    ));
+    // Atomic reject: neither op applied.
+    assert_eq!(root.children[0].size, 33.0);
+    assert_eq!(root.children[1].size, 367.0);
+}
+
+#[test]
+fn move_node_rejects_locked_source_and_locked_destination() {
+    let mut dissolved = group(
+        "colA",
+        FlexDirection::Column,
+        66.0,
+        vec![locked_leaf("l1", "b1", 33.0), locked_leaf("l2", "b2", 33.0)],
+    );
+    dissolved
+        .extra
+        .insert("columnDissolve".into(), serde_json::json!({"targetColumnId": "host"}));
+    let mut root = group(
+        "root",
+        FlexDirection::Row,
+        DEFAULT_NODE_SIZE,
+        vec![
+            group("host", FlexDirection::Column, 200.0, vec![dissolved, leaf("content", "b3", 300.0)]),
+            leaf("other", "b4", 200.0),
+        ],
+    );
+    // Moving a locked node out is rejected.
+    assert!(matches!(
+        move_node(&mut root, "l1", "root", 0),
+        Err(LayoutError::NodeLocked { .. })
+    ));
+    // Moving anything INTO a dissolved column is rejected.
+    assert!(matches!(
+        move_node(&mut root, "other", "colA", 0),
+        Err(LayoutError::NodeLocked { .. })
+    ));
+}
+
+#[test]
+fn swap_nodes_rejects_locked_endpoint() {
+    let mut root = group(
+        "root",
+        FlexDirection::Column,
+        DEFAULT_NODE_SIZE,
+        vec![locked_leaf("l1", "b1", 33.0), leaf("l2", "b2", 367.0)],
+    );
+    assert!(matches!(
+        swap_nodes(&mut root, "l1", "l2"),
+        Err(LayoutError::NodeLocked { .. })
+    ));
+    assert!(matches!(
+        swap_nodes(&mut root, "l2", "l1"),
+        Err(LayoutError::NodeLocked { .. })
+    ));
+}
+
+#[test]
+fn split_rejects_locked_target() {
+    let mut root = group(
+        "root",
+        FlexDirection::Column,
+        DEFAULT_NODE_SIZE,
+        vec![locked_leaf("l1", "b1", 33.0), leaf("l2", "b2", 367.0)],
+    );
+    assert!(matches!(
+        split_vertical(&mut root, "l1", leaf("new", "b9", 100.0), SplitPosition::After),
+        Err(LayoutError::NodeLocked { .. })
+    ));
+    assert!(matches!(
+        split_horizontal(&mut root, "l1", leaf("new", "b9", 100.0), SplitPosition::Before),
+        Err(LayoutError::NodeLocked { .. })
+    ));
+}
+
+#[test]
+fn enforce_locks_snaps_tampered_size_and_redistributes() {
+    // A minimized leaf whose size was dragged from its locked 33.0 up to 120.0
+    // (the reported bug). Enforcement snaps it back and returns the 87.0 delta
+    // to the unlocked sibling so the column's unit budget is conserved.
+    let mut tampered = locked_leaf("l1", "b1", 33.0);
+    tampered.size = 120.0;
+    let mut root = Some(group(
+        "root",
+        FlexDirection::Column,
+        DEFAULT_NODE_SIZE,
+        vec![tampered, leaf("l2", "b2", 280.0)],
+    ));
+    let snapped = enforce_minimized_locks(&mut root);
+    assert_eq!(snapped, 1);
+    let root = root.unwrap();
+    assert_eq!(root.children[0].size, 33.0);
+    assert_eq!(root.children[1].size, 367.0);
+}
+
+#[test]
+fn enforce_locks_noop_when_sizes_honored() {
+    let mut root = Some(group(
+        "root",
+        FlexDirection::Column,
+        DEFAULT_NODE_SIZE,
+        vec![locked_leaf("l1", "b1", 33.0), leaf("l2", "b2", 367.0)],
+    ));
+    assert_eq!(enforce_minimized_locks(&mut root), 0);
+    assert_eq!(enforce_minimized_locks(&mut None), 0);
+}
+
 #[test]
 fn balance_drops_empty_branch_child() {
     // Row[ leaf1, leaf2, empty-branch ] → empty branch dropped, 2 remain.

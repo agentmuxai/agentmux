@@ -137,6 +137,17 @@ pub(super) fn handle_layout_set_tree(
             "reducer: LayoutSetTree pruned dangling layout leaf/leaves referencing since-deleted blocks"
         );
     }
+    // Minimize-lock enforcement (same write-point-invariant shape as the
+    // prune above; SPEC_LAYOUT_MINIMIZE_LOCKED_STATE_REDESIGN_2026_07_16.md):
+    // a pushed tree that resized a minimized node gets snapped back here.
+    let snapped = crate::backend::layout::enforce_minimized_locks(&mut tab.rootnode);
+    if snapped > 0 {
+        tracing::warn!(
+            tab_id = %tab_id,
+            snapped,
+            "reducer: LayoutSetTree snapped minimize-locked node size(s) back to their locked values"
+        );
+    }
     let new_tree = tab.rootnode.clone();
     let v = state.bump_version();
     vec![Event::LayoutTreeReplaced {
@@ -725,6 +736,15 @@ pub(super) fn handle_layout_insert_node_at_index(
             "reducer: LayoutInsertNodeAtIndex pruned dangling layout leaf/leaves referencing since-deleted blocks"
         );
     }
+    // Minimize-lock enforcement, same choke point (see handle_layout_set_tree).
+    let snapped = crate::backend::layout::enforce_minimized_locks(&mut tab.rootnode);
+    if snapped > 0 {
+        tracing::warn!(
+            tab_id = %tab_id,
+            snapped,
+            "reducer: LayoutInsertNodeAtIndex snapped minimize-locked node size(s) back to their locked values"
+        );
+    }
     reconcile_focus_magnify(tab);
     let new_tree = tab.rootnode.clone();
     let v = state.bump_version();
@@ -789,6 +809,20 @@ where
             op,
             pruned,
             "reducer: pruned dangling layout leaf/leaves referencing since-deleted blocks"
+        );
+    }
+    // Minimize-lock enforcement, same choke point (see handle_layout_set_tree).
+    // The per-op guards (`LayoutError::NodeLocked`) reject ops that *target* a
+    // locked node; this pass additionally corrects indirect damage — e.g. a
+    // legitimate resize pair whose unit redistribution squeezed a locked
+    // sibling through `balance_node`'s rebuild.
+    let snapped = crate::backend::layout::enforce_minimized_locks(&mut tab.rootnode);
+    if snapped > 0 {
+        tracing::warn!(
+            tab_id = %tab_id,
+            op,
+            snapped,
+            "reducer: snapped minimize-locked node size(s) back to their locked values"
         );
     }
     Ok(())

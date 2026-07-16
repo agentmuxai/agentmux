@@ -3,6 +3,7 @@
 
 import { debounce } from "throttle-debounce";
 import { findNode } from "./layoutNode";
+import { isNodeLocked } from "./layoutMinimize";
 import {
     FlexDirection,
     LayoutTreeActionType,
@@ -69,6 +70,11 @@ export function onResizeMove(model: LayoutModel, resizeHandle: ResizeHandleProps
         const beforeNode = parentNode.children![resizeHandle.parentIndex];
         const afterNode = parentNode.children![resizeHandle.parentIndex + 1];
 
+        // Minimized is a locked state: locked edges get no handle (layoutGeometry),
+        // but a stale handle from a pre-suppression frame could still deliver a drag
+        // here — refuse to build a resize context that flanks a locked node.
+        if (isNodeLocked(beforeNode) || isNodeLocked(afterNode)) return;
+
         const addlProps = model.getter(model.additionalProps);
         const pixelToSizeRatio = addlProps[resizeHandle.parentNodeId]?.pixelToSizeRatio;
         if (beforeNode && afterNode && pixelToSizeRatio) {
@@ -98,12 +104,7 @@ export function onResizeMove(model: LayoutModel, resizeHandle: ResizeHandleProps
     const beforeNodeSize = model.resizeContext.beforeNodeStartSize - clientDiff;
     const afterNodeSize = model.resizeContext.afterNodeStartSize + clientDiff;
 
-    // Minimized nodes can legitimately be smaller than MinNodeSizePx — skip the guard for them.
-    const beforeNode = findNode(model.treeState.rootNode, model.resizeContext.beforeNodeId);
-    const afterNode = findNode(model.treeState.rootNode, model.resizeContext.afterNodeId);
-    const beforeMinimized = beforeNode?.minimizedSize !== undefined;
-    const afterMinimized = afterNode?.minimizedSize !== undefined;
-    if ((!beforeMinimized && beforeNodeSize < minNodeSize) || (!afterMinimized && afterNodeSize < minNodeSize)) {
+    if (beforeNodeSize < minNodeSize || afterNodeSize < minNodeSize) {
         return;
     }
 
