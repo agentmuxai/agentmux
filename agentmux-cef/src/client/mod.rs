@@ -184,6 +184,21 @@ impl AgentMuxHandler {
         }))
     }
 
+    /// The authoritative IPC port for URL / cred construction.
+    ///
+    /// The handler's own `self.ipc_port` field is ZERO for floating-pane /
+    /// pool window handlers — they are built via
+    /// `new_with_browser_pane(state, 0, true)`. Any URL or cred built from
+    /// that 0 (bridge re-injection, crash-recovery navigation URL, base-URL
+    /// resolve) yields `…:0`, which the frontend's `invokeCommand` rejects
+    /// (`if (!port)`) → the backend-never-starts lock-out (#52). `AppState`
+    /// holds the real port (set at startup), so read it there. For non-pane
+    /// windows `self.ipc_port` already equals `state.ipc_port`, so this is a
+    /// no-op change for them.
+    fn resolved_ipc_port(&self) -> u16 {
+        *self.state.ipc_port.lock()
+    }
+
     /// Reverse-lookup this browser's window label from the reducer's browsers
     /// map (label → browser), by object identity. Mirrors the find-by-identity
     /// loop in `on_before_close`. Used by the crash-recovery navigation so a
@@ -225,6 +240,6 @@ impl AgentMuxHandler {
             return u;
         }
         let label = self.window_label_for(owned);
-        recovery_pages::recovery_navigation_url(base_url, self.ipc_port, &self.state.ipc_token, label.as_deref())
+        recovery_pages::recovery_navigation_url(base_url, self.resolved_ipc_port(), &self.state.ipc_token, label.as_deref())
     }
 }
