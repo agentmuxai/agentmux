@@ -2763,6 +2763,56 @@ mod tests {
         }
     }
 
+    /// Minimize-lock enforcement at the set-tree choke point
+    /// (SPEC_LAYOUT_MINIMIZE_LOCKED_STATE_REDESIGN_2026_07_16.md): a pushed
+    /// tree in which a minimized node's size was tampered with (e.g. a
+    /// resize that slipped past a stale frontend's guards) must be snapped
+    /// back to its recorded locked size, with the delta repaid to the
+    /// unlocked sibling, before the tree is persisted.
+    #[test]
+    fn layout_set_tree_snaps_tampered_minimized_size_back_to_its_lock() {
+        let (mut state, tab_id) = fresh_tab();
+        seed_block(&mut state, &tab_id, "b1");
+        seed_block(&mut state, &tab_id, "b2");
+
+        let mut minimized = leaf_node("min", "b1");
+        minimized.size = 120.0; // tampered: locked value is 33.0
+        minimized
+            .extra
+            .insert("minimizedSize".into(), serde_json::json!(200.0));
+        minimized
+            .extra
+            .insert("minimizedLockedSize".into(), serde_json::json!(33.0));
+        let mut sibling = leaf_node("sib", "b2");
+        sibling.size = 280.0;
+        let pushed_tree = agentmux_common::LayoutNode {
+            id: "root".into(),
+            children: vec![minimized, sibling],
+            ..Default::default()
+        };
+
+        let events = update(
+            &mut state,
+            Command::LayoutSetTree {
+                tab_id: tab_id.clone(),
+                new_tree: Some(pushed_tree),
+                correlation_id: "corr".into(),
+                slices: None,
+            },
+            &ctx(1),
+        );
+
+        assert!(matches!(&events[0], Event::LayoutTreeReplaced { .. }));
+        let root = state.tabs[&tab_id].rootnode.as_ref().unwrap();
+        assert_eq!(root.children[0].size, 33.0, "tampered size snapped back to lock");
+        assert_eq!(root.children[1].size, 367.0, "delta repaid to the unlocked sibling");
+        // The emitted event's tree must reflect the healed sizes too — it is
+        // what the persist subscriber writes to db_layout.
+        if let Event::LayoutTreeReplaced { new_tree, .. } = &events[0] {
+            assert_eq!(new_tree.as_ref().unwrap().children[0].size, 33.0);
+        }
+    }
+
     /// SPEC_864 Phase 2 — a slice-carrying full-row push applies focus/
     /// magnify to the TabRecord (empty = clear) and echoes the slices on
     /// the emitted event for the persist subscriber.

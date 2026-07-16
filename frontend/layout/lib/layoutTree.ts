@@ -32,6 +32,7 @@ import {
 } from "./types";
 
 import { newLayoutNode } from "./layoutNode";
+import { isNodeLocked } from "./layoutMinimize";
 import { LayoutTreeReplaceNodeAction, LayoutTreeSplitHorizontalAction, LayoutTreeSplitVerticalAction } from "./types";
 
 export const DEFAULT_MAX_CHILDREN = 5;
@@ -252,6 +253,13 @@ export function moveNode(layoutState: LayoutTreeState, action: LayoutTreeMoveNod
     const parent = findNode(rootNode, action.parentId);
     const oldParent = findParent(rootNode, action.node.id);
 
+    // Minimized is a locked state: a locked node can't be moved (restore it first),
+    // and nothing may be inserted into a dissolved column.
+    if (isNodeLocked(node) || isNodeLocked(parent)) {
+        console.warn("moveNode rejected: source or destination is minimize-locked");
+        return;
+    }
+
     let startingIndex = 0;
 
     // If moving under the same parent, we need to make sure that we are removing the child from its old position, not its new one.
@@ -347,6 +355,15 @@ export function swapNode(layoutState: LayoutTreeState, action: LayoutTreeSwapNod
         return;
     }
 
+    // Minimized is a locked state: locked nodes don't swap.
+    if (
+        isNodeLocked(findNode(layoutState.rootNode, action.node1Id)) ||
+        isNodeLocked(findNode(layoutState.rootNode, action.node2Id))
+    ) {
+        console.warn("swapNode rejected: a swap endpoint is minimize-locked");
+        return;
+    }
+
     const parentNode1 = findParent(layoutState.rootNode, action.node1Id);
     const parentNode2 = findParent(layoutState.rootNode, action.node2Id);
     const parentNode1Index = parentNode1.children!.findIndex((child) => child.id === action.node1Id);
@@ -395,6 +412,15 @@ export function resizeNode(layoutState: LayoutTreeState, action: LayoutTreeResiz
     if (!action.resizeOperations) {
         console.error("invalid resizeNode operation. nodeSizes array must be defined.");
     }
+    // Minimized is a locked state: reject the whole action if any target is locked.
+    // Resize ops come in before/after pairs whose unit sum is conserved — applying
+    // only the unlocked half would leak flex units, so it's all-or-nothing.
+    for (const resize of action.resizeOperations) {
+        if (isNodeLocked(findNode(layoutState.rootNode, resize.nodeId))) {
+            console.warn(`resizeNode rejected: node ${resize.nodeId} is minimize-locked`);
+            return;
+        }
+    }
     for (const resize of action.resizeOperations) {
         if (!resize.nodeId || resize.size < 0 || resize.size > 100) {
             console.error("invalid resizeNode operation. nodeId must be defined and size must be between 0 and 100");
@@ -403,7 +429,7 @@ export function resizeNode(layoutState: LayoutTreeState, action: LayoutTreeResiz
         const node = findNode(layoutState.rootNode, resize.nodeId);
         node.size = resize.size;
     }
-    
+
 }
 
 export function focusNode(layoutState: LayoutTreeState, action: LayoutTreeFocusNodeAction) {
@@ -502,6 +528,11 @@ export function splitHorizontal(layoutState: LayoutTreeState, action: LayoutTree
         console.error("splitHorizontal: Target node not found", targetNodeId);
         return;
     }
+    // Minimized is a locked state: splitting would spawn a full pane inside a header strip.
+    if (isNodeLocked(targetNode)) {
+        console.warn("splitHorizontal rejected: target is minimize-locked", targetNodeId);
+        return;
+    }
     const originalTargetSize = applySizeFraction(targetNode, newNode, sizeFraction);
 
     const parent = findParent(layoutState.rootNode, targetNodeId);
@@ -547,6 +578,11 @@ export function splitVertical(layoutState: LayoutTreeState, action: LayoutTreeSp
     const targetNode = findNode(layoutState.rootNode, targetNodeId);
     if (!targetNode) {
         console.error("splitVertical: Target node not found", targetNodeId);
+        return;
+    }
+    // Minimized is a locked state: splitting would spawn a full pane inside a header strip.
+    if (isNodeLocked(targetNode)) {
+        console.warn("splitVertical rejected: target is minimize-locked", targetNodeId);
         return;
     }
     const originalTargetSize = applySizeFraction(targetNode, newNode, sizeFraction);

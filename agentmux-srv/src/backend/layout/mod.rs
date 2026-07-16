@@ -33,6 +33,10 @@ pub enum LayoutError {
     /// both `data` and `children`, or neither. The TS oracle (`validateNode`
     /// in `layoutNode.ts`) throws "Invalid node" here.
     InvalidNode { id: String },
+    /// The op targets a minimize-locked node (minimized leaf, slipped header,
+    /// or dissolved column). Minimized is a locked state — see
+    /// `docs/specs/SPEC_LAYOUT_MINIMIZE_LOCKED_STATE_REDESIGN_2026_07_16.md`.
+    NodeLocked { id: String },
 }
 
 impl std::fmt::Display for LayoutError {
@@ -44,6 +48,7 @@ impl std::fmt::Display for LayoutError {
             Self::InvalidSize { node_id, size } => write!(f, "invalid size {:.2} for node {}", size, node_id),
             Self::InvalidIndexPath => write!(f, "index_arr is empty or points to a non-existent location"),
             Self::InvalidNode { id } => write!(f, "invalid node (leaf-XOR-branch violated): {}", id),
+            Self::NodeLocked { id } => write!(f, "node is minimize-locked: {}", id),
         }
     }
 }
@@ -206,6 +211,62 @@ pub fn prune_dangling_block_refs(
         }
     }
     pruned
+}
+
+/// A minimize-locked node: a minimized leaf (`minimizedSize`), a slipped
+/// header (`slipMinimize`), or a dissolved column (`columnDissolve`). The
+/// fields are written by the frontend minimize subsystem and round-trip
+/// through the untyped `extra` catch-all on this side. Mirrors
+/// `isNodeLocked` in `frontend/layout/lib/layoutMinimize.ts`.
+pub fn is_node_locked(node: &LayoutNode) -> bool {
+    node.extra.contains_key("minimizedSize")
+        || node.extra.contains_key("slipMinimize")
+        || node.extra.contains_key("columnDissolve")
+}
+
+/// Write-point enforcement of the minimize lock (the invariant-at-the-write
+/// companion to `prune_dangling_block_refs`, per
+/// `SPEC_LAYOUT_MINIMIZE_LOCKED_STATE_REDESIGN_2026_07_16.md`): snap every
+/// locked node's `size` back to its recorded `minimizedLockedSize`,
+/// returning the delta to the nearest unlocked sibling (next preferred,
+/// then previous) so the parent's flex-unit budget is conserved. Mirrors
+/// `enforceMinimizedLocks` in `frontend/layout/lib/layoutMinimize.ts`.
+/// Returns the number of snapped nodes (0 = tree already honored the locks
+/// — the common case, cheap to call unconditionally on every write).
+///
+/// If every sibling is locked (inside a dissolved column) the delta is
+/// dropped: flex sizes are relative within the parent, so the locked
+/// nodes' shares stay proportionally correct.
+pub fn enforce_minimized_locks(root: &mut Option<LayoutNode>) -> usize {
+    fn walk(node: &mut LayoutNode) -> usize {
+        let mut snapped = 0;
+        let locked_flags: Vec<bool> = node.children.iter().map(is_node_locked).collect();
+        for i in 0..node.children.len() {
+            let locked_size = node.children[i]
+                .extra
+                .get("minimizedLockedSize")
+                .and_then(|v| v.as_f64())
+                .map(|v| v as f32);
+            if let (true, Some(locked_size)) = (locked_flags[i], locked_size) {
+                let delta = node.children[i].size - locked_size;
+                if delta.abs() > 1e-4 {
+                    node.children[i].size = locked_size;
+                    let beneficiary = (i + 1..node.children.len())
+                        .find(|&j| !locked_flags[j])
+                        .or_else(|| (0..i).rev().find(|&j| !locked_flags[j]));
+                    if let Some(j) = beneficiary {
+                        node.children[j].size += delta;
+                    }
+                    snapped += 1;
+                }
+            }
+        }
+        for child in &mut node.children {
+            snapped += walk(child);
+        }
+        snapped
+    }
+    root.as_mut().map_or(0, walk)
 }
 
 /// First leaf (depth-first) whose `data.block_id` is set but not present in
@@ -412,9 +473,18 @@ pub fn move_node(
     let node_to_move = find_node_by_id(root, node_id)
         .ok_or_else(|| LayoutError::NodeNotFound { id: node_id.to_string() })?
         .clone();
+    // Minimized is a locked state: a locked node can't be moved (restore it
+    // first), and nothing may be inserted into a dissolved column.
+    if is_node_locked(&node_to_move) {
+        return Err(LayoutError::NodeLocked { id: node_id.to_string() });
+    }
     // Confirm destination exists while tree is still intact.
-    if find_node_by_id(root, new_parent_id).is_none() {
-        return Err(LayoutError::NodeNotFound { id: new_parent_id.to_string() });
+    match find_node_by_id(root, new_parent_id) {
+        None => return Err(LayoutError::NodeNotFound { id: new_parent_id.to_string() }),
+        Some(p) if is_node_locked(p) => {
+            return Err(LayoutError::NodeLocked { id: new_parent_id.to_string() });
+        }
+        Some(_) => {}
     }
     // Confirm destination is NOT a descendant of the node being moved.
     if find_node_by_id(&node_to_move, new_parent_id).is_some() {
@@ -507,6 +577,13 @@ pub fn swap_nodes(
     let n2 = find_node_by_id(root, node2_id)
         .ok_or_else(|| LayoutError::NodeNotFound { id: node2_id.to_string() })?
         .clone();
+    // Minimized is a locked state: locked nodes don't swap.
+    if is_node_locked(&n1) {
+        return Err(LayoutError::NodeLocked { id: node1_id.to_string() });
+    }
+    if is_node_locked(&n2) {
+        return Err(LayoutError::NodeLocked { id: node2_id.to_string() });
+    }
     let p1_id = find_parent_id(root, node1_id)
         .ok_or_else(|| LayoutError::NodeNotFound { id: format!("parent of {}", node1_id) })?;
     let p2_id = find_parent_id(root, node2_id)
@@ -558,10 +635,18 @@ pub fn resize_nodes(root: &mut LayoutNode, ops: &[ResizeOp]) -> Result<(), Layou
             });
         }
     }
-    // Validation pass 2: all target nodes exist.
+    // Validation pass 2: all target nodes exist and none is minimize-locked.
+    // Ops come in before/after pairs whose unit sum is conserved — applying
+    // only the unlocked half would leak flex units, so it's all-or-nothing
+    // (same atomic-reject semantics as the passes above, and the same guard
+    // as the frontend's `resizeNode`).
     for op in ops {
-        if find_node_by_id(root, &op.node_id).is_none() {
-            return Err(LayoutError::NodeNotFound { id: op.node_id.clone() });
+        match find_node_by_id(root, &op.node_id) {
+            None => return Err(LayoutError::NodeNotFound { id: op.node_id.clone() }),
+            Some(node) if is_node_locked(node) => {
+                return Err(LayoutError::NodeLocked { id: op.node_id.clone() });
+            }
+            Some(_) => {}
         }
     }
     // Apply pass (all valid).
@@ -629,9 +714,13 @@ fn split_impl(
     position: SplitPosition,
     direction: FlexDirection,
 ) -> Result<(), LayoutError> {
-    // Find target; it must exist.
-    let _ = find_node_by_id(root, target_id)
+    // Find target; it must exist and must not be minimize-locked (splitting
+    // a locked node would spawn a full pane inside a header strip).
+    let target = find_node_by_id(root, target_id)
         .ok_or_else(|| LayoutError::NodeNotFound { id: target_id.to_string() })?;
+    if is_node_locked(target) {
+        return Err(LayoutError::NodeLocked { id: target_id.to_string() });
+    }
 
     let parent_id = find_parent_id(root, target_id);
 
