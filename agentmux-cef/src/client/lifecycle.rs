@@ -574,6 +574,24 @@ impl AgentMuxHandler {
         true // cancel the top-level popup creation
     }
 
+    /// Post `quit_message_loop()` back to the UI thread from a background
+    /// thread, once that thread's `backend_close_window` notify work is
+    /// done. Never call `quit_message_loop()` directly off the UI thread —
+    /// see `ui_tasks::QuitMessageLoopTask`'s doc comment. Fixes the
+    /// last-window close race — docs/retro/retro-last-window-close-quit-race-2026-07-16.md.
+    fn quit_after_backend_notify() {
+        let mut task = crate::ui_tasks::QuitMessageLoopTask::new();
+        let posted = post_task(ThreadId::UI, Some(&mut task));
+        if posted == 0 {
+            // post_task can fail during teardown if the UI thread's message
+            // loop already tore down its task queue (see the doc note at
+            // lifecycle.rs:416 for the analogous close_browser case). Nothing
+            // recoverable to do — the process is already on its way out one
+            // way or another; log so a future investigation isn't blind.
+            tracing::warn!(target: "wrr", "[wrr] quit_after_backend_notify: post_task(UI) failed — process is likely already exiting");
+        }
+    }
+
     pub(crate) fn on_before_close(&mut self, browser: Option<&mut Browser>) {
         debug_assert_ne!(currently_on(ThreadId::UI), 0);
 
@@ -934,90 +952,105 @@ impl AgentMuxHandler {
         // Stage 2: every browser this handler ever managed is now
         // gone. Safe to call quit_message_loop — no other CEF
         // lifecycle is in flight that could deadlock with it.
-        if self.browser_list.is_empty() && !self.is_browser_pane {
-            tracing::warn!(
-                target: "wrr",
-                "[wrr] stage 2: self.browser_list.is_empty() — calling quit_message_loop"
-            );
-            quit_message_loop();
-            tracing::warn!(target: "wrr", "[wrr] quit_message_loop returned");
-        } else {
-            // Phase B.7.3.3 — `Event::WindowClosed` +
-            // `Event::WindowInstanceReleased` from the launcher
-            // drive remaining renderers' InstancePanel atoms via the
-            // CEF JS bridge; no sync emit here.
+        //
+        // 2026-07-16 fix (docs/retro/retro-last-window-close-quit-race-2026-07-16.md):
+        // this branch used to call quit_message_loop() and NOTHING ELSE —
+        // the backend-notify block below lived only in the `else` arm, so
+        // closing the LAST window never even attempted backend_close_window
+        // for it. srv never heard about the close, its window/workspace/tab
+        // row leaked permanently, and crash-reproject faithfully resurrected
+        // it as a "ghost" window on every subsequent launch. The notify
+        // logic below now runs UNCONDITIONALLY (last window or not); when
+        // this is the last window, quit_message_loop is deferred until that
+        // notify work finishes, posted back to the UI thread (it must run
+        // there — see the comment above about deadlocking on a nested call).
+        let is_last_window = self.browser_list.is_empty() && !self.is_browser_pane;
 
-            // Tell the backend to clean up this window's workspace/tabs/shells.
-            // This replaces the JavaScript `beforeunload` handler — running it here
-            // ensures shells die after the CEF browser is gone (not while it's still
-            // alive), so Task Manager keeps them grouped until they exit.
-            if let Some(window_id) = backend_window_id {
-                let web_endpoint = self.state.backend_endpoints.lock().web_endpoint.clone();
-                let auth_key = self.state.auth_key.lock().clone();
-                // Safe to report here (reagent P1 on PR #1965): we already
-                // resolved the window_id, so there's no pending retry left
-                // to race against.
-                let unregister_lbl = label.clone();
-                dlog(&format!("spawning backend_close_window thread for window_id={}", window_id));
-                std::thread::spawn(move || {
-                    backend_close_window(&web_endpoint, &auth_key, &window_id);
-                    if let Some(lbl) = unregister_lbl {
+        // Phase B.7.3.3 — `Event::WindowClosed` +
+        // `Event::WindowInstanceReleased` from the launcher
+        // drive remaining renderers' InstancePanel atoms via the
+        // CEF JS bridge; no sync emit here.
+
+        // Tell the backend to clean up this window's workspace/tabs/shells.
+        // This replaces the JavaScript `beforeunload` handler — running it here
+        // ensures shells die after the CEF browser is gone (not while it's still
+        // alive), so Task Manager keeps them grouped until they exit.
+        if let Some(window_id) = backend_window_id {
+            let web_endpoint = self.state.backend_endpoints.lock().web_endpoint.clone();
+            let auth_key = self.state.auth_key.lock().clone();
+            // Safe to report here (reagent P1 on PR #1965): we already
+            // resolved the window_id, so there's no pending retry left
+            // to race against.
+            let unregister_lbl = label.clone();
+            dlog(&format!("spawning backend_close_window thread for window_id={}", window_id));
+            std::thread::spawn(move || {
+                backend_close_window(&web_endpoint, &auth_key, &window_id);
+                if let Some(lbl) = unregister_lbl {
+                    crate::launcher_ipc::report_backend_window_id_unregistered(lbl);
+                }
+                if is_last_window {
+                    tracing::warn!(target: "wrr", "[wrr] stage 2: backend notified — posting quit_message_loop to UI thread");
+                    Self::quit_after_backend_notify();
+                }
+            });
+        } else if let Some(lbl) = label.clone() {
+            // The immediate shadow lookup missed. This is expected and
+            // permanent for pre-promote pool-window churn (never had a
+            // backend_window_id, never will) — but it's also exactly
+            // what happens when a window is promoted and closed fast
+            // enough that the host->launcher->host register_backend_window
+            // round trip hasn't landed yet, confirmed in the 2026-07-04
+            // pagefile-test session (docs/retro/retro-window-lifecycle-leak-2026-07-04.md).
+            // Retry on this same background thread (never the UI thread)
+            // for a bounded window before giving up — closes that race
+            // without a larger reconciliation mechanism. See
+            // docs/specs/SPEC_WINDOW_LIFECYCLE_CLOSE_RELIABILITY_2026_07_04.md.
+            let state = self.state.clone();
+            let web_endpoint = self.state.backend_endpoints.lock().web_endpoint.clone();
+            let auth_key = self.state.auth_key.lock().clone();
+            std::thread::spawn(move || {
+                let sleep_fn = |d: std::time::Duration| std::thread::sleep(d);
+                match retry_backend_window_id_lookup(
+                    BACKEND_WINDOW_ID_RETRY_ATTEMPTS,
+                    BACKEND_WINDOW_ID_RETRY_DELAY,
+                    || state.backend_window_id(&lbl),
+                    sleep_fn,
+                ) {
+                    Some(window_id) => {
+                        dlog(&format!(
+                            "backend_window_id({:?}) resolved on retry — spawning backend_close_window",
+                            lbl
+                        ));
+                        backend_close_window(&web_endpoint, &auth_key, &window_id);
+                        // Report the unregister only now (reagent P1 on
+                        // PR #1965) — the retry just succeeded using
+                        // this mapping, so it's safe to tell the
+                        // launcher to drop it.
                         crate::launcher_ipc::report_backend_window_id_unregistered(lbl);
                     }
-                });
-            } else if let Some(lbl) = label.clone() {
-                // The immediate shadow lookup missed. This is expected and
-                // permanent for pre-promote pool-window churn (never had a
-                // backend_window_id, never will) — but it's also exactly
-                // what happens when a window is promoted and closed fast
-                // enough that the host->launcher->host register_backend_window
-                // round trip hasn't landed yet, confirmed in the 2026-07-04
-                // pagefile-test session (docs/retro/retro-window-lifecycle-leak-2026-07-04.md).
-                // Retry on this same background thread (never the UI thread)
-                // for a bounded window before giving up — closes that race
-                // without a larger reconciliation mechanism. See
-                // docs/specs/SPEC_WINDOW_LIFECYCLE_CLOSE_RELIABILITY_2026_07_04.md.
-                let state = self.state.clone();
-                let web_endpoint = self.state.backend_endpoints.lock().web_endpoint.clone();
-                let auth_key = self.state.auth_key.lock().clone();
-                std::thread::spawn(move || {
-                    let sleep_fn = |d: std::time::Duration| std::thread::sleep(d);
-                    match retry_backend_window_id_lookup(
-                        BACKEND_WINDOW_ID_RETRY_ATTEMPTS,
-                        BACKEND_WINDOW_ID_RETRY_DELAY,
-                        || state.backend_window_id(&lbl),
-                        sleep_fn,
-                    ) {
-                        Some(window_id) => {
-                            dlog(&format!(
-                                "backend_window_id({:?}) resolved on retry — spawning backend_close_window",
-                                lbl
-                            ));
-                            backend_close_window(&web_endpoint, &auth_key, &window_id);
-                            // Report the unregister only now (reagent P1 on
-                            // PR #1965) — the retry just succeeded using
-                            // this mapping, so it's safe to tell the
-                            // launcher to drop it.
-                            crate::launcher_ipc::report_backend_window_id_unregistered(lbl);
-                        }
-                        None => {
-                            let warn = format!(
-                                "[on_before_close] no backend window ID registered for label={:?} after {} retries ({}ms) — shells may orphan",
-                                lbl,
-                                BACKEND_WINDOW_ID_RETRY_ATTEMPTS,
-                                BACKEND_WINDOW_ID_RETRY_ATTEMPTS * BACKEND_WINDOW_ID_RETRY_DELAY.as_millis() as u32
-                            );
-                            dlog(&warn);
-                            tracing::warn!("{}", warn);
-                            // Retries exhausted — nothing left to protect
-                            // against racing; report the unregister so the
-                            // launcher's bookkeeping doesn't keep a stale
-                            // entry for a label that's now definitely gone.
-                            crate::launcher_ipc::report_backend_window_id_unregistered(lbl);
-                        }
+                    None => {
+                        let warn = format!(
+                            "[on_before_close] no backend window ID registered for label={:?} after {} retries ({}ms) — shells may orphan",
+                            lbl,
+                            BACKEND_WINDOW_ID_RETRY_ATTEMPTS,
+                            BACKEND_WINDOW_ID_RETRY_ATTEMPTS * BACKEND_WINDOW_ID_RETRY_DELAY.as_millis() as u32
+                        );
+                        dlog(&warn);
+                        tracing::warn!("{}", warn);
+                        // Retries exhausted — nothing left to protect
+                        // against racing; report the unregister so the
+                        // launcher's bookkeeping doesn't keep a stale
+                        // entry for a label that's now definitely gone.
+                        crate::launcher_ipc::report_backend_window_id_unregistered(lbl);
                     }
-                });
-            } else if !self.is_browser_pane {
+                }
+                if is_last_window {
+                    tracing::warn!(target: "wrr", "[wrr] stage 2: backend notify attempt finished — posting quit_message_loop to UI thread");
+                    Self::quit_after_backend_notify();
+                }
+            });
+        } else {
+            if !self.is_browser_pane {
                 let warn = format!(
                     "[on_before_close] no backend window ID registered for label={:?} — shells may orphan",
                     label
@@ -1033,6 +1066,16 @@ impl AgentMuxHandler {
             // with. Warning here would fire once per pane close now that
             // the wrapper teardown actually runs CEF's close pipeline
             // (retro-browser-pane-renderer-leak-2026-07-07) — pure noise.
+            //
+            // No async work was started above (no backend_window_id, no
+            // label to retry against), so if this was the last window,
+            // quit_message_loop is safe to call directly, right here on
+            // the UI thread — no need to post it.
+            if is_last_window {
+                tracing::warn!(target: "wrr", "[wrr] stage 2: no backend notify possible (no label) — calling quit_message_loop directly");
+                quit_message_loop();
+                tracing::warn!(target: "wrr", "[wrr] quit_message_loop returned");
+            }
         }
 
         tracing::debug!(

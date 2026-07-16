@@ -37,6 +37,31 @@ wrap_task! {
     }
 }
 
+// ── Deferred quit_message_loop (last-window close fix, 2026-07-16) ────────
+//
+// `quit_message_loop()` must run on the UI thread (see the Stage-2 comment
+// in `client/lifecycle.rs::on_before_close`), but the last-window-close fix
+// (docs/retro/retro-last-window-close-quit-race-2026-07-16.md) needs to call
+// it AFTER a background thread finishes notifying srv via
+// `backend_close_window` — otherwise the process can exit before that
+// network call completes, leaking the closing window's srv-side row. This
+// task lets the background thread post the quit back to the UI thread once
+// its notify work is done, instead of calling it inline (from a background
+// thread `quit_message_loop()` is undefined behavior — it's not
+// thread-safe).
+
+wrap_task! {
+    pub struct QuitMessageLoopTask {}
+
+    impl Task {
+        fn execute(&self) {
+            tracing::warn!(target: "wrr", "[wrr] QuitMessageLoopTask: calling quit_message_loop");
+            quit_message_loop();
+            tracing::warn!(target: "wrr", "[wrr] QuitMessageLoopTask: quit_message_loop returned");
+        }
+    }
+}
+
 // ── Close ────────────────────────────────────────────────────────────────
 
 wrap_task! {
@@ -59,6 +84,66 @@ wrap_task! {
             // Widget::Close CHECKs !on_call_stack_ and aborts if the widget is
             // already being destroyed (e.g. macOS windowShouldClose racing this
             // queued IPC task) — is handled by the is_closed() guard below.
+            // 2026-07-16 fix (docs/retro/retro-last-window-close-quit-race-2026-07-16.md):
+            // "main" was the ONE label structurally excluded from ANY
+            // srv-notify call anywhere in this function — every branch below
+            // that calls `demote_srv_cleanup` (the actual `backend_close_window`
+            // → srv `CloseWindow` → delete_workspace cascade trigger) is
+            // explicitly gated on `self.label.starts_with("window-")` or
+            // `self.label != "main"`, on the documented assumption that "main's
+            // close feeds the tuned wrr last-window quit sequence and process
+            // exit reaps everything there." Process exit does NOT reap
+            // anything srv-side: srv is a separate process with its own
+            // persistent DB, and nothing else ever tells it main's window
+            // closed. Confirmed live: closing "main" left its srv window/
+            // workspace/tab rows permanently orphaned, resurrected by
+            // crash-reproject as a "ghost" window on every subsequent launch,
+            // while every OTHER label's close correctly reached srv.
+            //
+            // MUST be synchronous (block this UI-thread task), not fired on a
+            // background thread like `demote_srv_cleanup` does for window-*
+            // labels. First attempt used the async version and it lost the
+            // race every time: `lib.rs`'s shutdown sequence
+            // (`run_message_loop()` returning → "Killing backend sidecar")
+            // followed within ~50ms in live testing, killing the very srv
+            // process the background thread's HTTP call needed to reach,
+            // before it ever got there. CEF's message loop is single-threaded
+            // — this task, the WRR win-event callback that eventually calls
+            // `quit_message_loop()`, and everything else all run on the same
+            // UI thread, so blocking HERE transitively delays all of that
+            // until the notify finishes (or its own bounded ~1s retry +
+            // ~2s-capped HTTP timeouts are exhausted) — which is the point.
+            // Acceptable: this only affects the final moments of an
+            // already-closing app, and mirrors the small bounded quit delay
+            // the on_before_close-path fix (same retro doc) already accepts
+            // for the platforms where that path is the live one.
+            #[cfg(target_os = "windows")]
+            if self.label == "main" {
+                crate::launcher_ipc::report_panes_reaped(self.label.clone());
+                let web_endpoint = self.state.backend_endpoints.lock().web_endpoint.clone();
+                let auth_key = self.state.auth_key.lock().clone();
+                let sleep_fn = |d: std::time::Duration| std::thread::sleep(d);
+                match crate::client::retry_backend_window_id_lookup(
+                    crate::client::BACKEND_WINDOW_ID_RETRY_ATTEMPTS,
+                    crate::client::BACKEND_WINDOW_ID_RETRY_DELAY,
+                    || self.state.backend_window_id(&self.label),
+                    sleep_fn,
+                ) {
+                    Some(window_id) => {
+                        crate::client::backend_close_window(&web_endpoint, &auth_key, &window_id);
+                        crate::launcher_ipc::report_backend_window_id_unregistered(self.label.clone());
+                    }
+                    None => {
+                        tracing::warn!(
+                            target: "wrr",
+                            label = %self.label,
+                            "[close-window] main: no backend window ID after retries — srv state may orphan",
+                        );
+                        crate::launcher_ipc::report_backend_window_id_unregistered(self.label.clone());
+                    }
+                }
+            }
+
             if let Some(window) = get_window_on_ui(&self.state, &self.label) {
                 // CEF 148 Views: closing the WINDOW FIRST tears down the
                 // Window but leaves the hosted browser HIDDEN/RECYCLED —
