@@ -335,6 +335,13 @@ export interface NodeModel {
     isFocused: Accessor<boolean>;
     isMagnified: Accessor<boolean>;
     isMinimized: Accessor<boolean>;
+    /**
+     * False when this pane is the LAST expanded (non-minimized) pane in the
+     * layout — the window must always keep at least one expanded pane, so the
+     * minimize button is hidden and `minimizeNodeToggle` no-ops. Restore is
+     * always allowed (true whenever the pane is currently minimized).
+     */
+    canMinimize: Accessor<boolean>;
     isEphemeral: Accessor<boolean>;
     ready: Accessor<boolean>;
     disablePointerEvents: Accessor<boolean>;

@@ -451,6 +451,101 @@ fn insert_node_at_index_rejects_locked_resolution() {
 }
 
 #[test]
+fn validate_invariants_clean_on_healthy_locked_tree() {
+    let root = Some(group(
+        "root",
+        FlexDirection::Column,
+        DEFAULT_NODE_SIZE,
+        vec![locked_leaf("l1", "b1", 33.0), leaf("l2", "b2", 367.0)],
+    ));
+    assert!(validate_layout_invariants(&root).is_empty());
+    assert!(validate_layout_invariants(&None).is_empty());
+}
+
+#[test]
+fn validate_invariants_flags_the_recovered_0_53_6_corruption() {
+    // Fixture: the exact corrupted shape recovered from a live v0.53.6
+    // instance's db_layout (issue #2179) — a BRANCH carrying the leaf-only
+    // `minimizedSize` marker, with a slipped leaf trapped inside it.
+    let mut term = leaf("term", "b-term", 2.2);
+    term.extra
+        .insert("slipMinimize".into(), serde_json::json!({"targetColumnId": "x"}));
+    let agent = leaf("agent", "b-agent", 4.4);
+    let mut mid = group("mid", FlexDirection::Row, 6.8, vec![term, agent]);
+    mid.extra.insert("minimizedSize".into(), serde_json::json!(9.0));
+    let mut outer = group("outer", FlexDirection::Column, 30.0, vec![mid]);
+    outer.extra.insert("_slipAnchor".into(), serde_json::Value::Bool(true));
+    let root = Some(group(
+        "root",
+        FlexDirection::Row,
+        10.0,
+        vec![outer, leaf("armory", "b-armory", 10.0)],
+    ));
+
+    let violations = validate_layout_invariants(&root);
+    assert!(
+        violations.iter().any(|v| v.starts_with("MIN_MARKER_ON_BRANCH")),
+        "expected MIN_MARKER_ON_BRANCH, got: {:?}",
+        violations
+    );
+}
+
+#[test]
+fn validate_invariants_flags_all_leaves_locked() {
+    // Every leaf minimize-locked = an all-headers window with nothing
+    // restorable in view (the frontend's last-expanded-pane guard exists to
+    // prevent exactly this).
+    let root = Some(group(
+        "root",
+        FlexDirection::Column,
+        DEFAULT_NODE_SIZE,
+        vec![locked_leaf("l1", "b1", 33.0), locked_leaf("l2", "b2", 33.0)],
+    ));
+    let violations = validate_layout_invariants(&root);
+    assert!(
+        violations.iter().any(|v| v.starts_with("ALL_LEAVES_LOCKED")),
+        "expected ALL_LEAVES_LOCKED, got: {:?}",
+        violations
+    );
+    // A healthy mixed tree does not trip it (covered by
+    // validate_invariants_clean_on_healthy_locked_tree).
+}
+
+#[test]
+fn validate_invariants_flags_flipped_dissolve_lock_mismatch_and_intruder() {
+    // A dissolved column with Row direction (#2176 signature), a tampered
+    // locked size, and an unlocked zero-size intruder child.
+    let mut tampered = locked_leaf("l1", "b1", 33.0);
+    tampered.size = 120.0;
+    let intruder = leaf("l9", "b9", 0.0);
+    let mut dissolved = group("colA", FlexDirection::Row, 66.0, vec![tampered, intruder]);
+    dissolved
+        .extra
+        .insert("columnDissolve".into(), serde_json::json!({"targetColumnId": "host"}));
+    let root = Some(group(
+        "host",
+        FlexDirection::Column,
+        400.0,
+        vec![dissolved, leaf("content", "b3", 300.0)],
+    ));
+
+    let violations = validate_layout_invariants(&root);
+    for expected in [
+        "DISSOLVED_NOT_COLUMN",
+        "LOCK_SIZE_MISMATCH",
+        "DISSOLVED_CHILD_UNLOCKED",
+        "NONPOSITIVE_SIZE",
+    ] {
+        assert!(
+            violations.iter().any(|v| v.starts_with(expected)),
+            "expected {}, got: {:?}",
+            expected,
+            violations
+        );
+    }
+}
+
+#[test]
 fn balance_drops_empty_branch_child() {
     // Row[ leaf1, leaf2, empty-branch ] → empty branch dropped, 2 remain.
     let mut node = group(

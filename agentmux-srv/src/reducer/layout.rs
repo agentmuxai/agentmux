@@ -148,6 +148,16 @@ pub(super) fn handle_layout_set_tree(
             "reducer: LayoutSetTree snapped minimize-locked node size(s) back to their locked values"
         );
     }
+    // Layout doctor (issue #2179): loudly attribute any surviving structural
+    // corruption to this write instead of letting it persist silently.
+    let violations = crate::backend::layout::validate_layout_invariants(&tab.rootnode);
+    if !violations.is_empty() {
+        tracing::error!(
+            tab_id = %tab_id,
+            violations = ?violations,
+            "layout-doctor: invariant violation(s) in tree persisted by LayoutSetTree"
+        );
+    }
     let new_tree = tab.rootnode.clone();
     let v = state.bump_version();
     vec![Event::LayoutTreeReplaced {
@@ -761,6 +771,15 @@ pub(super) fn handle_layout_insert_node_at_index(
             "reducer: LayoutInsertNodeAtIndex snapped minimize-locked node size(s) back to their locked values"
         );
     }
+    // Layout doctor (issue #2179), same rationale as handle_layout_set_tree.
+    let violations = crate::backend::layout::validate_layout_invariants(&tab.rootnode);
+    if !violations.is_empty() {
+        tracing::error!(
+            tab_id = %tab_id,
+            violations = ?violations,
+            "layout-doctor: invariant violation(s) in tree persisted by LayoutInsertNodeAtIndex"
+        );
+    }
     reconcile_focus_magnify(tab);
     let new_tree = tab.rootnode.clone();
     let v = state.bump_version();
@@ -839,6 +858,16 @@ where
             op,
             snapped,
             "reducer: snapped minimize-locked node size(s) back to their locked values"
+        );
+    }
+    // Layout doctor (issue #2179), same rationale as handle_layout_set_tree.
+    let violations = crate::backend::layout::validate_layout_invariants(&tab.rootnode);
+    if !violations.is_empty() {
+        tracing::error!(
+            tab_id = %tab_id,
+            op,
+            violations = ?violations,
+            "layout-doctor: invariant violation(s) in tree persisted by structural op"
         );
     }
     Ok(())
