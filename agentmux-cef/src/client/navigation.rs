@@ -209,35 +209,60 @@ impl AgentMuxHandler {
             return;
         }
 
+        // Re-inject the host IPC creds on EVERY main-frame load of OUR OWN
+        // frontend — crucially INCLUDING `is_browser_pane` floating-pane /
+        // pool windows, which host our frontend (on our localhost origin)
+        // but were starved of creds by the old `!is_browser_pane` gate.
+        //
+        // Why every load, not just the first: the frontend strips
+        // `ipc_port`/`ipc_token` from the URL after reading them once
+        // (cef-init.ts token-leak fix), so any reload (Vite HMR, WebGL
+        // context-loss reload, or the bridge auto-recover itself) arrives
+        // cred-less. Without re-injection, `setupCefApi` can't rebuild
+        // `window.api` → the permanent "window.api still undefined after 5s"
+        // blank + ~5s reload storm observed on floating-pool windows (#52).
+        //
+        // Gate on frame ORIGIN, not the pane flag: inject only when the
+        // loading main frame is on our frontend origin. A real browser pane
+        // rendering a remote site (example.com) is a different origin and
+        // still never receives the bearer token — preserving exactly the
+        // leak protection the `is_browser_pane` gate was meant to provide.
+        let frame_url = browser
+            .as_ref()
+            .and_then(|b| b.main_frame().map(|f| CefString::from(&f.url()).to_string()))
+            .unwrap_or_default();
+        // Non-pane windows (main + secondary app windows) always load our
+        // frontend → inject unconditionally (unchanged behavior; `||`
+        // short-circuits so the common path skips the origin resolve). Only
+        // `is_browser_pane` windows need the origin gate to separate our
+        // floating-pane/pool windows from real remote browser panes.
+        let should_inject = !self.is_browser_pane
+            || crate::commands::window::resolve_frontend_base_url(self.ipc_port)
+                .map(|base| super::recovery_pages::url_on_origin(&frame_url, &base))
+                .unwrap_or(false);
+        if should_inject {
+            let ipc_token = &self.state.ipc_token;
+            let js = format!(
+                "window.__AGENTMUX_IPC_PORT__ = {}; window.__AGENTMUX_IPC_TOKEN__ = '{}';",
+                self.ipc_port, ipc_token
+            );
+            let code = CefString::from(js.as_str());
+            let empty = CefString::from("");
+            frame.execute_java_script(Some(&code), Some(&empty), 0);
+            tracing::info!("Injected IPC port {} into page: {}", self.ipc_port, frame_url);
+        }
+
         // Pane-specific on_load_end work (focus subclass re-install after
-        // Chromium rebuilds Chrome_RenderWidgetHostHWND on navigation)
-        // lives in `crate::browser_pane::callbacks` after Phase 4. Returning early
-        // skips main-only IPC-port injection below.
+        // Chromium rebuilds Chrome_RenderWidgetHostHWND on navigation).
+        // Runs AFTER cred injection so a floating-pane window gets BOTH the
+        // bridge and its focus fix; a real remote browser pane falls through
+        // here having received no creds (origin didn't match above).
         if self.is_browser_pane {
             if let Some(b) = browser.as_deref() {
                 crate::browser_pane::callbacks::on_load_end_browser_pane(&self.state, b);
             }
             return;
         }
-
-        let ipc_token = &self.state.ipc_token;
-        let js = format!(
-            "window.__AGENTMUX_IPC_PORT__ = {}; window.__AGENTMUX_IPC_TOKEN__ = '{}';",
-            self.ipc_port, ipc_token
-        );
-        let code = CefString::from(js.as_str());
-        let url = CefString::from("");
-        frame.execute_java_script(Some(&code), Some(&url), 0);
-
-        let url_str = browser
-            .as_ref()
-            .and_then(|b| b.main_frame().map(|f| CefString::from(&f.url()).to_string()))
-            .unwrap_or_default();
-        tracing::info!(
-            "Injected IPC port {} into page: {}",
-            self.ipc_port,
-            url_str
-        );
 
         // Signal the pre-splash to fade out the moment CEF's first frame
         // is ready. The launcher created this named event and forwarded
