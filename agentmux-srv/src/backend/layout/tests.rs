@@ -228,6 +228,40 @@ fn balance_slip_anchor_suppresses_hoist() {
 }
 
 #[test]
+fn balance_column_dissolve_suppresses_direction_flip() {
+    // Sibling(Column)[ dissolved-colA(Column, columnDissolve)[ leaf1, leaf2 ], leaf3 ]
+    // — mirrors what layoutMinimize's `_dissolveColumn` produces: a dissolved
+    // column nested as the first child of a same-direction Column sibling.
+    // Without the columnDissolve guard, the unconditional direction-alternation
+    // rule would flip colA to Row, laying leaf1/leaf2 out side-by-side instead
+    // of stacked.
+    let mut dissolved_col = group(
+        "colA",
+        FlexDirection::Column,
+        DEFAULT_NODE_SIZE,
+        vec![
+            leaf_dir("l1", "b1", FlexDirection::Row),
+            leaf_dir("l2", "b2", FlexDirection::Row),
+        ],
+    );
+    dissolved_col
+        .extra
+        .insert("columnDissolve".into(), serde_json::json!({"targetColumnId": "sibling"}));
+    let mut sibling = group(
+        "sibling",
+        FlexDirection::Column,
+        DEFAULT_NODE_SIZE,
+        vec![dissolved_col, leaf_dir("l3", "b3", FlexDirection::Row)],
+    );
+    balance_node(&mut sibling).unwrap();
+    assert_eq!(
+        sibling.children[0].flex_direction,
+        FlexDirection::Column,
+        "dissolved column must stay Column so its stacked minimized panes render vertically"
+    );
+}
+
+#[test]
 fn balance_drops_empty_branch_child() {
     // Row[ leaf1, leaf2, empty-branch ] → empty branch dropped, 2 remain.
     let mut node = group(
