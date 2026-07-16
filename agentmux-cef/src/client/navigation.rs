@@ -231,25 +231,35 @@ impl AgentMuxHandler {
             .as_ref()
             .and_then(|b| b.main_frame().map(|f| CefString::from(&f.url()).to_string()))
             .unwrap_or_default();
+        // Use the AUTHORITATIVE port from AppState, not `self.ipc_port`.
+        // Floating-pane / pool window handlers are constructed with
+        // `new_with_browser_pane(state, 0, true)` — their `self.ipc_port` is
+        // ZERO. Injecting 0 makes the frontend's invokeCommand reject the
+        // creds (`if (!port)`) and time out on get_backend_endpoints, so the
+        // re-injection must carry the real IPC port that `state.ipc_port`
+        // holds. (The old code only injected for non-pane windows, whose
+        // `self.ipc_port` happens to be correct, which is why this never
+        // surfaced before.)
+        let ipc_port = *self.state.ipc_port.lock();
         // Non-pane windows (main + secondary app windows) always load our
         // frontend → inject unconditionally (unchanged behavior; `||`
         // short-circuits so the common path skips the origin resolve). Only
         // `is_browser_pane` windows need the origin gate to separate our
         // floating-pane/pool windows from real remote browser panes.
         let should_inject = !self.is_browser_pane
-            || crate::commands::window::resolve_frontend_base_url(self.ipc_port)
+            || crate::commands::window::resolve_frontend_base_url(ipc_port)
                 .map(|base| super::recovery_pages::url_on_origin(&frame_url, &base))
                 .unwrap_or(false);
         if should_inject {
             let ipc_token = &self.state.ipc_token;
             let js = format!(
                 "window.__AGENTMUX_IPC_PORT__ = {}; window.__AGENTMUX_IPC_TOKEN__ = '{}';",
-                self.ipc_port, ipc_token
+                ipc_port, ipc_token
             );
             let code = CefString::from(js.as_str());
             let empty = CefString::from("");
             frame.execute_java_script(Some(&code), Some(&empty), 0);
-            tracing::info!("Injected IPC port {} into page: {}", self.ipc_port, frame_url);
+            tracing::info!("Injected IPC port {} into page: {}", ipc_port, frame_url);
         }
 
         // Pane-specific on_load_end work (focus subclass re-install after
