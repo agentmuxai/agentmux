@@ -6,6 +6,11 @@ degraded state that *precedes* the OOM kills seen in prior incidents)
 **Status:** Diagnosed; root cause is largely **outside AgentMux** (system/driver committed shared
 memory). Corrects a measurement error in `SPEC_MEMORY_ANALYSIS_2026_06_26.md`. AgentMux-side
 follow-ups captured in `SPEC_MEMORY_COMMIT_ATTRIBUTION_CORRECTION_2026_07_02.md`.
+**2026-07-16 update:** §6.1's open question (driver *leak* vs live per-context commit) is resolved by a
+controlled restart experiment — the commit is **live, not leaked**, tied to the renderer fleet, and
+released cleanly on teardown (~43.6 GB reclaimed). See
+`docs/retro/retro-commit-restart-reclaim-2026-07-16.md`; recommendation §6.2 (GPU driver update) is
+thereby de-prioritized, and §B.5 renderer reclaim is promoted to the primary fix.
 **Reporter:** asaf ("the pagefile is growing too large … architectural problem in AgentMux")
 **Component:** Windows commit/pagefile behavior; AgentMux CEF fleet + agent subprocesses (contributors,
 not the dominant cause)
