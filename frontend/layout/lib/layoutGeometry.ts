@@ -3,6 +3,7 @@
 
 import { batch } from "solid-js";
 import { balanceNode, walkNodes } from "./layoutNode";
+import { enforceMinimizedLocks, isNodeLocked } from "./layoutMinimize";
 import {
     FlexDirection,
     LayoutNode,
@@ -46,8 +47,14 @@ export function updateTree(model: LayoutModel, balanceTree = true) {
                 boundingRect,
                 resizeAction
             );
-        if (balanceTree) model.treeState.rootNode = balanceNode(model.treeState.rootNode, callback);
-        else walkNodes(model.treeState.rootNode, callback);
+        if (balanceTree) {
+            // Enforce minimize locks before balancing — same choke point, same
+            // rationale as the backend's prune/enforce pair: any writer that
+            // changed a locked node's size (stale tree push, unguarded mutation)
+            // is corrected here rather than trusted to have known about the lock.
+            enforceMinimizedLocks(model.treeState.rootNode);
+            model.treeState.rootNode = balanceNode(model.treeState.rootNode, callback);
+        } else walkNodes(model.treeState.rootNode, callback);
 
         // Process ephemeral node, if present.
         const ephemeralNode = model.getter(model.ephemeralNode);
@@ -157,9 +164,14 @@ function updateTreeHelper(
             treeKey: additionalProps.treeKey + i,
         };
 
-        // We only want the resize handles in between nodes, this ensures we have n-1 handles.
-        if (lastChildRect) {
-            const resizeHandleIndex = resizeHandles.length;
+        // We only want the resize handles in between nodes, this ensures we have at most
+        // n-1 handles. A locked edge (either flanking child minimized/slipped/dissolved)
+        // gets no handle at all — minimized is a locked state, so there is nothing for
+        // the user to resize there (I3 in the minimize locked-state spec). Because gaps
+        // can now be skipped, parentIndex must be the child-array index (i - 1), NOT
+        // resizeHandles.length — onResizeMove uses it to look up the flanking children.
+        if (lastChildRect && !isNodeLocked(node.children[i - 1]) && !isNodeLocked(child)) {
+            const resizeHandleIndex = i - 1;
             const halfResizeHandleSizePx = resizeHandleSizePx / 2;
             const resizeHandleDimensions: Dimensions = {
                 top: nodeIsRow

@@ -209,6 +209,14 @@ export interface LayoutNode {
     /** Original size before minimization. Presence indicates the node is minimized. */
     minimizedSize?: number;
     /**
+     * The flex-unit size this node is locked to while minimized (header height in the
+     * parent's unit space at minimize time; for a dissolved column, the stacked-headers
+     * total). Written by the minimize subsystem alongside `minimizedSize`/`slipMinimize`/
+     * `columnDissolve`; `enforceMinimizedLocks` snaps `size` back to this value if any
+     * other writer changes it. Cleared on restore.
+     */
+    minimizedLockedSize?: number;
+    /**
      * Set when a pane was minimized from a solo Row slot (parent flex-direction = Row).
      * Instead of shrinking horizontally, the pane slips its header into the adjacent
      * column. Stores restore context so the operation is fully reversible.
