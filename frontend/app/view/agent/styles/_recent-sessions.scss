@@ -12,10 +12,12 @@
         flex-direction: column;
         gap: var(--space-2);
         width: 100%;
-        // Hard cap so the list doesn't swallow the picker when the
-        // user has 20 active sessions. Internal scroll instead.
-        max-height: 40vh;
-        overflow: hidden;
+        // Natural height — was capped to 40vh with its own internal
+        // scroll (to keep a large session count from pushing the
+        // templates tier off-screen), but that made My Agents and
+        // New-from-template two independent scroll areas instead of
+        // one continuous list. `.agent-picker` is now the single
+        // scroll boundary for the whole picker.
     }
 
     .agent-recent-sessions-header {
@@ -62,10 +64,8 @@
         grid-template-columns: repeat(auto-fill, minmax(min(var(--agent-tile-min, 240px), 100%), 1fr));
         gap: var(--space-2);
         align-content: start;
-        overflow-y: auto;
-        // Scroll containment so wheeling inside the list doesn't
-        // spill into the picker-list below once we hit the boundary.
-        overscroll-behavior: contain;
+        // Natural height, no independent scroll — `.agent-picker` is the
+        // single scroll boundary for the whole picker now.
     }
 
     .agent-recent-sessions-row {
