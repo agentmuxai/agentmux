@@ -251,6 +251,22 @@ async fn route_command(
             // before/after every tear-off to surface intermittent failures.
             Ok(commands::floating_pane::get_pane_debug_state(state))
         }
+        "debug:hang_ui" => {
+            // SPEC_LAUNCHER_TEARDOWN_BACKSTOP Phase 2 verification hook —
+            // deliberately wedge the CEF UI thread so the launcher's armed
+            // J0 teardown can be reproduced live (close the last window,
+            // watch the backstop terminate the tree within GRACE + 2 probe
+            // intervals). Double-gated: the env var must be explicitly set
+            // AND the command explicitly invoked — never reachable in
+            // normal operation.
+            if std::env::var("AGENTMUX_DEBUG_HANG").as_deref() != Ok("1") {
+                Err("debug:hang_ui refused — set AGENTMUX_DEBUG_HANG=1 to enable".to_string())
+            } else {
+                tracing::warn!("[debug:hang_ui] parking the CEF UI thread in a 1h sleep — teardown-backstop verification only");
+                crate::ui_tasks::post_hang_ui_thread(state);
+                Ok(serde_json::Value::Null)
+            }
+        }
         "get_instance_number" => Ok(commands::window::get_instance_number(state, args)),
         "register_backend_window" => Ok(commands::window::register_backend_window(state, args)),
         "get_env" => Ok(commands::platform::get_env(args)),

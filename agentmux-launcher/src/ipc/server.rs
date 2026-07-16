@@ -595,6 +595,53 @@ where
             reducer::update(&mut state, cmd.clone(), &rctx)
         };
 
+        // SPEC_LAUNCHER_TEARDOWN_BACKSTOP Phase 2 — arm/disarm the J0
+        // teardown state machine from the VALIDATED reducer output (same
+        // layering as the Phase-1 `ReportUiThreadAlive` intercept above:
+        // process-supervision state about the host, not domain state the
+        // reducer owns — hooking the emitted events keeps the reducer pure
+        // while still only reacting to reports the reducer accepted).
+        //
+        // Arm: `PoolDrained` (host's own "last user window closed, drain
+        // begins" report) or `OrphanInstance` drift (mirror saw the last
+        // user window close with the host still Running). Disarm: any
+        // `WindowOpened` (covers crash-reproject re-opening windows within
+        // the grace, and ordinary re-opens). The supervisor additionally
+        // disarms on every host exit (the crash-restart-gap guard).
+        for ev in &events {
+            match ev {
+                Event::PoolDrained { label, .. } => {
+                    if crate::teardown_backstop::arm() {
+                        crate::logging::log(&format!(
+                            "[teardown-backstop] ARMED (PoolDrained, label={}) — grace {}s, then ≥{} unanswered probes ⇒ teardown",
+                            label,
+                            crate::teardown_backstop::TEARDOWN_GRACE.as_secs(),
+                            crate::teardown_backstop::TEARDOWN_REQUIRED_MISSES,
+                        ));
+                    }
+                }
+                Event::HwndDriftDetected {
+                    kind: agentmux_common::ipc::HwndDriftKind::OrphanInstance,
+                    ..
+                } => {
+                    if crate::teardown_backstop::arm() {
+                        crate::logging::log(
+                            "[teardown-backstop] ARMED (OrphanInstance drift — last user window closed, host still alive)",
+                        );
+                    }
+                }
+                Event::WindowOpened { label, .. } => {
+                    if crate::teardown_backstop::disarm() {
+                        crate::logging::log(&format!(
+                            "[teardown-backstop] disarmed — user window opened (label={})",
+                            label
+                        ));
+                    }
+                }
+                _ => {}
+            }
+        }
+
         // If the reducer accepted the Register (no AlreadyRegistered
         // error in the output), commit the local connection state.
         if let Some((kind, pid)) = pre_register {

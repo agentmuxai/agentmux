@@ -34,6 +34,13 @@ pub struct UiLiveness {
     /// Last time ANY `ReportUiThreadAlive` arrived — proof the UI thread
     /// pumped at that moment, regardless of nonce matching.
     last_alive: Option<Instant>,
+    /// Phase 2 — consecutive DELIVERED-but-unanswered probes. Incremented
+    /// when a new probe overwrites an unanswered one; reset by any reply.
+    /// Retracted probes (send failed — transport evidence, not liveness
+    /// evidence) never reach the overwrite path, so they can't inflate
+    /// this. Consumed by the armed teardown rule
+    /// (`teardown_backstop::should_teardown`).
+    consecutive_misses: u32,
 }
 
 impl UiLiveness {
@@ -41,6 +48,18 @@ impl UiLiveness {
     /// `(nonce, sent)` if it was never answered — the caller logs the miss.
     pub fn record_probe_sent(&mut self, nonce: u64) -> Option<(u64, Instant)> {
         let unanswered = self.probe_sent.take();
+        if let Some((_, sent_at)) = unanswered {
+            // Wedge evidence only if the UI thread has NOT pumped since this
+            // probe was sent. A nonce-unmatched (late) reply doesn't clear
+            // the outstanding probe (Phase-1 semantics: it can still be
+            // answered for latency), but it DOES prove the thread pumped
+            // after `sent_at` — so the probe aging out is telemetry noise,
+            // not a wedge signal.
+            let pumped_since = self.last_alive.is_some_and(|la| la >= sent_at);
+            if !pumped_since {
+                self.consecutive_misses = self.consecutive_misses.saturating_add(1);
+            }
+        }
         self.probe_sent = Some((nonce, Instant::now()));
         unanswered
     }
@@ -62,6 +81,10 @@ impl UiLiveness {
     /// thread pumped after its probe was sent).
     pub fn record_alive(&mut self, nonce: u64) -> Option<std::time::Duration> {
         self.last_alive = Some(Instant::now());
+        // ANY reply proves the UI thread pumped — the wedge streak is over
+        // regardless of nonce matching (a late reply to an old probe is
+        // still a pump that happened after that probe was sent).
+        self.consecutive_misses = 0;
         match self.probe_sent {
             Some((sent_nonce, sent_at)) if sent_nonce == nonce => {
                 self.probe_sent = None;
@@ -76,6 +99,12 @@ impl UiLiveness {
     /// yet — startup, or standalone mode with no pipe).
     pub fn last_alive(&self) -> Option<Instant> {
         self.last_alive
+    }
+
+    /// Phase-2 consumer surface: consecutive delivered-but-unanswered
+    /// probes. See the field doc for what does (and doesn't) count.
+    pub fn consecutive_misses(&self) -> u32 {
+        self.consecutive_misses
     }
 }
 
@@ -100,9 +129,14 @@ pub fn record_alive(nonce: u64) -> Option<std::time::Duration> {
 }
 
 /// See [`UiLiveness::last_alive`]. Process-global instance.
-#[allow(dead_code)] // consumed by Phase 2's armed teardown rule
+#[allow(dead_code)] // kept as telemetry surface; Phase 2 consumes consecutive_misses
 pub fn last_alive() -> Option<Instant> {
     cell().lock().unwrap().last_alive()
+}
+
+/// See [`UiLiveness::consecutive_misses`]. Process-global instance.
+pub fn consecutive_misses() -> u32 {
+    cell().lock().unwrap().consecutive_misses()
 }
 
 #[cfg(test)]
@@ -143,6 +177,28 @@ mod tests {
             matches!(missed, Some((1, _))),
             "the unanswered probe must be surfaced to the caller"
         );
+    }
+
+    #[test]
+    fn consecutive_misses_count_and_reset() {
+        let mut l = UiLiveness::default();
+        assert_eq!(l.consecutive_misses(), 0);
+        // Two unanswered probes overwritten in sequence → 2 misses.
+        l.record_probe_sent(1);
+        l.record_probe_sent(2);
+        assert_eq!(l.consecutive_misses(), 1);
+        l.record_probe_sent(3);
+        assert_eq!(l.consecutive_misses(), 2);
+        // ANY reply — even nonce-unmatched — resets the streak, AND marks
+        // the still-outstanding probe (3) as pumped-since, so its later
+        // overwrite is telemetry noise, not a new miss.
+        l.record_alive(999);
+        assert_eq!(l.consecutive_misses(), 0);
+        // A retracted (send-failed) probe never inflates the count.
+        l.record_probe_sent(4);
+        l.retract_probe(4);
+        l.record_probe_sent(5);
+        assert_eq!(l.consecutive_misses(), 0);
     }
 
     #[test]
