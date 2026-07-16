@@ -513,5 +513,20 @@ describe("minimize lock — minimized is a locked state", () => {
         minimizeNodeToggle(model as any, paneA1.id);
         expect(enforceMinimizedLocks(root)).toBe(0);
     });
+
+    it("enforceMinimizedLocks clamps a negative-delta repayment at the 1-unit floor", () => {
+        const { root, colA, paneA1, paneA2 } = buildTwoColumnLayout();
+        const model = makeMockModel(root, { [colA.id]: { pixelToSizeRatio: 1 } });
+        minimizeNodeToggle(model as any, paneA1.id);
+
+        // Tampered BELOW the lock: delta is negative, and the beneficiary is
+        // too small to absorb it — the repayment must clamp, not go negative.
+        paneA1.size = 5;
+        paneA2.size = 10;
+
+        expect(enforceMinimizedLocks(root)).toBe(1);
+        expect(paneA1.size).toBe(HeaderHeightPx);
+        expect(paneA2.size).toBe(1);
+    });
 });
 

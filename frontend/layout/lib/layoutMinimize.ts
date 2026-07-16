@@ -34,7 +34,7 @@ export function isNodeLocked(node: LayoutNode | undefined): boolean {
  * flex sizes are relative within the parent, so the locked nodes' shares stay
  * proportionally correct.
  */
-export function enforceMinimizedLocks(root: LayoutNode): number {
+export function enforceMinimizedLocks(root: LayoutNode | undefined): number {
     let snapped = 0;
     function walk(node: LayoutNode) {
         if (!node.children) return;
@@ -46,7 +46,11 @@ export function enforceMinimizedLocks(root: LayoutNode): number {
                     const beneficiary =
                         node.children!.slice(i + 1).find((c) => !isNodeLocked(c)) ??
                         node.children!.slice(0, i).reverse().find((c) => !isNodeLocked(c));
-                    if (beneficiary) beneficiary.size += delta;
+                    // Floor at 1 flex unit (same floor as the slip/undissolve
+                    // restore paths): a tampered size BELOW the lock makes the
+                    // delta negative, and the repayment must not drive the
+                    // beneficiary's size to zero or negative.
+                    if (beneficiary) beneficiary.size = Math.max(beneficiary.size + delta, 1);
                     snapped++;
                 }
             }

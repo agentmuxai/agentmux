@@ -215,6 +215,22 @@ pub(super) fn handle_layout_insert_node(
     } else if let Some(pid) = parent_id.as_deref() {
         let root = tab.rootnode.as_mut().expect("non-empty checked above");
         match crate::backend::layout::find_node_by_id_mut(root, pid) {
+            // Minimize-locked parents (a dissolved column has `data: None`,
+            // so it would otherwise satisfy the group-node arm below) cannot
+            // host inserts — minimized is a locked state
+            // (SPEC_LAYOUT_MINIMIZE_LOCKED_STATE_REDESIGN_2026_07_16.md).
+            Some(parent_node) if crate::backend::layout::is_node_locked(parent_node) => {
+                let v = state.bump_version();
+                return vec![Event::Error {
+                    code: ErrorCode::InvalidCommand,
+                    message: format!(
+                        "LayoutInsertNode: parent_id {:?} is minimize-locked, cannot host inserts (tab {})",
+                        pid, tab_id
+                    ),
+                    fatal: false,
+                    version: v,
+                }];
+            }
             Some(parent_node) if parent_node.data.is_none() => {
                 let len = parent_node.children.len();
                 let target = index.map(|i| i.min(len)).unwrap_or(len);
