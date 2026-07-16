@@ -748,9 +748,29 @@ export function buildCefApi(): AppApi {
 
 /**
  * Detect whether we're running inside a CEF host.
- * Checks URL query params first (available immediately), then window globals.
+ *
+ * Checks, in order: the `ipc_port` URL param (present only on first load),
+ * the injected window global, then a sticky `sessionStorage` flag.
+ *
+ * The sessionStorage flag closes the #52 reload lock-out: `setupCefApi`
+ * strips `ipc_port`/`ipc_token` from the URL after first read (token-leak
+ * fix), so after ANY reload (Vite HMR, WebGL context-loss reload, bridge
+ * auto-recover) neither the URL param nor the not-yet-re-injected global is
+ * present — plain `isCef()` would return false and `setupCefApi` would bail
+ * BEFORE `waitForIpcCreds`, so the host's `on_load_end` re-injection is
+ * never awaited and `window.api` never rebuilds. Remembering "we are CEF"
+ * in sessionStorage (set the moment we first see `ipc_port`) survives the
+ * strip and any `history.replaceState` (e.g. pool promote), and is
+ * per-browsing-context so it never leaks between windows or to a plain
+ * browser tab (which never sees `ipc_port`).
  */
 export function isCef(): boolean {
-    return new URLSearchParams(window.location.search).has("ipc_port")
-        || typeof window.__AGENTMUX_IPC_PORT__ !== "undefined";
+    if (new URLSearchParams(window.location.search).has("ipc_port")) {
+        try { sessionStorage.setItem("amux:isCef", "1"); } catch { /* storage disabled */ }
+        return true;
+    }
+    if (typeof window.__AGENTMUX_IPC_PORT__ !== "undefined") {
+        return true;
+    }
+    try { return sessionStorage.getItem("amux:isCef") === "1"; } catch { return false; }
 }
