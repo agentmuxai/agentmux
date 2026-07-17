@@ -145,8 +145,9 @@ function applyMenuPosition(el: HTMLElement, pos: MenuPositionResult) {
 /**
  * Render a context menu as a positioned HTML overlay.
  * Fires the callback with the clicked item's id, then removes the overlay.
+ * Exported for tests only — production callers go through showContextMenu.
  */
-function showJsContextMenu(
+export function showJsContextMenu(
     items: NativeContextMenuItem[],
     position: { x: number; y: number },
     onClick: ((id: string) => void) | null
@@ -220,6 +221,13 @@ function showJsContextMenu(
             row.appendChild(label);
 
             if (item.submenu && item.submenu.length > 0) {
+                // Static CSS fallback (the pre-framework behavior): anchor at
+                // the row's right edge, which needs the row as positioned
+                // ancestor. Kept so a computeMenuPosition rejection still
+                // yields a positioned submenu; the framework placement below
+                // overrides it with fixed viewport coords on success.
+                row.style.position = "relative";
+
                 const arrow = document.createElement("i");
                 arrow.className = "fa-sharp fa-solid fa-chevron-right";
                 row.appendChild(arrow);
@@ -228,6 +236,8 @@ function showJsContextMenu(
                 sub.className = "menu sub-menu";
                 sub.setAttribute("data-pane-overlay", "");
                 sub.style.display = "none";
+                sub.style.left = "100%";
+                sub.style.top = "0";
                 renderItems(sub, item.submenu);
                 row.appendChild(sub);
                 // Positioned through the shared framework, like the top-level
