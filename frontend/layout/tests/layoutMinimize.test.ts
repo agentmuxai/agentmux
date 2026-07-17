@@ -233,6 +233,27 @@ describe("minimized panes are untargetable by tree mutations", () => {
         expect(paneA2.size).toBe(PANE_SIZE);
     });
 
+    it("resizeNode rejects a fully-minimized BRANCH — its stored size becomes load-bearing on restore", () => {
+        // A collapsed column has no branch-level marker in the display-mode
+        // model, but mutating its stored size while collapsed would corrupt
+        // the proportion that reappears when any child restores (reagent P1,
+        // round 3).
+        const { root, colA, paneA1, paneA2, colB } = buildTwoColumnLayout();
+        paneA1.minimized = true;
+        paneA2.minimized = true; // colA is now effectively minimized
+
+        resizeNode({ rootNode: root, pendingBackendActions: [] } as any, {
+            type: "resize" as any,
+            resizeOperations: [
+                { nodeId: colA.id, size: 1 },
+                { nodeId: colB.id, size: 399 },
+            ],
+        } as any);
+
+        expect(colA.size).toBe(PANE_SIZE);
+        expect(colB.size).toBe(PANE_SIZE);
+    });
+
     it("splitVertical rejects a minimized target", () => {
         const { root, colA, paneA1 } = buildTwoColumnLayout();
         paneA1.minimized = true;
@@ -267,11 +288,17 @@ describe("legacy state migration (rebuildMinimizedSet)", () => {
         expect(model.getMinimizedSet().has(paneA2.id)).toBe(false);
     });
 
-    it("migrates slip/dissolve/anchor bookkeeping: markers cleared, sizes restored from originalRowSize", () => {
-        const { root, colA, paneA1 } = buildTwoColumnLayout();
-        paneA1.slipMinimize = { targetColumnId: colA.id, originalRowSize: 150, originalRowIndex: 0, targetWasLeaf: true };
+    it("migrates slip/dissolve bookkeeping: sizes healed to a sane share of the CURRENT parent", () => {
+        // Flex sizes are relative within a parent. A slipped/dissolved node
+        // lives nested in its slip/dissolve TARGET — restoring the recorded
+        // originalRowSize (a weight from a DIFFERENT unit space) would give it
+        // a wildly wrong proportion; the migration heals to the mean of its
+        // current siblings instead (reagent P1, round 3).
+        const { root, colA, paneA1, paneA2, colB } = buildTwoColumnLayout();
+        paneA1.slipMinimize = { targetColumnId: colA.id, originalRowSize: 9999, originalRowIndex: 0, targetWasLeaf: true };
         paneA1.size = 2.2; // slip-era squeezed size
-        colA.columnDissolve = { targetColumnId: "x", originalRowSize: 120, originalRowIndex: 0, targetWasLeaf: false };
+        paneA2.size = 300; // paneA1's current sibling in colA
+        colA.columnDissolve = { targetColumnId: "x", originalRowSize: 9999, originalRowIndex: 0, targetWasLeaf: false };
         colA.size = -0.0039; // the cascade-bug corruption: stolen-total gone negative
         root._slipAnchor = true;
         const model = makeMockModel(root);
@@ -280,9 +307,9 @@ describe("legacy state migration (rebuildMinimizedSet)", () => {
 
         expect(paneA1.minimized).toBe(true);
         expect(paneA1.slipMinimize).toBeUndefined();
-        expect(paneA1.size).toBe(150); // pre-slip size restored, not a permanent sliver
+        expect(paneA1.size).toBe(300); // mean of current siblings, NOT the alien 9999
         expect(colA.columnDissolve).toBeUndefined();
-        expect(colA.size).toBe(120); // pre-dissolve size restored — heals the negative
+        expect(colA.size).toBe(colB.size); // sane share among root siblings — heals the negative
         expect(colA.minimized).toBeUndefined(); // branch never gets the flag
         expect(root._slipAnchor).toBeUndefined();
         expect(model.getMinimizedSet().has(paneA1.id)).toBe(true);

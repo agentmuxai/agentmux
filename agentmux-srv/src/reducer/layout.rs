@@ -229,7 +229,7 @@ pub(super) fn handle_layout_insert_node(
             // so it would otherwise satisfy the group-node arm below) cannot
             // host inserts — minimized is a locked state
             // (SPEC_LAYOUT_MINIMIZE_LOCKED_STATE_REDESIGN_2026_07_16.md).
-            Some(parent_node) if crate::backend::layout::is_node_locked(parent_node) => {
+            Some(parent_node) if crate::backend::layout::is_effectively_minimized(parent_node) => {
                 let v = state.bump_version();
                 return vec![Event::Error {
                     code: ErrorCode::InvalidCommand,

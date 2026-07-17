@@ -232,6 +232,20 @@ pub fn is_node_locked(node: &LayoutNode) -> bool {
         || node.extra.contains_key("columnDissolve")
 }
 
+/// True when a node renders as minimized: a locked leaf, or a branch whose
+/// every child is effectively minimized (a stacked chip strip). Mirrors
+/// `isEffectivelyMinimized` in `frontend/layout/lib/layoutInvariants.ts`.
+/// Reducer guards use THIS (not `is_node_locked`): a fully-collapsed branch
+/// has no branch-level marker in the display-mode model, but its stored size
+/// becomes load-bearing again the moment a child restores — so it must be
+/// just as untargetable as a minimized leaf.
+pub fn is_effectively_minimized(node: &LayoutNode) -> bool {
+    if node.children.is_empty() {
+        return is_node_locked(node);
+    }
+    node.children.iter().all(is_effectively_minimized)
+}
+
 /// Write-point enforcement of the minimize lock (the invariant-at-the-write
 /// companion to `prune_dangling_block_refs`, per
 /// `SPEC_LAYOUT_MINIMIZE_LOCKED_STATE_REDESIGN_2026_07_16.md`): snap every
@@ -541,7 +555,7 @@ pub fn insert_node_at_index(
     // Minimized is a locked state: an `index_arr` that resolves into a
     // dissolved column (locked container) or onto a minimized leaf (which
     // `ensure_group_node` would otherwise promote into a group) is rejected.
-    if is_node_locked(parent) {
+    if is_effectively_minimized(parent) {
         return Err(LayoutError::NodeLocked { id: parent.id.clone() });
     }
     ensure_group_node(parent);
@@ -617,13 +631,13 @@ pub fn move_node(
         .clone();
     // Minimized is a locked state: a locked node can't be moved (restore it
     // first), and nothing may be inserted into a dissolved column.
-    if is_node_locked(&node_to_move) {
+    if is_effectively_minimized(&node_to_move) {
         return Err(LayoutError::NodeLocked { id: node_id.to_string() });
     }
     // Confirm destination exists while tree is still intact.
     match find_node_by_id(root, new_parent_id) {
         None => return Err(LayoutError::NodeNotFound { id: new_parent_id.to_string() }),
-        Some(p) if is_node_locked(p) => {
+        Some(p) if is_effectively_minimized(p) => {
             return Err(LayoutError::NodeLocked { id: new_parent_id.to_string() });
         }
         Some(_) => {}
@@ -720,10 +734,10 @@ pub fn swap_nodes(
         .ok_or_else(|| LayoutError::NodeNotFound { id: node2_id.to_string() })?
         .clone();
     // Minimized is a locked state: locked nodes don't swap.
-    if is_node_locked(&n1) {
+    if is_effectively_minimized(&n1) {
         return Err(LayoutError::NodeLocked { id: node1_id.to_string() });
     }
-    if is_node_locked(&n2) {
+    if is_effectively_minimized(&n2) {
         return Err(LayoutError::NodeLocked { id: node2_id.to_string() });
     }
     let p1_id = find_parent_id(root, node1_id)
@@ -785,7 +799,7 @@ pub fn resize_nodes(root: &mut LayoutNode, ops: &[ResizeOp]) -> Result<(), Layou
     for op in ops {
         match find_node_by_id(root, &op.node_id) {
             None => return Err(LayoutError::NodeNotFound { id: op.node_id.clone() }),
-            Some(node) if is_node_locked(node) => {
+            Some(node) if is_effectively_minimized(node) => {
                 return Err(LayoutError::NodeLocked { id: op.node_id.clone() });
             }
             Some(_) => {}
@@ -860,7 +874,7 @@ fn split_impl(
     // a locked node would spawn a full pane inside a header strip).
     let target = find_node_by_id(root, target_id)
         .ok_or_else(|| LayoutError::NodeNotFound { id: target_id.to_string() })?;
-    if is_node_locked(target) {
+    if is_effectively_minimized(target) {
         return Err(LayoutError::NodeLocked { id: target_id.to_string() });
     }
 

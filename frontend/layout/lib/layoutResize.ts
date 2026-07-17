@@ -3,7 +3,7 @@
 
 import { debounce } from "throttle-debounce";
 import { findNode } from "./layoutNode";
-import { isNodeLocked } from "./layoutMinimize";
+import { isEffectivelyMinimized } from "./layoutMinimize";
 import {
     FlexDirection,
     LayoutTreeActionType,
@@ -73,7 +73,7 @@ export function onResizeMove(model: LayoutModel, resizeHandle: ResizeHandleProps
         // Minimized is a locked state: locked edges get no handle (layoutGeometry),
         // but a stale handle from a pre-suppression frame could still deliver a drag
         // here — refuse to build a resize context that flanks a locked node.
-        if (isNodeLocked(beforeNode) || isNodeLocked(afterNode)) return;
+        if (isEffectivelyMinimized(beforeNode) || isEffectivelyMinimized(afterNode)) return;
 
         const addlProps = model.getter(model.additionalProps);
         const pixelToSizeRatio = addlProps[resizeHandle.parentNodeId]?.pixelToSizeRatio;
