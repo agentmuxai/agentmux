@@ -149,6 +149,11 @@ export function useAgentControllerStatus(
         loginCancelled = false;
         setFlowRunning(true);
         setCanRetry(false);
+        // Any fresh launch/retry supersedes a prior recovery attempt — clear a
+        // stale authNotice (e.g. "no login URL captured" from an earlier
+        // relogin) so it can't linger past a "Retry Login" the user just
+        // clicked and mislead them about this attempt's outcome.
+        setAuthNotice(null);
         const prov = opts.provider();
         try {
             const authEnv = await buildAuthEnv(prov);
