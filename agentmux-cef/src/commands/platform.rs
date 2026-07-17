@@ -639,6 +639,198 @@ pub async fn run_cli_login(
     Ok(serde_json::json!({ "auth_url": auth_url }))
 }
 
+/// Minimal wait/kill surface over the two login-child representations:
+/// portable_pty's boxed Child on Windows (ConPTY path) and std's Child on
+/// Unix (hand-rolled openpty spawn — see `spawn_login_pty_unix` for why).
+/// Lets `run_cli_login_pty` keep one shared reaper for both.
+trait LoginChildWait: Send {
+    fn try_exit_code(&mut self) -> std::io::Result<Option<i64>>;
+    fn kill_child(&mut self) -> std::io::Result<()>;
+    fn wait_child(&mut self);
+}
+
+#[cfg(windows)]
+impl LoginChildWait for Box<dyn portable_pty::Child + Send + Sync> {
+    fn try_exit_code(&mut self) -> std::io::Result<Option<i64>> {
+        Ok(self.try_wait()?.map(|status| status.exit_code() as i64))
+    }
+    fn kill_child(&mut self) -> std::io::Result<()> {
+        self.kill()
+    }
+    fn wait_child(&mut self) {
+        let _ = self.wait();
+    }
+}
+
+#[cfg(unix)]
+impl LoginChildWait for std::process::Child {
+    fn try_exit_code(&mut self) -> std::io::Result<Option<i64>> {
+        Ok(self
+            .try_wait()?
+            .map(|status| status.code().map(i64::from).unwrap_or(-1)))
+    }
+    fn kill_child(&mut self) -> std::io::Result<()> {
+        self.kill()
+    }
+    fn wait_child(&mut self) {
+        let _ = self.wait();
+    }
+}
+
+/// Spawn the login CLI on a fresh PTY WITHOUT portable_pty's spawn path.
+///
+/// Why not `pair.slave.spawn_command()`: portable_pty's `pre_exec` calls
+/// `close_random_fds()`, which invokes the libc `close()` symbol on every
+/// fd ≥ 3 in the forked child. In this host, `close()` resolves to
+/// libcef.so's interposed close (Chromium's fd-ownership guard,
+/// base/files/scoped_file_linux.cc — libcef exports a strong `close`
+/// symbol). The guard hits a ScopedFD-owned fd and IMMEDIATE_CRASHes the
+/// child before exec — "Crashing due to FD ownership violation" in the
+/// [login-pty] capture, for ANY spawned program and CLI version. Diagnosed
+/// live 2026-07-16 by spawning /bin/sh through this path and observing the
+/// identical crash stack (same addresses across runs = pre-exec child
+/// running the host image, not the CLI). Supersedes the Bun-crash theory
+/// in SPEC_HOST_CLI_LOGIN_CAPTURE §2. agentmux-srv never hit this because
+/// it doesn't link libcef.
+///
+/// This variant performs fd hygiene with the raw close_range(2) syscall
+/// (invisible to symbol interposition) and otherwise mirrors portable_pty:
+/// signal reset, setsid, TIOCSCTTY, stdio on the slave.
+#[cfg(unix)]
+fn spawn_login_pty_unix(
+    cli_path: &str,
+    login_args: &[String],
+    auth_env: &std::collections::HashMap<String, String>,
+) -> Result<(std::process::Child, std::fs::File), String> {
+    use std::os::fd::FromRawFd;
+    use std::os::unix::process::CommandExt;
+
+    let mut master_fd: libc::c_int = -1;
+    let mut slave_fd: libc::c_int = -1;
+    let mut ws: libc::winsize = unsafe { std::mem::zeroed() };
+    ws.ws_row = 24;
+    ws.ws_col = 80;
+    let rc = unsafe {
+        libc::openpty(
+            &mut master_fd,
+            &mut slave_fd,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &ws,
+        )
+    };
+    if rc != 0 {
+        return Err(format!(
+            "openpty for {cli_path}: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    // Wrap immediately so the fds can't leak on an early return. Parent-side
+    // drops go through the interposed close() too, but the guard only fires
+    // for fds Chromium registered as owned — these are ours.
+    let master = unsafe { std::fs::File::from_raw_fd(master_fd) };
+    let slave = unsafe { std::fs::File::from_raw_fd(slave_fd) };
+
+    let stdin = slave.try_clone().map_err(|e| format!("dup pty slave: {e}"))?;
+    let stdout = slave.try_clone().map_err(|e| format!("dup pty slave: {e}"))?;
+
+    let mut cmd = std::process::Command::new(cli_path);
+    cmd.args(login_args);
+    for (k, v) in auth_env {
+        cmd.env(k, v);
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        cmd.current_dir(cwd);
+    }
+    cmd.stdin(std::process::Stdio::from(stdin))
+        .stdout(std::process::Stdio::from(stdout))
+        .stderr(std::process::Stdio::from(slave));
+
+    unsafe {
+        cmd.pre_exec(|| {
+            // Forked child of a Chromium-linked host: nothing in here may
+            // call the libc `close` symbol (see fn doc). Raw syscalls only.
+            // std has already dup2'd the pty slave onto fds 0/1/2.
+
+            // Default-reset signal dispositions + mask (mirrors
+            // portable_pty; the host runs Chromium's custom handlers).
+            for signo in [
+                libc::SIGCHLD,
+                libc::SIGHUP,
+                libc::SIGINT,
+                libc::SIGQUIT,
+                libc::SIGTERM,
+                libc::SIGALRM,
+            ] {
+                libc::signal(signo, libc::SIG_DFL);
+            }
+            let empty: libc::sigset_t = std::mem::zeroed();
+            libc::sigprocmask(libc::SIG_SETMASK, &empty, std::ptr::null_mut());
+
+            if libc::setsid() == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            // Adopt the slave (on fd 0) as the controlling terminal.
+            if libc::ioctl(0, libc::TIOCSCTTY as _, 0) == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+
+            // fd hygiene without the `close` symbol:
+            #[cfg(target_os = "linux")]
+            {
+                const CLOSE_RANGE_CLOEXEC: libc::c_uint = 4;
+                // Prefer mark-CLOEXEC (kernel 5.11+): every fd ≥ 3 vanishes
+                // at exec, and std's internal exec-error pipe (already
+                // CLOEXEC) still reports a failed exec to the parent.
+                if libc::syscall(
+                    libc::SYS_close_range,
+                    3 as libc::c_uint,
+                    libc::c_uint::MAX,
+                    CLOSE_RANGE_CLOEXEC,
+                ) == -1
+                {
+                    // Kernel 5.9–5.10: close outright. Older: leave them —
+                    // leaked fds are tolerated by the CLIs (verified with a
+                    // 154-fd table); the crash was only ever the interposed
+                    // close(), never the fds themselves.
+                    let _ = libc::syscall(
+                        libc::SYS_close_range,
+                        3 as libc::c_uint,
+                        libc::c_uint::MAX,
+                        0 as libc::c_uint,
+                    );
+                }
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                // macOS: no close_range(2); mark CLOEXEC via fcntl (not an
+                // interposed symbol — and Chromium's close guard is
+                // Linux-only anyway). Bounded by OPEN_MAX.
+                let max = match libc::sysconf(libc::_SC_OPEN_MAX) {
+                    n if n <= 0 => 10240,
+                    n => n.min(65536),
+                };
+                let mut fd: libc::c_int = 3;
+                while (fd as libc::c_long) < max {
+                    let flags = libc::fcntl(fd, libc::F_GETFD);
+                    if flags >= 0 {
+                        libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC);
+                    }
+                    fd += 1;
+                }
+            }
+            Ok(())
+        });
+    }
+
+    let child = cmd
+        .spawn()
+        .map_err(|e| format!("PTY spawn of {cli_path}: {e}"))?;
+    // The parent's slave copies were consumed by Stdio and closed by
+    // spawn(); only the master remains, so EOF on it tracks child exit.
+    Ok((child, master))
+}
+
 /// PTY-backed variant of run_cli_login. Used for providers whose auth
 /// subcommand requires an interactive TTY: Claude (`claude auth login`
 /// exits cleanly ~5s after printing the URL when spawned terminal-less)
@@ -650,10 +842,14 @@ pub async fn run_cli_login(
 /// `set_provider_auth` can deliver an OAuth code if the CLI prompts
 /// for one.
 ///
-/// CRITICAL ConPTY lifetime contract on Windows: the PtyPair (master +
-/// slave) MUST stay alive across child.wait(). Same hazard pattern
-/// agentmux-bashwrap navigates. The blocking wait task takes ownership
-/// of the pair so the destructor runs after the child reaps.
+/// Spawn is platform-split:
+///   - Windows: portable_pty/ConPTY. CRITICAL lifetime contract: the
+///     PtyPair (master + slave) MUST stay alive across child.wait(). Same
+///     hazard pattern agentmux-bashwrap navigates. The blocking wait task
+///     takes ownership of the pair so the destructor runs after the reap.
+///   - Unix: `spawn_login_pty_unix` — portable_pty's spawn is UNUSABLE in
+///     this host because its pre-exec fd cleanup trips libcef's interposed
+///     close() and crashes the child before exec (see that fn's doc).
 async fn run_cli_login_pty(
     state: Arc<AppState>,
     cli_path: String,
@@ -661,57 +857,80 @@ async fn run_cli_login_pty(
     auth_env: std::collections::HashMap<String, String>,
     generation: u64,
 ) -> Result<serde_json::Value, String> {
-    use portable_pty::{native_pty_system, CommandBuilder, PtySize};
-
-    let pty_system = native_pty_system();
-    let pair = pty_system
-        .openpty(PtySize {
-            rows: 24,
-            cols: 80,
-            pixel_width: 0,
-            pixel_height: 0,
-        })
-        .map_err(|e| format!("openpty for {cli_path}: {e}"))?;
-
-    let mut cmd = CommandBuilder::new(&cli_path);
-    for a in &login_args {
-        cmd.arg(a);
-    }
-    for (k, v) in &auth_env {
-        cmd.env(k, v);
-    }
-    if let Ok(cwd) = std::env::current_dir() {
-        cmd.cwd(cwd);
-    }
-
     // §5.1: capture the isolated CLAUDE_CONFIG_DIR so the reaper can report
     // whether `setup-token` wrote `.credentials.json` there on completion — that
     // decides whether the agent is auto-authed via the dir (no env-persist needed)
     // or we must persist the captured CLAUDE_CODE_OAUTH_TOKEN into the spawn env.
     let cred_check_dir = auth_env.get("CLAUDE_CONFIG_DIR").cloned();
 
-    let child = pair
-        .slave
-        .spawn_command(cmd)
-        .map_err(|e| format!("PTY spawn of {cli_path}: {e}"))?;
+    #[cfg(windows)]
+    let (child, child_pid, reader, writer, keepalive) = {
+        use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 
-    // Capture the child PID before moving the child into the wait
+        let pty_system = native_pty_system();
+        let pair = pty_system
+            .openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|e| format!("openpty for {cli_path}: {e}"))?;
+
+        let mut cmd = CommandBuilder::new(&cli_path);
+        for a in &login_args {
+            cmd.arg(a);
+        }
+        for (k, v) in &auth_env {
+            cmd.env(k, v);
+        }
+        if let Ok(cwd) = std::env::current_dir() {
+            cmd.cwd(cwd);
+        }
+
+        let child = pair
+            .slave
+            .spawn_command(cmd)
+            .map_err(|e| format!("PTY spawn of {cli_path}: {e}"))?;
+        let child_pid = child.process_id();
+
+        let reader = pair
+            .master
+            .try_clone_reader()
+            .map_err(|e| format!("PTY try_clone_reader: {e}"))?;
+        let writer = pair
+            .master
+            .take_writer()
+            .map_err(|e| format!("PTY take_writer: {e}"))?;
+        (child, child_pid, reader, writer, pair)
+    };
+
+    #[cfg(unix)]
+    let (child, child_pid, reader, writer, keepalive) = {
+        let (child, master) = spawn_login_pty_unix(&cli_path, &login_args, &auth_env)?;
+        let child_pid = Some(child.id());
+        let reader: Box<dyn std::io::Read + Send> = Box::new(
+            master
+                .try_clone()
+                .map_err(|e| format!("PTY clone reader: {e}"))?,
+        );
+        let writer: Box<dyn std::io::Write + Send> = Box::new(
+            master
+                .try_clone()
+                .map_err(|e| format!("PTY clone writer: {e}"))?,
+        );
+        // `master` doubles as the keep-alive: it must outlive the reap so
+        // the reader doesn't see a dead pty before the child is waited.
+        (child, child_pid, reader, writer, master)
+    };
+
+    // Store the child PID before moving the child into the wait
     // task — cancel_cli_login needs it to kill the subprocess
     // platform-side, since aborting the spawn_blocking wait does not
     // propagate to the child.
-    let child_pid = child.process_id();
     if let Some(pid) = child_pid {
         *state.cli_login_pty_pid.lock() = Some(pid);
     }
-
-    let reader = pair
-        .master
-        .try_clone_reader()
-        .map_err(|e| format!("PTY try_clone_reader: {e}"))?;
-    let writer = pair
-        .master
-        .take_writer()
-        .map_err(|e| format!("PTY take_writer: {e}"))?;
 
     tracing::info!(cli = %cli_path, pid = ?child_pid, "run_cli_login: spawned (PTY), waiting for OAuth URL");
 
@@ -830,10 +1049,10 @@ async fn run_cli_login_pty(
         let deadline =
             std::time::Instant::now() + std::time::Duration::from_secs(LOGIN_REAP_TIMEOUT_SECS);
         loop {
-            match child.try_wait() {
-                Ok(Some(status)) => {
+            match child.try_exit_code() {
+                Ok(Some(exit_code)) => {
                     tracing::info!(
-                        exit_code = ?status.exit_code(),
+                        exit_code,
                         "run_cli_login_pty: child exited"
                     );
                     // §5.1: report whether the login persisted isolated creds. If
@@ -853,8 +1072,8 @@ async fn run_cli_login_pty(
                 Ok(None) => {
                     if std::time::Instant::now() >= deadline {
                         tracing::warn!("run_cli_login_pty: login timed out, killing child");
-                        let _ = child.kill();
-                        let _ = child.wait();
+                        let _ = child.kill_child();
+                        child.wait_child();
                         break;
                     }
                     std::thread::sleep(std::time::Duration::from_millis(500));
@@ -865,8 +1084,9 @@ async fn run_cli_login_pty(
                 }
             }
         }
-        // pair drops here, after the child reaps (ConPTY lifetime contract).
-        drop(pair);
+        // The pty keep-alive (Windows: the PtyPair — ConPTY lifetime
+        // contract; Unix: the master File) drops here, after the child reaps.
+        drop(keepalive);
         // Only clear the slots if we still own them — a newer login may have
         // superseded us and repopulated them; clearing would strand the new
         // login's stdin handle (the "stuck login" bug).
@@ -1398,6 +1618,64 @@ mod redact_tests {
         assert!(!red.contains("AAAA"));
         assert!(!red.contains("BBBB"));
         assert_eq!(red.matches("…REDACTED").count(), 2);
+    }
+}
+
+#[cfg(all(test, unix))]
+mod spawn_login_pty_tests {
+    use super::spawn_login_pty_unix;
+    use std::collections::HashMap;
+    use std::io::{BufRead, BufReader, Read};
+
+    // Exercises the hand-rolled PTY spawn end to end: openpty → pre_exec
+    // (signal reset, setsid, TIOCSCTTY, close_range fd hygiene) → exec →
+    // read the child's stdout off the master. The unit-test binary does not
+    // link libcef, so the interposed-close crash can't reproduce here; what
+    // this pins is that the replacement spawn path is itself correct (a
+    // regression guard for the openpty/dup/stdio wiring). The live
+    // libcef-interposition proof is in the retro.
+    #[test]
+    fn spawns_program_on_pty_and_captures_stdout() {
+        let env: HashMap<String, String> = HashMap::new();
+        let (mut child, master) = spawn_login_pty_unix(
+            "/bin/echo",
+            &["hello-from-pty".to_string()],
+            &env,
+        )
+        .expect("spawn on pty");
+
+        let mut reader = BufReader::new(master.try_clone().expect("clone master"));
+        let mut line = String::new();
+        reader.read_line(&mut line).expect("read pty line");
+        assert!(
+            line.contains("hello-from-pty"),
+            "expected child stdout on the pty, got {line:?}"
+        );
+
+        // Drain to EOF so the child isn't blocked on a full pty buffer, then reap.
+        let mut rest = String::new();
+        let _ = reader.read_to_string(&mut rest);
+        let status = child.wait().expect("wait child");
+        assert!(status.success(), "echo should exit 0, got {status:?}");
+    }
+
+    // A child on its own session with the pty as controlling terminal must
+    // see a TTY on stdin (proves setsid + TIOCSCTTY took effect — the reason
+    // Claude's `auth login` runs its interactive flow instead of bailing).
+    #[test]
+    fn child_stdin_is_a_tty() {
+        let env: HashMap<String, String> = HashMap::new();
+        let (mut child, master) = spawn_login_pty_unix(
+            "/bin/sh",
+            &["-c".to_string(), "test -t 0 && echo IS_TTY || echo NO_TTY".to_string()],
+            &env,
+        )
+        .expect("spawn on pty");
+
+        let mut out = String::new();
+        let _ = BufReader::new(master).read_to_string(&mut out);
+        let _ = child.wait();
+        assert!(out.contains("IS_TTY"), "child stdin should be a tty, got {out:?}");
     }
 }
 
