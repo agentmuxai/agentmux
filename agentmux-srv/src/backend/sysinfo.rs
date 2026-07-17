@@ -585,6 +585,23 @@ mod commit_attribution_tests {
         assert_eq!(result.other_mb, 0.0);
         assert!(result.other_top.is_empty());
     }
+
+    /// Runs the real Win32 process-enumeration + `GlobalMemoryStatusEx` path
+    /// against this machine's actual process table — the synthetic-data
+    /// tests above cover classification logic but can't catch a bad
+    /// Win32 API call, an access-denied edge case, or a panic on a real
+    /// process's field values. This test's own process is guaranteed to
+    /// exist in the table with a real name and non-zero commit, so a
+    /// classification bucket is exercised end-to-end for real.
+    #[test]
+    fn log_memory_attribution_runs_against_the_real_process_table_without_panicking() {
+        let mut sys = sysinfo::System::new_all();
+        log_memory_attribution(&mut sys); // must not panic
+        assert!(
+            sys.processes().len() > 1,
+            "expected the real process table to have picked up more than just this test binary"
+        );
+    }
 }
 
 /// Network I/O tracking state for rate calculations.
