@@ -250,7 +250,10 @@ function EndIcons(props: {
 
     return (
         <>
-            <Show when={(endIconButtons()?.length ?? 0) > 0}>
+            {/* A collapsed (minimized) header shows at most the 3 window
+                controls — aux view icons (e.g. the agent ID card) and the mic
+                are hidden until the pane is restored. */}
+            <Show when={!minimized() && (endIconButtons()?.length ?? 0) > 0}>
                 <For each={endIconButtons()}>
                     {(button) => <IconButton decl={button} />}
                 </For>
@@ -260,7 +263,7 @@ function EndIcons(props: {
                 input (AgentFooter.tsx) instead of here — see
                 SPEC_AGENT_WORKING_INDICATOR_SHIMMER_AND_MIC_RELOCATION_2026_07_08.md.
                 Terminal keeps the header mic unchanged. */}
-            <Show when={props.viewModel?.voiceHandle && props.blockView !== "agent"}>
+            <Show when={!minimized() && props.viewModel?.voiceHandle && props.blockView !== "agent"}>
                 <MicButton
                     blockId={props.nodeModel.blockId}
                     handle={props.viewModel.voiceHandle!()}
@@ -454,10 +457,15 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
         }
         return elems;
     });
+    // A collapsed (minimized) header is reduced to identity (icon + name) and
+    // the 3 window controls: aux content — pre-icon button, connection button,
+    // summary/header text elems, view end-icons, mic — is hidden until restore.
+    const headerMinimized = () => props.nodeModel.isMinimized();
     // True when the textelems wrapper has visible content (summary text or an
     // error indicator). Used to conditionally apply max-width to the name
     // region — see block.scss .block-frame-default-header--has-summary.
     const hasSummary = createMemo(() => {
+        if (headerMinimized()) return props.error != null;
         if (props.error != null) return true;
         const htu = headerTextUnion();
         if (typeof htu === "string") return !util.isBlank(htu);
@@ -490,7 +498,7 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
             onDblClick={() => props.nodeModel.toggleMagnify()}
             style={headerStyle()}
         >
-            {preIconButtonElem}
+            <Show when={!headerMinimized()}>{preIconButtonElem}</Show>
             <div class="block-frame-default-header-iconview">
                 {viewIconElem()}
                 <Show
@@ -503,7 +511,7 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
                     <div class="block-frame-blockid">[{props.nodeModel.blockId.substring(0, 8)}]</div>
                 </Show>
             </div>
-            <Show when={manageConnection}>
+            <Show when={manageConnection && !headerMinimized()}>
                 <ConnectionButton
                     ref={props.connBtnRef}
                     connection={blockData()?.meta?.connection}
@@ -511,7 +519,7 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
                 />
             </Show>
             <div class="block-frame-textelems-wrapper">
-                {headerTextElems()}
+                <Show when={!headerMinimized()}>{headerTextElems()}</Show>
                 <Show when={props.error != null}>
                     <div
                         class="iconbutton disabled"
