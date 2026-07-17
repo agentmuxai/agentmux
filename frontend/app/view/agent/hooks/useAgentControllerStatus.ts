@@ -317,27 +317,33 @@ export function useAgentControllerStatus(
             return;
         }
         setAuthNotice(null);
-        let cliPath = getBlockMetaKeyAtom(opts.blockId, "cmd")() as string | undefined;
-        if (!cliPath) {
-            // Same H2 trap as relogin: the gated launch flow would trust the
-            // auth check and skip the login the user explicitly asked for.
-            cliPath = (await resolveCliForRecovery(prov, "login via terminal")) ?? undefined;
-            if (!cliPath) return;
-        }
-        const authEnv = await recoveryAuthEnv(prov);
-        const configDir = prov.authConfigDirEnvVar ? authEnv[prov.authConfigDirEnvVar] : undefined;
-
-        // Strip CLAUDE_CONFIG_DIR (and equivalents) from the terminal env so the
-        // login writes to the user's global ~/.claude instead of the isolated dir.
-        // seedGlobalLogin polls the global dir and copies on success — if we kept
-        // the isolated dir key the poll would look in global but the creds would
-        // land in isolated, and a terminal-fresh login would never be detected.
-        const terminalEnv: Record<string, string> = { ...authEnv };
-        if (prov.authConfigDirEnvVar) delete terminalEnv[prov.authConfigDirEnvVar];
-
+        // Claim the in-flight guard BEFORE any await. The CLI resolve below
+        // can take up to 300 s, and the recovery buttons have no disabled
+        // binding — so setting the flag only after the awaits (the previous
+        // bug) let a rapid double-click pass the top guard twice and open two
+        // terminal windows with overlapping poll loops. Mirror relogin: flag
+        // first, reset in finally.
         reloginInFlight = true;
         setLoginWaiting(true);
         try {
+            let cliPath = getBlockMetaKeyAtom(opts.blockId, "cmd")() as string | undefined;
+            if (!cliPath) {
+                // Same H2 trap as relogin: the gated launch flow would trust the
+                // auth check and skip the login the user explicitly asked for.
+                cliPath = (await resolveCliForRecovery(prov, "login via terminal")) ?? undefined;
+                if (!cliPath) return;
+            }
+            const authEnv = await recoveryAuthEnv(prov);
+            const configDir = prov.authConfigDirEnvVar ? authEnv[prov.authConfigDirEnvVar] : undefined;
+
+            // Strip CLAUDE_CONFIG_DIR (and equivalents) from the terminal env so the
+            // login writes to the user's global ~/.claude instead of the isolated dir.
+            // seedGlobalLogin polls the global dir and copies on success — if we kept
+            // the isolated dir key the poll would look in global but the creds would
+            // land in isolated, and a terminal-fresh login would never be detected.
+            const terminalEnv: Record<string, string> = { ...authEnv };
+            if (prov.authConfigDirEnvVar) delete terminalEnv[prov.authConfigDirEnvVar];
+
             await getApi().openLoginTerminal(cliPath, prov.authLoginCommand, terminalEnv);
             opts.log("auth", "A terminal window opened — complete the login there, then come back.");
 
