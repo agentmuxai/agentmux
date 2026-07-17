@@ -31,6 +31,15 @@ interface AgentDocumentViewProps {
     documentAtom: SignalPair<DocumentNode[]>;
     documentStateAtom: SignalPair<DocumentState>;
     authUrl?: Accessor<string | null>;
+    /**
+     * User-visible auth-recovery error (e.g. "Login Again" couldn't open a
+     * browser). Rendered as an error box in the same header slot as the
+     * auth-URL box, with a dismiss button. Never fail silently — see
+     * retro-agent-auth-relogin-noop-2026-07-01 §5.1.
+     */
+    authNotice?: Accessor<string | null>;
+    /** Dismiss handler for the auth notice (clears the signal). */
+    onDismissAuthNotice?: () => void;
     /** Provider ID for the active auth flow — used when submitting a pasted auth code. */
     authProviderId?: string;
     onSubagentClick?: (node: SubagentLinkNode) => void;
@@ -155,6 +164,20 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
             </Show>
             <Show when={props.authUrl?.()}>
                 {(url) => <AuthUrlBox url={url()} authProviderId={props.authProviderId} />}
+            </Show>
+            <Show when={props.authNotice?.()}>
+                {(notice) => (
+                    <div class="agent-auth-notice" role="alert">
+                        <span class="agent-auth-notice-text">{notice()}</span>
+                        <button
+                            class="agent-auth-notice-dismiss"
+                            title="Dismiss"
+                            onClick={() => props.onDismissAuthNotice?.()}
+                        >
+                            ✕
+                        </button>
+                    </div>
+                )}
             </Show>
         </>
     );
