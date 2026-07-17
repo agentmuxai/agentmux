@@ -185,6 +185,25 @@ describe("derived chip geometry", () => {
         expect(px[0] + px[1]).toBeCloseTo(40);
     });
 
+    it("gap compensation: chip slot = header + gap so the inset inner box is exactly header-sized", () => {
+        // innerRect renders each tile at calc(size - gapSizePx); the header has
+        // a FIXED --header-height, so allocating raw HeaderHeightPx would clip
+        // it by the gap (reagent P1 on PR #2197).
+        const gap = 3;
+        const { colA, paneA1 } = buildTwoColumnLayout();
+        paneA1.minimized = true;
+        const { px } = computeMainAxisAllocation(colA.children!, false, 800, size, gap);
+        expect(px[0]).toBe(HeaderHeightPx + gap);
+        expect(px[1]).toBe(800 - HeaderHeightPx - gap);
+
+        // Row parent: chip width also carries the gap.
+        const a = newLayoutNode(FlexDirection.Column, 10, undefined, { blockId: "a" });
+        const b = newLayoutNode(FlexDirection.Column, 10, undefined, { blockId: "b" });
+        a.minimized = true;
+        const row = computeMainAxisAllocation([a, b], true, 1000, size, gap);
+        expect(row.px[0]).toBe(MinimizedRowSlotWidthPx + gap);
+    });
+
     it("no minimized children: identical to plain proportional split", () => {
         const a = newLayoutNode(FlexDirection.Row, 100, undefined, { blockId: "a" });
         const b = newLayoutNode(FlexDirection.Row, 300, undefined, { blockId: "b" });
