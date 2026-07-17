@@ -42,11 +42,6 @@ dirs = "5"
 # serde_json round-trips for the vacuum cutoff parameter and for any
 # future structured-log integration.
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
-# LSD-1 (PR #LSD-1) — durable SQLite-backed launcher saga log. Mirrors
-# the srv saga log's `rusqlite = "0.31"` pin so both halves of the
-# saga durability story stay schema-compatible. `bundled` ships
-# SQLite with the binary; no system-libs assumption.
-rusqlite = { version = "0.31", features = ["bundled"] }
 # UUID v4 for the shared auth key launcher generates and gives to
 # both srv (env var) and host (env var). Same generation method the
 # host uses today (uuid::Uuid::new_v4) so the format is identical.
