@@ -253,9 +253,21 @@ mod tests {
         let mut child = cmd.spawn().expect("spawn sleep");
         let pid = child.id().expect("child has a pid") as libc::pid_t;
 
-        // SAFETY: getpgid with a process-scoped pid; no memory touched.
+        // SAFETY: getpgid with process-scoped pids; no memory touched.
         let pgid = unsafe { libc::getpgid(pid) };
+        let our_pgid = unsafe { libc::getpgid(0) };
         assert_eq!(pgid, pid, "process_group(0) must make pgid == pid");
+        // The behavioral half of the invariant (reagent P1, PR #2200): the
+        // child must NOT be in our own group, since that's exactly what
+        // makes it stop receiving a group-directed signal (e.g. a terminal
+        // Ctrl+C, which the shell delivers to its whole foreground group) —
+        // the tradeoff this change makes host/srv exit via the launcher's
+        // explicit terminate_child_gracefully instead of direct propagation.
+        assert_ne!(
+            pgid, our_pgid,
+            "process_group(0) must isolate the child from our own group, \
+             or a group-directed signal (e.g. terminal Ctrl+C) would still reach it"
+        );
 
         let _ = child.kill().await;
     }
