@@ -277,7 +277,72 @@ pub struct SubAgent {
   the new two-level model too. Flagging rather than deciding since it's a
   product-surface call, not a schema one.
 
-## 7. Migration plan
+## 7. Swarm-pane rendering rule: one row per AgentDispatch, members concatenated
+
+**Confirmed pattern, not just plausible:** a session typically has a handful
+of `AgentDispatch`es (single digits), but a Workflow-kind dispatch can have
+hundreds to low-thousands of members — this session's own crash investigation
+found workflow `wf_ff1c5825-522` with **1,030+ member subagent files** in one
+run (`docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md`). Workflow
+patterns are *designed* to fan out this way (loop-until-dry, judge panels,
+multi-modal sweeps) — a single dispatch legitimately produces far more
+members than a human would ever want listed as individual rows.
+
+**Current behavior falls short at this scale.** `WorkflowGroupRow`
+(`frontend/app/view/swarm/swarm-view.tsx:315-354`) already collapses the
+*top-level* row — one row per `workflow_id`, not one per member, matching
+`REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md`'s "group, not truncate"
+approach. But its expand state (L345-350) still renders one `<SubagentRow>`
+per member via `<For each={group.subagents}>` — fine at the scale the
+surrounding code comment anchors to (`"observed live: 45"`,
+`swarm-model.ts:66`), but this session's real corpus is ~20x past that:
+expanding a 1,030-member dispatch today would mount 1,030 `SubagentRow`
+components, each with its own state/handlers/detail-expand affordance.
+
+**New rule: a Workflow-kind `AgentDispatch` never renders one row per
+member, at any expand depth.** Expanding it shows a single **concatenated
+activity feed** instead of N nested rows — every member's events merged into
+one chronological, scrollable stream, each entry tagged with which member it
+came from (agent_id/slug/display_name prefix), the same shape as `docker
+compose logs` interleaving multiple services with a per-line service tag, or
+a CI matrix job's combined-log view. No per-member expand/collapse
+affordance, no per-member row mount cost, regardless of whether the dispatch
+has 3 members or 3,000.
+
+- **Solo-kind `AgentDispatch`** (`member_count == 1`) needs no wrapper row at
+  all — render its one member directly, identical to today's un-grouped
+  `SubagentRow`. Not a behavior change from today, just confirmed under the
+  new schema: the "concatenate" rule only has teeth once there's more than
+  one member to concatenate.
+- **`NameGroup`'s role shifts, not disappears.** Today it groups *loose*
+  (non-workflow) subagents sharing a generated `display_name`
+  (`swarm-model.ts:84-119`) — e.g. repeated "review this file" calls across
+  many files. Under the new schema that becomes grouping multiple *separate
+  solo* `AgentDispatch`es sharing a generated name — same real, common
+  pattern, just operating one level up (across dispatches, not across raw
+  members within one dispatch).
+- **Backend event-coalescing follow-on — do this in the same pass, not as a
+  separate later fix.** Today every member, however many, broadcasts its own
+  `subagent:spawned`/`subagent:activity`/`subagent:completed` WS event
+  individually — the exact mechanism behind the 1,030-event-in-10-seconds
+  broadcast storm in the OOM retro. If the product-level view for a large
+  Workflow dispatch is a concatenated feed rather than N individually-
+  tracked rows, there is no remaining product reason to broadcast N granular
+  per-member events for a large dispatch. The backend can batch new events
+  across a dispatch's members into a single throttled `dispatch:activity`
+  broadcast (e.g. coalesced every 250ms–1s while a dispatch has pending
+  events) instead of one WS message per member-event. This shrinks the
+  blast radius of the exact failure mode that caused the crash — not just
+  the render cost — so it belongs in the same implementation pass as the
+  `AgentDispatch` schema itself, not filed as a later follow-up.
+- **Open question added to §9**: is the concatenated feed's ordering a
+  strict chronological interleave across all members, or grouped-by-member-
+  then-chronological-within? And — mirroring PR #2205's `BACKFILL_MAX_FILES`
+  precedent — should the concatenated feed itself be capped/paginated rather
+  than rendering unbounded per-dispatch history inline, given a dispatch can
+  now legitimately have thousands of events behind it?
+
+## 8. Migration plan
 
 No data to migrate (§4) — this is a code-only change, phaseable and each
 phase independently shippable:
@@ -304,7 +369,7 @@ phase independently shippable:
    that citation, or a short lifecycle-reconciliation note should be written
    to actually back it.
 
-## 8. Open questions
+## 9. Open questions
 
 1. **Naming, final call**: primary recommendation (`AgentDispatch` +
    `SubAgent`) vs. the literal ask (`SubAgent` + `SubSubAgent`) vs. another
@@ -324,14 +389,24 @@ phase independently shippable:
    case of a Workflow dispatch with **zero** members yet (just started,
    before its first member file appears) — `Running`, presumably, but worth
    confirming explicitly in the implementation spec.
+4. **Concatenated-feed ordering and cap** (§7): strict chronological
+   interleave across all members, or grouped-by-member-then-chronological-
+   within? And should the feed itself be capped/paginated (mirroring PR
+   #2205's `BACKFILL_MAX_FILES` precedent) rather than rendering unbounded
+   per-dispatch history inline, now that a dispatch can legitimately have
+   thousands of events behind it?
+5. **`dispatch:activity` coalescing window** (§7): 250ms–1s was floated as a
+   plausible throttle range, not measured — needs a real number, likely
+   tuned against how "live" the concatenated feed needs to feel for an
+   actively-running large dispatch versus how much broadcast volume it saves.
 
-## 9. Sources
+## 10. Sources
 
 - `agentmux-srv/src/backend/subagent_watcher.rs` (current types, file-layout
   doc comment, `Abandoned` dangling citation)
 - `agentmux-srv/src/server/service/misc.rs:47-88`, `agentmux-srv/src/server/app_api/session.rs:195-279`
   (RPC surface)
-- `frontend/app/view/swarm/swarm-model.ts`, `frontend/app/view/subagent/subagent-model.ts`
+- `frontend/app/view/swarm/swarm-model.ts`, `frontend/app/view/swarm/swarm-view.tsx:315-354` (current per-member expand rendering), `frontend/app/view/subagent/subagent-model.ts`
 - `docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md` (this session — the crash that motivated re-examining this schema)
 - `docs/specs/SPEC_SWARM_LIVE_FEED_BINDINGS_2026_07_05.md`, `REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md`, `REPORT_SWARM_SUBAGENT_DETAIL_UX_ANALYSIS_2026_07_07.md`
 - GitHub Actions docs (Workflow Run → Job → Step): https://runs-on.com/github-actions/jobs-and-steps/
