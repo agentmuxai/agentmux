@@ -169,6 +169,20 @@ export const ActivityDock = (props: ActivityDockProps): JSX.Element => {
                     if (result?.tokens) recordTurn("ambient:subagent_name", result.tokens);
                 });
             }
+            // Same, for every unnamed member of a workflow/name group. The
+            // dock's roster (ActivityRow.tsx) renders all members flat, with
+            // no per-member toggle to hang this off of the way the Swarm
+            // pane's per-member SubagentRow.handleToggle does — so the
+            // group row's own first expand is the only hook available;
+            // fire it for every unnamed member at once instead of one.
+            if (a?.kind === "subagent" && a.subagentGroup) {
+                for (const member of a.subagentGroup.members) {
+                    if (member.display_name) continue;
+                    void callBackendService("subagent", "GenerateName", [member.agent_id]).then((result: any) => {
+                        if (result?.tokens) recordTurn("ambient:subagent_name", result.tokens);
+                    });
+                }
+            }
         }
     };
 
