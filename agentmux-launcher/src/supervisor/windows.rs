@@ -590,8 +590,47 @@ pub(crate) async fn run_windows(
     );
     ui_probe_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut ui_probe_nonce: u64 = 0;
+    // SPEC_LAUNCHER_TEARDOWN_BACKSTOP Phase 2 — armed J0 teardown check.
+    // Low-rate poll of the state machine (armed by the IPC server's
+    // post-reducer event hook on PoolDrained / OrphanInstance, disarmed on
+    // WindowOpened and on every host exit below). The teardown decision
+    // itself lives in `teardown_backstop::should_teardown` (grace elapsed
+    // AND ≥2 consecutive unanswered UI-thread probes); this tick only
+    // evaluates and executes. 5s granularity is plenty against a 30s grace.
+    let mut teardown_check_interval =
+        tokio::time::interval(std::time::Duration::from_secs(5));
+    teardown_check_interval
+        .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // Distinct exit code so the wedged-host teardown is unambiguous in any
+    // log/exit-code triage (spec: "launcher exit with a distinct code").
+    const TEARDOWN_BACKSTOP_EXIT_CODE: i32 = 86;
     let exit_code = loop {
         tokio::select! {
+            _ = teardown_check_interval.tick() => {
+                let misses = crate::ui_liveness::consecutive_misses();
+                if crate::teardown_backstop::should_teardown(misses) {
+                    log(&format!(
+                        "[teardown-backstop] host wedged with zero user windows — terminating job \
+                         (armed > {}s grace, {} consecutive unanswered UI-thread probes)",
+                        crate::teardown_backstop::TEARDOWN_GRACE.as_secs(),
+                        misses,
+                    ));
+                    // I2/I3 hold by construction: J0 is this launcher's own
+                    // unnamed job; the blast radius is exactly the processes
+                    // it spawned (host + srv + their descendants — the
+                    // launcher itself is never assigned to J0). The one
+                    // deliberate exception to "never kill what a saga can
+                    // reconcile": zero user windows remain and the UI thread
+                    // is provably dead, so there is nothing to reconcile.
+                    unsafe {
+                        windows_sys::Win32::System::JobObjects::TerminateJobObject(
+                            job_handle,
+                            TEARDOWN_BACKSTOP_EXIT_CODE as u32,
+                        );
+                    }
+                    break TEARDOWN_BACKSTOP_EXIT_CODE;
+                }
+            }
             _ = ui_probe_interval.tick() => {
                 ui_probe_nonce += 1;
                 if let Some((missed, sent_at)) = crate::ui_liveness::record_probe_sent(ui_probe_nonce) {
@@ -626,6 +665,16 @@ pub(crate) async fn run_windows(
                 }
             }
             host_status = host_child.wait() => {
+                // SPEC_LAUNCHER_TEARDOWN_BACKSTOP Phase 2 — the host exiting
+                // (cleanly, crashing, or recycled) always stands the armed
+                // teardown down: an Armed machine's whole premise is "the
+                // host is alive but wedged", and this is the crash-restart-gap
+                // false-positive guard — the machine stays suspended across
+                // the restart and can only re-arm from a fresh drain report
+                // by the NEW host.
+                if crate::teardown_backstop::disarm() {
+                    log("[teardown-backstop] disarmed — host exited (supervised-exit path owns it now)");
+                }
                 let code = match host_status {
                     Ok(s) => s.code().unwrap_or(1),
                     Err(e) => {

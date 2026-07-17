@@ -1,7 +1,7 @@
 # SPEC: Launcher-side teardown backstop (UI-thread liveness probe + armed J0 teardown)
 
 **Date:** 2026-07-11
-**Status:** Ready for implementation (Phase 1 first, observe-only)
+**Status:** Phase 1 merged 2026-07-11 (observe-only probe). Phase 2 implemented 2026-07-16 — armed state machine in `agentmux-launcher/src/teardown_backstop.rs`, arm/disarm hooks in `ipc/server.rs`'s post-reducer event pass (PoolDrained / OrphanInstance arm; WindowOpened disarms; supervisor disarms on every host exit), teardown execution in the supervisor's 5s check tick (`TerminateJobObject(J0)`, launcher exit code 86), `consecutive_misses` counter added to `ui_liveness` (any pump since a probe's send disqualifies it as wedge evidence), and the §Verification `debug:hang_ui` host command (double-gated: `AGENTMUX_DEBUG_HANG=1` + explicit invoke).
 **Tracking:** #2092 (carved out of Discussion #1680 §9.4); shared prerequisite with #942 §8
 **Scope:** `agentmux-common` (protocol), `agentmux-cef` (probe reply), `agentmux-launcher` (prober + rule)
 

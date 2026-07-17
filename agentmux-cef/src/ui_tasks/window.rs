@@ -1892,3 +1892,29 @@ pub fn post_probe_ui_thread_reply(nonce: u64) {
     let mut task = ProbeUiThreadReplyTask::new(nonce);
     post_task(ThreadId::UI, Some(&mut task));
 }
+
+// ── SPEC_LAUNCHER_TEARDOWN_BACKSTOP Phase 2 — debug wedge (verification) ──
+
+wrap_task! {
+    pub struct HangUiThreadTask {}
+
+    impl Task {
+        fn execute(&self) {
+            // Park the UI thread. The message loop stops pumping: probe
+            // reply tasks queue but never execute, so the launcher's
+            // consecutive-miss counter climbs and — once the last user
+            // window is closed and the machine arms — the backstop tears
+            // the tree down. 1h is effectively forever for the test while
+            // still self-recovering if the backstop somehow doesn't fire.
+            tracing::warn!("[debug:hang_ui] UI thread parked (1h sleep) — the teardown backstop should reap this process");
+            std::thread::sleep(std::time::Duration::from_secs(3600));
+        }
+    }
+}
+
+/// SPEC_LAUNCHER_TEARDOWN_BACKSTOP Phase 2 — verification-only UI-thread
+/// wedge. Caller (`ipc.rs "debug:hang_ui"`) gates on `AGENTMUX_DEBUG_HANG=1`.
+pub fn post_hang_ui_thread(_state: &Arc<AppState>) {
+    let mut task = HangUiThreadTask::new();
+    post_task(ThreadId::UI, Some(&mut task));
+}
