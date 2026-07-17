@@ -36,8 +36,17 @@ export interface PinnedActivity {
     // ── Kind-specific source, read by the row's tail + Expanded view ──
     /** Present when `kind === "shell"` (also "cron", which is a shell). */
     shell?: ShellNode;
-    /** Present when `kind === "subagent"`. */
+    /** Present when `kind === "subagent"` AND it represents exactly one
+     *  standalone subagent (no shared `workflow_id`/`display_name` group). */
     subagent?: ActiveSubagent;
+    /** Present when `kind === "subagent"` AND it represents a GROUP — every
+     *  subagent spawned together by one Task/Workflow-tool run, or every
+     *  loose subagent sharing one Haiku-generated `display_name` — collapsed
+     *  into a single dock row instead of one row per member. A single Agent
+     *  tool call can spawn dozens of subagents at once; without this a dock
+     *  row appeared per subagent instead of per tool call. Mutually
+     *  exclusive with `subagent` above. */
+    subagentGroup?: { members: ActiveSubagent[] };
 }
 
 /** Per-kind sigil; colored by status in CSS. */

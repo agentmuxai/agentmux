@@ -67,4 +67,39 @@ describe("subagentActivities", () => {
     it("returns an empty array when no subagents match the block", () => {
         expect(subagentActivities([mk({ agent_id: "a1", parent_block_id: "block-2" })], "block-1")).toEqual([]);
     });
+
+    it("collapses subagents sharing a workflow_id into one activity, not one per subagent", () => {
+        const all = [
+            mk({ agent_id: "a1", workflow_id: "wf_1", slug: "reviewer", status: "active" }),
+            mk({ agent_id: "a2", workflow_id: "wf_1", slug: "reviewer", status: "completed" }),
+            mk({ agent_id: "a3", workflow_id: "wf_1", slug: "reviewer", status: "completed" }),
+        ];
+        const result = subagentActivities(all, "block-1");
+        expect(result).toHaveLength(1);
+        expect(result[0].id).toBe("wf:wf_1");
+        expect(result[0].title).toBe("reviewer (3)");
+        expect(result[0].status).toBe("running"); // one member still active
+        expect(result[0].subagent).toBeUndefined();
+        expect(result[0].subagentGroup?.members).toHaveLength(3);
+    });
+
+    it("marks a workflow group done only once every member is terminal", () => {
+        const all = [
+            mk({ agent_id: "a1", workflow_id: "wf_1", status: "completed", last_event_at: 100 }),
+            mk({ agent_id: "a2", workflow_id: "wf_1", status: "completed", last_event_at: 200 }),
+        ];
+        const result = subagentActivities(all, "block-1");
+        expect(result[0].status).toBe("done");
+        expect(result[0].endedAt).toBe(200);
+    });
+
+    it("does not group standalone subagents (no workflow_id, no shared display_name)", () => {
+        const all = [
+            mk({ agent_id: "a1", workflow_id: null, display_name: null }),
+            mk({ agent_id: "a2", workflow_id: null, display_name: null }),
+        ];
+        const result = subagentActivities(all, "block-1");
+        expect(result.map((a) => a.id)).toEqual(["a1", "a2"]);
+        expect(result.every((a) => a.subagentGroup === undefined)).toBe(true);
+    });
 });
