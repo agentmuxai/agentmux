@@ -152,11 +152,26 @@ export function rebuildMinimizedSet(model: LayoutModel) {
             migrated++;
         }
         if (node.slipMinimize !== undefined) {
+            // The slip squeezed the leaf's size to header units in its host
+            // column — restore the recorded pre-slip size so a later restore
+            // doesn't render a permanent sliver (same rule as the
+            // minimizedSize path above). Unit spaces are per-parent, so the
+            // original Row-slot size is the best available record.
+            if (node.slipMinimize.originalRowSize > 0) {
+                node.size = node.slipMinimize.originalRowSize;
+            }
             if (isLeaf) node.minimized = true;
             node.slipMinimize = undefined;
             migrated++;
         }
         if (node.columnDissolve !== undefined) {
+            // The dissolve set the branch's size to the stolen header total —
+            // possibly tiny or even negative (the cascade bug this redesign
+            // kills). Restore the recorded pre-dissolve size: it becomes
+            // load-bearing again the moment any child leaf is restored.
+            if (node.columnDissolve.originalRowSize > 0) {
+                node.size = node.columnDissolve.originalRowSize;
+            }
             node.columnDissolve = undefined;
             migrated++;
         }
