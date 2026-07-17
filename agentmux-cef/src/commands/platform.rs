@@ -677,6 +677,44 @@ impl LoginChildWait for std::process::Child {
     }
 }
 
+/// Mark every fd ≥ 3 close-on-exec, using only `fcntl` (async-signal-safe,
+/// and — unlike `close` — NOT interposed by libcef). Called from a forked
+/// child's `pre_exec`, so it must not allocate or take locks.
+///
+/// Why mark-CLOEXEC instead of closing outright:
+///   1. It never calls the `close` symbol, so Chromium's fd-ownership guard
+///      (the whole bug this file fixes) can't fire.
+///   2. std's internal exec-error reporting pipe is itself an fd ≥ 3 and is
+///      already CLOEXEC. Re-marking it CLOEXEC is a no-op that KEEPS it open
+///      until `execve` succeeds — so a failed exec still writes its errno
+///      back and `Command::spawn()` returns the real error. Closing that fd
+///      outright (the old fallback) made a failed exec look like `Ok(child)`
+///      that immediately exits, masking the cause.
+///   3. Every inherited fd is neutralized (no host sockets/pipes leak into
+///      the exec'd CLI), including on kernels without `close_range`.
+///
+/// Upper bound: the soft RLIMIT_NOFILE, capped so the loop stays bounded if
+/// the limit is huge (this host's is 1048576). `getrlimit` is
+/// async-signal-safe; `sysconf` is avoided for that reason.
+#[cfg(unix)]
+unsafe fn mark_fds_cloexec_from_3() {
+    let mut rl: libc::rlimit = std::mem::zeroed();
+    let max_fd: libc::c_int = if libc::getrlimit(libc::RLIMIT_NOFILE, &mut rl) == 0 {
+        // rlim_cur is (highest fd)+1; cap to keep the fallback loop bounded.
+        (rl.rlim_cur.min(65536) as libc::c_int).max(3)
+    } else {
+        4096
+    };
+    let mut fd: libc::c_int = 3;
+    while fd < max_fd {
+        let flags = libc::fcntl(fd, libc::F_GETFD);
+        if flags >= 0 && (flags & libc::FD_CLOEXEC) == 0 {
+            libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC);
+        }
+        fd += 1;
+    }
+}
+
 /// Spawn the login CLI on a fresh PTY WITHOUT portable_pty's spawn path.
 ///
 /// Why not `pair.slave.spawn_command()`: portable_pty's `pre_exec` calls
@@ -775,13 +813,15 @@ fn spawn_login_pty_unix(
                 return Err(std::io::Error::last_os_error());
             }
 
-            // fd hygiene without the `close` symbol:
+            // fd hygiene WITHOUT the `close` symbol. Both paths only ever
+            // MARK fds close-on-exec — they never close in-process, so
+            // Chromium's guard can't fire and std's exec-error pipe survives
+            // to report a failed exec (see mark_fds_cloexec_from_3).
             #[cfg(target_os = "linux")]
             {
                 const CLOSE_RANGE_CLOEXEC: libc::c_uint = 4;
-                // Prefer mark-CLOEXEC (kernel 5.11+): every fd ≥ 3 vanishes
-                // at exec, and std's internal exec-error pipe (already
-                // CLOEXEC) still reports a failed exec to the parent.
+                // Fast path (kernel 5.11+): one syscall marks the whole
+                // fd ≥ 3 range CLOEXEC.
                 if libc::syscall(
                     libc::SYS_close_range,
                     3 as libc::c_uint,
@@ -789,35 +829,18 @@ fn spawn_login_pty_unix(
                     CLOSE_RANGE_CLOEXEC,
                 ) == -1
                 {
-                    // Kernel 5.9–5.10: close outright. Older: leave them —
-                    // leaked fds are tolerated by the CLIs (verified with a
-                    // 154-fd table); the crash was only ever the interposed
-                    // close(), never the fds themselves.
-                    let _ = libc::syscall(
-                        libc::SYS_close_range,
-                        3 as libc::c_uint,
-                        libc::c_uint::MAX,
-                        0 as libc::c_uint,
-                    );
+                    // close_range absent (pre-5.9, ENOSYS) or CLOEXEC flag
+                    // unsupported (5.9–5.10, EINVAL): fall back to the fcntl
+                    // marker — same CLOEXEC semantics, no fd left leaked, no
+                    // outright close of std's exec-error pipe.
+                    mark_fds_cloexec_from_3();
                 }
             }
             #[cfg(not(target_os = "linux"))]
             {
-                // macOS: no close_range(2); mark CLOEXEC via fcntl (not an
-                // interposed symbol — and Chromium's close guard is
-                // Linux-only anyway). Bounded by OPEN_MAX.
-                let max = match libc::sysconf(libc::_SC_OPEN_MAX) {
-                    n if n <= 0 => 10240,
-                    n => n.min(65536),
-                };
-                let mut fd: libc::c_int = 3;
-                while (fd as libc::c_long) < max {
-                    let flags = libc::fcntl(fd, libc::F_GETFD);
-                    if flags >= 0 {
-                        libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC);
-                    }
-                    fd += 1;
-                }
+                // macOS/BSD: no close_range(2). Chromium's close guard is
+                // Linux-only, but we still want clean fd inheritance.
+                mark_fds_cloexec_from_3();
             }
             Ok(())
         });
@@ -1657,6 +1680,56 @@ mod spawn_login_pty_tests {
         let _ = reader.read_to_string(&mut rest);
         let status = child.wait().expect("wait child");
         assert!(status.success(), "echo should exit 0, got {status:?}");
+    }
+
+    // fd hygiene: an inherited, explicitly non-CLOEXEC fd ≥ 3 must NOT be
+    // visible in the exec'd child. Proves the pre_exec CLOEXEC marking
+    // (close_range on this kernel, fcntl fallback elsewhere) actually
+    // neutralizes leaked host fds — the reagent P2 concern that the old
+    // outright-close fallback both leaked (ENOSYS) and clobbered std's
+    // exec-error pipe. We open a pipe, clear its CLOEXEC flag so it WOULD
+    // leak, then assert the child can't see that fd number.
+    #[test]
+    fn inherited_non_cloexec_fd_does_not_leak_into_child() {
+        use std::os::fd::AsRawFd;
+
+        // A pipe read end with CLOEXEC deliberately cleared → without our
+        // hygiene it would be inherited across exec.
+        let (rd, _wr) = nix_pipe();
+        let leaked = rd.as_raw_fd();
+        unsafe {
+            let flags = libc::fcntl(leaked, libc::F_GETFD);
+            assert!(flags >= 0);
+            libc::fcntl(leaked, libc::F_SETFD, flags & !libc::FD_CLOEXEC);
+        }
+
+        let env: HashMap<String, String> = HashMap::new();
+        let script = format!("test -e /proc/self/fd/{leaked} && echo LEAKED || echo CLEAN");
+        let (mut child, master) =
+            spawn_login_pty_unix("/bin/sh", &["-c".to_string(), script], &env)
+                .expect("spawn on pty");
+
+        let mut out = String::new();
+        let _ = BufReader::new(master).read_to_string(&mut out);
+        let _ = child.wait();
+        assert!(
+            out.contains("CLEAN") && !out.contains("LEAKED"),
+            "fd {leaked} leaked into the child; hygiene failed. child said: {out:?}"
+        );
+    }
+
+    // Minimal pipe(2) wrapper (avoids pulling nix into the test).
+    fn nix_pipe() -> (std::fs::File, std::fs::File) {
+        use std::os::fd::FromRawFd;
+        let mut fds = [0i32; 2];
+        let rc = unsafe { libc::pipe(fds.as_mut_ptr()) };
+        assert_eq!(rc, 0, "pipe() failed");
+        unsafe {
+            (
+                std::fs::File::from_raw_fd(fds[0]),
+                std::fs::File::from_raw_fd(fds[1]),
+            )
+        }
     }
 
     // A child on its own session with the pty as controlling terminal must
