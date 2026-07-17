@@ -7,6 +7,12 @@
  * filtered to one agent pane's own spawns (`parent_block_id`). Phase 2 of the
  * dock — proves the `PinnedActivity` abstraction generalizes beyond shells.
  *
+ * Grouping reuses `groupSubagentsByWorkflow` verbatim — the same algorithm
+ * the Swarm pane's own tree view uses to collapse a Task/Workflow-tool run's
+ * dozens of subagents into one row. Without it, the dock showed one row per
+ * `ActiveSubagent` instead of one row per Agent tool call (a single run can
+ * spawn dozens at once — observed live: 45).
+ *
  * `canStop` is always `false`: no subagent-cancel RPC/UI exists anywhere in
  * the app today (confirmed — `AgentStopCommand` targets a pane's own agent
  * process, not a subagent by `agent_id`; the Swarm pane itself has no cancel
@@ -16,7 +22,15 @@
  * Spec: docs/specs/SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15.md (§3, §7)
  */
 
-import type { ActiveSubagent } from "../../swarm/swarm-model";
+import {
+    groupCacheKey,
+    groupSubagentsByWorkflow,
+    isNameGroup,
+    isWorkflowGroup,
+    type ActiveSubagent,
+    type NameGroup,
+    type WorkflowGroup,
+} from "../../swarm/swarm-model";
 import type { ActivityStatus, PinnedActivity } from "./types";
 
 function subagentStatusToActivity(s: ActiveSubagent["status"]): ActivityStatus {
@@ -51,11 +65,35 @@ export function subagentToActivity(s: ActiveSubagent): PinnedActivity {
     };
 }
 
-/** This pane's own subagents (`parent_block_id === blockId`), mapped to activities. */
+/** A `WorkflowGroup`/`NameGroup` → one dock row summarizing every member,
+ *  instead of one row per subagent. `startedAt` is the earliest member's
+ *  spawn (the group's own lifetime, not just its most-recently-active
+ *  member's); `endedAt` only lands once every member is terminal, matching
+ *  `subagentToActivity`'s own "no member still running" rule. */
+function subagentGroupToActivity(group: WorkflowGroup | NameGroup): PinnedActivity {
+    const members = group.subagents;
+    const anyAbandoned = members.some((m) => m.status === "abandoned");
+    const status: ActivityStatus = group.activeCount > 0 ? "running" : anyAbandoned ? "stopped" : "done";
+    return {
+        id: groupCacheKey(group),
+        kind: "subagent",
+        title: `${group.name} (${group.totalCount})`,
+        status,
+        startedAt: Math.min(...members.map((m) => m.spawned_at)),
+        endedAt: group.activeCount === 0 ? group.lastEventAt : undefined,
+        canStop: false,
+        subagentGroup: { members },
+    };
+}
+
+/** This pane's own subagents (`parent_block_id === blockId`), grouped the
+ *  same way the Swarm pane's tree view groups them — by shared `workflow_id`,
+ *  then by shared `display_name` among what's left — and mapped to
+ *  activities. One dock row per Agent tool call, not per individual
+ *  subagent. */
 export function subagentActivities(all: ReadonlyArray<ActiveSubagent>, blockId: string): PinnedActivity[] {
-    const out: PinnedActivity[] = [];
-    for (const s of all) {
-        if (s.parent_block_id === blockId) out.push(subagentToActivity(s));
-    }
-    return out;
+    const mine = all.filter((s) => s.parent_block_id === blockId);
+    return groupSubagentsByWorkflow(mine).map((child) =>
+        isWorkflowGroup(child) || isNameGroup(child) ? subagentGroupToActivity(child) : subagentToActivity(child)
+    );
 }
