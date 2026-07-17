@@ -267,10 +267,12 @@ describe("legacy state migration (rebuildMinimizedSet)", () => {
         expect(model.getMinimizedSet().has(paneA2.id)).toBe(false);
     });
 
-    it("migrates slip/dissolve/anchor bookkeeping: markers cleared, slipped leaf flagged in place", () => {
+    it("migrates slip/dissolve/anchor bookkeeping: markers cleared, sizes restored from originalRowSize", () => {
         const { root, colA, paneA1 } = buildTwoColumnLayout();
-        paneA1.slipMinimize = { targetColumnId: colA.id, originalRowSize: 10, originalRowIndex: 0, targetWasLeaf: true };
-        colA.columnDissolve = { targetColumnId: "x", originalRowSize: 10, originalRowIndex: 0, targetWasLeaf: false };
+        paneA1.slipMinimize = { targetColumnId: colA.id, originalRowSize: 150, originalRowIndex: 0, targetWasLeaf: true };
+        paneA1.size = 2.2; // slip-era squeezed size
+        colA.columnDissolve = { targetColumnId: "x", originalRowSize: 120, originalRowIndex: 0, targetWasLeaf: false };
+        colA.size = -0.0039; // the cascade-bug corruption: stolen-total gone negative
         root._slipAnchor = true;
         const model = makeMockModel(root);
 
@@ -278,7 +280,9 @@ describe("legacy state migration (rebuildMinimizedSet)", () => {
 
         expect(paneA1.minimized).toBe(true);
         expect(paneA1.slipMinimize).toBeUndefined();
+        expect(paneA1.size).toBe(150); // pre-slip size restored, not a permanent sliver
         expect(colA.columnDissolve).toBeUndefined();
+        expect(colA.size).toBe(120); // pre-dissolve size restored — heals the negative
         expect(colA.minimized).toBeUndefined(); // branch never gets the flag
         expect(root._slipAnchor).toBeUndefined();
         expect(model.getMinimizedSet().has(paneA1.id)).toBe(true);
