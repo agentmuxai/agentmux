@@ -195,9 +195,9 @@ fn splash_selftest() {
         // Fire fake startup events so the stage list is exercised.
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(300));
-            sink.stage_begin("saga", "Saga recovery");
+            sink.stage_begin("prep", "Launcher setup");
             std::thread::sleep(std::time::Duration::from_millis(120));
-            sink.stage_end("saga", 120, startup_events::StartupStatus::Ok, None);
+            sink.stage_end("prep", 120, startup_events::StartupStatus::Ok, None);
             std::thread::sleep(std::time::Duration::from_millis(100));
             sink.stage_begin("migrations", "Migrations");
             sink.sub_begin("migrations", "0009", "cron_schema");
@@ -222,9 +222,9 @@ fn splash_selftest() {
         // fixture shape as the Linux branch above.
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(300));
-            sink.stage_begin("saga", "Saga recovery");
+            sink.stage_begin("prep", "Launcher setup");
             std::thread::sleep(std::time::Duration::from_millis(120));
-            sink.stage_end("saga", 120, startup_events::StartupStatus::Ok, None);
+            sink.stage_end("prep", 120, startup_events::StartupStatus::Ok, None);
             std::thread::sleep(std::time::Duration::from_millis(100));
             sink.stage_begin("migrations", "Migrations");
             sink.sub_begin("migrations", "0009", "cron_schema");
