@@ -2,7 +2,13 @@
 
 **Date:** 2026-07-16
 **Type:** Investigation + redesign proposal
-**Status:** Option B implemented 2026-07-16 (see §6); Option C remains a proposal
+**Status:** SUPERSEDED by the display-mode model, implemented 2026-07-16 (see §8).
+Option B (locks, §6) shipped in #2180, then was retired the same day after the layout
+doctor caught cascade arithmetic producing negative sizes live — Option B's locks
+faithfully preserved the garbage. External research
+(`docs/research/RESEARCH_PANE_MINIMIZE_BEST_PRACTICES_2026_07_16.md`) confirmed no mature
+system stores minimize as in-tree size state; the implemented design is the research's
+recommendation §7.3 (i3 pattern: display-mode flag + render-derived geometry).
 **Trigger:** User report: a minimized pane can still be resized by dragging the adjacent
 resize handle. Minimize is supposed to be a *locked* state; today it is not.
 **Prior related work:** `INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08.md`
@@ -234,3 +240,39 @@ Merged history this consolidates:
 - PR #2039 — `prune_dangling_block_refs` write-path invariant ("WRR-style").
 - PR #2176 — dissolved-column direction-flip guard in `balanceNode`/`balance_node`.
 - `docs/investigations/INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08.md`.
+
+## 8. Final design (implemented 2026-07-16): minimize is a display mode
+
+After the layout doctor (#2184) caught a live cascade computing **negative sizes** —
+which Option B's locks then preserved — external research
+(`RESEARCH_PANE_MINIMIZE_BEST_PRACTICES_2026_07_16.md`; i3, tmux, Eclipse, IntelliJ,
+FlexLayout, AvalonDock, Dockview, all source-verified) established that no mature system
+stores minimize as in-tree size state. The implemented model is the research's
+recommendation §7.3, the i3 pattern:
+
+- **State:** one leaf-only flag, `minimized: true`. Nothing else. Stored flex sizes are
+  **never touched** by minimize; restore = clear the flag, original geometry intact by
+  construction.
+- **Geometry is derived, per render pass** (`computeMainAxisAllocation` in
+  `layoutGeometry.ts`): a minimized leaf renders as a header chip (header height in a
+  Column parent; fixed `MinimizedRowSlotWidthPx` chip in a Row parent, cross-axis clamped
+  to header height); a fully-minimized subtree renders as a stacked chip strip (one
+  header height per leaf), with expanded siblings absorbing the remainder proportionally
+  to their untouched flex sizes. Chips scale down when the container is too small.
+- **Deleted wholesale:** `_slipMinimize`, `_dissolveColumn`, `_undissolveColumn`, the
+  `slipMinimize`/`columnDissolve`/`_slipAnchor` bookkeeping, `minimizedSize` restore
+  arithmetic, `minimizedLockedSize` + `enforceMinimizedLocks` on the frontend, and all
+  steal-from-neighbor math. `balanceNode`'s two carve-outs remain as inert pre-migration
+  protection; backend `enforce_minimized_locks` remains for unmigrated legacy trees.
+- **Kept:** the reducer guards both sides (`isNodeLocked`/`is_node_locked` now keyed on
+  the flag + legacy markers) — minimized panes stay untargetable by resize/move/swap/
+  split/insert; the last-expanded-pane guard; the collapsed-header reduction; the layout
+  doctor (I2 extended to the flag; I4/I5/I6/I7 now legacy-detection).
+- **Migration:** `rebuildMinimizedSet` converts legacy state in place at load
+  (`minimizedSize` → size restored + flag; `slipMinimize` → flag in place;
+  `columnDissolve`/`minimizedLockedSize`/`_slipAnchor` → dropped).
+- **Why each historical bug class is now structurally impossible:** direction flips
+  can't corrupt what geometry derives (bug 1); there is no squeezed size to resize and no
+  handle on chip edges (bug 2); one leaf-only flag instead of four marker fields
+  (bug 3, doctor I2 still watches promotions); no arithmetic exists to compute a negative
+  size (bug 4).

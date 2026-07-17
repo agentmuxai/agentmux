@@ -120,27 +120,41 @@ describe("validateLayoutInvariants", () => {
         expect(codes).toContain("NONPOSITIVE_SIZE");
     });
 
-    it("flags a tree where every leaf is minimize-locked (all-headers window)", () => {
+    it("flags a tree where every leaf is minimize-locked (all-headers window) — legacy and flag models", () => {
         const l1 = newLayoutNode(FlexDirection.Row, 33, undefined, { blockId: "b1" });
-        l1.minimizedSize = 200;
+        l1.minimizedSize = 200; // legacy marker
         const l2 = newLayoutNode(FlexDirection.Row, 33, undefined, { blockId: "b2" });
-        l2.minimizedSize = 200;
+        l2.minimized = true; // display-mode flag
         const root = newLayoutNode(FlexDirection.Column, 400, [l1, l2]);
 
         const codes = validateLayoutInvariants(root).map((v) => v.code);
         expect(codes).toContain("ALL_LEAVES_LOCKED");
     });
 
-    it("describeLayoutTree renders the lock flags", () => {
+    it("flags the minimized display-mode flag on a branch (leaf-only)", () => {
+        const l1 = newLayoutNode(FlexDirection.Row, 100, undefined, { blockId: "b1" });
+        const l2 = newLayoutNode(FlexDirection.Row, 100, undefined, { blockId: "b2" });
+        const branch = newLayoutNode(FlexDirection.Column, 200, [l1, l2]);
+        branch.minimized = true; // illegal: flag is leaf-only
+        const root = newLayoutNode(FlexDirection.Row, 200, [
+            branch,
+            newLayoutNode(FlexDirection.Column, 200, undefined, { blockId: "b3" }),
+        ]);
+
+        const codes = validateLayoutInvariants(root).map((v) => v.code);
+        expect(codes).toContain("MIN_MARKER_ON_BRANCH");
+    });
+
+    it("describeLayoutTree renders flag and legacy lock markers distinctly", () => {
         const l1 = newLayoutNode(FlexDirection.Row, 33, undefined, { blockId: "b1" });
         l1.minimizedSize = 200;
         l1.minimizedLockedSize = 33;
-        const root = newLayoutNode(FlexDirection.Column, 400, [
-            l1,
-            newLayoutNode(FlexDirection.Row, 367, undefined, { blockId: "b2" }),
-        ]);
+        const l2 = newLayoutNode(FlexDirection.Row, 367, undefined, { blockId: "b2" });
+        l2.minimized = true;
+        const root = newLayoutNode(FlexDirection.Column, 400, [l1, l2]);
         const desc = describeLayoutTree(root);
-        expect(desc).toContain("MIN(orig=200)");
-        expect(desc).toContain("LOCK=33");
+        expect(desc).toContain("legacyMIN(orig=200)");
+        expect(desc).toContain("legacyLOCK=33");
+        expect(desc).toContain(" MIN");
     });
 });

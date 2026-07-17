@@ -23,11 +23,15 @@ export interface LayoutViolation {
 const SIZE_EPS = 1e-4;
 
 /**
- * A locked node is one whose size is owned by the minimize subsystem: a minimized
- * leaf (`minimizedSize`), a slipped header (`slipMinimize`), or a dissolved column
- * (`columnDissolve`). No other writer may resize, move, swap, or split it, and no
- * resize handle is rendered on its edges. See
- * `docs/specs/SPEC_LAYOUT_MINIMIZE_LOCKED_STATE_REDESIGN_2026_07_16.md`.
+ * A locked node is one owned by the minimize subsystem. Current model: the
+ * `minimized` display-mode flag (geometry derived at render, stored size never
+ * touched — see `RESEARCH_PANE_MINIMIZE_BEST_PRACTICES_2026_07_16.md` §7).
+ * The legacy markers (`minimizedSize`/`slipMinimize`/`columnDissolve`) are
+ * still recognized so unmigrated persisted trees stay guarded until
+ * `rebuildMinimizedSet` migrates them at load.
+ *
+ * No other writer may resize, move, swap, or split a locked node, and no
+ * resize handle is rendered on its edges.
  *
  * Canonical home is here (the invariant module) so `layoutMinimize` can import
  * the doctor without an import cycle; `layoutMinimize` re-exports it for its
@@ -35,7 +39,25 @@ const SIZE_EPS = 1e-4;
  */
 export function isNodeLocked(node: LayoutNode | undefined): boolean {
     if (!node) return false;
-    return node.minimizedSize !== undefined || node.slipMinimize !== undefined || node.columnDissolve !== undefined;
+    return (
+        node.minimized === true ||
+        node.minimizedSize !== undefined ||
+        node.slipMinimize !== undefined ||
+        node.columnDissolve !== undefined
+    );
+}
+
+/**
+ * True when a node renders as minimized: a leaf with the `minimized` flag, or
+ * a branch whose every child is effectively minimized (a column of header
+ * chips). Drives render-time geometry derivation (`updateTreeHelper`) and
+ * resize-handle suppression. Legacy markers count so unmigrated trees render
+ * sanely before migration runs.
+ */
+export function isEffectivelyMinimized(node: LayoutNode | undefined): boolean {
+    if (!node) return false;
+    if (!node.children?.length) return isNodeLocked(node);
+    return node.children.every((c) => isEffectivelyMinimized(c));
 }
 
 /**
@@ -60,15 +82,16 @@ export function validateLayoutInvariants(root: LayoutNode | undefined): LayoutVi
             });
         }
 
-        // I2 — minimizedSize / slipMinimize are leaf-only markers. A branch
-        // carrying one means a minimized leaf was promoted to a group without
-        // migrating its minimize fields (e.g. addIntermediateNode, or the
-        // leaf→Column conversions in _slipMinimize/_dissolveColumn).
-        if (isBranch && (node.minimizedSize !== undefined || node.slipMinimize !== undefined)) {
+        // I2 — the `minimized` flag and the legacy minimizedSize/slipMinimize
+        // markers are leaf-only. A branch carrying one means a minimized leaf
+        // was promoted to a group without migrating its minimize fields.
+        if (isBranch && (node.minimized !== undefined || node.minimizedSize !== undefined || node.slipMinimize !== undefined)) {
             violations.push({
                 code: "MIN_MARKER_ON_BRANCH",
                 nodeId: node.id,
-                detail: `branch has ${node.minimizedSize !== undefined ? "minimizedSize" : "slipMinimize"}`,
+                detail: `branch has ${
+                    node.minimized !== undefined ? "minimized" : node.minimizedSize !== undefined ? "minimizedSize" : "slipMinimize"
+                }`,
             });
         }
 
@@ -142,11 +165,7 @@ export function validateLayoutInvariants(root: LayoutNode | undefined): LayoutVi
         if (!node.children?.length) {
             if (node.data !== undefined) {
                 leafCount++;
-                if (
-                    node.minimizedSize === undefined &&
-                    node.slipMinimize === undefined &&
-                    node.columnDissolve === undefined
-                ) {
+                if (!isNodeLocked(node)) {
                     expandedCount++;
                 }
             }
@@ -174,11 +193,12 @@ export function describeLayoutTree(root: LayoutNode | undefined): string {
     const lines: string[] = [];
     function walk(node: LayoutNode, depth: number) {
         const flags = [
-            node.minimizedSize !== undefined ? `MIN(orig=${node.minimizedSize})` : "",
-            node.minimizedLockedSize !== undefined ? `LOCK=${node.minimizedLockedSize}` : "",
-            node.slipMinimize !== undefined ? "SLIP" : "",
-            node.columnDissolve !== undefined ? "DISSOLVED" : "",
-            node._slipAnchor ? "anchor" : "",
+            node.minimized ? "MIN" : "",
+            node.minimizedSize !== undefined ? `legacyMIN(orig=${node.minimizedSize})` : "",
+            node.minimizedLockedSize !== undefined ? `legacyLOCK=${node.minimizedLockedSize}` : "",
+            node.slipMinimize !== undefined ? "legacySLIP" : "",
+            node.columnDissolve !== undefined ? "legacyDISSOLVED" : "",
+            node._slipAnchor ? "legacyAnchor" : "",
         ]
             .filter(Boolean)
             .join(" ");
