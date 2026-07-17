@@ -928,6 +928,8 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 documentAtom={agentAtoms().documentAtom}
                 documentStateAtom={agentAtoms().documentStateAtom}
                 authUrl={status.authUrl}
+                authNotice={status.authNotice}
+                onDismissAuthNotice={() => status.setAuthNotice(null)}
                 authProviderId={provider()?.id ?? providerKey()}
                 onSubagentClick={handleSubagentClick}
                 onAgentErrorLogin={() => {

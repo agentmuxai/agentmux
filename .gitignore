@@ -1,6 +1,7 @@
 .task
 frontend/dist
 dist/
+/log
 dist-dev/
 frontend/node_modules
 node_modules/

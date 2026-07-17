@@ -40,7 +40,16 @@ export interface ForceLoginParams {
     log: LogFn;
 }
 
-export async function forceProviderLogin(p: ForceLoginParams): Promise<void> {
+/**
+ * Outcome of a forced login attempt. "no-url" means the CLI produced no
+ * scrapeable OAuth URL — nothing was opened, and the CALLER must surface a
+ * user-visible error pointing at the reliable recovery paths (the silent
+ * warn-only branch here is how "Login Again" became a dead button —
+ * retro-agent-auth-relogin-noop-2026-07-01 §5.1).
+ */
+export type ForceLoginOutcome = "opened" | "no-url";
+
+export async function forceProviderLogin(p: ForceLoginParams): Promise<ForceLoginOutcome> {
     const { provider, cliPath, authEnv, setAuthUrl, log } = p;
     log("auth", "re-login: forcing a fresh OAuth (bypassing the auth-status check)…");
 
@@ -62,9 +71,10 @@ export async function forceProviderLogin(p: ForceLoginParams): Promise<void> {
             log("auth", "could not open a browser; copy the URL from the box above and open it manually", "warn");
         }
         log("auth", "after you finish, just send your message again — the agent will use the new token");
-    } else {
-        // No URL captured (some providers don't print one); the CLI may have
-        // opened its own browser. Leave the user to complete it manually.
-        log("auth", "a browser window should have opened — complete login there", "warn");
+        return "opened";
     }
+    // No URL captured — the CLI either crashed at spawn or runs a login TUI
+    // that prints no parseable URL (Claude Code v2.1.x). Nothing opened.
+    log("auth", "no login URL captured from the CLI — nothing was opened", "warn");
+    return "no-url";
 }
