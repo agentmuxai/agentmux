@@ -136,7 +136,18 @@ pub(crate) fn spawn_host_unix(
         // backstop) — kill_on_drop would SIGKILL the host the moment the
         // Child is dropped, robbing CEF of the chance to reap its render
         // subprocesses cleanly.
-        .kill_on_drop(false);
+        .kill_on_drop(false)
+        // SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11 unix parity — make the
+        // host its own process-group leader (pgid == its own pid) instead of
+        // inheriting the launcher's group. This is the prerequisite for
+        // `kill_process_group_forcefully`'s `kill(-pgid, SIGKILL)`: without
+        // an explicit group, the host and any CEF subprocesses it forks
+        // (renderer/GPU/zygote) sit in the launcher's OWN group, and a
+        // group-kill from the teardown backstop would take the launcher
+        // down with it mid-cleanup. Scoped exactly to what this call spawns
+        // — the same blast-radius bound Windows gets for free from owning
+        // its Job Object.
+        .process_group(0);
     if disable_gpu {
         host_cmd.arg("--disable-gpu");
     }
@@ -192,6 +203,94 @@ pub(crate) fn terminate_child_gracefully(child: &tokio::process::Child) {
         unsafe {
             libc::kill(pid as libc::pid_t, libc::SIGTERM);
         }
+    }
+}
+
+/// SIGKILL an entire process group in one shot — the unix analogue of
+/// Windows' `TerminateJobObject`. `child` must have been spawned with
+/// `.process_group(0)` (both `spawn_host_unix` and `srv_spawner::spawn_srv`
+/// do this) so its pgid equals its own pid; negating the pid targets the
+/// whole group instead of just the one process, reaping any descendants
+/// (e.g. CEF's forked renderer/GPU subprocesses) the launcher never tracks
+/// individually. Used by the teardown backstop
+/// (SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11) — a deliberately harsher
+/// exit than `terminate_child_gracefully`'s SIGTERM, reserved for the case
+/// where the host's UI thread is provably wedged and there is no graceful
+/// shutdown to wait for. No-op if the child has already exited (its pid may
+/// have been reaped; a stale pid's negated kill returns ESRCH, ignored).
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn kill_process_group_forcefully(child: &tokio::process::Child) {
+    if let Some(pid) = child.id() {
+        // SAFETY: kill(2) with a process-scoped pid + a constant signal —
+        // no memory is touched. A stale pid just returns ESRCH (ignored).
+        unsafe {
+            libc::kill(-(pid as libc::pid_t), libc::SIGKILL);
+        }
+    }
+}
+
+#[cfg(all(test, not(target_os = "windows")))]
+mod tests {
+    //! `kill_process_group_forcefully` and the `.process_group(0)` calls in
+    //! this file / `srv_spawner.rs` are the prerequisite the SPEC_LAUNCHER_
+    //! TEARDOWN_BACKSTOP_2026_07_11 unix teardown backstop depends on — a
+    //! survey ahead of this change (issue #2188) confirmed NO unix child of
+    //! the launcher was ever placed in its own process group, so
+    //! `kill(-pgid, SIGKILL)` had no safe target. These exercise the two
+    //! real invariants against actually-spawned processes rather than
+    //! asserting on the builder call alone, since a wrong signature (e.g.
+    //! `.process_group(pid)` instead of `.process_group(0)`) would compile
+    //! fine and silently fail to create a new group.
+
+    use super::kill_process_group_forcefully;
+
+    /// `.process_group(0)` makes the spawned child its own group leader —
+    /// pgid must equal its own pid, not the test process's pgid.
+    #[tokio::test]
+    async fn process_group_zero_makes_the_child_its_own_group_leader() {
+        let mut cmd = tokio::process::Command::new("sleep");
+        cmd.arg("5").kill_on_drop(true).process_group(0);
+        let mut child = cmd.spawn().expect("spawn sleep");
+        let pid = child.id().expect("child has a pid") as libc::pid_t;
+
+        // SAFETY: getpgid with a process-scoped pid; no memory touched.
+        let pgid = unsafe { libc::getpgid(pid) };
+        assert_eq!(pgid, pid, "process_group(0) must make pgid == pid");
+
+        let _ = child.kill().await;
+    }
+
+    /// The kill actually reaches the process (signal-terminated, not a
+    /// silent no-op) — the behavioral half of the prerequisite, mirroring
+    /// what the teardown backstop's live-fire path depends on.
+    #[tokio::test]
+    async fn kill_process_group_forcefully_terminates_a_real_child() {
+        use std::os::unix::process::ExitStatusExt;
+
+        let mut cmd = tokio::process::Command::new("sleep");
+        cmd.arg("5").kill_on_drop(false).process_group(0);
+        let mut child = cmd.spawn().expect("spawn sleep");
+
+        kill_process_group_forcefully(&child);
+
+        let status = tokio::time::timeout(std::time::Duration::from_secs(2), child.wait())
+            .await
+            .expect("child did not exit after group kill")
+            .expect("wait succeeded");
+        assert_eq!(status.signal(), Some(libc::SIGKILL));
+    }
+
+    /// A child that already exited (pid reaped) must not panic or error —
+    /// the teardown arm calls this unconditionally on both host and srv
+    /// without checking liveness first.
+    #[tokio::test]
+    async fn kill_process_group_forcefully_is_a_noop_on_an_already_exited_child() {
+        let mut cmd = tokio::process::Command::new("true");
+        cmd.kill_on_drop(false).process_group(0);
+        let mut child = cmd.spawn().expect("spawn true");
+        let _ = child.wait().await; // let it exit and get reaped
+
+        kill_process_group_forcefully(&child); // must not panic
     }
 }
 

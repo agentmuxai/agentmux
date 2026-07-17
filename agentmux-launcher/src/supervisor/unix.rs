@@ -282,7 +282,7 @@ pub(crate) async fn run_unix(
         );
         log(&format!("IPC server started on {}", socket_path));
 
-        (saga_coord, ipc_handle)
+        (saga_coord, ipc_handle, host_pipe)
     };
 
     // 2b. Spawn srv. The srv pipe path is the launcher-owned socket
@@ -294,7 +294,7 @@ pub(crate) async fn run_unix(
         launcher_setup,
         srv_spawner::spawn_srv(launcher_exe_dir, &paths, &srv_pipe_path, &startup_sink)
     );
-    let (saga_coord, _ipc_handle) = setup_result;
+    let (saga_coord, _ipc_handle, host_pipe) = setup_result;
     let (srv_result, mut srv_child) = match srv_spawn_result {
         Ok(pair) => pair,
         Err(e) => {
@@ -389,9 +389,90 @@ pub(crate) async fn run_unix(
     let mut oom_restarts: Vec<std::time::Instant> = Vec::new();
     let mut last_abnormal_code: Option<i32> = None;
     let mut host_degraded = false;
+    // SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11 unix parity — same shape as
+    // `run_windows`'s Phase 1/Phase 2 pair. Low-rate UI-thread liveness
+    // prober (60s, first tick delayed a full interval so a booting host
+    // isn't logged as a false miss) plus a low-rate poll (5s) of the armed
+    // teardown state machine (armed by the IPC server's post-reducer event
+    // hook on PoolDrained/OrphanInstance — see `ipc/server.rs`, already
+    // platform-neutral and unconsumed on unix until this — disarmed on
+    // WindowOpened and on every host exit below).
+    let mut ui_probe_interval = tokio::time::interval_at(
+        tokio::time::Instant::now() + std::time::Duration::from_secs(60),
+        std::time::Duration::from_secs(60),
+    );
+    ui_probe_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut ui_probe_nonce: u64 = 0;
+    let mut teardown_check_interval =
+        tokio::time::interval(std::time::Duration::from_secs(5));
+    teardown_check_interval
+        .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // Same distinct exit code as Windows so wedged-host teardown is
+    // unambiguous in log/exit-code triage across platforms.
+    const TEARDOWN_BACKSTOP_EXIT_CODE: i32 = 86;
     let exit_code = loop {
         tokio::select! {
+            _ = teardown_check_interval.tick() => {
+                let misses = crate::ui_liveness::consecutive_misses();
+                if crate::teardown_backstop::should_teardown(misses) {
+                    log(&format!(
+                        "[teardown-backstop] host wedged with zero user windows — terminating process \
+                         groups (armed > {}s grace, {} consecutive unanswered UI-thread probes)",
+                        crate::teardown_backstop::TEARDOWN_GRACE.as_secs(),
+                        misses,
+                    ));
+                    // I2/I3 hold by construction: each process group (host,
+                    // srv) was created explicitly at spawn time via
+                    // `.process_group(0)` — the blast radius is exactly the
+                    // processes THIS launcher spawned and their descendants,
+                    // never the launcher's own group. Mirrors the Windows J0
+                    // TerminateJobObject backstop; the one deliberate
+                    // exception to "never kill what a saga can reconcile" —
+                    // zero user windows remain and the UI thread is provably
+                    // dead, so there is nothing to reconcile.
+                    crate::host_spawn::kill_process_group_forcefully(&host_child);
+                    crate::host_spawn::kill_process_group_forcefully(&srv_child);
+                    break TEARDOWN_BACKSTOP_EXIT_CODE;
+                }
+            }
+            _ = ui_probe_interval.tick() => {
+                ui_probe_nonce += 1;
+                if let Some((missed, sent_at)) = crate::ui_liveness::record_probe_sent(ui_probe_nonce) {
+                    log(&format!(
+                        "[ui-liveness] probe nonce={} unanswered after {}s — UI thread did not pump in that window",
+                        missed,
+                        sent_at.elapsed().as_secs()
+                    ));
+                }
+                // Fail-fast send: try_send_command_no_buffer turns a
+                // disconnected pipe into an immediate error instead of
+                // buffering the probe through a crash-restart gap, where it
+                // could age into a false "did not pump" miss (see
+                // run_windows's identical comment for the full rationale).
+                if let Err(e) = host_pipe
+                    .try_send_command_no_buffer(&agentmux_common::ipc::Command::ProbeUiThread {
+                        nonce: ui_probe_nonce,
+                    })
+                    .await
+                {
+                    crate::ui_liveness::retract_probe(ui_probe_nonce);
+                    log(&format!(
+                        "[ui-liveness] probe send failed (transport, not liveness): {:?}",
+                        e
+                    ));
+                }
+            }
             host_status = host_child.wait() => {
+                // SPEC_LAUNCHER_TEARDOWN_BACKSTOP Phase 2 — the host exiting
+                // (cleanly, crashing, or relaunched) always stands the armed
+                // teardown down: an Armed machine's whole premise is "the
+                // host is alive but wedged", and this is the crash-restart-
+                // gap false-positive guard — the machine stays suspended
+                // across the restart and can only re-arm from a fresh drain
+                // report by the NEW host.
+                if crate::teardown_backstop::disarm() {
+                    log("[teardown-backstop] disarmed — host exited (supervised-exit path owns it now)");
+                }
                 use std::os::unix::process::ExitStatusExt;
                 let status = match host_status {
                     Ok(s) => s,
