@@ -398,47 +398,55 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                 }
 
-                let output = tokio::time::timeout(
-                    std::time::Duration::from_secs(10),
-                    {
-                        let mut check_cmd = make_cli_cmd(&cmd.cli_path);
-                        check_cmd.args(&cmd.auth_check_args);
-                        for (k, v) in &cmd.auth_env {
-                            check_cmd.env(k, v);
+                let (mut authenticated, mut email, mut auth_method, mut raw_output) =
+                    run_auth_check(&cmd.cli_path, &cmd.auth_check_args, &cmd.auth_env).await?;
+
+                // Self-heal a stale isolated/shared Claude credential (the Pozl
+                // 401). Validation failed, but if the user has a valid global
+                // ~/.claude login whose access token differs from the checked
+                // dir's, the isolated copy went stale (a global re-login rotated
+                // the token and killed the isolated refresh token) and the
+                // one-time import sentinel blocks auto-reimport. Refresh from
+                // global and re-validate ONCE, so the agent recovers without the
+                // user hunting for the right button. "auth.credstate:" /
+                // "identity.spawn" are `muxlog auth` vocabulary.
+                if !authenticated && cmd.cli_path.to_lowercase().contains("claude") {
+                    if let Some(config_dir) = cmd.auth_env.get("CLAUDE_CONFIG_DIR") {
+                        match refresh_claude_dir_from_global_if_stale(config_dir) {
+                            Ok(true) => {
+                                tracing::info!(
+                                    config_dir = %config_dir,
+                                    "auth.credstate: isolated dir failed validation but a newer global login exists — refreshed, re-validating"
+                                );
+                                match run_auth_check(
+                                    &cmd.cli_path,
+                                    &cmd.auth_check_args,
+                                    &cmd.auth_env,
+                                )
+                                .await
+                                {
+                                    Ok((a, e, m, r)) => {
+                                        authenticated = a;
+                                        email = e;
+                                        auth_method = m;
+                                        raw_output = r;
+                                        tracing::info!(
+                                            authenticated,
+                                            "auth.credstate: self-heal from global login complete"
+                                        );
+                                    }
+                                    Err(e) => tracing::warn!(
+                                        "auth.credstate: self-heal re-validation failed: {e}"
+                                    ),
+                                }
+                            }
+                            Ok(false) => {}
+                            Err(e) => tracing::warn!(
+                                "auth.credstate: self-heal refresh from global failed: {e}"
+                            ),
                         }
-                        // Null stdin: prevents the CLI from blocking on interactive
-                        // first-run prompts (onboarding, theme selection, etc.) that
-                        // only appear when stdin is a TTY or non-null pipe.
-                        check_cmd.stdin(std::process::Stdio::null());
-                        check_cmd.output()
-                    },
-                ).await
-                    .map_err(|_| "auth check timed out (10s)".to_string())?
-                    .map_err(|e| format!("failed to run auth check: {e}"))?;
-
-                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-                let mut email = None;
-                let mut auth_method = None;
-
-                let authenticated = if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout) {
-                    // Claude outputs `emailAddress`; other CLIs use `email`. Check both.
-                    email = json.get("emailAddress")
-                        .or_else(|| json.get("email"))
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string());
-                    auth_method = json.get("authMethod")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string());
-                    json.get("loggedIn")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false)
-                } else {
-                    output.status.success()
-                };
-
-                let raw_output = if !stdout.is_empty() { stdout } else { stderr };
+                    }
+                }
 
                 let result = CheckCliAuthResult {
                     authenticated,
@@ -680,6 +688,103 @@ pub(crate) fn make_cli_cmd(cli_path: &str) -> tokio::process::Command {
     agentmux_common::make_cli_cmd(cli_path)
 }
 
+/// Run the provider auth-check CLI against `auth_env` and parse the verdict.
+/// Returns `(authenticated, email, auth_method, raw_output)`. Extracted so the
+/// stale-credential self-heal can re-run the exact same check after refreshing.
+async fn run_auth_check(
+    cli_path: &str,
+    auth_check_args: &[String],
+    auth_env: &std::collections::HashMap<String, String>,
+) -> Result<(bool, Option<String>, Option<String>, String), String> {
+    let output = tokio::time::timeout(std::time::Duration::from_secs(10), {
+        let mut check_cmd = make_cli_cmd(cli_path);
+        check_cmd.args(auth_check_args);
+        for (k, v) in auth_env {
+            check_cmd.env(k, v);
+        }
+        // Null stdin: prevents the CLI from blocking on interactive first-run
+        // prompts (onboarding, theme selection) that only appear on a TTY.
+        check_cmd.stdin(std::process::Stdio::null());
+        check_cmd.output()
+    })
+    .await
+    .map_err(|_| "auth check timed out (10s)".to_string())?
+    .map_err(|e| format!("failed to run auth check: {e}"))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    let mut email = None;
+    let mut auth_method = None;
+    let authenticated = if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout) {
+        // Claude outputs `emailAddress`; other CLIs use `email`. Check both.
+        email = json
+            .get("emailAddress")
+            .or_else(|| json.get("email"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        auth_method = json
+            .get("authMethod")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        json.get("loggedIn").and_then(|v| v.as_bool()).unwrap_or(false)
+    } else {
+        output.status.success()
+    };
+    let raw_output = if !stdout.is_empty() { stdout } else { stderr };
+    Ok((authenticated, email, auth_method, raw_output))
+}
+
+/// Read the non-empty Claude access token from a credentials file, if any.
+fn claude_access_token(creds_path: &str) -> Option<String> {
+    let content = std::fs::read_to_string(creds_path).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&content).ok()?;
+    json.get("claudeAiOauth")
+        .and_then(|o| o.get("accessToken"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+}
+
+/// Refresh a stale Claude isolated/shared config dir from the user's GLOBAL
+/// `~/.claude` login. Copies global → dir ONLY when the global credentials file
+/// has a non-empty access token that DIFFERS from the dir's current one.
+/// Returns `Ok(true)` if it wrote a refreshed credential.
+///
+/// This is the recovery for the Pozl 401: a global re-login rotates the access
+/// token and invalidates the isolated copy's refresh token, but the one-time
+/// import sentinel (`.agentmux-cred-seeded`) blocks any auto-reimport — so the
+/// isolated dir stays stale and 401s with no self-recovery. Called ONLY after a
+/// validation failure, so at worst it copies a global that is itself expired
+/// (harmless — the re-validation just fails again).
+fn refresh_claude_dir_from_global_if_stale(config_dir: &str) -> std::io::Result<bool> {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_default();
+    if home.is_empty() {
+        return Ok(false);
+    }
+    let global = format!("{home}/.claude/.credentials.json");
+    refresh_dir_from_global(&global, config_dir)
+}
+
+/// Path-explicit core of the refresh (see `refresh_claude_dir_from_global_if_stale`).
+/// Copies `global_creds` → `<config_dir>/.credentials.json` only when the global
+/// file has a non-empty access token that differs from the dir's current one.
+fn refresh_dir_from_global(global_creds: &str, config_dir: &str) -> std::io::Result<bool> {
+    let iso = format!("{config_dir}/.credentials.json");
+    let global_tok = match claude_access_token(global_creds) {
+        Some(t) => t,
+        None => return Ok(false), // no global login to refresh from
+    };
+    if claude_access_token(&iso).as_deref() == Some(global_tok.as_str()) {
+        return Ok(false); // already identical — nothing to refresh
+    }
+    std::fs::create_dir_all(config_dir)?;
+    std::fs::copy(global_creds, &iso)?;
+    Ok(true)
+}
+
 /// Resolve a CLI command on the system PATH.
 ///
 /// Uses `where` on Windows and `which` on Unix. Returns the absolute path
@@ -749,5 +854,78 @@ async fn get_cli_version(cli_path: &str) -> String {
             tracing::warn!(cli_path = %cli_path, "get_cli_version timed out after 5s");
             "unknown".to_string()
         }
+    }
+}
+
+#[cfg(test)]
+mod selfheal_tests {
+    use super::{claude_access_token, refresh_dir_from_global};
+
+    fn write(p: &std::path::Path, tok: &str) {
+        std::fs::write(
+            p,
+            format!(r#"{{"claudeAiOauth":{{"accessToken":"{tok}","refreshToken":"rt"}}}}"#),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn access_token_parsing() {
+        let dir = std::env::temp_dir().join(format!("amx-sh-tok-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("c.json");
+        write(&f, "sk-ant-AAA");
+        assert_eq!(claude_access_token(f.to_str().unwrap()).as_deref(), Some("sk-ant-AAA"));
+        assert_eq!(claude_access_token("/no/such/file").as_deref(), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn refreshes_when_global_token_differs() {
+        let base = std::env::temp_dir().join(format!("amx-sh-diff-{}", std::process::id()));
+        let gdir = base.join("global");
+        let iso = base.join("iso");
+        std::fs::create_dir_all(&gdir).unwrap();
+        std::fs::create_dir_all(&iso).unwrap();
+        let global = gdir.join(".credentials.json");
+        write(&global, "sk-ant-NEW");
+        write(&iso.join(".credentials.json"), "sk-ant-OLD");
+
+        let did = refresh_dir_from_global(global.to_str().unwrap(), iso.to_str().unwrap()).unwrap();
+        assert!(did, "should refresh when tokens differ");
+        assert_eq!(
+            claude_access_token(iso.join(".credentials.json").to_str().unwrap()).as_deref(),
+            Some("sk-ant-NEW"),
+            "iso dir should now hold the global token"
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn no_op_when_tokens_identical() {
+        let base = std::env::temp_dir().join(format!("amx-sh-same-{}", std::process::id()));
+        let gdir = base.join("global");
+        let iso = base.join("iso");
+        std::fs::create_dir_all(&gdir).unwrap();
+        std::fs::create_dir_all(&iso).unwrap();
+        let global = gdir.join(".credentials.json");
+        write(&global, "sk-ant-SAME");
+        write(&iso.join(".credentials.json"), "sk-ant-SAME");
+        assert!(!refresh_dir_from_global(global.to_str().unwrap(), iso.to_str().unwrap()).unwrap());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn no_op_when_no_global_login() {
+        let base = std::env::temp_dir().join(format!("amx-sh-noglobal-{}", std::process::id()));
+        let iso = base.join("iso");
+        std::fs::create_dir_all(&iso).unwrap();
+        // Global path does not exist → nothing to refresh from, iso untouched.
+        assert!(!refresh_dir_from_global(
+            base.join("global/.credentials.json").to_str().unwrap(),
+            iso.to_str().unwrap()
+        )
+        .unwrap());
+        let _ = std::fs::remove_dir_all(&base);
     }
 }
