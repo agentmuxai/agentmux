@@ -206,7 +206,18 @@ export interface LayoutNode {
     children?: LayoutNode[];
     flexDirection: FlexDirection;
     size: number;
-    /** Original size before minimization. Presence indicates the node is minimized. */
+    /**
+     * Display-mode flag: the pane renders as a header chip; geometry is derived
+     * at render time (`updateTreeHelper`) and this node's stored `size` is NEVER
+     * touched by minimize — restore is just clearing the flag. The i3 pattern,
+     * per `RESEARCH_PANE_MINIMIZE_BEST_PRACTICES_2026_07_16.md` §7. Leaf-only.
+     */
+    minimized?: true;
+    /**
+     * LEGACY (pre display-mode model) — original size before minimization;
+     * presence indicated the node was minimized via size-squeezing. Migrated to
+     * the `minimized` flag by `rebuildMinimizedSet` at load; no new writes.
+     */
     minimizedSize?: number;
     /**
      * The flex-unit size this node is locked to while minimized (header height in the
