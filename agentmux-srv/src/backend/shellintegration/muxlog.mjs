@@ -432,6 +432,17 @@ function main() {
     }
 
     const targets = ["host", "srv", "launcher", "fe", "all"];
+    const validActions = ["tail", "cat", "grep"];
+    // A first token that is neither a known recipe (help/ls/mem/errors/swarm/
+    // auth/bridge — all handled above and returned), a log target, nor a bare
+    // action is an unknown command. Without this guard it silently falls
+    // through to `follow(host)` below and tails the host log forever with no
+    // filter — which is exactly how a typo, or `muxlog auth` run against a
+    // build predating the auth recipe, appears to "hang". Fail fast instead.
+    if (!targets.includes(cmd) && !validActions.includes(cmd)) {
+        console.error(`muxlog: unknown command '${cmd}'. Run \`muxlog help\` for usage.`);
+        process.exit(1);
+    }
     const target = targets.includes(cmd) ? cmd : "host";
     const action = (targets.includes(cmd) ? pos[1] : pos[0]) || "tail";
     if (action === "grep") { const re = pos[pos.indexOf("grep") + 1]; if (re) opt.grep = new RegExp(re, "i"); }
