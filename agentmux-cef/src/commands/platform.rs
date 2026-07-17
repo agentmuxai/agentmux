@@ -754,7 +754,11 @@ fn spawn_login_pty_unix(
             &mut slave_fd,
             std::ptr::null_mut(),
             std::ptr::null_mut(),
-            &ws,
+            // `&mut` coerces to both platform bindings: Apple libc declares
+            // `winp: *mut winsize`, Linux `*const winsize`. A plain `&ws`
+            // only satisfies Linux — breaking macOS builds, which CI never
+            // compiles (no macOS runner).
+            &mut ws,
         )
     };
     if rc != 0 {
