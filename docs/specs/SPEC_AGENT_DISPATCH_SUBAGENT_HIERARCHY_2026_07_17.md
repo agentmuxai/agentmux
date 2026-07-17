@@ -235,6 +235,15 @@ pub struct SubAgent {
     pub event_count: usize,
     pub model: Option<String>,
     pub display_name: Option<String>,
+    /// New (§9.2): the JSONL transcript's own `"parentUuid"` field, parsed
+    /// verbatim. `None` in every real transcript checked so far (228/228) —
+    /// nested subagent spawning is permitted for unrestricted-tool subagent
+    /// types but has never actually been observed on this machine. Captured
+    /// defensively since we already read this line for other fields; if
+    /// ever `Some`, this SubAgent is a grandchild of another SubAgent, not
+    /// a direct member of its nominal `dispatch_id` — the frontend should
+    /// attribute/nest it accordingly rather than showing it as a flat peer.
+    pub spawned_from_agent_id: Option<String>,
 }
 ```
 
@@ -349,8 +358,10 @@ phase independently shippable:
 
 1. **Backend types**: add `AgentDispatch`/`DispatchKind`/`DispatchStatus`;
    rename `SubagentInfo`→`SubAgent`, `workflow_id: Option<String>`→
-   `dispatch_id: String`. `WorkflowInfo`/`WorkflowStatus` are subsumed (every
-   existing `WorkflowInfo` becomes a `DispatchKind::Workflow` `AgentDispatch`).
+   `dispatch_id: String`, add `spawned_from_agent_id: Option<String>` parsed
+   from the transcript's `parentUuid` (§9.2). `WorkflowInfo`/`WorkflowStatus`
+   are subsumed (every existing `WorkflowInfo` becomes a
+   `DispatchKind::Workflow` `AgentDispatch`).
 2. **RPC + WS**: add `ListDispatches`, retire `ListWorkflows`; add
    `dispatch:updated`, retire `workflow:updated`; thread `dispatch_id`
    through the three `subagent:*` event payloads.
@@ -371,19 +382,30 @@ phase independently shippable:
 
 ## 9. Open questions
 
-1. **Naming, final call**: primary recommendation (`AgentDispatch` +
-   `SubAgent`) vs. the literal ask (`SubAgent` + `SubSubAgent`) vs. another
-   container noun from §3's list — this is the one decision this spec can't
-   make unilaterally.
-2. **Depth**: is two levels really the ceiling? Per Claude Code's own file
-   layout (§4) and the Workflow tool's documented constraint ("Nesting is one
-   level only: `workflow()` inside a child throws"), yes today — a Task-tool
-   call made *from inside* a subagent writes into that subagent's own
-   transcript, not a new top-level file `subagent_watcher.rs` would ever see.
-   Worth re-confirming empirically before implementation, but stated here as
-   the working assumption. If this ever changes, §2's "recursive systems
-   reuse one noun + a parent pointer" lesson is the pattern to reach for —
-   not a third stacked prefix.
+1. **Naming, final call: RESOLVED — `AgentDispatch` + `SubAgent`** (§3's
+   primary recommendation). Decided 2026-07-17.
+2. **Depth: RESOLVED — two levels, empirically confirmed, not just assumed.**
+   Structurally, nesting *is* possible: `general-purpose` and `claude`
+   (catch-all) subagent types have unrestricted tool access (`Tools: *`),
+   which includes the Agent tool itself — a subagent of one of those types
+   could call it and spawn a grandchild. `Explore`/`Plan` explicitly exclude
+   the Agent tool, blocking this for those types. The CLI has a field for
+   exactly this case: every subagent transcript's first JSONL line carries
+   `"parentUuid"`, presumably recording which turn's UUID the subagent's
+   conversation forked from. **Checked every real subagent transcript on
+   this machine — 228 files across 8+ distinct project sessions, spanning
+   weeks of actual usage, including sessions that used unrestricted-tool
+   subagent types — `parentUuid` is `null` in every single one.** Nested
+   spawning has never been observed to actually happen here, despite being
+   permitted. Two levels is empirically sufficient today.
+   `subagent_watcher.rs` currently does not parse `parentUuid` at all, so if
+   nesting ever did occur, AgentMux would have no way to notice — a
+   grandchild would land as an unexplained flat sibling file. Since we're
+   already reading this file's first line for other fields, capture
+   `parentUuid` from day one anyway (cheap, defensive) rather than adding it
+   only after the first real occurrence with no historical baseline to
+   validate the two-level assumption against — see §5's `SubAgent.
+   spawned_from_agent_id` field and §8 step 1.
 3. **`DispatchStatus::Abandoned` semantics**: proposed aggregation rule in
    §5 (`Completed` iff all members `Completed`) needs a decision on the edge
    case of a Workflow dispatch with **zero** members yet (just started,
