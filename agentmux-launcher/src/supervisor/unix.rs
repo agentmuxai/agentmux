@@ -7,7 +7,7 @@ use crate::second_instance::bind_socket_with_recovery;
 use crate::show_fatal_dialog;
 use crate::supervisor::{HOST_RESTART_BUDGET, HOST_RESTART_WINDOW};
 use crate::{
-    config, data_dir, event_log, hash, host_pipe, ipc, mem_supervisor, other_instances, saga,
+    data_dir, event_log, hash, host_pipe, ipc, mem_supervisor, other_instances, saga,
     srv_spawner, startup_events, state,
 };
 
@@ -204,18 +204,21 @@ pub(crate) async fn run_unix(
     // Canonical state shared between IPC server + saga coordinator.
     let state = std::sync::Arc::new(tokio::sync::Mutex::new(state::State::default()));
 
-    // Durable saga log at <data-dir>/db/launcher-sagas.db.
-    let saga_log_path = data_dir::launcher_saga_log_path(&paths.data_dir);
-    let saga_log = match saga::LauncherSagaLog::open(&saga_log_path) {
-        Ok(l) => std::sync::Arc::new(l),
-        Err(e) => {
-            log(&format!(
-                "FATAL: failed to open launcher saga log at {:?}: {}",
-                saga_log_path, e
-            ));
-            std::process::exit(2);
+    // Pillar 1 Step 6 — in-memory saga registry (see the Windows
+    // supervisor's comment for the full rationale). Best-effort cleanup of
+    // the legacy durable files.
+    let saga_log = std::sync::Arc::new(saga::LauncherSagaLog::new());
+    for legacy in [
+        paths.data_dir.join("db").join("launcher-sagas.db"),
+        paths.data_dir.join("launcher-sagas.db"),
+    ] {
+        for suffix in ["", "-wal", "-shm"] {
+            let p = std::path::PathBuf::from(format!("{}{}", legacy.display(), suffix));
+            if p.exists() && std::fs::remove_file(&p).is_ok() {
+                log(&format!("[saga] removed legacy durable saga log file {:?} (Step 6: registry is in-memory)", p));
+            }
         }
-    };
+    }
 
     // Startup telemetry bus.
     // Linux: sink was created in main() before the splash thread launched;
@@ -228,50 +231,13 @@ pub(crate) async fn run_unix(
         s
     });
 
-    // Saga recovery/vacuum/coordinator-setup/IPC-server-startup run
-    // concurrently with the srv boot below (tokio::join!) instead of
-    // sequentially before it. Neither branch depends on the other's
-    // output: this setup never reads srv_result, and srv never connects
-    // back to the launcher's IPC socket during its own startup (no
-    // AGENTMUX_LAUNCHER_PIPE-equivalent is passed into spawn_srv's env)
-    // — the sequential ordering was incidental program order, not a real
-    // dependency. See SPEC_MACOS_LAUNCH_SPEED_AND_SPLASH_TELEMETRY_
-    // 2026_07_02.md §A.4 item 5 (full parallelization with host spawn
-    // was investigated and found genuinely blocked — see item 1 there —
-    // this overlap is the safe subset that doesn't have that problem).
+    // Saga coordinator-setup/IPC-server-startup run concurrently with the
+    // srv boot below (tokio::join!) instead of sequentially before it.
+    // Neither branch depends on the other's output: this setup never reads
+    // srv_result, and srv never connects back to the launcher's IPC socket
+    // during its own startup. See SPEC_MACOS_LAUNCH_SPEED_AND_SPLASH_
+    // TELEMETRY_2026_07_02.md §A.4 item 5.
     let launcher_setup = async {
-        // Startup recovery walker: mark any saga left running from a prior
-        // crashed run as failed_compensation. Must run BEFORE coordinator
-        // spawn (LSD-3) — still enforced here, just no longer serialized
-        // against srv's own boot.
-        startup_sink.stage_begin("saga", "Saga recovery");
-        let saga_t = std::time::Instant::now();
-        if let Err(e) = saga::compensate_unresolved_launcher_sagas(&saga_log).await {
-            log(&format!(
-                "[saga-recovery] WARN: walker failed: {} — coordinator will still spawn",
-                e
-            ));
-        }
-
-        // Vacuum terminal saga rows older than the configured retention window.
-        // Runs after crash recovery so in-flight sagas are never vacuumed by accident.
-        {
-            let retention_days = config::load_saga_retention_days(&paths.user_home_dir, |w| log(w));
-            let cutoff = chrono::Utc::now() - chrono::Duration::days(retention_days);
-            match saga_log.vacuum_older_than(cutoff) {
-                Ok(n) if n > 0 => log(&format!("[saga-vacuum] removed {} terminal rows older than {} days", n, retention_days)),
-                Ok(_) => {}
-                Err(e) => log(&format!("[saga-vacuum] WARN: vacuum failed: {}", e)),
-            }
-        }
-
-        startup_sink.stage_end(
-            "saga",
-            saga_t.elapsed().as_millis() as u64,
-            startup_events::StartupStatus::Ok,
-            None,
-        );
-
         // Host pipe wrapper for saga-issued Commands → host. The IPC
         // server's per-connection handler installs the host's writer once
         // the host registers (see ipc/server.rs handle_connection's

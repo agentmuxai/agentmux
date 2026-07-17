@@ -42,11 +42,6 @@ dirs = "5"
 # serde_json round-trips for the vacuum cutoff parameter and for any
 # future structured-log integration.
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
-# LSD-1 (PR #LSD-1) — durable SQLite-backed launcher saga log. Mirrors
-# the srv saga log's `rusqlite = "0.31"` pin so both halves of the
-# saga durability story stay schema-compatible. `bundled` ships
-# SQLite with the binary; no system-libs assumption.
-rusqlite = { version = "0.31", features = ["bundled"] }
 # UUID v4 for the shared auth key launcher generates and gives to
 # both srv (env var) and host (env var). Same generation method the
 # host uses today (uuid::Uuid::new_v4) so the format is identical.
@@ -57,11 +52,6 @@ uuid = { version = "1", features = ["v4"] }
 agentmux-common = { path = "../agentmux-common" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# LSD-4: TOML parsing for `~/.agentmux/config.toml` so operators can
-# override saga-log retention via `[saga.launcher] retention_days = N`.
-# Pinned to 0.5 because that's what srv pulls in transitively (per
-# Cargo.lock); using the same version avoids a duplicate dep tree.
-toml = "0.5"
 # LSD-1: `#[derive(thiserror::Error)]` on the saga log's `LogError`
 # enum keeps the SQLite + serde_json + io error wrapping clean. Same
 # pin as srv so any cross-crate refactor stays trivial.

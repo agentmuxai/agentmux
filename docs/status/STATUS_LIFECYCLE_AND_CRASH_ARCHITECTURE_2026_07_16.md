@@ -14,12 +14,12 @@
 
 ## 0. The one-sentence picture
 
-**All three pillars are functionally complete** (Pillar 1 through Step 5, Step 6 gated on
-bake time; Pillars 2 and 3 fully done), the entire `Client.windowids` leak class is closed,
-the window-close → srv notify chain is now correct for **every** close path including the
-app's last window, and the launcher can now reap a wedged host on its own (teardown
-backstop Phase 2) — leaving Step 6, one gated task, and one hardware-blocked verification
-as the only open program items.
+**All three pillars are complete, Step 6 included** (updated later on 2026-07-16: the
+saga-durability collapse shipped the same day this snapshot was written — see §1). The
+entire `Client.windowids` leak class is closed, the window-close → srv notify chain is now
+correct for **every** close path including the app's last window, and the launcher can now
+reap a wedged host on its own (teardown backstop Phase 2) — leaving only the
+hardware-blocked platform verification (issues #2188/#2189) and low-priority follow-ups.
 
 ## 1. Pillar 1 — disposable host
 
@@ -30,7 +30,7 @@ as the only open program items.
 | 3 | Persist window `kind` + parent linkage | ✅ Done, merged, live-verified. |
 | 4 | Crash-reproject: fast-path from launcher snapshot, slow-path from srv, restoring-session overlay, splash respawn | ✅ Done, all 5 phases (#2014, #2015, #2017, #2032). |
 | 5 | E2E test: "host OOM ⇒ session reprojects" | ✅ Done. |
-| 6 | Collapse graceful-flush-vs-crash incoherence; shrink saga layer to an in-memory registry | ⬜ **Gated on bake period** (started ~2026-07-11; startable early-to-mid August 2026). Task #37. |
+| 6 | Collapse graceful-flush-vs-crash incoherence; shrink saga layer to an in-memory registry | ✅ **Done 2026-07-16** — gate re-evaluated with the user and lifted early: the durable layer's recovery was proven a behavioral no-op (tombstone writer only), so the calendar bake validated nothing about it. Launcher saga durability (SQLite log, recovery walker, retention vacuum, `rusqlite` dep, saga config, `--diag sagas` offline reader) deleted; in-memory registry behind the same coordinator API. See `SPEC_PILLAR1_STEP6_SAGA_COLLAPSE_2026_07_16.md`. Residual: `orphan_reconcile` shrink is a tracked follow-up. |
 
 Bake-period yield so far: the drag-HWND cross-wire (fixed, #2111) and the ghost-window
 resurrection below — both found precisely because reproject keeps running under real use.
@@ -70,8 +70,8 @@ GRACE + 2 probe intervals. Verification hook: `debug:hang_ui` (double-gated behi
 
 ## 6. Roadmap — open items, ranked
 
-1. **Pillar 1 Step 6** — startable early-to-mid August once the reproject bake completes
-   (task #37). The remaining structural item.
+1. ~~**Pillar 1 Step 6**~~ — **shipped 2026-07-16** (see §1); the follow-up is the
+   `orphan_reconcile` shrink assessment.
 2. **Task #15 — non-Windows close-path verification.** Blocked on macOS/Linux hardware.
    Scope has GROWN since 07-12: #2186's `on_before_close` defense-in-depth fix (the notify
    + deferred-quit path that IS live on those platforms) needs verifying there too.
