@@ -261,6 +261,10 @@ export function useAgentControllerStatus(
             return;
         }
         setAuthNotice(null);
+        // Clear any OAuth URL box left by a PRIOR attempt before starting a
+        // fresh one — otherwise a subsequent "no-url" outcome would stack the
+        // error notice below a stale, contradictory URL box (reagent P2).
+        setAuthUrl(null);
         // The CLI path + auth env are written to block meta at launch; reuse
         // them instead of re-resolving (the agent is already running, so the
         // CLI is installed). If `cmd` is missing, resolve it directly — see
