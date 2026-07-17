@@ -32,7 +32,7 @@ import {
 } from "./types";
 
 import { newLayoutNode } from "./layoutNode";
-import { isNodeLocked } from "./layoutMinimize";
+import { isEffectivelyMinimized } from "./layoutMinimize";
 import { LayoutTreeReplaceNodeAction, LayoutTreeSplitHorizontalAction, LayoutTreeSplitVerticalAction } from "./types";
 
 export const DEFAULT_MAX_CHILDREN = 5;
@@ -255,7 +255,7 @@ export function moveNode(layoutState: LayoutTreeState, action: LayoutTreeMoveNod
 
     // Minimized is a locked state: a locked node can't be moved (restore it first),
     // and nothing may be inserted into a dissolved column.
-    if (isNodeLocked(node) || isNodeLocked(parent)) {
+    if (isEffectivelyMinimized(node) || isEffectivelyMinimized(parent)) {
         console.warn("moveNode rejected: source or destination is minimize-locked");
         return;
     }
@@ -357,8 +357,8 @@ export function swapNode(layoutState: LayoutTreeState, action: LayoutTreeSwapNod
 
     // Minimized is a locked state: locked nodes don't swap.
     if (
-        isNodeLocked(findNode(layoutState.rootNode, action.node1Id)) ||
-        isNodeLocked(findNode(layoutState.rootNode, action.node2Id))
+        isEffectivelyMinimized(findNode(layoutState.rootNode, action.node1Id)) ||
+        isEffectivelyMinimized(findNode(layoutState.rootNode, action.node2Id))
     ) {
         console.warn("swapNode rejected: a swap endpoint is minimize-locked");
         return;
@@ -416,7 +416,7 @@ export function resizeNode(layoutState: LayoutTreeState, action: LayoutTreeResiz
     // Resize ops come in before/after pairs whose unit sum is conserved — applying
     // only the unlocked half would leak flex units, so it's all-or-nothing.
     for (const resize of action.resizeOperations) {
-        if (isNodeLocked(findNode(layoutState.rootNode, resize.nodeId))) {
+        if (isEffectivelyMinimized(findNode(layoutState.rootNode, resize.nodeId))) {
             console.warn(`resizeNode rejected: node ${resize.nodeId} is minimize-locked`);
             return;
         }
@@ -529,7 +529,7 @@ export function splitHorizontal(layoutState: LayoutTreeState, action: LayoutTree
         return;
     }
     // Minimized is a locked state: splitting would spawn a full pane inside a header strip.
-    if (isNodeLocked(targetNode)) {
+    if (isEffectivelyMinimized(targetNode)) {
         console.warn("splitHorizontal rejected: target is minimize-locked", targetNodeId);
         return;
     }
@@ -581,7 +581,7 @@ export function splitVertical(layoutState: LayoutTreeState, action: LayoutTreeSp
         return;
     }
     // Minimized is a locked state: splitting would spawn a full pane inside a header strip.
-    if (isNodeLocked(targetNode)) {
+    if (isEffectivelyMinimized(targetNode)) {
         console.warn("splitVertical rejected: target is minimize-locked", targetNodeId);
         return;
     }

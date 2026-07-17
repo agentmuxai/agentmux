@@ -4,7 +4,7 @@
 import { findNode } from "./layoutNode";
 import { isNodeLocked, isEffectivelyMinimized, reportLayoutViolations } from "./layoutInvariants";
 import type { LayoutModel } from "./layoutModel";
-import type { LayoutNode } from "./types";
+import { DefaultNodeSize, type LayoutNode } from "./types";
 
 /** Height of the block header in CSS pixels (matches --header-height in theme.scss). */
 export const HeaderHeightPx = 33;
@@ -140,10 +140,22 @@ export function rebuildMinimizedSet(model: LayoutModel) {
     const ids = new Set<string>();
     let migrated = 0;
     const root = model.treeState.rootNode;
-    function walk(node: LayoutNode) {
+    // Flex sizes are relative WITHIN a parent. A slipped/dissolved node lives
+    // nested in its slip/dissolve TARGET — a different unit space from where
+    // its `originalRowSize` was recorded — so restoring that raw number would
+    // give it a wildly wrong proportion among its current siblings. Instead,
+    // heal its size to a sane share of the parent it actually sits in: the
+    // mean of its positive-sized siblings, falling back to DefaultNodeSize.
+    const saneShare = (node: LayoutNode, parent: LayoutNode | undefined): number => {
+        const sibs = parent?.children?.filter((c) => c !== node && c.size > 0) ?? [];
+        if (!sibs.length) return DefaultNodeSize;
+        return sibs.reduce((s, c) => s + c.size, 0) / sibs.length;
+    };
+    function walk(node: LayoutNode, parent: LayoutNode | undefined) {
         if (!node) return;
         const isLeaf = !node.children?.length;
         if (node.minimizedSize !== undefined) {
+            // Same parent, same unit space — the recorded original is exact.
             if (isLeaf) {
                 node.size = node.minimizedSize;
                 node.minimized = true;
@@ -152,26 +164,20 @@ export function rebuildMinimizedSet(model: LayoutModel) {
             migrated++;
         }
         if (node.slipMinimize !== undefined) {
-            // The slip squeezed the leaf's size to header units in its host
-            // column — restore the recorded pre-slip size so a later restore
-            // doesn't render a permanent sliver (same rule as the
-            // minimizedSize path above). Unit spaces are per-parent, so the
-            // original Row-slot size is the best available record.
-            if (node.slipMinimize.originalRowSize > 0) {
-                node.size = node.slipMinimize.originalRowSize;
-            }
+            // Slip squeezed the leaf to header units inside its TARGET column;
+            // heal to a sane share of the column it now sits in.
+            node.size = saneShare(node, parent);
             if (isLeaf) node.minimized = true;
             node.slipMinimize = undefined;
             migrated++;
         }
         if (node.columnDissolve !== undefined) {
-            // The dissolve set the branch's size to the stolen header total —
+            // Dissolve set the branch's size to the stolen header total —
             // possibly tiny or even negative (the cascade bug this redesign
-            // kills). Restore the recorded pre-dissolve size: it becomes
-            // load-bearing again the moment any child leaf is restored.
-            if (node.columnDissolve.originalRowSize > 0) {
-                node.size = node.columnDissolve.originalRowSize;
-            }
+            // kills). The size becomes load-bearing again the moment any
+            // child leaf restores; heal it to a sane share of its CURRENT
+            // (nested) parent.
+            node.size = saneShare(node, parent);
             node.columnDissolve = undefined;
             migrated++;
         }
@@ -184,9 +190,9 @@ export function rebuildMinimizedSet(model: LayoutModel) {
             migrated++;
         }
         if (node.minimized && isLeaf) ids.add(node.id);
-        node.children?.forEach(walk);
+        node.children?.forEach((c) => walk(c, node));
     }
-    if (root) walk(root);
+    if (root) walk(root, undefined);
     if (migrated > 0) {
         console.warn(`[layoutMinimize] migrated ${migrated} legacy minimize field(s) to the display-mode flag`);
     }

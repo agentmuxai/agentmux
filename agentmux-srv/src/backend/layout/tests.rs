@@ -293,6 +293,61 @@ fn resize_nodes_rejects_display_mode_minimized_target() {
 }
 
 #[test]
+fn resize_nodes_rejects_fully_minimized_branch() {
+    // A collapsed column has no branch-level marker in the display-mode
+    // model, but its stored size becomes load-bearing again when any child
+    // restores — guards use is_effectively_minimized, not is_node_locked.
+    let stack = group(
+        "colA",
+        FlexDirection::Column,
+        200.0,
+        vec![minimized_leaf("l1", "b1", 200.0), minimized_leaf("l2", "b2", 200.0)],
+    );
+    let mut root = group(
+        "root",
+        FlexDirection::Row,
+        DEFAULT_NODE_SIZE,
+        vec![stack, leaf("colB", "b3", 200.0)],
+    );
+    let ops = vec![
+        ResizeOp { node_id: "colA".into(), size: 1.0 },
+        ResizeOp { node_id: "colB".into(), size: 99.0 },
+    ];
+    assert!(matches!(
+        resize_nodes(&mut root, &ops),
+        Err(LayoutError::NodeLocked { .. })
+    ));
+    assert_eq!(root.children[0].size, 200.0);
+    assert_eq!(root.children[1].size, 200.0);
+}
+
+#[test]
+fn move_node_rejects_fully_minimized_branch_endpoints() {
+    let stack = group(
+        "colA",
+        FlexDirection::Column,
+        200.0,
+        vec![minimized_leaf("l1", "b1", 200.0), minimized_leaf("l2", "b2", 200.0)],
+    );
+    let mut root = group(
+        "root",
+        FlexDirection::Row,
+        DEFAULT_NODE_SIZE,
+        vec![stack, leaf("other", "b3", 200.0)],
+    );
+    // Moving a fully-minimized branch is rejected.
+    assert!(matches!(
+        move_node(&mut root, "colA", "root", 1),
+        Err(LayoutError::NodeLocked { .. })
+    ));
+    // Moving anything INTO a fully-minimized branch is rejected.
+    assert!(matches!(
+        move_node(&mut root, "other", "colA", 0),
+        Err(LayoutError::NodeLocked { .. })
+    ));
+}
+
+#[test]
 fn validate_invariants_flags_display_mode_flag_on_branch() {
     let mut branch = group(
         "br",
