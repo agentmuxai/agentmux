@@ -146,12 +146,25 @@ fn cleanup_oauth_dir(
     }
     match std::fs::remove_dir_all(&canon_dir) {
         Ok(()) => {
-            tracing::info!(
-                account_id = %acct.id,
-                provider = %acct.provider,
-                dir = %dir.display(),
-                "identity.delete: oauth config dir removed"
-            );
+            // Verify the removal actually took — a "removed" log that leaves
+            // the credential on disk is the exact login/logout-round bug this
+            // diagnostic exists to catch (e.g. a racing re-seed, a bind-mount,
+            // or a handle keeping the tree alive). Escalate to WARN if so.
+            if canon_dir.exists() {
+                tracing::warn!(
+                    account_id = %acct.id,
+                    provider = %acct.provider,
+                    dir = %dir.display(),
+                    "identity.delete: oauth config dir STILL PRESENT after remove_dir_all — credential not cleared"
+                );
+            } else {
+                tracing::info!(
+                    account_id = %acct.id,
+                    provider = %acct.provider,
+                    dir = %dir.display(),
+                    "identity.delete: oauth config dir removed (verified absent)"
+                );
+            }
             SecretCleanup::OAuthDirRemoved(dir.to_path_buf())
         }
         Err(e) => {

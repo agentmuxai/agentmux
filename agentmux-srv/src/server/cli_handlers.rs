@@ -368,6 +368,21 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         Err(_) => false,
                     };
 
+                    // Login/logout robustness diagnostic: snapshot the SAME dir
+                    // we validate (token fingerprint is redacted — see
+                    // identity::auth_diag). Across login/logout rounds this
+                    // surfaces the classic bugs — a check reading a different
+                    // dir than login wrote, a token that didn't change after a
+                    // re-login, or a credential that outlived a logout. The CLI
+                    // verdict is logged separately below; compare the two.
+                    // "auth.credstate:" is `muxlog auth` vocabulary.
+                    if let Some(config_dir) = cmd.auth_env.get("CLAUDE_CONFIG_DIR") {
+                        tracing::info!(
+                            "auth.credstate: check {}",
+                            crate::identity::auth_diag::snapshot(config_dir)
+                        );
+                    }
+
                     if !tokens_exist {
                         // On macOS the Claude CLI stores credentials in the
                         // Keychain ("Claude Safe Storage"), NOT in
