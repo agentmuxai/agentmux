@@ -38,10 +38,16 @@ function countLeafPanes(node: LayoutNode): number {
  * Fixed main-axis pixels for a minimized child: a header-height strip per
  * stacked chip in a Column parent, a compact fixed-width chip in a Row parent.
  * Derived fresh every pass — minimize never writes sizes (see layoutMinimize).
+ *
+ * Gap compensation: each tile's rendered box is inset by `gapSizePx`
+ * downstream (`innerRect` computes `calc(size - gapSizePx)` in
+ * layoutNodeModels.ts), and the header has a FIXED --header-height in
+ * block.scss — so the slot allocation must be header + gap for the visible
+ * box to come out exactly header-sized instead of clipping.
  */
-function minimizedFixedPx(node: LayoutNode, parentIsRow: boolean): number {
-    if (parentIsRow) return MinimizedRowSlotWidthPx;
-    return countLeafPanes(node) * HeaderHeightPx;
+function minimizedFixedPx(node: LayoutNode, parentIsRow: boolean, gapPx: number): number {
+    if (parentIsRow) return MinimizedRowSlotWidthPx + gapPx;
+    return countLeafPanes(node) * (HeaderHeightPx + gapPx);
 }
 
 /**
@@ -55,9 +61,10 @@ export function computeMainAxisAllocation(
     children: LayoutNode[],
     nodeIsRow: boolean,
     nodePixels: number,
-    getSize: (n: LayoutNode) => number
+    getSize: (n: LayoutNode) => number,
+    gapPx = 0
 ): MainAxisAllocation {
-    const fixed = children.map((c) => (isEffectivelyMinimized(c) ? minimizedFixedPx(c, nodeIsRow) : 0));
+    const fixed = children.map((c) => (isEffectivelyMinimized(c) ? minimizedFixedPx(c, nodeIsRow, gapPx) : 0));
     const fixedTotal = fixed.reduce((a, b) => a + b, 0);
     const scale = fixedTotal > nodePixels && fixedTotal > 0 ? nodePixels / fixedTotal : 1;
     const remainingPx = Math.max(nodePixels - fixedTotal * scale, 0);
@@ -204,7 +211,8 @@ function updateTreeHelper(
     const nodeRect: Dimensions = node.id === model.treeState.rootNode.id ? boundingRect : additionalProps.rect;
     const nodeIsRow = node.flexDirection === FlexDirection.Row;
     const nodePixels = nodeIsRow ? nodeRect.width : nodeRect.height;
-    const alloc = computeMainAxisAllocation(node.children, nodeIsRow, nodePixels, getNodeSize);
+    const gapPx = model.gapSizePx();
+    const alloc = computeMainAxisAllocation(node.children, nodeIsRow, nodePixels, getNodeSize, gapPx);
     const pixelToSizeRatio = alloc.pixelToSizeRatio;
 
     let lastChildRect: Dimensions;
@@ -220,7 +228,11 @@ function updateTreeHelper(
             top: !nodeIsRow && lastChildRect ? lastChildRect.top + lastChildRect.height : nodeRect.top,
             left: nodeIsRow && lastChildRect ? lastChildRect.left + lastChildRect.width : nodeRect.left,
             width: nodeIsRow ? alloc.px[i] : nodeRect.width,
-            height: nodeIsRow ? (chipLeaf ? Math.min(HeaderHeightPx, nodeRect.height) : nodeRect.height) : alloc.px[i],
+            height: nodeIsRow
+                ? chipLeaf
+                    ? Math.min(HeaderHeightPx + gapPx, nodeRect.height)
+                    : nodeRect.height
+                : alloc.px[i],
         };
         const transform = setTransform(rect);
         additionalPropsMap[child.id] = {

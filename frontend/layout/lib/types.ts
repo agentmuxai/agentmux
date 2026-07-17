@@ -220,11 +220,11 @@ export interface LayoutNode {
      */
     minimizedSize?: number;
     /**
-     * The flex-unit size this node is locked to while minimized (header height in the
-     * parent's unit space at minimize time; for a dissolved column, the stacked-headers
-     * total). Written by the minimize subsystem alongside `minimizedSize`/`slipMinimize`/
-     * `columnDissolve`; `enforceMinimizedLocks` snaps `size` back to this value if any
-     * other writer changes it. Cleared on restore.
+     * LEGACY (pre display-mode model) — the flex-unit size a node was locked to
+     * while minimized under the size-squeeze model. No new writes; the frontend
+     * migrates it away in `rebuildMinimizedSet`, and only the Rust-side
+     * `enforce_minimized_locks` still reads it (protection for unmigrated
+     * persisted trees).
      */
     minimizedLockedSize?: number;
     /**
