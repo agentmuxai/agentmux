@@ -350,7 +350,7 @@ const HELP = `muxlog — AgentMux log viewer
   muxlog errors                      ERROR/WARN across host+srv (active instance)
   muxlog bridge                      startup-handshake trace (debug reconnect loops)
   muxlog swarm                       subagent/swarm lifecycle trace (spawn/name/status, debug duplicate groups)
-  muxlog auth                        provider auth/identity trace (login/OAuth wiring/unlink/account removal)
+  muxlog auth                        provider auth/identity trace (login/OAuth wiring/unlink/account removal, credstate snapshots)
 
 Options (any position):
   -i <substr>   pick the instance whose log path/branch/version matches <substr>
@@ -406,10 +406,15 @@ function main() {
         // logout side in server/app_api/identity.rs + agent_handlers/
         // identity.rs ("identity.unlink:", "identity.delete:"), plus the
         // layer-3 spawn gate in identity/resolver.rs
-        // ("identity.spawn.blocked:", "identity.spawn.ambient:") — so filter
-        // on the MESSAGE vocabulary, not a target (opt.grep matches the
-        // message field only, exactly what we want). A user --grep overrides
-        // the recipe's regex; --target/--level/--since/-n still combine.
+        // ("identity.spawn.blocked:", "identity.spawn.ambient:"), and the
+        // login/logout-round credential-state diagnostics in
+        // server/cli_handlers.rs ("auth.credstate:", a redacted
+        // token-fingerprint snapshot of the checked dir) + the post-removal
+        // verify in identity/cleanup.rs ("identity.delete: ... STILL PRESENT
+        // after remove_dir_all") — so filter on the MESSAGE vocabulary, not a
+        // target (opt.grep matches the message field only, exactly what we
+        // want). A user --grep overrides the recipe's regex;
+        // --target/--level/--since/-n still combine.
         opt.grep = opt.grep || /\bauth\.\w+|auth success|auth session|cancel_session|claude auth|CheckCliAuth|OAuth config dir|oauth probe|identity_upsert|identity\.(unlink|delete|self\.|account|spawn)|account\.oauth|keychain delete/i;
         const f = resolveFile("srv", opt);
         console.log(`=== auth trace: ${f} ===`);

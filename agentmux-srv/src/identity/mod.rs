@@ -29,6 +29,7 @@
 //! entity) were prerequisites; Phase 3 (encrypted vault, OAuth flows)
 //! is deferred.
 
+pub mod auth_diag;
 pub mod auth_patterns;
 pub mod auth_session;
 pub mod cleanup;
