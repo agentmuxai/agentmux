@@ -36,6 +36,7 @@
 import { createMemo, createSignal, onCleanup, type Accessor } from "solid-js";
 import { getApi, getBlockMetaKeyAtom } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
+import * as WOS from "@/app/store/wos";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { runLaunchFlow } from "../flows/launch-flow";
 import { forceProviderLogin } from "../flows/force-login";
@@ -52,6 +53,15 @@ export interface UseAgentControllerStatusOptions {
     onLoginSuccess?: (email: string | null) => void;
     /** Called once when the launch flow completes successfully and the agent is ready to receive messages. */
     onReady?: () => void;
+    /**
+     * Called when a recovery action (seed-from-global / terminal login) has
+     * successfully refreshed the credential. The pane wires this to retry the
+     * failed turn, so a single "Use existing login" click both fixes the
+     * credential AND drives the agent back to a working state — without it, the
+     * seed succeeds silently and the 401 failure row lingers (the "Login Again
+     * does nothing" symptom).
+     */
+    onRecovered?: () => void;
     /**
      * Returns the pane's current `{rows, cols}` (or undefined if not laid out
      * yet). Forwarded to the launch flow to seed the PTY size at spawn.
@@ -210,6 +220,14 @@ export function useAgentControllerStatus(
                 unix_install_command: prov.unixInstallCommand,
                 block_id: opts.blockId,
             }, { timeout: 300000 });
+            // Persist the resolved path back to block meta (mirrors
+            // launch-flow.ts) so a subsequent recovery click reuses it instead
+            // of re-running the full resolution RPC. Best-effort — a failed
+            // write just means the next click re-resolves.
+            try {
+                const oref = WOS.makeORef("block", opts.blockId);
+                await RpcApi.SetMetaCommand(TabRpcClient, { oref, meta: { cmd: r.cli_path } });
+            } catch { /* non-fatal: next click re-resolves */ }
             return r.cli_path;
         } catch (err: any) {
             const msg = `Couldn't find the ${prov.cliCommand} CLI to run the login: ${err?.message ?? String(err)}`;
@@ -301,7 +319,20 @@ export function useAgentControllerStatus(
                 const v = (envMeta as Record<string, unknown>)[prov.authConfigDirEnvVar];
                 if (typeof v === "string") configDir = v;
             }
-            await seedGlobalLogin(prov.id, opts.log, configDir);
+            const seeded = await seedGlobalLogin(prov.id, opts.log, configDir);
+            if (seeded) {
+                // Credential is now valid on disk — but the agent spawns fresh
+                // per turn and the failure row only clears on the next turn, so
+                // a successful seed looks like it "did nothing". Drive the
+                // recovery: retry the failed turn (fresh spawn picks up the new
+                // token and TurnStart clears the row).
+                opts.log("auth", "Signed in from your global login — retrying…");
+                opts.onRecovered?.();
+            } else {
+                const msg = "Couldn't use your global login — no valid global Claude credential was found. Try “Login via terminal”.";
+                opts.log("auth", msg, "warn");
+                setAuthNotice(msg);
+            }
         } catch (err: any) {
             const msg = `Use existing login failed: ${err?.message ?? String(err)}`;
             opts.log("auth", msg, "error");
@@ -364,8 +395,9 @@ export function useAgentControllerStatus(
                 seeded = await seedGlobalLogin(prov.id, silentLog, configDir);
             }
             if (seeded) {
-                opts.log("auth", "Login successful — your next message will use the new token.");
+                opts.log("auth", "Login successful — retrying…");
                 setAuthNotice(null);
+                opts.onRecovered?.();
             } else if (!loginCancelled) {
                 const msg = "No login detected after 5 minutes. Complete the login in the terminal, then click “Use existing login”.";
                 opts.log("auth", msg, "warn");
