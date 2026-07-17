@@ -354,6 +354,17 @@ pub async fn spawn_srv(
         }
     }
 
+    // SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11 unix parity — srv becomes
+    // its own process-group leader too, same rationale as
+    // `spawn_host_unix`'s `.process_group(0)`: the teardown backstop's
+    // `kill_process_group_forcefully` needs an explicit, launcher-scoped
+    // group for srv independent of host's (they spawn concurrently via
+    // `tokio::join!` in `run_unix`, so srv can't join a group host hasn't
+    // been assigned yet — each gets its own rather than coupling the two
+    // spawn call sites).
+    #[cfg(not(target_os = "windows"))]
+    cmd.process_group(0);
+
     let mut child = cmd
         .spawn()
         .map_err(|e| SrvSpawnError::SpawnFailed(e.to_string()))?;

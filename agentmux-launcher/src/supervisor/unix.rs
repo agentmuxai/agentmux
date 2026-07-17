@@ -40,9 +40,24 @@ async fn next_signal(s: &mut Option<tokio::signal::unix::Signal>) {
 /// Differs from `run_windows` only where the OS forces it:
 ///   * No Job Object — A0 (`PR_SET_PDEATHSIG` in `spawn_host_unix` and
 ///     `srv_spawner`) gives the equivalent kernel-side reap when the
-///     launcher dies abnormally. Terminal Ctrl+C reaches the process
-///     group; explicit SIGINT/SIGTERM handlers cover the
-///     `kill <launcher-pid>` case.
+///     launcher dies abnormally.
+///   * As of SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11 unix parity, host
+///     and srv are each spawned into their OWN process group
+///     (`.process_group(0)`) rather than inheriting the launcher's — the
+///     prerequisite for `kill_process_group_forcefully`'s
+///     `kill(-pgid, SIGKILL)` to be scoped to exactly what THIS launcher
+///     spawned, never the launcher's own group. Side effect (reagent P1,
+///     PR #2200): **a terminal Ctrl+C no longer reaches host/srv
+///     directly** — only the launcher (still in the terminal's foreground
+///     group) receives that SIGINT. Host/srv now die exclusively via the
+///     launcher's own explicit `terminate_child_gracefully` SIGTERM in the
+///     cleanup epilogue below (after the launcher's own SIGINT arm has
+///     already won the `select!` and broken the loop), never by an
+///     independent signal race inside the loop. See the (now narrower)
+///     group-shutdown guard comments on the `host_child.wait()` /
+///     `srv_child.wait()` arms for what scenario they still cover.
+///     `kill <launcher-pid>` is unaffected — the launcher's own
+///     SIGINT/SIGTERM handlers still catch it and drive the same cleanup.
 ///   * Unix-domain-socket IPC (A1) instead of named pipes; protocol on
 ///     the wire is identical (newline-delimited JSON Command/Event).
 ///     The launcher-side server uses `tokio::net::UnixListener`; the
@@ -282,7 +297,7 @@ pub(crate) async fn run_unix(
         );
         log(&format!("IPC server started on {}", socket_path));
 
-        (saga_coord, ipc_handle)
+        (saga_coord, ipc_handle, host_pipe)
     };
 
     // 2b. Spawn srv. The srv pipe path is the launcher-owned socket
@@ -294,7 +309,7 @@ pub(crate) async fn run_unix(
         launcher_setup,
         srv_spawner::spawn_srv(launcher_exe_dir, &paths, &srv_pipe_path, &startup_sink)
     );
-    let (saga_coord, _ipc_handle) = setup_result;
+    let (saga_coord, _ipc_handle, host_pipe) = setup_result;
     let (srv_result, mut srv_child) = match srv_spawn_result {
         Ok(pair) => pair,
         Err(e) => {
@@ -389,9 +404,90 @@ pub(crate) async fn run_unix(
     let mut oom_restarts: Vec<std::time::Instant> = Vec::new();
     let mut last_abnormal_code: Option<i32> = None;
     let mut host_degraded = false;
+    // SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11 unix parity — same shape as
+    // `run_windows`'s Phase 1/Phase 2 pair. Low-rate UI-thread liveness
+    // prober (60s, first tick delayed a full interval so a booting host
+    // isn't logged as a false miss) plus a low-rate poll (5s) of the armed
+    // teardown state machine (armed by the IPC server's post-reducer event
+    // hook on PoolDrained/OrphanInstance — see `ipc/server.rs`, already
+    // platform-neutral and unconsumed on unix until this — disarmed on
+    // WindowOpened and on every host exit below).
+    let mut ui_probe_interval = tokio::time::interval_at(
+        tokio::time::Instant::now() + std::time::Duration::from_secs(60),
+        std::time::Duration::from_secs(60),
+    );
+    ui_probe_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut ui_probe_nonce: u64 = 0;
+    let mut teardown_check_interval =
+        tokio::time::interval(std::time::Duration::from_secs(5));
+    teardown_check_interval
+        .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // Same distinct exit code as Windows so wedged-host teardown is
+    // unambiguous in log/exit-code triage across platforms.
+    const TEARDOWN_BACKSTOP_EXIT_CODE: i32 = 86;
     let exit_code = loop {
         tokio::select! {
+            _ = teardown_check_interval.tick() => {
+                let misses = crate::ui_liveness::consecutive_misses();
+                if crate::teardown_backstop::should_teardown(misses) {
+                    log(&format!(
+                        "[teardown-backstop] host wedged with zero user windows — terminating process \
+                         groups (armed > {}s grace, {} consecutive unanswered UI-thread probes)",
+                        crate::teardown_backstop::TEARDOWN_GRACE.as_secs(),
+                        misses,
+                    ));
+                    // I2/I3 hold by construction: each process group (host,
+                    // srv) was created explicitly at spawn time via
+                    // `.process_group(0)` — the blast radius is exactly the
+                    // processes THIS launcher spawned and their descendants,
+                    // never the launcher's own group. Mirrors the Windows J0
+                    // TerminateJobObject backstop; the one deliberate
+                    // exception to "never kill what a saga can reconcile" —
+                    // zero user windows remain and the UI thread is provably
+                    // dead, so there is nothing to reconcile.
+                    crate::host_spawn::kill_process_group_forcefully(&host_child);
+                    crate::host_spawn::kill_process_group_forcefully(&srv_child);
+                    break TEARDOWN_BACKSTOP_EXIT_CODE;
+                }
+            }
+            _ = ui_probe_interval.tick() => {
+                ui_probe_nonce += 1;
+                if let Some((missed, sent_at)) = crate::ui_liveness::record_probe_sent(ui_probe_nonce) {
+                    log(&format!(
+                        "[ui-liveness] probe nonce={} unanswered after {}s — UI thread did not pump in that window",
+                        missed,
+                        sent_at.elapsed().as_secs()
+                    ));
+                }
+                // Fail-fast send: try_send_command_no_buffer turns a
+                // disconnected pipe into an immediate error instead of
+                // buffering the probe through a crash-restart gap, where it
+                // could age into a false "did not pump" miss (see
+                // run_windows's identical comment for the full rationale).
+                if let Err(e) = host_pipe
+                    .try_send_command_no_buffer(&agentmux_common::ipc::Command::ProbeUiThread {
+                        nonce: ui_probe_nonce,
+                    })
+                    .await
+                {
+                    crate::ui_liveness::retract_probe(ui_probe_nonce);
+                    log(&format!(
+                        "[ui-liveness] probe send failed (transport, not liveness): {:?}",
+                        e
+                    ));
+                }
+            }
             host_status = host_child.wait() => {
+                // SPEC_LAUNCHER_TEARDOWN_BACKSTOP Phase 2 — the host exiting
+                // (cleanly, crashing, or relaunched) always stands the armed
+                // teardown down: an Armed machine's whole premise is "the
+                // host is alive but wedged", and this is the crash-restart-
+                // gap false-positive guard — the machine stays suspended
+                // across the restart and can only re-arm from a fresh drain
+                // report by the NEW host.
+                if crate::teardown_backstop::disarm() {
+                    log("[teardown-backstop] disarmed — host exited (supervised-exit path owns it now)");
+                }
                 use std::os::unix::process::ExitStatusExt;
                 let status = match host_status {
                     Ok(s) => s,
@@ -400,16 +496,22 @@ pub(crate) async fn run_unix(
                         break 1;
                     }
                 };
-                // Host killed by a signal. On a terminal Ctrl+C the host gets
-                // SIGINT DIRECTLY (it shares our foreground process group), so
-                // host_child.wait() can win the select! race against our own
-                // SIGINT arm. Without this guard the host's signal-death has no
-                // exit code → unwrap_or(1) → it looks like a crash and we'd
-                // relaunch a replacement host that the SIGINT arm then has to
-                // kill (reagent #1193 P2). Treat the group-shutdown signals
-                // (SIGINT/SIGTERM/SIGHUP) as a clean shutdown; real crash
-                // signals (SIGSEGV, SIGABRT, …) still fall through to the
-                // crash-budget relaunch below.
+                // Host killed by a signal. Originally written for the case
+                // where a terminal Ctrl+C reached the host DIRECTLY (it used
+                // to share our foreground process group) and host_child.wait()
+                // could win the select! race against our own SIGINT arm.
+                // Since PR #2200 gave host its own process group (prerequisite
+                // for the teardown backstop's group-kill), a terminal Ctrl+C
+                // no longer reaches host directly — only an EXTERNAL signal
+                // sent straight to host's own pid (e.g. `kill <host-pid>
+                // SIGTERM`, a container/systemd stop signal targeting it
+                // specifically) can still land here mid-loop. Kept for that
+                // case: without this guard such a signal-death has no exit
+                // code → unwrap_or(1) → looks like a crash and we'd relaunch a
+                // replacement host with nothing left to supervise it. Treat
+                // the group-shutdown signals (SIGINT/SIGTERM/SIGHUP) as a
+                // clean shutdown; real crash signals (SIGSEGV, SIGABRT, …)
+                // still fall through to the crash-budget relaunch below.
                 if let Some(sig) = status.signal() {
                     if sig == libc::SIGINT || sig == libc::SIGTERM || sig == libc::SIGHUP {
                         log(&format!("CEF host terminated by signal {} (group shutdown) — shutting down", sig));
@@ -547,16 +649,21 @@ pub(crate) async fn run_unix(
                 use std::os::unix::process::ExitStatusExt;
                 match srv_status {
                     Ok(s) => {
-                        // Mirror the host arm's group-shutdown guard. On a
-                        // terminal Ctrl+C srv gets SIGINT DIRECTLY (it shares
-                        // our foreground process group); its own signal handler
-                        // shuts it down gracefully and it exits with code 0
-                        // (agentmux-srv/src/main.rs — SIGINT/SIGTERM → cancel
-                        // token → clean exit). srv_child.wait() can win this
-                        // select! race against our own SIGINT arm, so a clean
-                        // (code 0) or signal-killed exit is a group teardown,
-                        // NOT an unexpected srv death — don't log a scary
-                        // message and break 1 (reagent #1193 P2).
+                        // Mirror the host arm's group-shutdown guard (see its
+                        // comment for the PR #2200 process-group caveat: a
+                        // terminal Ctrl+C no longer reaches srv directly,
+                        // since it now has its own process group). srv's own
+                        // signal handler (agentmux-srv/src/main.rs —
+                        // SIGINT/SIGTERM → cancel token → clean exit) still
+                        // turns an EXPLICIT SIGTERM — e.g. from our own
+                        // `terminate_child_gracefully` in the cleanup
+                        // epilogue, or a signal sent directly to srv's own
+                        // pid — into a clean `s.success()` exit; the
+                        // signal-death branch below is the narrower backstop
+                        // for a raw uncaught signal landing mid-loop. Either
+                        // way, a clean or signal-killed exit here is a
+                        // teardown, NOT an unexpected srv death — don't log a
+                        // scary message and break 1 (reagent #1193 P2).
                         let group_shutdown = matches!(
                             s.signal(),
                             Some(sig) if sig == libc::SIGINT || sig == libc::SIGTERM || sig == libc::SIGHUP
