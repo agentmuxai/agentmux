@@ -114,6 +114,40 @@
         box-shadow: 0 0 12px rgba(74, 158, 255, 0.15);
     }
 
+    // Auth-recovery error notice — same header slot as the auth-URL box, but
+    // error-accented: shown when a login action failed visibly (e.g. no OAuth
+    // URL could be captured, so no browser opened).
+    .agent-auth-notice {
+        display: flex;
+        align-items: flex-start;
+        gap: var(--space-2);
+        margin-top: var(--space-2);
+        padding: 10px var(--space-3);
+        background: color-mix(in srgb, var(--error-color) 10%, transparent);
+        border: 1px solid var(--error-color);
+        color: var(--main-text-color);
+        font-size: 12px;
+        line-height: 1.5;
+
+        .agent-auth-notice-text {
+            flex: 1;
+        }
+
+        .agent-auth-notice-dismiss {
+            flex: none;
+            background: none;
+            border: none;
+            color: var(--secondary-text-color);
+            cursor: pointer;
+            font-size: 12px;
+            padding: 0 2px;
+
+            &:hover {
+                color: var(--main-text-color);
+            }
+        }
+    }
+
     .agent-auth-title {
         font-size: 12px;
         font-weight: 700;

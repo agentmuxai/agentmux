@@ -459,6 +459,11 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             });
         },
         onReady: () => onReadyFn?.(),
+        // A successful recovery (seed-from-global / terminal login) refreshed
+        // the credential — retry the failed turn so the agent recovers in one
+        // click. Lazy arrow: retryLastTurn is defined below but only invoked at
+        // runtime (post-click), by which point it's initialized.
+        onRecovered: () => retryLastTurn(),
         getInitialTermSize: () => computeTermSizeFromEl(rootRef),
         // Mount-time TurnPhase reconciliation — see
         // docs/specs/REPORT_AGENT_PANE_STATE_RECONCILIATION_2026_07_07.md
@@ -928,6 +933,8 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 documentAtom={agentAtoms().documentAtom}
                 documentStateAtom={agentAtoms().documentStateAtom}
                 authUrl={status.authUrl}
+                authNotice={status.authNotice}
+                onDismissAuthNotice={() => status.setAuthNotice(null)}
                 authProviderId={provider()?.id ?? providerKey()}
                 onSubagentClick={handleSubagentClick}
                 onAgentErrorLogin={() => {

@@ -35,6 +35,9 @@
 
 import { createMemo, createSignal, onCleanup, type Accessor } from "solid-js";
 import { getApi, getBlockMetaKeyAtom } from "@/app/store/global";
+import { RpcApi } from "@/app/store/rpc-api";
+import * as WOS from "@/app/store/wos";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { runLaunchFlow } from "../flows/launch-flow";
 import { forceProviderLogin } from "../flows/force-login";
 import { seedGlobalLogin } from "../flows/seed-global-login";
@@ -51,6 +54,15 @@ export interface UseAgentControllerStatusOptions {
     /** Called once when the launch flow completes successfully and the agent is ready to receive messages. */
     onReady?: () => void;
     /**
+     * Called when a recovery action (seed-from-global / terminal login) has
+     * successfully refreshed the credential. The pane wires this to retry the
+     * failed turn, so a single "Use existing login" click both fixes the
+     * credential AND drives the agent back to a working state — without it, the
+     * seed succeeds silently and the 401 failure row lingers (the "Login Again
+     * does nothing" symptom).
+     */
+    onRecovered?: () => void;
+    /**
      * Returns the pane's current `{rows, cols}` (or undefined if not laid out
      * yet). Forwarded to the launch flow to seed the PTY size at spawn.
      */
@@ -62,6 +74,15 @@ export interface UseAgentControllerStatusOptions {
 export interface UseAgentControllerStatus {
     authUrl: Accessor<string | null>;
     setAuthUrl: (url: string | null) => void;
+    /**
+     * User-visible auth-recovery notice, rendered as an error box above the
+     * composer (same surface as the auth-URL box). Set when a recovery action
+     * fails in a way the user must react to — e.g. "Login Again" captured no
+     * OAuth URL so nothing opened (retro-agent-auth-relogin-noop-2026-07-01
+     * §5.1: never fail silently). Cleared on the next recovery attempt.
+     */
+    authNotice: Accessor<string | null>;
+    setAuthNotice: (notice: string | null) => void;
     canRetry: Accessor<boolean>;
     flowRunning: Accessor<boolean>;
     agentReady: Accessor<boolean>;
@@ -120,6 +141,7 @@ export function useAgentControllerStatus(
     opts: UseAgentControllerStatusOptions,
 ): UseAgentControllerStatus {
     const [authUrl, setAuthUrl] = createSignal<string | null>(null);
+    const [authNotice, setAuthNotice] = createSignal<string | null>(null);
     const [canRetry, setCanRetry] = createSignal(false);
     const [flowRunning, setFlowRunning] = createSignal(false);
     const [agentReady, setAgentReady] = createSignal(false);
@@ -137,6 +159,11 @@ export function useAgentControllerStatus(
         loginCancelled = false;
         setFlowRunning(true);
         setCanRetry(false);
+        // Any fresh launch/retry supersedes a prior recovery attempt — clear a
+        // stale authNotice (e.g. "no login URL captured" from an earlier
+        // relogin) so it can't linger past a "Retry Login" the user just
+        // clicked and mislead them about this attempt's outcome.
+        setAuthNotice(null);
         const prov = opts.provider();
         try {
             const authEnv = await buildAuthEnv(prov);
@@ -171,23 +198,47 @@ export function useAgentControllerStatus(
     // flight (the user double-clicks "Login Again"). Separate from flowRunning
     // — relogin must work even when the gated flow believes it already finished.
     let reloginInFlight = false;
-    const relogin = async () => {
-        if (reloginInFlight) return;
-        const prov = opts.provider();
-        if (!prov) {
-            opts.log("auth", "re-login: no active provider", "warn");
-            return;
+
+    /**
+     * Resolve the provider CLI directly when block meta has no `cmd` yet.
+     * The old fallback here ran the GATED launch flow — which trusts
+     * `CheckCliAuth`'s expired-but-present false positive and skips login,
+     * degrading "Login Again" into exactly the no-op it exists to bypass
+     * (retro-agent-auth-relogin-noop-2026-07-01 H2). Resolving the CLI and
+     * proceeding with the forced login keeps the user's explicit intent.
+     * Returns null (with a visible notice) if resolution fails.
+     */
+    const resolveCliForRecovery = async (prov: ProviderDefinition, action: string): Promise<string | null> => {
+        opts.log("auth", `${action}: CLI path not in block meta — resolving it directly`, "warn");
+        try {
+            const r = await RpcApi.ResolveCliCommand(TabRpcClient, {
+                provider_id: prov.id,
+                cli_command: prov.cliCommand,
+                npm_package: prov.npmPackage,
+                pinned_version: prov.pinnedVersion,
+                windows_install_command: prov.windowsInstallCommand,
+                unix_install_command: prov.unixInstallCommand,
+                block_id: opts.blockId,
+            }, { timeout: 300000 });
+            // Persist the resolved path back to block meta (mirrors
+            // launch-flow.ts) so a subsequent recovery click reuses it instead
+            // of re-running the full resolution RPC. Best-effort — a failed
+            // write just means the next click re-resolves.
+            try {
+                const oref = WOS.makeORef("block", opts.blockId);
+                await RpcApi.SetMetaCommand(TabRpcClient, { oref, meta: { cmd: r.cli_path } });
+            } catch { /* non-fatal: next click re-resolves */ }
+            return r.cli_path;
+        } catch (err: any) {
+            const msg = `Couldn't find the ${prov.cliCommand} CLI to run the login: ${err?.message ?? String(err)}`;
+            opts.log("auth", msg, "error");
+            setAuthNotice(msg);
+            return null;
         }
-        // The CLI path + auth env are written to block meta at launch; reuse
-        // them instead of re-resolving (the agent is already running, so the
-        // CLI is installed). If `cmd` is missing the agent never launched —
-        // fall back to the full launch flow.
-        const cliPath = getBlockMetaKeyAtom(opts.blockId, "cmd")() as string | undefined;
-        if (!cliPath) {
-            opts.log("auth", "re-login: CLI not resolved yet — running the full launch flow instead", "warn");
-            void startLaunchFlow();
-            return;
-        }
+    };
+
+    /** Auth env for recovery actions: block meta `cmd:env` when present, else rebuilt. */
+    const recoveryAuthEnv = async (prov: ProviderDefinition): Promise<Record<string, string>> => {
         const envMeta = getBlockMetaKeyAtom(opts.blockId, "cmd:env")();
         const authEnv: Record<string, string> = {};
         if (envMeta && typeof envMeta === "object") {
@@ -195,12 +246,53 @@ export function useAgentControllerStatus(
                 if (typeof v === "string") authEnv[k] = v;
             }
         }
+        if (Object.keys(authEnv).length > 0) return authEnv;
+        // Meta env missing (agent never launched) — rebuild the isolated-dir
+        // env the launch flow would have used, so the login lands in the same
+        // store the agent will read.
+        return (await buildAuthEnv(prov)) ?? {};
+    };
+
+    const relogin = async () => {
+        if (reloginInFlight) return;
+        const prov = opts.provider();
+        if (!prov) {
+            opts.log("auth", "re-login: no active provider", "warn");
+            return;
+        }
+        setAuthNotice(null);
+        // Clear any OAuth URL box left by a PRIOR attempt before starting a
+        // fresh one — otherwise a subsequent "no-url" outcome would stack the
+        // error notice below a stale, contradictory URL box (reagent P2).
+        setAuthUrl(null);
+        // The CLI path + auth env are written to block meta at launch; reuse
+        // them instead of re-resolving (the agent is already running, so the
+        // CLI is installed). If `cmd` is missing, resolve it directly — see
+        // resolveCliForRecovery for why this must NOT fall back to the gated
+        // launch flow.
+        let cliPath = getBlockMetaKeyAtom(opts.blockId, "cmd")() as string | undefined;
         reloginInFlight = true;
         setLoginWaiting(true);
         try {
-            await forceProviderLogin({ provider: prov, cliPath, authEnv, setAuthUrl, log: opts.log });
+            if (!cliPath) {
+                cliPath = (await resolveCliForRecovery(prov, "re-login")) ?? undefined;
+                if (!cliPath) return;
+            }
+            const authEnv = await recoveryAuthEnv(prov);
+            const outcome = await forceProviderLogin({ provider: prov, cliPath, authEnv, setAuthUrl, log: opts.log });
+            if (outcome === "no-url") {
+                // Never fail silently (retro §5.1): tell the user nothing
+                // opened and point at the recovery paths that do work.
+                setAuthNotice(
+                    "Couldn't start a browser login — the CLI didn't produce a login URL, so nothing was opened. " +
+                    "Use “Login via terminal” to complete the login in a real terminal window" +
+                    (prov.id === "claude" ? ", or “Use existing login” to copy your global Claude login into this agent." : "."),
+                );
+            }
         } catch (err: any) {
-            opts.log("auth", `re-login failed: ${err?.message ?? String(err)}`, "error");
+            const msg = `Re-login failed: ${err?.message ?? String(err)}`;
+            opts.log("auth", msg, "error");
+            setAuthNotice(msg);
         } finally {
             reloginInFlight = false;
             setLoginWaiting(false);
@@ -219,6 +311,7 @@ export function useAgentControllerStatus(
             opts.log("auth", "use existing login: no active provider", "warn");
             return;
         }
+        setAuthNotice(null);
         seedInFlight = true;
         try {
             // Seed into the agent's RESOLVED auth dir (from cmd:env), not a
@@ -230,9 +323,24 @@ export function useAgentControllerStatus(
                 const v = (envMeta as Record<string, unknown>)[prov.authConfigDirEnvVar];
                 if (typeof v === "string") configDir = v;
             }
-            await seedGlobalLogin(prov.id, opts.log, configDir);
+            const seeded = await seedGlobalLogin(prov.id, opts.log, configDir);
+            if (seeded) {
+                // Credential is now valid on disk — but the agent spawns fresh
+                // per turn and the failure row only clears on the next turn, so
+                // a successful seed looks like it "did nothing". Drive the
+                // recovery: retry the failed turn (fresh spawn picks up the new
+                // token and TurnStart clears the row).
+                opts.log("auth", "Signed in from your global login — retrying…");
+                opts.onRecovered?.();
+            } else {
+                const msg = "Couldn't use your global login — no valid global Claude credential was found. Try “Login via terminal”.";
+                opts.log("auth", msg, "warn");
+                setAuthNotice(msg);
+            }
         } catch (err: any) {
-            opts.log("auth", `use existing login failed: ${err?.message ?? String(err)}`, "error");
+            const msg = `Use existing login failed: ${err?.message ?? String(err)}`;
+            opts.log("auth", msg, "error");
+            setAuthNotice(msg);
         } finally {
             seedInFlight = false;
         }
@@ -248,32 +356,34 @@ export function useAgentControllerStatus(
             opts.log("auth", "login via terminal: no active provider", "warn");
             return;
         }
-        const cliPath = getBlockMetaKeyAtom(opts.blockId, "cmd")() as string | undefined;
-        if (!cliPath) {
-            opts.log("auth", "login via terminal: CLI not resolved — running launch flow instead", "warn");
-            void startLaunchFlow();
-            return;
-        }
-        const envMeta = getBlockMetaKeyAtom(opts.blockId, "cmd:env")();
-        const authEnv: Record<string, string> = {};
-        if (envMeta && typeof envMeta === "object") {
-            for (const [k, v] of Object.entries(envMeta as Record<string, unknown>)) {
-                if (typeof v === "string") authEnv[k] = v;
-            }
-        }
-        const configDir = prov.authConfigDirEnvVar ? authEnv[prov.authConfigDirEnvVar] : undefined;
-
-        // Strip CLAUDE_CONFIG_DIR (and equivalents) from the terminal env so the
-        // login writes to the user's global ~/.claude instead of the isolated dir.
-        // seedGlobalLogin polls the global dir and copies on success — if we kept
-        // the isolated dir key the poll would look in global but the creds would
-        // land in isolated, and a terminal-fresh login would never be detected.
-        const terminalEnv: Record<string, string> = { ...authEnv };
-        if (prov.authConfigDirEnvVar) delete terminalEnv[prov.authConfigDirEnvVar];
-
+        setAuthNotice(null);
+        // Claim the in-flight guard BEFORE any await. The CLI resolve below
+        // can take up to 300 s, and the recovery buttons have no disabled
+        // binding — so setting the flag only after the awaits (the previous
+        // bug) let a rapid double-click pass the top guard twice and open two
+        // terminal windows with overlapping poll loops. Mirror relogin: flag
+        // first, reset in finally.
         reloginInFlight = true;
         setLoginWaiting(true);
         try {
+            let cliPath = getBlockMetaKeyAtom(opts.blockId, "cmd")() as string | undefined;
+            if (!cliPath) {
+                // Same H2 trap as relogin: the gated launch flow would trust the
+                // auth check and skip the login the user explicitly asked for.
+                cliPath = (await resolveCliForRecovery(prov, "login via terminal")) ?? undefined;
+                if (!cliPath) return;
+            }
+            const authEnv = await recoveryAuthEnv(prov);
+            const configDir = prov.authConfigDirEnvVar ? authEnv[prov.authConfigDirEnvVar] : undefined;
+
+            // Strip CLAUDE_CONFIG_DIR (and equivalents) from the terminal env so the
+            // login writes to the user's global ~/.claude instead of the isolated dir.
+            // seedGlobalLogin polls the global dir and copies on success — if we kept
+            // the isolated dir key the poll would look in global but the creds would
+            // land in isolated, and a terminal-fresh login would never be detected.
+            const terminalEnv: Record<string, string> = { ...authEnv };
+            if (prov.authConfigDirEnvVar) delete terminalEnv[prov.authConfigDirEnvVar];
+
             await getApi().openLoginTerminal(cliPath, prov.authLoginCommand, terminalEnv);
             opts.log("auth", "A terminal window opened — complete the login there, then come back.");
 
@@ -289,12 +399,18 @@ export function useAgentControllerStatus(
                 seeded = await seedGlobalLogin(prov.id, silentLog, configDir);
             }
             if (seeded) {
-                opts.log("auth", "Login successful — your next message will use the new token.");
+                opts.log("auth", "Login successful — retrying…");
+                setAuthNotice(null);
+                opts.onRecovered?.();
             } else if (!loginCancelled) {
-                opts.log("auth", "No login detected after 5 minutes. Complete the login in the terminal, then click 'Use existing login'.", "warn");
+                const msg = "No login detected after 5 minutes. Complete the login in the terminal, then click “Use existing login”.";
+                opts.log("auth", msg, "warn");
+                setAuthNotice(msg);
             }
         } catch (err: any) {
-            opts.log("auth", `terminal login failed: ${err?.message ?? String(err)}`, "error");
+            const msg = `Terminal login failed: ${err?.message ?? String(err)}`;
+            opts.log("auth", msg, "error");
+            setAuthNotice(msg);
         } finally {
             reloginInFlight = false;
             setLoginWaiting(false);
@@ -324,6 +440,8 @@ export function useAgentControllerStatus(
     return {
         authUrl,
         setAuthUrl,
+        authNotice,
+        setAuthNotice,
         canRetry,
         flowRunning,
         agentReady,

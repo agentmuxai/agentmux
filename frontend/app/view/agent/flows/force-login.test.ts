@@ -7,8 +7,10 @@
  * The whole point of this helper is that it NEVER consults CheckCliAuth — it
  * unconditionally runs the provider login. These tests pin:
  *   - runCliLogin is called with the provider's login command + auth env;
- *   - a captured URL is pushed to setAuthUrl AND opened via openOAuthBrowserPane;
- *   - a null URL surfaces a warning and does not call setAuthUrl;
+ *   - a captured URL is pushed to setAuthUrl AND opened via openOAuthBrowserPane,
+ *     and the call resolves "opened";
+ *   - a null URL resolves "no-url" (the CALLER surfaces the visible error —
+ *     retro-agent-auth-relogin-noop-2026-07-01 §5.1) and does not call setAuthUrl;
  *   - CheckCliAuth is never invoked (no auth-status gate).
  */
 
@@ -43,7 +45,7 @@ describe("forceProviderLogin", () => {
         const setAuthUrl = vi.fn();
         const log = vi.fn();
 
-        await forceProviderLogin({
+        const outcome = await forceProviderLogin({
             provider,
             cliPath: "C:/cli/claude.cmd",
             authEnv: { CLAUDE_CONFIG_DIR: "C:/auth" },
@@ -59,6 +61,7 @@ describe("forceProviderLogin", () => {
         );
         expect(setAuthUrl).toHaveBeenCalledWith(URL);
         expect(hub.openPane).toHaveBeenCalledWith(URL);
+        expect(outcome).toBe("opened");
     });
 
     it("NEVER consults the auth-status check (the whole point of forcing)", async () => {
@@ -67,16 +70,19 @@ describe("forceProviderLogin", () => {
         expect(hub.checkCliAuth).not.toHaveBeenCalled();
     });
 
-    it("warns and does not set an auth URL when no URL is captured", async () => {
+    it("resolves 'no-url' and does not set an auth URL when no URL is captured", async () => {
         hub.runCliLogin.mockResolvedValue(null);
         const setAuthUrl = vi.fn();
         const log = vi.fn();
 
-        await forceProviderLogin({ provider, cliPath: "x", authEnv: {}, setAuthUrl, log });
+        const outcome = await forceProviderLogin({ provider, cliPath: "x", authEnv: {}, setAuthUrl, log });
 
         expect(setAuthUrl).not.toHaveBeenCalled();
         expect(hub.openPane).not.toHaveBeenCalled();
-        expect(log).toHaveBeenCalledWith("auth", expect.stringMatching(/browser window should have opened/i), "warn");
+        expect(outcome).toBe("no-url");
+        // The helper still logs, but must NOT pretend a browser opened — the
+        // caller owns the user-visible error (never fail silently, retro §5.1).
+        expect(log).toHaveBeenCalledWith("auth", expect.stringMatching(/no login URL captured/i), "warn");
     });
 
     it("still resolves (URL set) even when the pane falls back to the system browser", async () => {

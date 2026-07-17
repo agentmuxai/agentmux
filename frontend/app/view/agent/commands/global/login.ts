@@ -41,13 +41,23 @@ export const loginCommand: SlashCommand = {
             // Shared with the failure-banner / inline-error "Login Again" action
             // (useAgentControllerStatus.relogin) — opens the OAuth in an in-app
             // browser pane and surfaces the URL box. See force-login.ts.
-            await forceProviderLogin({
+            const outcome = await forceProviderLogin({
                 provider: prov,
                 cliPath,
                 authEnv,
                 setAuthUrl: ctx.setAuthUrl,
                 log: ctx.log,
             });
+            if (outcome === "no-url") {
+                // Never report success for a login that opened nothing
+                // (retro-agent-auth-relogin-noop-2026-07-01 §5.1).
+                return {
+                    kind: "error",
+                    message:
+                        "/login: the CLI didn't produce a login URL, so no browser was opened. " +
+                        "Use the “Login via terminal” or “Use existing login” actions instead.",
+                };
+            }
             ctx.log("auth", "run /cost to verify authentication once logged in");
             return { kind: "ok" };
         } catch (err: any) {
