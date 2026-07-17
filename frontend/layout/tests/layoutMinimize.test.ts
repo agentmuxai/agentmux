@@ -2,38 +2,30 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { newLayoutNode } from "../lib/layoutNode";
+import { newLayoutNode, balanceNode } from "../lib/layoutNode";
 import {
     minimizeNodeToggle,
     rebuildMinimizedSet,
-    enforceMinimizedLocks,
+    countExpandedLeaves,
     isNodeLocked,
+    isEffectivelyMinimized,
     HeaderHeightPx,
+    MinimizedRowSlotWidthPx,
 } from "../lib/layoutMinimize";
+import { computeMainAxisAllocation } from "../lib/layoutGeometry";
 import { resizeNode, splitVertical } from "../lib/layoutTree";
-import { balanceNode } from "../lib/layoutNode";
-import { FlexDirection, type LayoutNode, type LayoutNodeAdditionalProps } from "../lib/types";
+import { FlexDirection, type LayoutNode } from "../lib/types";
 
 // ── Minimal LayoutModel mock ─────────────────────────────────────────────────
+// The display-mode toggle needs no geometry (no addlProps, no gap, no ratios).
 
-function makeMockModel(
-    rootNode: LayoutNode,
-    addlProps: Record<string, Partial<LayoutNodeAdditionalProps>> = {},
-    gapSizePx = 0,
-) {
+function makeMockModel(rootNode: LayoutNode) {
     let minimizedSet = new Set<string>();
-    const treeState = { rootNode, pendingBackendActions: [] };
-    const model = {
-        treeState,
-        getter: (_sig: unknown) => addlProps as Record<string, LayoutNodeAdditionalProps>,
-        additionalProps: {} as any,
-        gapSizePx: () => gapSizePx,
+    return {
+        treeState: { rootNode, pendingBackendActions: [] },
         minimizedNodeIds: {
-            // Real SignalAtom._set accepts both a value and an updater function.
-            _set: (updaterOrValue: Set<string> | ((prev: Set<string>) => Set<string>)) => {
-                minimizedSet = typeof updaterOrValue === "function"
-                    ? updaterOrValue(minimizedSet)
-                    : updaterOrValue;
+            _set: (u: Set<string> | ((prev: Set<string>) => Set<string>)) => {
+                minimizedSet = typeof u === "function" ? u(minimizedSet) : u;
             },
         },
         updateTree: () => {},
@@ -41,463 +33,174 @@ function makeMockModel(
         persistToBackend: () => {},
         getMinimizedSet: () => minimizedSet,
     };
-    return model;
 }
 
-// Sizes must exceed HeaderHeightPx (33) so freedUnits > 0 and minimize doesn't no-op.
 const PANE_SIZE = 200;
 
-// ── Helper: build a 2-column layout ─────────────────────────────────────────
-//
 //   root (Row)
-//   ├── colA (Column, size=200)
-//   │   ├── paneA1 (leaf, size=200)
-//   │   └── paneA2 (leaf, size=200)
-//   └── colB (Column, size=200)
-//       └── paneB  (leaf, size=200)
-
+//   ├── colA (Column) → paneA1, paneA2
+//   └── colB (Column) → paneB
 function buildTwoColumnLayout() {
     const paneA1 = newLayoutNode(FlexDirection.Row, PANE_SIZE, undefined, { blockId: "paneA1" });
     const paneA2 = newLayoutNode(FlexDirection.Row, PANE_SIZE, undefined, { blockId: "paneA2" });
-    const colA   = newLayoutNode(FlexDirection.Column, PANE_SIZE, [paneA1, paneA2]);
-
-    const paneB  = newLayoutNode(FlexDirection.Row, PANE_SIZE, undefined, { blockId: "paneB" });
-    const colB   = newLayoutNode(FlexDirection.Column, PANE_SIZE, [paneB]);
-
-    const root   = newLayoutNode(FlexDirection.Row, PANE_SIZE, [colA, colB]);
+    const colA = newLayoutNode(FlexDirection.Column, PANE_SIZE, [paneA1, paneA2]);
+    const paneB = newLayoutNode(FlexDirection.Row, PANE_SIZE, undefined, { blockId: "paneB" });
+    const colB = newLayoutNode(FlexDirection.Column, PANE_SIZE, [paneB]);
+    const root = newLayoutNode(FlexDirection.Row, PANE_SIZE, [colA, colB]);
     return { root, colA, paneA1, paneA2, colB, paneB };
 }
 
-// ── Normal column-collapse (no dissolve) ─────────────────────────────────────
+// ── Display-mode toggle ──────────────────────────────────────────────────────
 
-describe("normal column collapse (partial — dissolve not triggered)", () => {
-    it("collapses the pane to header height, gives freed space to sibling", () => {
-        const { root, colA, paneA1, paneA2 } = buildTwoColumnLayout();
-        const model = makeMockModel(root, { [colA.id]: { pixelToSizeRatio: 1 } });
-
-        minimizeNodeToggle(model as any, paneA1.id);
-
-        expect(paneA1.minimizedSize).toBe(PANE_SIZE);
-        expect(paneA1.size).toBe(HeaderHeightPx);
-        expect(paneA2.size).toBe(PANE_SIZE + (PANE_SIZE - HeaderHeightPx));
-        expect(model.getMinimizedSet().has(paneA1.id)).toBe(true);
-        // colA stays in root Row — paneA2 still expanded
-        expect(root.children).toHaveLength(2);
-    });
-
-    it("restores pane to its original size", () => {
-        const { root, colA, paneA1 } = buildTwoColumnLayout();
-        const model = makeMockModel(root, { [colA.id]: { pixelToSizeRatio: 1 } });
+describe("minimize as a display mode", () => {
+    it("sets only the flag — stored sizes of the pane AND its siblings never change", () => {
+        const { root, paneA1, paneA2, colA, colB } = buildTwoColumnLayout();
+        const model = makeMockModel(root);
 
         minimizeNodeToggle(model as any, paneA1.id);
-        minimizeNodeToggle(model as any, paneA1.id);
 
-        expect(paneA1.minimizedSize).toBeUndefined();
+        expect(paneA1.minimized).toBe(true);
+        expect(isNodeLocked(paneA1)).toBe(true);
         expect(paneA1.size).toBe(PANE_SIZE);
-        expect(model.getMinimizedSet().has(paneA1.id)).toBe(false);
-        void root;
-    });
-});
-
-// ── Column dissolve ───────────────────────────────────────────────────────────
-
-describe("column dissolve — all panes minimized triggers dissolve into adjacent column", () => {
-    it("dissolves colA into colB when both panes in colA are minimized", () => {
-        const { root, colA, paneA1, paneA2, colB, paneB } = buildTwoColumnLayout();
-        const model = makeMockModel(root, {
-            [colA.id]: { pixelToSizeRatio: 1 },
-            [colB.id]: { pixelToSizeRatio: 1 },
-        });
-
-        minimizeNodeToggle(model as any, paneA1.id);
-        expect(root.children).toHaveLength(2); // no dissolve yet
-
-        minimizeNodeToggle(model as any, paneA2.id); // triggers dissolve
-
-        // Root Row now holds only colB
-        expect(root.children).toHaveLength(1);
-        expect(root.children![0].id).toBe(colB.id);
-        expect(root._slipAnchor).toBe(true);
-
-        // colA is now the first child of colB
-        expect(colB.children![0].id).toBe(colA.id);
-        expect(colA.columnDissolve).toBeDefined();
-        expect(colA.columnDissolve!.targetColumnId).toBe(colB.id);
-        expect(colA.columnDissolve!.originalRowSize).toBe(PANE_SIZE);
-        expect(colA.columnDissolve!.originalRowIndex).toBe(0);
-
-        // colB absorbed colA's Row-slot width
-        expect(colB.size).toBe(PANE_SIZE * 2);
-
-        // paneB is still in colB (after dissolved colA)
-        expect(colB.children![1].id).toBe(paneB.id);
-
-        // Both panes inside colA retain their minimizedSize
-        expect(paneA1.minimizedSize).toBeDefined();
-        expect(paneA2.minimizedSize).toBeDefined();
-        expect(model.getMinimizedSet().has(paneA1.id)).toBe(true);
-        expect(model.getMinimizedSet().has(paneA2.id)).toBe(true);
-    });
-
-    it("colA occupies 2 × HeaderHeightPx flex-units inside colB after dissolve", () => {
-        const { root, colA, paneA1, paneA2, colB } = buildTwoColumnLayout();
-        const model = makeMockModel(root, {
-            [colA.id]: { pixelToSizeRatio: 1 },
-            [colB.id]: { pixelToSizeRatio: 1 },
-        });
-
-        minimizeNodeToggle(model as any, paneA1.id);
-        minimizeNodeToggle(model as any, paneA2.id);
-
-        expect(colA.size).toBe(2 * HeaderHeightPx);
-        void colB;
-    });
-
-    // Regression: production calls balanceNode(root) on every geometry pass
-    // (layoutGeometry.ts's updateTree), which this test suite otherwise never
-    // exercises since makeMockModel's updateTree is a no-op stub. A dissolved
-    // column is nested inside a same-direction Column sibling by design, so
-    // balanceNode's direction-alternation rule used to flip colA's own
-    // flexDirection to Row, laying its two minimized headers out side-by-side
-    // ("narrow") instead of stacked ("short").
-    it("keeps the dissolved column's own flexDirection stacked after balanceNode runs", () => {
-        const { root, colA, paneA1, paneA2, colB } = buildTwoColumnLayout();
-        const model = makeMockModel(root, {
-            [colA.id]: { pixelToSizeRatio: 1 },
-            [colB.id]: { pixelToSizeRatio: 1 },
-        });
-
-        minimizeNodeToggle(model as any, paneA1.id);
-        minimizeNodeToggle(model as any, paneA2.id); // triggers dissolve: colA nests inside colB
-
-        expect(colB.children![0].id).toBe(colA.id);
-        expect(colA.flexDirection).toBe(FlexDirection.Column);
-        expect(colB.flexDirection).toBe(FlexDirection.Column);
-
-        balanceNode(root);
-
-        // colA is still nested first inside colB and still stacks vertically.
-        expect(colB.children![0].id).toBe(colA.id);
-        expect(colA.flexDirection).toBe(FlexDirection.Column);
-    });
-});
-
-// ── Undissolve on restore ─────────────────────────────────────────────────────
-
-describe("undissolve — clicking a pane in a dissolved column restores the column", () => {
-    it("undissolves colA and restores the clicked pane in a single toggle", () => {
-        const { root, colA, paneA1, paneA2, colB } = buildTwoColumnLayout();
-        const model = makeMockModel(root, {
-            [colA.id]: { pixelToSizeRatio: 1 },
-            [colB.id]: { pixelToSizeRatio: 1 },
-        });
-
-        minimizeNodeToggle(model as any, paneA1.id);
-        minimizeNodeToggle(model as any, paneA2.id);
-        expect(root.children).toHaveLength(1);
-
-        // One toggle on paneA2: undissolves colA AND restores paneA2
-        minimizeNodeToggle(model as any, paneA2.id);
-
-        // colA is back in the root Row at its original index
-        expect(root.children).toHaveLength(2);
-        expect(root.children![0].id).toBe(colA.id);
-        expect(colA.columnDissolve).toBeUndefined();
-        expect(root._slipAnchor).toBeUndefined();
-
-        // colB width is restored
-        expect(colB.size).toBe(PANE_SIZE);
-
-        // paneA2 is restored
-        expect(paneA2.minimizedSize).toBeUndefined();
-        expect(model.getMinimizedSet().has(paneA2.id)).toBe(false);
-
-        // paneA1 remains minimized inside colA
-        expect(paneA1.minimizedSize).toBeDefined();
-        expect(model.getMinimizedSet().has(paneA1.id)).toBe(true);
-    });
-
-    it("undissolves via paneA1 as well", () => {
-        const { root, colA, paneA1, paneA2, colB } = buildTwoColumnLayout();
-        const model = makeMockModel(root, {
-            [colA.id]: { pixelToSizeRatio: 1 },
-            [colB.id]: { pixelToSizeRatio: 1 },
-        });
-
-        minimizeNodeToggle(model as any, paneA1.id);
-        minimizeNodeToggle(model as any, paneA2.id);
-
-        minimizeNodeToggle(model as any, paneA1.id);
-
-        expect(root.children).toHaveLength(2);
-        expect(colA.columnDissolve).toBeUndefined();
-        expect(paneA1.minimizedSize).toBeUndefined();
-        expect(model.getMinimizedSet().has(paneA1.id)).toBe(false);
-        expect(paneA2.minimizedSize).toBeDefined();
-        void colB;
-    });
-});
-
-// ── rebuildMinimizedSet ───────────────────────────────────────────────────────
-
-describe("rebuildMinimizedSet", () => {
-    it("rebuilds minimizedNodeIds from minimizedSize fields after tree load", () => {
-        const { root, colA, paneA1, paneA2, colB } = buildTwoColumnLayout();
-        const model = makeMockModel(root, {
-            [colA.id]: { pixelToSizeRatio: 1 },
-            [colB.id]: { pixelToSizeRatio: 1 },
-        });
-
-        minimizeNodeToggle(model as any, paneA1.id);
-        minimizeNodeToggle(model as any, paneA2.id);
-
-        // Simulate fresh load: clear the set, then rebuild
-        model.minimizedNodeIds._set(new Set<string>());
-        rebuildMinimizedSet(model as any);
-
-        expect(model.getMinimizedSet().has(paneA1.id)).toBe(true);
-        expect(model.getMinimizedSet().has(paneA2.id)).toBe(true);
-    });
-
-    it("restores _slipAnchor on the owning Row for a dissolved column", () => {
-        const { root, colA, paneA1, paneA2, colB } = buildTwoColumnLayout();
-        const model = makeMockModel(root, {
-            [colA.id]: { pixelToSizeRatio: 1 },
-            [colB.id]: { pixelToSizeRatio: 1 },
-        });
-
-        minimizeNodeToggle(model as any, paneA1.id);
-        minimizeNodeToggle(model as any, paneA2.id);
-
-        root._slipAnchor = undefined; // simulate stale serialised state
-        rebuildMinimizedSet(model as any);
-
-        expect(root._slipAnchor).toBe(true);
-    });
-});
-
-// ── Cascade dissolve — 3 columns → 2 → 1 ────────────────────────────────────
-
-describe("cascade dissolve — multiple columns collapse into one", () => {
-    it("colA dissolves into colB, then colB dissolves into colC when all minimized", () => {
-        // root (Row)
-        // ├── colA (Column) → paneA1, paneA2
-        // ├── colB (Column) → paneB
-        // └── colC (Column) → paneC
-        const paneA1 = newLayoutNode(FlexDirection.Row, PANE_SIZE, undefined, { blockId: "paneA1" });
-        const paneA2 = newLayoutNode(FlexDirection.Row, PANE_SIZE, undefined, { blockId: "paneA2" });
-        const colA   = newLayoutNode(FlexDirection.Column, PANE_SIZE, [paneA1, paneA2]);
-        const paneB  = newLayoutNode(FlexDirection.Row, PANE_SIZE, undefined, { blockId: "paneB" });
-        const colB   = newLayoutNode(FlexDirection.Column, PANE_SIZE, [paneB]);
-        const paneC  = newLayoutNode(FlexDirection.Row, PANE_SIZE, undefined, { blockId: "paneC" });
-        const colC   = newLayoutNode(FlexDirection.Column, PANE_SIZE, [paneC]);
-        const root   = newLayoutNode(FlexDirection.Row, PANE_SIZE, [colA, colB, colC]);
-
-        const model = makeMockModel(root, {
-            [colA.id]: { pixelToSizeRatio: 1 },
-            [colB.id]: { pixelToSizeRatio: 1 },
-            [colC.id]: { pixelToSizeRatio: 1 },
-        });
-
-        // Minimize colA's panes → colA dissolves into colB
-        minimizeNodeToggle(model as any, paneA1.id);
-        minimizeNodeToggle(model as any, paneA2.id);
-        expect(root.children).toHaveLength(2); // colA gone, root has colB + colC
-        expect(colA.columnDissolve).toBeDefined();
-        expect(colB.children![0].id).toBe(colA.id);
-
-        // Minimize colB's pane (colB now has [colA-dissolved, paneB]) →
-        // allCollapsed includes columnDissolve, so colB dissolves into colC
-        minimizeNodeToggle(model as any, paneB.id);
-        expect(root.children).toHaveLength(1); // only colC remains
-        expect(root.children![0].id).toBe(colC.id);
-        expect(colB.columnDissolve).toBeDefined();
-        expect(colC.children![0].id).toBe(colB.id);
-
-        // colB (inside colC) still contains colA-dissolved
-        expect(colB.children!.some(c => c.id === colA.id)).toBe(true);
-
-        // paneC is now the LAST expanded pane — minimizing it is a no-op
-        // (the window must always keep one expanded pane).
-        minimizeNodeToggle(model as any, paneC.id);
-        expect(paneC.minimizedSize).toBeUndefined();
-        expect(root.children).toHaveLength(1);
-    });
-
-    it("restores pane from 3-deep cascade (A→B→C → restore colA pane)", () => {
-        // root (Row)
-        // ├── colA (Column) → paneA1, paneA2
-        // ├── colB (Column) → paneB
-        // └── colC (Column) → paneC
-        const paneA1 = newLayoutNode(FlexDirection.Row, PANE_SIZE, undefined, { blockId: "paneA1" });
-        const paneA2 = newLayoutNode(FlexDirection.Row, PANE_SIZE, undefined, { blockId: "paneA2" });
-        const colA   = newLayoutNode(FlexDirection.Column, PANE_SIZE, [paneA1, paneA2]);
-        const paneB  = newLayoutNode(FlexDirection.Row, PANE_SIZE, undefined, { blockId: "paneB" });
-        const colB   = newLayoutNode(FlexDirection.Column, PANE_SIZE, [paneB]);
-        const paneC  = newLayoutNode(FlexDirection.Row, PANE_SIZE, undefined, { blockId: "paneC" });
-        const colC   = newLayoutNode(FlexDirection.Column, PANE_SIZE, [paneC]);
-        const root   = newLayoutNode(FlexDirection.Row, PANE_SIZE, [colA, colB, colC]);
-
-        const model = makeMockModel(root, {
-            [colA.id]: { pixelToSizeRatio: 1 },
-            [colB.id]: { pixelToSizeRatio: 1 },
-            [colC.id]: { pixelToSizeRatio: 1 },
-        });
-
-        // Step 1: Dissolve colA into colB (minimize all panes in colA)
-        minimizeNodeToggle(model as any, paneA1.id);
-        minimizeNodeToggle(model as any, paneA2.id);
-        expect(colA.columnDissolve).toBeDefined();
-        expect(root.children).toHaveLength(2); // colB + colC remain
-
-        // Step 2: Dissolve colB into colC (colB now has [colA-dissolved, paneB]; minimizing paneB collapses it)
-        minimizeNodeToggle(model as any, paneB.id);
-        expect(colB.columnDissolve).toBeDefined();
-        expect(root.children).toHaveLength(1); // only colC remains
-        expect(root.children![0].id).toBe(colC.id);
-
-        // Step 3: Restore paneA1 from the deeply dissolved colA.
-        // The recursive-undissolve-ancestors path must undissolve colB (outermost) then colA
-        // (immediate parent) before restoring paneA1 — exercising the path added in commit 360dd82.
-        minimizeNodeToggle(model as any, paneA1.id);
-
-        // All three columns must be back in the root Row
-        expect(root.children).toHaveLength(3);
-        const rootIds = root.children!.map((c) => c.id);
-        expect(rootIds).toContain(colA.id);
-        expect(rootIds).toContain(colB.id);
-        expect(rootIds).toContain(colC.id);
-
-        // No column retains a columnDissolve marker
-        expect(colA.columnDissolve).toBeUndefined();
-        expect(colB.columnDissolve).toBeUndefined();
-        expect(colC.columnDissolve).toBeUndefined();
-
-        // Each column is restored to its original Row-slot size
+        expect(paneA2.size).toBe(PANE_SIZE);
         expect(colA.size).toBe(PANE_SIZE);
         expect(colB.size).toBe(PANE_SIZE);
-        expect(colC.size).toBe(PANE_SIZE);
-
-        // root Row no longer needs the slip anchor
-        expect(root._slipAnchor).toBeUndefined();
-
-        // paneA1 is restored (the pane we clicked)
         expect(paneA1.minimizedSize).toBeUndefined();
+        expect(paneA1.minimizedLockedSize).toBeUndefined();
+        expect(model.getMinimizedSet().has(paneA1.id)).toBe(true);
+    });
+
+    it("restore clears the flag — original geometry is intact by construction", () => {
+        const { root, paneA1 } = buildTwoColumnLayout();
+        const model = makeMockModel(root);
+
+        minimizeNodeToggle(model as any, paneA1.id);
+        minimizeNodeToggle(model as any, paneA1.id);
+
+        expect(paneA1.minimized).toBeUndefined();
+        expect(paneA1.size).toBe(PANE_SIZE);
         expect(model.getMinimizedSet().has(paneA1.id)).toBe(false);
+    });
 
-        // paneA2 remains minimized inside colA
-        expect(paneA2.minimizedSize).toBeDefined();
-        expect(model.getMinimizedSet().has(paneA2.id)).toBe(true);
+    it("no structural surgery: minimizing every pane of a column leaves the tree shape untouched", () => {
+        const { root, colA, paneA1, paneA2, colB } = buildTwoColumnLayout();
+        const model = makeMockModel(root);
 
-        // paneB remains minimized inside colB
-        expect(paneB.minimizedSize).toBeDefined();
-        expect(model.getMinimizedSet().has(paneB.id)).toBe(true);
+        minimizeNodeToggle(model as any, paneA1.id);
+        minimizeNodeToggle(model as any, paneA2.id);
+
+        // No dissolve: colA stays in the root Row with both children.
+        expect(root.children).toHaveLength(2);
+        expect(root.children![0].id).toBe(colA.id);
+        expect(colA.children).toHaveLength(2);
+        expect(colA.columnDissolve).toBeUndefined();
+        expect(root._slipAnchor).toBeUndefined();
+        // colA is now effectively minimized (renders as a chip stack).
+        expect(isEffectivelyMinimized(colA)).toBe(true);
+        expect(isEffectivelyMinimized(colB)).toBe(false);
+    });
+
+    it("toggle on a branch is a no-op", () => {
+        const { root, colA } = buildTwoColumnLayout();
+        const model = makeMockModel(root);
+        minimizeNodeToggle(model as any, colA.id);
+        expect(colA.minimized).toBeUndefined();
     });
 });
 
-// ── Bail case — no adjacent sibling ─────────────────────────────────────────
-
-describe("dissolve bail cases", () => {
-    it("refuses to minimize the last expanded pane (no-op), so a lone column never fully collapses", () => {
-        const pane1 = newLayoutNode(FlexDirection.Row, PANE_SIZE, undefined, { blockId: "p1" });
-        const pane2 = newLayoutNode(FlexDirection.Row, PANE_SIZE, undefined, { blockId: "p2" });
-        const col   = newLayoutNode(FlexDirection.Column, PANE_SIZE, [pane1, pane2]);
-        const root  = newLayoutNode(FlexDirection.Row, PANE_SIZE, [col]);
-
-        const model = makeMockModel(root, { [col.id]: { pixelToSizeRatio: 1 } });
-
-        minimizeNodeToggle(model as any, pane1.id);
-        // pane2 is now the LAST expanded pane — this toggle must no-op.
-        // (Previously it minimized and dissolve bailed, leaving an
-        // all-headers window with nothing restorable in view.)
-        minimizeNodeToggle(model as any, pane2.id);
-
-        expect(root.children).toHaveLength(1);
-        expect(col.columnDissolve).toBeUndefined();
-        expect(pane1.minimizedSize).toBeDefined();
-        expect(pane2.minimizedSize).toBeUndefined();
-        expect(pane2.size).toBeGreaterThan(HeaderHeightPx);
-
-        // Restoring pane1 re-enables minimizing pane2.
-        minimizeNodeToggle(model as any, pane1.id);
-        expect(pane1.minimizedSize).toBeUndefined();
-        minimizeNodeToggle(model as any, pane2.id);
-        expect(pane2.minimizedSize).toBeDefined();
-        expect(pane1.minimizedSize).toBeUndefined();
-    });
-});
-
-// ── Last expanded pane cannot be minimized ───────────────────────────────────
+// ── Last expanded pane guard ─────────────────────────────────────────────────
 
 describe("last expanded pane guard", () => {
-    it("no-ops when the only remaining expanded pane (after a dissolve) is toggled", () => {
-        const { root, colA, paneA1, paneA2, colB, paneB } = buildTwoColumnLayout();
-        const model = makeMockModel(root, {
-            [colA.id]: { pixelToSizeRatio: 1 },
-            [colB.id]: { pixelToSizeRatio: 1 },
-        });
+    it("refuses to minimize the last expanded pane; restore re-enables", () => {
+        const { root, paneA1, paneA2, paneB } = buildTwoColumnLayout();
+        const model = makeMockModel(root);
 
         minimizeNodeToggle(model as any, paneA1.id);
-        minimizeNodeToggle(model as any, paneA2.id); // colA dissolves into colB
-        expect(colA.columnDissolve).toBeDefined();
+        minimizeNodeToggle(model as any, paneA2.id);
+        expect(countExpandedLeaves(root)).toBe(1);
 
-        // paneB is the last expanded pane — toggle must not collapse it.
-        const sizeBefore = paneB.size;
-        minimizeNodeToggle(model as any, paneB.id);
-        expect(paneB.minimizedSize).toBeUndefined();
-        expect(paneB.size).toBe(sizeBefore);
-        expect(model.getMinimizedSet().has(paneB.id)).toBe(false);
+        minimizeNodeToggle(model as any, paneB.id); // last expanded — no-op
+        expect(paneB.minimized).toBeUndefined();
 
-        // Restoring one pane (undissolves colA) re-enables minimizing: with
-        // paneA1 and paneB both expanded, paneA1 can collapse again.
-        minimizeNodeToggle(model as any, paneA1.id);
-        expect(paneA1.minimizedSize).toBeUndefined();
-        minimizeNodeToggle(model as any, paneA1.id);
-        expect(paneA1.minimizedSize).toBeDefined();
+        minimizeNodeToggle(model as any, paneA1.id); // restore one
+        minimizeNodeToggle(model as any, paneB.id); // now allowed
+        expect(paneB.minimized).toBe(true);
+        expect(paneA1.minimized).toBeUndefined();
     });
 });
 
-// ── Minimize lock (locked-state spec, 2026-07-16) ───────────────────────────
+// ── Derived geometry (computeMainAxisAllocation) ─────────────────────────────
 
-describe("minimize lock — minimized is a locked state", () => {
-    it("records minimizedLockedSize on minimize and clears it on restore", () => {
-        const { root, colA, paneA1 } = buildTwoColumnLayout();
-        const model = makeMockModel(root, { [colA.id]: { pixelToSizeRatio: 1 } });
+describe("derived chip geometry", () => {
+    const size = (n: LayoutNode) => n.size;
 
-        minimizeNodeToggle(model as any, paneA1.id);
-        expect(paneA1.minimizedLockedSize).toBe(HeaderHeightPx);
-        expect(paneA1.size).toBe(HeaderHeightPx);
-        expect(isNodeLocked(paneA1)).toBe(true);
-
-        minimizeNodeToggle(model as any, paneA1.id);
-        expect(paneA1.minimizedLockedSize).toBeUndefined();
-        expect(isNodeLocked(paneA1)).toBe(false);
+    it("Column parent: minimized leaf gets exactly header height; sibling gets the rest", () => {
+        const { colA, paneA1, paneA2 } = buildTwoColumnLayout();
+        paneA1.minimized = true;
+        const { px, pixelToSizeRatio } = computeMainAxisAllocation(colA.children!, false, 800, size);
+        expect(px[0]).toBe(HeaderHeightPx);
+        expect(px[1]).toBe(800 - HeaderHeightPx);
+        // Ratio describes only the flex-distributed space.
+        expect(pixelToSizeRatio).toBeCloseTo(PANE_SIZE / (800 - HeaderHeightPx));
     });
 
-    it("records minimizedLockedSize on the dissolved column and clears it on undissolve", () => {
-        const { root, colA, paneA1, paneA2, colB } = buildTwoColumnLayout();
-        const model = makeMockModel(root, {
-            [colA.id]: { pixelToSizeRatio: 1 },
-            [colB.id]: { pixelToSizeRatio: 1 },
-        });
-
-        minimizeNodeToggle(model as any, paneA1.id);
-        minimizeNodeToggle(model as any, paneA2.id); // triggers dissolve
-        expect(colA.minimizedLockedSize).toBe(colA.size);
-        expect(isNodeLocked(colA)).toBe(true);
-
-        minimizeNodeToggle(model as any, paneA2.id); // undissolves + restores
-        expect(colA.minimizedLockedSize).toBeUndefined();
-        expect(isNodeLocked(colA)).toBe(false);
+    it("Row parent: minimized leaf gets the fixed chip width", () => {
+        const a = newLayoutNode(FlexDirection.Column, 10, undefined, { blockId: "a" });
+        const b = newLayoutNode(FlexDirection.Column, 10, undefined, { blockId: "b" });
+        a.minimized = true;
+        const { px } = computeMainAxisAllocation([a, b], true, 1000, size);
+        expect(px[0]).toBe(MinimizedRowSlotWidthPx);
+        expect(px[1]).toBe(1000 - MinimizedRowSlotWidthPx);
     });
 
-    it("resizeNode rejects the whole action when any target is locked (the reported bug)", () => {
+    it("fully-minimized column in a Row parent renders as one fixed-width chip stack", () => {
         const { root, colA, paneA1, paneA2 } = buildTwoColumnLayout();
-        const model = makeMockModel(root, { [colA.id]: { pixelToSizeRatio: 1 } });
+        paneA1.minimized = true;
+        paneA2.minimized = true;
+        const { px } = computeMainAxisAllocation(root.children!, true, 1000, size);
+        expect(px[0]).toBe(MinimizedRowSlotWidthPx); // colA: chip stack slot
+        expect(px[1]).toBe(1000 - MinimizedRowSlotWidthPx); // colB absorbs the rest
+    });
 
-        minimizeNodeToggle(model as any, paneA1.id);
-        const lockedSize = paneA1.size;
-        const siblingSize = paneA2.size;
+    it("fully-minimized column in a Column parent gets one header height per leaf", () => {
+        const inner1 = newLayoutNode(FlexDirection.Row, 10, undefined, { blockId: "i1" });
+        const inner2 = newLayoutNode(FlexDirection.Row, 10, undefined, { blockId: "i2" });
+        inner1.minimized = true;
+        inner2.minimized = true;
+        const stack = newLayoutNode(FlexDirection.Column, 10, [inner1, inner2]);
+        const other = newLayoutNode(FlexDirection.Row, 10, undefined, { blockId: "o" });
+        const { px } = computeMainAxisAllocation([stack, other], false, 600, size);
+        expect(px[0]).toBe(2 * HeaderHeightPx);
+        expect(px[1]).toBe(600 - 2 * HeaderHeightPx);
+    });
+
+    it("chips scale down proportionally when the container is too small for them", () => {
+        const a = newLayoutNode(FlexDirection.Row, 10, undefined, { blockId: "a" });
+        const b = newLayoutNode(FlexDirection.Row, 10, undefined, { blockId: "b" });
+        a.minimized = true;
+        b.minimized = true;
+        const { px } = computeMainAxisAllocation([a, b], false, 40, size);
+        expect(px[0]).toBeCloseTo(20);
+        expect(px[1]).toBeCloseTo(20);
+        expect(px[0] + px[1]).toBeCloseTo(40);
+    });
+
+    it("no minimized children: identical to plain proportional split", () => {
+        const a = newLayoutNode(FlexDirection.Row, 100, undefined, { blockId: "a" });
+        const b = newLayoutNode(FlexDirection.Row, 300, undefined, { blockId: "b" });
+        const { px, pixelToSizeRatio } = computeMainAxisAllocation([a, b], false, 800, size);
+        expect(px[0]).toBeCloseTo(200);
+        expect(px[1]).toBeCloseTo(600);
+        expect(pixelToSizeRatio).toBeCloseTo(400 / 800);
+    });
+});
+
+// ── Reducer guards (minimized = locked) ──────────────────────────────────────
+
+describe("minimized panes are untargetable by tree mutations", () => {
+    it("resizeNode rejects the whole action when any target is minimized", () => {
+        const { root, paneA1, paneA2 } = buildTwoColumnLayout();
+        paneA1.minimized = true;
 
         resizeNode({ rootNode: root, pendingBackendActions: [] } as any, {
             type: "resize" as any,
@@ -507,16 +210,13 @@ describe("minimize lock — minimized is a locked state", () => {
             ],
         } as any);
 
-        // Atomic reject: neither side of the pair applied.
-        expect(paneA1.size).toBe(lockedSize);
-        expect(paneA2.size).toBe(siblingSize);
+        expect(paneA1.size).toBe(PANE_SIZE);
+        expect(paneA2.size).toBe(PANE_SIZE);
     });
 
-    it("splitVertical rejects a locked target", () => {
+    it("splitVertical rejects a minimized target", () => {
         const { root, colA, paneA1 } = buildTwoColumnLayout();
-        const model = makeMockModel(root, { [colA.id]: { pixelToSizeRatio: 1 } });
-
-        minimizeNodeToggle(model as any, paneA1.id);
+        paneA1.minimized = true;
         const newNode = newLayoutNode(FlexDirection.Row, PANE_SIZE, undefined, { blockId: "newPane" });
         splitVertical({ rootNode: root, pendingBackendActions: [] } as any, {
             type: "splitvertical" as any,
@@ -524,49 +224,72 @@ describe("minimize lock — minimized is a locked state", () => {
             newNode,
             position: "after",
         } as any);
-
-        // Tree unchanged: colA still has exactly its two original panes.
         expect(colA.children).toHaveLength(2);
-        expect(paneA1.size).toBe(HeaderHeightPx);
-    });
-
-    it("enforceMinimizedLocks snaps a tampered minimized size back and repays the sibling", () => {
-        const { root, colA, paneA1, paneA2 } = buildTwoColumnLayout();
-        const model = makeMockModel(root, { [colA.id]: { pixelToSizeRatio: 1 } });
-
-        minimizeNodeToggle(model as any, paneA1.id);
-        const siblingSize = paneA2.size;
-
-        // Simulate a writer that bypassed the reducer guards (stale tree push).
-        paneA1.size = 120;
-        paneA2.size = siblingSize - (120 - HeaderHeightPx);
-
-        const snapped = enforceMinimizedLocks(root);
-        expect(snapped).toBe(1);
-        expect(paneA1.size).toBe(HeaderHeightPx);
-        expect(paneA2.size).toBe(siblingSize);
-    });
-
-    it("enforceMinimizedLocks is a no-op on a tree that honors its locks", () => {
-        const { root, colA, paneA1 } = buildTwoColumnLayout();
-        const model = makeMockModel(root, { [colA.id]: { pixelToSizeRatio: 1 } });
-        minimizeNodeToggle(model as any, paneA1.id);
-        expect(enforceMinimizedLocks(root)).toBe(0);
-    });
-
-    it("enforceMinimizedLocks clamps a negative-delta repayment at the 1-unit floor", () => {
-        const { root, colA, paneA1, paneA2 } = buildTwoColumnLayout();
-        const model = makeMockModel(root, { [colA.id]: { pixelToSizeRatio: 1 } });
-        minimizeNodeToggle(model as any, paneA1.id);
-
-        // Tampered BELOW the lock: delta is negative, and the beneficiary is
-        // too small to absorb it — the repayment must clamp, not go negative.
-        paneA1.size = 5;
-        paneA2.size = 10;
-
-        expect(enforceMinimizedLocks(root)).toBe(1);
-        expect(paneA1.size).toBe(HeaderHeightPx);
-        expect(paneA2.size).toBe(1);
     });
 });
 
+// ── Legacy migration ─────────────────────────────────────────────────────────
+
+describe("legacy state migration (rebuildMinimizedSet)", () => {
+    it("migrates a size-squeezed legacy pane: size restored, flag set, markers cleared", () => {
+        const { root, paneA1, paneA2 } = buildTwoColumnLayout();
+        paneA1.minimizedSize = PANE_SIZE; // legacy: original size recorded...
+        paneA1.size = HeaderHeightPx; // ...while size was squeezed
+        paneA1.minimizedLockedSize = HeaderHeightPx;
+        const model = makeMockModel(root);
+
+        rebuildMinimizedSet(model as any);
+
+        expect(paneA1.minimized).toBe(true);
+        expect(paneA1.size).toBe(PANE_SIZE);
+        expect(paneA1.minimizedSize).toBeUndefined();
+        expect(paneA1.minimizedLockedSize).toBeUndefined();
+        expect(model.getMinimizedSet().has(paneA1.id)).toBe(true);
+        expect(model.getMinimizedSet().has(paneA2.id)).toBe(false);
+    });
+
+    it("migrates slip/dissolve/anchor bookkeeping: markers cleared, slipped leaf flagged in place", () => {
+        const { root, colA, paneA1 } = buildTwoColumnLayout();
+        paneA1.slipMinimize = { targetColumnId: colA.id, originalRowSize: 10, originalRowIndex: 0, targetWasLeaf: true };
+        colA.columnDissolve = { targetColumnId: "x", originalRowSize: 10, originalRowIndex: 0, targetWasLeaf: false };
+        root._slipAnchor = true;
+        const model = makeMockModel(root);
+
+        rebuildMinimizedSet(model as any);
+
+        expect(paneA1.minimized).toBe(true);
+        expect(paneA1.slipMinimize).toBeUndefined();
+        expect(colA.columnDissolve).toBeUndefined();
+        expect(colA.minimized).toBeUndefined(); // branch never gets the flag
+        expect(root._slipAnchor).toBeUndefined();
+        expect(model.getMinimizedSet().has(paneA1.id)).toBe(true);
+    });
+
+    it("rebuilds the set from existing flags without touching anything", () => {
+        const { root, paneA2 } = buildTwoColumnLayout();
+        paneA2.minimized = true;
+        const model = makeMockModel(root);
+        rebuildMinimizedSet(model as any);
+        expect(model.getMinimizedSet()).toEqual(new Set([paneA2.id]));
+        expect(paneA2.size).toBe(PANE_SIZE);
+    });
+});
+
+// ── Legacy balance carve-outs stay inert but protective pre-migration ────────
+
+describe("balanceNode legacy carve-outs", () => {
+    it("still refuses to flip a legacy dissolved column's direction before migration runs", () => {
+        const l1 = newLayoutNode(FlexDirection.Row, 33, undefined, { blockId: "b1" });
+        l1.minimizedSize = 200;
+        const l2 = newLayoutNode(FlexDirection.Row, 33, undefined, { blockId: "b2" });
+        l2.minimizedSize = 200;
+        const dissolved = newLayoutNode(FlexDirection.Column, 66, [l1, l2]);
+        dissolved.columnDissolve = { targetColumnId: "host", originalRowSize: 200, originalRowIndex: 0, targetWasLeaf: true };
+        const content = newLayoutNode(FlexDirection.Row, 300, undefined, { blockId: "b3" });
+        const host = newLayoutNode(FlexDirection.Column, 400, [dissolved, content]);
+
+        balanceNode(host);
+
+        expect(host.children![0].flexDirection).toBe(FlexDirection.Column);
+    });
+});

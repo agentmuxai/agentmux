@@ -263,9 +263,79 @@ fn balance_column_dissolve_suppresses_direction_flip() {
 
 // ── Minimize lock (locked-state spec, 2026-07-16) ───────────────────────────
 
-/// Leaf carrying the minimize-lock fields the frontend writes (round-tripped
-/// through `extra`): `minimizedSize` (original size) + `minimizedLockedSize`
-/// (the size the node is locked to while minimized).
+/// Leaf carrying the display-mode minimize flag (current model — geometry
+/// derived at render, stored size untouched).
+fn minimized_leaf(id: &str, block_id: &str, size: f32) -> LayoutNode {
+    let mut node = leaf(id, block_id, size);
+    node.extra.insert("minimized".into(), serde_json::Value::Bool(true));
+    node
+}
+
+#[test]
+fn resize_nodes_rejects_display_mode_minimized_target() {
+    let mut root = group(
+        "root",
+        FlexDirection::Column,
+        DEFAULT_NODE_SIZE,
+        vec![minimized_leaf("l1", "b1", 200.0), leaf("l2", "b2", 200.0)],
+    );
+    let ops = vec![
+        ResizeOp { node_id: "l1".into(), size: 90.0 },
+        ResizeOp { node_id: "l2".into(), size: 10.0 },
+    ];
+    assert!(matches!(
+        resize_nodes(&mut root, &ops),
+        Err(LayoutError::NodeLocked { .. })
+    ));
+    // Atomic reject: stored sizes untouched (minimize never wrote them either).
+    assert_eq!(root.children[0].size, 200.0);
+    assert_eq!(root.children[1].size, 200.0);
+}
+
+#[test]
+fn validate_invariants_flags_display_mode_flag_on_branch() {
+    let mut branch = group(
+        "br",
+        FlexDirection::Column,
+        DEFAULT_NODE_SIZE,
+        vec![leaf("l1", "b1", 100.0), leaf("l2", "b2", 100.0)],
+    );
+    branch.extra.insert("minimized".into(), serde_json::Value::Bool(true));
+    let root = Some(group(
+        "root",
+        FlexDirection::Row,
+        DEFAULT_NODE_SIZE,
+        vec![branch, leaf("l3", "b3", 100.0)],
+    ));
+    let violations = validate_layout_invariants(&root);
+    assert!(
+        violations.iter().any(|v| v.starts_with("MIN_MARKER_ON_BRANCH")),
+        "expected MIN_MARKER_ON_BRANCH, got: {:?}",
+        violations
+    );
+}
+
+#[test]
+fn validate_invariants_flags_all_leaves_locked_via_display_flag() {
+    let root = Some(group(
+        "root",
+        FlexDirection::Column,
+        DEFAULT_NODE_SIZE,
+        vec![minimized_leaf("l1", "b1", 200.0), minimized_leaf("l2", "b2", 200.0)],
+    ));
+    let violations = validate_layout_invariants(&root);
+    assert!(
+        violations.iter().any(|v| v.starts_with("ALL_LEAVES_LOCKED")),
+        "expected ALL_LEAVES_LOCKED, got: {:?}",
+        violations
+    );
+}
+
+/// LEGACY MODEL — leaf carrying the pre-display-mode minimize-lock fields
+/// (round-tripped through `extra`): `minimizedSize` (original size) +
+/// `minimizedLockedSize` (the size the node was locked to while minimized).
+/// These markers remain recognized until persisted trees are migrated by the
+/// frontend's `rebuildMinimizedSet`.
 fn locked_leaf(id: &str, block_id: &str, locked_size: f32) -> LayoutNode {
     let mut node = leaf(id, block_id, locked_size);
     node.extra

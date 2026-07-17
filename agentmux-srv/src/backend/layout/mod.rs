@@ -219,7 +219,15 @@ pub fn prune_dangling_block_refs(
 /// through the untyped `extra` catch-all on this side. Mirrors
 /// `isNodeLocked` in `frontend/layout/lib/layoutMinimize.ts`.
 pub fn is_node_locked(node: &LayoutNode) -> bool {
-    node.extra.contains_key("minimizedSize")
+    // Current model: the `minimized` display-mode flag (geometry derived at
+    // render on the frontend; stored sizes never touched). The remaining keys
+    // are legacy markers from the pre-display-mode model, recognized until
+    // persisted trees are migrated by the frontend's `rebuildMinimizedSet`.
+    node.extra
+        .get("minimized")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+        || node.extra.contains_key("minimizedSize")
         || node.extra.contains_key("slipMinimize")
         || node.extra.contains_key("columnDissolve")
 }
@@ -300,12 +308,19 @@ pub fn validate_layout_invariants(root: &Option<LayoutNode>) -> Vec<String> {
                 if is_branch { "present" } else { "absent" }
             ));
         }
-        // I2 — minimizedSize / slipMinimize are leaf-only markers.
-        if is_branch && (has("minimizedSize") || has("slipMinimize")) {
+        // I2 — the `minimized` flag and the legacy minimizedSize/slipMinimize
+        // markers are leaf-only.
+        if is_branch && (has("minimized") || has("minimizedSize") || has("slipMinimize")) {
             violations.push(format!(
                 "MIN_MARKER_ON_BRANCH @ {}: branch has {}",
                 short(&node.id),
-                if has("minimizedSize") { "minimizedSize" } else { "slipMinimize" }
+                if has("minimized") {
+                    "minimized"
+                } else if has("minimizedSize") {
+                    "minimizedSize"
+                } else {
+                    "slipMinimize"
+                }
             ));
         }
         // I3 — columnDissolve is branch-only.

@@ -3,8 +3,8 @@
 
 import { batch } from "solid-js";
 import { balanceNode, walkNodes } from "./layoutNode";
-import { enforceMinimizedLocks, isNodeLocked } from "./layoutMinimize";
-import { reportLayoutViolations } from "./layoutInvariants";
+import { HeaderHeightPx, MinimizedRowSlotWidthPx } from "./layoutMinimize";
+import { isEffectivelyMinimized, reportLayoutViolations } from "./layoutInvariants";
 import {
     FlexDirection,
     LayoutNode,
@@ -15,6 +15,62 @@ import {
 } from "./types";
 import { setTransform } from "./utils";
 import type { LayoutModel } from "./layoutModel";
+
+export interface MainAxisAllocation {
+    /** Main-axis pixels per child, index-aligned with the children array. */
+    px: number[];
+    /**
+     * Flex-units-per-pixel for the EXPANDED children (minimized chips take
+     * fixed pixels off the top first). This is what resize-drag math uses to
+     * convert pointer deltas into flex units, so it must describe only the
+     * space the flex solver actually distributes.
+     */
+    pixelToSizeRatio: number;
+}
+
+/** Leaf count of a subtree — one header chip per leaf when fully minimized. */
+function countLeafPanes(node: LayoutNode): number {
+    if (!node.children?.length) return 1;
+    return node.children.reduce((s, c) => s + countLeafPanes(c), 0);
+}
+
+/**
+ * Fixed main-axis pixels for a minimized child: a header-height strip per
+ * stacked chip in a Column parent, a compact fixed-width chip in a Row parent.
+ * Derived fresh every pass — minimize never writes sizes (see layoutMinimize).
+ */
+function minimizedFixedPx(node: LayoutNode, parentIsRow: boolean): number {
+    if (parentIsRow) return MinimizedRowSlotWidthPx;
+    return countLeafPanes(node) * HeaderHeightPx;
+}
+
+/**
+ * Derive each child's main-axis pixels: minimized children get fixed
+ * chip-sized allocations (scaled down proportionally if the container is too
+ * small to fit them all), and the remaining pixels are split among expanded
+ * children proportionally to their stored flex sizes — which are never
+ * mutated by minimize. Pure; exported for unit tests.
+ */
+export function computeMainAxisAllocation(
+    children: LayoutNode[],
+    nodeIsRow: boolean,
+    nodePixels: number,
+    getSize: (n: LayoutNode) => number
+): MainAxisAllocation {
+    const fixed = children.map((c) => (isEffectivelyMinimized(c) ? minimizedFixedPx(c, nodeIsRow) : 0));
+    const fixedTotal = fixed.reduce((a, b) => a + b, 0);
+    const scale = fixedTotal > nodePixels && fixedTotal > 0 ? nodePixels / fixedTotal : 1;
+    const remainingPx = Math.max(nodePixels - fixedTotal * scale, 0);
+    const flexTotal = children.reduce((s, c, i) => (fixed[i] ? s : s + getSize(c)), 0);
+    const pixelToSizeRatio =
+        flexTotal > 0 && remainingPx > 0
+            ? flexTotal / remainingPx
+            : children.reduce((s, c) => s + getSize(c), 0) / Math.max(nodePixels, 1);
+    const px = children.map((c, i) =>
+        fixed[i] ? fixed[i] * scale : flexTotal > 0 ? getSize(c) / pixelToSizeRatio : 0
+    );
+    return { px, pixelToSizeRatio };
+}
 
 /**
  * Recursively walks the tree to find leaf nodes, update the resize handles, and compute additional properties for each node.
@@ -49,11 +105,10 @@ export function updateTree(model: LayoutModel, balanceTree = true) {
                 resizeAction
             );
         if (balanceTree) {
-            // Enforce minimize locks before balancing — same choke point, same
-            // rationale as the backend's prune/enforce pair: any writer that
-            // changed a locked node's size (stale tree push, unguarded mutation)
-            // is corrected here rather than trusted to have known about the lock.
-            enforceMinimizedLocks(model.treeState.rootNode);
+            // Minimize is a display mode: geometry for minimized panes is
+            // derived inside updateTreeHelper each pass, and stored sizes are
+            // never touched — so there are no size locks to enforce here
+            // anymore (see layoutMinimize.ts header).
             model.treeState.rootNode = balanceNode(model.treeState.rootNode, callback);
             // Layout doctor (issue #2179): observe the post-normalization tree
             // and log loudly if any structural invariant is broken, so a
@@ -149,19 +204,23 @@ function updateTreeHelper(
     const nodeRect: Dimensions = node.id === model.treeState.rootNode.id ? boundingRect : additionalProps.rect;
     const nodeIsRow = node.flexDirection === FlexDirection.Row;
     const nodePixels = nodeIsRow ? nodeRect.width : nodeRect.height;
-    const totalChildrenSize = node.children.reduce((acc, child) => acc + getNodeSize(child), 0);
-    const pixelToSizeRatio = totalChildrenSize / nodePixels;
+    const alloc = computeMainAxisAllocation(node.children, nodeIsRow, nodePixels, getNodeSize);
+    const pixelToSizeRatio = alloc.pixelToSizeRatio;
 
     let lastChildRect: Dimensions;
     const resizeHandles: ResizeHandleProps[] = [];
 
     node.children.forEach((child, i) => {
-        const childSize = getNodeSize(child);
+        // A minimized LEAF renders as a header chip: in a Row parent its
+        // cross-axis (height) is clamped to the header, top-aligned in the
+        // slot. Fully-minimized branches keep the full cross-axis — their own
+        // children are chips via recursion.
+        const chipLeaf = isEffectivelyMinimized(child) && !child.children?.length;
         const rect: Dimensions = {
             top: !nodeIsRow && lastChildRect ? lastChildRect.top + lastChildRect.height : nodeRect.top,
             left: nodeIsRow && lastChildRect ? lastChildRect.left + lastChildRect.width : nodeRect.left,
-            width: nodeIsRow ? childSize / pixelToSizeRatio : nodeRect.width,
-            height: nodeIsRow ? nodeRect.height : childSize / pixelToSizeRatio,
+            width: nodeIsRow ? alloc.px[i] : nodeRect.width,
+            height: nodeIsRow ? (chipLeaf ? Math.min(HeaderHeightPx, nodeRect.height) : nodeRect.height) : alloc.px[i],
         };
         const transform = setTransform(rect);
         additionalPropsMap[child.id] = {
@@ -171,12 +230,11 @@ function updateTreeHelper(
         };
 
         // We only want the resize handles in between nodes, this ensures we have at most
-        // n-1 handles. A locked edge (either flanking child minimized/slipped/dissolved)
-        // gets no handle at all — minimized is a locked state, so there is nothing for
-        // the user to resize there (I3 in the minimize locked-state spec). Because gaps
-        // can now be skipped, parentIndex must be the child-array index (i - 1), NOT
-        // resizeHandles.length — onResizeMove uses it to look up the flanking children.
-        if (lastChildRect && !isNodeLocked(node.children[i - 1]) && !isNodeLocked(child)) {
+        // n-1 handles. A minimized edge (either flanking child renders as a chip) gets
+        // no handle at all — chip geometry is derived, there is nothing to resize.
+        // Because gaps can be skipped, parentIndex must be the child-array index (i - 1),
+        // NOT resizeHandles.length — onResizeMove uses it to look up flanking children.
+        if (lastChildRect && !isEffectivelyMinimized(node.children[i - 1]) && !isEffectivelyMinimized(child)) {
             const resizeHandleIndex = i - 1;
             const halfResizeHandleSizePx = resizeHandleSizePx / 2;
             const resizeHandleDimensions: Dimensions = {
