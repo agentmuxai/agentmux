@@ -215,6 +215,31 @@ mod tests {
     }
 
     #[test]
+    fn srv_fastfail_code_with_low_commit_is_system_oom() {
+        // docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md: srv is a
+        // plain Rust process, so an OOM there never emits
+        // CHROMIUM_OOM_EXIT_CODE — it surfaces as Windows' generic fail-fast
+        // abort, 0xC0000409 (STATUS_STACK_BUFFER_OVERRUN — the code name is
+        // misleading; the CRT overloads it for abort()/allocation-failure
+        // fast-fails too, not just real buffer overruns). The exact live exit
+        // code from the incident, reused here as a regression anchor:
+        // classify_host_exit is generic over which process died — only the
+        // low-commit fallback branch needs to catch it, not an exact-code
+        // match — so this is a straight application of the existing
+        // low-commit branch, now exercised by the launcher's srv-exit arm too.
+        const SRV_FASTFAIL_EXIT_CODE: i32 = -1_073_740_791;
+        assert_eq!(
+            classify_host_exit(SRV_FASTFAIL_EXIT_CODE, RESUME_FLOOR_MB - 1),
+            HostExitClass::SystemOom
+        );
+        // Same code with headroom present is just a genuine srv crash.
+        assert_eq!(
+            classify_host_exit(SRV_FASTFAIL_EXIT_CODE, RESUME_FLOOR_MB),
+            HostExitClass::Abnormal
+        );
+    }
+
+    #[test]
     fn backoff_doubles_then_caps() {
         assert_eq!(next_backoff(Duration::from_secs(2)), Duration::from_secs(4));
         assert_eq!(next_backoff(Duration::from_secs(4)), Duration::from_secs(8));
