@@ -354,6 +354,29 @@ pub async fn spawn_srv(
         }
     }
 
+    // SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11 (Linux Phase 2, issue #2189):
+    // srv becomes the leader of a BRAND NEW process group (pgid == srv's own
+    // pid) instead of inheriting the launcher's ambient group. host joins this
+    // same group at its own spawn (host_spawn.rs). This creates a bounded
+    // container — {srv, host, host's CEF-spawned descendants} — that a wedged-
+    // host teardown can `killpg()` without touching the launcher itself or
+    // anything outside its own spawned tree (I2/I3). The launcher's own
+    // process group is untouched, so terminal Ctrl+C's normal shutdown path
+    // (explicit SIGINT/SIGTERM handlers + the always-run
+    // `terminate_child_gracefully` backstop, NOT ambient-group broadcast) is
+    // unaffected. `.process_group()` (not a hand-rolled `libc::setpgid` in
+    // `pre_exec`) is deliberate: it's the idiom already used elsewhere in this
+    // repo for agent-spawned shell groups (`backend/shell_node.rs`,
+    // `backend/shell_handlers.rs`), and a failure surfaces as a normal `Err`
+    // from `.spawn()` — unlike the PDEATHSIG pre_exec above, which can't report
+    // failure. Gated to Linux only (not general unix): macOS parity is issue
+    // #2188's separate, unverified follow-up.
+    // `.process_group()` is an inherent method on `tokio::process::Command`
+    // (unlike `std::process::Command`, it doesn't need the `CommandExt`
+    // trait import — that's only needed above for `.pre_exec()`).
+    #[cfg(target_os = "linux")]
+    cmd.process_group(0);
+
     let mut child = cmd
         .spawn()
         .map_err(|e| SrvSpawnError::SpawnFailed(e.to_string()))?;

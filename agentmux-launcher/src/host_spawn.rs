@@ -107,6 +107,16 @@ pub(crate) fn spawn_host_supervised(
 /// byte-identical to the legacy direct-invoke (`task dev:standalone`)
 /// path. Phase 2 will set it once the production runtime/ layout lands
 /// on macOS.
+/// `backstop_pgid`: on Linux, the process group host must join at spawn (see
+/// SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11, issue #2189) — srv's own pid,
+/// captured once after srv spawns (`srv_spawner.rs`'s `.process_group(0)`
+/// makes srv the leader of that group). Passed on every spawn, including
+/// crash-budget relaunches, since srv itself never restarts mid-session so
+/// the value never goes stale. `None` = teardown backstop disabled for this
+/// session (srv had no pid to key off of) — host spawns normally, just stays
+/// in the launcher's own ambient group as it did before this feature existed.
+/// Unused on macOS — Linux is the only platform this backstop is verified on
+/// so far (issue #2188 is the macOS follow-up).
 #[cfg(not(target_os = "windows"))]
 pub(crate) fn spawn_host_unix(
     real_exe: &std::path::Path,
@@ -114,6 +124,7 @@ pub(crate) fn spawn_host_unix(
     srv: &crate::srv_spawner::SrvSpawnResult,
     host_env: &[(&'static str, std::ffi::OsString)],
     disable_gpu: bool,
+    #[cfg_attr(not(target_os = "linux"), allow(unused_variables))] backstop_pgid: Option<i32>,
 ) -> Option<tokio::process::Child> {
     let mut host_cmd = tokio::process::Command::new(real_exe);
     host_cmd
@@ -163,6 +174,21 @@ pub(crate) fn spawn_host_unix(
                 libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL, 0, 0, 0);
                 Ok(())
             });
+        }
+        // SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11 (issue #2189): join srv's
+        // process group instead of the launcher's ambient one — see the
+        // matching comment in srv_spawner.rs for the full rationale. Race-free
+        // because `run_unix` only calls this after srv's ESTART handshake, by
+        // which point srv's own `.process_group(0)` has long since taken
+        // effect (setpgid's target must be an existing pgid in the same
+        // session — this is NOT just "after fork", it's "after srv's pre_exec
+        // ran", which the ESTART wait guarantees). Applied on every relaunch
+        // (crash-budget retries reuse the same `backstop_pgid`). `None` (srv
+        // had no pid) skips this — host stays in the launcher's own group,
+        // same as before this feature existed; never falls back to a bare `0`
+        // (see the caller's comment on why that would be unsafe).
+        if let Some(pgid) = backstop_pgid {
+            host_cmd.process_group(pgid);
         }
     }
     match host_cmd.spawn() {

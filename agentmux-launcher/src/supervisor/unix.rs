@@ -282,7 +282,11 @@ pub(crate) async fn run_unix(
         );
         log(&format!("IPC server started on {}", socket_path));
 
-        (saga_coord, ipc_handle)
+        // `host_pipe` is also returned to the supervisor loop — the Linux
+        // teardown-backstop UI-liveness prober (SPEC_LAUNCHER_TEARDOWN_
+        // BACKSTOP_2026_07_11, issue #2189) sends `Command::ProbeUiThread`
+        // over it directly, mirroring `run_windows`.
+        (saga_coord, ipc_handle, host_pipe)
     };
 
     // 2b. Spawn srv. The srv pipe path is the launcher-owned socket
@@ -294,7 +298,7 @@ pub(crate) async fn run_unix(
         launcher_setup,
         srv_spawner::spawn_srv(launcher_exe_dir, &paths, &srv_pipe_path, &startup_sink)
     );
-    let (saga_coord, _ipc_handle) = setup_result;
+    let (saga_coord, _ipc_handle, host_pipe) = setup_result;
     let (srv_result, mut srv_child) = match srv_spawn_result {
         Ok(pair) => pair,
         Err(e) => {
@@ -303,6 +307,31 @@ pub(crate) async fn run_unix(
             std::process::exit(1);
         }
     };
+
+    // SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11 (Linux Phase 2, issue #2189):
+    // srv's own pid IS the backstop process-group id — `srv_spawner::spawn_srv`
+    // gave srv `.process_group(0)` (Linux-only), making it the leader of a
+    // brand-new group separate from the launcher's own. host joins this group
+    // at every spawn below. Captured once: srv is never restarted mid-session
+    // (an unexpected srv exit always terminates the launcher — see the srv arm
+    // of the select loop below), so this stays valid for the launcher's whole
+    // lifetime.
+    //
+    // `None` (backstop disabled for this session, not "0") is used if srv's
+    // `Child` somehow has no pid at this point — deliberately NOT
+    // `unwrap_or(0)`: pgid 0 has a DIFFERENT special meaning to `killpg(2)`
+    // ("my own process group"), so a stray literal 0 here could make a later
+    // teardown kill the LAUNCHER's own group instead of doing nothing. Every
+    // consumer below treats `None` as "skip the backstop, still spawn host
+    // normally" — never as a fallback value.
+    #[cfg(target_os = "linux")]
+    let backstop_pgid: Option<i32> = srv_child.id().map(|p| p as i32);
+    #[cfg(not(target_os = "linux"))]
+    let backstop_pgid: Option<i32> = None;
+    #[cfg(target_os = "linux")]
+    if backstop_pgid.is_none() {
+        log("WARN: srv spawned with no pid — Linux teardown-backstop disabled for this session");
+    }
 
     // CRITICAL (same rationale as run_windows): take srv's stdin out of
     // the Child so tokio's wait() can't close it and trip srv's
@@ -346,7 +375,7 @@ pub(crate) async fn run_unix(
     // independently useful number.
     startup_sink.stage_begin("host", "Host startup");
     let host_spawn_t = std::time::Instant::now();
-    let mut host_child = match spawn_host_unix(real_exe, args, &srv_result, &host_env, false) {
+    let mut host_child = match spawn_host_unix(real_exe, args, &srv_result, &host_env, false, backstop_pgid) {
         Some(c) => {
             startup_sink.stage_end(
                 "host",
@@ -389,10 +418,112 @@ pub(crate) async fn run_unix(
     let mut oom_restarts: Vec<std::time::Instant> = Vec::new();
     let mut last_abnormal_code: Option<i32> = None;
     let mut host_degraded = false;
+
+    // SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11 (Linux Phase 2, issue #2189)
+    // — mirrors `run_windows`'s two low-rate ticks exactly (see that file for
+    // the full rationale); `teardown_backstop` / `ui_liveness` are already
+    // platform-neutral and the arm/disarm hooks in `ipc/server.rs` already
+    // fire for both platforms. Only the tick + the kill action are new here.
+    //
+    // NOT `#[cfg(target_os = "linux")]`-gated at this declaration/arm level —
+    // `tokio::select!` doesn't support `#[cfg]` attributes on branches at
+    // all. Instead these intervals + arms compile and tick on every Unix
+    // platform, but do nothing on macOS: `backstop_pgid` is unconditionally
+    // `None` there (captured above), and every consumer below branches on
+    // that Option — never on `target_os`. This is deliberately the SAME
+    // pattern as macOS today already: the shared reducer hooks in
+    // `ipc/server.rs` can already `arm()` this state machine on any
+    // platform (nothing about PoolDrained/OrphanInstance detection is
+    // Linux-specific); only Windows previously consumed it. Disarming
+    // unconditionally on host exit (below) is strictly better hygiene than
+    // before this change, not new platform-specific behavior.
+    let mut ui_probe_interval = tokio::time::interval_at(
+        tokio::time::Instant::now() + std::time::Duration::from_secs(60),
+        std::time::Duration::from_secs(60),
+    );
+    ui_probe_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut ui_probe_nonce: u64 = 0;
+    let mut teardown_check_interval = tokio::time::interval(std::time::Duration::from_secs(5));
+    teardown_check_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // Same sentinel exit code as `run_windows`'s `TerminateJobObject` path —
+    // keeps wedge-teardown unambiguous in any log/exit-code triage regardless
+    // of platform.
+    const TEARDOWN_BACKSTOP_EXIT_CODE: i32 = 86;
+
     let exit_code = loop {
         tokio::select! {
+            // SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11 (issue #2189). Only
+            // ever fires (past the Option check) on Linux — `backstop_pgid`
+            // is `None` on every other platform.
+            _ = teardown_check_interval.tick() => {
+                if let Some(pgid) = backstop_pgid {
+                    let misses = crate::ui_liveness::consecutive_misses();
+                    if crate::teardown_backstop::should_teardown(misses) {
+                        log(&format!(
+                            "[teardown-backstop] host wedged with zero user windows — terminating \
+                             process group {} (armed > {}s grace, {} consecutive unanswered UI-thread probes)",
+                            pgid,
+                            crate::teardown_backstop::TEARDOWN_GRACE.as_secs(),
+                            misses,
+                        ));
+                        // I2/I3 hold by construction: `pgid` is the group srv
+                        // created for itself at spawn (`.process_group(0)`)
+                        // and host joined (`.process_group(pgid)`) — the
+                        // launcher was never a member. Blast radius is exactly
+                        // {srv, host, host's CEF-spawned descendants}. SIGKILL
+                        // with no grace: this only fires when the UI thread is
+                        // proven wedged with zero windows — nothing left to
+                        // shut down gracefully.
+                        unsafe {
+                            libc::killpg(pgid, libc::SIGKILL);
+                        }
+                        break TEARDOWN_BACKSTOP_EXIT_CODE;
+                    }
+                }
+            }
+            // SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11 (issue #2189) —
+            // Phase 1 UI-thread liveness prober, mirroring `run_windows`. The
+            // `if` guard means this branch is simply skipped (re-polled next
+            // tick) whenever the backstop is disabled (`backstop_pgid: None`
+            // — every platform except Linux, or Linux with no srv pid).
+            _ = ui_probe_interval.tick(), if backstop_pgid.is_some() => {
+                ui_probe_nonce += 1;
+                if let Some((missed, sent_at)) = crate::ui_liveness::record_probe_sent(ui_probe_nonce) {
+                    log(&format!(
+                        "[ui-liveness] probe nonce={} unanswered after {}s — UI thread did not pump in that window",
+                        missed,
+                        sent_at.elapsed().as_secs()
+                    ));
+                }
+                if let Err(e) = host_pipe
+                    .try_send_command_no_buffer(&agentmux_common::ipc::Command::ProbeUiThread {
+                        nonce: ui_probe_nonce,
+                    })
+                    .await
+                {
+                    crate::ui_liveness::retract_probe(ui_probe_nonce);
+                    log(&format!(
+                        "[ui-liveness] probe send failed (transport, not liveness): {:?}",
+                        e
+                    ));
+                }
+            }
             host_status = host_child.wait() => {
                 use std::os::unix::process::ExitStatusExt;
+                // SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11 (issue #2189) —
+                // the host exiting for ANY reason (clean, crash, or the
+                // supervisor about to relaunch it) always stands an armed
+                // teardown down: the machine's whole premise is "host alive
+                // but wedged", which is now false regardless of why. Also the
+                // crash-restart-gap false-positive guard — re-arming can only
+                // come from a fresh drain report by the NEW host. Not
+                // Linux-gated: the shared `ipc/server.rs` reducer hooks can
+                // already `arm()` this on any platform, so disarming here
+                // unconditionally is just better hygiene everywhere, not new
+                // platform-specific behavior.
+                if crate::teardown_backstop::disarm() {
+                    log("[teardown-backstop] disarmed — host exited (supervised-exit path owns it now)");
+                }
                 let status = match host_status {
                     Ok(s) => s,
                     Err(e) => {
@@ -500,7 +631,7 @@ pub(crate) async fn run_unix(
                             );
                             break code;
                         }
-                        match spawn_host_unix(real_exe, args, &srv_result, &host_env, true) {
+                        match spawn_host_unix(real_exe, args, &srv_result, &host_env, true, backstop_pgid) {
                             Some(c) => host_child = c,
                             None => {
                                 log("host relaunch failed to spawn — giving up");
@@ -533,7 +664,7 @@ pub(crate) async fn run_unix(
                             HOST_RESTART_BUDGET,
                             if host_degraded { ", degraded: --disable-gpu" } else { "" }
                         ));
-                        match spawn_host_unix(real_exe, args, &srv_result, &host_env, host_degraded) {
+                        match spawn_host_unix(real_exe, args, &srv_result, &host_env, host_degraded, backstop_pgid) {
                             Some(c) => host_child = c,
                             None => {
                                 log("host relaunch failed to spawn — giving up");
