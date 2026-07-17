@@ -8,7 +8,11 @@
 // the React app bootstraps.
 
 import { invokeCommand, listenEvent } from "@/app/platform/ipc";
-import { computeMenuPosition } from "@/app/util/menu-position";
+import {
+    assertMenuInPaintableArea,
+    computeMenuPosition,
+    type MenuPositionResult,
+} from "@/app/util/menu-position";
 import { benchMark } from "@/util/startup-bench";
 
 // Cache for "synchronous" values that are fetched once at startup.
@@ -120,6 +124,25 @@ export async function initCefApi(): Promise<void> {
 let contextMenuClickCallback: ((id: string) => void) | null = null;
 
 /**
+ * Apply a computed MenuPositionResult to a menu element: fixed left/top plus
+ * the size() max-height cap so a menu taller than the free space scrolls
+ * internally instead of being placed partly outside. max-width is deliberately
+ * NOT applied — an inline max-width would override (and can loosen) the .menu
+ * 400px CSS cap, and horizontal fit is already guaranteed by flip+shift for
+ * menus at or under that cap. justify-content is forced to flex-start because
+ * the .menu rule's flex-end makes overflow unreachable in a scroll container
+ * (it is a no-op when the menu fits, so this only matters when capped).
+ */
+function applyMenuPosition(el: HTMLElement, pos: MenuPositionResult) {
+    el.style.position = "fixed";
+    if (pos.style.left != null) el.style.left = String(pos.style.left);
+    if (pos.style.top != null) el.style.top = String(pos.style.top);
+    el.style.maxHeight = `${pos.maxHeight}px`;
+    el.style.overflowY = "auto";
+    el.style.justifyContent = "flex-start";
+}
+
+/**
  * Render a context menu as a positioned HTML overlay.
  * Fires the callback with the clicked item's id, then removes the overlay.
  */
@@ -197,13 +220,6 @@ function showJsContextMenu(
             row.appendChild(label);
 
             if (item.submenu && item.submenu.length > 0) {
-                // The submenu uses `position: absolute; left: 100%` to
-                // anchor at the row's right edge. That requires the
-                // row to be a positioned ancestor; otherwise `left:
-                // 100%` resolves against the outer .menu and every
-                // submenu opens at the same vertical position.
-                row.style.position = "relative";
-
                 const arrow = document.createElement("i");
                 arrow.className = "fa-sharp fa-solid fa-chevron-right";
                 row.appendChild(arrow);
@@ -212,11 +228,38 @@ function showJsContextMenu(
                 sub.className = "menu sub-menu";
                 sub.setAttribute("data-pane-overlay", "");
                 sub.style.display = "none";
-                sub.style.left = "100%";
-                sub.style.top = "0";
                 renderItems(sub, item.submenu);
                 row.appendChild(sub);
-                row.addEventListener("mouseenter", () => { sub.style.display = ""; });
+                // Positioned through the shared framework, like the top-level
+                // menu: anchored to the row, preferring right-start — flip()
+                // sends it left of the parent near the right edge, shift()
+                // pulls it up near the bottom, size() caps it when taller than
+                // the free space. The computed coords are position:fixed, so
+                // staying nested inside the row (which the hover logic needs)
+                // doesn't affect placement. Held visibility:hidden until
+                // placed for the same reason as the parent menu: the
+                // pane-overlay clip must register the final rect only.
+                row.addEventListener("mouseenter", () => {
+                    sub.style.visibility = "hidden";
+                    sub.style.display = "";
+                    void computeMenuPosition(
+                        {
+                            anchor: row.getBoundingClientRect(),
+                            placement: "right-start",
+                            avoidNativePanes: false,
+                        },
+                        sub,
+                    ).then((pos) => {
+                        // Hover may have left (or the whole menu closed)
+                        // before the async placement resolved.
+                        if (!sub.isConnected || sub.style.display === "none") return;
+                        applyMenuPosition(sub, pos);
+                        sub.style.visibility = "";
+                        assertMenuInPaintableArea(sub, "context-submenu");
+                    }).catch(() => {
+                        if (sub.isConnected) sub.style.visibility = "";
+                    });
+                });
                 row.addEventListener("mouseleave", () => { sub.style.display = "none"; });
             } else if (item.enabled !== false) {
                 row.addEventListener("click", () => {
@@ -250,9 +293,9 @@ function showJsContextMenu(
         menuEl,
     ).then((pos) => {
         if (!menuEl.isConnected) return;
-        if (pos.style.left != null) menuEl.style.left = String(pos.style.left);
-        if (pos.style.top != null) menuEl.style.top = String(pos.style.top);
+        applyMenuPosition(menuEl, pos);
         menuEl.style.visibility = "";
+        assertMenuInPaintableArea(menuEl, "context-menu");
     }).catch(() => {
         // computeMenuPosition should not throw; if it does, fall back to the
         // raw cursor position rather than leaving the menu invisible.

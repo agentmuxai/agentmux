@@ -91,7 +91,9 @@ applies it:
 So even framework-routed menus can overflow when they're taller than the paintable
 area (they flip and shift, but never shrink/scroll). Low severity — it needs an
 unusually tall menu — but it's the same class of bug and the fix should thread it
-through (`max-height` + `overflow-y: auto`).
+through (`max-height` + `overflow-y: auto`). `maxWidth` is deliberately left
+unapplied: an inline max-width overrides (and can loosen) the `.menu` 400px CSS cap,
+and flip+shift already guarantee horizontal fit for menus at or under that cap.
 
 ## 4. Fix direction
 
@@ -107,7 +109,8 @@ pattern, adapted to the imperative DOM style of this function:
 2. On `mouseenter`: show it `visibility: hidden`, call
    `computeMenuPosition({ anchor: row.getBoundingClientRect(), placement:
    "right-start", avoidNativePanes: false }, sub)`, apply `left/top` **and**
-   `maxHeight/maxWidth` (with `overflow-y: auto`), then reveal — same
+   `maxHeight` (with `overflow-y: auto`; see §3 for why not `maxWidth`), then
+   reveal — same
    hidden-until-placed discipline the top level already uses (it also keeps the
    `data-pane-overlay` clip rect from registering a stale position).
 3. Call `assertMenuInPaintableArea(sub, "context-submenu")` after placement so the
