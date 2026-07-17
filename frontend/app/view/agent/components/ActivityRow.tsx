@@ -14,7 +14,13 @@ import { For, Show, createEffect, createMemo, createSignal, onCleanup, type JSX 
 import { useTick } from "@/app/hook/useTick";
 import { capChars, createChunkCapper, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
-import { createSubagentDetail, type SubagentDetail, type SubagentEvent } from "../../swarm/swarm-model";
+import {
+    createSubagentDetail,
+    subagentDisplayLabel,
+    type ActiveSubagent,
+    type SubagentDetail,
+    type SubagentEvent,
+} from "../../swarm/swarm-model";
 import { KIND_SIGIL, type PinnedActivity } from "../activity/types";
 import type { ToolLogChunk } from "../types";
 
@@ -31,6 +37,17 @@ function subagentEventLine(e: SubagentEvent): string {
         case "progress": return t.output;
         case "tool_use": return `→ ${t.name}`;
         case "tool_result": return t.is_error ? `✗ ${t.preview}` : t.preview;
+    }
+}
+
+/** Terminal-status glyph for one member row inside an expanded group roster
+ *  — mirrors ActivityRow's own top-level `sigil()` (running/done/stopped),
+ *  just scoped to a single `ActiveSubagent` instead of a `PinnedActivity`. */
+function memberSigil(status: ActiveSubagent["status"]): string {
+    switch (status) {
+        case "active": return KIND_SIGIL.subagent;
+        case "completed": return "✓";
+        case "abandoned": return "■";
     }
 }
 
@@ -97,6 +114,11 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
             // cost is reserved for the expanded view, below).
             const n = a.subagent.event_count;
             return n > 0 ? `${n} event${n === 1 ? "" : "s"}` : undefined;
+        }
+        if (a.subagentGroup) {
+            const members = a.subagentGroup.members;
+            const active = members.filter((m) => m.status === "active").length;
+            return active > 0 ? `${active}/${members.length} active` : `${members.length} subagents`;
         }
         return undefined;
     });
@@ -195,6 +217,29 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
                             </Show>
                             <For each={subagentDetail()?.eventsAtom() ?? []}>
                                 {(event) => <pre class="agent-tool-log-line">{subagentEventLine(event)}</pre>}
+                            </For>
+                        </div>
+                    </Show>
+
+                    {/* Group roster — a compact per-member summary, not a live
+                        transcript: opening one dock row's expand shouldn't
+                        subscribe to N members' event streams at once (a
+                        single Task/Workflow run can spawn dozens). Full
+                        per-member transcripts remain the Swarm pane's job. */}
+                    <Show when={props.expanded() && a().subagentGroup}>
+                        <div
+                            class="agent-activity-log agent-tool-overlay-log"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <For each={a().subagentGroup!.members}>
+                                {(member) => (
+                                    <pre class="agent-tool-log-line">
+                                        {memberSigil(member.status)} {subagentDisplayLabel(member)}
+                                        {member.event_count > 0
+                                            ? ` — ${member.event_count} event${member.event_count === 1 ? "" : "s"}`
+                                            : ""}
+                                    </pre>
+                                )}
                             </For>
                         </div>
                     </Show>
