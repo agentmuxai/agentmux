@@ -18,9 +18,22 @@ import {
 
 import "./flyoutmenu.scss";
 
-/** Serialize a MenuPositionResult.style (position:fixed + left/top) to a CSS string. */
-function styleToString(s: MenuPositionResult["style"]): string {
-    return `position:${s.position};left:${s.left};top:${s.top}`;
+/**
+ * Serialize a MenuPositionResult (position:fixed + left/top + size cap) to a
+ * CSS string. The size() max-height cap makes a menu taller than the free
+ * space scroll internally instead of overflowing the window. max-width is
+ * deliberately NOT applied — an inline max-width would override (and can
+ * loosen) the .menu 400px CSS cap, and horizontal fit is already guaranteed
+ * by flip+shift for menus at or under that cap. justify-content is forced to
+ * flex-start because the .menu rule's flex-end makes overflow unreachable in
+ * a scroll container (a no-op when the menu fits).
+ */
+function styleToString(pos: MenuPositionResult): string {
+    const s = pos.style;
+    return (
+        `position:${s.position};left:${s.left};top:${s.top};` +
+        `max-height:${pos.maxHeight}px;overflow-y:auto;justify-content:flex-start`
+    );
 }
 
 type MenuProps = {
@@ -78,7 +91,7 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
             { anchor: referenceEl, placement: props.placement ?? "bottom-start", avoidNativePanes: false },
             floatingEl,
         );
-        setFloatingStyle(styleToString(pos.style));
+        setFloatingStyle(styleToString(pos));
     };
 
     const registerFloating = (el: HTMLElement) => {
@@ -400,7 +413,7 @@ const SubMenu = (props: SubMenuProps): JSX.Element => {
                     },
                     el,
                 );
-                setSubStyle(styleToString(computed.style));
+                setSubStyle(styleToString(computed));
             };
             cleanupAutoUpdate?.();
             // anchorRect is a static DOMRect, so autoUpdate's reference is a
