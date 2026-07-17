@@ -293,7 +293,7 @@ export class LayoutModel {
 
     /**
      * Set of node IDs that are currently minimized (collapsed to header bar).
-     * Kept in sync with `node.minimizedSize` on each LayoutNode in the tree.
+     * Kept in sync with the `node.minimized` display-mode flag on each leaf.
      */
     minimizedNodeIds: SignalAtom<Set<string>>;
 
