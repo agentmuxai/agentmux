@@ -721,167 +721,32 @@ pub async fn run_sagas_diag(launcher_exe_dir: &std::path::Path) -> Result<(), St
 }
 
 async fn run_sagas_diag_impl(launcher_exe_dir: &std::path::Path) -> Result<(), String> {
-    let version = env!("CARGO_PKG_VERSION");
-
-    let paths = crate::data_dir::resolve_paths(launcher_exe_dir, version)
-        .map_err(|e| format!("path resolution failed: {}", e))?;
-    // `--diag sagas` is a passive on-disk inspector (see the doc
-    // comment for this function); use the read-only resolver so we
-    // don't trigger the legacy-file rename here. Reagent P2 on PR #932.
-    let saga_log_path = crate::data_dir::launcher_saga_log_path_read_only(&paths.data_dir);
-
+    // Pillar 1 Step 6 (SPEC_PILLAR1_STEP6_SAGA_COLLAPSE_2026_07_16): the
+    // durable SQLite saga log this subcommand used to read was collapsed
+    // into an in-memory registry inside the running launcher — there is no
+    // on-disk saga state left for an offline inspector to open. The live
+    // narration is unchanged: every saga transition is logged to the
+    // launcher log with a `[saga]` prefix, which is the supported triage
+    // surface now.
+    let _ = launcher_exe_dir;
     println!("AgentMux launcher saga diagnostic");
-    println!("Data dir: {}", paths.data_dir.display());
-    println!("Saga log: {}", saga_log_path.display());
     println!();
-
-    if !saga_log_path.exists() {
-        println!(
-            "(no saga log at {} — launcher hasn't written one yet, or this isn't an AgentMux data dir)",
-            saga_log_path.display()
-        );
-        return Ok(());
-    }
-
-    // Read-only open: an operator's diagnostic invocation must not
-    // mutate the log a running launcher owns. (codex P2 PR #647 round 3.)
-    let log = crate::saga::LauncherSagaLog::open_read_only(&saga_log_path)
-        .map_err(|e| format!("open saga log {:?} (read-only): {}", saga_log_path, e))?;
-
-    let snapshot = log
-        .snapshot_recent(50)
-        .map_err(|e| format!("snapshot_recent: {}", e))?;
-    let unresolved = log
-        .unresolved_sagas()
-        .map_err(|e| format!("unresolved_sagas: {}", e))?;
-
-    if snapshot.is_empty() {
-        println!("(saga log is empty)");
-        return Ok(());
-    }
-
-    println!("Recent launcher sagas (last {}):", snapshot.len());
-    for s in &snapshot {
-        let recovered_marker = if s.state == "failed_compensation" {
-            " (recovered on restart)"
-        } else {
-            ""
-        };
-        let ended = s.ended_at.as_deref().unwrap_or("—");
-        println!(
-            "  saga_id={} name={} state={}{}",
-            s.saga_id, s.name, s.state, recovered_marker
-        );
-        println!(
-            "    started={} ended={} steps_progressed={}",
-            s.started_at, ended, s.step_count
-        );
-        if let Some(reason) = &s.failure_reason {
-            println!("    failure: {}", reason);
-        }
-        if !s.input_json.is_empty() && s.input_json != "null" {
-            println!("    input: {}", s.input_json);
-        }
-
-        // Step rows. Surface step detail for both `unresolved` sagas
-        // AND `failed_compensation` sagas (recovered crashes) — the
-        // latter is the operator triage flow per LSD spec §3.5.
-        // (codex P1 PR #647 round 1: unresolved_sagas() filters
-        // out failed_compensation, so we fall back to a direct
-        // get_saga_steps query for those.)
-        let steps: Vec<crate::saga::log::UnresolvedLauncherStep> = if let Some(u) =
-            unresolved.iter().find(|u| u.saga_id == s.saga_id)
-        {
-            u.steps.clone()
-        } else if s.state == "failed_compensation" {
-            // Surface step-query failures rather than silently
-            // returning empty — operators need visibility into "why
-            // are step rows missing for this recovered saga".
-            // (codex P2 PR #647 round 3.)
-            match log.get_saga_steps(s.saga_id) {
-                Ok(steps) => steps,
-                Err(e) => {
-                    println!("    [step query failed: {} — saga rows may exist but cannot be read]", e);
-                    Vec::new()
-                }
-            }
-        } else {
-            Vec::new()
-        };
-        if !steps.is_empty() {
-            println!("    steps:");
-            for step in &steps {
-                let target = step.target.as_deref().unwrap_or("—");
-                let cmd_snippet = step
-                    .cmd_json
-                    .as_deref()
-                    .map(|c| truncate_for_display(c, 120))
-                    .unwrap_or_else(|| "—".into());
-                println!(
-                    "      {:>3}  {:30} target={:<14} state={:<10} cmd={}",
-                    step.step_index, step.name, target, step.state, cmd_snippet
-                );
-                if let Some(reason) = &step.failure_reason {
-                    println!("           failure: {}", reason);
-                }
-            }
-            // Pinpoint the in-flight step at crash time, mirroring
-            // the example in spec §3.5: "[step 2 was in-flight when
-            // launcher exited]". The step in `pending` state at the
-            // highest index is the one the saga was waiting on.
-            if let Some(in_flight) = steps.iter().rev().find(|st| st.state == "pending") {
-                println!(
-                    "      [step {} was in-flight when launcher exited]",
-                    in_flight.step_index
-                );
-            }
-        }
-        println!();
-    }
-
-    let recovered_count = snapshot
-        .iter()
-        .filter(|s| s.state == "failed_compensation")
-        .count();
-    if recovered_count > 0 {
-        println!(
-            "Note: {} saga(s) marked `failed_compensation` by the startup recovery walker.",
-            recovered_count
-        );
-        println!("These were unresolved when the launcher last exited; their effects on host state");
-        println!("may be partially applied. Inspect step rows above to see what was attempted.");
-    }
-
+    println!("The durable saga log was removed (Pillar 1 Step 6, 2026-07-16).");
+    println!("Launcher sagas now live in an in-memory registry inside the running");
+    println!("launcher; nothing is persisted for offline inspection.");
+    println!();
+    println!("To inspect saga activity, read the launcher log's [saga] lines:");
+    println!("    muxlog launcher | grep saga");
+    println!();
+    println!("Historical sagas.db files from older versions are deleted at first");
+    println!("startup of this version; any remaining copies are stale.");
     Ok(())
-}
-
-/// Trim a JSON snippet to `max_chars` for one-line display, appending
-/// `…` if it was truncated. Used to keep `--diag sagas` cmd columns
-/// readable when commands carry large payloads (e.g. block meta).
-fn truncate_for_display(s: &str, max_chars: usize) -> String {
-    if s.chars().count() <= max_chars {
-        s.to_string()
-    } else {
-        let truncated: String = s.chars().take(max_chars).collect();
-        format!("{}…", truncated)
-    }
 }
 
 #[cfg(test)]
 mod sagas_diag_tests {
-    use super::*;
     use crate::saga::{LauncherSagaLog, PipeTarget};
     use agentmux_common::ipc::{Command, Event};
-
-    #[test]
-    fn truncate_for_display_shortens_long_strings_and_keeps_short_ones() {
-        assert_eq!(truncate_for_display("hi", 10), "hi");
-        let long = "a".repeat(200);
-        let truncated = truncate_for_display(&long, 50);
-        // 50 a's + ellipsis.
-        assert_eq!(truncated.chars().count(), 51);
-        assert!(truncated.ends_with('…'));
-    }
 
     /// Smoke test: build a fixture saga log, run `snapshot_recent`
     /// and `unresolved_sagas`, and verify the formatter assembles the

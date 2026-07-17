@@ -93,7 +93,6 @@ dependencies = [
  "libc",
  "png",
  "proptest",
- "rusqlite",
  "serde",
  "serde_json",
  "smithay-client-toolkit",

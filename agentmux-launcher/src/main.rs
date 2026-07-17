@@ -24,7 +24,6 @@
 )]
 
 mod binary_resolution;
-mod config;
 mod data_dir;
 mod diag;
 mod event_log;
