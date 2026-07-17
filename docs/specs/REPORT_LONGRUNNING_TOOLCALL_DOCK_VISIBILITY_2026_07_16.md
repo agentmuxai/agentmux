@@ -2,7 +2,7 @@
 
 **Status:** Report — analysis + design direction, not yet implemented (one adjacent live bug found and fixed en route, see §5).
 **Author:** Agent2
-**Verified against:** `main` @ `3d1ce73c` (pulled 2026-07-16), with PR #2201 (dock subagent-grouping fix, same session) on top.
+**Verified against:** `main` @ `3d1ce73c` (pulled 2026-07-16). The dock subagent-grouping fix referenced in §5 was independently landed twice this session — this report's own version (PR #2201) was closed in favor of AgentY-asaf's more complete PR #2203, which additionally added a full multi-member roster to the expanded view. §5 below is updated to describe #2203's shipped shape.
 **Related:**
 - `docs/specs/REPORT_LONGRUNNING_SUBAGENT_SWARM_CONSOLIDATION_2026_07_16.md` (Agent3, same day) — the consolidated tracker for long-running processes / subagents / Swarm. This report is a deep-dive on that report's Area 1, specifically the "detect a blocking wait and get it out of the turn's critical status path" angle the user asked about directly.
 - `docs/retro/retro-persistent-agent-working-status-stuck-2026-07-16.md` (the "Agent1" incident) — the concrete, already-diagnosed case this report generalizes from: a `sleep`-based heartbeat loop inside a backgrounded Bash task pinned a pane's status to ambiguous "Working…/Waiting…" for ~12 hours.
@@ -56,17 +56,15 @@ So "return conversation to the user" is **not** about unlocking input — it alr
 
 This report's "detect sleep" ask is the sharper, more specific version of that retro's fix direction — Agent1's case was a *backgrounded* task; the user's ask also covers a **foreground, blocking** `sleep N` call sitting directly in the turn's critical path (no `run_in_background` needed to trigger the same bad UX: 30 seconds of "Working…" for a command that is, definitionally, doing nothing).
 
-## 5. Live bug found and fixed en route: dock subagent flood (PR #2201)
+## 5. Live bug found and fixed en route: dock subagent flood (PR #2203)
 
 While investigating the dock's current state, the user separately reported (mid-session): *"dozens of subagents appear in the dock now, but the agent only made 1 or 2 tool calls...the docked item needs to be per Agent tool call, not per subagent."*
 
 Root cause: `subagent-adapter.ts` mapped every `ActiveSubagent` the backend watcher knows about to its own `PinnedActivity`, with zero grouping. A single Workflow-tool call can spawn dozens of subagents at once — the Swarm pane's own docs cite **45 observed live in one run** (`REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md` Finding 4) — and the Swarm tree already solved this exact problem with `groupSubagentsByWorkflow` (shared `workflow_id` → one `WorkflowGroup`; same-name loose subagents → one `NameGroup`, `frontend/app/view/swarm/swarm-model.ts:151`). The dock adapter simply never adopted that grouping.
 
-**Fixed** (this session, PR #2201): `subagent-adapter.ts` now runs its block-filtered subagent list through the Swarm pane's own `groupSubagentsByWorkflow` before mapping to `PinnedActivity`, reusing `groupCacheKey` for row identity so the dock and the Swarm tree agree on what counts as "one call." One dock row per Agent/Workflow-tool invocation, not per subagent. 11 tests (4 new) passing; typecheck clean.
+**Fixed** (this session, PR #2203, AgentY-asaf — landed independently of and more completely than this report author's own first attempt at the same fix, PR #2201, closed as redundant): `subagent-adapter.ts` now runs its block-filtered subagent list through the Swarm pane's own `groupSubagentsByWorkflow` before mapping to `PinnedActivity`, reusing `groupCacheKey` for row identity so the dock and the Swarm tree agree on what counts as "one call." One dock row per Agent/Workflow-tool invocation, not per subagent. `PinnedActivity` gained a `subagentGroup?: { members: ActiveSubagent[] }` field (mutually exclusive with the existing single-`subagent` field), and `ActivityRow.tsx`'s expanded view renders a real per-member roster (sigil + label + event count per member) — a proper multi-member view, not a single-representative simplification. Status derivation distinguishes a fully-terminal-but-all-abandoned group as `stopped` rather than folding it into `done`.
 
-**Known simplification, left as a follow-up:** a grouped row's expanded view and tail text show only the most-recently-active member's transcript, not every member's — `ActivityRow.tsx` renders one `subagent` per row today; teaching it a real multi-member expanded view (e.g. a nested member list) is separate work, not required to fix the row-count explosion.
-
-This is directly relevant to the rest of this report: **any new dock-entry kind this report proposes (tool calls, sleep, backgrounded Bash) must go through the same "what counts as one call" discipline** — a naive one-row-per-raw-event mapping is exactly the bug class just fixed.
+This is directly relevant to the rest of this report: **any new dock-entry kind this report proposes (tool calls, sleep, backgrounded Bash) must go through the same "what counts as one call" discipline** — a naive one-row-per-raw-event mapping is exactly the bug class just fixed. It's also worth noting for process: two agents independently found and fixed the identical bug the same day, from the same user report surfaced in parallel sessions — a signal that this class of report (a live, concretely-reproducible UI bug with an existing in-repo precedent to reuse) is exactly the kind of thing likely to get duplicated effort absent a shared tracking issue; see the sibling consolidation report's tracker-hygiene recommendation.
 
 ## 6. Detecting "a sleep is used" — and generalizing to "every agent call"
 
