@@ -206,6 +206,52 @@ pub(crate) fn terminate_child_gracefully(child: &tokio::process::Child) {
     }
 }
 
+/// Send `signal` to an entire process group in one shot (negated pid — see
+/// the two public wrappers below for why this targets a whole group, not
+/// just one process). Shared by both so the return-value handling — a
+/// silently-ignored failure would otherwise let a genuinely-failed kill
+/// (anything but the expected "already empty" ESRCH) read as a successful
+/// teardown — lives in exactly one place. Logs on any failure OTHER than
+/// ESRCH (the routine no-op case: the group was already empty, e.g. a prior
+/// SIGTERM's own graceful shutdown already reaped it).
+#[cfg(not(target_os = "windows"))]
+fn kill_process_group(child: &tokio::process::Child, signal: libc::c_int, signal_name: &str) {
+    let Some(pid) = child.id() else { return };
+    // SAFETY: kill(2) with a process-scoped pid + a constant signal — no
+    // memory is touched. A stale pid just returns ESRCH (ignored below).
+    let rc = unsafe { libc::kill(-(pid as libc::pid_t), signal) };
+    if rc != 0 {
+        let err = std::io::Error::last_os_error();
+        if err.raw_os_error() != Some(libc::ESRCH) {
+            crate::logging::log(&format!(
+                "WARN: kill(-{}, {}) failed: {}",
+                pid, signal_name, err
+            ));
+        }
+    }
+}
+
+/// SIGTERM an entire process group — gives a process that installs a signal
+/// handler (srv does: SIGINT/SIGTERM → `shell_sessions.stop_all()`,
+/// `agentmux-srv/src/main.rs`) a chance to run its own graceful shutdown
+/// before the harder `kill_process_group_forcefully` follows. Matters
+/// specifically for srv: its tracked agent shells (`shell_node.rs`) are each
+/// spawned into THEIR OWN process group (`.process_group(0)`, same mechanism
+/// this backstop itself uses, applied for a different scoping purpose), so
+/// they are NOT members of srv's own group and a bare group-SIGKILL of srv
+/// would orphan them. `stop_all()` reaches them anyway — `kill_tree()`
+/// signals each tracked shell BY ITS OWN pid/pgid directly
+/// (`kill(-shell_pgid, SIGTERM)` then `SIGKILL`), independent of ambient
+/// process-group membership. host is not presumed capable of a meaningful
+/// graceful response here (the whole premise of a teardown-backstop
+/// scenario is that its UI thread is wedged) but SIGTERM-ing it too is
+/// harmless — a wedged process with no custom SIGTERM handler just
+/// terminates on it the same as SIGKILL would.
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn kill_process_group_gracefully(child: &tokio::process::Child) {
+    kill_process_group(child, libc::SIGTERM, "SIGTERM");
+}
+
 /// SIGKILL an entire process group in one shot — the unix analogue of
 /// Windows' `TerminateJobObject`. `child` must have been spawned with
 /// `.process_group(0)` (both `spawn_host_unix` and `srv_spawner::spawn_srv`
@@ -213,20 +259,15 @@ pub(crate) fn terminate_child_gracefully(child: &tokio::process::Child) {
 /// whole group instead of just the one process, reaping any descendants
 /// (e.g. CEF's forked renderer/GPU subprocesses) the launcher never tracks
 /// individually. Used by the teardown backstop
-/// (SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11) — a deliberately harsher
-/// exit than `terminate_child_gracefully`'s SIGTERM, reserved for the case
-/// where the host's UI thread is provably wedged and there is no graceful
-/// shutdown to wait for. No-op if the child has already exited (its pid may
-/// have been reaped; a stale pid's negated kill returns ESRCH, ignored).
+/// (SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11) as the hard backstop after
+/// `kill_process_group_gracefully`'s brief grace window — reserved for
+/// whatever a graceful SIGTERM didn't reap (a wedged-or-dead srv, or shells
+/// its own `stop_all()` couldn't finish in time). No-op if the child has
+/// already exited (its pid may have been reaped; a stale pid's negated kill
+/// returns ESRCH, ignored).
 #[cfg(not(target_os = "windows"))]
 pub(crate) fn kill_process_group_forcefully(child: &tokio::process::Child) {
-    if let Some(pid) = child.id() {
-        // SAFETY: kill(2) with a process-scoped pid + a constant signal —
-        // no memory is touched. A stale pid just returns ESRCH (ignored).
-        unsafe {
-            libc::kill(-(pid as libc::pid_t), libc::SIGKILL);
-        }
-    }
+    kill_process_group(child, libc::SIGKILL, "SIGKILL");
 }
 
 #[cfg(all(test, not(target_os = "windows")))]
@@ -242,7 +283,7 @@ mod tests {
     //! `.process_group(pid)` instead of `.process_group(0)`) would compile
     //! fine and silently fail to create a new group.
 
-    use super::kill_process_group_forcefully;
+    use super::{kill_process_group_forcefully, kill_process_group_gracefully};
 
     /// `.process_group(0)` makes the spawned child its own group leader —
     /// pgid must equal its own pid, not the test process's pgid.
@@ -303,6 +344,38 @@ mod tests {
         let _ = child.wait().await; // let it exit and get reaped
 
         kill_process_group_forcefully(&child); // must not panic
+    }
+
+    /// `kill_process_group_gracefully` sends SIGTERM, not SIGKILL — the
+    /// half of the two-phase teardown a process WITH a signal handler (srv)
+    /// gets a real chance to act on.
+    #[tokio::test]
+    async fn kill_process_group_gracefully_sends_sigterm_not_sigkill() {
+        use std::os::unix::process::ExitStatusExt;
+
+        let mut cmd = tokio::process::Command::new("sleep");
+        cmd.arg("5").kill_on_drop(false).process_group(0);
+        let mut child = cmd.spawn().expect("spawn sleep");
+
+        kill_process_group_gracefully(&child);
+
+        let status = tokio::time::timeout(std::time::Duration::from_secs(2), child.wait())
+            .await
+            .expect("child did not exit after graceful group kill")
+            .expect("wait succeeded");
+        assert_eq!(status.signal(), Some(libc::SIGTERM));
+    }
+
+    /// Same no-op-on-already-exited guarantee as the forceful variant — the
+    /// teardown arm calls both unconditionally.
+    #[tokio::test]
+    async fn kill_process_group_gracefully_is_a_noop_on_an_already_exited_child() {
+        let mut cmd = tokio::process::Command::new("true");
+        cmd.kill_on_drop(false).process_group(0);
+        let mut child = cmd.spawn().expect("spawn true");
+        let _ = child.wait().await; // let it exit and get reaped
+
+        kill_process_group_gracefully(&child); // must not panic
     }
 }
 
