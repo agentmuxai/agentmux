@@ -4,38 +4,36 @@
 /**
  * Open a provider login / OAuth URL for an agent re-auth.
  *
- * SPEC_REAUTH_FROM_AUTH_ERROR_2026_06_20: the user asked for "a browser window
- * + url as backup". The idiomatic, in-app "browser window" in AgentMux is a
- * **browser pane** (`createBlock({ meta: { view: "browser", url } })`), which
- * splits the current tab and renders a real CEF browser. A modal-embedded CEF
- * browser is architecturally impossible (the pane needs a native HWND child
- * window that can't be CSS-positioned inside a modal overlay).
- *
- * We split (not magnify) so the agent pane's AuthUrlBox — the URL text + the
- * paste-the-code input — stays visible beside the browser. If the in-app pane
- * can't be created (no layout model, RPC failure) we fall back to the system
- * browser via `openExternal`. The AuthUrlBox is the URL backup in either case.
+ * The system's default browser is the primary target: it already carries the
+ * user's existing session/cookies for most providers, so OAuth there is far
+ * more likely to auto-complete than in a fresh, cookie-less in-app pane
+ * (retro-agent-login-browser-2026-07-18 — the in-app pane was also fighting a
+ * separate rendering issue, but reusing the logged-in system browser is the
+ * better outcome either way). If the system browser can't be opened, we fall
+ * back to an in-app **browser pane** (`createBlock({ meta: { view: "browser",
+ * url } })`), which splits the current tab and renders a real CEF browser. The
+ * AuthUrlBox above the composer stays visible as a URL backup in both cases.
  *
  * Never throws: login UX must degrade gracefully, never crash the launch flow.
  */
 
-import { createBlock, getApi } from "@/app/store/global";
+import { createBlock } from "@/app/store/global";
+import { invokeCommand } from "@/app/platform/ipc";
 
 export type OAuthOpenResult = "pane" | "external" | "failed";
 
 export async function openOAuthBrowserPane(url: string): Promise<OAuthOpenResult> {
     try {
-        // In-app browser pane — the primary "browser window". Split beside the
-        // agent pane (magnified=false) so the AuthUrlBox paste-code input stays
-        // reachable for providers that hand back a code instead of redirecting.
-        await createBlock({ meta: { view: "browser", url } });
-        return "pane";
+        // Awaited (unlike getApi().openExternal's fire-and-forget form) so a
+        // real failure — no default browser handler, disallowed scheme, spawn
+        // error — falls through to the in-app pane instead of silently
+        // reporting "external" with nothing having opened.
+        await invokeCommand("open_external", { url });
+        return "external";
     } catch {
-        // Pane creation failed — fall back to the system browser. openExternal
-        // is fire-and-forget and swallows its own errors, so this won't throw.
         try {
-            getApi().openExternal(url);
-            return "external";
+            await createBlock({ meta: { view: "browser", url } });
+            return "pane";
         } catch {
             return "failed";
         }
