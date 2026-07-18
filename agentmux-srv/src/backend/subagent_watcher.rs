@@ -1481,6 +1481,15 @@ fn parse_event_type(value: &serde_json::Value) -> Option<SubagentEventType> {
     }
 }
 
+/// Modification time of `path`, or `UNIX_EPOCH` if it can't be read (a
+/// vanished/permission-denied file sorts oldest — excluded first by
+/// `scan_subagents_dir`'s recency cap rather than crashing the scan).
+fn file_mtime(path: &Path) -> std::time::SystemTime {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+}
+
 /// Walk up `path`'s ancestors (parent, grandparent, ...) and return the
 /// first one that already exists on disk. Used by `watch_agent` when the
 /// target directory doesn't exist yet — `notify::Watcher::watch` fails
@@ -1500,15 +1509,6 @@ fn parse_event_type(value: &serde_json::Value) -> Option<SubagentEventType> {
 /// (giving up on watching rather than risking an unbounded walk) if `path`
 /// isn't under the home directory at all, or if no existing ancestor is
 /// found within that bound.
-/// Modification time of `path`, or `UNIX_EPOCH` if it can't be read (a
-/// vanished/permission-denied file sorts oldest — excluded first by
-/// `scan_subagents_dir`'s recency cap rather than crashing the scan).
-fn file_mtime(path: &Path) -> std::time::SystemTime {
-    std::fs::metadata(path)
-        .and_then(|m| m.modified())
-        .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
-}
-
 fn nearest_existing_ancestor(path: &Path) -> Option<PathBuf> {
     let floor = dirs::home_dir()?;
     path.ancestors()
