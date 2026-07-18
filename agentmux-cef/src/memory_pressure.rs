@@ -56,9 +56,9 @@ const HYSTERESIS_RATIO: f64 = 0.03;
 pub enum PressureLevel {
     /// Ample commit headroom.
     Normal = 0,
-    /// Commit getting tight (< `WARN_ENTER_MB`) — proactive shedding territory.
+    /// Commit getting tight (< `WARN_ENTER_FREE_RATIO`) — proactive shedding territory.
     Warn = 1,
-    /// Commit critically low (< `CRITICAL_ENTER_MB`) — an OOM is imminent.
+    /// Commit critically low (< `CRITICAL_ENTER_FREE_RATIO`) — an OOM is imminent.
     Critical = 2,
 }
 
