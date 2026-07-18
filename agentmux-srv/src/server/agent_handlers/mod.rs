@@ -357,6 +357,7 @@ mod recent_sessions_tests {
                 String::new(),
                 "test".to_string(),
             ),
+            editor_file_watcher: None,
         };
 
         // Seed: 1 SEEDED definition (template), 1 account + direct
@@ -667,6 +668,7 @@ mod recent_sessions_tests {
                 String::new(),
                 "test".to_string(),
             ),
+            editor_file_watcher: None,
         };
 
         // One seeded template + one already-user-owned definition.

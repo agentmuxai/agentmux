@@ -35,6 +35,8 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { WorkspaceService } from "@/app/store/services";
 import { createBlockOnModel, waitForLayoutModel } from "@/app/tab/tab-presets";
 import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
+import { waveEventSubscribe } from "@/app/store/wps";
+import { WpsEvent } from "@/app/store/wps-events";
 import { createMemo, createSignal, type Accessor } from "solid-js";
 import { FileTreeModel } from "./file-tree-model";
 
@@ -166,6 +168,15 @@ export class EditorViewModel implements ViewModel {
      *  Removed on dispose. */
     private _globalHandler: (events: EditorPaneEvent[]) => void;
 
+    // ── Live-reload (SPEC_EDITOR_LIVE_FILE_RELOAD_2026_07_18) ───────────
+    // Path currently registered with the backend watcher, per tabId. A tab
+    // is watched from the moment its content first loads until it closes
+    // (or the pane disposes); a preview-tab file swap re-syncs it (unwatch
+    // old path, watch new). Backend refcounts by block_id, so re-watching
+    // the same path from this same pane is idempotent.
+    private _watchedPathByTab = new Map<string, string>();
+    private _unsubFileChanged: () => void = () => {};
+
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
         this.nodeModel = nodeModel;
@@ -191,11 +202,23 @@ export class EditorViewModel implements ViewModel {
                     this._contentByTab.delete(ev.tabId);
                     this._encodingByTab.delete(ev.tabId);
                     this._tabModes.delete(ev.tabId);
+                    this._unwatchTab(ev.tabId);
                 }
                 for (const sub of this._eventSubscribers) sub(ev);
             }
         };
         _instanceHandlers.add(this._globalHandler);
+
+        // Live-reload: one subscription per pane, scoped to this block.
+        // Fires when a path open in one of this pane's tabs changes on disk.
+        this._unsubFileChanged = waveEventSubscribe({
+            eventType: WpsEvent.EditorFileChanged,
+            scope: makeORef("block", blockId),
+            handler: (event) => {
+                const path = (event as any)?.data?.path as string | undefined;
+                if (path) void this._handleExternalFileChanged(path);
+            },
+        });
 
         // Projections from the slice's slot cell. Reading sliceVersionAtom
         // creates the Solid dependency that makes these re-evaluate.
@@ -407,19 +430,55 @@ export class EditorViewModel implements ViewModel {
         // so the about-to-fire RPC populates the new file's content.
         this._contentByTab.delete(tabId);
         try {
+            const hash = await this._loadFileIntoTab(tabId, filePath);
+            if (hash !== null) {
+                // Backwards-compat: persist the active file path under the
+                // legacy meta key so a downgrade (or a Phase 1C-less build)
+                // restores it. The 1C saga replaces this with the full
+                // editor:tabs persistence.
+                await this.persistMeta({ [META_LEGACY_FILE]: filePath });
+                this._syncWatch(tabId, canonical);
+            }
+        } finally {
+            this._loadingPaths.delete(canonical);
+        }
+    }
+
+    /** Fetch `filePath`'s current disk content via RPC and apply it to
+     *  `tabId`'s view-local buffer + slice state. Shared by the initial-open
+     *  path (`_openFileWithMode`) and the live-reload path
+     *  (`_handleExternalFileChanged`) — same fetch/sniff/hash/dispatch
+     *  sequence either way, just triggered differently.
+     *
+     *  When `skipIfHashMatches` is given and the freshly-read content hashes
+     *  the same, the buffer/dispatch are skipped entirely (no-op reload) —
+     *  this is what suppresses a self-triggered echo from our own
+     *  `writeeditorfile` save also tripping the fs watcher, and avoids
+     *  redundant re-renders on a metadata-only touch.
+     *
+     *  Returns the new contentHash on success, or null if the load failed,
+     *  was refused (binary/oversized), or the tab's path moved out from
+     *  under us mid-fetch. */
+    private async _loadFileIntoTab(
+        tabId: string,
+        filePath: string,
+        opts?: { skipIfHashMatches?: string },
+    ): Promise<string | null> {
+        const canonical = canonicalizePath(filePath);
+        try {
             const result = await RpcApi.ReadEditorFileCommand(TabRpcClient, {
                 path: filePath,
             });
             const content = result?.content ?? "";
 
-            // Re-check the slice: the preview slot's path may have been
-            // swapped out from under us by a faster click while this RPC
+            // Re-check the slice: the tab's path may have been swapped out
+            // from under us (preview-swap, or the tab closed) while this RPC
             // was in flight. Without this check we'd write THIS file's
             // content into a tab now showing a DIFFERENT file. Validate
             // by canonicalized path because the slice canonicalizes too.
             const tabNow = snapshot(this.blockId)?.tabs.find((t) => t.id === tabId);
             if (!tabNow || tabNow.filePath !== canonical) {
-                return;
+                return null;
             }
 
             // Refuse content that looks binary or that would freeze the
@@ -438,14 +497,18 @@ export class EditorViewModel implements ViewModel {
                     error: refusal,
                     source: "system",
                 });
-                return;
+                return null;
+            }
+
+            const hash = await sha256Hex(content);
+            if (opts?.skipIfHashMatches !== undefined && opts.skipIfHashMatches === hash) {
+                return hash;
             }
 
             this._contentByTab.set(tabId, content);
             this._rememberEncoding(tabId, result);
             this._contentVersion[1]((v) => v + 1);
 
-            const hash = await sha256Hex(content);
             dispatch(this.blockId, {
                 type: "TabContentLoaded",
                 tabId,
@@ -453,11 +516,7 @@ export class EditorViewModel implements ViewModel {
                 readOnly: result?.read_only ?? false,
                 source: "system",
             });
-
-            // Backwards-compat: persist the active file path under the legacy
-            // meta key so a downgrade (or a Phase 1C-less build) restores it.
-            // The 1C saga replaces this with the full editor:tabs persistence.
-            await this.persistMeta({ [META_LEGACY_FILE]: filePath });
+            return hash;
         } catch (e: unknown) {
             const message = e instanceof Error ? e.message : String(e);
             dispatch(this.blockId, {
@@ -466,9 +525,47 @@ export class EditorViewModel implements ViewModel {
                 error: message,
                 source: "system",
             });
-        } finally {
-            this._loadingPaths.delete(canonical);
+            return null;
         }
+    }
+
+    /** Handler for `editor:file_changed` WPS events. Reloads every open tab
+     *  in this pane pointing at the changed path — but only if it's clean.
+     *  A dirty tab is never auto-clobbered (no dirty-conflict banner exists
+     *  yet; see SPEC_EDITOR_LIVE_FILE_RELOAD_2026_07_18.md Phase 3 — until
+     *  then a dirty tab simply doesn't reload, same as today's behavior). */
+    private async _handleExternalFileChanged(rawPath: string): Promise<void> {
+        const canonical = canonicalizePath(rawPath);
+        const tabs = snapshot(this.blockId)?.tabs ?? [];
+        for (const tab of tabs) {
+            if (canonicalizePath(tab.filePath) !== canonical) continue;
+            if (tab.dirty) continue;
+            if (this._loadingPaths.has(canonical)) continue; // a load is already in flight for this path
+            await this._loadFileIntoTab(tab.id, tab.filePath, { skipIfHashMatches: tab.contentHash });
+        }
+    }
+
+    /** Sync the backend watch registration for `tabId` to `canonicalPath`.
+     *  No-op if already watching that exact path (covers repeat loads of an
+     *  unchanged tab). Unwatches the previous path first when it differs
+     *  (preview-tab file swap: same tabId, new file). */
+    private _syncWatch(tabId: string, canonicalPath: string): void {
+        const prev = this._watchedPathByTab.get(tabId);
+        if (prev === canonicalPath) return;
+        if (prev) {
+            void RpcApi.UnwatchEditorFileCommand(TabRpcClient, { path: prev, block_id: this.blockId }).catch(() => {});
+        }
+        this._watchedPathByTab.set(tabId, canonicalPath);
+        void RpcApi.WatchEditorFileCommand(TabRpcClient, { path: canonicalPath, block_id: this.blockId }).catch(() => {});
+    }
+
+    /** Stop watching whatever path `tabId` was registered under, if any.
+     *  Called on tab close and pane dispose. */
+    private _unwatchTab(tabId: string): void {
+        const prev = this._watchedPathByTab.get(tabId);
+        if (!prev) return;
+        this._watchedPathByTab.delete(tabId);
+        void RpcApi.UnwatchEditorFileCommand(TabRpcClient, { path: prev, block_id: this.blockId }).catch(() => {});
     }
 
     closeTab(tabId: string): void {
@@ -986,6 +1083,8 @@ export class EditorViewModel implements ViewModel {
     }
 
     dispose(): void {
+        this._unsubFileChanged();
+        for (const tabId of [...this._watchedPathByTab.keys()]) this._unwatchTab(tabId);
         _instanceHandlers.delete(this._globalHandler);
         this._eventSubscribers.clear();
         this._contentByTab.clear();
