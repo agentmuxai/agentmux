@@ -192,6 +192,7 @@ single pointer; run `muxlog ls` first when several instances are up.
 | Frontend `[fe]` lines | `muxlog fe` |
 | Search sidecar (agent transcript excluded) | `muxlog srv grep <regex>` |
 | Memory heartbeat | `muxlog host grep mem_heartbeat` |
+| Commit (pagefile) attribution — who's inflating commit: AgentMux itself, panes' process trees (Claude CLI etc.), or other apps | `muxlog srv grep mem_attribution` |
 | Errors + warnings (host & sidecar) | `muxlog errors` |
 | Startup-handshake / reconnect-loop trace | `muxlog bridge` |
 | Target a specific instance | `muxlog host -i <branch\|version>` |
