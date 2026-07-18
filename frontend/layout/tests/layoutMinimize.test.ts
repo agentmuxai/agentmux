@@ -12,7 +12,7 @@ import {
     HeaderHeightPx,
     MinimizedRowSlotWidthPx,
 } from "../lib/layoutMinimize";
-import { computeMainAxisAllocation } from "../lib/layoutGeometry";
+import { computeMainAxisAllocation, minimizedCrossAxisPx, resolveRowSlipTargets } from "../lib/layoutGeometry";
 import { resizeNode, splitVertical } from "../lib/layoutTree";
 import { FlexDirection, type LayoutNode } from "../lib/types";
 
@@ -21,18 +21,35 @@ import { FlexDirection, type LayoutNode } from "../lib/types";
 
 function makeMockModel(rootNode: LayoutNode) {
     let minimizedSet = new Set<string>();
-    return {
+    const model = {
         treeState: { rootNode, pendingBackendActions: [] },
         minimizedNodeIds: {
             _set: (u: Set<string> | ((prev: Set<string>) => Set<string>)) => {
                 minimizedSet = typeof u === "function" ? u(minimizedSet) : u;
             },
         },
-        updateTree: () => {},
+        // Real updateTree (layoutGeometry.ts) rebuilds minimizedNodeIds fresh
+        // from the tree's `.minimized` flags as part of its normal walk —
+        // mirror JUST that derivation here (no geometry needed for these
+        // tests) so callers relying on updateTree() having run see the same
+        // authoritative result production does.
+        updateTree: () => {
+            const ids = new Set<string>();
+            (function walk(n: LayoutNode | undefined) {
+                if (!n) return;
+                if (!n.children?.length) {
+                    if (n.minimized) ids.add(n.id);
+                    return;
+                }
+                n.children.forEach(walk);
+            })(model.treeState.rootNode);
+            minimizedSet = ids;
+        },
         localTreeStateAtom: { _set: () => {} },
         persistToBackend: () => {},
         getMinimizedSet: () => minimizedSet,
     };
+    return model;
 }
 
 const PANE_SIZE = 200;
@@ -212,6 +229,55 @@ describe("derived chip geometry", () => {
         expect(px[1]).toBeCloseTo(600);
         expect(pixelToSizeRatio).toBeCloseTo(400 / 800);
     });
+
+    // Regression: minimizedCrossAxisPx clamps a minimized child's
+    // CROSS-axis (height, under a Row parent) — this is what the rect
+    // builder in updateTreeHelper actually uses, distinct from
+    // computeMainAxisAllocation's MAIN-axis px[]. A single minimized leaf
+    // needs one header height; a fully-minimized BRANCH holding N leaves
+    // needs N (one per stacked chip its own recursive layout will render).
+    // Getting this wrong for branches was the live-repro bug: right_col's
+    // rect kept full container height while its own Column layout only
+    // filled the top N*(header+gap)px, leaving dead space below the chips
+    // ("2 half collapsed... to the right of the single pane").
+    it("minimizedCrossAxisPx: one header-height for a minimized leaf, N for an N-leaf minimized branch", () => {
+        const leaf = newLayoutNode(FlexDirection.Row, 10, undefined, { blockId: "a" });
+        leaf.minimized = true;
+        expect(minimizedCrossAxisPx(leaf, 3)).toBe(HeaderHeightPx + 3);
+
+        const cpu = newLayoutNode(FlexDirection.Row, 2, undefined, { blockId: "cpu" });
+        cpu.minimized = true;
+        const swarm = newLayoutNode(FlexDirection.Row, 8, undefined, { blockId: "swarm" });
+        swarm.minimized = true;
+        const rightCol = newLayoutNode(FlexDirection.Column, 5, [cpu, swarm]);
+        expect(minimizedCrossAxisPx(rightCol, 3)).toBe(2 * (HeaderHeightPx + 3));
+    });
+
+    it("no dead space: a clamped fully-minimized branch's own allocation exactly fills the space its parent gave it", () => {
+        const cpu = newLayoutNode(FlexDirection.Row, 2, undefined, { blockId: "cpu" });
+        cpu.minimized = true;
+        const swarm = newLayoutNode(FlexDirection.Row, 8, undefined, { blockId: "swarm" });
+        swarm.minimized = true;
+        const rightCol = newLayoutNode(FlexDirection.Column, 5, [cpu, swarm]);
+        const gap = 3;
+
+        // Step 1: the Row parent clamps rightCol's cross-axis to its actual
+        // chip-stack need (what the fixed rect builder now does) — NOT the
+        // full 800px container height a naive "branches keep full cross-axis"
+        // rule would have given it.
+        const clampedHeight = minimizedCrossAxisPx(rightCol, gap);
+        expect(clampedHeight).toBe(2 * (HeaderHeightPx + gap));
+        expect(clampedHeight).toBeLessThan(800);
+
+        // Step 2: recursing into rightCol's OWN Column-direction allocation
+        // with that clamped height as nodePixels must consume it exactly —
+        // zero leftover (dead space).
+        const inner = computeMainAxisAllocation(rightCol.children!, false, clampedHeight, size, gap);
+        const consumed = inner.px.reduce((a, b) => a + b, 0);
+        expect(consumed).toBeCloseTo(clampedHeight);
+        expect(inner.px[0]).toBe(HeaderHeightPx + gap);
+        expect(inner.px[1]).toBe(HeaderHeightPx + gap);
+    });
 });
 
 // ── Reducer guards (minimized = locked) ──────────────────────────────────────
@@ -341,5 +407,115 @@ describe("balanceNode legacy carve-outs", () => {
         balanceNode(host);
 
         expect(host.children![0].flexDirection).toBe(FlexDirection.Column);
+    });
+});
+
+// ── Row-slip target resolution ───────────────────────────────────────────────
+// Restored per docs/retro/retro-minimize-display-mode-lost-slip-requirement-
+// 2026-07-17.md — SPEC_PANE_MINIMIZE_REFINEMENTS_2026_06_24.md's per-pane
+// slip and SPEC_PANE_MINIMIZE_COLUMN_DISSOLVE_2026_06_27.md's cascading
+// full-column dissolve, unified into one rule via isEffectivelyMinimized.
+
+describe("resolveRowSlipTargets", () => {
+    function leaf(id: string, min = false): LayoutNode {
+        const n = newLayoutNode(FlexDirection.Column, 10, undefined, { blockId: id });
+        n.id = id;
+        if (min) n.minimized = true;
+        return n;
+    }
+
+    it("no minimized children: no entries", () => {
+        const [a, b, c] = [leaf("a"), leaf("b"), leaf("c")];
+        expect(resolveRowSlipTargets([a, b, c]).size).toBe(0);
+    });
+
+    it("right-preferred: a minimized child docks onto its right neighbor over its left", () => {
+        const [a, b, c] = [leaf("a"), leaf("b", true), leaf("c")];
+        const targets = resolveRowSlipTargets([a, b, c]);
+        expect(targets.get("b")?.id).toBe("c");
+    });
+
+    it("falls back to the left neighbor when there is no right one", () => {
+        const [a, b] = [leaf("a"), leaf("b", true)];
+        const targets = resolveRowSlipTargets([a, b]);
+        expect(targets.get("b")?.id).toBe("a");
+    });
+
+    it("scans PAST an adjacent minimized sibling to find a real anchor", () => {
+        // [A(min), B(min), C(expanded)] — A's immediate right neighbor (B) is
+        // itself minimized and not a valid anchor; A must keep scanning right
+        // to C. B's immediate right IS C directly.
+        const [a, b, c] = [leaf("a", true), leaf("b", true), leaf("c")];
+        const targets = resolveRowSlipTargets([a, b, c]);
+        expect(targets.get("a")?.id).toBe("c");
+        expect(targets.get("b")?.id).toBe("c");
+    });
+
+    it("multiple minimized siblings on both sides converge on the same nearest anchor", () => {
+        // [A(min), B(min), C(expanded), D(min)] — A and B slip right onto C;
+        // D has nothing to its right, so it falls back left onto C too.
+        const [a, b, c, d] = [leaf("a", true), leaf("b", true), leaf("c"), leaf("d", true)];
+        const targets = resolveRowSlipTargets([a, b, c, d]);
+        expect(targets.get("a")?.id).toBe("c");
+        expect(targets.get("b")?.id).toBe("c");
+        expect(targets.get("d")?.id).toBe("c");
+    });
+
+    it("no valid anchor when every sibling in the row is minimized: no entry (falls back to its own chip slot)", () => {
+        const [a, b] = [leaf("a", true), leaf("b", true)];
+        const targets = resolveRowSlipTargets([a, b]);
+        expect(targets.size).toBe(0);
+    });
+
+    it("a single child (no siblings at all): no entry", () => {
+        const [a] = [leaf("a", true)];
+        expect(resolveRowSlipTargets([a]).size).toBe(0);
+    });
+
+    it("treats a fully-minimized BRANCH exactly like a minimized leaf (the column-dissolve case)", () => {
+        const cpu = leaf("cpu", true);
+        const swarm = leaf("swarm", true);
+        const rightCol = newLayoutNode(FlexDirection.Column, 5, [cpu, swarm]);
+        rightCol.id = "rightCol";
+        const agent = leaf("agent");
+        const targets = resolveRowSlipTargets([agent, rightCol]);
+        expect(targets.get("rightCol")?.id).toBe("agent");
+        // cpu/swarm are resolved by right_col's OWN (Column-direction) layout
+        // pass, not by this row-level call — they have no entry here.
+        expect(targets.has("cpu")).toBe(false);
+        expect(targets.has("swarm")).toBe(false);
+    });
+
+    it("a partially-minimized branch (not every leaf minimized) is not slip-eligible", () => {
+        const cpu = leaf("cpu", true);
+        const swarm = leaf("swarm", false); // still expanded
+        const rightCol = newLayoutNode(FlexDirection.Column, 5, [cpu, swarm]);
+        rightCol.id = "rightCol";
+        const agent = leaf("agent");
+        expect(resolveRowSlipTargets([agent, rightCol]).size).toBe(0);
+    });
+});
+
+// ── computeMainAxisAllocation: slip children contribute zero width ──────────
+
+describe("computeMainAxisAllocation with slipChildIds", () => {
+    const size = (n: LayoutNode) => n.size;
+
+    it("a slip child gets 0 px; its would-be width flows entirely to the flex sibling", () => {
+        const a = newLayoutNode(FlexDirection.Row, 100, undefined, { blockId: "a" });
+        const b = newLayoutNode(FlexDirection.Row, 100, undefined, { blockId: "b" });
+        b.minimized = true;
+        const { px } = computeMainAxisAllocation([a, b], true, 1000, size, 3, new Set([b.id]));
+        expect(px[1]).toBe(0);
+        expect(px[0]).toBeCloseTo(1000);
+    });
+
+    it("without slipChildIds, the same minimized child gets the old fixed chip width (backward compatible)", () => {
+        const a = newLayoutNode(FlexDirection.Row, 100, undefined, { blockId: "a" });
+        const b = newLayoutNode(FlexDirection.Row, 100, undefined, { blockId: "b" });
+        b.minimized = true;
+        const { px } = computeMainAxisAllocation([a, b], true, 1000, size, 3);
+        expect(px[1]).toBe(MinimizedRowSlotWidthPx + 3);
+        expect(px[0]).toBeCloseTo(1000 - (MinimizedRowSlotWidthPx + 3));
     });
 });

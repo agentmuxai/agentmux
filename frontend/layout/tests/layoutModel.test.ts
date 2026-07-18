@@ -7,6 +7,7 @@ import { LayoutModel } from "@/layout/lib/layoutModel";
 import { newLayoutNode } from "@/layout/lib/layoutNode";
 import {
     FlexDirection,
+    LayoutNode,
     LayoutTreeActionType,
     LayoutTreeInsertNodeAction,
     LayoutTreeSplitHorizontalAction,
@@ -192,5 +193,171 @@ describe("LayoutModel", () => {
         // After commit, the pending action should be cleared
         const pendingAction = model.pendingTreeAction.throttledValueAtom();
         expect(pendingAction).toBeUndefined();
+    });
+
+    // Regression / feature restoration: the exact user-reported repro
+    // (docs/retro/retro-minimize-display-mode-lost-slip-requirement-2026-07-17.md)
+    // — minimize cpu then swarm in the default agent/cpu/swarm layout. Per
+    // SPEC_PANE_MINIMIZE_COLUMN_DISSOLVE_2026_06_27.md, right_col (now fully
+    // minimized) must dock its stacked headers onto agent — not render as a
+    // separate narrow column beside it — with agent's content area shrinking
+    // to make room and absorbing right_col's freed width.
+    it("docks a fully-minimized column's header stack onto its Row sibling instead of a separate slot", () => {
+        const model = createLayoutModel();
+        const agent = newLayoutNode(FlexDirection.Column, 5, undefined, { blockId: "agent" });
+        const cpu = newLayoutNode(FlexDirection.Row, 2, undefined, { blockId: "cpu" });
+        const swarm = newLayoutNode(FlexDirection.Row, 8, undefined, { blockId: "swarm" });
+        const rightCol = newLayoutNode(FlexDirection.Column, 5, [cpu, swarm]);
+        const root = newLayoutNode(FlexDirection.Row, 10, [agent, rightCol]);
+        model.treeState.rootNode = root;
+
+        model.updateTree();
+        const beforeProps = model.additionalProps();
+        expect(beforeProps[rightCol.id].rect.width).toBeGreaterThan(0);
+        expect(beforeProps[agent.id].rect.width).toBeGreaterThan(0);
+
+        cpu.minimized = true;
+        model.updateTree();
+        swarm.minimized = true;
+        model.updateTree();
+
+        const gap = model.gapSizePx();
+        const headerH = 33; // HeaderHeightPx
+        const props = model.additionalProps();
+
+        // agent's own slot absorbed ALL of rightCol's freed width — the
+        // reported bug (a separate ~180px-wide narrow strip next to agent)
+        // must not exist: agent's rect now spans the full row width.
+        expect(props[agent.id].rect.width).toBeCloseTo(800, 0);
+
+        // agent's content area shrank + shifted down to leave room for the
+        // 2-chip stack docked above it (cpu, then swarm).
+        const dockedHeight = 2 * (headerH + gap);
+        expect(props[agent.id].rect.top).toBeCloseTo(dockedHeight, 0);
+        expect(props[agent.id].rect.height).toBeCloseTo(600 - dockedHeight, 0);
+
+        // rightCol itself renders as the chip-stack overlay, pinned to the
+        // TOP of agent's original slot — same width as agent, not its own
+        // separate narrow column.
+        expect(props[rightCol.id].rect.top).toBeCloseTo(0, 0);
+        expect(props[rightCol.id].rect.width).toBeCloseTo(800, 0);
+        expect(props[rightCol.id].rect.height).toBeCloseTo(dockedHeight, 0);
+
+        // The two chips inside rightCol's (now correctly clamped) box stack
+        // with zero dead space between or below them.
+        expect(props[cpu.id].rect.top).toBeCloseTo(0, 0);
+        expect(props[cpu.id].rect.height).toBeCloseTo(headerH + gap, 0);
+        expect(props[swarm.id].rect.top).toBeCloseTo(headerH + gap, 0);
+        expect(props[swarm.id].rect.height).toBeCloseTo(headerH + gap, 0);
+
+        // No resize handle survives between agent and the now-docked rightCol.
+        expect(props[root.id].resizeHandles).toHaveLength(0);
+    });
+
+    // Regression (reagent P1, PR #2211): when several minimized panes
+    // converge on one small anchor, their combined stacked chip height can
+    // exceed the anchor's available cross-axis space. Each chip must scale
+    // down proportionally (mirroring computeMainAxisAllocation's `scale`
+    // factor for its analogous fixed-chip path) so the stack stays within
+    // the target's (and therefore the row's) bounds instead of overflowing
+    // past it.
+    it("scales down chip heights proportionally when a slip group's total height exceeds the target's space", () => {
+        const model = createLayoutModel();
+        model.getBoundingRect = () => ({ top: 0, left: 0, width: 800, height: 200 });
+        model.displayContainerRef.current = {
+            getBoundingClientRect: () => ({ top: 0, left: 0, width: 800, height: 200 }),
+        } as any;
+
+        // 6 minimized leaves stacked onto 1 anchor: 6 * (33 + gap) comfortably
+        // exceeds the 200px container height available to dock into.
+        const minimizedLeaves = Array.from({ length: 6 }, (_, i) => {
+            const n = newLayoutNode(FlexDirection.Row, 5, undefined, { blockId: `min${i}` });
+            n.minimized = true;
+            return n;
+        });
+        const anchor = newLayoutNode(FlexDirection.Row, 5, undefined, { blockId: "anchor" });
+        const root = newLayoutNode(FlexDirection.Row, 10, [anchor, ...minimizedLeaves]);
+        model.treeState.rootNode = root;
+        model.updateTree();
+
+        const gap = model.gapSizePx();
+        const headerH = 33;
+        const rawTotal = 6 * (headerH + gap);
+        const props = model.additionalProps();
+
+        // The chip stack must not exceed the anchor's original slot height.
+        const lastChip = props[minimizedLeaves[5].id].rect;
+        expect(lastChip.top + lastChip.height).toBeLessThanOrEqual(200 + 0.01);
+
+        // Each individual chip shrank by the same scale factor — combined
+        // height of all 6 (scaled) chips fills but does not exceed 200px,
+        // and is strictly less than the raw (unscaled) total would have been.
+        const totalScaledHeight = minimizedLeaves.reduce((s, c) => s + props[c.id].rect.height, 0);
+        expect(totalScaledHeight).toBeCloseTo(200, 0);
+        expect(totalScaledHeight).toBeLessThan(rawTotal);
+
+        // The anchor's own content area is fully consumed (0 height left) —
+        // the whole container is chips when they overflow this badly.
+        expect(props[anchor.id].rect.height).toBeCloseTo(0, 0);
+    });
+
+    // End-to-end regression for the exact user-reported corruption
+    // (2026-07-18): a blind InsertNode (e.g. a new pane created via the "+"
+    // button or an agent creating a terminal) whose heuristic target
+    // resolves onto a minimized leaf must not promote that leaf into a
+    // branch — the promotion left `minimized` stranded on the branch
+    // (violating the doctor's I2) while the id-inheriting intermediate
+    // child silently lost it, and the separately-tracked minimizedNodeIds
+    // set kept the stale id — so an EXPANDED pane showed a Restore button.
+    it("InsertNode never promotes a minimized leaf, and minimizedNodeIds cannot desync from the tree", () => {
+        const model = createLayoutModel();
+        // Root must be AT capacity (5 children, DEFAULT_MAX_CHILDREN=5) so it
+        // is excluded as an insert candidate itself — otherwise root always
+        // wins regardless of any leaf's minimize state and this test would
+        // pass trivially without ever exercising the corrupted path. With 5
+        // same-depth leaf candidates tied on score, the heuristic's (stable)
+        // sort picks whichever was visited first — reverse child order means
+        // the LAST array element wins the tie; put the minimized leaf there
+        // so, absent the fix, it's exactly what would get promoted.
+        const leaves = ["a", "b", "c", "d", "minimized"].map((id) =>
+            newLayoutNode(FlexDirection.Column, 5, undefined, { blockId: id })
+        );
+        const minimized = leaves[4];
+        minimized.minimized = true;
+        const root = newLayoutNode(FlexDirection.Row, 10, leaves);
+        model.treeState.rootNode = root;
+        model.updateTree();
+        expect(model.additionalProps()).toHaveProperty(minimized.id);
+
+        const newBlock = newLayoutNode(undefined, undefined, undefined, { blockId: "new" });
+        model.treeReducer({
+            type: LayoutTreeActionType.InsertNode,
+            node: newBlock,
+            magnified: false,
+            focused: false,
+        } as LayoutTreeInsertNodeAction);
+
+        // The minimized leaf must still be a LEAF, still minimized, still
+        // exactly where it was — untouched by the insert.
+        const stillMinimized = model.treeState.rootNode!.children!.find((c) => c.data?.blockId === "minimized");
+        expect(stillMinimized).toBeDefined();
+        expect(stillMinimized!.children).toBeUndefined();
+        expect(stillMinimized!.minimized).toBe(true);
+
+        // No node anywhere in the tree is a branch carrying `minimized` (the
+        // exact corruption) — walk the whole tree and check.
+        function walk(node: LayoutNode | undefined, assertNotCorrupted: (n: LayoutNode) => void) {
+            if (!node) return;
+            assertNotCorrupted(node);
+            node.children?.forEach((c) => walk(c, assertNotCorrupted));
+        }
+        walk(model.treeState.rootNode, (n) => {
+            if (n.children?.length) expect(n.minimized).toBeUndefined();
+        });
+
+        // minimizedNodeIds (derived fresh by updateTree, which treeReducer
+        // just triggered) exactly matches reality: the minimized leaf and
+        // nothing else.
+        expect(model.minimizedNodeIds()).toEqual(new Set([stillMinimized!.id]));
     });
 });
