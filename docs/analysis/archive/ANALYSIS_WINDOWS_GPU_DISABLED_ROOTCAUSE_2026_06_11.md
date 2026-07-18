@@ -1,3 +1,6 @@
+> **Archived 2026-07-17:** Resolved. Root-caused issue #1345, now closed. Kept for
+> historical reference only.
+
 # Root-Cause Analysis: Windows GPU Disabled (CEF GPU-process STATUS_BREAKPOINT)
 
 **Status:** Complete — empirically verified (CDP `SystemInfo`/`chrome://gpu`, CEF logs, A/B build, VS Code comparison)

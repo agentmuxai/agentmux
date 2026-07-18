@@ -266,7 +266,7 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
         // Force-load the term font BEFORE the first fit so cell-width
         // measurement uses real glyph metrics, not fallback (Courier).
         // Same race as termwrap.ts — see
-        // docs/terminal-jumbled-startup-investigation.md "Follow-up".
+        // docs/archive/terminal-jumbled-startup-investigation.md "Follow-up".
         // fonts.load() actively requests the face and resolves when ready;
         // fonts.ready alone is vacuous because the WOFF/WOFF2 isn't
         // requested until something measures a glyph.
