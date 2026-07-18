@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createMemo, createSignal, createEffect, onCleanup, For, onMount, Show, type JSX } from "solid-js";
-import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, WorkflowGroup, NameGroup, SubagentDetail, SubagentEvent } from "./swarm-model";
-import { isWorkflowGroup, isNameGroup, groupCacheKey, subagentDisplayLabel } from "./swarm-model";
+import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, WorkflowDispatch, NameGroup, SubagentDetail, SubagentEvent, DispatchActivityEntry } from "./swarm-model";
+import { isWorkflowDispatch, isNameGroup, groupCacheKey, subagentDisplayLabel } from "./swarm-model";
 import { ProviderLogo } from "@/app/element/ProviderLogo";
 import { callBackendService } from "@/store/wos";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -298,8 +298,8 @@ function AgentRow({
             <Show when={!collapsed()}>
                 <div class="swarm-children">
                     <For each={node.subagents}>
-                        {(child) => isWorkflowGroup(child)
-                            ? <WorkflowGroupRow group={child} model={model} parentAgentStatus={node.agentStatus} />
+                        {(child) => isWorkflowDispatch(child)
+                            ? <WorkflowDispatchRow group={child} model={model} />
                             : isNameGroup(child)
                             ? <NameGroupRow group={child} model={model} parentAgentStatus={node.agentStatus} />
                             : <SubagentRow sub={child} model={model} parentAgentStatus={node.agentStatus} />}
@@ -310,47 +310,137 @@ function AgentRow({
     );
 }
 
-// ── Workflow group row (collapsed by default) ───────────────────────────
+// ── Workflow dispatch row (collapsed by default) ────────────────────────
 
-function WorkflowGroupRow({
+/**
+ * One row for a Workflow-kind `AgentDispatch`. SPEC_AGENT_DISPATCH_SUBAGENT_
+ * HIERARCHY_2026_07_17 §7: never one row per member, however many the
+ * dispatch has (this session's own crash retro found one workflow run with
+ * 1,030+ members). Expanding shows a concatenated activity feed
+ * (`DispatchActivityFeed`) instead of nested `SubagentRow`s.
+ */
+function WorkflowDispatchRow({
     group,
     model,
-    parentAgentStatus,
 }: {
-    group: WorkflowGroup;
+    group: WorkflowDispatch;
     model: SwarmViewModel;
-    parentAgentStatus: "running" | "idle";
 }): JSX.Element {
     // Expand state lives on the ViewModel, not a local signal — see
     // SwarmViewModel._expandedIds for why a local signal here silently
     // collapses on unrelated tree refreshes.
-    const expanded = createMemo(() => model.isExpanded(group.workflowId));
+    const expanded = createMemo(() => model.isExpanded(group.dispatchId));
+    const activeCount = createMemo(() => group.memberCount - group.membersDone);
 
     return (
         <div class={`swarm-workflow-group swarm-workflow-group--${group.status}`}>
             <div
                 class="swarm-workflow-header"
-                onClick={() => model.toggleExpanded(group.workflowId)}
+                onClick={() => model.toggleDispatchExpanded(group.dispatchId)}
                 title={group.name}
             >
                 <i class={`fa-solid fa-${expanded() ? "chevron-down" : "chevron-right"} swarm-workflow-expand-icon`} />
                 <span class="swarm-workflow-name">{group.name}</span>
                 <span class="swarm-workflow-count">
-                    {group.status === "active" ? `${group.activeCount}/${group.totalCount} active` : `${group.totalCount} retired`}
+                    {group.status === "active"
+                        ? `${activeCount()}/${group.memberCount} active`
+                        : `${group.memberCount} retired`}
                 </span>
                 <span class={`swarm-workflow-status-badge swarm-workflow-status-badge--${group.status}`}>
                     {group.status === "active" ? "Active" : "Retired"}
                 </span>
             </div>
             <Show when={expanded()}>
-                <div class="swarm-workflow-members">
-                    <For each={group.subagents}>
-                        {(sub) => <SubagentRow sub={sub} model={model} parentAgentStatus={parentAgentStatus} />}
-                    </For>
-                </div>
+                <DispatchActivityFeed dispatchId={group.dispatchId} model={model} />
             </Show>
         </div>
     );
+}
+
+/**
+ * Concatenated activity feed for an expanded `WorkflowDispatchRow` (SPEC
+ * §7) — one chronological, member-tagged stream instead of nested member
+ * rows, fed by `createDispatchDetail`'s `dispatch:activity` subscription.
+ * Live-only: nothing to show until new activity arrives after expand (see
+ * that function's doc comment for why there's no historical backfill).
+ */
+function DispatchActivityFeed({ dispatchId, model }: { dispatchId: string; model: SwarmViewModel }): JSX.Element {
+    const detail = model.getDispatchDetail(dispatchId);
+    const entries = detail.entriesAtom;
+    return (
+        <div class="swarm-dispatch-feed">
+            <Show when={entries().length === 0}>
+                <div class="swarm-dispatch-feed-empty">
+                    Waiting for activity — showing new events from now on, not history.
+                </div>
+            </Show>
+            <For each={entries()}>{(entry) => <DispatchActivityFeedEntry entry={entry} />}</For>
+        </div>
+    );
+}
+
+function DispatchActivityFeedEntry({ entry }: { entry: DispatchActivityEntry }): JSX.Element {
+    const et = entry.event.event_type;
+    const [expanded, setExpanded] = createSignal(false);
+    const tag = <span class="swarm-dispatch-feed-tag">{entry.agentId.substring(0, 7)}</span>;
+
+    switch (et.type) {
+        case "text":
+        case "result":
+            return (
+                <div class="swarm-dispatch-feed-entry">
+                    {tag}
+                    <pre class="swarm-subagent-detail-text">{et.content}</pre>
+                </div>
+            );
+        case "tool_use":
+            return (
+                <div class="swarm-dispatch-feed-entry">
+                    {tag}
+                    <div class="swarm-subagent-detail-tool">
+                        <div class="swarm-subagent-detail-tool-header" onClick={() => setExpanded(!expanded())}>
+                            <i class={`fa-solid fa-${expanded() ? "chevron-down" : "chevron-right"} swarm-subagent-detail-expand-icon`} />
+                            <span class="swarm-subagent-detail-tool-name">{et.name}</span>
+                        </div>
+                        <Show when={expanded()}>
+                            <pre class="swarm-subagent-detail-text">{et.input_summary}</pre>
+                        </Show>
+                    </div>
+                </div>
+            );
+        case "tool_result":
+            return (
+                <div class="swarm-dispatch-feed-entry">
+                    {tag}
+                    <div class="swarm-subagent-detail-tool">
+                        <div
+                            class={`swarm-subagent-detail-tool-header ${et.is_error ? "swarm-subagent-detail-tool-header--error" : ""}`}
+                            onClick={() => setExpanded(!expanded())}
+                        >
+                            <i class={`fa-solid fa-${expanded() ? "chevron-down" : "chevron-right"} swarm-subagent-detail-expand-icon`} />
+                            <span>{et.is_error ? "Error" : "Result"}</span>
+                        </div>
+                        <Show when={expanded()}>
+                            <pre class={`swarm-subagent-detail-text ${et.is_error ? "swarm-subagent-detail-text--error" : ""}`}>
+                                {et.preview}
+                            </pre>
+                        </Show>
+                    </div>
+                </div>
+            );
+        case "progress":
+            return (
+                <div class="swarm-dispatch-feed-entry">
+                    {tag}
+                    <div class="swarm-subagent-detail-progress">
+                        <i class="fa-solid fa-spinner fa-spin" />
+                        <span>{et.output}</span>
+                    </div>
+                </div>
+            );
+        default:
+            return null;
+    }
 }
 
 // ── Name group row (loose subagents sharing one display_name) ──────────

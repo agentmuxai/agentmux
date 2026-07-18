@@ -16,7 +16,7 @@ function mk(overrides: Partial<ActiveSubagent> & Pick<ActiveSubagent, "agent_id"
         last_event_at: 0,
         event_count: 1,
         model: null,
-        workflow_id: null,
+        dispatch_id: `solo:${overrides.agent_id}`,
         display_name: null,
         ...overrides,
     };
