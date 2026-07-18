@@ -530,6 +530,10 @@ pub(crate) async fn run_windows(
     // a recycle must not step the retry ladder down to --disable-gpu),
     // while still counting against the host budget as runaway protection.
     let mut srv_restarts: Vec<std::time::Instant> = Vec::new();
+    // Separate budget for system-OOM srv exits, mirroring `oom_restarts`
+    // above — see the srv arm's classification comment
+    // (docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md).
+    let mut srv_oom_restarts: Vec<std::time::Instant> = Vec::new();
     let mut srv_recycle_kill = false;
     // SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11 Phase 1 — observe-only
     // UI-thread liveness prober. Low rate (60s); the first tick is delayed
@@ -698,7 +702,7 @@ pub(crate) async fn run_windows(
                         // run_windows has no signal arms (shutdown flows via the
                         // host/srv), so srv is the only concurrent event here.
                         let recovered = tokio::select! {
-                            r = mem_supervisor::await_commit_recovery(log) => r,
+                            r = mem_supervisor::await_commit_recovery("host", log) => r,
                             srv_status = srv_child.wait() => {
                                 match srv_status {
                                     Ok(s) => log(&format!(
@@ -852,26 +856,106 @@ pub(crate) async fn run_windows(
                         break 1;
                     }
                 };
-                if mem_supervisor::budget_exhausted(
-                    &mut srv_restarts,
-                    std::time::Instant::now(),
-                    SRV_RESTART_WINDOW,
-                    SRV_RESTART_BUDGET,
+                // Classify like the host arm above (SPEC_MEMORY_PRESSURE_
+                // SUPERVISION_2026_06_16 §5.B) instead of unconditionally
+                // burning the fast SRV_RESTART_BUDGET. srv is a plain Rust
+                // process, so it never emits Chromium's exact OOM code
+                // (`CHROMIUM_OOM_EXIT_CODE`) — but `classify_host_exit`'s
+                // low-commit-at-exit-time fallback still catches a genuine
+                // system-OOM srv abort (Rust's Windows fail-fast abort on
+                // allocation failure surfaces as the generic 0xC0000409, not
+                // 0xE0000008). Before this, EVERY srv exit — OOM or not —
+                // consumed the fixed, fast budget; a live incident hit that
+                // budget 3x in under 10 seconds (each respawned srv re-OOMing
+                // near-instantly into the still-starved system) and killed
+                // the whole launcher instead of waiting out a few seconds of
+                // transient commit pressure. See
+                // docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md.
+                let commit_free = mem_supervisor::commit_free_mb();
+                if matches!(
+                    mem_supervisor::classify_host_exit(code, commit_free),
+                    mem_supervisor::HostExitClass::SystemOom
                 ) {
+                    let now = std::time::Instant::now();
+                    if mem_supervisor::budget_exhausted(
+                        &mut srv_oom_restarts,
+                        now,
+                        mem_supervisor::OOM_RESTART_WINDOW,
+                        mem_supervisor::OOM_RESTART_BUDGET,
+                    ) {
+                        log(&format!(
+                            "srv hit system OOM (code {}, {} MB commit-free); srv OOM restart \
+                             budget exhausted ({} in {}s) — giving up",
+                            code,
+                            commit_free,
+                            mem_supervisor::OOM_RESTART_BUDGET,
+                            mem_supervisor::OOM_RESTART_WINDOW.as_secs()
+                        ));
+                        show_fatal_dialog(
+                            mem_supervisor::OOM_GIVEUP_TITLE,
+                            mem_supervisor::OOM_GIVEUP_BODY,
+                        );
+                        break code;
+                    }
                     log(&format!(
-                        "srv exited (code {}); srv restart budget exhausted ({} in {}s) — terminating launcher",
-                        code,
-                        SRV_RESTART_BUDGET,
-                        SRV_RESTART_WINDOW.as_secs()
+                        "srv hit system OOM (code {}, {} MB commit-free) — waiting for memory \
+                         to recover before respawning srv",
+                        code, commit_free
                     ));
-                    break 1;
+                    // Race the wait against the host dying too, same pattern
+                    // as the host arm's nested select above — without this,
+                    // a host crash during the (up to OOM_RELAUNCH_DEADLINE)
+                    // wait would go unnoticed until the wait finished.
+                    let recovered = tokio::select! {
+                        r = mem_supervisor::await_commit_recovery("srv", log) => r,
+                        host_status = host_child.wait() => {
+                            match host_status {
+                                Ok(s) => log(&format!(
+                                    "CEF host exited UNEXPECTEDLY during srv-OOM wait with code {} — \
+                                     terminating launcher",
+                                    s.code().unwrap_or(1)
+                                )),
+                                Err(e) => log(&format!(
+                                    "FATAL: host wait failed during srv-OOM wait: {}", e
+                                )),
+                            }
+                            break 1;
+                        }
+                    };
+                    if !recovered {
+                        show_fatal_dialog(
+                            mem_supervisor::OOM_GIVEUP_TITLE,
+                            mem_supervisor::OOM_GIVEUP_BODY,
+                        );
+                        break code;
+                    }
+                    log(&format!(
+                        "commit recovered — respawning srv (OOM restart {}/{})",
+                        srv_oom_restarts.len(),
+                        mem_supervisor::OOM_RESTART_BUDGET
+                    ));
+                } else {
+                    if mem_supervisor::budget_exhausted(
+                        &mut srv_restarts,
+                        std::time::Instant::now(),
+                        SRV_RESTART_WINDOW,
+                        SRV_RESTART_BUDGET,
+                    ) {
+                        log(&format!(
+                            "srv exited (code {}); srv restart budget exhausted ({} in {}s) — terminating launcher",
+                            code,
+                            SRV_RESTART_BUDGET,
+                            SRV_RESTART_WINDOW.as_secs()
+                        ));
+                        break 1;
+                    }
+                    log(&format!(
+                        "srv exited UNEXPECTEDLY (code {}) — respawning srv + recycling host (restart {}/{})",
+                        code,
+                        srv_restarts.len(),
+                        SRV_RESTART_BUDGET
+                    ));
                 }
-                log(&format!(
-                    "srv exited UNEXPECTEDLY (code {}) — respawning srv + recycling host (restart {}/{})",
-                    code,
-                    srv_restarts.len(),
-                    SRV_RESTART_BUDGET
-                ));
                 match srv_spawner::spawn_srv(
                     launcher_exe_dir,
                     &paths,
