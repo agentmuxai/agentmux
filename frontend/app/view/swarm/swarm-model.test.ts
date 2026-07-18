@@ -119,6 +119,24 @@ describe("buildDispatchChildren", () => {
         expect(loose).toHaveLength(1);
     });
 
+    it("falls back to a loose row for a workflow-kind subagent whose dispatch is missing from `dispatches` (stale/failed ListDispatches)", () => {
+        // `loadDispatches()` silently swallows RPC errors, so `dispatches`
+        // can lag or miss entries that `subagents` (a separate fetch)
+        // already has. A workflow member with no matching AgentDispatch row
+        // must degrade to a loose row, not vanish from the tree.
+        const dispatches = [mkDispatch({ dispatch_id: "wf_1", member_count: 1 })];
+        const subagents = [
+            mk({ agent_id: "a1", dispatch_id: "wf_1" }),
+            mk({ agent_id: "a2", dispatch_id: "wf_missing" }),
+        ];
+        const result = buildDispatchChildren(dispatches, subagents);
+        const groups = result.filter(isWorkflowDispatch);
+        const loose = result.filter((c) => !isWorkflowDispatch(c));
+        expect(groups).toHaveLength(1);
+        expect(loose).toHaveLength(1);
+        expect(childId(loose[0])).toBe("a2");
+    });
+
     it("passes AgentDispatch.status through directly — running → active, completed → retired", () => {
         const running = buildDispatchChildren(
             [mkDispatch({ dispatch_id: "wf_1", status: "running" })],

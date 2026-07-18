@@ -244,6 +244,14 @@ struct PendingDispatchActivity {
     spawned: Vec<PendingSpawn>,
     /// Members that finished since the last flush.
     completed: Vec<PendingCompletion>,
+    /// Most recent `AgentDispatch` snapshot since the last flush — coalesces
+    /// `dispatch:updated` the same way (reagent P1 on the coalescing PR: this
+    /// broadcast was still immediate-per-member-file via
+    /// `update_dispatch_membership`/`process_journal_change`, a third event
+    /// type undiminished by the original activity-only coalescing). Only the
+    /// latest snapshot matters — unlike spawned/completed, this is current
+    /// aggregate state, not a per-member event.
+    latest_info: Option<AgentDispatch>,
 }
 
 struct PendingSpawn {
@@ -266,6 +274,7 @@ impl PendingDispatchActivity {
             members: Vec::new(),
             spawned: Vec::new(),
             completed: Vec::new(),
+            latest_info: None,
         }
     }
 }
@@ -1346,6 +1355,10 @@ impl SubagentWatcher {
                     "subagent completed"
                 );
             }
+
+            if let Some(info) = &pending.latest_info {
+                self.broadcast_dispatch_updated(info);
+            }
         }
     }
 
@@ -1389,7 +1402,26 @@ impl SubagentWatcher {
             Self::refresh_dispatch_info(state);
             state.info.clone()
         };
-        self.broadcast_dispatch_updated(&info);
+        self.queue_dispatch_updated(workflow_id, parent_agent, parent_block_id, session_id, info);
+    }
+
+    /// Queue an `AgentDispatch` snapshot for the next coalesced flush instead
+    /// of broadcasting `dispatch:updated` immediately — every caller here is
+    /// a Workflow-kind dispatch (Solo dispatches broadcast directly via
+    /// `broadcast_dispatch_updated`, see `process_jsonl_change`'s solo path).
+    fn queue_dispatch_updated(
+        &self,
+        dispatch_id: &str,
+        parent_agent: &str,
+        parent_block_id: &str,
+        session_id: &str,
+        info: AgentDispatch,
+    ) {
+        let mut pending = self.pending_activity.lock().unwrap();
+        let entry = pending
+            .entry(dispatch_id.to_string())
+            .or_insert_with(|| PendingDispatchActivity::new(parent_agent, parent_block_id, session_id));
+        entry.latest_info = Some(info);
     }
 
     /// Process a changed workflow journal (subagents/workflows/<wf>/journal.jsonl):
@@ -1454,11 +1486,11 @@ impl SubagentWatcher {
             }
             state.info.clone()
         };
-        // Only broadcast when the counters actually moved — an offset-only
+        // Only queue when the counters actually moved — an offset-only
         // advance (non-started/result lines) has no observable effect on
         // AgentDispatch, so a broadcast would just be noise.
         if has_new_records {
-            self.broadcast_dispatch_updated(&info);
+            self.queue_dispatch_updated(&workflow_id, parent_agent, parent_block_id, &session_id, info);
         }
     }
 

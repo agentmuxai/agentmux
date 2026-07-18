@@ -197,7 +197,18 @@ export function buildDispatchChildren(
 
     const solo = subagents.filter((s) => s.dispatch_id.startsWith("solo:"));
 
-    const stillLoose: ActiveSubagent[] = [];
+    // Fallback for a failed/lagging `ListDispatches` call: `loadDispatches()`
+    // swallows RPC errors and leaves `dispatchesAtom` stale (see its call
+    // site), so `dispatches` here can lag or miss entries `subagents` (a
+    // separate fetch) already has. Without this, any workflow-kind subagent
+    // whose dispatch has no matching row in `workflowRows` would vanish from
+    // the tree entirely instead of degrading to an individual row.
+    const workflowDispatchIds = new Set(workflowRows.map((w) => w.dispatchId));
+    const orphanedWorkflowMembers = subagents.filter(
+        (s) => !s.dispatch_id.startsWith("solo:") && !workflowDispatchIds.has(s.dispatch_id)
+    );
+
+    const stillLoose: ActiveSubagent[] = [...orphanedWorkflowMembers];
     const byName = new Map<string, ActiveSubagent[]>();
     for (const s of solo) {
         if (s.display_name) {
