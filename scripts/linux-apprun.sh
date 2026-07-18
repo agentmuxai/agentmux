@@ -7,7 +7,7 @@
 #     CEF doesn't read WebKit env vars, has its own IME path
 #     (InputMethodAuralinux), and uses Ozone (not GDK) for Wayland/X11.
 #     Carrying them forward biased CEF toward stale Tauri-era behavior.
-#     Audit + rationale: docs/specs/linux-cef-flags-audit-2026-05-08.md.
+#     Audit + rationale: docs/specs/archive/linux-cef-flags-audit-2026-05-08.md.
 #
 #   - **Extract-once-cache (Phase 2 of cold-launch tax fix).** When the
 #     AppImage is launched for the first time, its SquashFS gets mounted

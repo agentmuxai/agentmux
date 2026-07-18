@@ -1140,7 +1140,7 @@ wrap_app! {
                 // renderer process serializes their JS event loops on a single
                 // thread, which manifests as hover/animation lag in the user-
                 // visible UI when pool windows are doing idle work. Removed
-                // 2026-05-09. See docs/specs/linux-cef-flags-audit-2026-05-08.md.
+                // 2026-05-09. See docs/specs/archive/linux-cef-flags-audit-2026-05-08.md.
             }
         }
 

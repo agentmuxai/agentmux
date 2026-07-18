@@ -1,3 +1,8 @@
+> **Archived 2026-07-17:** Resolved. The "thaw" fix proposed in §7a shipped the same
+> day as PR #1043 (PSReadLine cursor-desync thaw, still present in `termwrap.ts` as
+> `thawTimeoutId`/`thawRafId`), closing issue #1042. Kept for historical reference
+> only — do not treat as an open investigation.
+
 # Term-jumble: structured analysis after 8 failed fix attempts
 
 **Date:** 2026-05-25
