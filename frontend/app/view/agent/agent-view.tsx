@@ -504,6 +504,15 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 { type: "ReconcileTurnActive", at: Date.now(), active },
                 "system",
             );
+            // A real controllerstatus event for this pane is independent
+            // proof the CLI is alive and running turns — clear any stale
+            // "Retry Login" / auth notice left over from the mount-time
+            // gated launch flow's auth_failed classification. Otherwise
+            // the button can outlive the failure it was reporting: an
+            // agent recovers and starts answering messages through this
+            // same event stream, but nothing ever told useAgentControllerStatus
+            // its earlier canRetry=true was stale. Reported live 2026-07-18.
+            status.notifyControllerHealthy();
         },
     });
 
