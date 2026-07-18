@@ -24,18 +24,32 @@
 //! The classifier is pure and unit-tested; hysteresis prevents banner/log flap
 //! when commit oscillates around a threshold (the same anti-flap discipline the
 //! renderer spec's resume gate uses).
+//!
+//! Thresholds are **ratio-based** (free/total), not absolute MB — a prior
+//! version thresholded on absolute free MB, which on a large-commit-limit
+//! machine never fired until far past what the status bar's own ratio-based
+//! gauge (`SystemStats.tsx::commitColor`) already showed as red, so the
+//! shedding responses above engaged too late. See issue #2218.
 
 use std::sync::atomic::{AtomicU8, Ordering};
 
-/// Commit-free **enter** thresholds, in MB. Aligned with the spec's
-/// `WARN_FLOOR` (1 GB) and `RESUME_FLOOR` (512 MB) so the host's pressure view
-/// and the launcher's relaunch gate agree on what "low" means (SPEC §6).
-const WARN_ENTER_MB: u64 = 1024;
-const CRITICAL_ENTER_MB: u64 = 512;
-/// Hysteresis margin, in MB: to *leave* a pressure band, commit-free must
-/// recover this far past the enter threshold. Stops flap when commit hovers at
-/// a boundary.
-const HYSTERESIS_MB: u64 = 256;
+/// Commit-**free ratio** enter thresholds (free / total). Reagent-adjacent
+/// finding, `docs/retro/retro-commit-restart-reclaim-2026-07-16.md` §5.2: this
+/// classifier used to threshold on absolute free MB (1024 / 512), which on a
+/// large-commit-limit machine (60-80 GB seen live) never fires until far past
+/// the point the status bar already shows red — the frontend's gauge
+/// (`frontend/app/statusbar/SystemStats.tsx::commitColor`) has always been
+/// ratio-based (>95% used / >85% used). These are that same threshold,
+/// expressed as free-ratio (`1 - used/total`) so the two pipelines agree:
+/// used > 0.95 <=> free/total < 0.05, used > 0.85 <=> free/total < 0.15.
+const WARN_ENTER_FREE_RATIO: f64 = 0.15;
+const CRITICAL_ENTER_FREE_RATIO: f64 = 0.05;
+/// Hysteresis margin, in free-ratio points: to *leave* a pressure band,
+/// commit-free must recover this far past the enter threshold. Stops flap
+/// when commit hovers at a boundary — same role as the previous fixed-MB
+/// `HYSTERESIS_MB`, just expressed in ratio terms now that the thresholds
+/// themselves are ratios.
+const HYSTERESIS_RATIO: f64 = 0.03;
 
 /// Debounced system memory-pressure level. Ordered Normal < Warn < Critical.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -102,10 +116,12 @@ impl PressureTracker {
         self.level
     }
 
-    /// Feed a commit-free reading (MB). Returns `Some(level)` iff the debounced
-    /// level changed, and publishes the new level to `PRESSURE_LEVEL`.
-    pub fn observe(&mut self, commit_free_mb: u64) -> Option<PressureLevel> {
-        let next = classify(commit_free_mb, self.level);
+    /// Feed a commit-free/commit-total reading (MB). Returns `Some(level)` iff
+    /// the debounced level changed, and publishes the new level to
+    /// `PRESSURE_LEVEL`. `commit_total_mb == 0` (not yet sampled) is treated
+    /// as "unknown — stay Normal" rather than dividing by zero.
+    pub fn observe(&mut self, commit_free_mb: u64, commit_total_mb: u64) -> Option<PressureLevel> {
+        let next = classify(commit_free_mb, commit_total_mb, self.level);
         if next != self.level {
             self.level = next;
             PRESSURE_LEVEL.store(next as u8, Ordering::Relaxed);
@@ -117,32 +133,36 @@ impl PressureTracker {
 }
 
 /// Pure classifier with hysteresis: the *enter* thresholds are strict, but
-/// *leaving* a band requires recovering `HYSTERESIS_MB` past the enter
+/// *leaving* a band requires recovering `HYSTERESIS_RATIO` past the enter
 /// threshold, so a reading parked at a boundary doesn't oscillate.
-fn classify(free_mb: u64, current: PressureLevel) -> PressureLevel {
+fn classify(free_mb: u64, total_mb: u64, current: PressureLevel) -> PressureLevel {
+    if total_mb == 0 {
+        return PressureLevel::Normal;
+    }
+    let free_ratio = free_mb as f64 / total_mb as f64;
     match current {
         PressureLevel::Normal => {
-            if free_mb < CRITICAL_ENTER_MB {
+            if free_ratio < CRITICAL_ENTER_FREE_RATIO {
                 PressureLevel::Critical
-            } else if free_mb < WARN_ENTER_MB {
+            } else if free_ratio < WARN_ENTER_FREE_RATIO {
                 PressureLevel::Warn
             } else {
                 PressureLevel::Normal
             }
         }
         PressureLevel::Warn => {
-            if free_mb < CRITICAL_ENTER_MB {
+            if free_ratio < CRITICAL_ENTER_FREE_RATIO {
                 PressureLevel::Critical
-            } else if free_mb >= WARN_ENTER_MB + HYSTERESIS_MB {
+            } else if free_ratio >= WARN_ENTER_FREE_RATIO + HYSTERESIS_RATIO {
                 PressureLevel::Normal
             } else {
                 PressureLevel::Warn
             }
         }
         PressureLevel::Critical => {
-            if free_mb >= WARN_ENTER_MB + HYSTERESIS_MB {
+            if free_ratio >= WARN_ENTER_FREE_RATIO + HYSTERESIS_RATIO {
                 PressureLevel::Normal
-            } else if free_mb >= CRITICAL_ENTER_MB + HYSTERESIS_MB {
+            } else if free_ratio >= CRITICAL_ENTER_FREE_RATIO + HYSTERESIS_RATIO {
                 PressureLevel::Warn
             } else {
                 PressureLevel::Critical
@@ -155,55 +175,90 @@ fn classify(free_mb: u64, current: PressureLevel) -> PressureLevel {
 mod tests {
     use super::*;
 
+    /// Fixed total used across every test below so the free-MB values read
+    /// naturally as ratios (total = 10_000 MB, so e.g. free=1500 is exactly
+    /// the 0.15 WARN_ENTER_FREE_RATIO boundary).
+    const TOTAL: u64 = 10_000;
+
     #[test]
     fn starts_normal_and_classifies_each_band_from_normal() {
         let mut t = PressureTracker::new();
         assert_eq!(t.level(), PressureLevel::Normal);
-        // Ample headroom → no transition.
-        assert_eq!(t.observe(8192), None);
-        // Drop below WARN → Warn.
-        assert_eq!(t.observe(1000), Some(PressureLevel::Warn));
-        // Drop below CRITICAL → Critical.
-        assert_eq!(t.observe(400), Some(PressureLevel::Critical));
+        // Ample headroom (ratio 0.8) → no transition.
+        assert_eq!(t.observe(8000, TOTAL), None);
+        // Drop below WARN ratio (0.15) → Warn.
+        assert_eq!(t.observe(1000, TOTAL), Some(PressureLevel::Warn));
+        // Drop below CRITICAL ratio (0.05) → Critical.
+        assert_eq!(t.observe(400, TOTAL), Some(PressureLevel::Critical));
     }
 
     #[test]
     fn only_emits_on_change() {
         let mut t = PressureTracker::new();
-        assert_eq!(t.observe(1000), Some(PressureLevel::Warn));
+        assert_eq!(t.observe(1000, TOTAL), Some(PressureLevel::Warn));
         // Still in the Warn band → no repeat emission.
-        assert_eq!(t.observe(900), None);
-        assert_eq!(t.observe(1100), None); // below the warn-exit hysteresis ceiling
+        assert_eq!(t.observe(900, TOTAL), None);
+        assert_eq!(t.observe(1100, TOTAL), None); // below the warn-exit hysteresis ceiling
     }
 
     #[test]
     fn hysteresis_prevents_flap_at_the_warn_boundary() {
         let mut t = PressureTracker::new();
-        assert_eq!(t.observe(1000), Some(PressureLevel::Warn)); // enter Warn (<1024)
+        assert_eq!(t.observe(1499, TOTAL), Some(PressureLevel::Warn)); // enter Warn (ratio <0.15)
         // Hovering just above the enter threshold but below enter+hysteresis
-        // (1024..1280) must NOT leave Warn.
-        assert_eq!(t.observe(1024), None);
-        assert_eq!(t.observe(1279), None);
-        // Only at enter+hysteresis (1280) does it return to Normal.
-        assert_eq!(t.observe(1280), Some(PressureLevel::Normal));
+        // (ratio 0.15..0.18, free 1500..1799) must NOT leave Warn.
+        assert_eq!(t.observe(1500, TOTAL), None);
+        assert_eq!(t.observe(1799, TOTAL), None);
+        // Only at enter+hysteresis (ratio 0.18, free 1800) does it return to Normal.
+        assert_eq!(t.observe(1800, TOTAL), Some(PressureLevel::Normal));
     }
 
     #[test]
     fn critical_steps_down_through_warn_with_hysteresis() {
         let mut t = PressureTracker::new();
-        let _ = t.observe(400); // Normal → Critical
+        let _ = t.observe(400, TOTAL); // Normal → Critical (ratio 0.04)
         assert_eq!(t.level(), PressureLevel::Critical);
-        // Recover past CRITICAL_ENTER+HYST (768) but not WARN_ENTER+HYST (1280)
-        // → Warn.
-        assert_eq!(t.observe(800), Some(PressureLevel::Warn));
+        // Recover past CRITICAL_ENTER+HYST (ratio 0.08, free 800) but not
+        // WARN_ENTER+HYST (ratio 0.18, free 1800) → Warn.
+        assert_eq!(t.observe(800, TOTAL), Some(PressureLevel::Warn));
         // Recover fully → Normal.
-        assert_eq!(t.observe(1300), Some(PressureLevel::Normal));
+        assert_eq!(t.observe(1900, TOTAL), Some(PressureLevel::Normal));
     }
 
     #[test]
     fn normal_can_jump_straight_to_critical_and_back() {
         let mut t = PressureTracker::new();
-        assert_eq!(t.observe(100), Some(PressureLevel::Critical));
-        assert_eq!(t.observe(5000), Some(PressureLevel::Normal));
+        assert_eq!(t.observe(100, TOTAL), Some(PressureLevel::Critical));
+        assert_eq!(t.observe(5000, TOTAL), Some(PressureLevel::Normal));
+    }
+
+    #[test]
+    fn ratio_thresholds_match_frontend_commit_color() {
+        // frontend/app/statusbar/SystemStats.tsx::commitColor: used/total > 0.95
+        // -> red, > 0.85 -> amber. Expressed as free-ratio here: < 0.05 -> Critical,
+        // < 0.15 -> Warn. Locks the two independently-computed pipelines together
+        // so they can't silently drift apart again (the whole point of this fix).
+        let mut t = PressureTracker::new();
+        // Free ratio 0.1499 (< 0.15, i.e. used > 0.85) -> Warn.
+        assert_eq!(t.observe(1499, TOTAL), Some(PressureLevel::Warn));
+        // Free ratio 0.0499 (< 0.05, i.e. used > 0.95) -> Critical.
+        assert_eq!(t.observe(499, TOTAL), Some(PressureLevel::Critical));
+
+        // Exactly at the boundary (free ratio == 0.05, used == 0.95) must NOT
+        // be Critical -- commitColor uses a strict `>`, matched here by a
+        // strict `<` on the free-ratio classify condition.
+        let mut t2 = PressureTracker::new();
+        assert_eq!(t2.observe(500, TOTAL), Some(PressureLevel::Warn)); // ratio 0.05 -> not Critical, still < 0.15 -> Warn
+    }
+
+    #[test]
+    fn zero_total_does_not_panic_or_misclassify() {
+        let mut t = PressureTracker::new();
+        // Heartbeat hasn't sampled total yet -- must degrade to Normal, not
+        // divide by zero / panic.
+        assert_eq!(t.observe(0, 0), None);
+        assert_eq!(t.level(), PressureLevel::Normal);
+        assert_eq!(t.observe(100_000, 0), None);
+        assert_eq!(t.level(), PressureLevel::Normal);
     }
 }
