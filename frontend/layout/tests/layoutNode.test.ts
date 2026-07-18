@@ -299,3 +299,58 @@ test("findNextInsertLocation", () => {
     assert(insertLoc3.node.id === node3Inner4.id, "should insert into node3Inner4");
     assert(insertLoc3.index === 1, "should insert into index 1 of node3Inner4");
 });
+
+// Regression (2026-07-18): a minimized leaf/branch must never be a blind-
+// insert target. Before this fix, findNextInsertLocationHelper would
+// happily select a minimized leaf as the location to promote, and
+// addIntermediateNode left the leaf's `minimized` flag stranded on the new
+// branch (a leaf-only field, violating the layout doctor's I2) while the
+// intermediate child that inherited the leaf's original id silently lost
+// it — surfacing as "an expanded pane shows a Restore button" once the
+// (separately-tracked) minimizedNodeIds set kept the stale id.
+test("findNextInsertLocation skips a minimized leaf even when it would otherwise score first", () => {
+    // Root must be AT capacity (5 children, maxChildren=5) so it's excluded
+    // as a candidate itself (only `children.length < maxChildren` nodes
+    // qualify) — otherwise root always wins regardless of any leaf's
+    // minimize state, and the test would pass trivially without exercising
+    // the fix at all. With 5 same-depth leaf candidates all tied on score,
+    // the (stable) sort picks whichever was pushed first — the loop visits
+    // children in REVERSE order, so the LAST array element is pushed first
+    // and wins the tie. Put the minimized leaf there so, absent the fix,
+    // it's exactly the one that would otherwise be selected.
+    const leaves = ["a", "b", "c", "d", "minimized"].map((id) =>
+        newLayoutNode(FlexDirection.Row, undefined, undefined, { blockId: id })
+    );
+    const minimizedLeaf = leaves[4];
+    minimizedLeaf.minimized = true;
+    const root = newLayoutNode(FlexDirection.Row, undefined, leaves);
+
+    const insertLoc = findNextInsertLocation(root, 5);
+    assert(insertLoc.node !== undefined, "a valid unlocked candidate must still be found");
+    assert(insertLoc.node.id !== minimizedLeaf.id, "must never select the minimized leaf as the insert target");
+});
+
+test("findNextInsertLocation returns undefined when every candidate in the tree is minimized", () => {
+    const a = newLayoutNode(FlexDirection.Row, undefined, undefined, { blockId: "a" });
+    a.minimized = true;
+    const b = newLayoutNode(FlexDirection.Row, undefined, undefined, { blockId: "b" });
+    b.minimized = true;
+    const root = newLayoutNode(FlexDirection.Row, undefined, [a, b]);
+
+    const insertLoc = findNextInsertLocation(root, 5);
+    assert(insertLoc.node === undefined, "no valid unlocked location exists");
+});
+
+test("addIntermediateNode moves a leaf's minimized flag onto the intermediate child, not the new branch", () => {
+    // Direct unit test of the defense-in-depth fix — callers (insertNode)
+    // are expected to guard against reaching this at all, but if they
+    // don't, the invariant must still hold: `minimized` is leaf-only.
+    const leaf = newLayoutNode(FlexDirection.Row, undefined, undefined, { blockId: "block" });
+    leaf.minimized = true;
+
+    const intermediate = addIntermediateNode(leaf);
+
+    assert(leaf.minimized === undefined, "the promoted node is now a branch — minimized must not stay on it");
+    assert(intermediate.minimized === true, "the intermediate child holding the original data must carry the flag");
+    assert(intermediate.data?.blockId === "block", "the intermediate child holds the original leaf's data");
+});

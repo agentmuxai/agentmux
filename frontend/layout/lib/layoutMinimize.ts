@@ -25,20 +25,34 @@ export { isNodeLocked, isEffectivelyMinimized };
  *
  * A minimized pane is a leaf with `minimized: true` — nothing else. Its stored
  * flex `size` is NEVER touched: the renderer (`updateTreeHelper`) derives the
- * header-chip geometry fresh on every pass (header height in a Column parent,
- * a fixed-width chip in a Row parent, and a fully-minimized subtree renders as
- * a stacked strip of chips). Restore is just clearing the flag — the pane's
- * original size is intact by construction, because it never changed.
+ * header-chip geometry fresh on every pass. Restore is just clearing the
+ * flag — the pane's original size is intact by construction, because it
+ * never changed.
  *
  * This replaces the previous size-arithmetic model (squeeze `size` to header
  * height + `minimizedSize` restore bookkeeping + "slip" and "column dissolve"
- * structural surgery), which produced four distinct bug classes in two weeks
- * (see `docs/research/RESEARCH_PANE_MINIMIZE_BEST_PRACTICES_2026_07_16.md` §2).
- * The research verdict: every mature system models collapse as either
- * out-of-tree docking or a render-derived display mode (i3 stacked/tabbed,
- * maximize toggles); none stores squeezed sizes in the layout tree. Derived
+ * as STRUCTURAL TREE SURGERY), which produced four distinct bug classes in
+ * two weeks (see `docs/research/RESEARCH_PANE_MINIMIZE_BEST_PRACTICES_2026_07_16.md`
+ * §2). The research verdict: every mature system models collapse as either
+ * out-of-tree docking or a render-derived display mode; none stores squeezed
+ * sizes in the layout tree or splices nodes around to achieve it. Derived
  * state cannot drift, so this model needs no size locks, no snap-back
  * enforcement, and no restore arithmetic.
+ *
+ * The VISUAL slip/dissolve requirement itself — a minimized pane's header
+ * docks onto an adjacent pane, which absorbs its freed space — is a real,
+ * deliberately spec'd product requirement
+ * (`SPEC_PANE_MINIMIZE_REFINEMENTS_2026_06_24.md`,
+ * `SPEC_PANE_MINIMIZE_COLUMN_DISSOLVE_2026_06_27.md`) that the first cut of
+ * this redesign incorrectly deleted along with the buggy mechanism that used
+ * to implement it — see
+ * `docs/retro/retro-minimize-display-mode-lost-slip-requirement-2026-07-17.md`.
+ * It's restored here as pure derived geometry: `layoutGeometry.ts`'s
+ * `resolveRowSlipTargets` + the docking pass in `updateTreeHelper` compute,
+ * every render, which minimized Row-direction children should render as a
+ * header-chip stack overlaid on a sibling instead of claiming their own
+ * row-slot — no tree mutation, no restore-context bookkeeping, nothing for
+ * it to corrupt.
  *
  * Legacy trees (with `minimizedSize`/`slipMinimize`/`columnDissolve`/
  * `minimizedLockedSize`/`_slipAnchor`) are migrated in place by
@@ -98,17 +112,14 @@ export function minimizeNodeToggle(model: LayoutModel, nodeId: string) {
     _finishToggle(model, nodeId, true);
 }
 
-/** Commit tree changes and update the minimized-node-id reactive set. */
+/**
+ * Commit tree changes. `model.updateTree()` rebuilds `minimizedNodeIds`
+ * fresh from the (already-toggled) `node.minimized` flags as part of its own
+ * pass — see `layoutGeometry.ts::updateTree` — so there is nothing to set
+ * here directly; this function only exists for the doctor-report /
+ * persistence side effects around that call.
+ */
 function _finishToggle(model: LayoutModel, nodeId: string, minimized: boolean) {
-    model.minimizedNodeIds._set((prev) => {
-        const next = new Set(prev);
-        if (minimized) {
-            next.add(nodeId);
-        } else {
-            next.delete(nodeId);
-        }
-        return next;
-    });
     model.updateTree();
     // Layout doctor (issue #2179): validate immediately with toggle attribution.
     reportLayoutViolations(
@@ -121,8 +132,11 @@ function _finishToggle(model: LayoutModel, nodeId: string, minimized: boolean) {
 
 /**
  * Scan the loaded tree, migrate any legacy minimize state to the display-mode
- * flag, and rebuild the in-memory `minimizedNodeIds` set. Called once during
- * `initializeFromWaveObject`.
+ * flag, and seed the in-memory `minimizedNodeIds` set for the initial paint
+ * (the first `updateTree()` pass — see `layoutGeometry.ts::updateTree` —
+ * rebuilds it authoritatively moments later regardless; this just avoids a
+ * flash of wrong button state before that first pass runs). Called once
+ * during `initializeFromWaveObject`.
  *
  * Migration rules (one-way, in place):
  * - `minimizedSize` (leaf was size-squeezed): restore `size` to the recorded

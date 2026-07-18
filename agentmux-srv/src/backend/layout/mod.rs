@@ -476,6 +476,18 @@ fn collect_insert_candidates<'a>(
     depth: usize,
     out: &mut Vec<InsertCandidate<'a>>,
 ) {
+    // Minimized is a locked state: never a blind-insert target. Without
+    // this, `ensure_group_node` promoting a minimized leaf into a branch
+    // could leave the tree in a state where an agent/API-driven insert
+    // silently un-collapses a fully-minimized subtree (every child
+    // minimized → one child isn't anymore, with no user action on that
+    // branch at all). Mirrors `findNextInsertLocationHelper`'s guard in
+    // `frontend/layout/lib/layoutNode.ts` (2026-07-18). For a branch this
+    // also skips recursing into its children — they're all effectively
+    // minimized too by definition, so recursion would find nothing anyway.
+    if is_effectively_minimized(node) {
+        return;
+    }
     // Leaf node (has data but no children) — TS returns index 1.
     if node.data.is_some() && node.children.is_empty() {
         out.push(InsertCandidate { node, index: 1, depth });
@@ -501,7 +513,18 @@ fn collect_insert_candidates<'a>(
 /// is a leaf, it is promoted to a group first via `ensure_group_node`.
 /// Mirrors `insertNode` / `addChildAt` in `frontend/layout/lib/layoutTree.ts`.
 pub fn insert_node(root: &mut LayoutNode, node: LayoutNode) {
-    let loc_id = find_next_insert_location(root, DEFAULT_MAX_CHILDREN).0.id.clone();
+    let loc = find_next_insert_location(root, DEFAULT_MAX_CHILDREN);
+    // `collect_insert_candidates` already excludes locked candidates; this
+    // only fires in the degenerate fallback case where every node in the
+    // tree is locked (the `.unwrap_or((tree, ...))` root fallback).
+    if is_effectively_minimized(loc.0) {
+        tracing::warn!(
+            node_id = %loc.0.id,
+            "insert_node: no unlocked insert location available, dropping"
+        );
+        return;
+    }
+    let loc_id = loc.0.id.clone();
     if let Some(target) = find_node_by_id_mut(root, &loc_id) {
         ensure_group_node(target);
         target.children.push(node);
