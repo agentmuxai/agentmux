@@ -2,8 +2,8 @@
 
 **Status:** Research report + standard proposal — no implementation yet.
 **Author:** Agent3
-**Method:** Two deep-research harness passes + a code-level inventory of the
-Armory's actual schemas on `main` @ `e6ec3c42`.
+**Method:** Three deep-research harness passes + a code-level inventory of
+the Armory's actual schemas on `main` @ `e6ec3c42`.
 - **Pass 1** (5 search angles, 18 sources fetched) was cut short by an org
   spend limit partway through adversarial verification. Its claims are marked
   **[fetched]**: extracted from primary sources with supporting quotes, but
@@ -12,15 +12,27 @@ Armory's actual schemas on `main` @ `e6ec3c42`.
   claims extracted → 25 sent to 3-vote adversarial verification → 19
   confirmed / 6 refuted / 0 unverified, 95 agent calls total, zero errors)
   completed cleanly end-to-end, including synthesis. Its claims are marked
-  **[verified: N-M]** with the vote tally. Pass 2's own scope decomposition
-  was narrower than Pass 1's (3 angles vs 5) and its synthesis explicitly
-  flags AGENTS.md, A2A, LangChain Hub, OCI/Docker MCP Catalog, and emerging
-  manifest efforts (APM, AFPS) as **"unresearched this round, not ruled
-  out"** — i.e. absent from Pass 2 because it didn't route search queries
-  there, not because they were investigated and found irrelevant. Where Pass
-  2 refuted a claim Pass 1 had asserted, the correction is applied below and
-  called out explicitly.
-No claim below is from model memory alone.
+  **[verified: N-M]** with the vote tally. Its own scope decomposition was
+  narrower than Pass 1's (3 angles vs 5) and its synthesis explicitly flagged
+  AGENTS.md, A2A, LangChain Hub, OCI/Docker MCP Catalog, and emerging
+  manifest efforts (APM, AFPS) as unresearched-that-round.
+- **Pass 3** (targeted follow-up aimed directly at Pass 2's open questions;
+  6 search angles, 28 sources, 123 claims extracted → 25 verified → 22
+  confirmed / 3 refuted / 0 unverified, 111 agent calls, zero errors) resolved
+  four of the nine open items with high confidence — AGENTS.md governance/
+  scope, A2A Agent Cards, LangChain's new Context Hub, and OCI-artifact
+  distribution (Docker MCP Catalog, cagent, KitOps ModelKit) — all now
+  **[verified: N-M]**. The other five open questions (Microsoft APM,
+  Appstrate AFPS, whether Claude Code plugins bundle CLAUDE.md-style memory,
+  the skills.json-vs-SEP-2640 status, and any emerging cross-provider identity
+  standard) came back with **zero surviving claims** despite being the
+  explicit target — the search didn't route to sources on them this round,
+  for reasons the harness can't distinguish from "nothing there to find."
+  These five remain at Pass 1's **[fetched]**-tier status; a further
+  automated pass on the same five is unlikely to help and they're flagged
+  for manual/targeted verification if precision on them becomes load-bearing.
+Where a later pass refuted an earlier claim, the correction is applied below
+and called out explicitly. No claim below is from model memory alone.
 **Related:** `specs/SPEC_V1_MCP_SKILLS_PRIMITIVES_2026_06_30.md`,
 `docs/specs/SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md`,
 `docs/specs/archive/SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md`.
@@ -49,24 +61,35 @@ closest, and what should AgentMux adopt?
 
 **No standard — formal or de facto — bundles all four categories
 (instructions/memory, MCP configs, skills, credential references) as of
-mid-2026.** Confirmed independently by two research passes (the second
-completing full end-to-end adversarial verification: 19 confirmed / 6
-refuted / 0 unverified claims, 0 agent errors). What exists instead is a
-*layered* landscape: strong per-category standards for two of the four
-(skills — Agent Skills/SKILL.md, vendor-neutrally governed; MCP server
-description — `server.json`/`mcpServers`, though the registry itself is
-still pre-GA), a foundation-governed convention for a third (instructions —
-AGENTS.md, not independently re-verified in Pass 2), a **universal,
-deliberate refusal to package the fourth (credentials)** across every format
-examined in either pass — confirmed again in Pass 2 as the single strongest,
-most consistent finding — and a handful of young multi-category composition
-efforts, of which **Claude Code Plugins is the most fully verified and the
+mid-2026.** Confirmed independently by three research passes (the second and
+third both completing full end-to-end adversarial verification: 19+22=41
+confirmed / 6+3=9 refuted / 0 unverified claims across both, 0 agent errors
+in either). What exists instead is a *layered* landscape, now verified in
+detail across every category but one: strong, vendor-neutrally-governed
+per-category standards for **skills** (Agent Skills/SKILL.md), **MCP server
+description** (`server.json`/`mcpServers`, registry still pre-GA), and
+**instruction location/precedence** (AGENTS.md, now confirmed genuinely
+foundation-governed via the Agentic AI Foundation, not an OpenAI convention);
+a confirmed, **universal, deliberate refusal to package the fourth
+(credentials)** across every format examined in all three passes — the
+single most consistently reinforced finding of the whole effort, now backed
+by A2A Agent Cards, Docker's MCP Toolkit, and cagent in addition to the
+formats found in Pass 1; a real, maturing **OCI-artifact distribution
+substrate** (Docker MCP Catalog, cagent, KitOps ModelKit — all confirmed in
+detail in Pass 3); and a genuinely-expanded LangChain **Context Hub** now
+composing instructions + tools. Of the young multi-category composition
+efforts, **Claude Code Plugins remains the most fully verified and the
 closest to bundling multiple categories** (skills + MCP + hooks, with a
-real, size-capped credential mechanism; whether it bundles memory/
-instructions is explicitly unresolved, not settled). The strategic
-conclusion is unchanged and now more strongly evidenced: **adopt the
-per-category standards where they exist, and standardize only the
-composition layer + credential-reference schema ourselves** — which happens
+real, size-capped credential mechanism) — but whether it bundles
+memory/instructions is the report's single most-attempted,
+least-resolved question: three verification attempts across two passes
+(Pass 2's re-check, Pass 3's dedicated targeting) have failed to settle it
+either way. Microsoft APM and Appstrate AFPS remain unverified after two
+dedicated attempts each — real per Pass 1's sourcing, but not independently
+re-confirmed. The strategic conclusion is unchanged and now substantially
+more strongly evidenced: **adopt the per-category standards where they
+exist, and standardize only the composition layer + credential-reference
+schema ourselves** — which happens
 to be exactly the two things the Armory already does in proprietary form,
 and exactly the two things the entire research effort found nobody else has
 solved either.
@@ -145,8 +168,11 @@ solved either.
     (`modelcontextprotocol/registry` discussion #895, Jan 2026) proposes
     extending the Official MCP Registry with a `skills.json` schema modeled
     directly on `server.json` — but this competes with an alternative
-    **"Skills over MCP" (SEP-2640)** working-group track, and neither has
-    resolved as of mid-2026.
+    **"Skills over MCP" (SEP-2640)** working-group track. Status as of the
+    discussion's own last update: neither resolved. A dedicated Pass-3
+    attempt to get a current status update on this specific question came
+    back with **zero surviving claims** — check the live GitHub discussion
+    directly for the current state rather than trusting a timestamp here.
 - **Armory position:** `db_mcp_servers.config` already merges into standard
   `mcpServers` — this category is the closest to aligned. Adding
   `server.json` import (and its `isSecret` env declarations mapped onto
@@ -154,24 +180,34 @@ solved either.
 
 ### 3c. Instructions/memory — a convention, not a schema: AGENTS.md
 
-*(Pass 2's re-run did not route search queries to this angle and explicitly
-flags AGENTS.md as "unresearched this round, not ruled out" — the following
-remains Pass 1's [fetched]-tier findings, unconfirmed by adversarial vote but
-not contradicted either.)*
+*(Pass 3 confirmed this section with 3-0 adversarial votes across the board —
+upgraded from Pass 1's [fetched] tier.)*
 
-- **[fetched]** AGENTS.md is stewarded by the Agentic AI Foundation under the
-  Linux Foundation (originated with OpenAI, Amp, Google Jules, Cursor,
-  Factory); 60k+ repos and 20+ native tools as of May 2026. It standardizes
-  *location and precedence* (nearest-file-wins, nested scoping), **not
-  structure** — plain Markdown, no schema, no frontmatter.
-- **[fetched]** It explicitly excludes the other categories (no credentials
-  ever; MCP is "a separate layer"; SKILL.md is "Anthropic's separate spec").
-  Claude Code notably still reads CLAUDE.md, with `@AGENTS.md` referencing as
-  the interop workaround; Codex caps the file at 32 KiB.
-- **[fetched]** Letta's `.af` (Agent File) is the only found format that
-  serializes memory + tools together (system prompt, editable memory blocks,
-  tool code, model settings) — but it strips secrets to `null` on export, has
-  MCP support only on its roadmap, and adoption is effectively single-vendor.
+- **[verified: 3-0]** AGENTS.md is genuinely stewarded by the **Agentic AI
+  Foundation (AAIF)**, a directed fund under the Linux Foundation formed
+  2025-12-09. AAIF's three founding project contributions are MCP
+  (Anthropic), goose (Block), and AGENTS.md (OpenAI); its Governing Board
+  includes OpenAI, Anthropic, Block, Google, Microsoft, AWS, Bloomberg, and
+  Cloudflare — genuinely vendor-neutral, not an OpenAI convention with a
+  foundation badge stapled on. (Corrects Pass 1's vaguer "originated with
+  OpenAI, Amp, Google Jules, Cursor, Factory" framing.)
+- **[verified: 3-0]** Adoption: "more than 60,000 open source projects and
+  agent frameworks" per the Linux Foundation's and OpenAI's own announcement
+  text (as of the Dec 2025 AAIF launch), naming Amp, Codex, Cursor, Devin,
+  Factory, Gemini CLI, GitHub Copilot, Jules, and VS Code among adopters. A
+  more specific "24+ native tools" framing was **refuted (1-2)** — don't cite
+  an exact native-tool count beyond the ~9 named above.
+- **[verified: 3-0]** The spec standardizes *only* file location/precedence
+  — "just standard Markdown... no required fields or mandatory structure,"
+  nearest-file-wins with explicit user prompts overriding everything — and
+  addresses **no** memory-management, credential, MCP-config, or skills
+  schema anywhere in the spec. A frontmatter/schema proposal remains
+  open/unmerged as of mid-2026.
+- **[fetched, still unverified]** Letta's `.af` (Agent File) is the only
+  found format that serializes memory + tools together (system prompt,
+  editable memory blocks, tool code, model settings) — but it strips secrets
+  to `null` on export, has MCP support only on its roadmap, and adoption is
+  effectively single-vendor.
 - **Armory position:** `db_bundles.instructions` + `context_files` are
   functionally "portable AGENTS.md fragments + attachments" — near-alignable.
 
@@ -190,8 +226,25 @@ pattern AgentMux already implements (`SecretRef` pointers):
   decoupled from the artifact. (Status: implemented — spec issue #219.)
 - **[fetched]** Claude Code plugins: `userConfig` prompts per-user at enable
   time; sensitive values go to the OS keychain, never the bundle. MCPB: same
-  pattern. A2A Agent Cards: declare *auth schemes* only, recommend
-  out-of-band dynamic credentials.
+  pattern.
+- **[verified: 3-0]** A2A Agent Cards: confirmed as a discovery/metadata
+  document only — "Agents MUST NOT embed secrets or sensitive information in
+  the public Agent Card." The spec defines five discriminated
+  `securityScheme` types (API key, HTTP auth, OAuth2, OIDC, mTLS), all
+  mechanism metadata (header names, OAuth2 flow endpoints, OIDC discovery
+  URL) — never a secret value. A competing claim that this was still an
+  unfinished roadmap item was explicitly **refuted (0-3)**: auth-scheme
+  declaration is finished, current spec, not planned.
+- **[verified: 3-0]** The Docker ecosystem (MCP Toolkit, cagent) confirms the
+  same pattern at OCI-artifact scale: the MCP Toolkit manages OAuth via
+  browser-based authorization into a platform secret store ("You don't need
+  to manually create API tokens... credentials aren't included in shared
+  profiles"); cagent routes secrets through env files / a planned 1Password
+  integration / Docker Desktop's MCP Gateway secret engine at runtime, and
+  implements redaction hooks to strip secrets before an agent is shared as
+  an artifact. No verified source confirms the same explicitly for KitOps
+  ModelKit specifically — treat that one as inferred from its documented
+  contents, not directly sourced.
 - **Armory position:** ahead of the field — `db_accounts.secret_ref` is
   already a typed reference system. What no one standardizes (and we can) is
   the **declaration** format: "this bundle requires a `github` account with
@@ -199,82 +252,121 @@ pattern AgentMux already implements (`SecretRef` pointers):
 
 ### 3e. Multi-category composition — the frontier, and it's young
 
-- **[fetched, Pass 2 flags unresearched-not-ruled-out]** **Microsoft APM**
+- **[fetched — unresearched after TWO targeted passes]** **Microsoft APM**
   ("dependency manager for AI agents", ~3.3k stars, v0.25.0 released
   2026-07-12): one `apm.yml` manifest + lockfile declaring instructions,
   skills, prompts, agents, hooks, plugins, and MCP servers — explicitly
   *composing* AGENTS.md + Agent Skills + MCP rather than inventing formats;
   installs MCP servers by registry reverse-DNS id and deploys cross-client
   (Copilot, Claude, Cursor, Codex, Gemini, Windsurf…). **Covers 3 of 4
-  categories — no credentials/identity story.**
-- **[verified: multiple 3-0]** **Claude Code plugins** are the strongest
-  finding of Pass 2 and, across both passes, **the closest existing artifact
-  to a standard bundling multiple Armory categories together**: a
-  `.claude-plugin/plugin.json` manifest packages namespaced SKILL.md folders
-  (`plugin-name:skill-name`), subagents, hooks, and MCP (plus LSP) server
-  configs (via standard `.mcp.json` at plugin root or inline) into one
-  installable, versioned unit with **real dependency management** — semver
-  constraints, transitive install/enable, pruning, release tagging —
-  analogous to a traditional package manager. Confirmed via direct fetch of
-  Anthropic's own docs (code.claude.com/docs/en/plugins-reference): manifest
-  fields, component directories (`skills/`, `agents/`, `hooks/hooks.json`,
-  `.mcp.json`, `.lsp.json`, `scripts/`), namespacing, and the dependency-array
-  schema all verbatim-match the primary source.
+  categories — no credentials/identity story.** Pass 3 targeted this
+  explicitly and found **zero verifiable sources** this round — not
+  contradicted, just not surfaced twice now. Treat as Pass-1-tier only;
+  verify directly (the project's own repo/README) before relying on the
+  specific numbers here.
+- **[verified: multiple 3-0]** **Claude Code plugins** remain **the closest
+  existing artifact to a standard bundling multiple Armory categories
+  together**: a `.claude-plugin/plugin.json` manifest packages namespaced
+  SKILL.md folders (`plugin-name:skill-name`), subagents, hooks, and MCP
+  (plus LSP) server configs (via standard `.mcp.json` at plugin root or
+  inline) into one installable, versioned unit with **real dependency
+  management** — semver constraints, transitive install/enable, pruning,
+  release tagging — analogous to a traditional package manager. Confirmed
+  via direct fetch of Anthropic's own docs
+  (code.claude.com/docs/en/plugins-reference): manifest fields, component
+  directories (`skills/`, `agents/`, `hooks/hooks.json`, `.mcp.json`,
+  `.lsp.json`, `scripts/`), namespacing, and the dependency-array schema all
+  verbatim-match the primary source.
   - Credentials: a limited but real mechanism — `userConfig` entries flagged
     `sensitive:true` route to the OS keychain or a local credentials file,
     capped at **~2KB total, shared with OAuth tokens**. Proprietary to Claude
     Code, not a cross-provider identity standard, but notably more than any
     other format examined offers.
-  - Memory/instructions: **genuinely contested, not resolved either way.**
-    Pass 1 asserted plugins explicitly ignore `CLAUDE.md` at the plugin root;
-    Pass 2's adversarial re-check of that exact claim came back **refuted
-    (1-2 vote)**. Do not cite either position as settled — this is an open
-    question, not a confirmed gap, and needs a dedicated fresh verification
-    pass before AgentMux's design leans on it either way (see §7 open
-    questions).
+  - Memory/instructions: **still genuinely unresolved after two dedicated
+    verification attempts.** Pass 1 asserted plugins explicitly ignore
+    `CLAUDE.md` at the plugin root; Pass 2's adversarial re-check of that
+    exact claim came back refuted (1-2). Pass 3 was tasked specifically with
+    resolving this definitively by fetching Anthropic's own plugin docs and
+    checking exactly what happens to a root-level `CLAUDE.md` — and came back
+    with **zero surviving claims** on the question. This is now the report's
+    single most-attempted-and-least-resolved open item; a manual check of
+    the live Anthropic docs (not another automated pass) is the efficient
+    next step if this needs to be load-bearing for AgentMux's design.
   - The manifest tolerates foreign top-level fields — Claude Code ignores
     what it doesn't recognize — so one `plugin.json` can double as a VS
     Code/Cursor extension manifest, npm `package.json`, or MCPB manifest.
     That interoperability-by-tolerance is itself evidence no unified
     cross-tool standard exists; formats are being overlaid on shared files
     instead.
-- **[verified, medium confidence — inferential]** Across every spec/format
-  examined in Pass 2 (Agent Skills, MCP Registry/MCPB, mpak, Claude Code
-  plugins), **identity/credential management is the least standardized of
-  the four Armory categories**: it appears only as ad hoc, tool-local
-  mechanisms — OS keychain or local credentials file (plugins), OIDC
-  publisher auth (mpak) — never as a portable, cross-provider "agent
-  account/identity" object. No surviving claim in either research pass
-  identified any format that bundles memory + MCP config + skills + identity
-  together as first-class components of one artifact. This directly
-  reinforces §3d and is the strongest single conclusion of the whole
-  research effort.
-*(The remaining items in this subsection — AFPS, the OCI-artifact prior art,
-LangChain Hub, and A2A — are Pass 1 [fetched]-tier only; Pass 2 explicitly
-flags them as unresearched-this-round, not ruled out.)*
-
-- **[fetched]** **Appstrate AFPS v2.0**: the only spec found that attempts
-  credentials — one archive declaring agent + skills + MCP servers +
-  integrations, with OAuth/OIDC discovery metadata and credential *delivery*
-  schemas (env/http/files). Skills are a declared strict superset of Agent
-  Skills. But: **no memory/instruction category, and zero adoption** ("None
-  yet" under implementations) — a candidate spec, not a standard.
-- **[fetched]** Distribution prior art converges on **OCI artifacts**: Dev
-  Container Features (tgz layers, custom media types, full metadata as a
-  manifest annotation for registry-side indexing, semver with immutable
-  republish refusal, collection index files) is the most complete blueprint;
-  Docker cagent (agent YAML as OCI artifact, instruction files inlined before
-  push), KitOps ModelKits (CNCF-adjacent, explicitly lists "prompts, agent
-  skill files, MCP server configurations" as packageable, model optional),
-  and Docker's enterprise-catalog guidance (catalogs as immutable OCI
-  artifacts; Cosign signing; per-team "profiles" as artifacts; prod pins
-  v2.3 while QA runs v2.4) all reuse the container supply chain — signing,
-  scanning, access control — instead of inventing registries.
-- **[fetched]** LangChain Hub: prompts only, git-like immutable commit
-  hashes + mutable `staging`/`production` tags — a useful versioning/promotion
-  pattern, not a bundle standard. A2A (Linux Foundation, v1.0): discovery
-  metadata (`/.well-known/agent-card.json`, RFC 8615), explicitly no registry
-  API, no packaging.
+- **[verified: 3-0]** **LangChain's hub concept has genuinely expanded
+  beyond prompts-only.** The new **LangSmith Context Hub** (launched
+  2026-05-13) supersedes the old prompt-template-only LangChain Hub: "a
+  context is a versioned bundle of agent instructions and tools, either a
+  skill or a full agent, that you manage in LangSmith and promote to an
+  environment," and "an Agent context is a full agent bundle including an
+  AGENTS.md file and tools." This is a real, dated correction to Pass 1's
+  "prompts only" framing — LangChain is now composing instructions + tools
+  (two of the four Armory categories) under one versioned, promotable unit,
+  though still no credential or MCP-specific story confirmed. The git-like
+  immutable-commit-hash + mutable `staging`/`production`-tag versioning
+  pattern from the legacy Hub is a real precedent worth borrowing regardless.
+- **[verified: 3-0]** **A2A (Agent2Agent) protocol**: genuinely a Linux
+  Foundation open-source project (contributed by Google), now at stable
+  v1.0.1 (2026-05-28, following v1.0.0 on 2026-03-12), governed by a
+  Technical Steering Committee including AWS, Cisco, Google, IBM Research,
+  Microsoft, Salesforce, SAP, and ServiceNow. Agent Cards remain
+  discovery/metadata only, not a packaging format — see §3d for the
+  credential-scheme-only confirmation.
+- **[verified: 3-0]** **OCI-artifact distribution is real and maturing**,
+  confirmed in detail (correcting/upgrading Pass 1's [fetched] framing):
+  - **Docker MCP Catalog**: 300+ servers, packaged as Docker images
+    distributed via Docker Hub, each running as an isolated container.
+    Docker-built (`mcp/`-namespaced) images are digitally signed with full
+    provenance + SBOM metadata for transparency — this signing/SBOM claim
+    had a non-unanimous 2-1 vote, so treat as medium- not high-confidence,
+    and note it's scoped to Docker-built/local servers, not necessarily
+    third-party/remote partner ones.
+  - **Docker cagent**: an open-source CLI whose agent configs are
+    distributed/versioned as OCI artifacts via standard registries (`cagent
+    push`, `cagent run docker.io/...`) — confirmed with an exact working
+    command from Docker's own blog. Credentials are consistently kept
+    external (env files, planned 1Password integration, the MCP Gateway's
+    secret engine); cagent has redaction hooks that strip secrets before an
+    agent is shared.
+  - **KitOps ModelKit**: confirmed verbatim as bundling "models, datasets,
+    code, prompts, agent skill files, MCP server configurations, and
+    documentation" in one OCI-compliant artifact, with a model **genuinely
+    optional** — documented example kits contain only prompts+skills, or
+    only an MCP server + its config. No source directly confirms credential
+    exclusion for ModelKit specifically (inferred from its documented
+    contents, not sourced) — the one sub-claim in this cluster that remains
+    only partially verified.
+  - Dev Container Features (tgz layers, custom media types, metadata-as-
+    manifest-annotation, semver immutable-republish-refusal) and Docker's
+    per-team "profiles as pinned artifacts" enterprise guidance remain
+    **[fetched]**-tier — not re-targeted by Pass 3, still Pass-1-only.
+- **[verified, medium confidence — inferential, reinforced across all three
+  passes]** Across every spec/format examined — Agent Skills, MCP
+  Registry/MCPB, mpak, Claude Code plugins, A2A Agent Cards, Docker MCP
+  Toolkit, cagent — **identity/credential management is the least
+  standardized of the four Armory categories**: it appears only as ad hoc,
+  tool-local mechanisms (OS keychain, local credentials file, OIDC publisher
+  auth, browser-based OAuth into a platform secret store) never as a
+  portable, cross-provider "agent account/identity" object. No surviving
+  claim across any of the three passes identified a format that bundles
+  memory + MCP config + skills + identity together as first-class
+  components of one artifact. This is the strongest, most consistently
+  reinforced single conclusion of the entire research effort.
+- **[fetched — unresearched after TWO targeted passes]** **Appstrate AFPS
+  v2.0**: the only spec found (Pass 1 only) that attempts credentials — one
+  archive declaring agent + skills + MCP servers + integrations, with
+  OAuth/OIDC discovery metadata and credential *delivery* schemas
+  (env/http/files); skills declared a strict superset of Agent Skills; **no
+  memory/instruction category, and claimed zero adoption**. Pass 3 targeted
+  this explicitly (does it exist as described? real implementations vs.
+  "zero adoption"?) and came back with zero surviving claims. Verify
+  directly against the project's own spec repo before citing its adoption
+  status either way.
 
 ## 4. Gap analysis: Armory vs the landscape
 
@@ -421,56 +513,67 @@ contribution) before minting anything as "1.0".
 
 ## 7. Verification caveats and open questions
 
-**What's now fully verified (Pass 2, completed clean — 95/95 agent calls, 0
-errors, 19/25 claims confirmed by 3-vote adversarial check, 0 left
-unverified):** the Agent Skills spec's scope and governance move to
-agentskills.io; the MCP Registry's pre-GA status and the unmerged draft
-status of its `.well-known` discovery SEPs; the existence and scope of the
-`mpak` skills+MCP convergence registry and the competing `skills.json`-vs-
-`SEP-2640` proposals; Claude Code Plugins' manifest/dependency/credential
-mechanics; and — the report's central conclusion — that credential/identity
-management is the least standardized category everywhere, with no format
-bundling all four categories as first-class components.
+**What's now fully verified, across Pass 2 and Pass 3 (both completed
+clean — 95/95 then 111/111 agent calls, 0 errors either time, 41 total
+claims confirmed by 3-vote adversarial check across the two, 0 left
+unverified):**
+- Agent Skills' scope and governance move to agentskills.io (Pass 2).
+- The MCP Registry's pre-GA status and the unmerged draft status of its
+  `.well-known` discovery SEPs; the `mpak` skills+MCP convergence registry
+  (Pass 2).
+- Claude Code Plugins' manifest/dependency/credential mechanics (Pass 2,
+  reinforced in Pass 3's targeted follow-up).
+- **AGENTS.md**'s genuine Agentic AI Foundation / Linux Foundation
+  governance, its 60,000+-project adoption figure, and its schema-free
+  location/precedence-only scope (Pass 3).
+- **A2A Agent Cards**: Linux Foundation governance, v1.0.1 maturity,
+  discovery-only scope, and confirmed auth-schemes-never-secrets design
+  (Pass 3).
+- **LangChain's Context Hub**: a real, dated expansion (2026-05-13) beyond
+  prompts-only into bundling instructions + tools (Pass 3) — this is new
+  information, not present in the original Pass-1 draft at all.
+- **OCI-artifact distribution**: Docker MCP Catalog, cagent, and KitOps
+  ModelKit all confirmed in detail, including that every one of them keeps
+  credentials external to the artifact (Pass 3).
+- And — the report's central, now triple-confirmed conclusion — that
+  credential/identity management is the least standardized category
+  everywhere, with no format across three research passes found to bundle
+  all four categories as first-class components.
 
-**Two Pass-1 claims were corrected after Pass 2 refuted them** (both fixed
-in §3a/§3e above, not just noted here): the specific "~45 clients, portable
-unmodified" framing for Agent Skills adoption, and the flat assertion that
-Claude Code plugins "explicitly ignore CLAUDE.md" — that's now marked
-genuinely contested pending a dedicated verification pass.
+**Three claims were corrected after later passes refuted earlier ones**
+(all fixed in place in §3, not just noted here): the specific "~45 clients,
+portable unmodified" framing for Agent Skills adoption (Pass 2 refuted); a
+vaguer, less accurate account of AGENTS.md's origin/governance (Pass 3
+corrected with the AAIF/Linux-Foundation specifics); and the "24+ native
+tools" framing for AGENTS.md adoption (Pass 3's own re-check of its own new
+claim refuted this specific sub-number, 1-2).
 
-**What remains [fetched]-tier (extracted with quotes, not adversarially
-voted; Pass 2 explicitly flags these as unresearched-this-round, not
-investigated-and-dismissed):** AGENTS.md's adoption numbers and governance
-details (§3c), Letta `.af`'s roadmap status, Microsoft APM's release/star
-counts (§3e), Appstrate AFPS (§3e), the OCI-artifact prior-art cluster —
-Dev Container Features, Docker cagent, KitOps ModelKit, Docker's enterprise
-catalog guidance — and LangChain Hub / A2A Agent Cards. Before any
-external-facing publication of this report's specific numbers (60k repos,
-~300 MCP Catalog servers, APM's v0.25.0/star counts, AFPS "zero adoption"),
-re-verify against the live sources with a dedicated pass. None of the
-*directional* conclusions (no all-four standard exists; credentials are
-universally excluded from every packaging format; OCI is the emerging
-distribution substrate; Agent Skills has won its category) rest on a single
-unverified number — each is corroborated by at least one Pass-2-verified
-claim from a different angle.
+**What remains [fetched]-tier after three passes** (extracted with quotes
+in Pass 1, not adversarially voted, and — critically — **not resolved by
+two separate dedicated attempts** in Pass 2 and Pass 3 despite direct
+targeting): **Microsoft APM**, **Appstrate AFPS**, and — the report's
+single most-attempted, least-resolved question — **whether Claude Code
+plugins (or any format) support bundling persistent memory/instruction
+files as a first-class component**. Also still `[fetched]`-tier, not yet
+re-targeted: Dev Container Features and Docker's enterprise-catalog
+"profiles as pinned artifacts" guidance, and Letta `.af`'s roadmap status.
+For these specific items, a fourth automated research pass is judged
+unlikely to help — two consecutive targeted attempts came back with zero
+surviving claims on exactly these questions, suggesting either the search
+angle isn't finding the right sources or the harness's source mix doesn't
+cover them well. **A manual, human-directed check of the primary sources
+directly** (Anthropic's plugin docs for the CLAUDE.md question;
+APM's/AFPS's own repos for the other two) is the efficient next step if
+precision on these three becomes load-bearing for AgentMux's design —
+none of them currently block any part of the §5 proposal or §6
+implementation plan, since the proposal composes standards that *are*
+verified (Agent Skills, `server.json`/`mcpServers`, AGENTS.md-style
+instructions) and invents only the two things confirmed nobody else has
+solved (composition manifest, credential requirements declaration).
 
-**Open questions worth a dedicated follow-up pass**, carried over directly
-from Pass 2's synthesis:
-1. Does any spec — Claude Code plugins or otherwise — actually support
-   bundling persistent memory/instruction files (CLAUDE.md-style) as a
-   first-class package component? Explicitly unresolved (§3e).
-2. How do AGENTS.md, A2A Agent Cards, LangChain/LlamaHub-style hubs, and
-   OCI-artifact distribution (Docker MCP Catalog) fit relative to SKILL.md,
-   the MCP Registry, and Claude Code plugins specifically — i.e., do Pass
-   1's [fetched] findings about them survive adversarial verification?
-3. Will `SEP-2640` ("Skills over MCP") or the competing `skills.json`
-   MCP-Registry proposal converge into one ratified skills-distribution
-   mechanism, and would it pull in credentials or memory, or stay scoped to
-   skills+MCP only? Timeline-sensitive — worth re-checking before AgentMux
-   commits to a specific interop shape in §5.
-4. Is any cross-provider identity/credential standard for AI agents emerging
-   anywhere, given every format examined handles credentials only as
-   tool-local keychain storage or publisher auth? If the answer stays "no"
-   on a dedicated pass, that's further validation that Armory's
-   `requirements.json` declaration (§5.3) is filling a real, unaddressed gap
-   rather than reinventing something in flight elsewhere.
+Before any external-facing publication of this report's specific unverified
+numbers (APM's v0.25.0/star counts, AFPS's claimed "zero adoption"), verify
+directly against the live sources. None of the report's *directional*
+conclusions rest on a single unverified number — each is corroborated by at
+least one Pass-2-or-Pass-3-verified claim from a different, independent
+angle.
