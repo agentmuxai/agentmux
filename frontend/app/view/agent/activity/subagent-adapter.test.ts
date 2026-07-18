@@ -16,7 +16,7 @@ function mk(overrides: Partial<ActiveSubagent> & Pick<ActiveSubagent, "agent_id"
         last_event_at: 1000,
         event_count: 0,
         model: null,
-        workflow_id: null,
+        dispatch_id: `solo:${overrides.agent_id}`,
         display_name: null,
         ...overrides,
     };
@@ -68,15 +68,15 @@ describe("subagentActivities", () => {
         expect(subagentActivities([mk({ agent_id: "a1", parent_block_id: "block-2" })], "block-1")).toEqual([]);
     });
 
-    it("collapses subagents sharing a workflow_id into one activity, not one per subagent", () => {
+    it("collapses subagents sharing a dispatch_id into one activity, not one per subagent", () => {
         const all = [
-            mk({ agent_id: "a1", workflow_id: "wf_1", slug: "reviewer", status: "active" }),
-            mk({ agent_id: "a2", workflow_id: "wf_1", slug: "reviewer", status: "completed" }),
-            mk({ agent_id: "a3", workflow_id: "wf_1", slug: "reviewer", status: "completed" }),
+            mk({ agent_id: "a1", dispatch_id: "wf_1", slug: "reviewer", status: "active" }),
+            mk({ agent_id: "a2", dispatch_id: "wf_1", slug: "reviewer", status: "completed" }),
+            mk({ agent_id: "a3", dispatch_id: "wf_1", slug: "reviewer", status: "completed" }),
         ];
         const result = subagentActivities(all, "block-1");
         expect(result).toHaveLength(1);
-        expect(result[0].id).toBe("wf:wf_1");
+        expect(result[0].id).toBe("wf_1");
         expect(result[0].title).toBe("reviewer (3)");
         expect(result[0].status).toBe("running"); // one member still active
         expect(result[0].subagent).toBeUndefined();
@@ -85,18 +85,18 @@ describe("subagentActivities", () => {
 
     it("marks a workflow group done only once every member is terminal", () => {
         const all = [
-            mk({ agent_id: "a1", workflow_id: "wf_1", status: "completed", last_event_at: 100 }),
-            mk({ agent_id: "a2", workflow_id: "wf_1", status: "completed", last_event_at: 200 }),
+            mk({ agent_id: "a1", dispatch_id: "wf_1", status: "completed", last_event_at: 100 }),
+            mk({ agent_id: "a2", dispatch_id: "wf_1", status: "completed", last_event_at: 200 }),
         ];
         const result = subagentActivities(all, "block-1");
         expect(result[0].status).toBe("done");
         expect(result[0].endedAt).toBe(200);
     });
 
-    it("does not group standalone subagents (no workflow_id, no shared display_name)", () => {
+    it("does not group standalone subagents (distinct solo dispatch_ids, no shared display_name)", () => {
         const all = [
-            mk({ agent_id: "a1", workflow_id: null, display_name: null }),
-            mk({ agent_id: "a2", workflow_id: null, display_name: null }),
+            mk({ agent_id: "a1", display_name: null }),
+            mk({ agent_id: "a2", display_name: null }),
         ];
         const result = subagentActivities(all, "block-1");
         expect(result.map((a) => a.id)).toEqual(["a1", "a2"]);
