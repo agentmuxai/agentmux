@@ -152,17 +152,27 @@ impl EditorFileWatcher {
         }
         inner.watched_paths.remove(&canonical);
 
-        let Some(dir) = canonical.parent().map(Path::to_path_buf) else {
-            return;
-        };
-        if let Some(refcount) = inner.watched_dirs.get_mut(&dir) {
-            *refcount -= 1;
-            if *refcount == 0 {
-                inner.watched_dirs.remove(&dir);
-                let mut w = self._watcher.lock().unwrap();
-                let _ = w.unwatch(&dir);
+        if let Some(dir) = canonical.parent().map(Path::to_path_buf) {
+            if let Some(refcount) = inner.watched_dirs.get_mut(&dir) {
+                *refcount -= 1;
+                if *refcount == 0 {
+                    inner.watched_dirs.remove(&dir);
+                    let mut w = self._watcher.lock().unwrap();
+                    let _ = w.unwatch(&dir);
+                }
             }
         }
+        drop(inner);
+
+        // Prune the debounce-generation entry now that nothing watches this
+        // path — otherwise every distinct path ever externally modified
+        // during the process's lifetime accumulates here forever, even
+        // after its last watcher unsubscribed. Any debounce task already in
+        // flight still holds its own Arc clone of the counter, so this is
+        // safe to drop from the map immediately; a future re-watch of the
+        // same path just mints a fresh counter in handle_fs_event.
+        self.debounce_gens.lock().unwrap().remove(&canonical);
+
         tracing::debug!(path = %canonical.display(), block_id, "editor file watch: stopped");
     }
 
@@ -272,6 +282,34 @@ mod tests {
             let canonical = tmp.canonicalize().unwrap();
             assert!(!inner.watched_paths.contains_key(&canonical));
         }
+
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[tokio::test]
+    async fn test_unwatch_prunes_debounce_gen_entry() {
+        // Regression: debounce_gens used to only ever grow — an entry was
+        // minted on the first fs event for a path but never removed when
+        // the last watcher for that path unsubscribed, so the map grew
+        // unbounded over a long-running process's lifetime.
+        let broker = Arc::new(Broker::new());
+        let watcher = EditorFileWatcher::new(broker).expect("watcher should construct");
+
+        let tmp = std::env::temp_dir().join("agentmux_editor_watch_debounce_test.txt");
+        std::fs::write(&tmp, "hello").unwrap();
+        let canonical = tmp.canonicalize().unwrap();
+
+        watcher.watch_path(&tmp, "block-1");
+        // Simulate a debounce-generation entry the way handle_fs_event would
+        // create one, without depending on a real fs-event round trip.
+        watcher.debounce_gens.lock().unwrap().insert(canonical.clone(), Arc::new(AtomicU64::new(3)));
+        assert!(watcher.debounce_gens.lock().unwrap().contains_key(&canonical));
+
+        watcher.unwatch_path(&tmp, "block-1");
+        assert!(
+            !watcher.debounce_gens.lock().unwrap().contains_key(&canonical),
+            "debounce_gens entry must be pruned once the last watcher for a path unsubscribes"
+        );
 
         let _ = std::fs::remove_file(&tmp);
     }
