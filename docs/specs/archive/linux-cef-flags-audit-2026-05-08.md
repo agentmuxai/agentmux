@@ -1,3 +1,8 @@
+> **Archived 2026-07-17:** Superseded by the still-live
+> `docs/specs/SPEC_LINUX_GPU_BACKEND_PRECEDENCE_2026_06_13.md` ("Implemented in
+> PR #1394"), which replaced the VMware DMI gate this audit fed into. Kept for
+> historical reference only.
+
 # Linux CEF flags audit and cleanup
 
 **Status:** Draft.

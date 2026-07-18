@@ -1,3 +1,8 @@
+> **Archived 2026-07-17:** Stale handoff note. PR #267 merged in split form (CSS-only
+> focus-ring fix); the "default to DOM renderer on Windows" change discussed here did
+> not ship. PR #276 closed without merging (echo-delay fix landed separately). Kept
+> for historical reference only.
+
 # PR #267 + #276 Takeover Report
 
 **Date:** 2026-04-02

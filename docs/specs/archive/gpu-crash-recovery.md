@@ -1,3 +1,7 @@
+> **Archived 2026-07-17:** Resolved — the recovery mechanism proposed here shipped
+> (see issue #778's triage comment: launcher auto-recovery in
+> `agentmux-launcher/src/main.rs:1520-1545`). Kept for historical reference only.
+
 # GPU Crash Recovery Spec
 
 **Date:** 2026-04-04

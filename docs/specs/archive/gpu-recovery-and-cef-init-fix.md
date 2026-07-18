@@ -1,3 +1,7 @@
+> **Archived 2026-07-17:** Resolved — shipped (see issue #778's triage comment:
+> launcher auto-recovery in `agentmux-launcher/src/main.rs:1520-1545`, plus bundled
+> SwiftShader fallback). Kept for historical reference only.
+
 # Implementation Spec: GPU Context Recovery + CEF API Init Fix
 
 **Date:** 2026-04-08

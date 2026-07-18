@@ -1,3 +1,7 @@
+> **Archived 2026-07-17:** Decision concluded — the app migrated straight to CEF;
+> Tauri was never shipped and its code has been fully removed (see CLAUDE.md). Kept
+> for historical reference only.
+
 # Performance Comparison Spec: Tauri vs CEF Builds
 
 **Status:** Draft

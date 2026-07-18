@@ -7,7 +7,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { WOS, atoms, fetchWaveFile, getSettingsKeyAtom, openLink, setTermRendererAtom } from "@/app/store/global";
 import * as services from "@/app/store/services";
-import { PLATFORM, PlatformLinux, PlatformMacOS, PlatformWindows } from "@/util/platformutil";
+import { PLATFORM, PlatformMacOS, PlatformWindows } from "@/util/platformutil";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { base64ToArray, fireAndForget } from "@/util/util";
 import { SearchAddon } from "@xterm/addon-search";
@@ -340,7 +340,7 @@ export class TermWrap {
             }
         });
 
-        // PSReadLine cursor-desync "thaw" — see #1042 / docs/analysis/
+        // PSReadLine cursor-desync "thaw" — see #1042 / docs/analysis/archive/
         // TERM_JUMBLE_STRUCTURED_2026_05_25.md §7a.
         //
         // When a terminal is created without subsequent sibling-pane
@@ -639,18 +639,14 @@ export class TermWrap {
     }
 
     private loadRendererAddon(useWebGl: boolean) {
-        // WebKitGTK's WebGL2 implementation has systemic rendering issues —
-        // texture atlas doesn't redraw after control sequences (backspace, erase-in-line).
-        // This is a WebKitGTK bug, not xterm.js (Tauri #6559, WebKit Bug 228268).
-        // Default to DOM renderer on Linux; WebGL opt-in via term:disablewebgl=false.
-        if (PLATFORM === PlatformLinux && !useWebGl) {
-            if (!loggedWebGL) {
-                console.log("linux: using DOM renderer (WebKitGTK WebGL workaround)");
-                loggedWebGL = true;
-            }
-            setTermRendererAtom("dom"); // surfaces in the status-bar GPU indicator
-            return; // DOM renderer is the default when no renderer addon is loaded
-        }
+        // Linux used to default away from WebGL here (WebKitGTK-era workaround, back
+        // when the Linux build ran on a WebKitGTK webview). That's moot post-CEF —
+        // there is no WebKitGTK in this app anymore — and the real Linux GPU-backend
+        // problem it was papering over (ANGLE defaulting to software Vulkan on VMware
+        // guests) is now fixed properly at the host level via capability-probed ANGLE
+        // backend selection (PR #1394, docs/specs/SPEC_LINUX_GPU_BACKEND_PRECEDENCE_2026_06_13.md).
+        // WebGL is now the default on every platform; term:disablewebgl remains the
+        // manual escape hatch (handled by the `else` branch below on any platform).
         if (WebGLSupported && useWebGl) {
             try {
                 const webglAddon = new WebglAddon();

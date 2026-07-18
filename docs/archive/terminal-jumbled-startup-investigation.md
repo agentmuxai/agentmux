@@ -1,3 +1,7 @@
+> **Archived 2026-07-17:** Resolved. The font-load race described here shipped as
+> `document.fonts.load()` in `termwrap.ts` (PRs #1030, #1040). Kept for historical
+> reference only — do not treat as current behavior.
+
 # Terminal jumbled on startup — investigation
 
 **Symptom:** When loading a terminal pane (especially when starting Claude Code),
