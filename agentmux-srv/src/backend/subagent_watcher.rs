@@ -236,6 +236,38 @@ struct PendingDispatchActivity {
     session_id: String,
     /// One entry per member that had new events since the last flush.
     members: Vec<(String /* agent_id */, Vec<SubagentEvent>)>,
+    /// Members newly discovered since the last flush — buffered so a cold
+    /// backfill's `subagent:spawned` broadcasts are smoothed onto the flush
+    /// cadence too, not just activity ticks (reagent P1 on the coalescing
+    /// PR: `spawned`/`completed` were still unconditional-and-immediate,
+    /// undiminished by the activity coalescing above).
+    spawned: Vec<PendingSpawn>,
+    /// Members that finished since the last flush.
+    completed: Vec<PendingCompletion>,
+}
+
+struct PendingSpawn {
+    agent_id: String,
+    slug: String,
+    model: Option<String>,
+}
+
+struct PendingCompletion {
+    agent_id: String,
+    total_events: usize,
+}
+
+impl PendingDispatchActivity {
+    fn new(parent_agent: &str, parent_block_id: &str, session_id: &str) -> Self {
+        Self {
+            parent_agent: parent_agent.to_string(),
+            parent_block_id: parent_block_id.to_string(),
+            session_id: session_id.to_string(),
+            members: Vec::new(),
+            spawned: Vec::new(),
+            completed: Vec::new(),
+        }
+    }
 }
 
 /// Flush cadence for buffered dispatch activity (SPEC §9.5 — 250ms-1s was
@@ -1077,35 +1109,47 @@ impl SubagentWatcher {
         // Mutex released here — broadcast outside the lock
 
         if is_new {
-            let spawned_event = WSEventType {
-                eventtype: WS_EVENT_RPC.to_string(),
-                oref: String::new(),
-                data: Some(json!({
-                    "command": "eventrecv",
-                    "data": {
-                        "event": "subagent:spawned",
+            if workflow_id.is_some() {
+                let mut pending = self.pending_activity.lock().unwrap();
+                let entry = pending
+                    .entry(dispatch_id.clone())
+                    .or_insert_with(|| PendingDispatchActivity::new(parent_agent, parent_block_id, &session_id));
+                entry.spawned.push(PendingSpawn {
+                    agent_id: info_snapshot.agent_id.clone(),
+                    slug: info_snapshot.slug.clone(),
+                    model: info_snapshot.model.clone(),
+                });
+            } else {
+                let spawned_event = WSEventType {
+                    eventtype: WS_EVENT_RPC.to_string(),
+                    oref: String::new(),
+                    data: Some(json!({
+                        "command": "eventrecv",
                         "data": {
-                            "agentId": info_snapshot.agent_id,
-                            "slug": info_snapshot.slug,
-                            "parentAgent": parent_agent,
-                            "parentBlockId": parent_block_id,
-                            "sessionId": session_id,
-                            "model": info_snapshot.model,
-                            "dispatchId": info_snapshot.dispatch_id,
+                            "event": "subagent:spawned",
+                            "data": {
+                                "agentId": info_snapshot.agent_id,
+                                "slug": info_snapshot.slug,
+                                "parentAgent": parent_agent,
+                                "parentBlockId": parent_block_id,
+                                "sessionId": session_id,
+                                "model": info_snapshot.model,
+                                "dispatchId": info_snapshot.dispatch_id,
+                            }
                         }
-                    }
-                })),
-            };
-            self.event_bus.broadcast_event(&spawned_event);
-            tracing::info!(
-                agent_id = %agent_id,
-                slug = %info_snapshot.slug,
-                parent = %parent_agent,
-                parent_block_id = %parent_block_id,
-                session_id = %session_id,
-                dispatch_id = %info_snapshot.dispatch_id,
-                "subagent spawned"
-            );
+                    })),
+                };
+                self.event_bus.broadcast_event(&spawned_event);
+                tracing::info!(
+                    agent_id = %agent_id,
+                    slug = %info_snapshot.slug,
+                    parent = %parent_agent,
+                    parent_block_id = %parent_block_id,
+                    session_id = %session_id,
+                    dispatch_id = %info_snapshot.dispatch_id,
+                    "subagent spawned"
+                );
+            }
         }
 
         if !new_events.is_empty() {
@@ -1118,12 +1162,7 @@ impl SubagentWatcher {
                 let mut pending = self.pending_activity.lock().unwrap();
                 let entry = pending
                     .entry(dispatch_id.clone())
-                    .or_insert_with(|| PendingDispatchActivity {
-                        parent_agent: parent_agent.to_string(),
-                        parent_block_id: parent_block_id.to_string(),
-                        session_id: session_id.clone(),
-                        members: Vec::new(),
-                    });
+                    .or_insert_with(|| PendingDispatchActivity::new(parent_agent, parent_block_id, &session_id));
                 entry.members.push((agent_id.clone(), new_events.clone()));
             } else {
                 // Solo dispatch: exactly one member, no coalescing benefit —
@@ -1152,32 +1191,43 @@ impl SubagentWatcher {
         }
 
         if completed {
-            let completed_event = WSEventType {
-                eventtype: WS_EVENT_RPC.to_string(),
-                oref: String::new(),
-                data: Some(json!({
-                    "command": "eventrecv",
-                    "data": {
-                        "event": "subagent:completed",
+            if workflow_id.is_some() {
+                let mut pending = self.pending_activity.lock().unwrap();
+                let entry = pending
+                    .entry(dispatch_id.clone())
+                    .or_insert_with(|| PendingDispatchActivity::new(parent_agent, parent_block_id, &session_id));
+                entry.completed.push(PendingCompletion {
+                    agent_id: agent_id.clone(),
+                    total_events: info_snapshot.event_count,
+                });
+            } else {
+                let completed_event = WSEventType {
+                    eventtype: WS_EVENT_RPC.to_string(),
+                    oref: String::new(),
+                    data: Some(json!({
+                        "command": "eventrecv",
                         "data": {
-                            "agentId": agent_id,
-                            "parentAgent": parent_agent,
-                            "parentBlockId": parent_block_id,
-                            "totalEvents": info_snapshot.event_count,
-                            "dispatchId": info_snapshot.dispatch_id,
+                            "event": "subagent:completed",
+                            "data": {
+                                "agentId": agent_id,
+                                "parentAgent": parent_agent,
+                                "parentBlockId": parent_block_id,
+                                "totalEvents": info_snapshot.event_count,
+                                "dispatchId": info_snapshot.dispatch_id,
+                            }
                         }
-                    }
-                })),
-            };
-            self.event_bus.broadcast_event(&completed_event);
-            tracing::info!(
-                agent_id = %agent_id,
-                total_events = info_snapshot.event_count,
-                parent_block_id = %parent_block_id,
-                session_id = %session_id,
-                dispatch_id = %info_snapshot.dispatch_id,
-                "subagent completed"
-            );
+                    })),
+                };
+                self.event_bus.broadcast_event(&completed_event);
+                tracing::info!(
+                    agent_id = %agent_id,
+                    total_events = info_snapshot.event_count,
+                    parent_block_id = %parent_block_id,
+                    session_id = %session_id,
+                    dispatch_id = %info_snapshot.dispatch_id,
+                    "subagent completed"
+                );
+            }
         }
 
         if let Some(wf_id) = workflow_id {
@@ -1211,31 +1261,91 @@ impl SubagentWatcher {
             std::mem::take(&mut *pending)
         };
         for (dispatch_id, pending) in batch {
-            if pending.members.is_empty() {
-                continue;
-            }
-            let new_events: usize = pending.members.iter().map(|(_, evs)| evs.len()).sum();
-            let event = WSEventType {
-                eventtype: WS_EVENT_RPC.to_string(),
-                oref: String::new(),
-                data: Some(json!({
-                    "command": "eventrecv",
-                    "data": {
-                        "event": "dispatch:activity",
+            for spawn in &pending.spawned {
+                let spawned_event = WSEventType {
+                    eventtype: WS_EVENT_RPC.to_string(),
+                    oref: String::new(),
+                    data: Some(json!({
+                        "command": "eventrecv",
                         "data": {
-                            "dispatchId": dispatch_id,
-                            "parentAgent": pending.parent_agent,
-                            "parentBlockId": pending.parent_block_id,
-                            "sessionId": pending.session_id,
-                            "newEvents": new_events,
-                            "members": pending.members.iter().map(|(agent_id, events)| {
-                                json!({ "agentId": agent_id, "events": events })
-                            }).collect::<Vec<_>>(),
+                            "event": "subagent:spawned",
+                            "data": {
+                                "agentId": spawn.agent_id,
+                                "slug": spawn.slug,
+                                "parentAgent": pending.parent_agent,
+                                "parentBlockId": pending.parent_block_id,
+                                "sessionId": pending.session_id,
+                                "model": spawn.model,
+                                "dispatchId": dispatch_id,
+                            }
                         }
-                    }
-                })),
-            };
-            self.event_bus.broadcast_event(&event);
+                    })),
+                };
+                self.event_bus.broadcast_event(&spawned_event);
+                tracing::info!(
+                    agent_id = %spawn.agent_id,
+                    slug = %spawn.slug,
+                    parent = %pending.parent_agent,
+                    parent_block_id = %pending.parent_block_id,
+                    session_id = %pending.session_id,
+                    dispatch_id = %dispatch_id,
+                    "subagent spawned"
+                );
+            }
+
+            if !pending.members.is_empty() {
+                let new_events: usize = pending.members.iter().map(|(_, evs)| evs.len()).sum();
+                let event = WSEventType {
+                    eventtype: WS_EVENT_RPC.to_string(),
+                    oref: String::new(),
+                    data: Some(json!({
+                        "command": "eventrecv",
+                        "data": {
+                            "event": "dispatch:activity",
+                            "data": {
+                                "dispatchId": dispatch_id,
+                                "parentAgent": pending.parent_agent,
+                                "parentBlockId": pending.parent_block_id,
+                                "sessionId": pending.session_id,
+                                "newEvents": new_events,
+                                "members": pending.members.iter().map(|(agent_id, events)| {
+                                    json!({ "agentId": agent_id, "events": events })
+                                }).collect::<Vec<_>>(),
+                            }
+                        }
+                    })),
+                };
+                self.event_bus.broadcast_event(&event);
+            }
+
+            for done in &pending.completed {
+                let completed_event = WSEventType {
+                    eventtype: WS_EVENT_RPC.to_string(),
+                    oref: String::new(),
+                    data: Some(json!({
+                        "command": "eventrecv",
+                        "data": {
+                            "event": "subagent:completed",
+                            "data": {
+                                "agentId": done.agent_id,
+                                "parentAgent": pending.parent_agent,
+                                "parentBlockId": pending.parent_block_id,
+                                "totalEvents": done.total_events,
+                                "dispatchId": dispatch_id,
+                            }
+                        }
+                    })),
+                };
+                self.event_bus.broadcast_event(&completed_event);
+                tracing::info!(
+                    agent_id = %done.agent_id,
+                    total_events = done.total_events,
+                    parent_block_id = %pending.parent_block_id,
+                    session_id = %pending.session_id,
+                    dispatch_id = %dispatch_id,
+                    "subagent completed"
+                );
+            }
         }
     }
 
