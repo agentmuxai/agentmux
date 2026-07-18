@@ -146,23 +146,31 @@ pub fn commit_free_mb() -> u64 {
 /// recovered, or `false` if `OOM_RELAUNCH_DEADLINE` elapses first (the caller
 /// then gives up gracefully). `log` is the launcher's logger, threaded in so the
 /// wait is observable in the launcher log.
-pub async fn await_commit_recovery(log: impl Fn(&str)) -> bool {
+/// `subject` names whatever is being waited on for the two terminal log
+/// lines ("relaunching {subject}" / "giving up {subject} relaunch") — this
+/// function is shared by the host-OOM wait (`subject: "host"`) and the
+/// srv-OOM wait (`subject: "srv"`, `SPEC_MEMORY_PRESSURE_SUPERVISION`'s srv
+/// counterpart). Hardcoding "host" here made the srv-OOM wait's log
+/// misleadingly claim it was relaunching the host during an actual srv-OOM
+/// incident — reagent P1 on PR #2206.
+pub async fn await_commit_recovery(subject: &str, log: impl Fn(&str)) -> bool {
     let start = Instant::now();
     let mut backoff = BACKOFF_START;
     loop {
         let free = commit_free_mb();
         if free >= RESUME_FLOOR_MB {
             log(&format!(
-                "commit recovered: {} MB free (>= {} MB floor) — relaunching host",
-                free, RESUME_FLOOR_MB
+                "commit recovered: {} MB free (>= {} MB floor) — relaunching {}",
+                free, RESUME_FLOOR_MB, subject
             ));
             return true;
         }
         if start.elapsed() >= OOM_RELAUNCH_DEADLINE {
             log(&format!(
-                "commit still low ({} MB free) after {}s — giving up host relaunch",
+                "commit still low ({} MB free) after {}s — giving up {} relaunch",
                 free,
-                OOM_RELAUNCH_DEADLINE.as_secs()
+                OOM_RELAUNCH_DEADLINE.as_secs(),
+                subject
             ));
             return false;
         }

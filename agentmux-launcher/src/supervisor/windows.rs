@@ -702,7 +702,7 @@ pub(crate) async fn run_windows(
                         // run_windows has no signal arms (shutdown flows via the
                         // host/srv), so srv is the only concurrent event here.
                         let recovered = tokio::select! {
-                            r = mem_supervisor::await_commit_recovery(log) => r,
+                            r = mem_supervisor::await_commit_recovery("host", log) => r,
                             srv_status = srv_child.wait() => {
                                 match srv_status {
                                     Ok(s) => log(&format!(
@@ -907,7 +907,7 @@ pub(crate) async fn run_windows(
                     // a host crash during the (up to OOM_RELAUNCH_DEADLINE)
                     // wait would go unnoticed until the wait finished.
                     let recovered = tokio::select! {
-                        r = mem_supervisor::await_commit_recovery(log) => r,
+                        r = mem_supervisor::await_commit_recovery("srv", log) => r,
                         host_status = host_child.wait() => {
                             match host_status {
                                 Ok(s) => log(&format!(

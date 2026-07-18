@@ -462,7 +462,7 @@ pub(crate) async fn run_unix(
                         // SIGINT/SIGTERM + srv arms are starved for the whole
                         // wait (reagent P2). Mirrors the outer select! arms.
                         let recovered = tokio::select! {
-                            r = mem_supervisor::await_commit_recovery(log) => r,
+                            r = mem_supervisor::await_commit_recovery("host", log) => r,
                             srv_status = srv_child.wait() => {
                                 use std::os::unix::process::ExitStatusExt;
                                 match srv_status {
