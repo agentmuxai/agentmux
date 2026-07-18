@@ -5,7 +5,9 @@
 //! and publishes them via the WPS broker. Sampling interval is configurable
 //! via the `telemetry:interval` setting (0.1s–2.0s, default 1.0s).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+#[cfg(target_os = "windows")]
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -38,15 +40,19 @@ const MAX_INTERVAL_SECS: f64 = 2.0;
 // visibility — Chrome, VS Code, Docker, Windows itself, ...).
 
 /// How often to log a full attribution snapshot in the steady state.
+#[cfg(target_os = "windows")]
 const ATTRIBUTION_INTERVAL: Duration = Duration::from_secs(30);
 /// Re-snapshot immediately (bypassing `ATTRIBUTION_INTERVAL`) once available
 /// commit drops below this — a snapshot taken seconds before a crash is far
 /// more useful than one from up to 30s earlier.
+#[cfg(target_os = "windows")]
 const ATTRIBUTION_URGENT_THRESHOLD_GB: f64 = 2.0;
 /// Debounce for the urgent trigger so a sustained low-commit period doesn't
 /// log every single tick.
+#[cfg(target_os = "windows")]
 const ATTRIBUTION_URGENT_COOLDOWN: Duration = Duration::from_secs(10);
 /// How many "other" processes to name individually in the log line.
+#[cfg(target_os = "windows")]
 const ATTRIBUTION_OTHER_TOP_N: usize = 5;
 /// Per-block descendant-PID cap for the attribution walk — deliberately its
 /// OWN, much larger constant, not `process_tree::MAX_PIDS_PER_BLOCK` (64).
@@ -58,6 +64,7 @@ const ATTRIBUTION_OTHER_TOP_N: usize = 5;
 /// beyond "returned exactly `max_pids` results," so that's what
 /// `log_memory_attribution` checks to log a truncation warning rather than
 /// silently under-counting (no silent caps).
+#[cfg(target_os = "windows")]
 const ATTRIBUTION_MAX_PIDS_PER_BLOCK: usize = 4096;
 
 /// One process's classification input — commit charge, not working set:
@@ -65,12 +72,14 @@ const ATTRIBUTION_MAX_PIDS_PER_BLOCK: usize = 4096;
 /// Windows is `PROCESS_MEMORY_COUNTERS_EX::PrivateUsage` — a misleading
 /// name from sysinfo's cross-platform API, but the right number: the
 /// process's private/committed bytes.)
+#[cfg(target_os = "windows")]
 struct ProcSample {
     pid: u32,
     name: String,
     commit_mb: f64,
 }
 
+#[cfg(target_os = "windows")]
 struct AttributionResult {
     agentmux_mb: f64,
     panes_mb: f64,
@@ -83,7 +92,12 @@ struct AttributionResult {
 /// process table (mirrors `resolve_pagefile_watch_target` above).
 /// `pane_pids` is the exact PID set `pidregistry`'s block trees computed —
 /// membership, not a name guess, so this bucket can never miscount a
-/// same-named-but-unrelated process.
+/// same-named-but-unrelated process. Aggregates "other" by process name
+/// before ranking the top-N — a multi-process app (Chrome, VS Code) would
+/// otherwise get split across many small per-PID entries that individually
+/// miss the cutoff while collectively dominating `other_mb`, hiding the
+/// true top contributor (reagent P1 on PR #2207).
+#[cfg(target_os = "windows")]
 fn classify_commit_attribution(
     samples: &[ProcSample],
     pane_pids: &HashSet<u32>,
@@ -91,16 +105,17 @@ fn classify_commit_attribution(
 ) -> AttributionResult {
     let mut agentmux_mb = 0.0;
     let mut panes_mb = 0.0;
-    let mut other: Vec<(String, f64)> = Vec::new();
+    let mut other_by_name: HashMap<String, f64> = HashMap::new();
     for s in samples {
         if s.name.to_ascii_lowercase().starts_with("agentmux") {
             agentmux_mb += s.commit_mb;
         } else if pane_pids.contains(&s.pid) {
             panes_mb += s.commit_mb;
         } else {
-            other.push((s.name.clone(), s.commit_mb));
+            *other_by_name.entry(s.name.clone()).or_insert(0.0) += s.commit_mb;
         }
     }
+    let mut other: Vec<(String, f64)> = other_by_name.into_iter().collect();
     other.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     let other_mb: f64 = other.iter().map(|(_, mb)| mb).sum();
     other.truncate(top_n);
@@ -122,6 +137,7 @@ fn classify_commit_attribution(
 /// `commit_used_gb`/`commit_total_gb` come from the caller's already-computed
 /// `get_commit_data` values rather than re-querying `GlobalMemoryStatusEx`
 /// here — this function is on the same tick as that call.
+#[cfg(target_os = "windows")]
 fn log_memory_attribution(sys: &mut sysinfo::System, commit_used_gb: f64, commit_total_gb: f64) {
     // Only name()/parent()/virtual_memory() are read below — parent() and
     // name() are always populated regardless of refresh kind, so only
@@ -524,7 +540,7 @@ mod pagefile_volume_tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "windows"))]
 mod commit_attribution_tests {
     use super::*;
 
@@ -577,6 +593,27 @@ mod commit_attribution_tests {
     }
 
     #[test]
+    fn aggregates_other_by_name_before_ranking_so_a_multi_process_app_is_not_split_below_the_cutoff() {
+        // A multi-process app (Chrome, VS Code) spread across many small
+        // per-PID entries must still rank by its TOTAL commit, not have each
+        // PID compete individually against single-process apps — otherwise
+        // the true top contributor can be missing from other_top even
+        // though other_mb (the sum) correctly reflects it. reagent P1 on
+        // PR #2207.
+        let samples = vec![
+            sample(1, "chrome.exe", 100.0),
+            sample(2, "chrome.exe", 100.0),
+            sample(3, "chrome.exe", 100.0),
+            sample(4, "chrome.exe", 100.0),
+            sample(5, "single_app.exe", 250.0),
+        ];
+        let result = classify_commit_attribution(&samples, &HashSet::new(), 1);
+        assert_eq!(result.other_mb, 650.0);
+        assert_eq!(result.other_top.len(), 1);
+        assert_eq!(result.other_top[0], ("chrome.exe".to_string(), 400.0));
+    }
+
+    #[test]
     fn name_match_is_case_insensitive() {
         let samples = vec![sample(1, "AgentMux-Srv.exe", 42.0)];
         let result = classify_commit_attribution(&samples, &HashSet::new(), 5);
@@ -592,13 +629,13 @@ mod commit_attribution_tests {
         assert!(result.other_top.is_empty());
     }
 
-    /// Runs the real Win32 process-enumeration + `GlobalMemoryStatusEx` path
-    /// against this machine's actual process table — the synthetic-data
-    /// tests above cover classification logic but can't catch a bad
-    /// Win32 API call, an access-denied edge case, or a panic on a real
-    /// process's field values. This test's own process is guaranteed to
-    /// exist in the table with a real name and non-zero commit, so a
-    /// classification bucket is exercised end-to-end for real.
+    /// Runs the real Win32 process-enumeration path against this machine's
+    /// actual process table — the synthetic-data tests above cover
+    /// classification logic but can't catch a bad Win32 API call, an
+    /// access-denied edge case, or a panic on a real process's field
+    /// values. This test's own process is guaranteed to exist in the table
+    /// with a real name and non-zero commit, so a classification bucket is
+    /// exercised end-to-end for real.
     #[test]
     fn log_memory_attribution_runs_against_the_real_process_table_without_panicking() {
         let mut sys = sysinfo::System::new_all();
@@ -693,9 +730,12 @@ pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigWat
     // Commit-attribution cadence — see the "Commit (pagefile) attribution"
     // section above. Starts due-now-minus-interval so the first snapshot
     // establishes a baseline shortly after startup, not 30s of silence.
+    // Windows-only — see the matching #[cfg] on the loop body below.
+    #[cfg(target_os = "windows")]
     let mut last_attribution = Instant::now()
         .checked_sub(ATTRIBUTION_INTERVAL)
         .unwrap_or_else(Instant::now);
+    #[cfg(target_os = "windows")]
     let mut last_urgent_attribution: Option<Instant> = None;
 
     let mut current_interval = get_interval_secs(&config_watcher);
@@ -754,23 +794,32 @@ pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigWat
         // (debounced) when commit heads toward exhaustion — see
         // docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md. Reuses
         // the commit numbers just computed above rather than re-querying.
-        let commit_avail_gb = match (values.get("mem:commit:total"), values.get("mem:commit:used")) {
-            (Some(total), Some(used)) => Some(total - used),
-            _ => None,
-        };
-        let due_periodic = now_instant.duration_since(last_attribution) >= ATTRIBUTION_INTERVAL;
-        let due_urgent = commit_avail_gb.is_some_and(|gb| gb < ATTRIBUTION_URGENT_THRESHOLD_GB)
-            && last_urgent_attribution
-                .is_none_or(|t| now_instant.duration_since(t) >= ATTRIBUTION_URGENT_COOLDOWN);
-        if due_periodic || due_urgent {
-            let commit_used_gb = *values.get("mem:commit:used").unwrap_or(&0.0);
-            let commit_total_gb = *values.get("mem:commit:total").unwrap_or(&0.0);
-            tokio::task::block_in_place(|| {
-                log_memory_attribution(&mut sys, commit_used_gb, commit_total_gb)
-            });
-            last_attribution = now_instant;
-            if due_urgent {
-                last_urgent_attribution = Some(now_instant);
+        // Windows-only like every other commit/pagefile helper in this file
+        // (get_commit_data, available_commit_gb, get_pagefile_volume_data) —
+        // its rationale (pagefile/commit exhaustion) doesn't apply elsewhere,
+        // and off-Windows `mem:commit:*` are never populated, so this would
+        // otherwise pay a full process-table refresh every tick just to log
+        // a permanently-zero commit_used_gb/commit_total_gb.
+        #[cfg(target_os = "windows")]
+        {
+            let commit_avail_gb = match (values.get("mem:commit:total"), values.get("mem:commit:used")) {
+                (Some(total), Some(used)) => Some(total - used),
+                _ => None,
+            };
+            let due_periodic = now_instant.duration_since(last_attribution) >= ATTRIBUTION_INTERVAL;
+            let due_urgent = commit_avail_gb.is_some_and(|gb| gb < ATTRIBUTION_URGENT_THRESHOLD_GB)
+                && last_urgent_attribution
+                    .is_none_or(|t| now_instant.duration_since(t) >= ATTRIBUTION_URGENT_COOLDOWN);
+            if due_periodic || due_urgent {
+                let commit_used_gb = *values.get("mem:commit:used").unwrap_or(&0.0);
+                let commit_total_gb = *values.get("mem:commit:total").unwrap_or(&0.0);
+                tokio::task::block_in_place(|| {
+                    log_memory_attribution(&mut sys, commit_used_gb, commit_total_gb)
+                });
+                last_attribution = now_instant;
+                if due_urgent {
+                    last_urgent_attribution = Some(now_instant);
+                }
             }
         }
 
