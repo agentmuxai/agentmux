@@ -49,41 +49,51 @@ log() { (( QUIET )) && return; echo "$*"; }
 PKG_V="$(node -p "require('./package.json').version" 2>/dev/null || echo '<unreadable>')"
 CARGO_V="$(sed -n '/^\[workspace\.package\]/,/^\[/{s/^version *= *"\(.*\)"$/\1/p;}' Cargo.toml | head -1)"
 PL_V="$(node -p "require('./package-lock.json').version" 2>/dev/null || echo '<unreadable>')"
-CL_V="$(sed -n '/^name = "agentmux-cef"$/{n;s/^version = "\(.*\)"$/\1/p;q}' Cargo.lock)"
+CL_V="$(sed -n '/^name = "agentmux-cef"$/{
+n
+s/^version = "\(.*\)"$/\1/p
+q
+}' Cargo.lock)"
 VH_V="$(awk '/^## /{print $2; exit}' VERSION_HISTORY.md)"
 
-declare -A LOCATIONS=(
-    [package.json]="$PKG_V"
-    [Cargo.toml]="$CARGO_V"
-    [package-lock.json]="$PL_V"
-    [Cargo.lock]="$CL_V"
-    [VERSION_HISTORY.md]="$VH_V"
-)
+# Associative arrays need bash 4+; macOS ships 3.2 (GPLv3 avoidance) with
+# no newer bash on PATH by default, so this deliberately sticks to indexed
+# arrays + a case lookup over the 5 fixed, known-in-advance locations —
+# portable across whatever `bash` this resolves to, without requiring a
+# Homebrew bash install. (This script isn't actually invoked by
+# release.sh — see the file header — only by CI, which runs a newer bash;
+# that's why this went unnoticed until run locally.)
+VALUES=("$PKG_V" "$CARGO_V" "$PL_V" "$CL_V" "$VH_V")
 
 # ── Compute the consensus (most-common value) ────────────────────────
 #
 # We compare every location against the modal value. If only one place
 # disagrees, that's the bad file. If they all disagree, the report
-# tells the operator which set they need to reconcile.
-declare -A COUNTS=()
-for loc in "${!LOCATIONS[@]}"; do
-    v="${LOCATIONS[$loc]}"
-    COUNTS[$v]=$((${COUNTS[$v]:-0} + 1))
-done
-
+# tells the operator which set they need to reconcile. O(n^2) over 5
+# fixed values is negligible.
 CONSENSUS=""
 CONSENSUS_COUNT=0
-for v in "${!COUNTS[@]}"; do
-    if (( COUNTS[$v] > CONSENSUS_COUNT )); then
+for v in "${VALUES[@]}"; do
+    count=0
+    for v2 in "${VALUES[@]}"; do
+        [[ "$v2" == "$v" ]] && count=$((count + 1))
+    done
+    if (( count > CONSENSUS_COUNT )); then
         CONSENSUS="$v"
-        CONSENSUS_COUNT="${COUNTS[$v]}"
+        CONSENSUS_COUNT="$count"
     fi
 done
 
 # ── Report ───────────────────────────────────────────────────────────
 MISMATCHES=()
 for loc in package.json Cargo.toml package-lock.json Cargo.lock VERSION_HISTORY.md; do
-    v="${LOCATIONS[$loc]}"
+    case "$loc" in
+        package.json) v="$PKG_V" ;;
+        Cargo.toml) v="$CARGO_V" ;;
+        package-lock.json) v="$PL_V" ;;
+        Cargo.lock) v="$CL_V" ;;
+        VERSION_HISTORY.md) v="$VH_V" ;;
+    esac
     if [[ "$v" != "$CONSENSUS" ]]; then
         MISMATCHES+=("$loc: $v (expected $CONSENSUS)")
     fi

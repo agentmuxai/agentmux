@@ -1,5 +1,44 @@
 # AgentMux Version History
 
+## 0.53.7 — 2026-07-18
+
+- revert(cef): New Window color-flash fix (#2163) — introduced pool-promote failure on Windows
+- fix(armory): eliminate split-screen list+detail layouts, single pane at every width
+- fix(win): suppress console-window flashes from CLI probe spawns (make_cli_cmd + where + auth-poll)
+- fix(theme): set color-scheme so native select popups aren't white-on-white
+- fix(win): suppress console flashes from launcher splash / git-branch / taskkill / migrate spawns
+- fix(win): suppress console flashes from srv mcp-probe / whisper / browser-open spawns
+- fix(layout): stop balanceNode from flipping a dissolved column's own direction
+- fix(tabs): commit-on-release tab tear-off + loosen reorder threshold + kill drag circle-slash (Windows)
+- fix(ui): unify nested scroll areas in Accounts and the agent picker into one continuous list
+- fix(cef): recover host bridge on reload for floating-pane/pool windows (#52)
+- fix(layout): minimize is a locked state — reject/snap-back resize and structural ops on minimized panes
+- feat(swarm): collapsible top-level agent rows in the swarm tree
+- feat(layout): layout doctor invariant diagnostics + last-expanded-pane minimize guard
+- fix(agent): reconcile TurnPhase down to Idle when the backend reports the turn ended (unsticks Working/Queued)
+- fix(cef): closing the last window ("main") never notified srv, leaking its rows forever
+- feat(launcher): teardown backstop Phase 2 — armed J0 teardown for a wedged host
+- feat(launcher): Pillar 1 Step 6 — collapse saga durability to an in-memory registry
+- fix(auth): surface silent login-recovery failures instead of dead-ending
+- fix(cef): login CLI no longer crashes on libcef interposed close() (FD ownership violation)
+- feat(diags): login/logout credential-state snapshots + post-logout removal verify (muxlog auth)
+- fix(auth): self-heal stale isolated credential from a valid global login
+- fix(ui): ProviderLogo gradient-icon id collision made icons render blank when mounted twice
+- feat(layout): minimize is a display mode — derived geometry, slip/dissolve machinery deleted
+- fix(menu): route pane context-menu submenus through the paintable-area framework — "Replace With..."/"Pane Color" no longer cut off at the window edge; menus taller than the free space now scroll internally
+- fix(cef): macOS build broken by openpty winsize mutability (#2193 regression)
+- feat(launcher): unix teardown-backstop parity (issue #2188 Part 2)
+- fix(dock): collapse subagents spawned by one Agent tool call into a single dock row instead of one per subagent
+- fix(srv): cap cold-backfill subagent replay to the 200 most-recent files — an unbounded full-history replay on every pane reopen/srv restart was a live contributor to a launcher-killing crash loop
+- fix(launcher): wire the existing commit-aware OOM retry into srv exits, not just CEF-host exits — a srv crash-loop under system OOM previously burned the fast restart budget and killed the whole launcher instead of waiting out the transient pressure
+- feat(srv): log periodic + urgent-on-pressure commit (pagefile) attribution — buckets every process into AgentMux's own family, pane process trees (Claude CLI etc.), and other apps, so a future OOM crash leaves a forensic trail of who was consuming commit
+- feat(swarm): AgentDispatch/SubAgent two-level schema — one row per Agent-tool-or-Workflow-tool call in the Swarm pane, with a concatenated live activity feed for large workflow dispatches instead of one row per member
+- fix(launcher): teardown backstop — SIGTERM srv before SIGKILL so agent shells get cleaned up
+- fix(agent): clear stale 'Retry Login' bar once the controller proves itself healthy
+- feat(layout): restore minimize slip-docking + fix insert-into-minimized-leaf corruption
+- fix(term): remove stale WebKitGTK/Tauri WebGL workaround on Linux
+
+
 ## 0.53.6 — 2026-07-15
 
 - fix(providers): consolidate Claude CLI pin to 2.1.198 across all four registries + drift-guard test
