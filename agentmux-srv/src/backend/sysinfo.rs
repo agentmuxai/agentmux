@@ -118,11 +118,21 @@ fn classify_commit_attribution(
 /// pressure), classify, and log one line. Independent of the per-tick
 /// block-stats pass above — it does its own PID-tree collection so it
 /// can't be affected by that pass's ordering.
-fn log_memory_attribution(sys: &mut sysinfo::System) {
+///
+/// `commit_used_gb`/`commit_total_gb` come from the caller's already-computed
+/// `get_commit_data` values rather than re-querying `GlobalMemoryStatusEx`
+/// here — this function is on the same tick as that call.
+fn log_memory_attribution(sys: &mut sysinfo::System, commit_used_gb: f64, commit_total_gb: f64) {
+    // Only name()/parent()/virtual_memory() are read below — parent() and
+    // name() are always populated regardless of refresh kind, so only
+    // memory needs to be requested. The per-pane pass a few lines below
+    // (targeted `ProcessesToUpdate::Some`) uses the same restraint; this is
+    // the whole-machine equivalent, so it's the one call where skipping
+    // CPU deltas/disk I/O/exe/cmdline/environ actually matters.
     sys.refresh_processes_specifics(
         ProcessesToUpdate::All,
         true, // remove dead processes — keep this bounded to what's live
-        ProcessRefreshKind::everything(),
+        ProcessRefreshKind::nothing().with_memory(),
     );
 
     let mut pane_pids: HashSet<u32> = HashSet::new();
@@ -154,27 +164,6 @@ fn log_memory_attribution(sys: &mut sysinfo::System) {
         .collect();
 
     let result = classify_commit_attribution(&samples, &pane_pids, ATTRIBUTION_OTHER_TOP_N);
-    let (commit_used_gb, commit_total_gb) = {
-        #[cfg(target_os = "windows")]
-        {
-            use windows_sys::Win32::System::SystemInformation::{
-                GlobalMemoryStatusEx, MEMORYSTATUSEX,
-            };
-            let mut mem: MEMORYSTATUSEX = unsafe { std::mem::zeroed() };
-            mem.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
-            if unsafe { GlobalMemoryStatusEx(&mut mem) } != 0 {
-                let total_gb = mem.ullTotalPageFile as f64 / BYTES_PER_GB;
-                let avail_gb = mem.ullAvailPageFile as f64 / BYTES_PER_GB;
-                (total_gb - avail_gb, total_gb)
-            } else {
-                (0.0, 0.0)
-            }
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            (0.0, 0.0)
-        }
-    };
 
     let other_top_str = result
         .other_top
@@ -613,7 +602,7 @@ mod commit_attribution_tests {
     #[test]
     fn log_memory_attribution_runs_against_the_real_process_table_without_panicking() {
         let mut sys = sysinfo::System::new_all();
-        log_memory_attribution(&mut sys); // must not panic
+        log_memory_attribution(&mut sys, 0.0, 0.0); // must not panic
         assert!(
             sys.processes().len() > 1,
             "expected the real process table to have picked up more than just this test binary"
@@ -774,7 +763,11 @@ pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigWat
             && last_urgent_attribution
                 .is_none_or(|t| now_instant.duration_since(t) >= ATTRIBUTION_URGENT_COOLDOWN);
         if due_periodic || due_urgent {
-            tokio::task::block_in_place(|| log_memory_attribution(&mut sys));
+            let commit_used_gb = *values.get("mem:commit:used").unwrap_or(&0.0);
+            let commit_total_gb = *values.get("mem:commit:total").unwrap_or(&0.0);
+            tokio::task::block_in_place(|| {
+                log_memory_attribution(&mut sys, commit_used_gb, commit_total_gb)
+            });
             last_attribution = now_instant;
             if due_urgent {
                 last_urgent_attribution = Some(now_instant);
