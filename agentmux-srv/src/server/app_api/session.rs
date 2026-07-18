@@ -192,7 +192,7 @@ pub(crate) async fn generate_pushed_activity_summary(
 /// Ambient-call purpose tag for the on-demand subagent display name (see
 /// `generate_subagent_name`). One-shot per subagent — `generation` is always
 /// the constant `1` since a name, once generated, is cached on
-/// `SubagentInfo.display_name` and never regenerated; there is no "newer
+/// `SubAgent.display_name` and never regenerated; there is no "newer
 /// turn" to supersede an in-flight naming call the way there is for the
 /// per-turn pull RPCs above.
 const AMBIENT_PURPOSE_SUBAGENT_NAME: &str = "subagent_name";

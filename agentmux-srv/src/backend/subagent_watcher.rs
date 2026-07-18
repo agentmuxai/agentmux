@@ -15,10 +15,14 @@
 //!
 //! This module watches those directories and emits:
 //!   - `subagent:spawned`   — new subagent JSONL file detected
-//!   - `subagent:activity`  — new events appended to a subagent file
+//!   - `subagent:activity`  — new events for a Solo dispatch's one member
+//!     (Workflow-dispatch member activity is coalesced into
+//!     `dispatch:activity` instead — see `PendingDispatchActivity`)
 //!   - `subagent:completed` — subagent finished (result event seen)
-//!   - `workflow:updated`   — a workflow run's member count or journal
-//!     `started`/`result` tally changed (see `WorkflowInfo`)
+//!   - `dispatch:updated`   — an `AgentDispatch`'s member count or status
+//!     changed (both Solo and Workflow kinds; see `AgentDispatch`)
+//!   - `dispatch:activity`  — coalesced new events across a Workflow
+//!     dispatch's members, flushed every `DISPATCH_ACTIVITY_FLUSH_INTERVAL`
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
@@ -35,8 +39,12 @@ use super::eventbus::{EventBus, WSEventType, WS_EVENT_RPC};
 
 // ── Public types ──────────────────────────────────────────────────────────
 
+// SPEC_AGENT_DISPATCH_SUBAGENT_HIERARCHY_2026_07_17: `SubAgent` is the
+// member-level entity (one spawned Claude Code agent instance) — renamed
+// in place from `SubagentInfo`. Its container, `AgentDispatch` (below), is
+// the new entity: one per Agent-tool-or-Workflow-tool call.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SubagentInfo {
+pub struct SubAgent {
     pub agent_id: String,
     pub slug: String,
     pub jsonl_path: String,
@@ -49,21 +57,34 @@ pub struct SubagentInfo {
     /// dock to render an elapsed timer / sort by spawn recency.
     pub spawned_at: u64,
     pub last_event_at: u64,
-    pub status: SubagentStatus,
+    pub status: SubAgentStatus,
     pub event_count: usize,
     pub model: Option<String>,
-    /// Some("wf_<id>") when this subagent runs inside a Workflow tool run
-    /// (JSONL under `subagents/workflows/<id>/`); None for direct subagents.
-    pub workflow_id: Option<String>,
+    /// The owning `AgentDispatch.dispatch_id` — mandatory, unlike the old
+    /// `workflow_id: Option<String>` it replaces. A Workflow-tool member
+    /// carries the run-id Claude Code already assigns
+    /// (`subagents/workflows/<run-id>/`); a solo Task-tool call gets a
+    /// synthesized `format!("solo:{agent_id}")` (see `solo_dispatch_id`) —
+    /// every SubAgent now has a real container, not just workflow members.
+    pub dispatch_id: String,
     /// Concise Haiku-generated name, set once on-demand when a client first
     /// expands this subagent (see `subagent.GenerateName`). None until then
     /// — callers fall back to `slug`/`agent_id` themselves.
     pub display_name: Option<String>,
+    /// The transcript's own `"parentUuid"` field, parsed verbatim (SPEC
+    /// §9.2). `None` in every real transcript checked so far — nested
+    /// subagent spawning is permitted for unrestricted-tool subagent types
+    /// (`general-purpose`/`claude`) but has never been observed in
+    /// practice. Captured defensively since the first JSONL line is
+    /// already read for `slug`/`model`; if ever `Some`, this SubAgent is a
+    /// grandchild of another SubAgent, not a direct member of its nominal
+    /// `dispatch_id`.
+    pub spawned_from_agent_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
-pub enum SubagentStatus {
+pub enum SubAgentStatus {
     Active,
     Completed,
     /// The parent block's turn ended without a `Result` line ever appearing
@@ -71,8 +92,7 @@ pub enum SubagentStatus {
     /// app/srv restart mid-task. Distinct from `Completed`: the subagent
     /// didn't finish, it was cut off. Set only by
     /// `reconcile_stale_subagents`, never by `process_jsonl_change`'s
-    /// normal event processing. See
-    /// docs/specs/SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md.
+    /// normal event processing.
     Abandoned,
 }
 
@@ -97,26 +117,58 @@ pub enum SubagentEventType {
     Result { content: String },
 }
 
+/// The container-level entity: one per Agent-tool (Task tool) call or
+/// Workflow-tool call. "What got kicked off," not "what ran" — a `Solo`
+/// dispatch always has exactly one `SubAgent`; a `Workflow` dispatch has
+/// however many the run has spawned so far (may still be growing).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WorkflowInfo {
-    pub workflow_id: String,
+pub struct AgentDispatch {
+    /// Workflow kind: the run-id Claude Code already assigns
+    /// (`subagents/workflows/<run-id>/`) — stable across srv restarts,
+    /// unlike an agent_id. Solo kind: `format!("solo:{agent_id}")` (see
+    /// `solo_dispatch_id`) — a solo dispatch is 1:1 with its one member, so
+    /// no separate ID-minting is needed.
+    pub dispatch_id: String,
+    pub kind: DispatchKind,
     pub parent_agent: String,
     pub parent_block_id: String,
     pub session_id: String,
-    /// Agents launched, per the run's journal `started` records (falls back
-    /// to the count of member JSONL files seen when the journal lags).
-    pub agents_total: usize,
-    /// Agents finished, per the journal's `result` records.
-    pub agents_done: usize,
-    pub status: WorkflowStatus,
+    /// Members launched. Workflow kind: per the run's journal `started`
+    /// records (falls back to the count of member JSONL files seen when the
+    /// journal lags). Solo kind: always 1.
+    pub member_count: usize,
+    /// Members finished. Workflow kind: per the journal's `result` records.
+    /// Solo kind: 1 once its one SubAgent is Completed, else 0.
+    pub members_done: usize,
+    pub status: DispatchStatus,
     pub last_event_at: u64,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum DispatchKind {
+    Solo,
+    Workflow,
+}
+
+// SPEC §9.3 (open): an Abandoned aggregation rule for DispatchStatus,
+// mirroring SubAgentStatus::Abandoned one level up, is proposed but not yet
+// implemented — this enum matches today's WorkflowStatus behavior (no
+// abandoned tracking at the dispatch level) rather than half-implementing
+// an undecided rule.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
-pub enum WorkflowStatus {
+pub enum DispatchStatus {
     Running,
     Completed,
+}
+
+/// Solo dispatch identity — a solo Task-tool call has no run-id from Claude
+/// Code (it's a flat file directly under `subagents/`, not nested under
+/// `workflows/<run-id>/`), so it needs a synthesized-but-deterministic ID.
+/// Prefixed so it can never collide with a real workflow run-id.
+fn solo_dispatch_id(agent_id: &str) -> String {
+    format!("solo:{agent_id}")
 }
 
 // ── Internal state ────────────────────────────────────────────────────────
@@ -141,15 +193,19 @@ const MAX_SUBAGENT_EVENTS: usize = 2048;
 const BACKFILL_MAX_FILES: usize = 200;
 
 struct SubagentState {
-    info: SubagentInfo,
+    info: SubAgent,
     file_offset: u64,
     events: Vec<SubagentEvent>,
 }
 
-struct WorkflowState {
-    info: WorkflowInfo,
+/// Tracked state for a Workflow-kind `AgentDispatch`. Solo-kind dispatches
+/// have no equivalent persistent state — they're synthesized on demand
+/// (`list_dispatches`) directly from their one `SubAgent`, since there's
+/// nothing to aggregate across members when there's only ever one.
+struct DispatchState {
+    info: AgentDispatch,
     journal_offset: u64,
-    /// Journal-sourced counters. `agents_total` in the public info is
+    /// Journal-sourced counters. `member_count` in the public info is
     /// max(journal_started, member files seen) since either side can lag.
     journal_started: usize,
     journal_results: usize,
@@ -166,11 +222,33 @@ struct WatchedAgent {
 
 // ── SubagentWatcher ───────────────────────────────────────────────────────
 
+/// Buffered `subagent:activity` events for one Workflow-kind dispatch,
+/// coalesced into a single `dispatch:activity` broadcast on the next flush
+/// tick instead of one WS message per member-event (SPEC §7 — the exact
+/// mechanism behind the 1,030-events-in-10-seconds broadcast storm in
+/// docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md). Solo-kind
+/// dispatches are never buffered here — one member has no coalescing
+/// benefit, and immediate feedback matters more when it's the only thing
+/// running.
+struct PendingDispatchActivity {
+    parent_agent: String,
+    parent_block_id: String,
+    session_id: String,
+    /// One entry per member that had new events since the last flush.
+    members: Vec<(String /* agent_id */, Vec<SubagentEvent>)>,
+}
+
+/// Flush cadence for buffered dispatch activity (SPEC §9.5 — 250ms-1s was
+/// floated as a plausible range, not measured; 500ms is the midpoint,
+/// picked as a reasonable default pending real usage data).
+const DISPATCH_ACTIVITY_FLUSH_INTERVAL: Duration = Duration::from_millis(500);
+
 pub struct SubagentWatcher {
     event_bus: Arc<EventBus>,
     sessions: Mutex<HashMap<String, SessionWatch>>,
     watched_agents: Mutex<Vec<WatchedAgent>>,
-    workflows: Mutex<HashMap<String, WorkflowState>>,
+    dispatches: Mutex<HashMap<String, DispatchState>>,
+    pending_activity: Mutex<HashMap<String, PendingDispatchActivity>>,
 }
 
 impl SubagentWatcher {
@@ -179,14 +257,26 @@ impl SubagentWatcher {
             event_bus,
             sessions: Mutex::new(HashMap::new()),
             watched_agents: Mutex::new(Vec::new()),
-            workflows: Mutex::new(HashMap::new()),
+            dispatches: Mutex::new(HashMap::new()),
+            pending_activity: Mutex::new(HashMap::new()),
         }
     }
 
-    /// Create a new SubagentWatcher and return it wrapped in Arc.
+    /// Create a new SubagentWatcher and return it wrapped in Arc. Also
+    /// starts the background flush loop for coalesced dispatch activity
+    /// (SPEC §7) — runs for the lifetime of the process, mirroring
+    /// `watch_agent`'s existing `tokio::spawn` pattern.
     pub fn spawn(event_bus: Arc<EventBus>) -> Arc<Self> {
         let watcher = Arc::new(Self::new(event_bus));
         tracing::info!("subagent watcher initialized");
+        let flusher = Arc::clone(&watcher);
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(DISPATCH_ACTIVITY_FLUSH_INTERVAL);
+            loop {
+                interval.tick().await;
+                flusher.flush_pending_dispatch_activity();
+            }
+        });
         watcher
     }
 
@@ -448,7 +538,7 @@ impl SubagentWatcher {
     }
 
     /// List all subagents across all sessions (sync — safe to call from RPC dispatch).
-    pub fn list_active(&self) -> Vec<SubagentInfo> {
+    pub fn list_active(&self) -> Vec<SubAgent> {
         let sessions = self.sessions.lock().unwrap();
         let mut result = Vec::new();
         for session in sessions.values() {
@@ -460,18 +550,54 @@ impl SubagentWatcher {
         result
     }
 
-    /// List all tracked workflow runs (sync — safe to call from RPC dispatch).
-    pub fn list_workflows(&self) -> Vec<WorkflowInfo> {
-        let mut workflows = self.workflows.lock().unwrap();
-        let mut result: Vec<WorkflowInfo> = workflows
-            .values_mut()
-            .map(|state| {
-                Self::refresh_workflow_status(state);
-                state.info.clone()
-            })
-            .collect();
+    /// List all tracked dispatches — both kinds (sync — safe to call from
+    /// RPC dispatch). Workflow-kind dispatches come from tracked
+    /// `DispatchState`; Solo-kind dispatches have no persistent state of
+    /// their own and are synthesized 1:1 from every loose `SubAgent` (SPEC
+    /// §5/§8) — this is what gives every solo Task-tool call a real,
+    /// backend-issued container it never had before.
+    pub fn list_dispatches(&self) -> Vec<AgentDispatch> {
+        let mut result: Vec<AgentDispatch> = {
+            let mut dispatches = self.dispatches.lock().unwrap();
+            dispatches
+                .values_mut()
+                .map(|state| {
+                    Self::refresh_dispatch_status(state);
+                    state.info.clone()
+                })
+                .collect()
+        };
+        let sessions = self.sessions.lock().unwrap();
+        for session in sessions.values() {
+            for state in session.subagents.values() {
+                if let Some(solo) = Self::solo_dispatch(&state.info) {
+                    result.push(solo);
+                }
+            }
+        }
         result.sort_by(|a, b| b.last_event_at.cmp(&a.last_event_at));
         result
+    }
+
+    /// Synthesize the `AgentDispatch` for a loose (non-workflow) `SubAgent`.
+    /// `None` for a workflow member — those are represented by their
+    /// tracked `DispatchState` instead, not synthesized per-call.
+    fn solo_dispatch(sub: &SubAgent) -> Option<AgentDispatch> {
+        if !sub.dispatch_id.starts_with("solo:") {
+            return None;
+        }
+        let done = matches!(sub.status, SubAgentStatus::Completed | SubAgentStatus::Abandoned);
+        Some(AgentDispatch {
+            dispatch_id: sub.dispatch_id.clone(),
+            kind: DispatchKind::Solo,
+            parent_agent: sub.parent_agent.clone(),
+            parent_block_id: sub.parent_block_id.clone(),
+            session_id: sub.session_id.clone(),
+            member_count: 1,
+            members_done: done as usize,
+            status: if done { DispatchStatus::Completed } else { DispatchStatus::Running },
+            last_event_at: sub.last_event_at,
+        })
     }
 
     /// Get recent events for a specific subagent (sync — safe to call from RPC dispatch).
@@ -492,7 +618,7 @@ impl SubagentWatcher {
     /// after its `subagent:spawned` event already fired needs its info once,
     /// at mount; scanning + cloning every active subagent across every
     /// session for that is wasteful when the caller already knows the id.
-    pub fn get_info(&self, agent_id: &str) -> Option<SubagentInfo> {
+    pub fn get_info(&self, agent_id: &str) -> Option<SubAgent> {
         let sessions = self.sessions.lock().unwrap();
         for session in sessions.values() {
             if let Some(state) = session.subagents.get(agent_id) {
@@ -512,9 +638,9 @@ impl SubagentWatcher {
         // Captured alongside the mutation itself (not re-looked-up after
         // unlocking) — this is the exact moment a NAME-based grouping key is
         // born, so the fields that decide which group it lands in
-        // (workflow_id, parent_block_id) need to be logged from the same
+        // (dispatch_id, parent_block_id) need to be logged from the same
         // locked read that set it, not a racy re-fetch.
-        let mut found_context: Option<(String, String, Option<String>)> = None;
+        let mut found_context: Option<(String, String, String)> = None;
         let found = {
             let mut sessions = self.sessions.lock().unwrap();
             let mut found = false;
@@ -524,7 +650,7 @@ impl SubagentWatcher {
                     found_context = Some((
                         state.info.parent_block_id.clone(),
                         state.info.session_id.clone(),
-                        state.info.workflow_id.clone(),
+                        state.info.dispatch_id.clone(),
                     ));
                     found = true;
                     break;
@@ -534,13 +660,13 @@ impl SubagentWatcher {
         };
         // Mutex released here — broadcast outside the lock
 
-        if let Some((parent_block_id, session_id, workflow_id)) = &found_context {
+        if let Some((parent_block_id, session_id, dispatch_id)) = &found_context {
             tracing::info!(
                 agent_id = %agent_id,
                 display_name = %display_name,
                 parent_block_id = %parent_block_id,
                 session_id = %session_id,
-                workflow_id = ?workflow_id,
+                dispatch_id = %dispatch_id,
                 "subagent display_name resolved"
             );
         }
@@ -680,18 +806,18 @@ impl SubagentWatcher {
             if state.info.parent_block_id != parent_block_id {
                 continue;
             }
-            if state.info.status == SubagentStatus::Active {
-                state.info.status = SubagentStatus::Abandoned;
+            if state.info.status == SubAgentStatus::Active {
+                state.info.status = SubAgentStatus::Abandoned;
                 reconciled += 1;
                 // Every field a NAME-based grouping/dedup bug needs to
-                // reconstruct offline: which subagent, which workflow (if
-                // any), which display_name it had already resolved (grouping
-                // is keyed on this), and which block/session it's bound to.
+                // reconstruct offline: which subagent, which dispatch,
+                // which display_name it had already resolved (grouping is
+                // keyed on this), and which block/session it's bound to.
                 tracing::info!(
                     agent_id = %state.info.agent_id,
                     parent_block_id = %parent_block_id,
                     session_id = %session_id,
-                    workflow_id = ?state.info.workflow_id,
+                    dispatch_id = %state.info.dispatch_id,
                     display_name = ?state.info.display_name,
                     slug = %state.info.slug,
                     "subagent reconciled: active -> abandoned (parent turn ended)"
@@ -812,6 +938,9 @@ impl SubagentWatcher {
         // so walk ancestors instead of assuming a fixed depth.
         let session_id = derive_session_id(jsonl_path);
         let workflow_id = parse_workflow_id(jsonl_path);
+        // Every SubAgent has a real dispatch_id now — a solo Task-tool call
+        // gets a synthesized one (SPEC §5), not just workflow members.
+        let dispatch_id = workflow_id.clone().unwrap_or_else(|| solo_dispatch_id(&agent_id));
 
         // Read the current offset before locking (so file I/O is outside the lock)
         let current_offset = {
@@ -874,7 +1003,7 @@ impl SubagentWatcher {
             }
             let state = session.subagents.entry(agent_id.clone()).or_insert_with(|| {
                 SubagentState {
-                    info: SubagentInfo {
+                    info: SubAgent {
                         agent_id: agent_id.clone(),
                         slug: String::new(),
                         jsonl_path: jsonl_path.to_string_lossy().to_string(),
@@ -883,11 +1012,12 @@ impl SubagentWatcher {
                         session_id: session_id.clone(),
                         spawned_at: now_millis(),
                         last_event_at: now_millis(),
-                        status: SubagentStatus::Active,
+                        status: SubAgentStatus::Active,
                         event_count: 0,
                         model: None,
-                        workflow_id: None,
+                        dispatch_id: dispatch_id.clone(),
                         display_name: None,
+                        spawned_from_agent_id: None,
                     },
                     file_offset: 0,
                     events: Vec::new(),
@@ -895,7 +1025,7 @@ impl SubagentWatcher {
             });
 
             state.file_offset = new_offset;
-            state.info.workflow_id = workflow_id.clone();
+            state.info.dispatch_id = dispatch_id.clone();
 
             // Update metadata from first line if we got it
             if let Some(m) = meta {
@@ -904,6 +1034,9 @@ impl SubagentWatcher {
                 }
                 if let Some(model) = m.model {
                     state.info.model = Some(model);
+                }
+                if m.parent_uuid.is_some() {
+                    state.info.spawned_from_agent_id = m.parent_uuid;
                 }
             }
 
@@ -934,7 +1067,7 @@ impl SubagentWatcher {
             if let Some(last) = new_events.last() {
                 if matches!(&last.event_type, SubagentEventType::Result { .. }) {
                     completed = true;
-                    state.info.status = SubagentStatus::Completed;
+                    state.info.status = SubAgentStatus::Completed;
                 }
             }
 
@@ -958,7 +1091,7 @@ impl SubagentWatcher {
                             "parentBlockId": parent_block_id,
                             "sessionId": session_id,
                             "model": info_snapshot.model,
-                            "workflowId": info_snapshot.workflow_id,
+                            "dispatchId": info_snapshot.dispatch_id,
                         }
                     }
                 })),
@@ -970,32 +1103,52 @@ impl SubagentWatcher {
                 parent = %parent_agent,
                 parent_block_id = %parent_block_id,
                 session_id = %session_id,
-                workflow_id = ?info_snapshot.workflow_id,
+                dispatch_id = %info_snapshot.dispatch_id,
                 "subagent spawned"
             );
         }
 
         if !new_events.is_empty() {
-            let activity_event = WSEventType {
-                eventtype: WS_EVENT_RPC.to_string(),
-                oref: String::new(),
-                data: Some(json!({
-                    "command": "eventrecv",
-                    "data": {
-                        "event": "subagent:activity",
+            if workflow_id.is_some() {
+                // Workflow-kind member: buffer for the next coalesced
+                // dispatch:activity flush instead of broadcasting per-member
+                // (SPEC §7) — a large dispatch's activity ticks are the
+                // exact mechanism behind the crash-storm broadcast volume in
+                // docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md.
+                let mut pending = self.pending_activity.lock().unwrap();
+                let entry = pending
+                    .entry(dispatch_id.clone())
+                    .or_insert_with(|| PendingDispatchActivity {
+                        parent_agent: parent_agent.to_string(),
+                        parent_block_id: parent_block_id.to_string(),
+                        session_id: session_id.clone(),
+                        members: Vec::new(),
+                    });
+                entry.members.push((agent_id.clone(), new_events.clone()));
+            } else {
+                // Solo dispatch: exactly one member, no coalescing benefit —
+                // broadcast immediately, same as before the redesign.
+                let activity_event = WSEventType {
+                    eventtype: WS_EVENT_RPC.to_string(),
+                    oref: String::new(),
+                    data: Some(json!({
+                        "command": "eventrecv",
                         "data": {
-                            "agentId": agent_id,
-                            "parentAgent": parent_agent,
-                            "parentBlockId": parent_block_id,
-                            "newEvents": new_events.len(),
-                            "totalEvents": info_snapshot.event_count,
-                            "events": new_events,
-                            "workflowId": info_snapshot.workflow_id,
+                            "event": "subagent:activity",
+                            "data": {
+                                "agentId": agent_id,
+                                "parentAgent": parent_agent,
+                                "parentBlockId": parent_block_id,
+                                "newEvents": new_events.len(),
+                                "totalEvents": info_snapshot.event_count,
+                                "events": new_events,
+                                "dispatchId": info_snapshot.dispatch_id,
+                            }
                         }
-                    }
-                })),
-            };
-            self.event_bus.broadcast_event(&activity_event);
+                    })),
+                };
+                self.event_bus.broadcast_event(&activity_event);
+            }
         }
 
         if completed {
@@ -1011,7 +1164,7 @@ impl SubagentWatcher {
                             "parentAgent": parent_agent,
                             "parentBlockId": parent_block_id,
                             "totalEvents": info_snapshot.event_count,
-                            "workflowId": info_snapshot.workflow_id,
+                            "dispatchId": info_snapshot.dispatch_id,
                         }
                     }
                 })),
@@ -1022,13 +1175,13 @@ impl SubagentWatcher {
                 total_events = info_snapshot.event_count,
                 parent_block_id = %parent_block_id,
                 session_id = %session_id,
-                workflow_id = ?info_snapshot.workflow_id,
+                dispatch_id = %info_snapshot.dispatch_id,
                 "subagent completed"
             );
         }
 
         if let Some(wf_id) = workflow_id {
-            self.update_workflow_membership(
+            self.update_dispatch_membership(
                 &wf_id,
                 parent_agent,
                 parent_block_id,
@@ -1036,19 +1189,66 @@ impl SubagentWatcher {
                 is_new,
                 completed,
             );
+        } else if is_new || completed {
+            // Solo dispatch: no tracked DispatchState to update — just
+            // broadcast the freshly-synthesized AgentDispatch so dispatch:
+            // updated fires for both kinds (SPEC §5), not just Workflow.
+            if let Some(dispatch) = Self::solo_dispatch(&info_snapshot) {
+                self.broadcast_dispatch_updated(&dispatch);
+            }
         }
     }
 
-    /// Fold a member subagent's lifecycle into its workflow aggregate and
-    /// broadcast `workflow:updated` — but only when membership actually
+    /// Flush every dispatch with buffered activity as one coalesced
+    /// `dispatch:activity` broadcast (SPEC §7). Called on
+    /// `DISPATCH_ACTIVITY_FLUSH_INTERVAL` by the background task
+    /// `spawn` starts. A quiet dispatch (nothing buffered) costs nothing —
+    /// the map only ever holds entries for dispatches with real pending
+    /// activity, drained on every flush.
+    fn flush_pending_dispatch_activity(&self) {
+        let batch: HashMap<String, PendingDispatchActivity> = {
+            let mut pending = self.pending_activity.lock().unwrap();
+            std::mem::take(&mut *pending)
+        };
+        for (dispatch_id, pending) in batch {
+            if pending.members.is_empty() {
+                continue;
+            }
+            let new_events: usize = pending.members.iter().map(|(_, evs)| evs.len()).sum();
+            let event = WSEventType {
+                eventtype: WS_EVENT_RPC.to_string(),
+                oref: String::new(),
+                data: Some(json!({
+                    "command": "eventrecv",
+                    "data": {
+                        "event": "dispatch:activity",
+                        "data": {
+                            "dispatchId": dispatch_id,
+                            "parentAgent": pending.parent_agent,
+                            "parentBlockId": pending.parent_block_id,
+                            "sessionId": pending.session_id,
+                            "newEvents": new_events,
+                            "members": pending.members.iter().map(|(agent_id, events)| {
+                                json!({ "agentId": agent_id, "events": events })
+                            }).collect::<Vec<_>>(),
+                        }
+                    }
+                })),
+            };
+            self.event_bus.broadcast_event(&event);
+        }
+    }
+
+    /// Fold a member subagent's lifecycle into its dispatch aggregate and
+    /// broadcast `dispatch:updated` — but only when membership actually
     /// changed (a spawn or a completion). `process_jsonl_change` calls this
     /// unconditionally for every workflow member, including plain
     /// text/tool_use/tool_result activity ticks that carry neither flag; a
-    /// workflow with several active members would otherwise broadcast a WS
-    /// event on every one of those ticks even though `agentsTotal`/
-    /// `agentsDone` never moved. Mirrors the `has_new_records` gate in
+    /// dispatch with several active members would otherwise broadcast a WS
+    /// event on every one of those ticks even though `memberCount`/
+    /// `membersDone` never moved. Mirrors the `has_new_records` gate in
     /// `process_journal_change`.
-    fn update_workflow_membership(
+    fn update_dispatch_membership(
         &self,
         workflow_id: &str,
         parent_agent: &str,
@@ -1062,9 +1262,9 @@ impl SubagentWatcher {
         }
 
         let info = {
-            let mut workflows = self.workflows.lock().unwrap();
-            let state = Self::workflow_entry(
-                &mut workflows,
+            let mut dispatches = self.dispatches.lock().unwrap();
+            let state = Self::dispatch_entry(
+                &mut dispatches,
                 workflow_id,
                 parent_agent,
                 parent_block_id,
@@ -1076,14 +1276,14 @@ impl SubagentWatcher {
             if member_completed {
                 state.members_completed += 1;
             }
-            Self::refresh_workflow_info(state);
+            Self::refresh_dispatch_info(state);
             state.info.clone()
         };
-        self.broadcast_workflow_updated(&info);
+        self.broadcast_dispatch_updated(&info);
     }
 
     /// Process a changed workflow journal (subagents/workflows/<wf>/journal.jsonl):
-    /// tally new `started`/`result` records and broadcast `workflow:updated`.
+    /// tally new `started`/`result` records and broadcast `dispatch:updated`.
     fn process_journal_change(
         &self,
         parent_agent: &str,
@@ -1098,8 +1298,8 @@ impl SubagentWatcher {
 
         // Read the current offset before locking (file I/O outside the lock).
         let offset = {
-            let workflows = self.workflows.lock().unwrap();
-            workflows
+            let dispatches = self.dispatches.lock().unwrap();
+            dispatches
                 .get(&workflow_id)
                 .map(|w| w.journal_offset)
                 .unwrap_or(0)
@@ -1124,9 +1324,9 @@ impl SubagentWatcher {
 
         let has_new_records = started > 0 || results > 0;
         let info = {
-            let mut workflows = self.workflows.lock().unwrap();
-            let state = Self::workflow_entry(
-                &mut workflows,
+            let mut dispatches = self.dispatches.lock().unwrap();
+            let state = Self::dispatch_entry(
+                &mut dispatches,
                 &workflow_id,
                 parent_agent,
                 parent_block_id,
@@ -1140,36 +1340,37 @@ impl SubagentWatcher {
             if has_new_records {
                 state.journal_started += started;
                 state.journal_results += results;
-                Self::refresh_workflow_info(state);
+                Self::refresh_dispatch_info(state);
             }
             state.info.clone()
         };
         // Only broadcast when the counters actually moved — an offset-only
         // advance (non-started/result lines) has no observable effect on
-        // WorkflowInfo, so a broadcast would just be noise.
+        // AgentDispatch, so a broadcast would just be noise.
         if has_new_records {
-            self.broadcast_workflow_updated(&info);
+            self.broadcast_dispatch_updated(&info);
         }
     }
 
-    fn workflow_entry<'a>(
-        workflows: &'a mut HashMap<String, WorkflowState>,
+    fn dispatch_entry<'a>(
+        dispatches: &'a mut HashMap<String, DispatchState>,
         workflow_id: &str,
         parent_agent: &str,
         parent_block_id: &str,
         session_id: &str,
-    ) -> &'a mut WorkflowState {
-        workflows
+    ) -> &'a mut DispatchState {
+        dispatches
             .entry(workflow_id.to_string())
-            .or_insert_with(|| WorkflowState {
-                info: WorkflowInfo {
-                    workflow_id: workflow_id.to_string(),
+            .or_insert_with(|| DispatchState {
+                info: AgentDispatch {
+                    dispatch_id: workflow_id.to_string(),
+                    kind: DispatchKind::Workflow,
                     parent_agent: parent_agent.to_string(),
                     parent_block_id: parent_block_id.to_string(),
                     session_id: session_id.to_string(),
-                    agents_total: 0,
-                    agents_done: 0,
-                    status: WorkflowStatus::Running,
+                    member_count: 0,
+                    members_done: 0,
+                    status: DispatchStatus::Running,
                     last_event_at: now_millis(),
                 },
                 journal_offset: 0,
@@ -1183,43 +1384,44 @@ impl SubagentWatcher {
     /// Recompute public counters from raw journal/member counters. Either
     /// source can lag the other (journal writes vs member file creation), so
     /// take the max of each pair.
-    fn refresh_workflow_info(state: &mut WorkflowState) {
-        state.info.agents_total = state.journal_started.max(state.member_files);
-        state.info.agents_done = state.journal_results.max(state.members_completed);
+    fn refresh_dispatch_info(state: &mut DispatchState) {
+        state.info.member_count = state.journal_started.max(state.member_files);
+        state.info.members_done = state.journal_results.max(state.members_completed);
         state.info.last_event_at = now_millis();
-        Self::refresh_workflow_status(state);
+        Self::refresh_dispatch_status(state);
     }
 
     /// Counts-complete + 60s quiet ⇒ Completed. There is no timer: the flip
-    /// happens lazily at the next event or ListWorkflows read. `started ==
+    /// happens lazily at the next event or ListDispatches read. `started ==
     /// results` alone is not terminal — it also holds between phases of a
     /// still-running workflow, hence the quiet window.
-    fn refresh_workflow_status(state: &mut WorkflowState) {
-        let counts_complete = state.info.agents_total > 0
-            && state.info.agents_done >= state.info.agents_total;
+    fn refresh_dispatch_status(state: &mut DispatchState) {
+        let counts_complete = state.info.member_count > 0
+            && state.info.members_done >= state.info.member_count;
         let quiet = now_millis().saturating_sub(state.info.last_event_at) > 60_000;
         state.info.status = if counts_complete && quiet {
-            WorkflowStatus::Completed
+            DispatchStatus::Completed
         } else {
-            WorkflowStatus::Running
+            DispatchStatus::Running
         };
     }
 
-    fn broadcast_workflow_updated(&self, info: &WorkflowInfo) {
+    fn broadcast_dispatch_updated(&self, info: &AgentDispatch) {
         let event = WSEventType {
             eventtype: WS_EVENT_RPC.to_string(),
             oref: String::new(),
             data: Some(json!({
                 "command": "eventrecv",
                 "data": {
-                    "event": "workflow:updated",
+                    "event": "dispatch:updated",
                     "data": {
-                        "workflowId": info.workflow_id,
+                        "dispatchId": info.dispatch_id,
+                        "kind": info.kind,
                         "parentAgent": info.parent_agent,
                         "parentBlockId": info.parent_block_id,
                         "sessionId": info.session_id,
-                        "agentsTotal": info.agents_total,
-                        "agentsDone": info.agents_done,
+                        "memberCount": info.member_count,
+                        "membersDone": info.members_done,
                         "status": info.status,
                     }
                 }
@@ -1235,6 +1437,10 @@ impl SubagentWatcher {
 struct JsonlMeta {
     slug: String,
     model: Option<String>,
+    /// The line's own `"parentUuid"` field, verbatim (SPEC §9.2 — `SubAgent.
+    /// spawned_from_agent_id`). `None` in every real transcript checked so
+    /// far; captured defensively since this line is already parsed.
+    parent_uuid: Option<String>,
 }
 
 /// Read a JSONL file from a byte offset, parsing new subagent events.
@@ -1277,6 +1483,10 @@ fn read_jsonl_from_offset(
 
         // Extract metadata from init/config lines
         if offset == 0 && meta.is_none() {
+            let parent_uuid = value
+                .get("parentUuid")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
             if let Some(slug) = value.get("slug").and_then(|v| v.as_str()) {
                 meta = Some(JsonlMeta {
                     slug: slug.to_string(),
@@ -1284,6 +1494,7 @@ fn read_jsonl_from_offset(
                         .get("model")
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_string()),
+                    parent_uuid: parent_uuid.clone(),
                 });
             }
             if meta.is_none() {
@@ -1298,6 +1509,7 @@ fn read_jsonl_from_offset(
                             .get("model")
                             .and_then(|v| v.as_str())
                             .map(|s| s.to_string()),
+                        parent_uuid,
                     });
                 }
             }
@@ -1677,7 +1889,7 @@ mod tests {
 
     fn fixture_state(parent_agent: &str, agent_id: &str, session_id: &str) -> SubagentState {
         SubagentState {
-            info: SubagentInfo {
+            info: SubAgent {
                 agent_id: agent_id.to_string(),
                 slug: String::new(),
                 jsonl_path: String::new(),
@@ -1686,11 +1898,12 @@ mod tests {
                 session_id: session_id.to_string(),
                 spawned_at: 0,
                 last_event_at: 0,
-                status: SubagentStatus::Active,
+                status: SubAgentStatus::Active,
                 event_count: 0,
                 model: None,
-                workflow_id: None,
+                dispatch_id: solo_dispatch_id(agent_id),
                 display_name: None,
+                spawned_from_agent_id: None,
             },
             file_offset: 0,
             events: Vec::new(),
@@ -1912,7 +2125,7 @@ mod tests {
             let sessions = watcher.sessions.lock().unwrap();
             let session = sessions.values().next().expect("session recorded");
             let state = session.subagents.get("sub-a").expect("subagent recorded");
-            assert_eq!(state.info.status, SubagentStatus::Completed);
+            assert_eq!(state.info.status, SubAgentStatus::Completed);
             assert!(matches!(
                 state.events.last().unwrap().event_type,
                 SubagentEventType::Result { .. }
@@ -1940,7 +2153,174 @@ mod tests {
             let sessions = watcher.sessions.lock().unwrap();
             let session = sessions.values().next().expect("session recorded");
             let state = session.subagents.get("sub-b").expect("subagent recorded");
-            assert_eq!(state.info.status, SubagentStatus::Active);
+            assert_eq!(state.info.status, SubAgentStatus::Active);
+        }
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // ── AgentDispatch (SPEC_AGENT_DISPATCH_SUBAGENT_HIERARCHY_2026_07_17) ──
+
+    #[test]
+    fn process_jsonl_change_parses_spawned_from_agent_id_from_parent_uuid() {
+        // Empirically null in every real transcript checked (SPEC §9.2), but
+        // the field is captured defensively — verify it round-trips when
+        // present so a future real occurrence isn't silently dropped.
+        let dir = std::env::temp_dir().join(format!("amx-subagent-parentuuid-{}", now_millis()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let jsonl_path = dir.join("agent-child-a.jsonl");
+        std::fs::write(
+            &jsonl_path,
+            "{\"parentUuid\":\"parent-turn-uuid-123\",\"agentId\":\"child-a\",\"type\":\"user\"}\n",
+        )
+        .unwrap();
+
+        let watcher = fixture_watcher();
+        watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path);
+
+        let sessions = watcher.sessions.lock().unwrap();
+        let session = sessions.values().next().expect("session recorded");
+        let state = session.subagents.get("child-a").expect("subagent recorded");
+        assert_eq!(
+            state.info.spawned_from_agent_id.as_deref(),
+            Some("parent-turn-uuid-123")
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn process_jsonl_change_leaves_spawned_from_agent_id_none_when_parent_uuid_is_null() {
+        let dir = std::env::temp_dir().join(format!("amx-subagent-parentuuid-null-{}", now_millis()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let jsonl_path = dir.join("agent-child-b.jsonl");
+        std::fs::write(
+            &jsonl_path,
+            "{\"parentUuid\":null,\"agentId\":\"child-b\",\"type\":\"user\"}\n",
+        )
+        .unwrap();
+
+        let watcher = fixture_watcher();
+        watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path);
+
+        let sessions = watcher.sessions.lock().unwrap();
+        let session = sessions.values().next().expect("session recorded");
+        let state = session.subagents.get("child-b").expect("subagent recorded");
+        assert_eq!(state.info.spawned_from_agent_id, None);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn list_dispatches_synthesizes_a_solo_dispatch_for_a_loose_subagent() {
+        let dir = std::env::temp_dir().join(format!("amx-solo-dispatch-{}", now_millis()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let jsonl_path = dir.join("agent-solo-a.jsonl");
+        std::fs::write(
+            &jsonl_path,
+            "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n",
+        )
+        .unwrap();
+
+        let watcher = fixture_watcher();
+        watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path);
+
+        let dispatches = watcher.list_dispatches();
+        assert_eq!(dispatches.len(), 1, "one solo dispatch, synthesized on demand");
+        let d = &dispatches[0];
+        assert_eq!(d.dispatch_id, "solo:solo-a");
+        assert_eq!(d.kind, DispatchKind::Solo);
+        assert_eq!(d.member_count, 1);
+        assert_eq!(d.members_done, 0, "still active, not yet completed");
+        assert_eq!(d.status, DispatchStatus::Running);
+
+        // The same dispatch_id is stamped on the member itself.
+        let active = watcher.list_active();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].dispatch_id, "solo:solo-a");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn list_dispatches_marks_solo_dispatch_done_once_its_member_completes() {
+        let dir = std::env::temp_dir().join(format!("amx-solo-dispatch-done-{}", now_millis()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let jsonl_path = dir.join("agent-solo-b.jsonl");
+        std::fs::write(&jsonl_path, "{\"type\":\"result\",\"result\":\"done\"}\n").unwrap();
+
+        let watcher = fixture_watcher();
+        watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path);
+
+        let dispatches = watcher.list_dispatches();
+        assert_eq!(dispatches.len(), 1);
+        assert_eq!(dispatches[0].members_done, 1);
+        assert_eq!(dispatches[0].status, DispatchStatus::Completed);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn list_dispatches_includes_a_tracked_workflow_dispatch_from_its_journal() {
+        let dir = std::env::temp_dir().join(format!("amx-workflow-dispatch-{}", now_millis()));
+        let run_dir = dir.join("subagents").join("workflows").join("wf_xyz789");
+        std::fs::create_dir_all(&run_dir).unwrap();
+        let journal_path = run_dir.join("journal.jsonl");
+        std::fs::write(
+            &journal_path,
+            concat!(
+                "{\"type\":\"started\",\"agent_id\":\"m1\"}\n",
+                "{\"type\":\"started\",\"agent_id\":\"m2\"}\n",
+            ),
+        )
+        .unwrap();
+
+        let watcher = fixture_watcher();
+        watcher.process_journal_change("parent-1", "block-1", &journal_path);
+
+        let dispatches = watcher.list_dispatches();
+        assert_eq!(dispatches.len(), 1);
+        let d = &dispatches[0];
+        assert_eq!(d.dispatch_id, "wf_xyz789");
+        assert_eq!(d.kind, DispatchKind::Workflow);
+        assert_eq!(d.member_count, 2);
+        assert_eq!(d.members_done, 0);
+        assert_eq!(d.status, DispatchStatus::Running);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn workflow_member_activity_is_buffered_not_broadcast_immediately() {
+        // SPEC §7: a Workflow-kind member's new events are coalesced into
+        // pending_activity, not broadcast per-member — the direct fix for
+        // the crash-storm mechanism in
+        // docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md.
+        let dir = std::env::temp_dir().join(format!("amx-coalesce-{}", now_millis()));
+        let run_dir = dir.join("subagents").join("workflows").join("wf_coalesce1");
+        std::fs::create_dir_all(&run_dir).unwrap();
+        let jsonl_path = run_dir.join("agent-member-a.jsonl");
+        std::fs::write(
+            &jsonl_path,
+            "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"working\"}]}}\n",
+        )
+        .unwrap();
+
+        let watcher = fixture_watcher();
+        watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path);
+
+        {
+            let pending = watcher.pending_activity.lock().unwrap();
+            let buffered = pending.get("wf_coalesce1").expect("activity buffered for this dispatch");
+            assert_eq!(buffered.members.len(), 1);
+            assert_eq!(buffered.members[0].0, "member-a");
+        }
+
+        // Flushing drains the buffer.
+        watcher.flush_pending_dispatch_activity();
+        {
+            let pending = watcher.pending_activity.lock().unwrap();
+            assert!(pending.is_empty(), "flush must drain every dispatch's buffer");
         }
 
         std::fs::remove_dir_all(&dir).ok();
@@ -2326,7 +2706,7 @@ mod tests {
         watcher.reconcile_stale_subagents(&block_id, "s1");
 
         let info = watcher.get_info("sub-a").expect("sub-a should still exist");
-        assert_eq!(info.status, SubagentStatus::Abandoned);
+        assert_eq!(info.status, SubAgentStatus::Abandoned);
     }
 
     #[test]
@@ -2347,7 +2727,7 @@ mod tests {
         watcher.reconcile_stale_subagents(&block_id, "s1");
 
         let info = watcher.get_info("sub-a").expect("sub-a should still exist");
-        assert_eq!(info.status, SubagentStatus::Active, "a genuinely active parent turn must never be reconciled away");
+        assert_eq!(info.status, SubAgentStatus::Active, "a genuinely active parent turn must never be reconciled away");
     }
 
     #[test]
@@ -2371,7 +2751,7 @@ mod tests {
         watcher.reconcile_stale_subagents(&block_id, "s1");
 
         let info = watcher.get_info("sub-a").expect("sub-a should still exist");
-        assert_eq!(info.status, SubagentStatus::Active);
+        assert_eq!(info.status, SubAgentStatus::Active);
     }
 
     #[test]
@@ -2385,7 +2765,7 @@ mod tests {
             let mut s1 = SessionWatch { subagents: HashMap::new() };
             let mut state = fixture_state("parent-1", "sub-a", "s1");
             state.info.parent_block_id = block_id.clone();
-            state.info.status = SubagentStatus::Completed;
+            state.info.status = SubAgentStatus::Completed;
             s1.subagents.insert("sub-a".to_string(), state);
             sessions.insert("s1".to_string(), s1);
         }
@@ -2393,7 +2773,7 @@ mod tests {
         watcher.reconcile_stale_subagents(&block_id, "s1");
 
         let info = watcher.get_info("sub-a").expect("sub-a should still exist");
-        assert_eq!(info.status, SubagentStatus::Completed, "a subagent that genuinely finished must stay Completed, not be downgraded");
+        assert_eq!(info.status, SubAgentStatus::Completed, "a subagent that genuinely finished must stay Completed, not be downgraded");
     }
 
     #[test]
@@ -2425,9 +2805,9 @@ mod tests {
         watcher.reconcile_stale_subagents(&idle_block, "s1");
 
         let owned_info = watcher.get_info("sub-owned").expect("sub-owned should still exist");
-        assert_eq!(owned_info.status, SubagentStatus::Abandoned, "this block's own subagent should still be reconciled");
+        assert_eq!(owned_info.status, SubAgentStatus::Abandoned, "this block's own subagent should still be reconciled");
         let sibling_info = watcher.get_info("sub-sibling").expect("sub-sibling should still exist");
-        assert_eq!(sibling_info.status, SubagentStatus::Active, "a sibling block's subagent must never be reconciled by an unrelated block's idle read");
+        assert_eq!(sibling_info.status, SubAgentStatus::Active, "a sibling block's subagent must never be reconciled by an unrelated block's idle read");
     }
 
     /// End-to-end: a subagent JSONL with no terminal `result` line, backfilled
@@ -2462,7 +2842,7 @@ mod tests {
         let active = watcher.list_active();
         assert_eq!(active.len(), 1);
         assert_eq!(active[0].agent_id, "crashed");
-        assert_eq!(active[0].status, SubagentStatus::Abandoned);
+        assert_eq!(active[0].status, SubAgentStatus::Abandoned);
 
         std::fs::remove_dir_all(&config_dir).ok();
     }

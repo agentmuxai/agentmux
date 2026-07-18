@@ -243,6 +243,42 @@
     }
 }
 
+// ── Dispatch concatenated activity feed (SPEC_AGENT_DISPATCH_SUBAGENT_HIERARCHY_2026_07_17 §7) ──
+// A Workflow-kind dispatch expands into this instead of nested member rows —
+// never one row per member, however many the dispatch has.
+
+.swarm-dispatch-feed {
+    display: flex;
+    flex-direction: column;
+    margin: 0 6px 4px 30px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--panel-bg-color, var(--main-bg-color));
+    max-height: 320px;
+    overflow-y: auto;
+    padding: 2px 8px 4px;
+}
+
+.swarm-dispatch-feed-empty {
+    padding: 8px 0;
+    font-size: 11px;
+    color: var(--secondary-text-color);
+}
+
+.swarm-dispatch-feed-entry {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+}
+
+.swarm-dispatch-feed-tag {
+    flex-shrink: 0;
+    padding-top: 2px;
+    font-size: 10px;
+    font-family: var(--monospace-font, monospace);
+    color: var(--secondary-text-color);
+}
+
 // ── Subagent child row ───────────────────────────────────────────────────
 
 .swarm-subagent-group {
