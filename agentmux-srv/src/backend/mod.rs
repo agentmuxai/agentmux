@@ -12,6 +12,7 @@ pub mod layout;
 pub mod providers;
 pub mod model_catalog;
 pub mod config_watcher_fs;
+pub mod editor_file_watcher;
 pub mod ijson;
 pub mod docsite;
 pub mod eventbus;

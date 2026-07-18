@@ -676,6 +676,13 @@ async fn main() {
     let bridge = backend::eventbus::EventBusBridge::new(event_bus.clone());
     broker.set_client(Box::new(bridge));
 
+    // Watches files open in editor/preview panes, publishing a per-block
+    // wake signal on external changes. See SPEC_EDITOR_LIVE_FILE_RELOAD_2026_07_18.md.
+    let editor_file_watcher = backend::editor_file_watcher::EditorFileWatcher::new(broker.clone());
+    if editor_file_watcher.is_none() {
+        tracing::warn!("editor file watcher not started; editor panes will not live-reload on external changes");
+    }
+
     // Config watcher (created before sysinfo loop so it can read telemetry:interval)
     let config_watcher = Arc::new(wconfig::ConfigWatcher::with_config(wconfig::build_default_config()));
 
@@ -1157,6 +1164,7 @@ async fn main() {
             local_web_url.clone(),
             config.auth_key.clone(),
         ),
+        editor_file_watcher,
     };
 
     // Start persistent cron scheduler — load enabled jobs from DB, fire any

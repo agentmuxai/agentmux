@@ -106,6 +106,56 @@ fn inject_global_bundles(claude_md: &str, id_store: &Arc<Store>) -> String {
 
 pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let id_store = state.id_store.clone();
+    let editor_file_watcher = state.editor_file_watcher.clone();
+
+    // watcheditorfile → start live-reload watching for a (path, block_id)
+    // pair. Called by the frontend once a tab's content finishes loading.
+    // No-op (not an error) if the watcher failed to start at boot — editor
+    // panes still work, they just don't live-reload.
+    // Spec: docs/specs/SPEC_EDITOR_LIVE_FILE_RELOAD_2026_07_18.md
+    {
+        let watcher = editor_file_watcher.clone();
+        engine.register_handler(
+            "watcheditorfile",
+            Box::new(move |data, _ctx| {
+                let watcher = watcher.clone();
+                Box::pin(async move {
+                    #[derive(serde::Deserialize)]
+                    struct Cmd { path: String, block_id: String }
+                    let cmd: Cmd = serde_json::from_value(data)
+                        .map_err(|e| format!("watcheditorfile: {e}"))?;
+                    if let Some(w) = watcher {
+                        let expanded = expand_home_dir_safe(&cmd.path);
+                        w.watch_path(expanded.as_path(), &cmd.block_id);
+                    }
+                    Ok(None)
+                })
+            }),
+        );
+    }
+
+    // unwatcheditorfile → stop live-reload watching for a (path, block_id)
+    // pair. Called on tab close / pane dispose.
+    {
+        let watcher = editor_file_watcher.clone();
+        engine.register_handler(
+            "unwatcheditorfile",
+            Box::new(move |data, _ctx| {
+                let watcher = watcher.clone();
+                Box::pin(async move {
+                    #[derive(serde::Deserialize)]
+                    struct Cmd { path: String, block_id: String }
+                    let cmd: Cmd = serde_json::from_value(data)
+                        .map_err(|e| format!("unwatcheditorfile: {e}"))?;
+                    if let Some(w) = watcher {
+                        let expanded = expand_home_dir_safe(&cmd.path);
+                        w.unwatch_path(expanded.as_path(), &cmd.block_id);
+                    }
+                    Ok(None)
+                })
+            }),
+        );
+    }
 
     // writeagentconfig → write config files atomically to agent working directory
     engine.register_handler(

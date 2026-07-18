@@ -23,6 +23,11 @@ export const WpsEvent = {
     ShellNodeCreate: "shell_node_create",
     ShellChunk: "shell_chunk",
     BlockActivity: "block:activity",
+    // Fired when a file open in at least one editor/preview tab changes on
+    // disk. Payload: `{ path }` — a wake signal only, no content; handlers
+    // re-fetch via ReadEditorFileCommand. See
+    // docs/specs/SPEC_EDITOR_LIVE_FILE_RELOAD_2026_07_18.md.
+    EditorFileChanged: "editor:file_changed",
     UpgradeMigrationEvent:     "upgrade:migration-event",
     UpgradeMigrationsComplete: "upgrade:migrations-complete",
     UpgradeMigrationsFailed:   "upgrade:migrations-failed",
