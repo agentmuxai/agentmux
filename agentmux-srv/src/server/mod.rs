@@ -167,6 +167,13 @@ pub struct AppState {
     /// POST to `/agentmux/reactive/inject`. See
     /// `docs/specs/SPEC_CRON_LOOP_ROBUSTNESS_2026_06_25.md §3.2`.
     pub cron_scheduler: std::sync::Arc<crate::backend::cron::CronScheduler>,
+    /// Filesystem watcher for files open in editor/preview panes — publishes
+    /// `EVENT_EDITOR_FILE_CHANGED` (scoped per-block) when a watched path
+    /// changes on disk, so panes can refresh instead of silently going
+    /// stale. `None` when the underlying `notify` watcher couldn't be
+    /// created (live-reload is a nice-to-have, not a boot requirement).
+    /// See docs/specs/SPEC_EDITOR_LIVE_FILE_RELOAD_2026_07_18.md.
+    pub editor_file_watcher: Option<std::sync::Arc<crate::backend::editor_file_watcher::EditorFileWatcher>>,
 }
 
 /// Build the Axum router with all routes, auth middleware, and CORS.

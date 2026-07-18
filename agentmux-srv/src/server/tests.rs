@@ -81,6 +81,7 @@ pub(crate) fn test_state() -> AppState {
             String::new(),
             "test-secret-key".to_string(),
         ),
+        editor_file_watcher: None,
     }
 }
 

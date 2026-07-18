@@ -135,6 +135,26 @@ export const FileApi = {
         return client.rpcCall("writeeditorfile", data, opts);
     },
 
+    // Start/stop live-reload watching for a (path, block_id) pair. The
+    // backend publishes `editor:file_changed` (scoped to `block:<block_id>`)
+    // when the path changes on disk. See
+    // docs/specs/SPEC_EDITOR_LIVE_FILE_RELOAD_2026_07_18.md.
+    WatchEditorFileCommand(
+        client: RpcClient,
+        data: { path: string; block_id: string },
+        opts?: RpcOpts,
+    ): Promise<void> {
+        return client.rpcCall("watcheditorfile", data, opts);
+    },
+
+    UnwatchEditorFileCommand(
+        client: RpcClient,
+        data: { path: string; block_id: string },
+        opts?: RpcOpts,
+    ): Promise<void> {
+        return client.rpcCall("unwatcheditorfile", data, opts);
+    },
+
     // Spec: specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md
     ListEditorDirCommand(
         client: RpcClient,
