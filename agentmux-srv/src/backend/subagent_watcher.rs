@@ -133,6 +133,13 @@ struct SessionWatch {
 /// the hard ceiling on what's retained to serve it from.
 const MAX_SUBAGENT_EVENTS: usize = 2048;
 
+/// Cap on how many `agent-*.jsonl` files `scan_subagents_dir` will replay in
+/// one cold backfill (pane reopen / srv restart) — see that function's doc
+/// comment. 200 comfortably covers a real reopen's "what happened recently"
+/// use case while bounding the worst case to a fixed, small cost regardless
+/// of how many workflow runs a long-lived session has accumulated.
+const BACKFILL_MAX_FILES: usize = 200;
+
 struct SubagentState {
     info: SubagentInfo,
     file_offset: u64,
@@ -703,18 +710,45 @@ impl SubagentWatcher {
 
     /// Process agent-*.jsonl directly in `dir`, plus workflow runs under
     /// `dir/workflows/<wf>/` (member agent files + journal).
+    ///
+    /// A pane's `subagents/` directory accumulates forever — every Task-tool
+    /// and Workflow-tool run this session has ever made leaves its
+    /// `agent-*.jsonl` files behind. Because `is_new` (`process_jsonl_change`)
+    /// is keyed off the in-memory `sessions` map, which starts empty on every
+    /// srv process (restart or fresh start), an unbounded scan here replays
+    /// the session's ENTIRE history — full-file read + parse + WS broadcast
+    /// per file — on every pane reopen or srv restart. On a heavily-used pane
+    /// this is a genuine crash trigger, not just wasted work: a live incident
+    /// (see docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md) hit
+    /// 1,000+ replayed files across three back-to-back srv restarts in under
+    /// 10 seconds, on a machine already near its commit ceiling — the
+    /// resulting allocation/broadcast storm is a plausible contributor to
+    /// each restart re-crashing before the launcher's 3-strikes budget gave
+    /// up and killed the whole app.
+    ///
+    /// Bound the replay to the `BACKFILL_MAX_FILES` most-recently-modified
+    /// agent files (by mtime) — recent activity is what the Swarm pane's
+    /// reopen backfill exists to show; a months-old workflow run replaying on
+    /// every restart serves no one. Skipped files are still on disk and
+    /// still show up via `list_active`'s normal file-count telemetry if
+    /// something later reads them directly — this only bounds the *push*
+    /// (broadcast) side of a cold backfill.
     fn scan_subagents_dir(&self, parent_agent: &str, parent_block_id: &str, dir: &Path) {
+        let mut candidates: Vec<(std::time::SystemTime, PathBuf)> = Vec::new();
+
         if let Ok(files) = std::fs::read_dir(dir) {
             for file in files.flatten() {
                 let path = file.path();
                 if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                     if name.starts_with("agent-") && name.ends_with(".jsonl") {
-                        self.process_jsonl_change(parent_agent, parent_block_id, &path);
+                        candidates.push((file_mtime(&path), path));
                     }
                 }
             }
         }
+
         let workflows_dir = dir.join("workflows");
+        let mut journals: Vec<PathBuf> = Vec::new();
         if let Ok(runs) = std::fs::read_dir(&workflows_dir) {
             for run in runs.flatten() {
                 if let Ok(files) = std::fs::read_dir(run.path()) {
@@ -724,16 +758,39 @@ impl SubagentWatcher {
                             Some(name)
                                 if name.starts_with("agent-") && name.ends_with(".jsonl") =>
                             {
-                                self.process_jsonl_change(parent_agent, parent_block_id, &path);
+                                candidates.push((file_mtime(&path), path));
                             }
-                            Some("journal.jsonl") => {
-                                self.process_journal_change(parent_agent, parent_block_id, &path);
-                            }
+                            // Journals are one small file per run (not one per
+                            // member agent) — always process them so
+                            // `workflow:updated`/run status stay accurate
+                            // regardless of the member-file cap below.
+                            Some("journal.jsonl") => journals.push(path),
                             _ => {}
                         }
                     }
                 }
             }
+        }
+
+        let total = candidates.len();
+        candidates.sort_by(|a, b| b.0.cmp(&a.0)); // newest mtime first
+        let skipped = total.saturating_sub(BACKFILL_MAX_FILES);
+        if skipped > 0 {
+            tracing::info!(
+                agent = %parent_agent,
+                parent_block_id = %parent_block_id,
+                dir = %dir.display(),
+                total,
+                skipped,
+                cap = BACKFILL_MAX_FILES,
+                "scan_subagents_dir: capping cold-backfill replay to the most recent files"
+            );
+        }
+        for (_, path) in candidates.into_iter().take(BACKFILL_MAX_FILES) {
+            self.process_jsonl_change(parent_agent, parent_block_id, &path);
+        }
+        for path in journals {
+            self.process_journal_change(parent_agent, parent_block_id, &path);
         }
     }
 
@@ -1424,6 +1481,15 @@ fn parse_event_type(value: &serde_json::Value) -> Option<SubagentEventType> {
     }
 }
 
+/// Modification time of `path`, or `UNIX_EPOCH` if it can't be read (a
+/// vanished/permission-denied file sorts oldest — excluded first by
+/// `scan_subagents_dir`'s recency cap rather than crashing the scan).
+fn file_mtime(path: &Path) -> std::time::SystemTime {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+}
+
 /// Walk up `path`'s ancestors (parent, grandparent, ...) and return the
 /// first one that already exists on disk. Used by `watch_agent` when the
 /// target directory doesn't exist yet — `notify::Watcher::watch` fails
@@ -1596,6 +1662,17 @@ mod tests {
 
     fn fixture_watcher() -> SubagentWatcher {
         SubagentWatcher::new(Arc::new(EventBus::new()))
+    }
+
+    /// Write a minimal terminated subagent JSONL file with an explicit mtime
+    /// (`UNIX_EPOCH + offset_secs`), so backfill-ordering tests don't depend
+    /// on real wall-clock write speed / filesystem timestamp resolution.
+    fn write_agent_file_with_mtime(path: &Path, offset_secs: u64) {
+        use std::io::Write;
+        let mut f = std::fs::File::create(path).unwrap();
+        f.write_all(b"{\"type\":\"result\",\"result\":\"done\"}\n").unwrap();
+        f.set_modified(std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(offset_secs))
+            .unwrap();
     }
 
     fn fixture_state(parent_agent: &str, agent_id: &str, session_id: &str) -> SubagentState {
@@ -2081,6 +2158,103 @@ mod tests {
         watcher.scan_session_subagents("parent-1", "block-1", &config_dir, "never-existed");
 
         assert!(watcher.list_active().is_empty(), "unknown session id must not fall back to scanning everything");
+
+        std::fs::remove_dir_all(&config_dir).ok();
+    }
+
+    // ── scan_subagents_dir backfill cap (docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md) ──
+    //
+    // A long-lived pane's subagents/ directory accumulates forever; without a
+    // cap, every cold backfill (pane reopen, srv restart) replays the WHOLE
+    // history — a live incident hit 1,000+ replayed files across three
+    // back-to-back srv crash-restarts in under 10 seconds. These tests lock
+    // in the fix: the cap applies regardless of corpus size, and it always
+    // keeps the most RECENT files, not an arbitrary subset.
+
+    #[test]
+    fn scan_subagents_dir_caps_cold_backfill_to_the_most_recent_files() {
+        let config_dir = std::env::temp_dir()
+            .join(format!("amx-scan-backfill-cap-test-{}", now_millis()));
+        let session_id = "backfill-cap-session";
+        let subagents_dir = config_dir
+            .join("projects")
+            .join("ws-enc")
+            .join(session_id)
+            .join("subagents");
+        std::fs::create_dir_all(&subagents_dir).unwrap();
+
+        // One more file than the cap, mtimes strictly increasing by index —
+        // "newest BACKFILL_MAX_FILES" is unambiguous regardless of directory
+        // enumeration order.
+        let total = BACKFILL_MAX_FILES + 1;
+        for i in 0..total {
+            let path = subagents_dir.join(format!("agent-id{i:04}.jsonl"));
+            write_agent_file_with_mtime(&path, i as u64);
+        }
+
+        let watcher = fixture_watcher();
+        watcher.scan_session_subagents("parent-1", "block-1", &config_dir, session_id);
+
+        let active = watcher.list_active();
+        assert_eq!(
+            active.len(),
+            BACKFILL_MAX_FILES,
+            "cold backfill must not replay more than the cap regardless of corpus size"
+        );
+        assert!(
+            !active.iter().any(|a| a.agent_id == "id0000"),
+            "the single oldest file must be the one dropped"
+        );
+        assert!(
+            active
+                .iter()
+                .any(|a| a.agent_id == format!("id{:04}", total - 1)),
+            "the newest file must always survive the cap"
+        );
+
+        std::fs::remove_dir_all(&config_dir).ok();
+    }
+
+    #[test]
+    fn scan_subagents_dir_processes_workflow_journal_even_beyond_the_member_cap() {
+        let config_dir = std::env::temp_dir()
+            .join(format!("amx-scan-backfill-journal-test-{}", now_millis()));
+        let session_id = "backfill-journal-session";
+        let run_dir = config_dir
+            .join("projects")
+            .join("ws-enc")
+            .join(session_id)
+            .join("subagents")
+            .join("workflows")
+            .join("wf_test-run");
+        std::fs::create_dir_all(&run_dir).unwrap();
+
+        // More member files than the cap — the cap must still apply here...
+        let total = BACKFILL_MAX_FILES + 5;
+        for i in 0..total {
+            let path = run_dir.join(format!("agent-id{i:04}.jsonl"));
+            write_agent_file_with_mtime(&path, i as u64);
+        }
+        // ...but the run's journal (one small file, not one per member) is
+        // always processed regardless — it drives `workflow:updated`/run
+        // status, which must stay accurate even when membership is capped.
+        std::fs::write(
+            run_dir.join("journal.jsonl"),
+            "{\"type\":\"started\",\"agent_id\":\"id0000\"}\n",
+        )
+        .unwrap();
+
+        let watcher = fixture_watcher();
+        watcher.scan_session_subagents("parent-1", "block-1", &config_dir, session_id);
+
+        assert_eq!(
+            watcher.list_active().len(),
+            BACKFILL_MAX_FILES,
+            "member files are still capped inside a workflow run"
+        );
+        let workflows = watcher.list_workflows();
+        assert_eq!(workflows.len(), 1, "the run's journal must still be processed");
+        assert_eq!(workflows[0].workflow_id, "wf_test-run");
 
         std::fs::remove_dir_all(&config_dir).ok();
     }
