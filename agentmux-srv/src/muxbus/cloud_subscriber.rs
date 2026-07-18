@@ -289,15 +289,32 @@ async fn connect_and_run(
     _wstore: &Arc<Store>,
     http: &reqwest::Client,
 ) -> Result<(), String> {
-    use tokio_tungstenite::tungstenite::http::Request;
+    use tokio_tungstenite::tungstenite::ClientRequestBuilder;
 
-    // Only set Authorization — tungstenite adds Connection/Upgrade/Sec-WebSocket-*
-    // automatically. Setting them manually causes duplicate headers in the handshake.
-    let request = Request::builder()
-        .uri(MUXBUS_WS_URL)
-        .header("Authorization", format!("Bearer {}", token))
-        .body(())
-        .map_err(|e| format!("build request: {e}"))?;
+    // Issue #2091: a hand-built `http::Request` (as this used to be, via
+    // `Request::builder()...body(())`) is NOT auto-completed by tungstenite.
+    // `IntoClientRequest for Request` is a bare passthrough (`Ok(self)`) —
+    // the Host/Connection/Upgrade/Sec-WebSocket-Version/Sec-WebSocket-Key
+    // headers this comment used to claim were "added automatically" are only
+    // generated when tungstenite builds the request itself from a bare
+    // `Uri`/`&str`/`String` (`impl IntoClientRequest for Uri`, which calls
+    // `generate_key()`). A hand-built Request with only `Authorization` set
+    // therefore had no `Sec-WebSocket-Key` at all, and tungstenite's own
+    // `generate_request()` requires it to already be present — every
+    // connection attempt failed handshake validation on its OWN outgoing
+    // request before a single byte reached the network, logged as "Missing,
+    // duplicated or incorrect header sec-websocket-key". This has been
+    // broken since the file's first commit; reproduced in isolation
+    // (`examples/ws_probe.rs`, removed after confirming the fix) and
+    // confirmed fixed by switching to `ClientRequestBuilder` — tungstenite's
+    // own purpose-built API for "URI + extra headers": it builds the request
+    // from the `Uri` (generating the required headers, including a fresh
+    // `Sec-WebSocket-Key`) and layers `with_header` calls on top, so nothing
+    // required is ever missing.
+    let uri: tokio_tungstenite::tungstenite::http::Uri =
+        MUXBUS_WS_URL.parse().map_err(|e| format!("parse url: {e}"))?;
+    let request = ClientRequestBuilder::new(uri)
+        .with_header("Authorization", format!("Bearer {}", token));
 
     let (ws_stream, _) = connect_async_tls_with_config(request, None, false, None)
         .await
@@ -632,6 +649,44 @@ async fn load_valid_token(wstore: &Store, http: &reqwest::Client) -> Option<Stri
                 None
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    use tokio_tungstenite::tungstenite::ClientRequestBuilder;
+
+    /// Regression for issue #2091: every connection attempt failed the
+    /// WebSocket handshake with "Missing, duplicated or incorrect header
+    /// sec-websocket-key" from the moment this file was first written,
+    /// because the old code hand-built an `http::Request` with only
+    /// `Authorization` set — tungstenite's `IntoClientRequest for Request`
+    /// is a bare passthrough, so none of Host/Connection/Upgrade/
+    /// Sec-WebSocket-Version/Sec-WebSocket-Key were ever added, and
+    /// tungstenite's handshake code requires all five to already be present
+    /// on the outgoing request. This test builds the request the exact way
+    /// `connect_and_run` now does and asserts every required header exists
+    /// — it would have failed against the old `Request::builder()` code and
+    /// passes against `ClientRequestBuilder`. No network access needed: this
+    /// only inspects the request tungstenite would send, before any I/O.
+    #[test]
+    fn ws_request_carries_every_header_the_handshake_requires() {
+        let uri: tokio_tungstenite::tungstenite::http::Uri =
+            "wss://muxbus-ws.agentmux.ai".parse().unwrap();
+        let request = ClientRequestBuilder::new(uri)
+            .with_header("Authorization", "Bearer test-token")
+            .into_client_request()
+            .expect("request should build");
+
+        let headers = request.headers();
+        for required in ["Host", "Connection", "Upgrade", "Sec-WebSocket-Version", "Sec-WebSocket-Key"] {
+            assert!(
+                headers.contains_key(required),
+                "missing required WebSocket handshake header: {required}"
+            );
+        }
+        assert_eq!(headers.get("Authorization").unwrap(), "Bearer test-token");
     }
 }
 
