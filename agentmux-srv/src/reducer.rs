@@ -1192,6 +1192,121 @@ mod tests {
         assert!(!state.workspaces.contains_key(&ws_id));
     }
 
+    /// issue #2218 (B.4): TabDeleted/WorkspaceDeleted never emitted a
+    /// per-block BlockDeleted, so the host had no signal to tear down a
+    /// browser-pane renderer whose tab/workspace was deleted while it was
+    /// never live/loaded in a window. `block_ids` on these events is that
+    /// signal — this test locks the cascade actually carries them.
+    #[test]
+    fn delete_tab_emits_cascaded_block_ids() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let _ = update(
+            &mut state,
+            Command::CreateTab { workspace_id: ws_id.clone(), name: "t1".into() },
+            &ctx(1),
+        );
+        let tab1_id = state.workspaces[&ws_id].tab_ids[0].clone();
+        // A second tab so the delete isn't a last-tab delete (needs force).
+        let _ = update(
+            &mut state,
+            Command::CreateTab { workspace_id: ws_id.clone(), name: "t2".into() },
+            &ctx(2),
+        );
+        let block1 = match &update(
+            &mut state,
+            Command::CreateBlock { tab_id: tab1_id.clone(), meta: serde_json::Value::Null },
+            &ctx(3),
+        )[0] {
+            Event::BlockCreated { block_id, .. } => block_id.clone(),
+            other => panic!("expected BlockCreated, got {:?}", other),
+        };
+        let block2 = match &update(
+            &mut state,
+            Command::CreateBlock { tab_id: tab1_id.clone(), meta: serde_json::Value::Null },
+            &ctx(4),
+        )[0] {
+            Event::BlockCreated { block_id, .. } => block_id.clone(),
+            other => panic!("expected BlockCreated, got {:?}", other),
+        };
+        let events = update(
+            &mut state,
+            Command::DeleteTab { workspace_id: ws_id, tab_id: tab1_id, force: false },
+            &ctx(5),
+        );
+        match &events[0] {
+            Event::TabDeleted { block_ids, .. } => {
+                assert_eq!(block_ids.len(), 2);
+                assert!(block_ids.contains(&block1));
+                assert!(block_ids.contains(&block2));
+            }
+            other => panic!("expected TabDeleted, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn delete_tab_with_zero_blocks_emits_empty_block_ids() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let _ = update(
+            &mut state,
+            Command::CreateTab { workspace_id: ws_id.clone(), name: "t1".into() },
+            &ctx(1),
+        );
+        let tab1_id = state.workspaces[&ws_id].tab_ids[0].clone();
+        let _ = update(
+            &mut state,
+            Command::CreateTab { workspace_id: ws_id.clone(), name: "t2".into() },
+            &ctx(2),
+        );
+        let events = update(
+            &mut state,
+            Command::DeleteTab { workspace_id: ws_id, tab_id: tab1_id, force: false },
+            &ctx(3),
+        );
+        match &events[0] {
+            Event::TabDeleted { block_ids, .. } => assert!(block_ids.is_empty()),
+            other => panic!("expected TabDeleted, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn delete_workspace_emits_cascaded_block_ids_across_all_tabs() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let tab1_id = create_tab(&mut state, &ws_id, "t1");
+        let tab2_id = create_tab(&mut state, &ws_id, "t2");
+        let mut expected = Vec::new();
+        for (i, tab_id) in [&tab1_id, &tab2_id].into_iter().enumerate() {
+            for j in 0..2 {
+                let block_id = match &update(
+                    &mut state,
+                    Command::CreateBlock { tab_id: tab_id.clone(), meta: serde_json::Value::Null },
+                    &ctx(10 + (i * 2 + j) as u64),
+                )[0] {
+                    Event::BlockCreated { block_id, .. } => block_id.clone(),
+                    other => panic!("expected BlockCreated, got {:?}", other),
+                };
+                expected.push(block_id);
+            }
+        }
+        assert_eq!(expected.len(), 4);
+        let events = update(
+            &mut state,
+            Command::DeleteWorkspace { workspace_id: ws_id.clone(), force: false },
+            &ctx(20),
+        );
+        match &events[0] {
+            Event::WorkspaceDeleted { block_ids, .. } => {
+                assert_eq!(block_ids.len(), 4);
+                for b in &expected {
+                    assert!(block_ids.contains(b));
+                }
+            }
+            other => panic!("expected WorkspaceDeleted, got {:?}", other),
+        }
+    }
+
     fn create_tab(state: &mut State, workspace_id: &str, name: &str) -> String {
         let events = update(
             state,

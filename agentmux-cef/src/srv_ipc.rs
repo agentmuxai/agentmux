@@ -119,6 +119,38 @@ pub async fn connect_to_srv(
                 Ok(Some(line)) if line.trim().is_empty() => continue,
                 Ok(Some(line)) => match serde_json::from_str::<Event>(&line) {
                     Ok(event) => {
+                        // B.4 (issue #2218): tear down any browser-pane
+                        // renderer implicated by this delete, independent of
+                        // whether a live renderer has that tab loaded to
+                        // notice via the normal BrowserView-unmount ->
+                        // invokeCommand("browser_pane_close") path. close()
+                        // is a guaranteed no-op for a block_id with no
+                        // browser_panes entry (browser_panes.rs), so calling
+                        // it unconditionally for every cascaded block_id —
+                        // including a large tab/workspace delete where only
+                        // one block happens to be a browser pane — is safe.
+                        let cascaded_block_ids: &[String] = match &event {
+                            Event::BlockDeleted { block_id, .. } => {
+                                std::slice::from_ref(block_id)
+                            }
+                            Event::TabDeleted { block_ids, .. } => block_ids.as_slice(),
+                            Event::WorkspaceDeleted { block_ids, .. } => block_ids.as_slice(),
+                            _ => &[],
+                        };
+                        for block_id in cascaded_block_ids {
+                            // Cancel any pending HTTP-auth callback parked for
+                            // this pane BEFORE tearing it down — mirrors the
+                            // established `browser_pane_close` invokeCommand
+                            // path (ipc.rs), which does the same ordering for
+                            // the same reason: without this, a pane torn down
+                            // via this cascade path while an auth prompt is
+                            // pending leaks the CEF AuthCallback for the full
+                            // 5-minute TTL instead of being cancelled
+                            // immediately. No-op (returns 0) for a block_id
+                            // with nothing pending, same as `close()` below.
+                            crate::browser_pane::auth::cancel_for_block(block_id);
+                            state_for_reader.browser_panes.close(block_id, &state_for_reader);
+                        }
                         crate::srv_event_bridge::dispatch_to_renderers(&state_for_reader, &event);
                     }
                     Err(e) => {
