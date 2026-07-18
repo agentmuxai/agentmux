@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { DEFAULT_MAX_CHILDREN } from "./layoutTree";
+import { isEffectivelyMinimized } from "./layoutInvariants";
 import { DefaultNodeSize, FlexDirection, LayoutNode } from "./types";
 import { reverseFlexDirection } from "./utils";
 
@@ -79,6 +80,19 @@ export function addIntermediateNode(node: LayoutNode): LayoutNode {
         intermediateNode = newLayoutNode(reverseFlexDirection(node.flexDirection), undefined, undefined, node.data);
         node.children = [intermediateNode];
         node.data = undefined;
+        // Defense-in-depth: callers are expected to guard against promoting
+        // a minimized leaf (see findNextInsertLocation/insertNode's own
+        // isEffectivelyMinimized checks), but if this ever runs on one
+        // anyway, `minimized` must travel with the DATA, not stay on `node`
+        // — `node` is now a branch (leaf-only field; the 2026-07-18
+        // "expanded pane shows Restore" corruption was exactly a leaf's
+        // `minimized` flag left stranded on the branch it got promoted
+        // into, while the intermediate child that inherited the leaf's id
+        // silently lost it).
+        if (node.minimized) {
+            intermediateNode.minimized = true;
+            node.minimized = undefined;
+        }
     } else {
         const intermediateNodeInner = newLayoutNode(node.flexDirection, undefined, node.children);
         intermediateNode = newLayoutNode(reverseFlexDirection(node.flexDirection), undefined, [intermediateNodeInner]);
@@ -290,6 +304,16 @@ function findNextInsertLocationHelper(
     curDepth: number = 1
 ): { node: LayoutNode; index: number; depth: number } {
     if (!node) return;
+    // A minimized leaf or fully-collapsed branch is locked — never a blind-
+    // insert target. Without this, `addChildAt` promoting a minimized leaf
+    // into a branch (via `addIntermediateNode`) left the STALE `minimized`
+    // flag on the new branch (a leaf-only field, violating the layout
+    // doctor's I2) while the inherited-id child silently lost it — the
+    // "expanded pane shows a Restore button" corruption (2026-07-18). For a
+    // fully-minimized branch this also prevents a blind insert from
+    // silently un-collapsing it (every child minimized → one child isn't
+    // anymore, with no user action on that branch at all).
+    if (isEffectivelyMinimized(node)) return;
     if (!node.children) return { node, index: 1, depth: curDepth };
     let insertLocs: { node: LayoutNode; index: number; depth: number }[] = [];
     if (node.children.length < maxChildren) {
