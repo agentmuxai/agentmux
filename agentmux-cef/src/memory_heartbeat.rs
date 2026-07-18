@@ -16,6 +16,14 @@ use std::time::Duration;
 /// See docs/specs/SPEC_GATED_RENDERER_RECOVERY_2026_06_01.md §6.A.
 static COMMIT_FREE_MB: AtomicU64 = AtomicU64::new(u64::MAX);
 
+/// Latest observed system commit **total** (limit) in MB, alongside
+/// `COMMIT_FREE_MB` above. `0` until the first sample — used by
+/// `memory_pressure.rs` to convert the free-MB reading into a ratio, since an
+/// absolute-MB threshold is meaningless across the huge range of commit
+/// limits real machines run with (SPEC_WIN10_PAGEFILE_OOM_CRASH's own status
+/// bar already gauges by ratio; the pressure classifier didn't, until now).
+static COMMIT_TOTAL_MB: AtomicU64 = AtomicU64::new(0);
+
 /// On-demand synchronous probe of system commit-free (available page file), in
 /// MB. ~microsecond cost (a single `GlobalMemoryStatusEx`). Republishes the
 /// atomic so `last_commit_free_mb()` stays fresh. On non-Windows returns
@@ -29,6 +37,7 @@ pub fn commit_free_mb() -> u64 {
     if unsafe { GlobalMemoryStatusEx(&mut mem) } != 0 {
         let mb = (mem.ullAvailPageFile / (1024 * 1024)) as u64;
         COMMIT_FREE_MB.store(mb, Ordering::Relaxed);
+        COMMIT_TOTAL_MB.store((mem.ullTotalPageFile / (1024 * 1024)) as u64, Ordering::Relaxed);
         mb
     } else {
         COMMIT_FREE_MB.load(Ordering::Relaxed)
@@ -38,6 +47,14 @@ pub fn commit_free_mb() -> u64 {
 #[cfg(not(target_os = "windows"))]
 pub fn commit_free_mb() -> u64 {
     u64::MAX
+}
+
+/// Latest observed system commit total (limit), in MB. See `COMMIT_TOTAL_MB`.
+/// `0` on non-Windows / before the first sample — `memory_pressure.rs`
+/// treats a zero total as "not yet known" and stays `Normal` rather than
+/// dividing by zero.
+pub fn commit_total_mb() -> u64 {
+    COMMIT_TOTAL_MB.load(Ordering::Relaxed)
 }
 
 /// Spawn a background thread that logs memory stats at a fixed interval.
@@ -60,7 +77,8 @@ pub fn start(state: std::sync::Arc<crate::state::AppState>) {
                 // thread); the banner shows on Warn/Critical and clears on the
                 // return to Normal.
                 let free = commit_free_mb();
-                let transition = pressure.observe(free);
+                let total = commit_total_mb();
+                let transition = pressure.observe(free, total);
                 let level_now = pressure.level();
                 if let Some(level) = transition {
                     tracing::warn!(
