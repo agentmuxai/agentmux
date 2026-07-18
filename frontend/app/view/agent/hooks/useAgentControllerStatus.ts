@@ -115,6 +115,22 @@ export interface UseAgentControllerStatus {
      */
     loginViaTerminal: () => Promise<void>;
     cancelLogin: () => void;
+    /**
+     * Clear stale auth-recovery UI (the "Retry Login" bar / any lingering
+     * `authNotice`) once we have independent proof the controller is
+     * healthy. `canRetry`/`authNotice` are set once, from the mount-time
+     * gated launch flow or an explicit recovery attempt, and nothing
+     * previously reset them if the agent later became healthy through a
+     * DIFFERENT path — e.g. a `controllerstatus` event proving the CLI is
+     * alive and running turns, which is exactly what
+     * `useControllerStatusEvents`'s continuous `onTurnActive` already
+     * tracks for `TurnPhase` reconciliation (Agent1/Agent2 stuck-"Working"
+     * incidents). Call this from that same signal so "Retry Login" can't
+     * outlive the failure it was reporting — a leak reported live: an
+     * agent recovered and was answering messages, but the initial
+     * auth_failed launch had left the button stuck showing.
+     */
+    notifyControllerHealthy: () => void;
 }
 
 /**
@@ -423,6 +439,11 @@ export function useAgentControllerStatus(
         opts.log("auth", "login cancelled", "warn");
     };
 
+    const notifyControllerHealthy = () => {
+        setCanRetry(false);
+        setAuthNotice(null);
+    };
+
     // If the pane is closed while login is in progress, cancel and kill
     // the host CLI process. This onCleanup is registered against the
     // SolidJS owner context that called useAgentControllerStatus — the
@@ -451,6 +472,7 @@ export function useAgentControllerStatus(
         relogin,
         useGlobalLogin,
         loginViaTerminal,
+        notifyControllerHealthy,
         cancelLogin,
     };
 }
