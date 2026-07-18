@@ -783,6 +783,56 @@ fn pool_destroy_after_ready_clears_queue() {
     );
 }
 
+// ── B.5 Part 1 pane-pool eviction (issue #2218) ─────────────────────────
+//
+// `evict_idle_pane_pool_window` (commands/window_pool.rs) reuses
+// `PanePoolWindowDestroyedBeforePromote` — the same command
+// `cleanup_failed_pane_pool_creation` already dispatches for a
+// creation-failure cleanup — rather than adding a new HostCommand for
+// eviction. These tests pin the exact semantics that reuse depends on.
+
+/// Mirrors `pool_destroy_after_ready_clears_queue` for the pane pool: a
+/// label that reached `queue` (spawn + ready) is fully scrubbed from BOTH
+/// `queue` and `unpromoted` by `PanePoolWindowDestroyedBeforePromote`, and
+/// `respawn_in_flight` resets — this is `evict_idle_pane_pool_window`'s
+/// only cleanup step after the actual Win32 destroy is posted.
+#[test]
+fn pane_pool_destroyed_before_promote_pops_and_clears_state() {
+    let mut state = HostState::default();
+    update(&mut state, HostCommand::PanePoolWindowSpawnStart { label: "pp1".into() });
+    update(&mut state, HostCommand::PanePoolWindowReady { label: "pp1".into() });
+    assert_eq!(state.pane_pool.queue.len(), 1);
+    assert!(!state.pane_pool.unpromoted.contains("pp1"));
+
+    let out = update(
+        &mut state,
+        HostCommand::PanePoolWindowDestroyedBeforePromote { label: "pp1".into() },
+    );
+    assert!(state.pane_pool.queue.is_empty(), "queue must not retain the evicted label");
+    assert!(state.pane_pool.unpromoted.is_empty());
+    assert!(!state.pane_pool.respawn_in_flight);
+    assert!(out.pane_pool_destroyed_was_unpromoted, "must report a real removal, not a no-op");
+    assert_eq!(out.pane_pool_size_after, Some(0));
+}
+
+/// `evict_idle_pane_pool_window` peeks `queue.front()` before dispatching
+/// this command, so in normal operation it never fires with an unknown
+/// label — but the command itself stays idempotent for one anyway
+/// (matching `PoolWindowDestroyedBeforePromote`'s pattern), so a stale/
+/// racing call can never corrupt pool bookkeeping.
+#[test]
+fn pane_pool_destroyed_before_promote_on_unknown_label_is_noop() {
+    let mut state = HostState::default();
+    let out = update(
+        &mut state,
+        HostCommand::PanePoolWindowDestroyedBeforePromote { label: "ghost".into() },
+    );
+    assert!(!out.pane_pool_destroyed_was_unpromoted);
+    assert_eq!(out.pane_pool_size_after, Some(0));
+    assert!(state.pane_pool.queue.is_empty());
+    assert!(state.pane_pool.unpromoted.is_empty());
+}
+
 /// Regression test for reagent P2 on PR #654 round 3.
 ///
 /// `handle_promote_pool_window` should be idempotent for truly unknown

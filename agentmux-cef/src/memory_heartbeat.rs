@@ -69,6 +69,21 @@ pub fn start(state: std::sync::Arc<crate::state::AppState>) {
                         commit_free_mb = free,
                         "system memory pressure changed"
                     );
+                    // B.5 Part 1 (issue #2218): react to the transition, not
+                    // just log it. Entering Warn/Critical trims the pane pool
+                    // (the one pool with a reliable on-demand destroy path
+                    // today — see evict_idle_pane_pool_window's doc comment);
+                    // returning to Normal best-effort refills both pools so a
+                    // transient pressure blip doesn't leave them starved for
+                    // the rest of the session. Both spawn_* fns are already
+                    // internally single-flight + target-size-gated, so calling
+                    // them unconditionally here is safe.
+                    if level != crate::memory_pressure::PressureLevel::Normal {
+                        while crate::commands::window_pool::evict_idle_pane_pool_window(&state) {}
+                    } else {
+                        crate::commands::window_pool::spawn_pane_pool_window(&state);
+                        crate::commands::window_pool::spawn_pool_window(&state);
+                    }
                 }
                 // Push to the banner on a transition (to show or clear it), AND
                 // re-assert a steady non-Normal level each tick so a window
