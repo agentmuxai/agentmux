@@ -146,23 +146,31 @@ pub fn commit_free_mb() -> u64 {
 /// recovered, or `false` if `OOM_RELAUNCH_DEADLINE` elapses first (the caller
 /// then gives up gracefully). `log` is the launcher's logger, threaded in so the
 /// wait is observable in the launcher log.
-pub async fn await_commit_recovery(log: impl Fn(&str)) -> bool {
+/// `subject` names whatever is being waited on for the two terminal log
+/// lines ("relaunching {subject}" / "giving up {subject} relaunch") — this
+/// function is shared by the host-OOM wait (`subject: "host"`) and the
+/// srv-OOM wait (`subject: "srv"`, `SPEC_MEMORY_PRESSURE_SUPERVISION`'s srv
+/// counterpart). Hardcoding "host" here made the srv-OOM wait's log
+/// misleadingly claim it was relaunching the host during an actual srv-OOM
+/// incident — reagent P1 on PR #2206.
+pub async fn await_commit_recovery(subject: &str, log: impl Fn(&str)) -> bool {
     let start = Instant::now();
     let mut backoff = BACKOFF_START;
     loop {
         let free = commit_free_mb();
         if free >= RESUME_FLOOR_MB {
             log(&format!(
-                "commit recovered: {} MB free (>= {} MB floor) — relaunching host",
-                free, RESUME_FLOOR_MB
+                "commit recovered: {} MB free (>= {} MB floor) — relaunching {}",
+                free, RESUME_FLOOR_MB, subject
             ));
             return true;
         }
         if start.elapsed() >= OOM_RELAUNCH_DEADLINE {
             log(&format!(
-                "commit still low ({} MB free) after {}s — giving up host relaunch",
+                "commit still low ({} MB free) after {}s — giving up {} relaunch",
                 free,
-                OOM_RELAUNCH_DEADLINE.as_secs()
+                OOM_RELAUNCH_DEADLINE.as_secs(),
+                subject
             ));
             return false;
         }
@@ -212,6 +220,31 @@ mod tests {
         // A genuine crash with memory available → existing fast wedged-host path.
         assert_eq!(classify_host_exit(1, RESUME_FLOOR_MB), HostExitClass::Abnormal);
         assert_eq!(classify_host_exit(-1, 16_384), HostExitClass::Abnormal);
+    }
+
+    #[test]
+    fn srv_fastfail_code_with_low_commit_is_system_oom() {
+        // docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md: srv is a
+        // plain Rust process, so an OOM there never emits
+        // CHROMIUM_OOM_EXIT_CODE — it surfaces as Windows' generic fail-fast
+        // abort, 0xC0000409 (STATUS_STACK_BUFFER_OVERRUN — the code name is
+        // misleading; the CRT overloads it for abort()/allocation-failure
+        // fast-fails too, not just real buffer overruns). The exact live exit
+        // code from the incident, reused here as a regression anchor:
+        // classify_host_exit is generic over which process died — only the
+        // low-commit fallback branch needs to catch it, not an exact-code
+        // match — so this is a straight application of the existing
+        // low-commit branch, now exercised by the launcher's srv-exit arm too.
+        const SRV_FASTFAIL_EXIT_CODE: i32 = -1_073_740_791;
+        assert_eq!(
+            classify_host_exit(SRV_FASTFAIL_EXIT_CODE, RESUME_FLOOR_MB - 1),
+            HostExitClass::SystemOom
+        );
+        // Same code with headroom present is just a genuine srv crash.
+        assert_eq!(
+            classify_host_exit(SRV_FASTFAIL_EXIT_CODE, RESUME_FLOOR_MB),
+            HostExitClass::Abnormal
+        );
     }
 
     #[test]
