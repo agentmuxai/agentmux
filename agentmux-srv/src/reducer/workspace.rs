@@ -58,8 +58,14 @@ pub(super) fn handle_delete_workspace(
     let Some(removed) = state.workspaces.remove(&workspace_id) else {
         return Vec::new();
     };
+    // `cascaded_block_ids` rides the WorkspaceDeleted event below so the
+    // host can tear down any browser-pane renderer whose block was never
+    // live/loaded in a window (issue #2218, B.4) — same rationale as
+    // TabDeleted's `block_ids` (reducer/tab.rs::handle_delete_tab).
+    let mut cascaded_block_ids: Vec<String> = Vec::new();
     for tab_id in &removed.tab_ids {
         if let Some(tab) = state.tabs.remove(tab_id) {
+            cascaded_block_ids.extend(tab.block_ids.iter().cloned());
             for block_id in &tab.block_ids {
                 state.blocks.remove(block_id);
             }
@@ -83,6 +89,7 @@ pub(super) fn handle_delete_workspace(
     let v = state.bump_version();
     events.push(Event::WorkspaceDeleted {
         workspace_id,
+        block_ids: cascaded_block_ids,
         version: v,
     });
     for window_id in dropped_window_ids {

@@ -139,7 +139,14 @@ pub(super) fn handle_delete_tab(
     // Phase E.3 — cascade to blocks. Subscribers observing TabDeleted
     // are expected to drop dependent block state (no per-block
     // BlockDeleted events emitted; mirrors workspace→tabs cascade
-    // semantics).
+    // semantics). `block_ids` on the event below carries the cascaded ids
+    // anyway (issue #2218, B.4) — the host uses it to tear down any
+    // browser-pane renderer that was never live/loaded in a window and so
+    // never got a chance to reach the renderer-mediated close path.
+    let cascaded_block_ids: Vec<String> = removed_tab
+        .as_ref()
+        .map(|t| t.block_ids.clone())
+        .unwrap_or_default();
     if let Some(tab) = &removed_tab {
         for block_id in &tab.block_ids {
             state.blocks.remove(block_id);
@@ -150,6 +157,7 @@ pub(super) fn handle_delete_tab(
     events.push(Event::TabDeleted {
         workspace_id: workspace_id.clone(),
         tab_id,
+        block_ids: cascaded_block_ids,
         version: v,
     });
     if let Some(new_active) = active_changed {

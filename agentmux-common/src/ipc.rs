@@ -1290,6 +1290,15 @@ pub enum Event {
     /// Phase E.2 — workspace was deleted.
     WorkspaceDeleted {
         workspace_id: String,
+        /// Every block_id cascaded out with this workspace (every block in
+        /// every tab it contained) — `TabDeleted`/`WorkspaceDeleted` never
+        /// emitted per-block events (see `reducer/tab.rs::handle_delete_tab`),
+        /// so this is the host's only signal to tear down a browser-pane
+        /// renderer whose tab/workspace was deleted while unloaded/inactive
+        /// (issue #2218, B.4). `#[serde(default)]` so replaying an old
+        /// saga-log entry (predating this field) still deserializes.
+        #[serde(default)]
+        block_ids: Vec<String>,
         version: u64,
     },
     /// Phase E.2b — tab was created inside a workspace. Carries the
@@ -1305,6 +1314,10 @@ pub enum Event {
     TabDeleted {
         workspace_id: String,
         tab_id: String,
+        /// Every block_id cascaded out with this tab. See `WorkspaceDeleted`'s
+        /// `block_ids` doc — same rationale (issue #2218, B.4).
+        #[serde(default)]
+        block_ids: Vec<String>,
         version: u64,
     },
     /// Phase E.2b — a workspace's active tab changed. `tab_id: None`
