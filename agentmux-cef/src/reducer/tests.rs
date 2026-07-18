@@ -785,11 +785,13 @@ fn pool_destroy_after_ready_clears_queue() {
 
 // ── B.5 Part 1 pane-pool eviction (issue #2218) ─────────────────────────
 //
-// `evict_idle_pane_pool_window` (commands/window_pool.rs) reuses
-// `PanePoolWindowDestroyedBeforePromote` — the same command
-// `cleanup_failed_pane_pool_creation` already dispatches for a
-// creation-failure cleanup — rather than adding a new HostCommand for
-// eviction. These tests pin the exact semantics that reuse depends on.
+// `evict_idle_pane_pool_window` (commands/window_pool.rs) claims the front
+// pane-pool label atomically via `PopFrontPanePoolWindowForEviction` (round
+// 2 — replaced an initial peek-then-separately-dispatch design after reagent
+// flagged a race with a concurrent real tear-off promotion, P2). The older
+// `PanePoolWindowDestroyedBeforePromote` command below is still exercised —
+// `cleanup_failed_pane_pool_creation` still dispatches it for a
+// creation-failure cleanup — just no longer by the eviction path.
 
 /// Mirrors `pool_destroy_after_ready_clears_queue` for the pane pool: a
 /// label that reached `queue` (spawn + ready) is fully scrubbed from BOTH
@@ -829,6 +831,40 @@ fn pane_pool_destroyed_before_promote_on_unknown_label_is_noop() {
     );
     assert!(!out.pane_pool_destroyed_was_unpromoted);
     assert_eq!(out.pane_pool_size_after, Some(0));
+    assert!(state.pane_pool.queue.is_empty());
+    assert!(state.pane_pool.unpromoted.is_empty());
+}
+
+/// `PopFrontPanePoolWindowForEviction` — the atomic claim
+/// `evict_idle_pane_pool_window` dispatches (issue #2218, B.5 Part 1, round
+/// 2 fix). Pops the front label, clears it from `unpromoted`, and resets
+/// `respawn_in_flight` in one mutex-guarded dispatch, same as
+/// `PopAndPromoteFrontPanePoolWindow` does for the promote path — this is
+/// what makes the two commands mutually exclusive for a given front label
+/// instead of racing via a non-atomic peek-then-separate-mutate.
+#[test]
+fn pop_front_pane_pool_for_eviction_pops_and_clears_state() {
+    let mut state = HostState::default();
+    update(&mut state, HostCommand::PanePoolWindowSpawnStart { label: "pp1".into() });
+    update(&mut state, HostCommand::PanePoolWindowReady { label: "pp1".into() });
+    assert_eq!(state.pane_pool.queue.len(), 1);
+
+    let out = update(&mut state, HostCommand::PopFrontPanePoolWindowForEviction);
+    assert!(state.pane_pool.queue.is_empty(), "queue must not retain the evicted label");
+    assert!(state.pane_pool.unpromoted.is_empty());
+    assert!(!state.pane_pool.respawn_in_flight);
+    assert_eq!(out.evicted_pane_pool_label, Some("pp1".to_string()));
+    assert_eq!(out.pane_pool_size_after, Some(0));
+}
+
+/// Empty queue must be a genuine no-op — `evict_idle_pane_pool_window`
+/// relies on `evicted_pane_pool_label: None` to bail out cleanly when
+/// pressure fires with nothing left to evict.
+#[test]
+fn pop_front_pane_pool_for_eviction_on_empty_queue_is_noop() {
+    let mut state = HostState::default();
+    let out = update(&mut state, HostCommand::PopFrontPanePoolWindowForEviction);
+    assert_eq!(out.evicted_pane_pool_label, None);
     assert!(state.pane_pool.queue.is_empty());
     assert!(state.pane_pool.unpromoted.is_empty());
 }

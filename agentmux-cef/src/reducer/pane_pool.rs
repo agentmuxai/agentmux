@@ -60,6 +60,32 @@ pub(super) fn handle_pane_pool_destroyed_before_promote(state: &mut HostState, l
     }
 }
 
+/// Atomically pop the front of the pane-pool queue for eviction under
+/// memory pressure (issue #2218, B.5 Part 1) — NOT promotion; `is_pool`/
+/// `state.browsers` are left untouched here (the caller separately arms and
+/// destroys the Browser). A prior version of the caller peeked
+/// `queue.front()` then separately called `PanePoolWindowDestroyedBeforePromote`
+/// with that label — two non-atomic reducer dispatches with a race window in
+/// between where a concurrent `PopAndPromoteFrontPanePoolWindow` (a real
+/// user tear-off) could win the SAME front label, and the eviction path
+/// would then destroy the window the user just promoted (reagent P2). Doing
+/// the pop itself here, under the same `host_state` mutex every other pool
+/// mutation goes through, makes the two commands mutually exclusive: only
+/// one can ever claim a given front label.
+pub(super) fn handle_pop_front_pane_pool_for_eviction(state: &mut HostState) -> DispatchOutput {
+    let Some(label) = state.pane_pool.queue.pop_front() else {
+        return DispatchOutput::default();
+    };
+    state.pane_pool.unpromoted.remove(&label);
+    state.pane_pool.respawn_in_flight = false;
+    let queue_len_after = state.pane_pool.queue.len();
+    DispatchOutput {
+        evicted_pane_pool_label: Some(label),
+        pane_pool_size_after: Some(queue_len_after),
+        ..Default::default()
+    }
+}
+
 pub(super) fn handle_pop_and_promote_front_pane_pool_window(state: &mut HostState) -> DispatchOutput {
     let label = match state.pane_pool.queue.pop_front() {
         Some(l) => l,
