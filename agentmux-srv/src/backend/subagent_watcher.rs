@@ -2742,9 +2742,9 @@ mod tests {
             BACKFILL_MAX_FILES,
             "member files are still capped inside a workflow run"
         );
-        let workflows = watcher.list_workflows();
-        assert_eq!(workflows.len(), 1, "the run's journal must still be processed");
-        assert_eq!(workflows[0].workflow_id, "wf_test-run");
+        let dispatches = watcher.list_dispatches();
+        assert_eq!(dispatches.len(), 1, "the run's journal must still be processed");
+        assert_eq!(dispatches[0].dispatch_id, "wf_test-run");
 
         std::fs::remove_dir_all(&config_dir).ok();
     }
