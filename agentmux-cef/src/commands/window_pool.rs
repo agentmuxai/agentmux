@@ -1760,9 +1760,19 @@ pub(crate) const PANE_POOL_HEIGHT: i32 = 600;
 /// the user never saw. Pane-pool windows are unowned top-level `WS_POPUP`s the
 /// app itself created, not `WS_CHILD` of `main` like browser panes (which
 /// need the wrapper-reparent dance) — a direct `DestroyWindow` on the thread
-/// that created it is the same, already-proven-safe shape.
+/// that created it is the same, already-proven-safe shape *for the HWND*.
 ///
-/// Cleanup (reducer `pane_pool.queue`/`unpromoted` pruning) reuses
+/// The Browser itself still needs arming first, though: `close_browser(1)` is
+/// called on the label's `Browser` before the native destroy, mirroring
+/// `CloseWindowTask`'s round-5 sequencing exactly (`ui_tasks/window.rs`) —
+/// this is what drives `on_before_close` -> reducer `UnregisterBrowser`,
+/// which cleans the `state.browsers` map entry. That's a SEPARATE piece of
+/// state from `pane_pool.queue`/`unpromoted` (cleaned below); skipping the
+/// arm step leaves `state.browsers` with a permanent orphaned entry every
+/// eviction, even though the HWND and pool bookkeeping are both correctly
+/// gone (reagent P0, first version of this PR).
+///
+/// Pool-side cleanup (`pane_pool.queue`/`unpromoted` pruning) reuses
 /// `PanePoolWindowDestroyedBeforePromote` — the same command
 /// `cleanup_failed_pane_pool_creation` already dispatches for a
 /// creation-failure cleanup — rather than a new command: the semantics are
@@ -1787,6 +1797,34 @@ pub fn evict_idle_pane_pool_window(state: &Arc<AppState>) -> bool {
         );
         return false;
     };
+    // Arm the browser destruction BEFORE the native DestroyWindow — the same
+    // "close_browser(1) first" sequencing `CloseWindowTask`'s round 5 uses
+    // (ui_tasks/window.rs), and for the same reason: this is what drives
+    // `on_before_close` -> reducer `UnregisterBrowser`, which cleans the
+    // SEPARATE `state.browsers` map entry (`pane_pool.queue`/`unpromoted`,
+    // scrubbed below via `PanePoolWindowDestroyedBeforePromote`, is a
+    // different piece of state). Skipping this leaks a permanent
+    // "hostless pool-kind" `state.browsers` entry on every eviction —
+    // reagent P0 on this PR.
+    {
+        use cef::{ImplBrowser, ImplBrowserHost};
+        if let Some(mut browser) = state.get_browser(&label) {
+            if let Some(host) = browser.host() {
+                tracing::debug!(
+                    target: "pool:pane",
+                    label = %label,
+                    "[pane-pool] eviction: close_browser(1) to arm destruction"
+                );
+                host.close_browser(1);
+            }
+        } else {
+            tracing::warn!(
+                target: "pool:pane",
+                label = %label,
+                "[pane-pool] eviction: no Browser found for label — state.browsers entry may already be stale"
+            );
+        }
+    }
     let mut task = DestroyPanePoolHwndTask::new(hwnd as isize);
     let posted = cef::post_task(cef::ThreadId::UI, Some(&mut task));
     if posted == 0 {
