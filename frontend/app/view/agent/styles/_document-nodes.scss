@@ -1450,7 +1450,11 @@
     th {
         position: sticky;
         top: 0;
-        background: var(--main-bg-color);
+        // Matches .agent-tool-panel's background exactly (not transparent —
+        // this header must stay opaque-ish to occlude rows scrolling
+        // beneath it) so the sticky row doesn't show a color seam against
+        // the panel's new shade.
+        background: color-mix(in srgb, var(--main-text-color) 4%, var(--main-bg-color));
         color: var(--accent-color);
         font-weight: 500;
     }
