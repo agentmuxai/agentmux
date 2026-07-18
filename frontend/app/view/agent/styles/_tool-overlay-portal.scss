@@ -22,7 +22,13 @@
     gap: var(--space-1);
     padding: var(--space-1) var(--space-2);
     border-bottom: 1px solid var(--border-color);
-    background: var(--main-bg-color);
+    // Transparent so the parent .agent-tool-panel's shade shows through —
+    // this header renders for failed/denied/canceled/awaiting-approval/
+    // awaiting-answer states, and a solid var(--main-bg-color) here (same
+    // token as the rest of the pane) created a visible color seam against
+    // the panel's color-mix background exactly in the states most likely
+    // to be scrutinized.
+    background: transparent;
     font-size: 11px;
     color: var(--secondary-text-color);
 

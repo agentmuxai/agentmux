@@ -333,7 +333,17 @@
             display: flex;
             flex-direction: column;
             margin: 4px 0 8px 0;
-            background: var(--surface-elevated, rgba(255, 255, 255, 0.02));
+            // Tool previews (Write/Read/Diff/Bash/etc.) need to read as a
+            // distinct surface from the rest of the conversation, not blend
+            // into it — this used to reference the undefined
+            // `--surface-elevated` token (always fell back to a
+            // near-invisible rgba(255,255,255,0.02) wash regardless of
+            // theme). color-mix against the real theme tokens gives every
+            // theme a consistent, visible-but-subtle offset. The nested
+            // per-tool-type backgrounds (.agent-tool-read-content,
+            // .agent-diff, .agent-bash, etc.) are transparent so this one
+            // shade is what the user actually sees for every tool type.
+            background: color-mix(in srgb, var(--main-text-color) 4%, var(--main-bg-color));
             border-radius: 0;
             padding: 6px 8px;
             max-height: 50vh;
@@ -562,7 +572,9 @@
     }
 
     .agent-diff {
-        background: var(--main-bg-color);
+        // Transparent so the parent .agent-tool-panel's shade shows
+        // through — see the comment there.
+        background: transparent;
         border: none;
         border-left: 2px solid var(--border-color);
         border-radius: 0;
@@ -646,7 +658,9 @@
 
     // === Bash Output ===
     .agent-bash {
-        background: var(--main-bg-color);
+        // Transparent so the parent .agent-tool-panel's shade shows
+        // through — see the comment there.
+        background: transparent;
         border: none;
         border-left: 2px solid var(--border-color);
         border-radius: 0;
@@ -1279,14 +1293,16 @@
 
         .agent-tool-read-content {
             // No max-height/overflow here — see .agent-bash-output above;
-            // the overlay-log is the single scroll container.
-            background: var(--main-bg-color);
+            // the overlay-log is the single scroll container. Transparent so
+            // the parent .agent-tool-panel's shade shows through — see the
+            // comment there.
+            background: transparent;
             border: 1px solid var(--border-color);
             border-radius: 0;
             margin: 0;
             // Shiki <pre> override: ensure our bg wins
             &[style*="background"] {
-                background: var(--main-bg-color) !important; /* stylelint-disable-line declaration-no-important */
+                background: transparent !important; /* stylelint-disable-line declaration-no-important */
             }
         }
 
@@ -1331,7 +1347,9 @@
         }
 
         .agent-tool-search-results {
-            background: var(--main-bg-color);
+            // Transparent so the parent .agent-tool-panel's shade shows
+            // through — see the comment there.
+            background: transparent;
             border: 1px solid var(--border-color);
             padding: var(--space-1) var(--space-1-5);
             border-radius: 0;
@@ -1345,7 +1363,9 @@
     // above; the overlay-log is the single scroll container.
     .agent-tool-generic,
     .agent-tool-task-info {
-        background: var(--main-bg-color);
+        // Transparent so the parent .agent-tool-panel's shade shows
+        // through — see the comment there.
+        background: transparent;
         border: 1px solid var(--border-color);
         padding: var(--space-1) var(--space-1-5);
         border-radius: 0;
@@ -1387,7 +1407,9 @@
 
         .agent-tool-compact-json {
             // No max-height/overflow here — see .agent-bash-output above.
-            background: var(--main-bg-color);
+            // Transparent so the parent .agent-tool-panel's shade shows
+            // through — see the comment there.
+            background: transparent;
             border: 1px solid var(--border-color);
             padding: var(--space-1) var(--space-1-5);
             border-radius: 0;
@@ -1428,7 +1450,11 @@
     th {
         position: sticky;
         top: 0;
-        background: var(--main-bg-color);
+        // Matches .agent-tool-panel's background exactly (not transparent —
+        // this header must stay opaque-ish to occlude rows scrolling
+        // beneath it) so the sticky row doesn't show a color seam against
+        // the panel's new shade.
+        background: color-mix(in srgb, var(--main-text-color) 4%, var(--main-bg-color));
         color: var(--accent-color);
         font-weight: 500;
     }
@@ -1479,7 +1505,9 @@
         padding: var(--space-1) var(--space-1-5);
         border: 1px solid var(--border-color);
         border-radius: 0;
-        background: var(--main-bg-color);
+        // Transparent so the parent .agent-tool-panel's shade shows
+        // through — see the comment there.
+        background: transparent;
         cursor: default;
 
         &:hover {
@@ -1699,7 +1727,9 @@
 // carry a terminal string body (stdout/output/content).
 .agent-terminal-output {
     // No max-height/overflow here — see .agent-tool-record-table above.
-    background: var(--main-bg-color);
+    // Transparent so the parent .agent-tool-panel's shade shows through —
+    // see the comment on .agent-tool-panel.
+    background: transparent;
     border: 1px solid var(--border-color);
     border-radius: 0;
     padding: var(--space-1) var(--space-1-5);
