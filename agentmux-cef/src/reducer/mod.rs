@@ -403,6 +403,12 @@ pub enum HostCommand {
     /// Atomic pop+promote front of pane pool queue.
     /// Returns promoted label via `DispatchOutput::promoted_pane_pool_label`.
     PopAndPromoteFrontPanePoolWindow,
+    /// Atomic pop of the front of the pane pool queue for memory-pressure
+    /// eviction (issue #2218, B.5 Part 1) — NOT promotion; distinct from
+    /// `PopAndPromoteFrontPanePoolWindow` above so eviction and a real
+    /// tear-off can never race for the same front label (reagent P2).
+    /// Returns the popped label via `DispatchOutput::evicted_pane_pool_label`.
+    PopFrontPanePoolWindowForEviction,
 
     // ── H.5 — quit lifecycle ────────────────────────────────────────────
 
@@ -587,6 +593,7 @@ impl std::fmt::Debug for HostCommand {
                 .field("label", label)
                 .finish(),
             HostCommand::PopAndPromoteFrontPanePoolWindow => f.write_str("PopAndPromoteFrontPanePoolWindow"),
+            HostCommand::PopFrontPanePoolWindowForEviction => f.write_str("PopFrontPanePoolWindowForEviction"),
             HostCommand::BeginDrain { reason } => f
                 .debug_struct("BeginDrain")
                 .field("reason", reason)
@@ -914,6 +921,12 @@ pub struct DispatchOutput {
     pub pane_pool_size_after: Option<usize>,
     pub pane_pool_destroyed_was_unpromoted: bool,
     pub promoted_pane_pool_label: Option<String>,
+    /// Set by `PopFrontPanePoolWindowForEviction` — the label atomically
+    /// popped for memory-pressure eviction (issue #2218, B.5 Part 1), or
+    /// `None` if the queue was already empty. Distinct from
+    /// `promoted_pane_pool_label` so eviction and promotion can never be
+    /// confused with each other (reagent P2).
+    pub evicted_pane_pool_label: Option<String>,
     /// Pillar 2 (level-triggered quit) — set by `update()` after any quit-relevant
     /// command when the host should begin draining NOW (no live user window, no
     /// user creation in flight, still `Running`). The UI-thread drain executor
@@ -1069,6 +1082,7 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
             pane_pool::handle_pane_pool_destroyed_before_promote(state, label)
         }
         HostCommand::PopAndPromoteFrontPanePoolWindow => pane_pool::handle_pop_and_promote_front_pane_pool_window(state),
+        HostCommand::PopFrontPanePoolWindowForEviction => pane_pool::handle_pop_front_pane_pool_for_eviction(state),
         // H.5 quit
         HostCommand::BeginDrain { reason } => quit::handle_begin_drain(state, reason),
         HostCommand::ConfirmDrained => quit::handle_confirm_drained(state),

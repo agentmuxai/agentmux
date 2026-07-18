@@ -34,6 +34,13 @@ use std::sync::Mutex;
 use std::collections::HashMap;
 
 use crate::state::{AppState, WindowKind, WindowMeta};
+// `Task`/`WrapTask`/`ImplTask` are what `cef::wrap_task!` expands into —
+// needed in scope for the DestroyPanePoolHwndTask definition below (B.5
+// Part 1, issue #2218). Named imports rather than `use cef::*` (the pattern
+// browser_panes.rs uses) to avoid widening this already-large file's
+// namespace.
+#[cfg(target_os = "windows")]
+use cef::{rc::Rc, ImplTask, Task, WrapTask};
 
 /// HWND cache for pool windows. Populated at `on_after_created`
 /// (register_pool_window) and consulted at `promote_pool_window` as
@@ -152,6 +159,21 @@ pub(crate) fn cleanup_failed_pane_pool_creation(state: &Arc<AppState>, label: &s
 /// Target pool size. See module-level comment for rationale.
 pub const POOL_TARGET_SIZE: usize = 2;
 
+/// The window-pool demote cap, as a pure function of pressure level (issue
+/// #2218, B.5 Part 2) — factored out of `demote_promoted_pool_window` so the
+/// decision itself is unit-testable without a real `cef::Window` (that
+/// function needs one; this doesn't). See the call site's doc comment for
+/// why tightening the cap under pressure is a low-risk lever (routes into
+/// the already-reliable `park_and_blank_window`, not the flakier round-5
+/// destroy).
+fn effective_pool_demote_cap(pressure: crate::memory_pressure::PressureLevel) -> usize {
+    if pressure != crate::memory_pressure::PressureLevel::Normal {
+        POOL_TARGET_SIZE
+    } else {
+        POOL_TARGET_SIZE + 2
+    }
+}
+
 /// Pool windows are spawned at this off-screen position so they
 /// don't appear on the user's desktop while pre-painting. On
 /// promote they're moved to the cursor and shown.
@@ -220,6 +242,24 @@ mod clamp_tests {
         // Secondary monitor to the left of the primary (negative virtual coords).
         let (x, _y, w, _h) = clamp_rect_within(-1900, 100, 960, 640, -1920, 0, 1920, 1080);
         assert!(x >= -1920 && x + w <= 0, "rect must stay on the left monitor: {:?}", (x, w));
+    }
+}
+
+/// B.5 Part 2 (issue #2218): the demote cap must tighten under pressure.
+#[cfg(test)]
+mod demote_cap_tests {
+    use super::{effective_pool_demote_cap, POOL_TARGET_SIZE};
+    use crate::memory_pressure::PressureLevel;
+
+    #[test]
+    fn normal_allows_the_full_overfill_margin() {
+        assert_eq!(effective_pool_demote_cap(PressureLevel::Normal), POOL_TARGET_SIZE + 2);
+    }
+
+    #[test]
+    fn warn_and_critical_disallow_overfill() {
+        assert_eq!(effective_pool_demote_cap(PressureLevel::Warn), POOL_TARGET_SIZE);
+        assert_eq!(effective_pool_demote_cap(PressureLevel::Critical), POOL_TARGET_SIZE);
     }
 }
 
@@ -754,15 +794,27 @@ pub fn demote_promoted_pool_window(
     // reusable instead of unreachable. Beyond the cap (pathological burst
     // closes), fall back to destroy: same cost as the pre-round-6 leak,
     // with srv state still cleaned.
-    const POOL_DEMOTE_CAP: usize = POOL_TARGET_SIZE + 2;
+    //
+    // The cap itself is pressure-aware (issue #2218, B.5 Part 2): under
+    // Warn/Critical, no overfill is allowed, so a burst of demotes routes
+    // into the destroy fallback below — which in practice usually resolves
+    // one level further down this function, into `park_and_blank_window`
+    // (a RELIABLE reclaim path; see its doc comment), not the flakier
+    // round-5 destroy in `CloseWindowTask` that only fires if park-and-blank
+    // itself fails. `POOL_DEMOTE_CAP` was previously a one-way ratchet —
+    // nothing ever shrank it back to POOL_TARGET_SIZE once overfilled — this
+    // is the cheapest lever to stop it compounding under pressure, without
+    // (yet) building an on-demand "evict an already-idle pool window" primitive
+    // for the window pool specifically (deferred — see the plan behind #2218).
+    let pool_demote_cap = effective_pool_demote_cap(crate::memory_pressure::current_level());
     let pool_population = {
         let st = state.host_state.lock();
         st.pool.unpromoted.len() + st.pool.queue.len()
     };
-    if pool_population >= POOL_DEMOTE_CAP {
+    if pool_population >= pool_demote_cap {
         crate::client::dlog(&format!(
             "demote({}): pool at demote cap ({} >= {}) — destroy fallback",
-            label, pool_population, POOL_DEMOTE_CAP
+            label, pool_population, pool_demote_cap
         ));
         return false;
     }
@@ -1690,6 +1742,137 @@ pub fn promote_pool_window_for_new_window(
 pub const PANE_POOL_TARGET_SIZE: usize = 1;
 pub(crate) const PANE_POOL_WIDTH: i32 = 900;
 pub(crate) const PANE_POOL_HEIGHT: i32 = 600;
+
+/// Evict one idle (renderer-ready, never-promoted) pane-pool window on a
+/// memory-pressure transition into Warn/Critical (issue #2218, B.5 Part 1).
+/// Until this existed, the only pressure reaction anywhere in this crate was
+/// `spawn_pool_window`/`spawn_pane_pool_window` refusing to grow the pool —
+/// nothing ever shrank an already-warm one, so commit charge only ever
+/// ratcheted up during a session.
+///
+/// Deliberately reuses the plain, already-reliable owned-popup `DestroyWindow`
+/// mechanism (the same one `floating_pane.rs`'s failure-cleanup path uses on
+/// its own outer HWND) rather than routing through `ui_tasks::post_close_window`
+/// / `CloseWindowTask` — that function's `main`/`window-*`/`floating-*`
+/// branching carries a lot of history (Discussion #1680: orphaned-process-tree
+/// regressions, srv-notify races) built for a *user* closing a *visible*
+/// window, none of which applies to the host quietly reclaiming a pool window
+/// the user never saw. Pane-pool windows are unowned top-level `WS_POPUP`s the
+/// app itself created, not `WS_CHILD` of `main` like browser panes (which
+/// need the wrapper-reparent dance) — a direct `DestroyWindow` on the thread
+/// that created it is the same, already-proven-safe shape *for the HWND*.
+///
+/// The queue claim itself is atomic: `HostCommand::PopFrontPanePoolWindowForEviction`
+/// pops-and-clears the front label under the same `host_state` mutex every
+/// other pool mutation goes through, so this can never race a concurrent
+/// `PopAndPromoteFrontPanePoolWindow` (a real user tear-off) for the same
+/// label — a prior version peeked `queue.front()` non-destructively and
+/// separately mutated, leaving a window where eviction could destroy a
+/// window the user had just promoted (reagent P2, round 2).
+///
+/// The Browser itself still needs arming first, though: `close_browser(1)`
+/// must run on the CEF UI thread — calling it directly from this function
+/// (which runs on the mem-heartbeat background thread) risks a UI-thread
+/// hang (reagent P1, round 2). So both `close_browser(1)` and the native
+/// `DestroyWindow` are done inside the SAME posted `DestroyPanePoolHwndTask`,
+/// on `cef::ThreadId::UI`, mirroring `CloseWindowTask`'s round-5 sequencing
+/// exactly (`ui_tasks/window.rs`) — `close_browser(1)` first is what drives
+/// `on_before_close` -> reducer `UnregisterBrowser`, which cleans the
+/// `state.browsers` map entry; that's a SEPARATE piece of state from
+/// `pane_pool.queue`/`unpromoted` (already cleared by the atomic pop above).
+///
+/// Returns `true` iff a label was popped and a destroy was posted.
+#[cfg(target_os = "windows")]
+pub fn evict_idle_pane_pool_window(state: &Arc<AppState>) -> bool {
+    let dispatch = state.host_dispatch(
+        crate::reducer::HostCommand::PopFrontPanePoolWindowForEviction,
+    );
+    let Some(label) = dispatch.evicted_pane_pool_label else {
+        return false;
+    };
+    let Some(hwnd) = take_pane_pool_hwnd(&label) else {
+        tracing::warn!(
+            target: "pool:pane",
+            label = %label,
+            "[pane-pool] eviction: no cached HWND for queued label — pool short by one"
+        );
+        return false;
+    };
+    let mut task = DestroyPanePoolHwndTask::new(Arc::clone(state), label.clone(), hwnd as isize);
+    let posted = cef::post_task(cef::ThreadId::UI, Some(&mut task));
+    if posted == 0 {
+        tracing::error!(
+            target: "pool:pane",
+            label = %label,
+            hwnd,
+            "[pane-pool] eviction: post_task(destroy) failed — window will leak"
+        );
+        return false;
+    }
+    tracing::info!(
+        target: "pool:pane",
+        label = %label,
+        "[pane-pool] evicted idle pool window under memory pressure"
+    );
+    true
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn evict_idle_pane_pool_window(_state: &Arc<AppState>) -> bool {
+    // No live-verified reliable destroy path on macOS/Linux for a pane-pool
+    // window yet (mirrors demote_promoted_pool_window/park_and_blank_window's
+    // existing Windows-only scope in this file) — matches the pressure
+    // spawn-refusal guards above, which already degrade to a no-op question
+    // that never arises off-Windows (memory_pressure::current_level() has no
+    // Windows-only gate, but there's nothing to evict if nothing is ever
+    // trimmed here).
+    false
+}
+
+#[cfg(target_os = "windows")]
+cef::wrap_task! {
+    struct DestroyPanePoolHwndTask {
+        state: Arc<AppState>,
+        label: String,
+        hwnd: isize,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            // Arm the browser destruction BEFORE the native DestroyWindow —
+            // the same "close_browser(1) first" sequencing CloseWindowTask's
+            // round 5 uses (ui_tasks/window.rs), and for the same reason:
+            // this is what drives on_before_close -> reducer
+            // UnregisterBrowser, which cleans the state.browsers map entry.
+            // Must run here, on the CEF UI thread this task is posted to
+            // (cef::ThreadId::UI) — calling close_browser off-thread risks a
+            // UI-thread hang (reagent P1, round 2).
+            {
+                use cef::{ImplBrowser, ImplBrowserHost};
+                if let Some(mut browser) = self.state.get_browser(&self.label) {
+                    if let Some(host) = browser.host() {
+                        tracing::debug!(
+                            target: "pool:pane",
+                            label = %self.label,
+                            "[pane-pool] eviction: close_browser(1) to arm destruction"
+                        );
+                        host.close_browser(1);
+                    }
+                } else {
+                    tracing::warn!(
+                        target: "pool:pane",
+                        label = %self.label,
+                        "[pane-pool] eviction: no Browser found for label — state.browsers entry may already be stale"
+                    );
+                }
+            }
+            unsafe {
+                use windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow;
+                DestroyWindow(self.hwnd as *mut std::ffi::c_void);
+            }
+        }
+    }
+}
 
 /// Spawn a single pre-warmed frameless pane window. Follows the same
 /// single-flight + refill chain pattern as `spawn_pool_window`.
