@@ -470,12 +470,65 @@ pub(crate) async fn run_unix(
                         // created for itself at spawn (`.process_group(0)`)
                         // and host joined (`.process_group(pgid)`) — the
                         // launcher was never a member. Blast radius is exactly
-                        // {srv, host, host's CEF-spawned descendants}. SIGKILL
-                        // with no grace: this only fires when the UI thread is
-                        // proven wedged with zero windows — nothing left to
-                        // shut down gracefully.
-                        unsafe {
-                            libc::killpg(pgid, libc::SIGKILL);
+                        // {srv, host, host's CEF-spawned descendants}.
+                        //
+                        // reagent P1 (PR #2204): agent-spawned PTY shells
+                        // (host's `run_command` via `setsid()`,
+                        // `agentmux-srv/src/backend/shell_node.rs`'s own
+                        // `.process_group(0)`) deliberately escape into THEIR
+                        // OWN process groups — same mechanism this backstop
+                        // uses, applied for a different scoping purpose — so
+                        // they are NOT members of `pgid` and a bare
+                        // `killpg(pgid, SIGKILL)` would orphan them. This is
+                        // NOT a Linux-only gap: srv's own per-agent Windows
+                        // `JobObjectTracker` (`backend/process_tracker/
+                        // windows.rs`) creates a brand-new, unnested job per
+                        // agent block — `TerminateJobObject(J0)` doesn't reach
+                        // those either. Hard, kernel-guaranteed cleanup of
+                        // every agent subprocess tree on ANY teardown path is
+                        // out of scope here (it would mean duplicating
+                        // `process_tracker`'s own pid/job bookkeeping).
+                        //
+                        // What we CAN cheaply do: srv (unlike host) is not
+                        // presumed wedged by this scenario — only the host's
+                        // UI thread failed to answer probes — so give the
+                        // group a brief chance to shut down via SIGTERM
+                        // first. srv's own signal handler
+                        // (`agentmux-srv/src/main.rs`, SIGINT/SIGTERM →
+                        // `shell_sessions.stop_all()`) already tears down its
+                        // TRACKED agent shells correctly on a graceful exit —
+                        // by PID/job, not by process-group membership, so it
+                        // reaches the escaped subgroups this killpg can't.
+                        // SIGKILL remains the hard backstop for whatever's
+                        // still alive after a short grace (same 1500ms window
+                        // `terminate_child_gracefully` uses elsewhere in this
+                        // file) — covers a wedged-or-dead srv, or shells
+                        // `stop_all()` itself couldn't reap in time.
+                        let sigterm_ok = unsafe { libc::killpg(pgid, libc::SIGTERM) };
+                        if sigterm_ok != 0 {
+                            log(&format!(
+                                "[teardown-backstop] killpg({}, SIGTERM) failed: {} — \
+                                 group may already be empty, proceeding to SIGKILL",
+                                pgid,
+                                std::io::Error::last_os_error()
+                            ));
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                        let sigkill_ok = unsafe { libc::killpg(pgid, libc::SIGKILL) };
+                        if sigkill_ok != 0 {
+                            let err = std::io::Error::last_os_error();
+                            if err.raw_os_error() == Some(libc::ESRCH) {
+                                log(&format!(
+                                    "[teardown-backstop] killpg({}, SIGKILL): group already empty \
+                                     (SIGTERM + srv's own shutdown handler reaped it)",
+                                    pgid
+                                ));
+                            } else {
+                                log(&format!(
+                                    "[teardown-backstop] killpg({}, SIGKILL) failed: {}",
+                                    pgid, err
+                                ));
+                            }
                         }
                         break TEARDOWN_BACKSTOP_EXIT_CODE;
                     }
