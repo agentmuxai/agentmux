@@ -489,7 +489,7 @@ fn format_srv_event(e: &Event) -> String {
         Event::WorkspaceCreated { workspace_id, name, version } => {
             format!("v={:>3} WorkspaceCreated   id={} name={}", version, workspace_id, name)
         }
-        Event::WorkspaceDeleted { workspace_id, version } => {
+        Event::WorkspaceDeleted { workspace_id, version, .. } => {
             format!("v={:>3} WorkspaceDeleted   id={}", version, workspace_id)
         }
         Event::TabCreated { workspace_id, tab_id, name, version } => {

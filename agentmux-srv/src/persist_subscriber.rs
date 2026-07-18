@@ -1298,6 +1298,7 @@ mod tests {
         apply_event_to_wstore(
             &Event::WorkspaceDeleted {
                 workspace_id: "ghost".into(),
+                block_ids: Vec::new(),
                 version: 1,
             },
             &s,
@@ -1991,6 +1992,7 @@ mod tests {
         apply_event_to_wstore(
             &Event::WorkspaceDeleted {
                 workspace_id: ws.oid.clone(),
+                block_ids: Vec::new(),
                 version: 1,
             },
             &s,
