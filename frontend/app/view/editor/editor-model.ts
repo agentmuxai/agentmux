@@ -568,6 +568,22 @@ export class EditorViewModel implements ViewModel {
         void RpcApi.UnwatchEditorFileCommand(TabRpcClient, { path: prev, block_id: this.blockId }).catch(() => {});
     }
 
+    /** Re-sync the watch registration after an in-app rename (`renameFile`).
+     *  The slice's `RenameFile` command updates a tab's `filePath` in place
+     *  (same tabId), but that leaves the backend still watching the OLD path
+     *  — which no longer exists after the rename — and never registers the
+     *  new one, silently breaking live-reload for that tab. Looks up the
+     *  tab by its (already-updated) new path and re-points the watch if it
+     *  was being watched under the old one. No-op for a tab that never
+     *  finished loading (never got a watch registered in the first place). */
+    private _resyncWatchAfterRename(oldPath: string, newPath: string): void {
+        const oldCanon = canonicalizePath(oldPath);
+        const newCanon = canonicalizePath(newPath);
+        const tab = snapshot(this.blockId)?.tabs.find((t) => t.filePath === newCanon);
+        if (!tab || this._watchedPathByTab.get(tab.id) !== oldCanon) return;
+        this._syncWatch(tab.id, newCanon);
+    }
+
     closeTab(tabId: string): void {
         // Phase 1B: force-close even for dirty tabs (matches today's
         // behavior — pane closes silently lose unsaved changes). The
@@ -824,6 +840,7 @@ export class EditorViewModel implements ViewModel {
                 newPath: result.new_path,
                 source: "system",
             });
+            this._resyncWatchAfterRename(path, result.new_path);
             // Also update any tabs that are children of a renamed directory.
             // Canonicalize both paths with a trailing sep so we don't match
             // "~/proj2" when renaming "~/proj".
@@ -836,6 +853,7 @@ export class EditorViewModel implements ViewModel {
                 if (tabCanon.startsWith(oldPrefix)) {
                     const newTabPath = newPrefix + tabCanon.slice(oldPrefix.length);
                     dispatch(this.blockId, { type: "RenameFile", oldPath: tab.filePath, newPath: newTabPath, source: "system" });
+                    this._resyncWatchAfterRename(tab.filePath, newTabPath);
                 }
             }
             // Refresh the parent directory.
