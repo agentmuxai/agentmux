@@ -204,7 +204,11 @@ PL_V="$(node -p "require('./package-lock.json').version" 2>/dev/null || echo '<u
 [[ "$PL_V" == "$NEW_VERSION" ]] || \
     INCONSISTENCIES+=("package-lock.json version=$PL_V")
 
-CL_V="$(sed -n '/^name = "agentmux-cef"$/{n;s/^version = "\(.*\)"$/\1/p;q}' Cargo.lock)"
+CL_V="$(sed -n '/^name = "agentmux-cef"$/{
+n
+s/^version = "\(.*\)"$/\1/p
+q
+}' Cargo.lock)"
 [[ "$CL_V" == "$NEW_VERSION" ]] || \
     INCONSISTENCIES+=("Cargo.lock agentmux-cef version=$CL_V")
 
