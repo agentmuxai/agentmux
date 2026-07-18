@@ -445,6 +445,29 @@ pub(crate) async fn run_unix(
                     // exception to "never kill what a saga can reconcile" —
                     // zero user windows remain and the UI thread is provably
                     // dead, so there is nothing to reconcile.
+                    //
+                    // SIGTERM first, brief grace, then the hard SIGKILL
+                    // backstop — not a straight SIGKILL. Host is presumed
+                    // wedged by this whole scenario (its UI thread didn't
+                    // answer probes), but srv is NOT — nothing here indicates
+                    // srv itself is unresponsive, only that the host lost
+                    // track of its windows. A bare group-SIGKILL of srv would
+                    // orphan its tracked agent shells: each is spawned into
+                    // ITS OWN process group (`shell_node.rs`'s own
+                    // `.process_group(0)`, same mechanism, different scoping
+                    // purpose), so they are NOT members of srv's group and a
+                    // signal to srv's group alone never reaches them. Giving
+                    // srv a moment to catch SIGTERM lets its own handler
+                    // (`agentmux-srv/src/main.rs` → `shell_sessions.stop_all()`)
+                    // run first — `stop_all()` reaches every tracked shell by
+                    // its own pid/pgid directly (`shell_node.rs::kill_tree`),
+                    // independent of ambient process-group membership, so it
+                    // closes exactly the gap a launcher-level group-kill
+                    // can't. Same 1500ms grace `terminate_child_gracefully`
+                    // uses elsewhere in this file, for consistency.
+                    crate::host_spawn::kill_process_group_gracefully(&host_child);
+                    crate::host_spawn::kill_process_group_gracefully(&srv_child);
+                    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
                     crate::host_spawn::kill_process_group_forcefully(&host_child);
                     crate::host_spawn::kill_process_group_forcefully(&srv_child);
                     break TEARDOWN_BACKSTOP_EXIT_CODE;
