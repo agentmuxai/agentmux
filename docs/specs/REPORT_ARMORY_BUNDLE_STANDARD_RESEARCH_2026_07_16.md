@@ -2,7 +2,7 @@
 
 **Status:** Research report + standard proposal — no implementation yet.
 **Author:** Agent3
-**Method:** Three deep-research harness passes + a code-level inventory of
+**Method:** Four deep-research harness passes + a code-level inventory of
 the Armory's actual schemas on `main` @ `e6ec3c42`.
 - **Pass 1** (5 search angles, 18 sources fetched) was cut short by an org
   spend limit partway through adversarial verification. Its claims are marked
@@ -31,6 +31,15 @@ the Armory's actual schemas on `main` @ `e6ec3c42`.
   These five remain at Pass 1's **[fetched]**-tier status; a further
   automated pass on the same five is unlikely to help and they're flagged
   for manual/targeted verification if precision on them becomes load-bearing.
+- **Pass 4** (dedicated to a question the first three passes had implicitly
+  conflated away — see the naming note in §1: is there a standard for
+  *dynamic agent memory*, distinct from the *static instructions* AGENTS.md
+  covers? — 4 search angles, sources on Letta `.af`, Mem0, Zep, MemGPT,
+  LangMem, standards-body efforts, vendor-hosted exportable memory, and a
+  memory-as-MCP-server pattern; 25 claims verified → 20 confirmed / 5
+  refuted / 0 unverified, 109 agent calls, zero errors) found the dynamic-
+  memory landscape is **more fragmented than every other category
+  researched**, including credentials. Results are in the new §3f.
 Where a later pass refuted an earlier claim, the correction is applied below
 and called out explicitly. No claim below is from model memory alone.
 **Related:** `specs/SPEC_V1_MCP_SKILLS_PRIMITIVES_2026_06_30.md`,
@@ -45,11 +54,25 @@ AgentMux's Armory manages five primitives, composed per-agent:
 
 | Armory primitive | Storage (today) | Materialized at launch as |
 |---|---|---|
-| **Bundles** (instructions + context files + refs) | `db_bundles` (instructions, `context_files` JSON, `mcp_servers` JSON, `skills` id-array, provider/model, `is_global`, `sort_order`) | CLAUDE.md sections via `format_global_brain_block` |
+| **Bundles** (instructions + context files + refs) — UI-labeled "Memories"/"Brain" | `db_bundles` (instructions, `context_files` JSON, `mcp_servers` JSON, `skills` id-array, provider/model, `is_global`, `sort_order`) | CLAUDE.md sections via `format_global_brain_block` |
 | **Accounts** (identity/credentials) | `db_accounts` with `secret_ref` tagged enum (`Env`/`SecretsManager`/`PlaintextDev`/`OAuthConfigDir`/`Keychain`) — plaintext never stored | env vars (`GITHUB_TOKEN`, `ANTHROPIC_API_KEY`, …) or config-dir injection (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`) |
 | **Skills** | `db_skills` (trigger, skill_type, content) | `.claude/commands/<trigger>.md` slash commands + CLAUDE.md index |
 | **MCP servers** | `db_mcp_servers` (transport, config JSON) | standard `.mcp.json` `mcpServers` object |
 | **Per-agent composition** | `db_agent_skills_ref`, `db_agent_mcp_ref`, `db_agent_identity_links` | — |
+
+**A naming note, caught mid-report and worth stating precisely:** the
+Armory's "Bundles" primitive is what the *UI* calls "Memories"/"Brain"
+(`GlobalBrainManager`), but its actual schema — `instructions` +
+`context_files`, write-once/read-many, human-authored — is structurally
+**static instructions** (the same category as AGENTS.md/CLAUDE.md), not
+**dynamic memory** (state an agent accumulates and mutates on its own across
+sessions, the way Letta/Mem0/Zep use the word). This report's original draft
+conflated the two under one "memory/instruction bundles" category; §3c below
+covers the instructions side (well-standardized, via AGENTS.md), and the new
+§3f covers true dynamic memory as its own, separately-researched question
+(the landscape there turns out to be meaningfully different — and worse).
+AgentMux currently implements only the instructions side; it has no dynamic
+per-agent memory primitive at all as of this report.
 
 Everything is **SQLite-only**; there is no export/import/share path for any
 Armory primitive (the only exporter, `exportagents`, covers agent definitions,
@@ -59,17 +82,26 @@ closest, and what should AgentMux adopt?
 
 ## 2. Answer
 
-**No standard — formal or de facto — bundles all four categories
-(instructions/memory, MCP configs, skills, credential references) as of
-mid-2026.** Confirmed independently by three research passes (the second and
-third both completing full end-to-end adversarial verification: 19+22=41
-confirmed / 6+3=9 refuted / 0 unverified claims across both, 0 agent errors
-in either). What exists instead is a *layered* landscape, now verified in
-detail across every category but one: strong, vendor-neutrally-governed
-per-category standards for **skills** (Agent Skills/SKILL.md), **MCP server
-description** (`server.json`/`mcpServers`, registry still pre-GA), and
-**instruction location/precedence** (AGENTS.md, now confirmed genuinely
-foundation-governed via the Agentic AI Foundation, not an OpenAI convention);
+**No standard — formal or de facto — bundles even the four categories this
+report originally set out to check (instructions, MCP configs, skills,
+credential references), and a fifth category this report initially
+conflated with "instructions" — dynamic agent memory — turns out to have
+*no* standard either, and is the single least-converged category of all
+five.** Confirmed by four research passes (three completing full end-to-end
+adversarial verification: 19+22+20=61 confirmed / 6+3+5=14 refuted / 0
+unverified claims across all three, 0 agent errors in any of them). What
+exists instead is a *layered* landscape, now verified in detail across
+every category but two (dynamic memory, and the five still-open items in
+§7): strong, vendor-neutrally-governed per-category standards for
+**skills** (Agent Skills/SKILL.md), **MCP server description**
+(`server.json`/`mcpServers`, registry still pre-GA), and **static
+instruction location/precedence** (AGENTS.md, now confirmed genuinely
+foundation-governed via the Agentic AI Foundation, not an OpenAI
+convention) — but **no standard, and not even a shared non-standard, for
+dynamic memory**: Letta, Zep, and LangMem each use structurally
+incompatible representations (memory blocks, temporal knowledge graphs, and
+no format at all, respectively), with none adopted outside its own
+framework;
 a confirmed, **universal, deliberate refusal to package the fourth
 (credentials)** across every format examined in all three passes — the
 single most consistently reinforced finding of the whole effort, now backed
@@ -80,16 +112,19 @@ detail in Pass 3); and a genuinely-expanded LangChain **Context Hub** now
 composing instructions + tools. Of the young multi-category composition
 efforts, **Claude Code Plugins remains the most fully verified and the
 closest to bundling multiple categories** (skills + MCP + hooks, with a
-real, size-capped credential mechanism) — but whether it bundles
-memory/instructions is the report's single most-attempted,
+real, size-capped credential mechanism) — but whether it bundles static
+CLAUDE.md-style instructions is the report's single most-attempted,
 least-resolved question: three verification attempts across two passes
 (Pass 2's re-check, Pass 3's dedicated targeting) have failed to settle it
 either way. Microsoft APM and Appstrate AFPS remain unverified after two
 dedicated attempts each — real per Pass 1's sourcing, but not independently
 re-confirmed. The strategic conclusion is unchanged and now substantially
 more strongly evidenced: **adopt the per-category standards where they
-exist, and standardize only the composition layer + credential-reference
-schema ourselves** — which happens
+exist (skills, MCP config, static instructions), and standardize only the
+composition layer + credential-reference schema ourselves — deliberately
+leaving dynamic memory out of v0.1**, since there's no standard, no
+convergent non-standard, and not even Armory's own current implementation
+to align it against. That composition + credential-declaration scope happens
 to be exactly the two things the Armory already does in proprietary form,
 and exactly the two things the entire research effort found nobody else has
 solved either.
@@ -178,10 +213,12 @@ solved either.
   `server.json` import (and its `isSecret` env declarations mapped onto
   Armory account references) is incremental.
 
-### 3c. Instructions/memory — a convention, not a schema: AGENTS.md
+### 3c. Instructions — a convention, not a schema: AGENTS.md
 
-*(Pass 3 confirmed this section with 3-0 adversarial votes across the board —
-upgraded from Pass 1's [fetched] tier.)*
+*(Static, human-authored context only — see the naming note in §1. Dynamic,
+agent-accumulated memory is a separate question, researched independently in
+§3f. Pass 3 confirmed this section with 3-0 adversarial votes across the
+board — upgraded from Pass 1's [fetched] tier.)*
 
 - **[verified: 3-0]** AGENTS.md is genuinely stewarded by the **Agentic AI
   Foundation (AAIF)**, a directed fund under the Linux Foundation formed
@@ -203,13 +240,11 @@ upgraded from Pass 1's [fetched] tier.)*
   addresses **no** memory-management, credential, MCP-config, or skills
   schema anywhere in the spec. A frontmatter/schema proposal remains
   open/unmerged as of mid-2026.
-- **[fetched, still unverified]** Letta's `.af` (Agent File) is the only
-  found format that serializes memory + tools together (system prompt,
-  editable memory blocks, tool code, model settings) — but it strips secrets
-  to `null` on export, has MCP support only on its roadmap, and adoption is
-  effectively single-vendor.
 - **Armory position:** `db_bundles.instructions` + `context_files` are
   functionally "portable AGENTS.md fragments + attachments" — near-alignable.
+  (Letta's `.af` format, which does touch real dynamic memory, is covered in
+  §3f, not here — it's a different category from what AGENTS.md/`db_bundles`
+  actually are.)
 
 ### 3d. Credentials/identity — no standard exists, by universal design
 
@@ -368,14 +403,101 @@ pattern AgentMux already implements (`SecretRef` pointers):
   directly against the project's own spec repo before citing its adoption
   status either way.
 
+### 3f. Dynamic memory — no standard, and *less* converged than any other category
+
+*(A genuinely different question from §3c: not "where do static, authored
+instructions live" but "how does an agent's own accumulated, mutated,
+cross-session state — learned facts, user preferences, episodic/semantic
+recall — get serialized and moved between tools." Pass 4, dedicated
+entirely to this question: 20 confirmed / 5 refuted / 0 unverified, 109
+agent calls, zero errors.)*
+
+- **[verified: high confidence]** **No cross-vendor standard exists for
+  dynamic memory serialization, and the field is more fragmented than every
+  other category in this report — including credentials**, where at least
+  every vendor converges on the *same* non-solution (defer to OS
+  keychain/OAuth). Here, each framework has a structurally different,
+  mutually incompatible representation: Letta uses labeled memory blocks,
+  Zep uses a temporal knowledge graph, LangMem has no format of its own at
+  all. There isn't even a shared *non-standard* to point to.
+- **[verified: high confidence]** **Letta's Agent File (`.af`) is the
+  closest real candidate**, and it's a meaningfully different kind of
+  artifact from AGENTS.md or SKILL.md: it bundles an agent's *full runtime
+  state* — system prompt, message history, tool configs (code + schema),
+  model settings, environment variables, tool rules, **and memory as
+  discrete, labeled, individually-editable "memory blocks"** (e.g.
+  `persona`, `human`/user-info) rather than one blob. A real, inspectable
+  Pydantic schema exists (`AgentSchema`, `CoreMemoryBlockSchema`,
+  `MessageSchema`, `ToolSchema`) — but it lives inside Letta's own
+  application repo, not a standalone JSON Schema document, and not under any
+  standards body.
+  - **Coverage gap:** `.af` covers only *in-context* memory blocks — Letta's
+    own **Archival Memory ("Passages")** is explicitly unsupported, listed
+    as a roadmap item, not implemented. There's no memory-block-level
+    versioning/history either (only agent-level version + per-block
+    timestamps), despite "versioning agents over time" being a stated design
+    goal.
+  - **Adoption is Letta's own words, not inference:** "Theoretically, other
+    frameworks could also load in `.af` files if they convert the state into
+    their own representations" — no named third-party framework (LangChain,
+    CrewAI, AutoGen, Google ADK) natively reads `.af`. Those frameworks have
+    instead converged on **A2A/MCP for interop**, not a shared memory format.
+  - An adversarial attempt to characterize `.af` as a formal "open standard"
+    (rather than Letta's own de facto format) was **explicitly refuted
+    (1-2)** — sharpening, not weakening, the "no standard exists" conclusion.
+- **[verified: high confidence]** **Zep** represents memory as a temporal
+  knowledge graph (entity nodes, entity edges, episodic nodes) built on
+  **Graphiti**, its own open-source (Apache 2.0) graph engine — a real,
+  independently-reimplementable architecture (a third party, GraphZep, has
+  shipped a TypeScript reimplementation), but **Zep documents no
+  export/portability API**. Migrating memory *into* Zep (e.g. from Mem0) is
+  fully manual: map IDs, convert records to JSON/text, push through Zep's
+  own `graph.add()` API — not a file conversion. An attempted claim that
+  GraphZep offers semantic-web export (Turtle/JSON-LD/RDF) was **refuted
+  (0-3)** — there's no portable serialization out of this ecosystem either.
+- **[verified: high confidence]** **LangMem** (LangChain's memory library)
+  defines **no storage format of its own at all** — its core API is
+  explicitly designed to work with "any storage system," delegating
+  entirely to whatever backend is configured (LangGraph's `BaseStore`,
+  Postgres, MongoDB, in-memory). There is no LangMem-native file to move.
+- **[gap — no primary source found, flagged explicitly rather than
+  guessed]** Five of the eight original sub-questions came back with **zero
+  verified claims**, and should be treated as open, not answered:
+  1. **Mem0**'s own portable export format and governance (OSS core vs.
+     hosted-only) — unconfirmed either way.
+  2. Whether **MemGPT** (the project Letta evolved from) survives as an
+     independently-maintained spec distinct from `.af`, or was fully
+     absorbed with no separate surviving artifact.
+  3. Any **W3C/IETF or standards-body** effort on agent-memory
+     serialization — none found, but not exhaustively ruled out.
+  4. Whether **OpenAI, Anthropic, or Google** offer any documented,
+     end-user-*exportable* memory file from their hosted agent products —
+     unconfirmed; if the answer is "no," it's unclear whether that's
+     deliberate lock-in or simply unaddressed.
+  5. Whether any memory framework has shipped a **"memory MCP server"**
+     pattern — exposing its store over MCP's already-standard protocol, even
+     without a portable underlying file format — as a lighter-weight
+     interop path than full serialization. Not found, not ruled out.
+- **Armory position:** AgentMux currently has **no dynamic memory primitive
+  at all** — `db_bundles` is entirely static instructions (§1's naming
+  note). This isn't a gap relative to a missed standard (there isn't one to
+  align with); it's a genuinely open design space. If AgentMux ever adds
+  real cross-session agent memory, Letta's memory-block *shape* (discrete,
+  labeled, individually addressable) is the most-precedented pattern to
+  borrow from — but the underlying storage/versioning would still be
+  AgentMux's own design, not an import of an existing standard, because
+  none of the four examined frameworks (Letta, Zep, LangMem, Mem0) offer one
+  worth adopting wholesale.
+
 ## 4. Gap analysis: Armory vs the landscape
 
 | Category | Standard exists? | Armory today | Distance |
 |---|---|---|---|
-| Skills | **Yes — Agent Skills (SKILL.md)**, ~45 clients | Proprietary slash-command rows | **Misaligned** — biggest single win available |
+| Skills | **Yes — Agent Skills (SKILL.md)**, vendor-neutrally governed | Proprietary slash-command rows | **Misaligned** — biggest single win available |
 | MCP configs | **Yes — `server.json` + `mcpServers`** (registry in preview) | Emits standard `mcpServers` | Nearly aligned; add server.json import + `isSecret`→account-ref mapping |
-| Instructions/memory | Convention only (AGENTS.md: location/precedence, no schema) | `instructions` + `context_files` in DB | Alignable by materializing as Markdown + files; no schema exists to adopt |
+| Instructions (static, authored) | **Yes — AGENTS.md**, Linux Foundation-governed convention (location/precedence, no schema) | `instructions` + `context_files` in DB | Alignable by materializing as Markdown + files; no schema exists to adopt |
 | Credentials | **No standard anywhere; universal reference-don't-bundle** | `SecretRef` typed pointers — ahead of field | Standardize the *requirement declaration*, keep resolution local |
+| **Dynamic memory** (agent-accumulated state) | **No standard, no convergent non-standard either** — more fragmented than credentials; Letta `.af`'s memory-block shape is the only real precedent, not adopted anywhere else | **None** — `db_bundles` is static instructions, not this | Not a gap to close now — genuinely nothing to align with; a future non-goal/extension point, not a v0.1 requirement |
 | Composition | Young (APM 3/4 no-creds; AFPS 3/4 no-memory, no adoption; plugins no-instructions) | `db_bundles` + ref tables, DB-only | **This is the open space** — nothing owns it yet |
 | Distribution | De facto substrate: OCI artifacts (devcontainer Features blueprint) | None (no export at all) | Green field; follow the Features pattern |
 
@@ -460,6 +582,23 @@ manifest annotation for registry-side indexing without pulls, semver tags
 with immutable-republish refusal, Cosign-compatible. This reuses the
 container supply chain AgentMux already ships with (signing, scanning,
 registry auth) — no new infrastructure invented.
+
+### 5.5 Dynamic memory: explicit non-goal for v0.1
+
+§3f found no standard, and no convergent non-standard, for dynamic agent
+memory — and AgentMux doesn't have a dynamic memory primitive to bundle in
+the first place (§1's naming note: `db_bundles`/"Memories" is static
+instructions). ABF's `components` object (§5.2) is therefore deliberately
+open-ended (unrecognized keys are ignored, matching the Claude-plugin
+tolerance pattern) rather than closed to exactly four categories, so a
+future `"memory"` component key can be added without a breaking manifest
+version bump — but nothing is specified for it now. If AgentMux ever adds
+real cross-session agent memory, Letta's memory-block shape (discrete,
+labeled, individually addressable, not one blob) is the most-precedented
+pattern to borrow from — but the storage/versioning underneath would still
+be an AgentMux design, not an import, because none of the four frameworks
+examined (Letta, Zep, LangMem, Mem0) offer a standard worth adopting
+wholesale.
 
 ## 6. Implementation steps for AgentMux
 
@@ -553,11 +692,13 @@ in Pass 1, not adversarially voted, and — critically — **not resolved by
 two separate dedicated attempts** in Pass 2 and Pass 3 despite direct
 targeting): **Microsoft APM**, **Appstrate AFPS**, and — the report's
 single most-attempted, least-resolved question — **whether Claude Code
-plugins (or any format) support bundling persistent memory/instruction
-files as a first-class component**. Also still `[fetched]`-tier, not yet
-re-targeted: Dev Container Features and Docker's enterprise-catalog
-"profiles as pinned artifacts" guidance, and Letta `.af`'s roadmap status.
-For these specific items, a fourth automated research pass is judged
+plugins (or any format) support bundling persistent *static* instruction
+files (CLAUDE.md) as a first-class component**. Also still `[fetched]`-tier,
+not yet re-targeted: Dev Container Features and Docker's enterprise-catalog
+"profiles as pinned artifacts" guidance. (Letta `.af`'s roadmap/coverage
+status is now separately verified — see the Pass 4 summary below, §3f.)
+For these specific items, a further automated research pass on the same
+narrow questions is judged
 unlikely to help — two consecutive targeted attempts came back with zero
 surviving claims on exactly these questions, suggesting either the search
 angle isn't finding the right sources or the harness's source mix doesn't
@@ -577,3 +718,22 @@ directly against the live sources. None of the report's *directional*
 conclusions rest on a single unverified number — each is corroborated by at
 least one Pass-2-or-Pass-3-verified claim from a different, independent
 angle.
+
+**Pass 4 (dynamic memory, completed clean — 109/109 agent calls, 0 errors,
+20 confirmed / 5 refuted / 0 unverified):** fully verified Letta `.af`'s
+memory-block structure, its real-but-Letta-owned Pydantic schema, its
+Archival-Memory/Passages coverage gap, and its "theoretical," not adopted,
+cross-framework portability; fully verified Zep's Graphiti-based knowledge-
+graph architecture and its lack of any export/portability mechanism; fully
+verified LangMem's complete absence of a native storage format. Explicitly
+**not resolved, zero surviving claims, flagged as open rather than
+guessed**: Mem0's own format/governance, whether MemGPT survives as a spec
+independent of `.af`, any W3C/IETF standards-body effort on agent memory,
+whether any major vendor (OpenAI/Anthropic/Google) offers end-user-
+exportable memory, and whether any framework exposes memory over MCP as a
+protocol-portable (if not format-portable) interface. Same policy as the
+other open items: a manual, source-directed check is more efficient than a
+further automated pass on these specific five sub-questions, and none of
+them block §5's proposal, which treats dynamic memory as an explicit
+non-goal (§5.5) rather than something requiring a resolved external
+standard to design against.
