@@ -710,6 +710,52 @@ fn insert_node_appends_to_existing_non_full_node() {
     assert!(root.children.iter().any(|c| c.id == "new"));
 }
 
+/// Regression (2026-07-18, mirrors the TS fix in
+/// frontend/layout/lib/layoutNode.ts): a minimized leaf must never be a
+/// blind-insert target. Root is deliberately AT capacity (5 children,
+/// DEFAULT_MAX_CHILDREN) so root itself is excluded as a candidate and the
+/// heuristic must descend into a leaf — otherwise root always wins
+/// regardless of any leaf's minimize state and the test wouldn't exercise
+/// the fix. With 5 same-depth leaf candidates tied on score, the (stable)
+/// sort's tie-break favors whichever was visited first — reverse child
+/// order means the LAST array element wins — so the minimized leaf is
+/// placed there: absent the fix, it's exactly what would get promoted.
+#[test]
+fn insert_node_never_promotes_a_minimized_leaf() {
+    let mut root = group(
+        "root",
+        FlexDirection::Row,
+        10.0,
+        vec![
+            leaf("a", "b1", 5.0),
+            leaf("b", "b2", 5.0),
+            leaf("c", "b3", 5.0),
+            leaf("d", "b4", 5.0),
+            minimized_leaf("last", "b5", 5.0),
+        ],
+    );
+    let new = leaf("new", "b6", 5.0);
+    insert_node(&mut root, new);
+
+    // The minimized leaf must still be exactly what it was: a leaf, still
+    // minimized, not promoted into a branch.
+    let still_minimized = root.children.iter().find(|c| c.id == "last").unwrap();
+    assert!(still_minimized.children.is_empty(), "must still be a leaf");
+    assert!(is_node_locked(still_minimized), "must still be minimized");
+
+    // No branch anywhere carries `minimized` (I2: leaf-only) — the exact
+    // corruption this guards against.
+    fn assert_not_corrupted(node: &LayoutNode) {
+        if !node.children.is_empty() {
+            assert!(!node.extra.contains_key("minimized"), "branch {} carries minimized", node.id);
+        }
+        for c in &node.children {
+            assert_not_corrupted(c);
+        }
+    }
+    assert_not_corrupted(&root);
+}
+
 // ── insertNodeAtIndex ────────────────────────────────────────────────────────
 
 #[test]

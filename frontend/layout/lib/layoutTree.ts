@@ -303,6 +303,18 @@ export function insertNode(layoutState: LayoutTreeState, action: LayoutTreeInser
         layoutState.rootNode = action.node;
     } else {
         const insertLoc = findNextInsertLocation(layoutState.rootNode, DEFAULT_MAX_CHILDREN);
+        // findNextInsertLocation already skips minimize-locked candidates;
+        // this only fires in the degenerate case where every node in the
+        // tree is locked (last-expanded-pane guard prevents that globally,
+        // but not per-subtree — see resolveRowSlipTargets's equivalent note).
+        if (!insertLoc?.node) {
+            console.warn("insertNode: no unlocked insert location available, dropping");
+            return;
+        }
+        if (isEffectivelyMinimized(insertLoc.node)) {
+            console.warn("insertNode rejected: resolved location is minimize-locked", insertLoc.node.id);
+            return;
+        }
         addChildAt(insertLoc.node, insertLoc.index, action.node);
         if (action.magnified) {
             layoutState.magnifiedNodeId = action.node.id;
@@ -326,6 +338,14 @@ export function insertNodeAtIndex(layoutState: LayoutTreeState, action: LayoutTr
         const insertLoc = findInsertLocationFromIndexArr(layoutState.rootNode, action.indexArr);
         if (!insertLoc) {
             console.error("insertNodeAtIndex unable to find insert location");
+            return;
+        }
+        // Minimized is a locked state: an explicit index path can still
+        // resolve onto a locked node (unlike the heuristic locator, this one
+        // follows a caller-supplied path rather than choosing among
+        // candidates), so guard here — same rationale as insertNode above.
+        if (isEffectivelyMinimized(insertLoc.node)) {
+            console.warn("insertNodeAtIndex rejected: resolved location is minimize-locked", insertLoc.node.id);
             return;
         }
         addChildAt(insertLoc.node, insertLoc.index + 1, action.node);
