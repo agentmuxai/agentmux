@@ -138,6 +138,17 @@ pub async fn connect_to_srv(
                             _ => &[],
                         };
                         for block_id in cascaded_block_ids {
+                            // Cancel any pending HTTP-auth callback parked for
+                            // this pane BEFORE tearing it down — mirrors the
+                            // established `browser_pane_close` invokeCommand
+                            // path (ipc.rs), which does the same ordering for
+                            // the same reason: without this, a pane torn down
+                            // via this cascade path while an auth prompt is
+                            // pending leaks the CEF AuthCallback for the full
+                            // 5-minute TTL instead of being cancelled
+                            // immediately. No-op (returns 0) for a block_id
+                            // with nothing pending, same as `close()` below.
+                            crate::browser_pane::auth::cancel_for_block(block_id);
                             state_for_reader.browser_panes.close(block_id, &state_for_reader);
                         }
                         crate::srv_event_bridge::dispatch_to_renderers(&state_for_reader, &event);
