@@ -254,6 +254,53 @@ describe("LayoutModel", () => {
         expect(props[root.id].resizeHandles).toHaveLength(0);
     });
 
+    // Regression (reagent P1, PR #2211): when several minimized panes
+    // converge on one small anchor, their combined stacked chip height can
+    // exceed the anchor's available cross-axis space. Each chip must scale
+    // down proportionally (mirroring computeMainAxisAllocation's `scale`
+    // factor for its analogous fixed-chip path) so the stack stays within
+    // the target's (and therefore the row's) bounds instead of overflowing
+    // past it.
+    it("scales down chip heights proportionally when a slip group's total height exceeds the target's space", () => {
+        const model = createLayoutModel();
+        model.getBoundingRect = () => ({ top: 0, left: 0, width: 800, height: 200 });
+        model.displayContainerRef.current = {
+            getBoundingClientRect: () => ({ top: 0, left: 0, width: 800, height: 200 }),
+        } as any;
+
+        // 6 minimized leaves stacked onto 1 anchor: 6 * (33 + gap) comfortably
+        // exceeds the 200px container height available to dock into.
+        const minimizedLeaves = Array.from({ length: 6 }, (_, i) => {
+            const n = newLayoutNode(FlexDirection.Row, 5, undefined, { blockId: `min${i}` });
+            n.minimized = true;
+            return n;
+        });
+        const anchor = newLayoutNode(FlexDirection.Row, 5, undefined, { blockId: "anchor" });
+        const root = newLayoutNode(FlexDirection.Row, 10, [anchor, ...minimizedLeaves]);
+        model.treeState.rootNode = root;
+        model.updateTree();
+
+        const gap = model.gapSizePx();
+        const headerH = 33;
+        const rawTotal = 6 * (headerH + gap);
+        const props = model.additionalProps();
+
+        // The chip stack must not exceed the anchor's original slot height.
+        const lastChip = props[minimizedLeaves[5].id].rect;
+        expect(lastChip.top + lastChip.height).toBeLessThanOrEqual(200 + 0.01);
+
+        // Each individual chip shrank by the same scale factor — combined
+        // height of all 6 (scaled) chips fills but does not exceed 200px,
+        // and is strictly less than the raw (unscaled) total would have been.
+        const totalScaledHeight = minimizedLeaves.reduce((s, c) => s + props[c.id].rect.height, 0);
+        expect(totalScaledHeight).toBeCloseTo(200, 0);
+        expect(totalScaledHeight).toBeLessThan(rawTotal);
+
+        // The anchor's own content area is fully consumed (0 height left) —
+        // the whole container is chips when they overflow this badly.
+        expect(props[anchor.id].rect.height).toBeCloseTo(0, 0);
+    });
+
     // End-to-end regression for the exact user-reported corruption
     // (2026-07-18): a blind InsertNode (e.g. a new pane created via the "+"
     // button or an agent creating a terminal) whose heuristic target

@@ -373,6 +373,15 @@ function updateTreeHelper(
             const originalTop = targetProps.rect.top;
             const totalSlipHeight = slipChildren.reduce((s, c) => s + minimizedCrossAxisPx(c, gapPx), 0);
             const clampedSlipHeight = Math.min(totalSlipHeight, targetProps.rect.height);
+            // Scale EACH chip down proportionally when the group's combined
+            // height exceeds the target's available space (several minimized
+            // panes converging on one small anchor) — mirrors
+            // computeMainAxisAllocation's `scale` factor for its analogous
+            // fixed-chip path. Without this, chips were sized at their raw
+            // unclamped height and the stack overflowed past
+            // originalTop + clampedSlipHeight, outside the row's bounds
+            // [reagent P1].
+            const scale = totalSlipHeight > clampedSlipHeight && totalSlipHeight > 0 ? clampedSlipHeight / totalSlipHeight : 1;
             const shrunkRect: Dimensions = {
                 ...targetProps.rect,
                 top: originalTop + clampedSlipHeight,
@@ -385,7 +394,7 @@ function updateTreeHelper(
             };
             let chipTop = originalTop;
             for (const slipChild of slipChildren) {
-                const chipHeight = minimizedCrossAxisPx(slipChild, gapPx);
+                const chipHeight = minimizedCrossAxisPx(slipChild, gapPx) * scale;
                 const chipRect: Dimensions = {
                     top: chipTop,
                     left: shrunkRect.left,
