@@ -48,6 +48,17 @@ const ATTRIBUTION_URGENT_THRESHOLD_GB: f64 = 2.0;
 const ATTRIBUTION_URGENT_COOLDOWN: Duration = Duration::from_secs(10);
 /// How many "other" processes to name individually in the log line.
 const ATTRIBUTION_OTHER_TOP_N: usize = 5;
+/// Per-block descendant-PID cap for the attribution walk — deliberately its
+/// OWN, much larger constant, not `process_tree::MAX_PIDS_PER_BLOCK` (64).
+/// That cap is sized for the Sysinfo pane's small per-block CPU/mem display;
+/// reusing it here silently dropped overflow into the "other" bucket
+/// instead of "panes" in exactly the storm scenario this feature exists to
+/// diagnose (a single block's descendant tree exceeding 64 processes) —
+/// reagent P1 on PR #2207. `collect_descendants` gives no truncation signal
+/// beyond "returned exactly `max_pids` results," so that's what
+/// `log_memory_attribution` checks to log a truncation warning rather than
+/// silently under-counting (no silent caps).
+const ATTRIBUTION_MAX_PIDS_PER_BLOCK: usize = 4096;
 
 /// One process's classification input — commit charge, not working set:
 /// what actually exhausts the pagefile. (sysinfo's `virtual_memory()` on
@@ -114,17 +125,23 @@ fn log_memory_attribution(sys: &mut sysinfo::System) {
         ProcessRefreshKind::everything(),
     );
 
-    let pane_pids: HashSet<u32> = pidregistry::get_all()
-        .iter()
-        .flat_map(|(_, pid)| {
-            process_tree::collect_descendants(
-                sys,
-                Pid::from(*pid as usize),
-                process_tree::MAX_PIDS_PER_BLOCK,
-            )
-        })
-        .map(|pid| pid.as_u32())
-        .collect();
+    let mut pane_pids: HashSet<u32> = HashSet::new();
+    for (block_id, pid) in pidregistry::get_all() {
+        let tree = process_tree::collect_descendants(
+            sys,
+            Pid::from(pid as usize),
+            ATTRIBUTION_MAX_PIDS_PER_BLOCK,
+        );
+        if tree.len() == ATTRIBUTION_MAX_PIDS_PER_BLOCK {
+            tracing::warn!(
+                block_id = %block_id,
+                cap = ATTRIBUTION_MAX_PIDS_PER_BLOCK,
+                "log_memory_attribution: block's descendant PID tree hit the cap — \
+                 some processes may be misclassified into \"other\" instead of \"panes\""
+            );
+        }
+        pane_pids.extend(tree.into_iter().map(|pid| pid.as_u32()));
+    }
 
     let samples: Vec<ProcSample> = sys
         .processes()
