@@ -126,6 +126,13 @@ struct PersistentInner {
     proc_exit_code: i32,
     status_version: i32,
     session_id: Option<String>,
+    /// A `--resume` id the CLI has confirmed (via stderr) it can't find under
+    /// the current config dir. The stdout reader echoes back whatever
+    /// `--resume` value it was given as its first line REGARDLESS of whether
+    /// resume actually succeeds, racing the stderr reader's own clear of
+    /// `session_id` — this stops that race from re-adopting a known-dead id.
+    /// Cleared once a *different*, real session id is captured.
+    resume_poisoned: Option<String>,
     current_pid: Option<u32>,
     /// Channel to send messages to the stdin writer task.
     stdin_tx: Option<mpsc::Sender<String>>,
@@ -219,6 +226,7 @@ impl PersistentSubprocessController {
                 proc_exit_code: 0,
                 status_version: 0,
                 session_id: None,
+                resume_poisoned: None,
                 current_pid: None,
                 stdin_tx: None,
                 kill_tx: None,
@@ -610,12 +618,19 @@ impl PersistentSubprocessController {
         // conversation. cli_args carries the runtime flags (model/effort/perm)
         // already rebuilt by the frontend (useAgentCommands buildRuntimeArgs).
         let mut spawn_args = config.cli_args.clone();
+        // Recorded so the stderr reader can tell "No conversation found" apart
+        // from an unrelated CLI error, and so it knows exactly which id to
+        // poison against the stdout reader's own capture (see below) — a
+        // provider that echoes back whatever --resume it was given as its
+        // first stdout line, even when that id turns out to be unreachable.
+        let mut attempted_resume_sid: Option<String> = None;
         {
             let inner = self.inner.lock().unwrap();
             if let Some(ref sid) = inner.session_id {
                 if !config.resume_flag.is_empty() {
                     spawn_args.push(config.resume_flag.clone());
                     spawn_args.push(sid.clone());
+                    attempted_resume_sid = Some(sid.clone());
                 }
             }
         }
@@ -689,6 +704,10 @@ impl PersistentSubprocessController {
         // Drain stderr in background — log lines for debugging
         if let Some(stderr_pipe) = stderr {
             let block_id_stderr = self.block_id.clone();
+            let inner_stderr = Arc::clone(&self.inner);
+            let wstore_stderr = self.wstore.clone();
+            let event_bus_stderr = self.event_bus.clone();
+            let attempted_resume_sid = attempted_resume_sid.clone();
             tokio::spawn(async move {
                 let mut reader = BufReader::new(stderr_pipe).lines();
                 while let Ok(Some(line)) = reader.next_line().await {
@@ -697,6 +716,43 @@ impl PersistentSubprocessController {
                         line = %line,
                         "persistent stderr"
                     );
+                    // Claude Code's own message when `--resume <sid>` targets a
+                    // conversation its current CLAUDE_CONFIG_DIR can't see — e.g.
+                    // after a relogin/reseed moves the agent onto a different
+                    // config dir than the one the session was recorded under. Left
+                    // uncleared, EVERY future respawn (one per message, since a
+                    // dead persistent process auto-restarts on next send) keeps
+                    // retrying the same unreachable --resume and immediately
+                    // exits again — a permanent "Agent encountered an error" with
+                    // no path to recovery. Clear it so the next respawn starts a
+                    // fresh conversation instead.
+                    if line.contains("No conversation found with session ID") {
+                        if let Some(ref bad_sid) = attempted_resume_sid {
+                            // Poison-then-clear in one critical section: the CLI
+                            // echoes back whatever --resume it was given as its
+                            // first stdout line REGARDLESS of whether resume
+                            // actually succeeds (the stdout reader below adopts
+                            // that into inner.session_id). Racing that adoption
+                            // against a clear-only fix would sometimes lose —
+                            // the stdout capture re-sets the same dead id right
+                            // after this clears it. Recording it as poisoned
+                            // makes the stdout reader refuse to (re-)adopt it,
+                            // whichever task wins the race.
+                            let mut inner = inner_stderr.lock().unwrap();
+                            inner.resume_poisoned = Some(bad_sid.clone());
+                            if inner.session_id.as_deref() == Some(bad_sid.as_str()) {
+                                inner.session_id = None;
+                            }
+                            drop(inner);
+                            tracing::warn!(
+                                block_id = %block_id_stderr,
+                                session_id = %bad_sid,
+                                "stale --resume session id unreachable under the current config dir — \
+                                 clearing so the next message starts a fresh conversation"
+                            );
+                            core::persist_session_id(&block_id_stderr, "", &wstore_stderr, &event_bus_stderr);
+                        }
+                    }
                 }
             });
         }
@@ -869,14 +925,30 @@ impl PersistentSubprocessController {
                     }
                     if let Some(sid) = parsed.get(&session_id_field).and_then(|v| v.as_str()) {
                         let sid_string = sid.to_string();
-                        let already_captured = inner_read.lock().unwrap().session_id.is_some();
-                        if !already_captured {
+                        // Single critical section for check-and-set (no gap for
+                        // the stderr reader's poison write to land in between)
+                        // and refuses to (re-)adopt an id already confirmed
+                        // unreachable — the CLI echoes back whatever --resume
+                        // it was given as this very first stdout line even when
+                        // that resume goes on to fail, racing the stderr
+                        // reader's clear. A real *different* id (e.g. after the
+                        // CLI gives up and starts fresh) still gets captured
+                        // normally, which also lifts the poison.
+                        let should_capture = {
+                            let mut inner = inner_read.lock().unwrap();
+                            let poisoned = inner.resume_poisoned.as_deref() == Some(sid_string.as_str());
+                            let capture = inner.session_id.is_none() && !poisoned;
+                            if capture {
+                                inner.session_id = Some(sid_string.clone());
+                            }
+                            capture
+                        };
+                        if should_capture {
                             tracing::info!(
                                 block_id = %block_id_read,
                                 session_id = %sid_string,
                                 "persistent session ID captured"
                             );
-                            inner_read.lock().unwrap().session_id = Some(sid_string.clone());
                             core::persist_session_id(&block_id_read, &sid_string, &wstore_read, &event_bus_read);
                         }
                     }
