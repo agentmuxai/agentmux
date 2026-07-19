@@ -38,7 +38,7 @@ Claude session — no manual polling, no checking GitHub, no delay.
 | `inject_muxbus_env()` | Injects `MUXBUS_TOKEN` into agent spawn env | ✅ |
 | `reactive.rs` | `add_agent()` on reactive-register, `remove_agent()` on deregister | ✅ |
 | `AgentMuxConnectPanel.tsx` | Full connect/disconnect UI | ✅ but gated |
-| Accounts gallery tile | Trust Center → Accounts → AgentMux tile | ✅ exists |
+| Accounts gallery tile | Armory → Accounts → AgentMux tile | ✅ exists |
 
 ### 2.3 How the delivery path works (end-to-end, when connected)
 
@@ -118,7 +118,7 @@ Extend the regex to extract the agent prefix from any `{prefix}-workflow[bot]`
 or `{prefix}-{github_handle}` username. Less precise but covers the long tail.
 
 Recommendation: **Option A for new PRs** (zero cloud changes needed) +
-**Option B for the full solution** (user-configurable via Trust Center).
+**Option B for the full solution** (user-configurable via Armory).
 
 ### 3.3 Reactive auto-registration gap  ← P1
 
@@ -138,7 +138,7 @@ Users must manually configure a GitHub org/repo webhook pointing to the cloud
 consumer endpoint. There is no setup flow, no documentation surface in the UI,
 and no validation that the webhook is working.
 
-**Fix:** Add a "Connect GitHub" step in Trust Center → Accounts → GitHub tile
+**Fix:** Add a "Connect GitHub" step in Armory → Accounts → GitHub tile
 (currently OAuth / PAT only). The step shows the webhook URL + secret to paste
 into GitHub, and a "Test" button that confirms delivery.
 
@@ -168,13 +168,13 @@ Minimal set of changes to make the use case work end-to-end:
 | M2 | Embed agent ID in PR bodies (Option A) | Convention + agent prompt / git hook | 1 day |
 | M3 | Update cloud `agent-mapping.ts` to extract from PR body | `consumers/github/events/review.ts` | 2h |
 | M4 | Auto-register agents with cloud subscriber at startup | `agentmux-srv/src/server/agent_handlers.rs` | 2h |
-| M5 | Document GitHub webhook setup | `docs/` or Trust Center help text | 1h |
+| M5 | Document GitHub webhook setup | `docs/` or Armory help text | 1h |
 
 P1 additions (post-MVP):
 | # | Change | Effort |
 |---|--------|--------|
 | P1a | User-configurable mapping API in cloud (Option B) | 1 day |
-| P1b | Trust Center webhook setup flow | 2 days |
+| P1b | Armory webhook setup flow | 2 days |
 | P1c | Toast notification on injection delivery | 1 day |
 
 ---
@@ -253,13 +253,13 @@ Actions: `approved`, `changes_requested`, `commented`, `dismissed`.
 
 ---
 
-## 8. Trust center — not a blocker
+## 8. Armory — not a blocker
 
-The Trust Center redesign (`docs/specs/archive/SPEC_TRUST_CENTER_GLOBAL_BRAIN_2026_06_19.md`) is
+The Armory redesign (`docs/specs/archive/SPEC_TRUST_CENTER_GLOBAL_BRAIN_2026_06_19.md`) is
 **not required** for this MVP. The accounts gallery tile and `AgentMuxConnectPanel`
 already exist and work correctly once `VITE_MUXBUS_CLIENT_ID` is set (M1).
 
-Trust Center work becomes relevant for:
+Armory work becomes relevant for:
 - User-configurable agent-to-GitHub mapping (P1a)
 - GitHub webhook setup UI (P1b)
 - Subscription management / tier display
@@ -286,7 +286,7 @@ Trust Center work becomes relevant for:
 
 ## 10. Acceptance criteria (MVP)
 
-- User can sign into AgentMux Cloud from Trust Center → Accounts → AgentMux tile
+- User can sign into AgentMux Cloud from Armory → Accounts → AgentMux tile
 - Agent that opens a PR has `<!-- agentmux:agent_id=X -->` in the PR body
 - When a reviewer approves / requests changes on that PR, the agent receives an
   injected message within ~5 seconds (WS wake) or ~30 seconds (polling fallback)

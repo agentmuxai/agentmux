@@ -28,7 +28,7 @@ This is a developer-grade experience. It:
 
 ## Goal
 
-A **Settings pane** widget — same scaffold as Toolchain / Trust Center — that:
+A **Settings pane** widget — same scaffold as Toolchain / Armory — that:
 1. Presents all user-facing settings as form controls with labels and descriptions
 2. Applies changes immediately and reactively via `SetConfigCommand` (no Save button)
 3. Groups settings into logical sections with a left-rail navigator
@@ -393,6 +393,6 @@ the theme's CSS variable values without requiring a full page re-render.
   surface; don't merge here.
 - **Widget pinning UI** — managed by right-click on the widget bar, not the Settings pane.
 - **Agent-level overrides** — per-agent model/effort/provider config lives in the agent
-  Identity/Preset system (Trust Center), not global settings.
+  Identity/Preset system (Armory), not global settings.
 - **Import/export** — bulk settings portability is out of scope; the raw JSON escape
   hatch covers this use case adequately.

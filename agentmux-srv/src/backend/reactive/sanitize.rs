@@ -154,7 +154,7 @@ const SENSITIVE_WHOLE_WORD_KEYWORDS: &[&str] = &[
 /// substring matches are always sensitive — no common English words contain them).
 const SENSITIVE_SUBSTRING_KEYWORDS: &[&str] = &[
     "api_key", "apikey", "force-push", "--force", "drop table", "rm -rf",
-    "delete_repo", "account.key.verify", "trust center", "private key",
+    "delete_repo", "account.key.verify", "trust center", "armory", "private key",
     "ssh key", "webhook secret", "auth key",
 ];
 

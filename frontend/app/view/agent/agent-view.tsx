@@ -685,7 +685,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         model: paneModel,
         failure: agentAtoms().failureAtom[0],
         onRetry: retryLastTurn,
-        onTrustCenter: () => void openOrFocusPaneByView("armory"),
+        onOpenArmory: () => void openOrFocusPaneByView("armory"),
         canSeed: () => provider()?.id === "claude",
         // context_exceeded recovery — drop the over-full session and return to
         // the picker for a clean relaunch (resuming would only re-fail).

@@ -20,7 +20,7 @@ We want a **tile grid that fills the pane** — more agents visible at a glance,
 - Render **My Agents** and **Templates** as a **responsive tile grid** that uses the full pane width (no 520px cap), reflowing column count to the available space.
 - **Maximize screen room:** wide panes show many columns; the grid area scrolls vertically when it overflows ("it can get full").
 - Preserve every existing interaction: click-to-launch/reattach, modifier-force-modal, `+ New`, install ribbon/state, delete, hidden-templates section.
-- Match the app design system; reuse the existing tile-grid precedent (`accounts-gallery.scss`, the Trust Center brand tiles).
+- Match the app design system; reuse the existing tile-grid precedent (`accounts-gallery.scss`, the Armory brand tiles).
 
 ---
 
@@ -61,7 +61,7 @@ Replace the capped single-column flex lists with a grid that auto-fills:
 
 - Vertical, fixed-ish footprint: provider logo (larger, ~36–40px) on top or top-left, **title** (CLI blurb / display name) and **caption** beneath, install ribbon as a corner badge, `+ New` + spinner revealed on hover/focus (as today).
 - Consistent tile height (clamp the description to 1–2 lines with ellipsis) so rows align in the grid.
-- Hard corners + accent-on-hover, per the app convention and the Trust Center pattern:
+- Hard corners + accent-on-hover, per the app convention and the Armory pattern:
   ```scss
   .agent-card {
       display: flex; flex-direction: column; gap: var(--space-2);
@@ -89,7 +89,7 @@ Click → launch (template) / reattach (My Agent); modifier keys → force the l
 
 ## 4. Reference
 
-`frontend/app/view/accounts/accounts-gallery.scss` is the existing in-app tile grid (Trust Center): `display: grid` of bordered tiles, `gap`, hover → `--accent-color` border, accent count badges, `color-mix` accents. The picker grid should mirror its grid/spacing/hover structure (adjusted to hard corners) so the two galleries feel like one system.
+`frontend/app/view/accounts/accounts-gallery.scss` is the existing in-app tile grid (Armory): `display: grid` of bordered tiles, `gap`, hover → `--accent-color` border, accent count badges, `color-mix` accents. The picker grid should mirror its grid/spacing/hover structure (adjusted to hard corners) so the two galleries feel like one system.
 
 ---
 

@@ -1,9 +1,9 @@
-# Proposal: A Composable Agent Model for the Trust Center
+# Proposal: A Composable Agent Model for the Armory
 
 **Date:** 2026-06-30
 **Status:** Proposal — for discussion (naming + IA decisions needed)
 **Author:** AgentX
-**Driver:** "I'd like a cleaner model… break out skills and MCP into the Trust Center… should we call them bundles? preset bundles? would a preset be a one-stop shop?"
+**Driver:** "I'd like a cleaner model… break out skills and MCP into the Trust Center… should we call them bundles? preset bundles? would a preset be a one-stop shop?" *(verbatim — the Trust Center → Armory rename came later, PR #1917)*
 **Related:** CLAUDE.md "Not widgets" (Identity / Presets); `db_memory_bundles`, `db_identity_bundles`; the per-agent identity provisioning work (`specs/archive/SPEC_PER_AGENT_IDENTITY_PROVISIONING_2026_06_30.md`); the agent App API identity/preset/memory handlers.
 
 ---
@@ -26,8 +26,8 @@ context files + MCP servers + skills* in one record, while **identity** and
    "bundles." Adding "preset bundle" on top would compound the collision.
 
 The fix is not a bigger preset. It's to **separate the reusable building blocks
-from the thing that assembles them**, and give each a clear home in the Trust
-Center.
+from the thing that assembles them**, and give each a clear home in the
+Armory.
 
 ## 2. Design principles
 
@@ -38,7 +38,7 @@ Center.
   them.
 - **Reference, don't copy.** The bundle stores pointers; edit a primitive once
   and every agent using it updates.
-- **The Trust Center is the trust + capability surface.** Accounts (credentials),
+- **The Armory is the trust + capability surface.** Accounts (credentials),
   MCP (external reach), and skills (injected instructions) are all *trust
   decisions* — they belong together where you grant and review capability.
 - **Primitives bind directly; collections are optional.** An agent can bind
@@ -49,15 +49,15 @@ Center.
 
 ## 3. Proposed model — primitives + an optional collection
 
-### 3.1 The primitives (Trust Center, each independently managed & shareable)
+### 3.1 The primitives (Armory, each independently managed & shareable)
 
 | Primitive | What it is | Today | Proposed home |
 |---|---|---|---|
-| **Account** | The provider login + credential the agent authenticates as (OAuth/key, per-account `CLAUDE_CONFIG_DIR`) | `db_identity_accounts`, wrapped in a redundant identity-**bundle** layer | Trust Center › **Accounts** (drop the bundle wrapper — §3.3) |
-| **Memory** | Persistent learned knowledge (native memory store; the `memory.*` App API / `memory/` dir) | colloquially "the brain", per-account | Trust Center › **Memories** |
-| **MCP server** | An external tool/connection surface (URL/stdio + which tools) | inlined in preset | Trust Center › **MCP Servers** (break out) |
-| **Skill** | On-demand instruction/knowledge module (a folder) | inlined in preset | Trust Center › **Skills** (break out) |
-| **Brief** | **The first message** injected when an agent pane opens — the startup payload (session context / identity / kickoff). That is *all* it is. It is **not** a standing instruction set; there is no always-on instruction blob. Behavioral/instructional content lives in **Skills** (on-demand). | the `startup` content type | Trust Center › **Briefs** |
+| **Account** | The provider login + credential the agent authenticates as (OAuth/key, per-account `CLAUDE_CONFIG_DIR`) | `db_identity_accounts`, wrapped in a redundant identity-**bundle** layer | Armory › **Accounts** (drop the bundle wrapper — §3.3) |
+| **Memory** | Persistent learned knowledge (native memory store; the `memory.*` App API / `memory/` dir) | colloquially "the brain", per-account | Armory › **Memories** |
+| **MCP server** | An external tool/connection surface (URL/stdio + which tools) | inlined in preset | Armory › **MCP Servers** (break out) |
+| **Skill** | On-demand instruction/knowledge module (a folder) | inlined in preset | Armory › **Skills** (break out) |
+| **Brief** | **The first message** injected when an agent pane opens — the startup payload (session context / identity / kickoff). That is *all* it is. It is **not** a standing instruction set; there is no always-on instruction blob. Behavioral/instructional content lives in **Skills** (on-demand). | the `startup` content type | Armory › **Briefs** |
 
 > Each primitive carries its own **ownership/sharing** (agent-owned vs **global**,
 > mirroring the App API's existing global-preset guard) and its own audit trail.
@@ -196,10 +196,10 @@ That inverts the old objection: removing `_bundles` from the legacy names is
 precisely what *frees* the word for its natural use. `db_memory_bundles` →
 **`db_bundles`** (the collection store); "bundle" means the collection, full stop.
 
-## 5. Trust Center information architecture
+## 5. Armory information architecture
 
 ```
-Trust Center
+Armory
 ├─ Bundles      ← named collections you apply to agents (optional, reusable)
 ├─ Accounts        ← provider logins / credentials (per-account CLAUDE_CONFIG_DIR)
 ├─ Memories        ← memory stores
@@ -223,7 +223,7 @@ workspace.
   App API.)
 - **Accounts** and **MCP servers** carry the heaviest trust weight (credentials +
   external reach). First-class status means they get explicit grant/review in the
-  Trust Center instead of riding hidden inside a preset.
+  Armory instead of riding hidden inside a preset.
 - An Bundle referencing a global primitive can't silently fork it; it points at
   the shared definition.
 

@@ -101,10 +101,10 @@ Auth state is **not centralized**. Each surface owns its own state:
 |---|---|---|
 | Agent pane | `useAgentControllerStatus.ts` | `authUrl`, `canRetry`, `loginWaiting`, `agentReady` |
 | Agent failure banner | `useAgentFailure.ts` | failure type, retry countdown, expanded |
-| Trust Center / HostPopover | `useMuxBusStatus()` | `{connected, email, expiresAt, valid}` — re-fetched on open |
+| Armory / HostPopover | `useMuxBusStatus()` | `{connected, email, expiresAt, valid}` — re-fetched on open |
 | Terminal pane | nothing | inherits ambient, never checks |
 
-**Problem:** Cross-pane auth events are invisible. If the user logs in via the Trust Center, agent panes don't re-check. If a MuxBus token expires, nothing tells the agent panes proactively.
+**Problem:** Cross-pane auth events are invisible. If the user logs in via the Armory, agent panes don't re-check. If a MuxBus token expires, nothing tells the agent panes proactively.
 
 ---
 
@@ -131,11 +131,11 @@ Auth state is **not centralized**. Each surface owns its own state:
 ### P1 — No credential seeding on agent launch
 
 **Impact:** Every agent pane launch requires manual intervention for new bundles.
-**Fix:** On first agent spawn against a bundle with no credentials, proactively check if a valid global `~/.claude/.credentials.json` exists. If yes, auto-seed it (same logic as "Use Existing Login"). Show a toast: "Using your global Claude login — manage in Trust Center."
+**Fix:** On first agent spawn against a bundle with no credentials, proactively check if a valid global `~/.claude/.credentials.json` exists. If yes, auto-seed it (same logic as "Use Existing Login"). Show a toast: "Using your global Claude login — manage in Armory."
 
 ### P1 — No central auth reducer / cross-pane sync
 
-**Impact:** Trust Center login doesn't update agent pane banners; MuxBus token expiry is silent.
+**Impact:** Armory login doesn't update agent pane banners; MuxBus token expiry is silent.
 **Fix:** Introduce a single SolidJS store atom (or Zustand-style slice) for app-wide auth state:
 ```ts
 interface AppAuthState {
@@ -177,7 +177,7 @@ AuthStateService (new)                           useAppAuth() store (new SolidJS
 AgentSpawnService (extend)                       ├─ Agent pane 401 banner
 ├─ pre-flight: seed global creds if bundle empty │  (no more per-pane polling)
 ├─ post-launch: subscribe agent to auth:changed  ├─ HostPopover MuxBus chip
-└─ on auth:changed: update live agent env vars   └─ Trust Center panel
+└─ on auth:changed: update live agent env vars   └─ Armory panel
 
 CEF CliLogin (fix)
 ├─ keep pair.master alive past child.wait()

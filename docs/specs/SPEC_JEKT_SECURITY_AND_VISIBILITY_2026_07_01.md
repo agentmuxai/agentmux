@@ -30,7 +30,7 @@ both incoming and outgoing jekts.
 ## 1. Observed Attack Vector (this session)
 
 1. A message appeared in Agent2's input claiming to be from Agent1, asking Agent2
-   to register a GitHub PAT in the trust center keychain via WebSocket RPC.
+   to register a GitHub PAT in the Armory keychain via WebSocket RPC.
 2. Agent2 correctly flagged it and refused until the user confirmed.
 3. Agent2 then sent a muxbus `SendMessage` to Agent1 asking for confirmation.
 4. The reply came back via the same injectable channel.
@@ -141,7 +141,7 @@ If `jekt_tier` is absent, the receiving agent applies a keyword scan on the
 message body. Presence of any of the following triggers SENSITIVE handling:
 - `PAT`, `token`, `api_key`, `apiKey`, `secret`, `password`, `credential`
 - `force-push`, `--force`, `drop table`, `rm -rf`, `delete_repo`
-- `account.key.verify`, `trust center`, `keychain`
+- `account.key.verify`, `trust center`, `armory`, `keychain`
 
 This catches legacy senders that don't set the tier field.
 
@@ -171,7 +171,7 @@ declared `jekt_tier`.
 
 ### 5.3 Future: signed jekts
 
-When the trust center keychain is stable, add an optional `jekt_sig` field:
+When the Armory keychain is stable, add an optional `jekt_sig` field:
 a HMAC-SHA256 of `(msgid + payload + timestamp)` using a per-agent secret stored
 in the keychain. The receiver verifies with the sender's public identity. Until
 then, host-tier = trusted; network-tier = always treat as SENSITIVE.
@@ -214,10 +214,10 @@ envelope. Srv validates tier on incoming network messages.
 
 ### Phase 5 — HMAC signatures (host-tier bootstrap)
 
-**Files:** trust center keychain, muxbus consumer  
+**Files:** Armory keychain, muxbus consumer  
 **Change:** agent at spawn time loads its signing key from the keychain; signs all
-outgoing jekts; receiver verifies using sender's public identity from the trust
-center.  
+outgoing jekts; receiver verifies using sender's public identity from the
+Armory.  
 **Result:** spoofed jekts are detectable even on the host tier.
 
 ---
