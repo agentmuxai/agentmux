@@ -15,20 +15,20 @@ import { useTick } from "@/app/hook/useTick";
 import { capChars, createChunkCapper, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
 import {
-    createSubagentDetail,
+    createDispatchDetail,
     subagentDisplayLabel,
     type ActiveSubagent,
-    type SubagentDetail,
+    type DispatchDetail,
     type SubagentEvent,
 } from "../../swarm/swarm-model";
 import { KIND_SIGIL, type PinnedActivity } from "../activity/types";
 import type { ToolLogChunk } from "../types";
 
 /** One-line text summary per subagent event kind — deliberately simpler than
- *  the Swarm pane's own `SubagentDetailEvent` (no per-event expand/collapse,
- *  no dedicated CSS): the dock reuses the existing shell-log line chrome
- *  (`.agent-tool-log-line`) instead of depending on `swarm-view.scss`, which
- *  only loads once the user has opened a Swarm pane this session. */
+ *  the Swarm pane's own `DispatchActivityFeedEntry` (no per-event expand/
+ *  collapse, no dedicated CSS): the dock reuses the existing shell-log line
+ *  chrome (`.agent-tool-log-line`) instead of depending on `swarm-view.scss`,
+ *  which only loads once the user has opened a Swarm pane this session. */
 function subagentEventLine(e: SubagentEvent): string {
     const t = e.event_type;
     switch (t.type) {
@@ -133,18 +133,18 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
     });
 
     // Expanded subagent transcript — created only while this row is actually
-    // expanded (mirrors SwarmViewModel's own lazy `getSubagentDetail` cache),
+    // expanded (mirrors SwarmViewModel's own lazy `getDispatchDetail` cache),
     // disposed on collapse/unmount so an idle dock isn't holding N live
     // event subscriptions for subagents nobody is looking at.
-    const [subagentDetail, setSubagentDetail] = createSignal<SubagentDetail | null>(null);
+    const [dispatchDetail, setDispatchDetail] = createSignal<DispatchDetail | null>(null);
     createEffect(() => {
         const sub = props.activity()?.subagent;
         if (!props.expanded() || !sub) {
-            setSubagentDetail(null);
+            setDispatchDetail(null);
             return;
         }
-        const detail = createSubagentDetail(sub.agent_id);
-        setSubagentDetail(detail);
+        const detail = createDispatchDetail(sub.dispatch_id, sub.agent_id);
+        setDispatchDetail(detail);
         onCleanup(() => detail.dispose());
     });
 
@@ -209,14 +209,11 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
                             class="agent-activity-log agent-tool-overlay-log"
                             onClick={(e) => e.stopPropagation()}
                         >
-                            <Show when={subagentDetail()?.statusAtom() === "loading"}>
-                                <pre class="agent-tool-log-line">Loading…</pre>
-                            </Show>
-                            <Show when={subagentDetail() && subagentDetail()!.eventsAtom().length === 0 && subagentDetail()!.statusAtom() !== "loading"}>
+                            <Show when={dispatchDetail() && dispatchDetail()!.entriesAtom().length === 0}>
                                 <pre class="agent-tool-log-line">No activity yet</pre>
                             </Show>
-                            <For each={subagentDetail()?.eventsAtom() ?? []}>
-                                {(event) => <pre class="agent-tool-log-line">{subagentEventLine(event)}</pre>}
+                            <For each={dispatchDetail()?.entriesAtom() ?? []}>
+                                {(entry) => <pre class="agent-tool-log-line">{subagentEventLine(entry.event)}</pre>}
                             </For>
                         </div>
                     </Show>

@@ -67,6 +67,17 @@ export interface AgentDispatch {
     members_done: number;
     status: "running" | "completed";
     last_event_at: number;
+    /** For a Workflow-kind dispatch: a concise Haiku-generated name, resolved
+     *  EAGERLY (SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 Phase A)
+     *  the first time its first member is observed live — not on-click like
+     *  `ActiveSubagent.display_name`. `null` until resolved.
+     *
+     *  For a Solo-kind dispatch: mirrors that one member's own
+     *  `display_name` directly (`subagent_watcher.rs`'s `solo_dispatch()`) —
+     *  there's no separate dispatch-level naming call for Solo, so this is
+     *  `null` until that member's `display_name` itself resolves, same
+     *  timing as `ActiveSubagent.display_name`, not always `null`. */
+    dispatch_name: string | null;
 }
 
 // ── Subagent event log (inline-expand detail) ───────────────────────────
@@ -98,8 +109,11 @@ export type SubagentEventType =
 export interface WorkflowDispatch {
     kind: "workflowDispatch";
     dispatchId: string;
-    /** Derived client-side from a member's slug (SPEC keeps this — the
-     *  backend still has no separate dispatch-name concept). */
+    /** Prefers the backend's eagerly-resolved `AgentDispatch.dispatch_name`
+     *  (SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 Phase A) —
+     *  falls back to a member's `slug`, then the raw `dispatchId`, only for
+     *  the brief window before the eager Haiku call resolves (or if it
+     *  never does — see that spec's naming-failure fallback notes). */
     name: string;
     memberCount: number;
     membersDone: number;
@@ -111,54 +125,6 @@ export interface WorkflowDispatch {
     lastEventAt: number;
 }
 
-/**
- * A group of solo-dispatch subagents (no Workflow-tool run — a Solo
- * `AgentDispatch` each) that share one grouping key: `display_name` once a
- * client has resolved it (Haiku-generated, on-demand), or `slug` before that —
- * see `groupKeyFor` below. A user repeatedly spawning similar tasks (e.g.
- * "review this file" across many files) legitimately gets the same/
- * near-identical name for each invocation — the naming model doing its job,
- * not a malfunction — but left flat that reads as "dozens of duplicate rows."
- * A subagent belonging to a Workflow dispatch never enters this grouping
- * pass, regardless of name — it's already represented by its one
- * `WorkflowDispatch` row.
- */
-export interface NameGroup {
-    kind: "nameGroup";
-    /** The shared grouping key (`display_name` if resolved, else `slug`) —
-     *  always non-empty; see `groupKeyFor`. A member that later gets its own
-     *  `display_name` resolved (via `subagent.GenerateName`) migrates out of
-     *  a slug-keyed group into a display_name-keyed one on the next
-     *  `buildDispatchChildren()` pass — no explicit "ungroup" step needed. */
-    name: string;
-    /** Every member's shared parent_block_id — buildDispatchChildren is
-     *  always called with an already block-filtered subagent list (see
-     *  buildTree()), so this is uniform across the group. Required for
-     *  groupCacheKey: unlike WorkflowDispatch's backend-unique dispatchId, a
-     *  Haiku-generated display_name can plausibly repeat across two
-     *  unrelated agent panes (e.g. "Code Reviewer" in both), and
-     *  groupIdentityCache/expandedIds are shared across the WHOLE tree —
-     *  without this, two different blocks' same-named groups would stomp
-     *  each other's cached identity and expand/collapse state. Reagent P1
-     *  on PR #2123. */
-    parentBlockId: string;
-    subagents: ActiveSubagent[];
-    activeCount: number;
-    totalCount: number;
-    status: "active" | "retired";
-    lastEventAt: number;
-}
-
-export type SwarmChild = ActiveSubagent | WorkflowDispatch | NameGroup;
-
-export function isWorkflowDispatch(child: SwarmChild): child is WorkflowDispatch {
-    return "kind" in child && child.kind === "workflowDispatch";
-}
-
-export function isNameGroup(child: SwarmChild): child is NameGroup {
-    return "kind" in child && child.kind === "nameGroup";
-}
-
 export interface AgentTreeNode {
     blockId: string | null;
     agentName: string;
@@ -166,41 +132,30 @@ export interface AgentTreeNode {
     activitySummary: string | null;
     contextTokens: number | null;
     agentStatus: "running" | "idle";
-    subagents: SwarmChild[];
+    /** One row per Agent-tool (solo) dispatch — always a flat list, never
+     *  grouped/collapsed by shared name (SPEC_SWARM_DISPATCH_NAMING_AND_
+     *  ROW_MODEL_2026_07_19 §2, superseding the `NameGroup` slug-fallback
+     *  approach from PR #2226: eager per-dispatch naming means there's no
+     *  more "many rows share one uninformative label" problem to collapse
+     *  away). Sorted by most recent activity. */
+    agentToolRows: ActiveSubagent[];
+    /** One row per Workflow-tool dispatch, always its own row regardless of
+     *  member count (SPEC §7, unchanged from the pre-existing design).
+     *  Sorted by most recent activity. */
+    workflowRows: WorkflowDispatch[];
 }
 
 /**
- * A solo dispatch's grouping key: its resolved `display_name` if a client
- * has already expanded it once (Haiku-generated via `subagent.GenerateName`),
- * else its `slug`. Falling back to `slug` here — instead of leaving
- * not-yet-named subagents ungrouped — matters because `slug` is itself
- * usually shared across an entire CLI session/batch (see
- * `subagentDisplayLabel`'s doc comment below), so a session that has spawned
- * many solo Task-tool calls and never had any of them individually expanded
- * would otherwise render every single one as its own top-level row — the
- * exact "one line per Agent Tool call/workflow" goal (SPEC §5/§7) violated
- * by omission, not by a grouping bug. Empty string is treated as "no key"
- * (both fields can legitimately be empty before either resolves).
+ * Build one block's two fixed row buckets from its `AgentDispatch`es
+ * (already block-filtered) and raw `SubAgent`s — always exactly these two
+ * groupings, never data-driven collapsing by shared name (see
+ * `AgentTreeNode.agentToolRows`'s doc comment for why that approach was
+ * retired). Each bucket is independently sorted by recency.
  */
-function groupKeyFor(s: ActiveSubagent): string {
-    return s.display_name || s.slug;
-}
-
-/**
- * Build one block's tree children from its `AgentDispatch`es (already
- * block-filtered) and raw `SubAgent`s. Every Workflow-kind dispatch becomes
- * exactly one `WorkflowDispatch` row (SPEC §7 — never one row per member).
- * Every Solo-kind dispatch's one member renders as a plain `ActiveSubagent`
- * row, no wrapper (SPEC §5) — among those, two or more sharing a
- * `groupKeyFor` value still collapse into a `NameGroup` (grouping solo
- * DISPATCHES now, not raw subagents, but every subagent has exactly one
- * dispatch so the input set is the same). Result is sorted by most recent
- * activity, mixing loose subagents and both group kinds in one recency order.
- */
-export function buildDispatchChildren(
+export function buildDispatchBuckets(
     dispatches: AgentDispatch[],
     subagents: ActiveSubagent[]
-): SwarmChild[] {
+): { agentToolRows: ActiveSubagent[]; workflowRows: WorkflowDispatch[] } {
     const workflowRows: WorkflowDispatch[] = dispatches
         .filter((d) => d.kind === "workflow")
         .map((d) => {
@@ -208,13 +163,14 @@ export function buildDispatchChildren(
             return {
                 kind: "workflowDispatch" as const,
                 dispatchId: d.dispatch_id,
-                name: namedMember?.slug || d.dispatch_id,
+                name: d.dispatch_name || namedMember?.slug || d.dispatch_id,
                 memberCount: d.member_count,
                 membersDone: d.members_done,
                 status: d.status === "completed" ? ("retired" as const) : ("active" as const),
                 lastEventAt: d.last_event_at,
             };
-        });
+        })
+        .sort((a, b) => b.lastEventAt - a.lastEventAt);
 
     const solo = subagents.filter((s) => s.dispatch_id.startsWith("solo:"));
 
@@ -223,56 +179,25 @@ export function buildDispatchChildren(
     // site), so `dispatches` here can lag or miss entries `subagents` (a
     // separate fetch) already has. Without this, any workflow-kind subagent
     // whose dispatch has no matching row in `workflowRows` would vanish from
-    // the tree entirely instead of degrading to an individual row.
+    // the tree entirely instead of degrading to an Agent Tool row.
     const workflowDispatchIds = new Set(workflowRows.map((w) => w.dispatchId));
     const orphanedWorkflowMembers = subagents.filter(
         (s) => !s.dispatch_id.startsWith("solo:") && !workflowDispatchIds.has(s.dispatch_id)
     );
 
-    const stillLoose: ActiveSubagent[] = [...orphanedWorkflowMembers];
-    const byName = new Map<string, ActiveSubagent[]>();
-    for (const s of solo) {
-        const key = groupKeyFor(s);
-        if (key) {
-            const members = byName.get(key) ?? [];
-            members.push(s);
-            byName.set(key, members);
-        } else {
-            stillLoose.push(s);
-        }
-    }
+    const agentToolRows = [...solo, ...orphanedWorkflowMembers].sort(
+        (a, b) => b.last_event_at - a.last_event_at
+    );
 
-    const nameGroups: NameGroup[] = [];
-    for (const [name, members] of byName) {
-        if (members.length < 2) {
-            stillLoose.push(...members);
-            continue;
-        }
-        const sorted = [...members].sort((a, b) => b.last_event_at - a.last_event_at);
-        const activeCount = sorted.filter((m) => m.status === "active").length;
-        nameGroups.push({
-            kind: "nameGroup" as const,
-            name,
-            // Uniform across the group — buildDispatchChildren is always
-            // called with an already block-filtered list (buildTree()).
-            parentBlockId: sorted[0].parent_block_id,
-            subagents: sorted,
-            activeCount,
-            totalCount: sorted.length,
-            status: activeCount > 0 ? ("active" as const) : ("retired" as const),
-            lastEventAt: sorted[0]?.last_event_at ?? 0,
-        });
-    }
-
-    const lastEventOf = (c: SwarmChild): number =>
-        isWorkflowDispatch(c) || isNameGroup(c) ? c.lastEventAt : c.last_event_at;
-    return [...stillLoose, ...workflowRows, ...nameGroups].sort((a, b) => lastEventOf(b) - lastEventOf(a));
+    return { agentToolRows, workflowRows };
 }
 
 /**
- * Compute the label `SubagentRow`/`SubagentDetailPane` show for a subagent,
- * in the same priority order both call sites use: `display_name` (once
- * Haiku resolves it) > `slug` > a short prefix of `agent_id`.
+ * Compute the label `SubagentRow` shows for a subagent, in priority order:
+ * `display_name` (Haiku-resolved — as of
+ * SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 Phase A, resolved
+ * EAGERLY at dispatch time for the common case, not just on-click) > `slug`
+ * > a short prefix of `agent_id`.
  *
  * `slug` is NOT a per-subagent-unique identifier — it's read straight
  * through from whatever the Claude Code CLI happened to write into the
@@ -283,7 +208,8 @@ export function buildDispatchChildren(
  * already established as an expected, non-buggy signature in
  * docs/specs/REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md Finding 3
  * ("one shared slug = one legitimate concurrent spawn") and relied on by
- * `buildDispatchChildren`'s `WorkflowDispatch.name` derivation above.
+ * `buildDispatchBuckets`'s `WorkflowDispatch.name` derivation above as a
+ * fallback for the brief window before eager naming resolves.
  *
  * Falling back to a bare `slug` as a ROW LABEL, though, silently assumed
  * the opposite — that it WAS subagent-unique — so every member of such a
@@ -296,9 +222,9 @@ export function buildDispatchChildren(
  * grouping never entered the picture since neither had resolved yet).
  * Appending a short, always-unique `agent_id` suffix keeps same-slug
  * siblings visually distinct without claiming a uniqueness `slug` never
- * had — mirrors the existing pattern in `SubagentDetailPane`, which
- * already shows `agent_id.substring(0, 7)` as a separate meta chip next to
- * the name for exactly this reason.
+ * had — the same `agent_id.substring(0, 7)` disambiguator the now-retired
+ * `SubagentDetailPane` used to show as a separate meta chip, for the same
+ * reason.
  */
 export function subagentDisplayLabel(
     sub: Pick<ActiveSubagent, "display_name" | "slug" | "agent_id">
@@ -345,183 +271,73 @@ export function mergeSubagentsPreservingIdentity(
     });
 }
 
-/** `shallowEqualGroupContent` — type-aware, since `WorkflowDispatch` no
- *  longer carries a member list (SPEC §7 — a dispatch can have thousands of
- *  members, too many to hold in the tree atom) while `NameGroup` still does.
- *  A kind mismatch is never equal (defensive; `groupCacheKey`'s namespacing
- *  already prevents the two kinds from ever sharing a cache key). */
-function shallowEqualGroupContent(a: WorkflowDispatch | NameGroup, b: WorkflowDispatch | NameGroup): boolean {
-    if (isWorkflowDispatch(a) !== isWorkflowDispatch(b)) return false;
-    if (isWorkflowDispatch(a) && isWorkflowDispatch(b)) {
-        return (
-            a.dispatchId === b.dispatchId &&
-            a.name === b.name &&
-            a.memberCount === b.memberCount &&
-            a.membersDone === b.membersDone &&
-            a.status === b.status &&
-            a.lastEventAt === b.lastEventAt
-        );
-    }
-    const na = a as NameGroup;
-    const nb = b as NameGroup;
+/** Content-equality check for a `WorkflowDispatch` wrapper — used by
+ *  `stabilizeGroupIdentity` to decide whether to reuse the old object
+ *  reference or accept the freshly-built one. */
+function shallowEqualWorkflowDispatch(a: WorkflowDispatch, b: WorkflowDispatch): boolean {
     return (
-        na.name === nb.name &&
-        na.activeCount === nb.activeCount &&
-        na.totalCount === nb.totalCount &&
-        na.status === nb.status &&
-        na.lastEventAt === nb.lastEventAt &&
-        na.subagents.length === nb.subagents.length &&
-        na.subagents.every((m, i) => m === nb.subagents[i])
+        a.dispatchId === b.dispatchId &&
+        a.name === b.name &&
+        a.memberCount === b.memberCount &&
+        a.membersDone === b.membersDone &&
+        a.status === b.status &&
+        a.lastEventAt === b.lastEventAt
     );
 }
 
-/** Namespaced cache key so a `WorkflowDispatch`'s `dispatchId` and a
- *  `NameGroup`'s `name` can never collide in the shared identity cache.
- *  `NameGroup` additionally scopes by `parentBlockId`: a `dispatchId` is
- *  backend-unique so a bare name would never collide there, but a
- *  Haiku-generated `display_name` (e.g. "Code Reviewer") can plausibly
- *  repeat across two unrelated agent panes, and `groupIdentityCache`/
- *  `expandedIds` are shared across the WHOLE tree (every block) — without
- *  the block scope, two blocks' same-named groups would stomp each other's
- *  cached identity and expand/collapse state. Reagent P1 on PR #2123. */
-export function groupCacheKey(child: WorkflowDispatch | NameGroup): string {
-    return isWorkflowDispatch(child)
-        ? `wf:${child.dispatchId}`
-        : `name:${child.parentBlockId}:${child.name}`;
+/** Cache key for a `WorkflowDispatch` — namespaced (`wf:`) even though only
+ *  one kind uses this cache now, kept from the pre-two-bucket design so
+ *  `expandedIdsAtom`'s ids stay stable across the change (a `NameGroup`'s
+ *  `name:`-namespaced keys no longer exist — see the two-bucket redesign,
+ *  SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19). */
+export function groupCacheKey(child: WorkflowDispatch): string {
+    return `wf:${child.dispatchId}`;
 }
 
 /**
- * Stabilize `WorkflowDispatch`/`NameGroup` wrapper identity across
- * `buildTree()` calls, mirroring `mergeSubagentsPreservingIdentity` one
- * level up. `buildDispatchChildren` is a pure function — it unconditionally
- * builds brand-new group objects per call, even when nothing about a given
- * group actually changed. Left alone, that fresh wrapper still remounts
- * `WorkflowDispatchRow`/`NameGroupRow` — and everything nested inside an
- * expanded one — on every unrelated tree recompute, which for a large
- * workflow dispatch defeats the very remount fix `expandedIdsAtom`/
- * `getDispatchDetail` were meant to provide.
+ * Stabilize `WorkflowDispatch` wrapper identity across `buildTree()` calls,
+ * mirroring `mergeSubagentsPreservingIdentity` one level up.
+ * `buildDispatchBuckets` is a pure function — it unconditionally builds
+ * brand-new wrapper objects per call, even when nothing about a given
+ * dispatch actually changed. Left alone, that fresh wrapper still remounts
+ * `WorkflowDispatchRow` — and everything nested inside an expanded one — on
+ * every unrelated tree recompute, which for a large workflow dispatch
+ * defeats the very remount fix `expandedIdsAtom`/`getDispatchDetail` were
+ * meant to provide.
  *
- * `cache` is a `Map<groupCacheKey, group>` the caller keeps around (one per
- * `SwarmViewModel`), shared and called once per BLOCK within one
+ * `cache` is a `Map<groupCacheKey, dispatch>` the caller keeps around (one
+ * per `SwarmViewModel`), shared and called once per BLOCK within one
  * `buildTree()` pass — this function only reuses-or-replaces into `cache`,
- * it never prunes it (pruning here, scoped to one block's children, would
- * evict entries a DIFFERENT block's call just wrote). Callers doing a full
+ * it never prunes it (pruning here, scoped to one block's rows, would evict
+ * entries a DIFFERENT block's call just wrote). Callers doing a full
  * multi-block tree rebuild should prune the cache once afterward against
- * every group key actually produced across the whole tree — see
+ * every key actually produced across the whole tree — see
  * `pruneGroupIdentityCache`.
  */
 export function stabilizeGroupIdentity(
-    cache: Map<string, WorkflowDispatch | NameGroup>,
-    children: SwarmChild[]
-): SwarmChild[] {
-    return children.map((child) => {
-        if (!isWorkflowDispatch(child) && !isNameGroup(child)) return child;
-        const key = groupCacheKey(child);
+    cache: Map<string, WorkflowDispatch>,
+    rows: WorkflowDispatch[]
+): WorkflowDispatch[] {
+    return rows.map((row) => {
+        const key = groupCacheKey(row);
         const old = cache.get(key);
-        const stable = old && shallowEqualGroupContent(old, child) ? old : child;
+        const stable = old && shallowEqualWorkflowDispatch(old, row) ? old : row;
         cache.set(key, stable);
         return stable;
     });
 }
 
-/** Drop cache entries for groups no longer present anywhere in the tree —
- *  call once after a full `buildTree()` pass, not per-block (see
- *  `stabilizeGroupIdentity`), so it can't grow unbounded across sessions.
- *  `liveGroupKeys` must use the same `wf:<id>` / `name:<name>` namespacing
- *  as `groupCacheKey` — see `SwarmViewModel.buildTree()`. */
-export function pruneGroupIdentityCache(cache: Map<string, WorkflowDispatch | NameGroup>, liveGroupKeys: Set<string>): void {
+/** Drop cache entries for dispatches no longer present anywhere in the tree
+ *  — call once after a full `buildTree()` pass, not per-block (see
+ *  `stabilizeGroupIdentity`), so it can't grow unbounded across sessions. */
+export function pruneGroupIdentityCache(cache: Map<string, WorkflowDispatch>, liveGroupKeys: Set<string>): void {
     for (const key of [...cache.keys()]) {
         if (!liveGroupKeys.has(key)) cache.delete(key);
     }
 }
 
-// ── Subagent detail (inline-expand event log) ───────────────────────────
-
-export interface SubagentDetail {
-    eventsAtom: Accessor<SubagentEvent[]>;
-    infoAtom: Accessor<ActiveSubagent | null>;
-    statusAtom: Accessor<"active" | "completed" | "abandoned" | "loading">;
-    dispose: () => void;
-}
-
-/**
- * Plain-function counterpart of the retired SubagentViewModel — fetches one
- * subagent's event history + info once and keeps them live via
- * subagent:activity/subagent:completed. Deliberately NOT tied to a
- * component's render lifecycle (no `onCleanup`): `SwarmViewModel` caches
- * one of these per expanded subagent (`getSubagentDetail`) so it survives
- * `<For>` remounts `tree()` can still cause for unrelated reasons, instead
- * of refetching/resubscribing on every incidental re-render while a row is
- * open. See `mergeSubagentsPreservingIdentity` and `stabilizeGroupIdentity`
- * above for how row/wrapper object identity itself is kept stable in the
- * first place.
- */
-export function createSubagentDetail(subagentId: string): SubagentDetail {
-    const [events, setEvents] = createSignal<SubagentEvent[]>([]);
-    const [info, setInfo] = createSignal<ActiveSubagent | null>(null);
-    const [status, setStatus] = createSignal<"active" | "completed" | "abandoned" | "loading">("loading");
-
-    const unsubs: (() => void)[] = [];
-
-    const unsubActivity = waveEventSubscribe({
-        eventType: "subagent:activity",
-        handler: (event: WaveEvent) => {
-            const data = event?.data as any;
-            if (data?.agentId !== subagentId) return;
-            const newEvents = (data?.events as SubagentEvent[]) ?? [];
-            if (newEvents.length > 0) setEvents((prev) => [...prev, ...newEvents]);
-            if (data?.totalEvents != null) {
-                setInfo((prev) => (prev ? { ...prev, event_count: data.totalEvents } : prev));
-            }
-        },
-    });
-    if (unsubActivity) unsubs.push(unsubActivity);
-
-    const unsubCompleted = waveEventSubscribe({
-        eventType: "subagent:completed",
-        handler: (event: WaveEvent) => {
-            const data = event?.data as any;
-            if (data?.agentId !== subagentId) return;
-            setStatus("completed");
-            setInfo((prev) => (prev ? { ...prev, status: "completed" } : prev));
-        },
-    });
-    if (unsubCompleted) unsubs.push(unsubCompleted);
-
-    void (async () => {
-        try {
-            const result = await callBackendService("subagent", "GetHistory", [subagentId, 500]);
-            setEvents((result as SubagentEvent[]) ?? []);
-            setStatus("active");
-        } catch {
-            setStatus("active");
-        }
-        // Targeted single-agent lookup (not ListActive's full scan) — this
-        // subagent may have spawned before this pane opened, so its
-        // subagent:spawned event already fired and won't refire.
-        try {
-            const result = await callBackendService("subagent", "GetInfo", [subagentId]);
-            if (result) {
-                const match = result as ActiveSubagent;
-                setInfo(match);
-                setStatus(match.status);
-            }
-        } catch {
-            // ignore
-        }
-    })();
-
-    return {
-        eventsAtom: events,
-        infoAtom: info,
-        statusAtom: status,
-        dispose: () => {
-            for (const unsub of unsubs) unsub();
-        },
-    };
-}
-
-// ── Dispatch concatenated activity feed (SPEC §7) ───────────────────────
+// ── Dispatch concatenated activity feed (SPEC §7, generalized to solo
+//    dispatches in SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 §4) ──
 
 export interface DispatchActivityEntry {
     agentId: string;
@@ -539,22 +355,85 @@ export interface DispatchDetail {
  *  this redesign exists to avoid. Oldest entries drop first. */
 const MAX_DISPATCH_FEED_ENTRIES = 500;
 
+/** Identifies one `DispatchActivityEntry` for de-dup purposes — an
+ *  (agentId, timestamp, event payload) triple is stable across both the
+ *  live `dispatch:activity` broadcast and a `GetHistory` backfill, since
+ *  both ultimately read the same underlying event, not a re-generated one. */
+function dispatchActivityEntryKey(e: DispatchActivityEntry): string {
+    return `${e.agentId}:${e.event.timestamp}:${JSON.stringify(e.event.event_type)}`;
+}
+
 /**
- * Expanding a `WorkflowDispatchRow` shows this instead of nested member rows
- * (SPEC §7): every member's new events, merged into one chronological,
- * member-tagged stream, fed by the backend's coalesced `dispatch:activity`
- * broadcast (`subagent_watcher.rs`'s `flush_pending_dispatch_activity`).
+ * Merge freshly-arrived entries into `prev`, de-duplicating by
+ * `dispatchActivityEntryKey`, re-sorting by timestamp, and capping to
+ * `MAX_DISPATCH_FEED_ENTRIES`. Exported (pure, no signal access) so the
+ * de-dup behavior itself is unit-testable — see swarm-model.test.ts.
  *
- * Deliberately LIVE-ONLY — no historical backfill fetch when a dispatch is
- * expanded. SPEC §9.4 leaves the backfill/pagination question explicitly
- * open: a large dispatch can have thousands of prior events across hundreds
- * of members, and eagerly fetching + merging that on every expand would
- * reintroduce the exact request/render volume problem this redesign exists
- * to fix. Until that's designed, the feed only shows what happens from the
- * moment of expand onward.
+ * De-dup matters because a solo dispatch's `GetHistory` backfill and the
+ * live `dispatch:activity` broadcast race independently: an event the
+ * backend already flushed into `pending_activity` before `GetHistory`
+ * resolves is present in both, so blindly concatenating double-counts it
+ * (reagent P1 on #2232).
  */
-export function createDispatchDetail(dispatchId: string): DispatchDetail {
+export function mergeDispatchActivityEntries(
+    prev: DispatchActivityEntry[],
+    incoming: DispatchActivityEntry[]
+): DispatchActivityEntry[] {
+    if (incoming.length === 0) return prev;
+    const seen = new Set(prev.map(dispatchActivityEntryKey));
+    const fresh = incoming.filter((e) => {
+        const key = dispatchActivityEntryKey(e);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+    if (fresh.length === 0) return prev;
+    const merged = [...prev, ...fresh].sort((a, b) => a.event.timestamp - b.event.timestamp);
+    return merged.length > MAX_DISPATCH_FEED_ENTRIES
+        ? merged.slice(merged.length - MAX_DISPATCH_FEED_ENTRIES)
+        : merged;
+}
+
+/**
+ * Expanding a row (`WorkflowDispatchRow`, or an Agent Tool row —
+ * SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 §4) shows this: every
+ * member's new events, merged into one chronological, member-tagged stream,
+ * fed by the backend's coalesced `dispatch:activity` broadcast
+ * (`subagent_watcher.rs`'s `flush_pending_dispatch_activity` — as of Phase A
+ * this fires for solo `dispatch_id`s too, dual-emitted alongside the
+ * existing immediate `subagent:activity`).
+ *
+ * Live activity is LIVE-ONLY for a Workflow dispatch — SPEC §9.4 leaves the
+ * backfill/pagination question for a large multi-hundred-member workflow
+ * explicitly open (eagerly fetching + merging thousands of prior events on
+ * every expand would reintroduce the exact request/render volume problem
+ * this redesign exists to fix), and there is no bulk-backfill RPC for a
+ * whole workflow's history today. A single subagent's history, though, is
+ * bounded (one member) and an RPC for it already exists — `subagent.
+ * GetHistory` — so backfilling it here closes the one real regression this
+ * unification would otherwise introduce (the retired `SubagentDetailPane`/
+ * `createSubagentDetail` DID backfill via that same RPC).
+ *
+ * `backfillAgentId` (optional): scopes BOTH the `GetHistory` backfill AND
+ * the live `dispatch:activity` subscription down to this one agent's own
+ * events. Callers rendering a single-subagent row (any Agent Tool row,
+ * including an orphaned workflow member — see `getDispatchDetail`'s doc
+ * comment) should pass the subagent's own `agent_id` explicitly rather than
+ * relying on `dispatchId` happening to start with `"solo:"` — that prefix
+ * alone doesn't cover the orphaned-member case, AND an orphaned member's
+ * `dispatchId` can be shared with sibling rows, so without this filter a
+ * single-subagent row would render every sibling's live events too. Falls
+ * back to parsing the `"solo:"` prefix when omitted, for callers with no
+ * `ActiveSubagent` in scope. Omitted entirely for a genuine multi-member
+ * `WorkflowDispatchRow`, which legitimately wants every member's events.
+ */
+export function createDispatchDetail(dispatchId: string, backfillAgentId?: string): DispatchDetail {
     const [entries, setEntries] = createSignal<DispatchActivityEntry[]>([]);
+
+    const mergeIncoming = (incoming: DispatchActivityEntry[]): void => {
+        if (incoming.length === 0) return;
+        setEntries((prev) => mergeDispatchActivityEntries(prev, incoming));
+    };
 
     const unsub = waveEventSubscribe({
         eventType: "dispatch:activity",
@@ -562,18 +441,24 @@ export function createDispatchDetail(dispatchId: string): DispatchDetail {
             const data = event?.data as any;
             if (data?.dispatchId !== dispatchId) return;
             const members = (data?.members as { agentId: string; events: SubagentEvent[] }[]) ?? [];
-            const incoming: DispatchActivityEntry[] = members.flatMap((m) =>
-                (m.events ?? []).map((event) => ({ agentId: m.agentId, event }))
-            );
-            if (incoming.length === 0) return;
-            setEntries((prev) => {
-                const merged = [...prev, ...incoming].sort((a, b) => a.event.timestamp - b.event.timestamp);
-                return merged.length > MAX_DISPATCH_FEED_ENTRIES
-                    ? merged.slice(merged.length - MAX_DISPATCH_FEED_ENTRIES)
-                    : merged;
-            });
+            const relevant = backfillAgentId ? members.filter((m) => m.agentId === backfillAgentId) : members;
+            mergeIncoming(relevant.flatMap((m) => (m.events ?? []).map((evt) => ({ agentId: m.agentId, event: evt }))));
         },
     });
+
+    const soloAgentId = backfillAgentId ?? (dispatchId.startsWith("solo:") ? dispatchId.slice("solo:".length) : undefined);
+    if (soloAgentId) {
+        const agentId = soloAgentId;
+        void (async () => {
+            try {
+                const result = await callBackendService("subagent", "GetHistory", [agentId, MAX_DISPATCH_FEED_ENTRIES]);
+                const events = (result as SubagentEvent[]) ?? [];
+                mergeIncoming(events.map((event) => ({ agentId, event })));
+            } catch {
+                // ignore — feed still works live-only
+            }
+        })();
+    }
 
     return {
         entriesAtom: entries,
@@ -648,16 +533,18 @@ export class SwarmViewModel implements ViewModel {
     loadingAtom: Accessor<boolean> = this._loading[0];
     private setLoading: Setter<boolean> = this._loading[1];
 
-    // Rows the user has expanded — keyed by dispatchId (WorkflowDispatchRow)
-    // or agent_id (SubagentRow). Lives here, not as row-local component state:
-    // `tree()` recomputes on every trackedBlockIds/subagents/agentStatuses
-    // change (agentStatuses updates on every controllerstatus tick — very
-    // frequent during an active turn) and rebuilds fresh WorkflowDispatch/
-    // AgentTreeNode wrapper objects every time regardless of whether that
-    // row's own data changed, so `<For>`'s reference-diffing remounts row
-    // components far more often than "the user actually changed something."
-    // Local expand state would silently collapse on the very next unrelated
-    // status tick; keying by a stable string id here survives that churn.
+    // Rows the user has expanded — keyed by dispatchId (WorkflowDispatchRow
+    // and, since the two-bucket redesign, SubagentRow too — both use
+    // toggleDispatchExpanded now). Lives here, not as row-local component
+    // state: `tree()` recomputes on every trackedBlockIds/subagents/
+    // agentStatuses change (agentStatuses updates on every controllerstatus
+    // tick — very frequent during an active turn) and rebuilds fresh
+    // WorkflowDispatch/AgentTreeNode wrapper objects every time regardless
+    // of whether that row's own data changed, so `<For>`'s reference-diffing
+    // remounts row components far more often than "the user actually
+    // changed something." Local expand state would silently collapse on the
+    // very next unrelated status tick; keying by a stable string id here
+    // survives that churn.
     private _expandedIds = createSignal<Set<string>>(new Set());
     expandedIdsAtom: Accessor<Set<string>> = this._expandedIds[0];
     private setExpandedIds: Setter<Set<string>> = this._expandedIds[1];
@@ -673,28 +560,24 @@ export class SwarmViewModel implements ViewModel {
     collapsedAgentIdsAtom: Accessor<Set<string>> = this._collapsedAgentIds[0];
     private setCollapsedAgentIds: Setter<Set<string>> = this._collapsedAgentIds[1];
 
-    // One SubagentDetail per currently-expanded subagent, created lazily on
-    // first expand. Same rationale as expandedIds above: if this fetch+
-    // subscribe lifecycle lived inside the row component instead, every
-    // incidental remount (see above) would refetch GetHistory/GetInfo and
-    // resubscribe from scratch — potentially several times a second while a
-    // row is open during an active turn.
-    private detailCache = new Map<string, SubagentDetail>();
-
-    // One DispatchDetail (concatenated activity feed, SPEC §7) per
-    // currently-expanded WorkflowDispatch row — same lazy-create/dispose-on-
-    // collapse rationale as detailCache above.
+    // One DispatchDetail (concatenated activity feed) per currently-expanded
+    // row — Agent Tool (solo) rows and Workflow rows alike, unified in
+    // SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 §4 (retired the
+    // separate per-subagent SubagentDetail/detailCache this used to be split
+    // from). Created lazily on first expand: if this fetch+subscribe
+    // lifecycle lived inside the row component instead, every incidental
+    // remount (see expandedIds above) would refetch/resubscribe from
+    // scratch — potentially several times a second while a row is open
+    // during an active turn.
     private dispatchDetailCache = new Map<string, DispatchDetail>();
 
     // Persisted across buildTree() calls so stabilizeGroupIdentity can reuse
-    // the same WorkflowDispatch/NameGroup wrapper object when a group's own
-    // content is unchanged — without this, expandedIds/detailCache above
-    // still don't help a subagent NESTED inside a group, since <For> remounts
-    // the whole WorkflowDispatchRow/NameGroupRow subtree whenever the
-    // group's own wrapper reference changes, which is every buildTree() call
-    // otherwise. Keyed by groupCacheKey's namespaced "wf:<id>" / "name:<name>"
-    // strings so the two group kinds' key spaces never collide.
-    private groupIdentityCache = new Map<string, WorkflowDispatch | NameGroup>();
+    // the same WorkflowDispatch wrapper object when a dispatch's own content
+    // is unchanged — without this, expandedIds/dispatchDetailCache above
+    // still don't help a row NESTED inside an expanded one, since <For>
+    // remounts the whole WorkflowDispatchRow subtree whenever the wrapper's
+    // own reference changes, which is every buildTree() call otherwise.
+    private groupIdentityCache = new Map<string, WorkflowDispatch>();
 
     private unsubs: (() => void)[] = [];
     // Per-block controllerstatus unsubs — cleaned up when block list refreshes
@@ -876,44 +759,54 @@ export class SwarmViewModel implements ViewModel {
         });
     }
 
-    /** SubagentRow's toggle — also tears down the cached SubagentDetail
-     *  (and its WS subscriptions) on collapse, so a subagent a user opened
-     *  once and moved on from doesn't keep a live subscription forever. */
-    toggleSubagentExpanded(agentId: string): void {
-        const wasExpanded = this.isExpanded(agentId);
-        this.toggleExpanded(agentId);
+    /** Every row's toggle. `rowKey` must be a per-ROW-unique identity, NOT
+     *  necessarily the row's `dispatch_id` — a `WorkflowDispatchRow`'s own
+     *  `dispatch_id` is always 1:1 with its row, but an Agent Tool row's
+     *  `dispatch_id` is NOT: an orphaned workflow member (falling back into
+     *  the Agent Tool bucket while `ListDispatches` is stale/lagging) shares
+     *  its real `dispatch_id` with every sibling member still waiting on
+     *  the same lag. Callers rendering a single-subagent row must pass a
+     *  key derived from something per-row-unique instead (e.g.
+     *  `agent:${sub.agent_id}`) — see `getDispatchDetail`'s doc comment.
+     *  Tears down the cached DispatchDetail (and its WS subscriptions) on
+     *  collapse, so a row a user opened once and moved on from doesn't keep
+     *  a live subscription forever. Unified in
+     *  SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 §4 (was split
+     *  into toggleSubagentExpanded/toggleDispatchExpanded). */
+    toggleDispatchExpanded(rowKey: string): void {
+        const wasExpanded = this.isExpanded(rowKey);
+        this.toggleExpanded(rowKey);
         if (wasExpanded) {
-            this.detailCache.get(agentId)?.dispose();
-            this.detailCache.delete(agentId);
+            this.dispatchDetailCache.get(rowKey)?.dispose();
+            this.dispatchDetailCache.delete(rowKey);
         }
     }
 
-    getSubagentDetail(agentId: string): SubagentDetail {
-        let detail = this.detailCache.get(agentId);
+    /**
+     * `rowKey`: cache identity for THIS row — must be unique per row (see
+     * `toggleDispatchExpanded`'s doc comment for why this can't just be
+     * `dispatchId` for an Agent Tool row). Two sibling rows sharing one
+     * `dispatchId` but caching under distinct `rowKey`s previously each
+     * subscribed to the SAME live `dispatch:activity` broadcast unfiltered,
+     * so each would render every OTHER sibling's events too — fixed by
+     * `dispatchId`: the real dispatch_id to subscribe to for live
+     * `dispatch:activity` events (may legitimately be shared across sibling
+     * rows — `createDispatchDetail` itself filters live events down to
+     * `backfillAgentId` when one is given, so this is safe even then).
+     *
+     * `backfillAgentId`: pass the row's own single `ActiveSubagent.agent_id`
+     * whenever the caller is rendering exactly one subagent's row (an Agent
+     * Tool row, including an orphaned workflow member) — NOT just when
+     * `dispatchId` happens to start with `"solo:"`, which silently dropped
+     * an orphaned member's `GetHistory` backfill (reagent P1 on #2232).
+     * Omit it for a genuine `WorkflowDispatchRow`, which represents many
+     * members and has no one agent to backfill or filter to.
+     */
+    getDispatchDetail(rowKey: string, dispatchId: string, backfillAgentId?: string): DispatchDetail {
+        let detail = this.dispatchDetailCache.get(rowKey);
         if (!detail) {
-            detail = createSubagentDetail(agentId);
-            this.detailCache.set(agentId, detail);
-        }
-        return detail;
-    }
-
-    /** WorkflowDispatchRow's toggle — mirrors toggleSubagentExpanded, tearing
-     *  down the cached DispatchDetail (and its dispatch:activity
-     *  subscription) on collapse. */
-    toggleDispatchExpanded(dispatchId: string): void {
-        const wasExpanded = this.isExpanded(dispatchId);
-        this.toggleExpanded(dispatchId);
-        if (wasExpanded) {
-            this.dispatchDetailCache.get(dispatchId)?.dispose();
-            this.dispatchDetailCache.delete(dispatchId);
-        }
-    }
-
-    getDispatchDetail(dispatchId: string): DispatchDetail {
-        let detail = this.dispatchDetailCache.get(dispatchId);
-        if (!detail) {
-            detail = createDispatchDetail(dispatchId);
-            this.dispatchDetailCache.set(dispatchId, detail);
+            detail = createDispatchDetail(dispatchId, backfillAgentId);
+            this.dispatchDetailCache.set(rowKey, detail);
         }
         return detail;
     }
@@ -975,13 +868,11 @@ export class SwarmViewModel implements ViewModel {
         const parentIds = subagents.map((s) => s.parent_block_id).filter(Boolean);
         const allBlockIds = [...new Set([...blockIds, ...parentIds])];
 
-        // Collected from the groups actually produced below, not derived
-        // from the raw subagent list — a NameGroup only exists once 2+
-        // subagents share a name (see buildDispatchChildren), so a
-        // subagent-list-level heuristic ("any subagent with this name is
-        // live") would wrongly keep singleton entries' keys alive forever.
-        // Harmless either way (stabilizeGroupIdentity only ever cache.set()s
-        // keys for groups that actually formed), but this is the precise set.
+        // Collected from the WorkflowDispatch rows actually produced below,
+        // not derived from the raw dispatch list, so stabilizeGroupIdentity's
+        // cache only ever retains keys for dispatches actually present this
+        // pass — same "harmless either way, but this is the precise set"
+        // rationale the pre-two-bucket design used for NameGroup keys.
         const liveGroupKeys = new Set<string>();
         const nodes = allBlockIds.map((blockId) => {
             const blockAtom = WOS.getWaveObjectAtom<Block>(`block:${blockId}`);
@@ -995,15 +886,13 @@ export class SwarmViewModel implements ViewModel {
             const rawCtx = block?.meta?.["term:ctx-tokens"];
             const contextTokens = typeof rawCtx === "number" ? rawCtx : null;
             const agentStatus = statuses.get(blockId) ?? "idle";
-            const rawChildren = buildDispatchChildren(
+            const { agentToolRows, workflowRows: rawWorkflowRows } = buildDispatchBuckets(
                 dispatches.filter((d) => d.parent_block_id === blockId),
                 subagents.filter((s) => s.parent_block_id === blockId)
             );
-            for (const c of rawChildren) {
-                if (isWorkflowDispatch(c) || isNameGroup(c)) liveGroupKeys.add(groupCacheKey(c));
-            }
-            const children = stabilizeGroupIdentity(this.groupIdentityCache, rawChildren);
-            return { blockId, agentName, agentProvider, activitySummary, contextTokens, agentStatus, subagents: children };
+            for (const w of rawWorkflowRows) liveGroupKeys.add(groupCacheKey(w));
+            const workflowRows = stabilizeGroupIdentity(this.groupIdentityCache, rawWorkflowRows);
+            return { blockId, agentName, agentProvider, activitySummary, contextTokens, agentStatus, agentToolRows, workflowRows };
         });
 
         // Prune once per full pass (not per-block — see stabilizeGroupIdentity).
@@ -1020,8 +909,6 @@ export class SwarmViewModel implements ViewModel {
             clearTimeout(this.loadSubagentsDebounceTimer);
             this.loadSubagentsDebounceTimer = undefined;
         }
-        for (const detail of this.detailCache.values()) detail.dispose();
-        this.detailCache.clear();
         for (const detail of this.dispatchDetailCache.values()) detail.dispose();
         this.dispatchDetailCache.clear();
         this.groupIdentityCache.clear();
