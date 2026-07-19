@@ -920,7 +920,7 @@ async fn main() {
     let messagebus = Arc::new(backend::messagebus::MessageBus::new());
 
     // Subagent watcher — monitors Claude Code session dirs for spawned subagents
-    let subagent_watcher = backend::subagent_watcher::SubagentWatcher::spawn(event_bus.clone());
+    let subagent_watcher = backend::subagent_watcher::SubagentWatcher::spawn(event_bus.clone(), wstore.clone());
 
     // History service — discovers and indexes past CLI agent conversations
     let history_service = Arc::new(backend::history::HistoryService::new());

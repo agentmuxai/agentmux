@@ -280,6 +280,97 @@ pub(crate) async fn generate_subagent_name(
     Some((name, tokens))
 }
 
+/// Ambient-call purpose tag for eager Workflow-dispatch naming — distinct
+/// from `AMBIENT_PURPOSE_SUBAGENT_NAME` so cost-dashboard tagging can tell
+/// the two apart even though they share the same gateway/semaphore. See
+/// docs/specs/SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19.md.
+const AMBIENT_PURPOSE_DISPATCH_NAME: &str = "dispatch_name";
+
+/// Generate the one Haiku display name for a Workflow-kind dispatch,
+/// eagerly, the first time its first member is observed live (never called
+/// for a Solo dispatch — a Solo dispatch's name IS its one member's
+/// `display_name`, already covered by `generate_subagent_name`; never called
+/// during cold-backfill replay — see `subagent_watcher.rs`'s
+/// `trigger_eager_naming`/`process_jsonl_change`'s `live` gate).
+///
+/// A workflow has no single task prompt the way a solo call does (members
+/// can have different prompts) — this reads `first_member_agent_id`'s own
+/// task prompt via the same `read_task_prompt()` `generate_subagent_name`
+/// uses, on the resolved design basis that the first member's prompt is a
+/// reasonable stand-in for the whole batch (SPEC §3 — not a perfect
+/// representation of every member's task, an accepted v1 trade-off).
+///
+/// Otherwise mirrors `generate_subagent_name`'s admission/semaphore/prompt/
+/// block-resolve/haiku-call shape exactly — no cache-hit short-circuit here
+/// (unlike that function): this is only ever called once per dispatch,
+/// already guarded by `naming_triggered` at the call site, so a cache check
+/// would be dead code, not a real fast path.
+pub(crate) async fn generate_dispatch_name(
+    wstore: &Store,
+    subagent_watcher: &Arc<crate::backend::subagent_watcher::SubagentWatcher>,
+    dispatch_id: &str,
+    first_member_agent_id: &str,
+) -> Option<(String, Option<crate::agents::TokenCounts>)> {
+    let info = subagent_watcher.get_info(first_member_agent_id)?;
+
+    let key = crate::ambient::AmbientCallKey::new(dispatch_id.to_string(), AMBIENT_PURPOSE_DISPATCH_NAME);
+    let guard = match crate::ambient::gateway().admit(key, 1) {
+        crate::ambient::Admission::Proceed(guard) => guard,
+        crate::ambient::Admission::StaleOnArrival => return None,
+    };
+    let cancel = guard.cancellation();
+
+    // Same cross-block concurrency cap as every other ambient caller — see
+    // AMBIENT_PURPOSE_SUBAGENT_NAME's comment above.
+    let permit = tokio::select! {
+        biased;
+        _ = cancel.cancelled() => None,
+        permit = pull_call_semaphore().acquire() => permit.ok(),
+    };
+    let Some(_permit) = permit else {
+        drop(guard);
+        return None;
+    };
+
+    let Some(task_prompt) = crate::backend::subagent_watcher::read_task_prompt(&info.jsonl_path) else {
+        drop(guard);
+        return None;
+    };
+
+    let block: Block = match wstore.get(&info.parent_block_id) {
+        Ok(Some(b)) => b,
+        _ => {
+            drop(guard);
+            return None;
+        }
+    };
+    let cli_path = obj::meta_get_string(&block.meta, "cmd", "");
+    if cli_path.is_empty() {
+        drop(guard);
+        return None;
+    }
+
+    let prompt = format!(
+        "Give a concise ~5-word name for this workflow batch, based on its \
+         first task. Plain text only — no markdown, no code fences, no \
+         backticks, no punctuation, no quotes, no preamble. Respond with \
+         just the name.\n\n\
+         Task:\n\n{task_prompt}"
+    );
+
+    let result = invoke_ambient_haiku_call(&cli_path, &prompt, &block.meta, cancel).await.ok();
+    drop(guard);
+
+    let (name, tokens) = result?;
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return None;
+    }
+
+    subagent_watcher.set_dispatch_name(dispatch_id, &name);
+    Some((name, tokens))
+}
+
 fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
     let filestore = state.filestore.clone();
