@@ -3,7 +3,7 @@
 **Date:** 2026-06-30
 **Status:** Draft — implementation spec
 **Author:** AgentX
-**Parent:** `PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30.md` (the composable Trust Center model — Bundle · Account · Memory · MCP Server · Skill · Brief)
+**Parent:** `PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30.md` (the composable Armory model — Bundle · Account · Memory · MCP Server · Skill · Brief)
 **Related code:** `agentmux-srv/src/backend/storage/{skills.rs,content.rs,agents.rs}`, `backend/agent_config.rs`, `server/app_api.rs` (`write_agent_config_files`, `preset.*`/`memory.*` handlers), `backend/rpc_types.rs`.
 
 ---
@@ -13,12 +13,12 @@
 Break **MCP Servers** and **Skills** out of the per-agent inline storage into
 **standalone, shareable, referenceable primitives** — the lowest-risk, highest-value
 slice of the composable model. After v1: define an MCP server or a skill **once**,
-reference it from many agents; manage both in the Trust Center.
+reference it from many agents; manage both in the Armory.
 
 **In scope (v1):** standalone storage for skills + MCP servers, ownership/global
 flags, direct **agent→primitive references**, the `skill.*`/`mcp.*` App API, the
 config-generation rewrite to read references, migration of existing inline data,
-and two Trust Center tabs.
+and two Armory tabs.
 
 **Out of scope (later):** the **Bundle** collection (grouping references — v2);
 Accounts/Memory/Brief/Policy changes; the `soul`/`agentmd` → Skills content move
@@ -161,7 +161,7 @@ One-time, idempotent, behind the App API surface:
    the v1 skill primitive; schedule it once v1 storage/API land, so the heavy
    always-on CLAUDE.md can be retired.
 
-## 8. Trust Center UI
+## 8. Armory UI
 
 Two new tabs (each: list / create / edit / delete / toggle global / bind-to-agent):
 - **MCP Servers** — name, transport, config; "used by N agents".

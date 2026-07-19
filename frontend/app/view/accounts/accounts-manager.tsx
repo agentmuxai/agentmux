@@ -36,7 +36,7 @@ export function AccountsManager(): JSX.Element {
     // module-level cache + `*IdentityAccountCommand` RPCs, so a synthetic id
     // and a stub nodeModel are safe. Created once per mount (SolidJS component
     // bodies run a single time).
-    const model = new IdentityViewModel("trust-center:accounts", {} as BlockNodeModel);
+    const model = new IdentityViewModel("armory:accounts", {} as BlockNodeModel);
     onCleanup(() => model.dispose());
 
     // Shared AgentMux Cloud session controller — single source of truth for the

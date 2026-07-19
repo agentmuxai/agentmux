@@ -1,3 +1,5 @@
+> **Archived 2026-07-19:** Bugs described here were fixed in the session that wrote this doc (see §3). "Trust Center" is this UI's pre-rename name (renamed to Armory, PR #1917, 2026-07-02) — left as written for historical accuracy. Kept for reference only.
+
 # Analysis: Trust Center Accounts UI — Gaps & Fixes
 
 **Date:** 2026-06-18

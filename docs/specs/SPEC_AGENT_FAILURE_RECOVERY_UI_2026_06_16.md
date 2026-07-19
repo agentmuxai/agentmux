@@ -3,8 +3,8 @@
 - **Status:** Draft / proposed
 - **Date:** 2026-06-16
 - **Author:** AgentA
-- **Area:** `frontend/app/view/agent` (pane UI + state), `frontend/app/view/accounts` (Trust Center), `agentmux-srv` agent failure event
-- **Related:** `SPEC_AGENT_FAILURE_DIAGNOSTICS_2026_06_11.md` (the classifier — Phase 1/2, shipped #1353 + #1464), Trust Center / Accounts (#1478)
+- **Area:** `frontend/app/view/agent` (pane UI + state), `frontend/app/view/accounts` (Armory), `agentmux-srv` agent failure event
+- **Related:** `SPEC_AGENT_FAILURE_DIAGNOSTICS_2026_06_11.md` (the classifier — Phase 1/2, shipped #1353 + #1464), Armory / Accounts (#1478)
 
 ---
 
@@ -13,7 +13,7 @@
 When an agent dies, the pane now **shows the real cause** (PR #1464: the `agentfailure`
 wave event carries a classified `AgentFailure`, rendered today as red log lines). This spec
 turns that diagnosis into **one-click recovery**: a per-error-class **recovery banner** in the
-agent pane whose actions match the failure — *Login Again* / *Trust Center* for auth,
+agent pane whose actions match the failure — *Login Again* / *Armory* for auth,
 *Retry* (with a 5-second **auto-retry**) for transient throttling, and class-appropriate
 actions for the rest.
 
@@ -29,7 +29,7 @@ actions for the rest.
 | Event → pane | `frontend/app/view/agent/hooks/useControllerStatusEvents.ts:42` | currently only `opts.log(...)` red text lines |
 | Re-run a turn | `sendMessage()` `hooks/useAgentCommands.ts:231` → `RpcApi.AgentInputCommand` (`rpc-api.ts:1202`) → backend `agentinput` → `spawn_turn` (`subprocess.rs:345`) | resumes via `--resume <session_id>`; busy turns queue + drain on exit |
 | Last user message | `documentAtom` last `UserMessageNode` (`view/agent/types.ts:279`) | the text to re-submit for "Retry" |
-| Trust Center → Accounts | `openBundleManager()` (`modals/bundle-manager-modal.tsx:255`) | singleton modal; "Accounts" is the default section |
+| Armory → Accounts | `openBundleManager()` (`modals/bundle-manager-modal.tsx:255`) | singleton modal; "Accounts" is the default section |
 | Agent → account lookup | `RpcApi.ListAgentIdentitiesCommand({agent_id})` → `GetIdentityAccountCommand({id})` (`rpc-api.ts:792`, `:686`) | resolves the agent's provider account |
 | Re-auth (OAuth) | `RpcApi.AccountOAuthStartCommand` + `AccountOAuthPollCommand` (`rpc-api.ts:747`, `:756`) | service-OAuth connect flow (#1478) |
 | Re-auth (API key) | `RpcApi.AccountKeyVerifyCommand` (`rpc-api.ts:717`) | for `kind === "api_key"` accounts |
@@ -46,11 +46,11 @@ secondary action. `retryable` (from the classifier) drives whether **auto-retry*
 
 | `code` | Icon | Primary action | Secondary | Auto-retry | Rationale |
 |---|---|---|---|---|---|
-| `auth` | 🔐 | **Login Again** (re-auth the agent's account inline) | **Trust Center → Accounts** | no | 401 — creds rejected/expired; re-auth then offer Retry |
+| `auth` | 🔐 | **Login Again** (re-auth the agent's account inline) | **Armory → Accounts** | no | 401 — creds rejected/expired; re-auth then offer Retry |
 | `rate_limited` | ⏱ | **Retry now** | Dismiss | **yes, 5 s** | transient 429; retry shortly |
 | `overloaded` | 🌀 | **Retry now** | Dismiss | **yes, 5 s** | transient 529; server overloaded |
 | `network` | 🌐 | **Retry now** | Dismiss | **yes, 5 s** | transient connectivity |
-| `usage_limit` | 🚫 | **Trust Center → Accounts** (switch account / upgrade) | Dismiss | no | plan/quota — not transient; a different account may have budget |
+| `usage_limit` | 🚫 | **Armory → Accounts** (switch account / upgrade) | Dismiss | no | plan/quota — not transient; a different account may have budget |
 | `context_exceeded` | 📏 | **New session & retry** (fresh `session_id`, re-send) | Dismiss | no | window full; resuming won't help |
 | `max_turns` | 🔁 | **Continue** (re-run, resumes via `--resume`) | Raise `--max-turns` → settings | no | hit the cap; continuing extends |
 | `killed` | ⛔ | **Retry now** | Dismiss | no (caution) | OOM/signal; auto-looping could thrash memory |
@@ -79,7 +79,7 @@ and the fork bar all render through. The failure surface maps **exactly** onto i
 | `title` | `failure.title` |
 | `meta` | `code` · `[exit N]` / `[signal N]` · `(retryable)` |
 | expanded body | `failure.detail` + collapsible `stderrTail` |
-| `actions[]` | the per-class buttons from §3 (glyph + handler): Retry / Login Again / Trust Center / … |
+| `actions[]` | the per-class buttons from §3 (glyph + handler): Retry / Login Again / Armory / … |
 
 So there is **no `AgentFailureBanner.tsx` / `_failure-banner.scss`** — the failure surface is a
 **`PaneRow` descriptor**, produced by a pure `failure → PaneRow` function (à la
@@ -169,7 +169,7 @@ if (acct.kind === "oauth") {
 account without a second lookup. New optional fields `accountId?`, `provider?` on
 `AgentFailure` (additive, snake→camel as today).
 
-### 5.3 Trust Center → Accounts
+### 5.3 Armory → Accounts
 ```
 import { openBundleManager } from "@/app/modals/bundle-manager-modal";
 onClick={() => openBundleManager()}   // opens the singleton modal on the Accounts section
@@ -200,7 +200,7 @@ button becomes a **countdown that fires itself**:
 ## 7. Reconciliation with `AgentRetryBar`
 
 `AgentRetryBar` (`agent-view.tsx:993`) is a login-retry bar predating the classifier. This
-spec **subsumes** it: the recovery banner handles `auth` (Login Again / Trust Center) and
+spec **subsumes** it: the recovery banner handles `auth` (Login Again / Armory) and
 all other classes uniformly. Plan: route `AgentRetryBar`'s login affordance into the banner's
 `auth` case and remove the standalone bar (or keep it rendering the banner) to avoid two
 competing surfaces. Likewise, the `session:was_interrupted` "Resume" banner
@@ -212,7 +212,7 @@ competing surfaces. Likewise, the `session:was_interrupted` "Resume" banner
   reusing the accessory primitive) + `lastFailure` state + `TurnFailure` dispatch; **Retry** +
   **5 s auto-retry** for `rate_limited`/`overloaded`/`network`; generic **Retry / Show-details**
   for the rest. (Delivers the user's headline ask.)
-- **P2 — Auth actions.** **Login Again** (OAuth/API-key re-auth) + **Trust Center → Accounts**;
+- **P2 — Auth actions.** **Login Again** (OAuth/API-key re-auth) + **Armory → Accounts**;
   backend `accountId`/`provider` on `AgentFailure`; auto-offer Retry after re-auth.
 - **P3 — Specialized actions.** `usage_limit` (account switch), `context_exceeded`
   (new-session & retry), `max_turns` (Continue / raise cap), `spawn_failure` (provider setup);
@@ -220,7 +220,7 @@ competing surfaces. Likewise, the `session:was_interrupted` "Resume" banner
 
 ## 9. Open questions
 
-1. **Auth re-auth UX** — inline (poll in the banner) vs. opening Trust Center and letting the
+1. **Auth re-auth UX** — inline (poll in the banner) vs. opening Armory and letting the
    user complete there? Proposal: try inline OAuth; fall back to `openBundleManager()`.
 2. **Auto-retry default-on?** Proposal: on for transient classes, capped (2× backoff). A
    `settings.json` toggle (`agent:autoRetryTransient`) is a stretch.

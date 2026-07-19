@@ -105,7 +105,7 @@ const mkUI = (onRetry: () => void) => {
         onLoginAgain() {},
         onUseExistingLogin() {},
         onLoginViaTerminal() {},
-        onTrustCenter() {},
+        onOpenArmory() {},
         onNewSession() {},
     });
     return { ui, model };
