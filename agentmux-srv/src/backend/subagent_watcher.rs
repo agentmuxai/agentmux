@@ -15,14 +15,22 @@
 //!
 //! This module watches those directories and emits:
 //!   - `subagent:spawned`   — new subagent JSONL file detected
-//!   - `subagent:activity`  — new events for a Solo dispatch's one member
-//!     (Workflow-dispatch member activity is coalesced into
-//!     `dispatch:activity` instead — see `PendingDispatchActivity`)
+//!   - `subagent:activity`  — new events for a Solo dispatch's one member,
+//!     broadcast immediately (existing per-member consumers, e.g. the
+//!     agent-pane activity dock, still rely on this)
 //!   - `subagent:completed` — subagent finished (result event seen)
-//!   - `dispatch:updated`   — an `AgentDispatch`'s member count or status
-//!     changed (both Solo and Workflow kinds; see `AgentDispatch`)
-//!   - `dispatch:activity`  — coalesced new events across a Workflow
-//!     dispatch's members, flushed every `DISPATCH_ACTIVITY_FLUSH_INTERVAL`
+//!   - `subagent:named`     — a `SubAgent.display_name` resolved (on-demand
+//!     click-triggered, or eager at dispatch time — see `trigger_eager_naming`)
+//!   - `dispatch:updated`   — an `AgentDispatch`'s member count, status, or
+//!     `dispatch_name` changed (both Solo and Workflow kinds)
+//!   - `dispatch:activity`  — coalesced new events across a dispatch's
+//!     members, flushed every `DISPATCH_ACTIVITY_FLUSH_INTERVAL`. Workflow
+//!     dispatches are ONLY ever represented here (no per-member broadcast).
+//!     Solo dispatches are ALSO queued here in addition to the immediate
+//!     `subagent:activity` above (dual emission, not a replacement) — see
+//!     docs/specs/SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19.md
+//!     Phase A, added so a solo dispatch's row can use the same
+//!     concatenated-feed expand mechanism a Workflow row already had.
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
@@ -142,6 +150,14 @@ pub struct AgentDispatch {
     pub members_done: usize,
     pub status: DispatchStatus,
     pub last_event_at: u64,
+    /// Concise Haiku-generated name, resolved eagerly the first time this
+    /// dispatch's first member is observed live (never during cold-backfill
+    /// replay — see `process_jsonl_change`'s `live` gate). One call per
+    /// dispatch, not per member — mirrors `SubAgent.display_name` one level
+    /// up. `None` until resolved; callers fall back to a member's `slug`/the
+    /// raw `dispatch_id` themselves (unchanged from before this field
+    /// existed). See docs/specs/SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19.md.
+    pub dispatch_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -286,20 +302,46 @@ const DISPATCH_ACTIVITY_FLUSH_INTERVAL: Duration = Duration::from_millis(500);
 
 pub struct SubagentWatcher {
     event_bus: Arc<EventBus>,
+    wstore: Arc<crate::backend::storage::store::Store>,
     sessions: Mutex<HashMap<String, SessionWatch>>,
     watched_agents: Mutex<Vec<WatchedAgent>>,
     dispatches: Mutex<HashMap<String, DispatchState>>,
     pending_activity: Mutex<HashMap<String, PendingDispatchActivity>>,
+    /// Dispatch IDs that have already had their one eager Haiku-naming call
+    /// triggered (issue: SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19)
+    /// — checked-and-inserted atomically at the same point `is_new` is
+    /// computed in `process_jsonl_change`, so a Workflow dispatch (whose
+    /// `dispatch_id` is shared by every member) only ever triggers once,
+    /// on its first-observed-live member, not once per member. Never
+    /// cleared — naming is "at most once ever per dispatch," not a
+    /// retryable in-flight guard (unlike `activity_watcher.rs`'s
+    /// `in_flight` set, which this deliberately does NOT mirror: there's no
+    /// "try again later" concept for a dispatch's name).
+    naming_triggered: Mutex<std::collections::HashSet<String>>,
+    /// Weak self-reference, populated once by `spawn()` right after the
+    /// `Arc::new` that wraps this watcher — lets any `&self` method upgrade
+    /// to `Arc<Self>` to move into a `tokio::spawn`ed background task (the
+    /// eager-naming trigger) without threading `Arc<Self>` through every
+    /// caller of `process_jsonl_change` (`scan_subagents_dir`/
+    /// `scan_session_subagents`, both `&self` today). `None` for a
+    /// `SubagentWatcher` built via bare `new()` (as most tests do, to skip
+    /// the background flush loop) — eager naming silently no-ops in that
+    /// case rather than panicking, matching this module's existing
+    /// "unknown/untracked -> safe no-op" convention (see `set_display_name`).
+    self_ref: Mutex<Option<std::sync::Weak<SubagentWatcher>>>,
 }
 
 impl SubagentWatcher {
-    pub fn new(event_bus: Arc<EventBus>) -> Self {
+    pub fn new(event_bus: Arc<EventBus>, wstore: Arc<crate::backend::storage::store::Store>) -> Self {
         Self {
             event_bus,
+            wstore,
             sessions: Mutex::new(HashMap::new()),
             watched_agents: Mutex::new(Vec::new()),
             dispatches: Mutex::new(HashMap::new()),
             pending_activity: Mutex::new(HashMap::new()),
+            naming_triggered: Mutex::new(std::collections::HashSet::new()),
+            self_ref: Mutex::new(None),
         }
     }
 
@@ -307,8 +349,9 @@ impl SubagentWatcher {
     /// starts the background flush loop for coalesced dispatch activity
     /// (SPEC §7) — runs for the lifetime of the process, mirroring
     /// `watch_agent`'s existing `tokio::spawn` pattern.
-    pub fn spawn(event_bus: Arc<EventBus>) -> Arc<Self> {
-        let watcher = Arc::new(Self::new(event_bus));
+    pub fn spawn(event_bus: Arc<EventBus>, wstore: Arc<crate::backend::storage::store::Store>) -> Arc<Self> {
+        let watcher = Arc::new(Self::new(event_bus, wstore));
+        *watcher.self_ref.lock().unwrap() = Some(Arc::downgrade(&watcher));
         tracing::info!("subagent watcher initialized");
         let flusher = Arc::clone(&watcher);
         tokio::spawn(async move {
@@ -524,10 +567,14 @@ impl SubagentWatcher {
                             &changed_path,
                         );
                     } else {
+                        // live=true: this came from the filesystem watcher
+                        // observing a real, in-the-moment change — eligible
+                        // to trigger eager Haiku naming.
                         self_clone.process_jsonl_change(
                             &parent_agent,
                             &parent_block_id,
                             &changed_path,
+                            true,
                         );
                     }
                 }
@@ -638,6 +685,10 @@ impl SubagentWatcher {
             members_done: done as usize,
             status: if done { DispatchStatus::Completed } else { DispatchStatus::Running },
             last_event_at: sub.last_event_at,
+            // A solo dispatch's name IS its one member's display_name — no
+            // separate dispatch_name storage needed for the Solo kind (only
+            // Workflow-kind DispatchState carries its own dispatch_name).
+            dispatch_name: sub.display_name.clone(),
         })
     }
 
@@ -730,6 +781,77 @@ impl SubagentWatcher {
             self.event_bus.broadcast_event(&named_event);
         }
         found
+    }
+
+    /// Set a Workflow-kind dispatch's Haiku-generated name and broadcast
+    /// `dispatch:updated` so every client watching this session picks up the
+    /// result. Mirrors `set_display_name` one level up — see that method's
+    /// doc comment for the "found=false is a safe no-op" convention. Only
+    /// Workflow-kind dispatches store a `dispatch_name` here; a Solo
+    /// dispatch's name IS its one member's `display_name` (`solo_dispatch`
+    /// reads it straight through), so `set_display_name` already covers the
+    /// Solo case — this method is never called for a `solo:` dispatch_id.
+    pub fn set_dispatch_name(&self, dispatch_id: &str, name: &str) -> bool {
+        let info = {
+            let mut dispatches = self.dispatches.lock().unwrap();
+            match dispatches.get_mut(dispatch_id) {
+                Some(state) => {
+                    state.info.dispatch_name = Some(name.to_string());
+                    Some(state.info.clone())
+                }
+                None => None,
+            }
+        };
+        // Mutex released here — broadcast outside the lock
+
+        let Some(info) = info else { return false };
+        tracing::info!(
+            dispatch_id = %dispatch_id,
+            dispatch_name = %name,
+            parent_block_id = %info.parent_block_id,
+            session_id = %info.session_id,
+            "dispatch display_name resolved"
+        );
+        self.broadcast_dispatch_updated(&info);
+        true
+    }
+
+    /// Fire the one eager Haiku-naming call for a dispatch's first-observed
+    /// live spawn (issue: SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19).
+    /// Caller (`process_jsonl_change`) has already atomically claimed
+    /// `dispatch_id` in `naming_triggered` before calling this — this method
+    /// itself does no further dedup.
+    ///
+    /// Upgrades `self_ref` to a real `Arc<Self>` to move into the spawned
+    /// task; silently no-ops if this watcher was built via bare `new()`
+    /// (most unit tests) rather than `spawn()` — there is no Arc to upgrade
+    /// to in that case, matching this module's "untracked -> safe no-op"
+    /// convention rather than panicking.
+    #[cfg(test)]
+    pub(crate) fn naming_triggered_contains(&self, dispatch_id: &str) -> bool {
+        self.naming_triggered.lock().unwrap().contains(dispatch_id)
+    }
+
+    fn trigger_eager_naming(&self, dispatch_id: String, first_member_agent_id: String, is_workflow: bool) {
+        let Some(watcher) = self.self_ref.lock().unwrap().as_ref().and_then(|w| w.upgrade()) else {
+            return;
+        };
+        tokio::spawn(async move {
+            if is_workflow {
+                crate::server::app_api::session::generate_dispatch_name(
+                    &watcher.wstore,
+                    &watcher,
+                    &dispatch_id,
+                    &first_member_agent_id,
+                ).await;
+            } else {
+                crate::server::app_api::session::generate_subagent_name(
+                    &watcher.wstore,
+                    &watcher,
+                    &first_member_agent_id,
+                ).await;
+            }
+        });
     }
 
     // ── Internal methods ──────────────────────────────────────────────────
@@ -954,7 +1076,10 @@ impl SubagentWatcher {
             );
         }
         for (_, path) in candidates.into_iter().take(BACKFILL_MAX_FILES) {
-            self.process_jsonl_change(parent_agent, parent_block_id, &path);
+            // live=false: this is a cold-backfill replay (pane reopen / srv
+            // restart), not a genuinely-live spawn — must never trigger eager
+            // Haiku naming (see process_jsonl_change's `live` param doc).
+            self.process_jsonl_change(parent_agent, parent_block_id, &path, false);
         }
         for path in journals {
             self.process_journal_change(parent_agent, parent_block_id, &path);
@@ -963,7 +1088,18 @@ impl SubagentWatcher {
 
     /// Process a changed/new JSONL subagent file. Reads new lines, updates state,
     /// and broadcasts events via EventBus.
-    fn process_jsonl_change(&self, parent_agent: &str, parent_block_id: &str, jsonl_path: &Path) {
+    ///
+    /// `live`: `true` only when this call originates from the filesystem
+    /// watcher observing a real, in-the-moment change; `false` for a
+    /// cold-backfill replay (`scan_subagents_dir`, capped at
+    /// `BACKFILL_MAX_FILES`, run on pane reopen / srv restart). Eager
+    /// Haiku-naming (see the `is_new` handling below) is gated on `live` —
+    /// without this, every restart of a long-lived session would re-fire a
+    /// naming call for every dispatch replayed from history, repeating the
+    /// broadcast-storm incident class in
+    /// docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md, just for
+    /// Haiku spend instead of WS events.
+    fn process_jsonl_change(&self, parent_agent: &str, parent_block_id: &str, jsonl_path: &Path, live: bool) {
         // Extract agent ID from filename: agent-<id>.jsonl
         let agent_id = match jsonl_path
             .file_stem()
@@ -1118,6 +1254,17 @@ impl SubagentWatcher {
         // Mutex released here — broadcast outside the lock
 
         if is_new {
+            // Eager per-dispatch Haiku naming (issue:
+            // SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19). Gated on
+            // `live` (never during backfill replay) and on `naming_triggered`
+            // atomically claiming this dispatch_id — for a Workflow dispatch,
+            // every member's is_new fires with the SAME dispatch_id, so only
+            // the first member to reach this point wins the claim; a Solo
+            // dispatch's dispatch_id is unique to its one member, so it
+            // always wins its own claim exactly once.
+            if live && self.naming_triggered.lock().unwrap().insert(dispatch_id.clone()) {
+                self.trigger_eager_naming(dispatch_id.clone(), agent_id.clone(), workflow_id.is_some());
+            }
             if workflow_id.is_some() {
                 let mut pending = self.pending_activity.lock().unwrap();
                 let entry = pending
@@ -1174,8 +1321,24 @@ impl SubagentWatcher {
                     .or_insert_with(|| PendingDispatchActivity::new(parent_agent, parent_block_id, &session_id));
                 entry.members.push((agent_id.clone(), new_events.clone()));
             } else {
-                // Solo dispatch: exactly one member, no coalescing benefit —
-                // broadcast immediately, same as before the redesign.
+                // Solo dispatch: exactly one member, no coalescing benefit for
+                // this event itself — broadcast subagent:activity immediately,
+                // same as before the redesign (existing consumers, e.g. the
+                // agent-pane activity dock, still rely on this per-member
+                // stream). ADDITIONALLY queue into pending_activity so
+                // dispatch:activity also flows for solo dispatch_ids — Phase B
+                // of SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19's
+                // unified concatenated feed needs this for solo rows, which
+                // dispatch:activity never covered before. Deliberate dual
+                // emission, not a replacement — see that spec's Phase A notes
+                // for why the existing subagent:activity stream is kept as-is.
+                {
+                    let mut pending = self.pending_activity.lock().unwrap();
+                    let entry = pending
+                        .entry(dispatch_id.clone())
+                        .or_insert_with(|| PendingDispatchActivity::new(parent_agent, parent_block_id, &session_id));
+                    entry.members.push((agent_id.clone(), new_events.clone()));
+                }
                 let activity_event = WSEventType {
                     eventtype: WS_EVENT_RPC.to_string(),
                     oref: String::new(),
@@ -1514,6 +1677,7 @@ impl SubagentWatcher {
                     members_done: 0,
                     status: DispatchStatus::Running,
                     last_event_at: now_millis(),
+                    dispatch_name: None,
                 },
                 journal_offset: 0,
                 journal_started: 0,
@@ -1565,6 +1729,7 @@ impl SubagentWatcher {
                         "memberCount": info.member_count,
                         "membersDone": info.members_done,
                         "status": info.status,
+                        "dispatchName": info.dispatch_name,
                     }
                 }
             })),
@@ -2015,7 +2180,8 @@ mod tests {
     use super::*;
 
     fn fixture_watcher() -> SubagentWatcher {
-        SubagentWatcher::new(Arc::new(EventBus::new()))
+        let wstore = Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
+        SubagentWatcher::new(Arc::new(EventBus::new()), wstore)
     }
 
     /// Write a minimal terminated subagent JSONL file with an explicit mtime
@@ -2261,7 +2427,7 @@ mod tests {
         .unwrap();
 
         let watcher = fixture_watcher();
-        watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path);
+        watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, true);
 
         {
             let sessions = watcher.sessions.lock().unwrap();
@@ -2289,7 +2455,7 @@ mod tests {
         .unwrap();
 
         let watcher = fixture_watcher();
-        watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path);
+        watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, true);
 
         {
             let sessions = watcher.sessions.lock().unwrap();
@@ -2318,7 +2484,7 @@ mod tests {
         .unwrap();
 
         let watcher = fixture_watcher();
-        watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path);
+        watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, true);
 
         let sessions = watcher.sessions.lock().unwrap();
         let session = sessions.values().next().expect("session recorded");
@@ -2343,7 +2509,7 @@ mod tests {
         .unwrap();
 
         let watcher = fixture_watcher();
-        watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path);
+        watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, true);
 
         let sessions = watcher.sessions.lock().unwrap();
         let session = sessions.values().next().expect("session recorded");
@@ -2365,7 +2531,7 @@ mod tests {
         .unwrap();
 
         let watcher = fixture_watcher();
-        watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path);
+        watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, true);
 
         let dispatches = watcher.list_dispatches();
         assert_eq!(dispatches.len(), 1, "one solo dispatch, synthesized on demand");
@@ -2392,7 +2558,7 @@ mod tests {
         std::fs::write(&jsonl_path, "{\"type\":\"result\",\"result\":\"done\"}\n").unwrap();
 
         let watcher = fixture_watcher();
-        watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path);
+        watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, true);
 
         let dispatches = watcher.list_dispatches();
         assert_eq!(dispatches.len(), 1);
@@ -2449,7 +2615,7 @@ mod tests {
         .unwrap();
 
         let watcher = fixture_watcher();
-        watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path);
+        watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, true);
 
         {
             let pending = watcher.pending_activity.lock().unwrap();
@@ -2464,6 +2630,73 @@ mod tests {
             let pending = watcher.pending_activity.lock().unwrap();
             assert!(pending.is_empty(), "flush must drain every dispatch's buffer");
         }
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Issue: SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 Phase A —
+    /// a Workflow dispatch's `dispatch_id` is shared by every member, so
+    /// `naming_triggered` must claim it exactly once, on the first member's
+    /// live `is_new`, not once per member. `fixture_watcher()` has no
+    /// `self_ref` (built via bare `new()`), so `trigger_eager_naming` itself
+    /// no-ops after the gate — this test only exercises the synchronous
+    /// gating logic in `process_jsonl_change`, not the async Haiku call.
+    #[test]
+    fn process_jsonl_change_claims_naming_triggered_once_per_workflow_not_once_per_member() {
+        let dir = std::env::temp_dir().join(format!("amx-naming-wf-{}", now_millis()));
+        let run_dir = dir.join("subagents").join("workflows").join("wf_naming1");
+        std::fs::create_dir_all(&run_dir).unwrap();
+
+        let watcher = fixture_watcher();
+        assert!(!watcher.naming_triggered_contains("wf_naming1"));
+
+        for member in ["member-a", "member-b"] {
+            let jsonl_path = run_dir.join(format!("agent-{member}.jsonl"));
+            std::fs::write(
+                &jsonl_path,
+                "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n",
+            )
+            .unwrap();
+            watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, true);
+        }
+
+        // Claimed after the FIRST member's live is_new — this is the
+        // dedup key that keeps the eventual Haiku call to exactly one per
+        // dispatch regardless of member count.
+        assert!(watcher.naming_triggered_contains("wf_naming1"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Issue: SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 Phase A —
+    /// the non-negotiable backfill guard: `live=false` (the exact value
+    /// `scan_subagents_dir`'s cold-backfill replay passes) must never claim
+    /// `naming_triggered`, even though `is_new` is still true for a file the
+    /// in-memory `sessions` map has never seen before (which is the whole
+    /// backfill mechanism). Without this, every srv restart / pane reopen
+    /// against a long-lived session would re-fire a Haiku call for every
+    /// dispatch replayed from history — the exact incident class in
+    /// docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md, just for
+    /// Haiku spend instead of WS broadcast volume.
+    #[test]
+    fn process_jsonl_change_never_claims_naming_triggered_during_backfill_replay() {
+        let dir = std::env::temp_dir().join(format!("amx-naming-backfill-{}", now_millis()));
+        let subagents_dir = dir.join("subagents");
+        std::fs::create_dir_all(&subagents_dir).unwrap();
+        let jsonl_path = subagents_dir.join("agent-replayed.jsonl");
+        std::fs::write(
+            &jsonl_path,
+            "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n",
+        )
+        .unwrap();
+
+        let watcher = fixture_watcher();
+        watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, false);
+
+        assert!(
+            !watcher.naming_triggered_contains("solo:replayed"),
+            "backfill replay (live=false) must never claim naming_triggered"
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }
