@@ -31,6 +31,13 @@
 //!     docs/specs/SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19.md
 //!     Phase A, added so a solo dispatch's row can use the same
 //!     concatenated-feed expand mechanism a Workflow row already had.
+//!   - `subagent:block_pruned` — a deleted block's subagents/dispatches were
+//!     just pruned from this watcher's state (`prune_block`/`unwatch_agent`,
+//!     driven by `spawn_block_prune_subscriber` reacting to
+//!     `Event::BlockDeleted`/`TabDeleted`/`WorkspaceDeleted`). Without this,
+//!     `ListActive`/`ListDispatches` kept returning a closed block's
+//!     subagents forever, so the Swarm pane kept rendering a ghost row for
+//!     it until the whole app/srv restarted.
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
@@ -591,12 +598,16 @@ impl SubagentWatcher {
     /// ever ran leaked one OS watch handle + channel + idle task for the rest of
     /// the process lifetime, even after its pane/agent was deleted.
     ///
-    /// Also prunes `sessions`: every subagent whose `info.parent_agent` is
-    /// this agent (across all sessions — subagents are keyed by session_id,
-    /// not by parent), and any session left with no subagents afterward.
-    /// The parent agent is gone, so nothing can query this data again — it
-    /// was previously left as plain data forever, growing `sessions` by one
-    /// entry set per distinct agent that ever ran a subagent.
+    /// Also prunes `sessions`, `dispatches`, and `pending_activity`: every
+    /// entry whose owner is this agent (`SubAgent`/`AgentDispatch`'s
+    /// `parent_agent`, `PendingDispatchActivity.parent_agent`), and any
+    /// session left with no subagents afterward. The parent agent is gone,
+    /// so nothing can query this data again — it was previously left as
+    /// plain data forever, growing these maps by one entry set per distinct
+    /// agent that ever ran a subagent. (`dispatches`/`pending_activity`
+    /// pruning added alongside `prune_block`'s block-scoped equivalent,
+    /// below — this method previously only pruned `sessions`, silently
+    /// leaking a Workflow-kind `DispatchState` for the agent's lifetime.)
     pub fn unwatch_agent(&self, agent_id: &str) {
         let mut watched = self.watched_agents.lock().unwrap();
         let before = watched.len();
@@ -622,6 +633,115 @@ impl SubagentWatcher {
                 pruned_subagents,
                 "pruned subagent session state for unwatched agent"
             );
+        }
+        drop(sessions);
+
+        let mut dispatches = self.dispatches.lock().unwrap();
+        let before = dispatches.len();
+        dispatches.retain(|_, state| state.info.parent_agent != agent_id);
+        let pruned_dispatches = before - dispatches.len();
+        drop(dispatches);
+
+        let mut pending = self.pending_activity.lock().unwrap();
+        let before = pending.len();
+        pending.retain(|_, activity| activity.parent_agent != agent_id);
+        let pruned_pending = before - pending.len();
+        drop(pending);
+
+        if pruned_dispatches > 0 || pruned_pending > 0 {
+            tracing::debug!(
+                agent = %agent_id,
+                pruned_dispatches,
+                pruned_pending,
+                "pruned dispatch/pending-activity state for unwatched agent"
+            );
+        }
+    }
+
+    /// Prune every subagent, dispatch, and buffered activity entry owned by
+    /// `block_id` — the block-scoped counterpart of `unwatch_agent`'s
+    /// agent-scoped pruning, above. This is the robust backstop: it runs
+    /// from a `srv_events_tx` subscriber reacting to `Event::BlockDeleted`/
+    /// `TabDeleted`/`WorkspaceDeleted` (see `spawn_block_prune_subscriber`
+    /// below), independent of whether the frontend's normal
+    /// `/agentmux/reactive/unregister` teardown path (which drives
+    /// `unwatch_agent`) actually fires for this close — that path depends
+    /// on a live renderer's `TermWrap.dispose()` completing an async fetch,
+    /// which an API-driven delete, a tab/workspace cascade delete, or a
+    /// crash can all skip. Without this, closing an agent pane left its
+    /// Swarm-pane row (and any subagents/dispatches under it) visible
+    /// until the whole app/srv restarted — `ListActive`/`ListDispatches`
+    /// kept returning them forever, and the frontend's `buildTree()` has a
+    /// `parentIds` fallback (`swarm-model.ts`) that renders a row for any
+    /// block_id it still sees in the subagent list, with no complementary
+    /// removal path of its own.
+    ///
+    /// Block-scoped (not agent-name-scoped like `unwatch_agent`) so this
+    /// also correctly handles an agent identity reused across multiple
+    /// blocks over time — pruning by `parent_block_id` can never touch a
+    /// different, still-live block that happens to share an agent name.
+    ///
+    /// Returns whether anything was actually pruned, so the caller only
+    /// broadcasts a refresh when there's something for clients to refresh.
+    pub fn prune_block(&self, block_id: &str) -> bool {
+        let mut pruned = false;
+
+        let mut sessions = self.sessions.lock().unwrap();
+        sessions.retain(|_session_id, session| {
+            let before = session.subagents.len();
+            session
+                .subagents
+                .retain(|_agent_id, state| state.info.parent_block_id != block_id);
+            if session.subagents.len() != before {
+                pruned = true;
+            }
+            !session.subagents.is_empty()
+        });
+        drop(sessions);
+
+        let mut dispatches = self.dispatches.lock().unwrap();
+        let before = dispatches.len();
+        dispatches.retain(|_, state| state.info.parent_block_id != block_id);
+        if dispatches.len() != before {
+            pruned = true;
+        }
+        drop(dispatches);
+
+        let mut pending = self.pending_activity.lock().unwrap();
+        let before = pending.len();
+        pending.retain(|_, activity| activity.parent_block_id != block_id);
+        if pending.len() != before {
+            pruned = true;
+        }
+        drop(pending);
+
+        if pruned {
+            tracing::debug!(block_id = %block_id, "pruned subagent/dispatch state for deleted block");
+        }
+        pruned
+    }
+
+    fn broadcast_block_pruned(&self, block_id: &str) {
+        let event = WSEventType {
+            eventtype: WS_EVENT_RPC.to_string(),
+            oref: String::new(),
+            data: Some(json!({
+                "command": "eventrecv",
+                "data": {
+                    "event": "subagent:block_pruned",
+                    "data": { "blockId": block_id }
+                }
+            })),
+        };
+        self.event_bus.broadcast_event(&event);
+    }
+
+    /// Prune `block_id` and broadcast `subagent:block_pruned` if anything
+    /// was actually removed — the combined operation `spawn_block_prune_
+    /// subscriber` calls per cascaded block_id.
+    pub fn prune_block_and_notify(&self, block_id: &str) {
+        if self.prune_block(block_id) {
+            self.broadcast_block_pruned(block_id);
         }
     }
 
@@ -1743,6 +1863,57 @@ impl SubagentWatcher {
     }
 }
 
+// ── Block-delete cascade subscriber ─────────────────────────────────────
+
+/// Subscribe to the reducer's `srv_events_tx` broadcast and prune `watcher`'s
+/// per-block state on `Event::BlockDeleted`/`TabDeleted`/`WorkspaceDeleted` —
+/// the robust backstop described on `SubagentWatcher::prune_block`'s doc
+/// comment. Mirrors `agentmux-cef/src/srv_ipc.rs`'s cascaded-block-id
+/// extraction (same three-arm match, same rationale: `TabDeleted`/
+/// `WorkspaceDeleted` never emit a per-block event of their own — see
+/// `reducer/tab.rs::handle_delete_tab`'s doc comment — so `block_ids` is the
+/// only signal for a block that cascaded out via its tab/workspace) and
+/// `server/wave_obj_bridge.rs::run_wave_obj_bridge`'s subscribe-loop
+/// plumbing (lag/close handling).
+pub fn spawn_block_prune_subscriber(
+    watcher: Arc<SubagentWatcher>,
+    mut events_rx: tokio::sync::broadcast::Receiver<agentmux_common::ipc::Event>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        loop {
+            match events_rx.recv().await {
+                Ok(event) => {
+                    let cascaded_block_ids: &[String] = match &event {
+                        agentmux_common::ipc::Event::BlockDeleted { block_id, .. } => {
+                            std::slice::from_ref(block_id)
+                        }
+                        agentmux_common::ipc::Event::TabDeleted { block_ids, .. } => block_ids.as_slice(),
+                        agentmux_common::ipc::Event::WorkspaceDeleted { block_ids, .. } => block_ids.as_slice(),
+                        _ => &[],
+                    };
+                    for block_id in cascaded_block_ids {
+                        watcher.prune_block_and_notify(block_id);
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    // Same non-fatal, no-automatic-recovery handling as
+                    // wave_obj_bridge.rs's identical arm: a lag here means a
+                    // stale swarm-pane row could persist until its block's
+                    // next delete-adjacent event, not silent data loss.
+                    tracing::warn!(
+                        skipped = n,
+                        "subagent block-prune subscriber lagged; some BlockDeleted/TabDeleted/WorkspaceDeleted events were dropped"
+                    );
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                    tracing::info!("subagent block-prune subscriber exiting: events channel closed");
+                    return;
+                }
+            }
+        }
+    })
+}
+
 // ── JSONL parsing ─────────────────────────────────────────────────────────
 
 /// Metadata extracted from the first JSONL line (the subagent init record).
@@ -2364,6 +2535,139 @@ mod tests {
 
         let sessions = watcher.sessions.lock().unwrap();
         assert!(sessions.get("s1").unwrap().subagents.contains_key("sub-a"));
+    }
+
+    fn fixture_state_for_block(parent_block_id: &str, agent_id: &str, session_id: &str) -> SubagentState {
+        let mut state = fixture_state("some-agent", agent_id, session_id);
+        state.info.parent_block_id = parent_block_id.to_string();
+        state
+    }
+
+    fn fixture_dispatch_state(dispatch_id: &str, parent_block_id: &str) -> DispatchState {
+        DispatchState {
+            info: AgentDispatch {
+                dispatch_id: dispatch_id.to_string(),
+                kind: DispatchKind::Workflow,
+                parent_agent: "some-agent".to_string(),
+                parent_block_id: parent_block_id.to_string(),
+                session_id: "s1".to_string(),
+                member_count: 1,
+                members_done: 0,
+                status: DispatchStatus::Running,
+                last_event_at: 0,
+                dispatch_name: None,
+            },
+            journal_offset: 0,
+            journal_started: 0,
+            journal_results: 0,
+            member_files: 0,
+            members_completed: 0,
+        }
+    }
+
+    #[test]
+    fn prune_block_prunes_only_matching_parent_block_subagents() {
+        let watcher = fixture_watcher();
+        {
+            let mut sessions = watcher.sessions.lock().unwrap();
+            let mut s1 = SessionWatch { subagents: HashMap::new() };
+            s1.subagents.insert("sub-a".to_string(), fixture_state_for_block("block-1", "sub-a", "s1"));
+            s1.subagents.insert("sub-b".to_string(), fixture_state_for_block("block-2", "sub-b", "s1"));
+            sessions.insert("s1".to_string(), s1);
+
+            let mut s2 = SessionWatch { subagents: HashMap::new() };
+            s2.subagents.insert("sub-c".to_string(), fixture_state_for_block("block-1", "sub-c", "s2"));
+            sessions.insert("s2".to_string(), s2);
+        }
+
+        let pruned = watcher.prune_block("block-1");
+        assert!(pruned);
+
+        let sessions = watcher.sessions.lock().unwrap();
+        let s1 = sessions.get("s1").expect("s1 still has block-2's subagent, should not be dropped");
+        assert!(!s1.subagents.contains_key("sub-a"));
+        assert!(s1.subagents.contains_key("sub-b"));
+        assert!(!sessions.contains_key("s2"), "session left with zero subagents must be removed, not left empty");
+    }
+
+    #[test]
+    fn prune_block_prunes_matching_dispatches_and_leaves_others() {
+        let watcher = fixture_watcher();
+        {
+            let mut dispatches = watcher.dispatches.lock().unwrap();
+            dispatches.insert("wf_1".to_string(), fixture_dispatch_state("wf_1", "block-1"));
+            dispatches.insert("wf_2".to_string(), fixture_dispatch_state("wf_2", "block-2"));
+        }
+
+        let pruned = watcher.prune_block("block-1");
+        assert!(pruned);
+
+        let dispatches = watcher.dispatches.lock().unwrap();
+        assert!(!dispatches.contains_key("wf_1"));
+        assert!(dispatches.contains_key("wf_2"));
+    }
+
+    #[test]
+    fn prune_block_prunes_matching_pending_activity_and_leaves_others() {
+        let watcher = fixture_watcher();
+        {
+            let mut pending = watcher.pending_activity.lock().unwrap();
+            pending.insert("wf_1".to_string(), PendingDispatchActivity::new("some-agent", "block-1", "s1"));
+            pending.insert("wf_2".to_string(), PendingDispatchActivity::new("some-agent", "block-2", "s1"));
+        }
+
+        let pruned = watcher.prune_block("block-1");
+        assert!(pruned);
+
+        let pending = watcher.pending_activity.lock().unwrap();
+        assert!(!pending.contains_key("wf_1"));
+        assert!(pending.contains_key("wf_2"));
+    }
+
+    #[test]
+    fn prune_block_on_unknown_block_is_noop_and_returns_false() {
+        let watcher = fixture_watcher();
+        {
+            let mut sessions = watcher.sessions.lock().unwrap();
+            let mut s1 = SessionWatch { subagents: HashMap::new() };
+            s1.subagents.insert("sub-a".to_string(), fixture_state_for_block("block-1", "sub-a", "s1"));
+            sessions.insert("s1".to_string(), s1);
+        }
+
+        let pruned = watcher.prune_block("never-tracked");
+        assert!(!pruned);
+
+        let sessions = watcher.sessions.lock().unwrap();
+        assert!(sessions.get("s1").unwrap().subagents.contains_key("sub-a"));
+    }
+
+    #[test]
+    fn unwatch_agent_also_prunes_matching_dispatches_and_pending_activity() {
+        let watcher = fixture_watcher();
+        {
+            let mut dispatches = watcher.dispatches.lock().unwrap();
+            let mut d1 = fixture_dispatch_state("wf_1", "block-1");
+            d1.info.parent_agent = "parent-1".to_string();
+            dispatches.insert("wf_1".to_string(), d1);
+            let mut d2 = fixture_dispatch_state("wf_2", "block-2");
+            d2.info.parent_agent = "parent-2".to_string();
+            dispatches.insert("wf_2".to_string(), d2);
+        }
+        {
+            let mut pending = watcher.pending_activity.lock().unwrap();
+            pending.insert("wf_1".to_string(), PendingDispatchActivity::new("parent-1", "block-1", "s1"));
+            pending.insert("wf_2".to_string(), PendingDispatchActivity::new("parent-2", "block-2", "s1"));
+        }
+
+        watcher.unwatch_agent("parent-1");
+
+        let dispatches = watcher.dispatches.lock().unwrap();
+        assert!(!dispatches.contains_key("wf_1"));
+        assert!(dispatches.contains_key("wf_2"));
+
+        let pending = watcher.pending_activity.lock().unwrap();
+        assert!(!pending.contains_key("wf_1"));
+        assert!(pending.contains_key("wf_2"));
     }
 
     #[test]
