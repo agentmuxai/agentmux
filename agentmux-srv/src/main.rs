@@ -1094,6 +1094,15 @@ async fn main() {
         }
     });
 
+    // Block-delete cascade backstop for the subagent watcher: prunes a
+    // closed block's subagents/dispatches on Event::BlockDeleted/TabDeleted/
+    // WorkspaceDeleted, independent of whether the frontend's normal
+    // /agentmux/reactive/unregister teardown path fires for this close (see
+    // SubagentWatcher::prune_block's doc comment). Without this, closing an
+    // agent pane left a ghost row in the Swarm pane until srv restart.
+    let block_prune_rx = srv_events_tx.subscribe();
+    backend::subagent_watcher::spawn_block_prune_subscriber(subagent_watcher.clone(), block_prune_rx);
+
     // Clone before move into AppState for cron_scheduler construction.
     let shared_store_for_cron = shared_store.clone();
 
