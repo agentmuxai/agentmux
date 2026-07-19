@@ -33,6 +33,26 @@ on:
   repository_dispatch:
     types: [build-macos]
     # client_payload: { ref: "vX.Y.Z", release_tag: "vX.Y.Z", cef_runtime_tag: "" }
+  workflow_call:
+    # Lets release.yml invoke this as a reusable workflow instead of inlining
+    # a second copy of the CEF-provisioning + signing/notarization steps.
+    # `inputs.*` below is populated from the caller's `with:` block exactly
+    # like workflow_dispatch — the "Resolve inputs" step needs no changes.
+    inputs:
+      ref:
+        description: "agentmux ref to build (tag / branch / SHA)"
+        required: true
+        type: string
+      release-tag:
+        description: "GitHub release tag to upload the DMG to (blank = skip upload)"
+        required: false
+        type: string
+        default: ""
+      cef-runtime-tag:
+        description: "agentmuxai/cef release tag for patched framework (blank = latest macOS)"
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: write   # needed to upload release assets via GITHUB_TOKEN
