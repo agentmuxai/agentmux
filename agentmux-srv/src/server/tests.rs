@@ -40,7 +40,7 @@ pub(crate) fn test_state() -> AppState {
         app_path: String::new(),
         wstore: wstore.clone(),
         shared_store: None,
-        id_store: wstore,
+        id_store: wstore.clone(),
         filestore,
         global_transcript_store: None,
         event_bus: event_bus.clone(),
@@ -51,7 +51,7 @@ pub(crate) fn test_state() -> AppState {
         messagebus: Arc::new(crate::backend::messagebus::MessageBus::new()),
         http_client: reqwest::Client::new(),
         local_web_url: String::new(),
-        subagent_watcher: Arc::new(crate::backend::subagent_watcher::SubagentWatcher::new(event_bus.clone())),
+        subagent_watcher: Arc::new(crate::backend::subagent_watcher::SubagentWatcher::new(event_bus.clone(), wstore.clone())),
         history_service: Arc::new(crate::backend::history::HistoryService::new()),
         lan_discovery: Arc::new(crate::backend::lan_discovery::LanDiscoveryController::new(
             "test-instance".to_string(),
