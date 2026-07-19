@@ -217,10 +217,11 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
             if (loginUrl) {
                 setAuthUrl(loginUrl);
                 log("auth", "opening browser...");
-                // Open the OAuth URL in an in-app browser pane (the "browser
-                // window" half of SPEC_REAUTH_FROM_AUTH_ERROR); falls back to the
-                // system browser if the pane can't be created. The auth-url box
-                // above the composer is the URL backup either way.
+                // Open the OAuth URL in the system browser — it already has the
+                // user's session/cookies, so login there is more likely to
+                // auto-complete; falls back to an in-app browser pane if the
+                // system browser can't be opened. The auth-url box above the
+                // composer is the URL backup either way.
                 const opened = await openOAuthBrowserPane(loginUrl);
                 if (opened === "pane") {
                     log("auth", "opened login in an in-app browser pane — complete login there");
