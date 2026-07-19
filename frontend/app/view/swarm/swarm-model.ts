@@ -355,6 +355,45 @@ export interface DispatchDetail {
  *  this redesign exists to avoid. Oldest entries drop first. */
 const MAX_DISPATCH_FEED_ENTRIES = 500;
 
+/** Identifies one `DispatchActivityEntry` for de-dup purposes — an
+ *  (agentId, timestamp, event payload) triple is stable across both the
+ *  live `dispatch:activity` broadcast and a `GetHistory` backfill, since
+ *  both ultimately read the same underlying event, not a re-generated one. */
+function dispatchActivityEntryKey(e: DispatchActivityEntry): string {
+    return `${e.agentId}:${e.event.timestamp}:${JSON.stringify(e.event.event_type)}`;
+}
+
+/**
+ * Merge freshly-arrived entries into `prev`, de-duplicating by
+ * `dispatchActivityEntryKey`, re-sorting by timestamp, and capping to
+ * `MAX_DISPATCH_FEED_ENTRIES`. Exported (pure, no signal access) so the
+ * de-dup behavior itself is unit-testable — see swarm-model.test.ts.
+ *
+ * De-dup matters because a solo dispatch's `GetHistory` backfill and the
+ * live `dispatch:activity` broadcast race independently: an event the
+ * backend already flushed into `pending_activity` before `GetHistory`
+ * resolves is present in both, so blindly concatenating double-counts it
+ * (reagent P1 on #2232).
+ */
+export function mergeDispatchActivityEntries(
+    prev: DispatchActivityEntry[],
+    incoming: DispatchActivityEntry[]
+): DispatchActivityEntry[] {
+    if (incoming.length === 0) return prev;
+    const seen = new Set(prev.map(dispatchActivityEntryKey));
+    const fresh = incoming.filter((e) => {
+        const key = dispatchActivityEntryKey(e);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+    if (fresh.length === 0) return prev;
+    const merged = [...prev, ...fresh].sort((a, b) => a.event.timestamp - b.event.timestamp);
+    return merged.length > MAX_DISPATCH_FEED_ENTRIES
+        ? merged.slice(merged.length - MAX_DISPATCH_FEED_ENTRIES)
+        : merged;
+}
+
 /**
  * Expanding a row (`WorkflowDispatchRow`, or an Agent Tool row —
  * SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 §4) shows this: every
@@ -380,12 +419,7 @@ export function createDispatchDetail(dispatchId: string): DispatchDetail {
 
     const mergeIncoming = (incoming: DispatchActivityEntry[]): void => {
         if (incoming.length === 0) return;
-        setEntries((prev) => {
-            const merged = [...prev, ...incoming].sort((a, b) => a.event.timestamp - b.event.timestamp);
-            return merged.length > MAX_DISPATCH_FEED_ENTRIES
-                ? merged.slice(merged.length - MAX_DISPATCH_FEED_ENTRIES)
-                : merged;
-        });
+        setEntries((prev) => mergeDispatchActivityEntries(prev, incoming));
     };
 
     const unsub = waveEventSubscribe({

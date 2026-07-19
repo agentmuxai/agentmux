@@ -5,14 +5,28 @@ import { describe, expect, it } from "vitest";
 import {
     buildDispatchBuckets,
     groupCacheKey,
+    mergeDispatchActivityEntries,
     mergeSubagentsPreservingIdentity,
     pruneGroupIdentityCache,
     stabilizeGroupIdentity,
     subagentDisplayLabel,
     type ActiveSubagent,
     type AgentDispatch,
+    type DispatchActivityEntry,
     type WorkflowDispatch,
 } from "./swarm-model";
+
+function mkEntry(opts: { agentId?: string; timestamp: number; content?: string }): DispatchActivityEntry {
+    const agentId = opts.agentId ?? "a1";
+    return {
+        agentId,
+        event: {
+            agent_id: agentId,
+            timestamp: opts.timestamp,
+            event_type: { type: "text", content: opts.content ?? "hi" },
+        },
+    };
+}
 
 function mk(overrides: Partial<ActiveSubagent> & Pick<ActiveSubagent, "agent_id">): ActiveSubagent {
     return {
@@ -286,6 +300,47 @@ describe("stabilizeGroupIdentity", () => {
         expect(cache.size).toBe(2);
         expect(cache.has("wf:wf_a")).toBe(true);
         expect(cache.has("wf:wf_b")).toBe(true);
+    });
+});
+
+describe("mergeDispatchActivityEntries", () => {
+    it("appends genuinely new entries and re-sorts by timestamp", () => {
+        const prev = [mkEntry({ timestamp: 100 })];
+        const merged = mergeDispatchActivityEntries(prev, [mkEntry({ timestamp: 50 }), mkEntry({ timestamp: 200 })]);
+        expect(merged.map((e) => e.event.timestamp)).toEqual([50, 100, 200]);
+    });
+
+    it("drops an incoming entry that duplicates one already present — the live/backfill race (reagent P1 on #2232)", () => {
+        // A solo dispatch's `GetHistory` backfill and the live
+        // `dispatch:activity` broadcast can both deliver the same
+        // (agentId, timestamp, event) triple if the backend already
+        // flushed it before GetHistory resolved.
+        const prev = [mkEntry({ timestamp: 100, content: "same" })];
+        const merged = mergeDispatchActivityEntries(prev, [mkEntry({ timestamp: 100, content: "same" })]);
+        expect(merged).toHaveLength(1);
+        expect(merged).toBe(prev); // no-op merge returns the same reference
+    });
+
+    it("does not drop two entries that merely share a timestamp but differ in content or agent", () => {
+        const prev = [mkEntry({ timestamp: 100, content: "first" })];
+        const merged = mergeDispatchActivityEntries(prev, [
+            mkEntry({ timestamp: 100, content: "second" }),
+            mkEntry({ timestamp: 100, agentId: "a2", content: "first" }),
+        ]);
+        expect(merged).toHaveLength(3);
+    });
+
+    it("caps the merged feed at MAX_DISPATCH_FEED_ENTRIES (500), dropping the oldest first", () => {
+        const prev = Array.from({ length: 500 }, (_, i) => mkEntry({ timestamp: i }));
+        const merged = mergeDispatchActivityEntries(prev, [mkEntry({ timestamp: 1000 })]);
+        expect(merged).toHaveLength(500);
+        expect(merged[0].event.timestamp).toBe(1);
+        expect(merged[merged.length - 1].event.timestamp).toBe(1000);
+    });
+
+    it("returns the input `prev` array unchanged (by reference) when incoming is empty", () => {
+        const prev = [mkEntry({ timestamp: 100 })];
+        expect(mergeDispatchActivityEntries(prev, [])).toBe(prev);
     });
 });
 

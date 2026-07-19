@@ -397,11 +397,13 @@ function WorkflowDispatchRow({
 }
 
 /**
- * Concatenated activity feed for an expanded `WorkflowDispatchRow` (SPEC
- * §7) — one chronological, member-tagged stream instead of nested member
- * rows, fed by `createDispatchDetail`'s `dispatch:activity` subscription.
- * Live-only: nothing to show until new activity arrives after expand (see
- * that function's doc comment for why there's no historical backfill).
+ * Concatenated activity feed for an expanded Agent Tool or Workflow row —
+ * one chronological, member-tagged stream instead of nested member rows,
+ * fed by `createDispatchDetail`'s `dispatch:activity` subscription. A solo
+ * (Agent Tool) dispatch also backfills history via `GetHistory`; a Workflow
+ * dispatch stays live-only (see `createDispatchDetail`'s doc comment for
+ * why) — so an empty feed right after expand is expected for a Workflow row
+ * and doesn't necessarily mean "no history", hence the kind-neutral copy.
  */
 function DispatchActivityFeed({ dispatchId, model }: { dispatchId: string; model: SwarmViewModel }): JSX.Element {
     const detail = model.getDispatchDetail(dispatchId);
@@ -409,9 +411,7 @@ function DispatchActivityFeed({ dispatchId, model }: { dispatchId: string; model
     return (
         <div class="swarm-dispatch-feed">
             <Show when={entries().length === 0}>
-                <div class="swarm-dispatch-feed-empty">
-                    Waiting for activity — showing new events from now on, not history.
-                </div>
+                <div class="swarm-dispatch-feed-empty">No activity yet.</div>
             </Show>
             <For each={entries()}>{(entry) => <DispatchActivityFeedEntry entry={entry} />}</For>
         </div>
@@ -547,8 +547,6 @@ function SubagentRow({
         </div>
     );
 }
-
-// ── Status chip ──────────────────────────────────────────────────────────
 
 // ── Status chip ──────────────────────────────────────────────────────────
 
