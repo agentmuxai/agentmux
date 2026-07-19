@@ -46,7 +46,7 @@ Practical effect: a jekt message discussing the Armory's credential UI (e.g. "go
 
 `PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30.md` needed the most judgment: its title and a whole section header ("Trust Center information architecture") are structurally built around the old name, updated to Armory — **except** a direct driver quote at line 6 (*"I'd like a cleaner model… break out skills and MCP into the Trust Center…"*), left verbatim since it's a historical quote, not descriptive prose.
 
-`docs/specs/SPEC_AGENT_PANE_UNIFIED_FAILURE_REDUCER_2026_07_06.md` was on the original scan list but has zero actual `"Trust Center"` matches on the current tree (already clean, or a stale grep artifact) — no change needed.
+`docs/specs/SPEC_AGENT_PANE_UNIFIED_FAILURE_REDUCER_2026_07_06.md` had zero matches for the literal phrase `"Trust Center"` — correction, post-review: it did have a stale identifier, `trustCenter: opts.onTrustCenter`, in an embedded code sample. This was missed because the scan for §3.5's code-identifier cleanup only checked actual `.ts`/`.tsx` source, not identifier references inside doc code samples. Fixed alongside this report's own correction; see §6 for the review-driven fixes this file's first draft required.
 
 `SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md` gets different treatment for its two kinds of mention: prose describing the UI surface ("register a GitHub PAT in the trust center keychain") → "Armory", but its keyword-list line (§2 above) gets `armory` *added alongside* `trust center`, not replaced — consistent with the additive, no-regressions approach used for the other three keyword lists.
 
@@ -93,3 +93,10 @@ Both remain accurate scoping documents for whoever picks up that broader work ne
 | agentmux | `docs/handoff/HANDOFF_MEMORY_IDENTITY_MODALS_2026_06_19.md` | Archived → `docs/archive/` |
 | agentmux-docs | `src/content/docs/internals/interagent-comms.md` | Add `armory` to documented keyword list |
 | agentmux-cloud | `muxbus/server/src/index.ts` | Add `'armory'` to `SENSITIVE_KEYWORDS` |
+
+## 6. Corrections made during review
+
+The original scan methodology (single-line `grep -i "trust center"`) had two blind spots, both caught by ReAgent's PR review rather than a second self-check:
+
+1. **Word-wrapped prose.** `SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md`'s Phase 5 section had "...identity from the trust\ncenter." — the phrase split across a markdown line wrap, invisible to a single-line grep. A follow-up multiline-aware search (`trust\s*\n\s*center`) across the whole repo found exactly one more instance of the same class, in `PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30.md` ("...home in the Trust\nCenter."). Both fixed; the multiline search now returns zero hits repo-wide.
+2. **Identifiers inside doc code samples.** §3.5's code-identifier cleanup (`trustCenter`/`onTrustCenter` → `openArmory`/`onOpenArmory`) only searched actual `.ts`/`.tsx` source files. `SPEC_AGENT_PANE_UNIFIED_FAILURE_REDUCER_2026_07_06.md` has an embedded code sample using the same old identifier (`trustCenter: opts.onTrustCenter`) that the source-only search never saw — this is also what produced §3.1's now-corrected, originally-mistaken claim that this file had "zero actual matches." Fixed; a follow-up repo-wide grep for the bare identifiers confirms the only remaining matches are this report's own narrative and the correctly-untouched archived rename spec.
