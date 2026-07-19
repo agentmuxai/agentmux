@@ -1,3 +1,12 @@
+> **Archived 2026-07-19:** Stale — describes an 11-file snapshot from 2026-06-28
+> that already predates several since-landed consolidations (`ci-fast.yml` and
+> `ci-nightly.yml` no longer exist; folded into `ci-nightly-build.yml` per this
+> doc's own recommendations), plus this PR's own deletion of
+> `input-bench-report.yml` and merge of the two `input-handler-*` guardrails
+> into one file. Superseded by
+> `docs/analysis/ANALYSIS_CI_WORKFLOW_CATALOG_2026_07_18.md`, which catalogs
+> the current state. Kept for historical reference only.
+
 # GitHub Actions Workflow Audit — 2026-06-28
 
 11 workflow files in `.github/workflows/`.
