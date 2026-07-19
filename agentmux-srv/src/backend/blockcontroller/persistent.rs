@@ -131,7 +131,9 @@ struct PersistentInner {
     /// `--resume` value it was given as its first line REGARDLESS of whether
     /// resume actually succeeds, racing the stderr reader's own clear of
     /// `session_id` — this stops that race from re-adopting a known-dead id.
-    /// Cleared once a *different*, real session id is captured.
+    /// Never reset back to `None`: a genuinely fresh session id (a new CLI-
+    /// generated UUID) will never equal this one, so a stale poison value
+    /// is permanently inert rather than something that needs clearing.
     resume_poisoned: Option<String>,
     current_pid: Option<u32>,
     /// Channel to send messages to the stdin writer task.
@@ -144,6 +146,36 @@ struct PersistentInner {
     /// AskUserQuestion; consumed by `answer_question` to build the matching
     /// `control_response`. Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
     pending_questions: HashMap<String, (String, serde_json::Value)>,
+}
+
+impl PersistentInner {
+    /// Records `bad_sid` as confirmed-unreachable (the CLI reported "No
+    /// conversation found" for it) and clears it from `session_id` if it's
+    /// currently held there. Pairs with `try_capture_session_id` below —
+    /// whichever of the stderr/stdout reader tasks runs first, the
+    /// poisoned id never survives as the live `session_id`.
+    fn poison_resume(&mut self, bad_sid: &str) {
+        self.resume_poisoned = Some(bad_sid.to_string());
+        if self.session_id.as_deref() == Some(bad_sid) {
+            self.session_id = None;
+        }
+    }
+
+    /// Attempts to adopt `sid` as the live session id. Returns `false`
+    /// (does not adopt) if a session id is already held, or if `sid` is
+    /// the confirmed-poisoned id from a prior `poison_resume` call — the
+    /// CLI echoes back whatever `--resume` it was given as its first
+    /// stdout line even when that resume goes on to fail, so without this
+    /// check a losing race would silently re-adopt a known-dead id right
+    /// after `poison_resume` cleared it. A genuinely different (fresh)
+    /// sid is unaffected and still captured normally.
+    fn try_capture_session_id(&mut self, sid: &str) -> bool {
+        if self.session_id.is_some() || self.resume_poisoned.as_deref() == Some(sid) {
+            return false;
+        }
+        self.session_id = Some(sid.to_string());
+        true
+    }
 }
 
 /// PersistentSubprocessController keeps a long-running CLI process alive,
@@ -728,22 +760,10 @@ impl PersistentSubprocessController {
                     // fresh conversation instead.
                     if line.contains("No conversation found with session ID") {
                         if let Some(ref bad_sid) = attempted_resume_sid {
-                            // Poison-then-clear in one critical section: the CLI
-                            // echoes back whatever --resume it was given as its
-                            // first stdout line REGARDLESS of whether resume
-                            // actually succeeds (the stdout reader below adopts
-                            // that into inner.session_id). Racing that adoption
-                            // against a clear-only fix would sometimes lose —
-                            // the stdout capture re-sets the same dead id right
-                            // after this clears it. Recording it as poisoned
-                            // makes the stdout reader refuse to (re-)adopt it,
-                            // whichever task wins the race.
-                            let mut inner = inner_stderr.lock().unwrap();
-                            inner.resume_poisoned = Some(bad_sid.clone());
-                            if inner.session_id.as_deref() == Some(bad_sid.as_str()) {
-                                inner.session_id = None;
-                            }
-                            drop(inner);
+                            // See PersistentInner::poison_resume — also guards
+                            // against the stdout reader's own capture (below)
+                            // re-adopting this same dead id if it wins the race.
+                            inner_stderr.lock().unwrap().poison_resume(bad_sid);
                             tracing::warn!(
                                 block_id = %block_id_stderr,
                                 session_id = %bad_sid,
@@ -925,24 +945,11 @@ impl PersistentSubprocessController {
                     }
                     if let Some(sid) = parsed.get(&session_id_field).and_then(|v| v.as_str()) {
                         let sid_string = sid.to_string();
-                        // Single critical section for check-and-set (no gap for
-                        // the stderr reader's poison write to land in between)
-                        // and refuses to (re-)adopt an id already confirmed
-                        // unreachable — the CLI echoes back whatever --resume
-                        // it was given as this very first stdout line even when
-                        // that resume goes on to fail, racing the stderr
-                        // reader's clear. A real *different* id (e.g. after the
-                        // CLI gives up and starts fresh) still gets captured
-                        // normally, which also lifts the poison.
-                        let should_capture = {
-                            let mut inner = inner_read.lock().unwrap();
-                            let poisoned = inner.resume_poisoned.as_deref() == Some(sid_string.as_str());
-                            let capture = inner.session_id.is_none() && !poisoned;
-                            if capture {
-                                inner.session_id = Some(sid_string.clone());
-                            }
-                            capture
-                        };
+                        // See PersistentInner::try_capture_session_id — refuses
+                        // to (re-)adopt an id the stderr reader (above) already
+                        // confirmed unreachable, whichever task wins the race.
+                        let should_capture =
+                            inner_read.lock().unwrap().try_capture_session_id(&sid_string);
                         if should_capture {
                             tracing::info!(
                                 block_id = %block_id_read,
@@ -1300,5 +1307,75 @@ mod send_input_tests {
             !c.get_status_snapshot().turn_active,
             "turn_active must flip back false once the turn ends"
         );
+    }
+}
+
+/// Covers the stderr-poison / stdout-capture race directly against
+/// `PersistentInner`'s decision logic, without spawning a real CLI
+/// process — see `poison_resume` / `try_capture_session_id`.
+#[cfg(test)]
+mod resume_poison_tests {
+    use super::*;
+
+    fn inner_with_session_id(session_id: Option<&str>) -> PersistentInner {
+        PersistentInner {
+            proc_status: STATUS_INIT.to_string(),
+            proc_exit_code: 0,
+            status_version: 0,
+            session_id: session_id.map(str::to_string),
+            resume_poisoned: None,
+            current_pid: None,
+            stdin_tx: None,
+            kill_tx: None,
+            pending_questions: HashMap::new(),
+        }
+    }
+
+    // stderr wins the race: poisons the id and clears it from session_id,
+    // then the stdout reader's later echo of the same dead id is refused.
+    #[test]
+    fn stderr_first_then_stdout_echo_is_refused() {
+        let mut inner = inner_with_session_id(Some("dead-sid"));
+        inner.poison_resume("dead-sid");
+        assert_eq!(inner.session_id, None, "poisoning the live session id clears it");
+
+        let captured = inner.try_capture_session_id("dead-sid");
+        assert!(!captured, "must refuse to re-adopt a confirmed-poisoned id");
+        assert_eq!(inner.session_id, None);
+    }
+
+    // stdout wins the race (echoes the dead id before stderr's "No
+    // conversation found" arrives): the later poison must still clear it.
+    #[test]
+    fn stdout_first_then_stderr_poison_still_clears() {
+        let mut inner = inner_with_session_id(None);
+        let captured = inner.try_capture_session_id("dead-sid");
+        assert!(captured, "first capture with no prior state succeeds");
+        assert_eq!(inner.session_id.as_deref(), Some("dead-sid"));
+
+        inner.poison_resume("dead-sid");
+        assert_eq!(inner.session_id, None, "poison must clear it even though stdout set it first");
+    }
+
+    // A genuinely fresh session id (the CLI gave up on --resume and started
+    // a new conversation) is unaffected by an unrelated prior poison.
+    #[test]
+    fn different_fresh_session_id_is_captured_normally() {
+        let mut inner = inner_with_session_id(None);
+        inner.poison_resume("dead-sid");
+
+        let captured = inner.try_capture_session_id("fresh-sid");
+        assert!(captured, "a different id is not blocked by an unrelated poison");
+        assert_eq!(inner.session_id.as_deref(), Some("fresh-sid"));
+    }
+
+    // Once a session id is already held, a second stdout line (e.g. a
+    // duplicate echo) must not overwrite it.
+    #[test]
+    fn does_not_overwrite_an_already_captured_session_id() {
+        let mut inner = inner_with_session_id(Some("first-sid"));
+        let captured = inner.try_capture_session_id("second-sid");
+        assert!(!captured, "must not overwrite an already-captured session id");
+        assert_eq!(inner.session_id.as_deref(), Some("first-sid"));
     }
 }
