@@ -947,13 +947,15 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 authProviderId={provider()?.id ?? providerKey()}
                 onSubagentClick={handleSubagentClick}
                 onAgentErrorLogin={() => {
-                    if (provider()?.id === "claude") {
-                        log("auth", "Use existing login (inline error node) — seeding from global Claude login");
-                        void status.useGlobalLogin();
-                    } else {
-                        log("auth", "Login Again (inline error node) — forcing a fresh provider login");
-                        void status.relogin();
-                    }
+                    // Must match onLoginAgain above: the button is labeled "Login
+                    // Again", so it has to force a fresh OAuth regardless of
+                    // provider. A prior version special-cased Claude into
+                    // useGlobalLogin() instead — silently reusing the (possibly
+                    // equally-stale) global credential under a "Login Again"
+                    // label, which is exactly the kind of no-op this button
+                    // exists to avoid (retro-agent-auth-relogin-noop-2026-07-01).
+                    log("auth", "Login Again (inline error node) — forcing a fresh provider login");
+                    void status.relogin();
                 }}
                 onLoadOlder={history.loadOlder}
                 loadingOlder={history.loadingOlder}

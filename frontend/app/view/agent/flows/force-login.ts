@@ -14,7 +14,7 @@
  * or the `/login` command) we KNOW the token is bad, so we must force a fresh
  * OAuth instead of trusting the check.
  *
- * Opens the OAuth in an in-app browser pane (with the system browser as a
+ * Opens the OAuth in the system browser (with an in-app browser pane as a
  * fallback) and surfaces the URL via `setAuthUrl` so the auth box appears above
  * the composer with the URL + paste-the-code input. The running persistent
  * agent re-reads its credential per request, so it picks up the fresh token on
