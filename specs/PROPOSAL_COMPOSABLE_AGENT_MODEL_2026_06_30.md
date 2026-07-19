@@ -26,8 +26,8 @@ context files + MCP servers + skills* in one record, while **identity** and
    "bundles." Adding "preset bundle" on top would compound the collision.
 
 The fix is not a bigger preset. It's to **separate the reusable building blocks
-from the thing that assembles them**, and give each a clear home in the Trust
-Center.
+from the thing that assembles them**, and give each a clear home in the
+Armory.
 
 ## 2. Design principles
 
