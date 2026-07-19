@@ -164,6 +164,49 @@
     flex-direction: column;
 }
 
+// ── Dispatch-kind buckets (SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19
+// §4) — two fixed sections per agent, "Agent Tool" and "Workflow", each its
+// own color so the two kinds read apart at a glance even before their
+// (eagerly-resolved) names are legible. Hidden entirely when empty — see
+// AgentToolBucket/WorkflowBucket in swarm-view.tsx. Colors reuse existing
+// theme vars only (--accent-color, --warning-color — the latter already
+// tied to "workflow active" status elsewhere in this file, so reusing it
+// for the Workflow bucket label keeps one coherent color association
+// instead of introducing an unrelated third meaning for the same hue). ────
+
+.swarm-bucket {
+    display: flex;
+    flex-direction: column;
+
+    &--agent-tool .swarm-bucket-label {
+        color: var(--accent-color);
+    }
+    &--workflow .swarm-bucket-label {
+        color: var(--warning-color, #f5a623);
+    }
+}
+
+.swarm-bucket-header {
+    display: flex;
+    align-items: center;
+    height: 22px;
+    padding: 0 6px 0 22px;
+    gap: 6px;
+    user-select: none;
+}
+
+.swarm-bucket-label {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.swarm-bucket-count {
+    font-size: 10px;
+    color: var(--secondary-text-color);
+}
+
 // ── Workflow group (subagents spawned together by one Task/Workflow-tool
 // run, collapsed into one row instead of one row per member) ─────────────
 
@@ -231,15 +274,6 @@
     &--retired {
         color: var(--secondary-text-color);
         background: var(--highlight-bg);
-    }
-}
-
-.swarm-workflow-members {
-    display: flex;
-    flex-direction: column;
-
-    .swarm-subagent-row {
-        padding-left: 48px; // one indent level deeper than a loose subagent row
     }
 }
 
@@ -335,55 +369,8 @@
     flex-shrink: 0;
 }
 
-// ── Subagent inline detail (expanded event log) ──────────────────────────
-
-.swarm-subagent-detail {
-    display: flex;
-    flex-direction: column;
-    margin: 0 6px 4px 30px;
-    border: 1px solid var(--border-color);
-    border-radius: 4px;
-    background: var(--panel-bg-color, var(--main-bg-color));
-    max-height: 320px;
-    overflow: hidden;
-}
-
-.swarm-subagent-detail-header {
-    display: flex;
-    align-items: baseline;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 6px 8px;
-    border-bottom: 1px solid var(--border-color);
-    flex-shrink: 0;
-}
-
-.swarm-subagent-detail-name {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--main-text-color);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.swarm-subagent-detail-meta {
-    font-size: 10px;
-    color: var(--secondary-text-color);
-    white-space: nowrap;
-}
-
-.swarm-subagent-detail-log {
-    overflow-y: auto;
-    padding: 2px 8px 4px;
-}
-
-.swarm-subagent-detail-loading,
-.swarm-subagent-detail-empty {
-    padding: 8px 0;
-    font-size: 11px;
-    color: var(--secondary-text-color);
-}
+// ── Subagent detail event rendering (shared by the concatenated dispatch
+// feed above — DispatchActivityFeedEntry, swarm-view.tsx) ────────────────
 
 .swarm-subagent-detail-text {
     margin: 2px 0;

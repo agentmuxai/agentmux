@@ -3,29 +3,16 @@
 
 import { describe, expect, it } from "vitest";
 import {
-    buildDispatchChildren,
+    buildDispatchBuckets,
     groupCacheKey,
-    isNameGroup,
-    isWorkflowDispatch,
     mergeSubagentsPreservingIdentity,
     pruneGroupIdentityCache,
     stabilizeGroupIdentity,
     subagentDisplayLabel,
     type ActiveSubagent,
     type AgentDispatch,
-    type NameGroup,
-    type SwarmChild,
     type WorkflowDispatch,
 } from "./swarm-model";
-
-/** Extract a SwarmChild's own identifying id, for assertions that don't care
- *  which of the three variants they got — narrows through all three via
- *  isWorkflowDispatch/isNameGroup rather than an unsafe cast. */
-function childId(c: SwarmChild): string {
-    if (isWorkflowDispatch(c)) return c.dispatchId;
-    if (isNameGroup(c)) return c.name;
-    return c.agent_id;
-}
 
 function mk(overrides: Partial<ActiveSubagent> & Pick<ActiveSubagent, "agent_id">): ActiveSubagent {
     return {
@@ -54,32 +41,32 @@ function mkDispatch(overrides: Partial<AgentDispatch> & Pick<AgentDispatch, "dis
         members_done: 0,
         status: "running",
         last_event_at: 0,
+        dispatch_name: null,
         ...overrides,
     };
 }
 
-describe("buildDispatchChildren", () => {
-    it("leaves solo-dispatch subagents (no tracked AgentDispatch) as loose, ungrouped rows", () => {
-        const result = buildDispatchChildren([], [mk({ agent_id: "a1" }), mk({ agent_id: "a2" })]);
-        expect(result).toHaveLength(2);
-        expect(result.every((c) => !isWorkflowDispatch(c))).toBe(true);
+describe("buildDispatchBuckets", () => {
+    it("puts every solo dispatch in agentToolRows, never grouped", () => {
+        const { agentToolRows, workflowRows } = buildDispatchBuckets(
+            [],
+            [mk({ agent_id: "a1" }), mk({ agent_id: "a2" }), mk({ agent_id: "a3" })]
+        );
+        expect(agentToolRows).toHaveLength(3);
+        expect(workflowRows).toHaveLength(0);
     });
 
-    it("renders a Workflow-kind AgentDispatch as one row regardless of member count", () => {
+    it("renders a Workflow-kind AgentDispatch as one row in workflowRows, regardless of member count", () => {
         const dispatches = [mkDispatch({ dispatch_id: "wf_1", member_count: 3, status: "running" })];
         const subagents = [
             mk({ agent_id: "a1", dispatch_id: "wf_1", slug: "cheerful-enchanting-sketch" }),
             mk({ agent_id: "a2", dispatch_id: "wf_1", slug: "cheerful-enchanting-sketch" }),
             mk({ agent_id: "a3", dispatch_id: "wf_1", slug: "cheerful-enchanting-sketch" }),
         ];
-        const result = buildDispatchChildren(dispatches, subagents);
-        expect(result).toHaveLength(1);
-        const group = result[0];
-        expect(isWorkflowDispatch(group)).toBe(true);
-        if (isWorkflowDispatch(group)) {
-            expect(group.memberCount).toBe(3);
-            expect(group.name).toBe("cheerful-enchanting-sketch");
-        }
+        const { agentToolRows, workflowRows } = buildDispatchBuckets(dispatches, subagents);
+        expect(agentToolRows).toHaveLength(0);
+        expect(workflowRows).toHaveLength(1);
+        expect(workflowRows[0].memberCount).toBe(3);
     });
 
     it("never renders one row per member — SPEC §7, even for a dispatch this test can't realistically construct at full scale (1,030+ observed live)", () => {
@@ -87,21 +74,20 @@ describe("buildDispatchChildren", () => {
         const subagents = Array.from({ length: 50 }, (_, i) =>
             mk({ agent_id: `m${i}`, dispatch_id: "wf_big" })
         );
-        const result = buildDispatchChildren(dispatches, subagents);
-        // One row for the dispatch — the (partial, in this test) member list
-        // never expands into its own rows.
-        expect(result).toHaveLength(1);
-        expect(isWorkflowDispatch(result[0])).toBe(true);
+        const { workflowRows } = buildDispatchBuckets(dispatches, subagents);
+        expect(workflowRows).toHaveLength(1);
+        expect(workflowRows[0].memberCount).toBe(200);
     });
 
     it("does not carry a member list on WorkflowDispatch — SPEC §7 (a large dispatch can't hold thousands of members in the tree atom)", () => {
         const dispatches = [mkDispatch({ dispatch_id: "wf_1", member_count: 2 })];
         const subagents = [mk({ agent_id: "a1", dispatch_id: "wf_1" }), mk({ agent_id: "a2", dispatch_id: "wf_1" })];
-        const [group] = buildDispatchChildren(dispatches, subagents);
-        expect("subagents" in (group as object)).toBe(false);
+        const { workflowRows } = buildDispatchBuckets(dispatches, subagents);
+        expect("subagents" in (workflowRows[0] as object)).toBe(false);
+        expect("members" in (workflowRows[0] as object)).toBe(false);
     });
 
-    it("mixes loose subagents and workflow dispatches independently, one row per distinct dispatch", () => {
+    it("mixes agentToolRows and workflowRows independently, one row per distinct dispatch", () => {
         const dispatches = [
             mkDispatch({ dispatch_id: "wf_1", member_count: 2 }),
             mkDispatch({ dispatch_id: "wf_2", member_count: 1 }),
@@ -111,253 +97,105 @@ describe("buildDispatchChildren", () => {
             mk({ agent_id: "a2", dispatch_id: "wf_1" }),
             mk({ agent_id: "a3", dispatch_id: "wf_2" }),
             mk({ agent_id: "a4" }), // solo
+            mk({ agent_id: "a5" }), // solo
         ];
-        const result = buildDispatchChildren(dispatches, subagents);
-        const groups = result.filter(isWorkflowDispatch);
-        const loose = result.filter((c) => !isWorkflowDispatch(c));
-        expect(groups).toHaveLength(2);
-        expect(loose).toHaveLength(1);
+        const { agentToolRows, workflowRows } = buildDispatchBuckets(dispatches, subagents);
+        expect(workflowRows).toHaveLength(2);
+        expect(agentToolRows).toHaveLength(2);
     });
 
-    it("falls back to a loose row for a workflow-kind subagent whose dispatch is missing from `dispatches` (stale/failed ListDispatches)", () => {
+    it("falls back to agentToolRows for a workflow-kind subagent whose dispatch is missing from `dispatches` (stale/failed ListDispatches)", () => {
         // `loadDispatches()` silently swallows RPC errors, so `dispatches`
         // can lag or miss entries that `subagents` (a separate fetch)
         // already has. A workflow member with no matching AgentDispatch row
-        // must degrade to a loose row, not vanish from the tree.
+        // must degrade to an Agent Tool row, not vanish from the tree.
         const dispatches = [mkDispatch({ dispatch_id: "wf_1", member_count: 1 })];
         const subagents = [
             mk({ agent_id: "a1", dispatch_id: "wf_1" }),
             mk({ agent_id: "a2", dispatch_id: "wf_missing" }),
         ];
-        const result = buildDispatchChildren(dispatches, subagents);
-        const groups = result.filter(isWorkflowDispatch);
-        const loose = result.filter((c) => !isWorkflowDispatch(c));
-        expect(groups).toHaveLength(1);
-        expect(loose).toHaveLength(1);
-        expect(childId(loose[0])).toBe("a2");
+        const { agentToolRows, workflowRows } = buildDispatchBuckets(dispatches, subagents);
+        expect(workflowRows).toHaveLength(1);
+        expect(agentToolRows).toHaveLength(1);
+        expect(agentToolRows[0].agent_id).toBe("a2");
     });
 
     it("passes AgentDispatch.status through directly — running → active, completed → retired", () => {
-        const running = buildDispatchChildren(
-            [mkDispatch({ dispatch_id: "wf_1", status: "running" })],
-            [mk({ agent_id: "a1", dispatch_id: "wf_1" })]
-        )[0];
-        const completed = buildDispatchChildren(
-            [mkDispatch({ dispatch_id: "wf_2", status: "completed" })],
-            [mk({ agent_id: "a2", dispatch_id: "wf_2" })]
-        )[0];
-        if (isWorkflowDispatch(running) && isWorkflowDispatch(completed)) {
-            expect(running.status).toBe("active");
-            expect(completed.status).toBe("retired");
-        } else {
-            throw new Error("expected workflow dispatch rows");
-        }
+        const { workflowRows } = buildDispatchBuckets(
+            [
+                mkDispatch({ dispatch_id: "wf_1", status: "running" }),
+                mkDispatch({ dispatch_id: "wf_2", status: "completed" }),
+            ],
+            [mk({ agent_id: "a1", dispatch_id: "wf_1" }), mk({ agent_id: "a2", dispatch_id: "wf_2" })]
+        );
+        const running = workflowRows.find((w) => w.dispatchId === "wf_1");
+        const completed = workflowRows.find((w) => w.dispatchId === "wf_2");
+        expect(running?.status).toBe("active");
+        expect(completed?.status).toBe("retired");
     });
 
-    it("derives the dispatch name from the first member with a non-empty slug", () => {
-        const result = buildDispatchChildren(
-            [mkDispatch({ dispatch_id: "wf_1" })],
+    it("prefers the backend's eager dispatch_name over a member's slug", () => {
+        const { workflowRows } = buildDispatchBuckets(
+            [mkDispatch({ dispatch_id: "wf_1", dispatch_name: "Refactor auth module" })],
+            [mk({ agent_id: "a1", dispatch_id: "wf_1", slug: "zesty-crafting-kahan" })]
+        );
+        expect(workflowRows[0].name).toBe("Refactor auth module");
+    });
+
+    it("falls back to a member's slug when dispatch_name hasn't resolved yet", () => {
+        const { workflowRows } = buildDispatchBuckets(
+            [mkDispatch({ dispatch_id: "wf_1", dispatch_name: null })],
             [
                 mk({ agent_id: "a1", dispatch_id: "wf_1", slug: "", last_event_at: 200 }),
                 mk({ agent_id: "a2", dispatch_id: "wf_1", slug: "zesty-crafting-kahan", last_event_at: 100 }),
             ]
         );
-        const group = result[0];
-        if (isWorkflowDispatch(group)) {
-            expect(group.name).toBe("zesty-crafting-kahan");
-        } else {
-            throw new Error("expected a workflow dispatch");
-        }
+        expect(workflowRows[0].name).toBe("zesty-crafting-kahan");
     });
 
-    it("falls back to the dispatch id as the name when no member has a slug (or no members are known yet)", () => {
-        const result = buildDispatchChildren(
-            [mkDispatch({ dispatch_id: "wf_unnamed" })],
+    it("falls back to the raw dispatch id when neither dispatch_name nor any member slug is available", () => {
+        const { workflowRows } = buildDispatchBuckets(
+            [mkDispatch({ dispatch_id: "wf_unnamed", dispatch_name: null })],
             [mk({ agent_id: "a1", dispatch_id: "wf_unnamed", slug: "" })]
         );
-        const group = result[0];
-        if (isWorkflowDispatch(group)) {
-            expect(group.name).toBe("wf_unnamed");
-        } else {
-            throw new Error("expected a workflow dispatch");
-        }
+        expect(workflowRows[0].name).toBe("wf_unnamed");
     });
 
-    it("sorts loose subagents and dispatches together by most recent activity", () => {
-        const result = buildDispatchChildren(
-            [mkDispatch({ dispatch_id: "wf_1", last_event_at: 500 })],
+    it("sorts agentToolRows by most recent activity", () => {
+        const { agentToolRows } = buildDispatchBuckets(
+            [],
             [
-                mk({ agent_id: "old-loose", last_event_at: 100 }),
-                mk({ agent_id: "a1", dispatch_id: "wf_1", last_event_at: 500 }),
-                mk({ agent_id: "newest-loose", last_event_at: 900 }),
+                mk({ agent_id: "old", last_event_at: 100 }),
+                mk({ agent_id: "newest", last_event_at: 900 }),
+                mk({ agent_id: "mid", last_event_at: 500 }),
             ]
         );
-        expect(result).toHaveLength(3);
-        // newest-loose (900) > wf_1 dispatch (500) > old-loose (100)
-        expect(childId(result[0])).toBe("newest-loose");
-        expect(childId(result[2])).toBe("old-loose");
+        expect(agentToolRows.map((r) => r.agent_id)).toEqual(["newest", "mid", "old"]);
     });
 
-    describe("name-based grouping of solo dispatches (issue: same-name duplicate rows)", () => {
-        it("collapses 2+ solo dispatches sharing a display_name into one NameGroup", () => {
-            const result = buildDispatchChildren(
-                [],
-                [
-                    mk({ agent_id: "a1", display_name: "Code Reviewer" }),
-                    mk({ agent_id: "a2", display_name: "Code Reviewer" }),
-                    mk({ agent_id: "a3", display_name: "Code Reviewer" }),
-                ]
-            );
-            expect(result).toHaveLength(1);
-            const group = result[0];
-            expect(isNameGroup(group)).toBe(true);
-            if (isNameGroup(group)) {
-                expect(group.name).toBe("Code Reviewer");
-                expect(group.totalCount).toBe(3);
-            }
-        });
+    it("sorts workflowRows by most recent activity", () => {
+        const { workflowRows } = buildDispatchBuckets(
+            [
+                mkDispatch({ dispatch_id: "wf_old", last_event_at: 100 }),
+                mkDispatch({ dispatch_id: "wf_newest", last_event_at: 900 }),
+                mkDispatch({ dispatch_id: "wf_mid", last_event_at: 500 }),
+            ],
+            []
+        );
+        expect(workflowRows.map((r) => r.dispatchId)).toEqual(["wf_newest", "wf_mid", "wf_old"]);
+    });
 
-        it("leaves a single subagent with a unique display_name as a loose row (no group chrome for a non-dupe)", () => {
-            const result = buildDispatchChildren([], [mk({ agent_id: "a1", display_name: "Only One" })]);
-            expect(result).toHaveLength(1);
-            expect(isNameGroup(result[0])).toBe(false);
-            expect(childId(result[0])).toBe("a1");
-        });
-
-        it("leaves subagents with no display_name AND no slug as loose, ungrouped rows even if several exist", () => {
-            const result = buildDispatchChildren(
-                [],
-                [mk({ agent_id: "a1", display_name: null }), mk({ agent_id: "a2", display_name: null })]
-            );
-            expect(result).toHaveLength(2);
-            expect(result.every((c) => !isNameGroup(c))).toBe(true);
-        });
-
-        it("collapses 2+ solo dispatches sharing only a slug (no display_name resolved yet) into one NameGroup", () => {
-            // The common case: Claude Code stamps one slug per CLI session on
-            // every subagent it spawns (not per-subagent), and display_name
-            // only resolves once a client manually expands a row — so most
-            // solo dispatches are seen here with display_name: null and an
-            // identical slug. Without the slug fallback, a session with many
-            // solo Task-tool calls renders one row per call at the top level,
-            // which is the "dozens of copies of the same slug" regression.
-            const result = buildDispatchChildren(
-                [],
-                [
-                    mk({ agent_id: "a1", display_name: null, slug: "quizzical-tumbling-valiant" }),
-                    mk({ agent_id: "a2", display_name: null, slug: "quizzical-tumbling-valiant" }),
-                    mk({ agent_id: "a3", display_name: null, slug: "quizzical-tumbling-valiant" }),
-                ]
-            );
-            expect(result).toHaveLength(1);
-            const group = result[0];
-            expect(isNameGroup(group)).toBe(true);
-            if (isNameGroup(group)) {
-                expect(group.name).toBe("quizzical-tumbling-valiant");
-                expect(group.totalCount).toBe(3);
-            }
-        });
-
-        it("prefers display_name over slug as the grouping key — a named member does not join its same-slug siblings' slug-keyed group", () => {
-            const result = buildDispatchChildren(
-                [],
-                [
-                    mk({ agent_id: "a1", display_name: null, slug: "shared-slug" }),
-                    mk({ agent_id: "a2", display_name: null, slug: "shared-slug" }),
-                    mk({ agent_id: "a3", display_name: "Named Differently", slug: "shared-slug" }),
-                ]
-            );
-            const groups = result.filter(isNameGroup);
-            // a1/a2 collapse under the shared slug; a3 (resolved display_name)
-            // is its own loose row since nothing else shares "Named Differently".
-            expect(groups).toHaveLength(1);
-            expect(groups[0].name).toBe("shared-slug");
-            expect(groups[0].totalCount).toBe(2);
-            expect(result.some((c) => !isNameGroup(c) && !isWorkflowDispatch(c) && c.agent_id === "a3")).toBe(true);
-        });
-
-        it("workflow dispatches take priority — same-named subagents in a workflow never form a NameGroup", () => {
-            const result = buildDispatchChildren(
-                [mkDispatch({ dispatch_id: "wf_1", member_count: 2 })],
-                [
-                    mk({ agent_id: "a1", dispatch_id: "wf_1", display_name: "Worker" }),
-                    mk({ agent_id: "a2", dispatch_id: "wf_1", display_name: "Worker" }),
-                ]
-            );
-            expect(result).toHaveLength(1);
-            expect(isWorkflowDispatch(result[0])).toBe(true);
-            expect(result.some(isNameGroup)).toBe(false);
-        });
-
-        it("marks a NameGroup active if any member is still active", () => {
-            const result = buildDispatchChildren(
-                [],
-                [
-                    mk({ agent_id: "a1", display_name: "N", status: "completed" }),
-                    mk({ agent_id: "a2", display_name: "N", status: "active" }),
-                ]
-            );
-            const group = result[0];
-            if (isNameGroup(group)) {
-                expect(group.status).toBe("active");
-                expect(group.activeCount).toBe(1);
-            } else {
-                throw new Error("expected a name group");
-            }
-        });
-
-        it("marks a NameGroup retired only once every member has completed", () => {
-            const result = buildDispatchChildren(
-                [],
-                [
-                    mk({ agent_id: "a1", display_name: "N", status: "completed" }),
-                    mk({ agent_id: "a2", display_name: "N", status: "completed" }),
-                ]
-            );
-            const group = result[0];
-            if (isNameGroup(group)) {
-                expect(group.status).toBe("retired");
-            } else {
-                throw new Error("expected a name group");
-            }
-        });
-
-        it("treats an abandoned NameGroup member the same as a completed one (both terminal)", () => {
-            const result = buildDispatchChildren(
-                [],
-                [
-                    mk({ agent_id: "a1", display_name: "N", status: "completed" }),
-                    mk({ agent_id: "a2", display_name: "N", status: "abandoned" }),
-                ]
-            );
-            const group = result[0];
-            if (isNameGroup(group)) {
-                expect(group.status).toBe("retired");
-                expect(group.activeCount).toBe(0);
-            } else {
-                throw new Error("expected a name group");
-            }
-        });
-
-        it("mixes loose subagents, workflow dispatches, and name groups together, sorted by recency", () => {
-            const result = buildDispatchChildren(
-                [mkDispatch({ dispatch_id: "wf_1", last_event_at: 500 })],
-                [
-                    mk({ agent_id: "solo", display_name: "Unique", last_event_at: 50 }),
-                    mk({ agent_id: "n1", display_name: "Dup", last_event_at: 300 }),
-                    mk({ agent_id: "n2", display_name: "Dup", last_event_at: 700 }),
-                    mk({ agent_id: "w1", dispatch_id: "wf_1", last_event_at: 500 }),
-                ]
-            );
-            expect(result).toHaveLength(3);
-            const nameGroups = result.filter(isNameGroup);
-            const workflowDispatches = result.filter(isWorkflowDispatch);
-            expect(nameGroups).toHaveLength(1);
-            expect(workflowDispatches).toHaveLength(1);
-            // Dup group's lastEventAt (700, from n2) > wf_1 dispatch (500) > solo (50)
-            expect(childId(result[0])).toBe("Dup");
-            expect(childId(result[2])).toBe("solo");
-        });
+    it("workflow membership always wins over same-slug agentToolRows leakage — a tracked workflow member never also appears in agentToolRows", () => {
+        const dispatches = [mkDispatch({ dispatch_id: "wf_1", member_count: 2 })];
+        const subagents = [
+            mk({ agent_id: "a1", dispatch_id: "wf_1", slug: "shared-slug" }),
+            mk({ agent_id: "a2", dispatch_id: "wf_1", slug: "shared-slug" }),
+            mk({ agent_id: "a3", slug: "shared-slug" }), // genuinely solo, same slug
+        ];
+        const { agentToolRows, workflowRows } = buildDispatchBuckets(dispatches, subagents);
+        expect(workflowRows).toHaveLength(1);
+        expect(agentToolRows).toHaveLength(1);
+        expect(agentToolRows[0].agent_id).toBe("a3");
     });
 });
 
@@ -404,13 +242,13 @@ describe("stabilizeGroupIdentity", () => {
         const cache = new Map<string, WorkflowDispatch>();
         const dispatches = [mkDispatch({ dispatch_id: "wf_1", member_count: 1 })];
         const members = [mk({ agent_id: "a1", dispatch_id: "wf_1" })];
-        const first = buildDispatchChildren(dispatches, members);
+        const first = buildDispatchBuckets(dispatches, members).workflowRows;
         const stabilizedFirst = stabilizeGroupIdentity(cache, first);
 
         // A second, independently-built (but content-identical) row for the
-        // same dispatch — mirrors what a fresh buildDispatchChildren() call
+        // same dispatch — mirrors what a fresh buildDispatchBuckets() call
         // produces on an unrelated buildTree() recompute.
-        const second = buildDispatchChildren(dispatches, members);
+        const second = buildDispatchBuckets(dispatches, members).workflowRows;
         const stabilizedSecond = stabilizeGroupIdentity(cache, second);
 
         expect(stabilizedSecond[0]).toBe(stabilizedFirst[0]);
@@ -418,127 +256,60 @@ describe("stabilizeGroupIdentity", () => {
 
     it("returns a fresh reference when the dispatch's own fields actually changed", () => {
         const cache = new Map<string, WorkflowDispatch>();
-        const first = buildDispatchChildren(
+        const first = buildDispatchBuckets(
             [mkDispatch({ dispatch_id: "wf_1", member_count: 1, members_done: 0 })],
             [mk({ agent_id: "a1", dispatch_id: "wf_1" })]
-        );
+        ).workflowRows;
         const stabilizedFirst = stabilizeGroupIdentity(cache, first);
 
-        const second = buildDispatchChildren(
+        const second = buildDispatchBuckets(
             [mkDispatch({ dispatch_id: "wf_1", member_count: 1, members_done: 1, status: "completed" })],
             [mk({ agent_id: "a1", dispatch_id: "wf_1" })]
-        );
+        ).workflowRows;
         const stabilizedSecond = stabilizeGroupIdentity(cache, second);
 
         expect(stabilizedSecond[0]).not.toBe(stabilizedFirst[0]);
     });
 
-    it("passes loose (non-group) subagents through unchanged", () => {
+    it("keeps two distinct dispatches as independent cache entries", () => {
         const cache = new Map<string, WorkflowDispatch>();
-        const loose = buildDispatchChildren([], [mk({ agent_id: "a1" })]);
-        const stabilized = stabilizeGroupIdentity(cache, loose);
-        expect(stabilized[0]).toBe(loose[0]);
-        expect(cache.size).toBe(0);
-    });
-
-    it("reuses the cached NameGroup reference when nothing about the group changed", () => {
-        const cache = new Map<string, WorkflowDispatch | NameGroup>();
-        const members = [
-            mk({ agent_id: "a1", display_name: "Dup" }),
-            mk({ agent_id: "a2", display_name: "Dup" }),
-        ];
-        const first = buildDispatchChildren([], members);
-        const stabilizedFirst = stabilizeGroupIdentity(cache, first);
-
-        const second = buildDispatchChildren([], members);
-        const stabilizedSecond = stabilizeGroupIdentity(cache, second);
-
-        expect(stabilizedSecond[0]).toBe(stabilizedFirst[0]);
-    });
-
-    it("keeps a WorkflowDispatch and a NameGroup with the same raw id/name as distinct cache entries", () => {
-        // groupCacheKey namespaces with "wf:"/"name:" precisely so this
-        // coincidence can't collide two unrelated groups into one cache slot.
-        const cache = new Map<string, WorkflowDispatch | NameGroup>();
-        const wfChildren = buildDispatchChildren(
-            [mkDispatch({ dispatch_id: "shared-id", member_count: 2 })],
-            [mk({ agent_id: "a1", dispatch_id: "shared-id" }), mk({ agent_id: "a2", dispatch_id: "shared-id" })]
-        );
-        const nameChildren = buildDispatchChildren(
-            [],
-            [
-                mk({ agent_id: "b1", display_name: "shared-id" }),
-                mk({ agent_id: "b2", display_name: "shared-id" }),
-            ]
-        );
-        stabilizeGroupIdentity(cache, wfChildren);
-        stabilizeGroupIdentity(cache, nameChildren);
+        const rowsA = buildDispatchBuckets(
+            [mkDispatch({ dispatch_id: "wf_a" })],
+            [mk({ agent_id: "a1", dispatch_id: "wf_a" })]
+        ).workflowRows;
+        const rowsB = buildDispatchBuckets(
+            [mkDispatch({ dispatch_id: "wf_b" })],
+            [mk({ agent_id: "b1", dispatch_id: "wf_b" })]
+        ).workflowRows;
+        stabilizeGroupIdentity(cache, rowsA);
+        stabilizeGroupIdentity(cache, rowsB);
         expect(cache.size).toBe(2);
-        expect(cache.has("wf:shared-id")).toBe(true);
-        expect(cache.has("name:block-1:shared-id")).toBe(true);
-    });
-
-    it("keeps same-named NameGroups from two different agent blocks as distinct cache entries (reagent P1 on #2123)", () => {
-        // groupIdentityCache/expandedIds are shared across the WHOLE tree
-        // (buildTree() calls buildDispatchChildren once per block, into one
-        // cache) — a Haiku-generated name like "Code Reviewer" can plausibly
-        // repeat across two unrelated agent panes. Without parentBlockId in
-        // the key, block A's and block B's same-named groups would stomp
-        // each other's identity/expand state.
-        const cache = new Map<string, WorkflowDispatch | NameGroup>();
-        const blockAChildren = buildDispatchChildren(
-            [],
-            [
-                mk({ agent_id: "a1", parent_block_id: "block-A", display_name: "Code Reviewer" }),
-                mk({ agent_id: "a2", parent_block_id: "block-A", display_name: "Code Reviewer" }),
-            ]
-        );
-        const blockBChildren = buildDispatchChildren(
-            [],
-            [
-                mk({ agent_id: "b1", parent_block_id: "block-B", display_name: "Code Reviewer" }),
-                mk({ agent_id: "b2", parent_block_id: "block-B", display_name: "Code Reviewer" }),
-            ]
-        );
-        const stabilizedA = stabilizeGroupIdentity(cache, blockAChildren);
-        const stabilizedB = stabilizeGroupIdentity(cache, blockBChildren);
-        expect(cache.size).toBe(2);
-        expect(stabilizedA[0]).not.toBe(stabilizedB[0]);
-        if (isNameGroup(stabilizedA[0]) && isNameGroup(stabilizedB[0])) {
-            expect(stabilizedA[0].subagents.map((s) => s.agent_id)).toEqual(["a1", "a2"]);
-            expect(stabilizedB[0].subagents.map((s) => s.agent_id)).toEqual(["b1", "b2"]);
-        } else {
-            throw new Error("expected two name groups");
-        }
+        expect(cache.has("wf:wf_a")).toBe(true);
+        expect(cache.has("wf:wf_b")).toBe(true);
     });
 });
 
 describe("groupCacheKey", () => {
-    it("namespaces a WorkflowDispatch key with 'wf:' and a NameGroup key with 'name:<parentBlockId>:'", () => {
-        const [wf] = buildDispatchChildren(
+    it("namespaces every key with 'wf:'", () => {
+        const [wf] = buildDispatchBuckets(
             [mkDispatch({ dispatch_id: "wf_1" })],
             [mk({ agent_id: "a1", dispatch_id: "wf_1" })]
-        ).filter(isWorkflowDispatch);
-        const [ng] = buildDispatchChildren(
-            [],
-            [mk({ agent_id: "a1", display_name: "N" }), mk({ agent_id: "a2", display_name: "N" })]
-        ).filter(isNameGroup);
+        ).workflowRows;
         expect(groupCacheKey(wf)).toBe("wf:wf_1");
-        expect(groupCacheKey(ng)).toBe("name:block-1:N");
     });
 });
 
 describe("pruneGroupIdentityCache", () => {
     it("drops entries for dispatches no longer live, keeps the rest", () => {
         const cache = new Map<string, WorkflowDispatch>();
-        const groupA = buildDispatchChildren(
+        const groupA = buildDispatchBuckets(
             [mkDispatch({ dispatch_id: "wf_a" })],
             [mk({ agent_id: "a1", dispatch_id: "wf_a" })]
-        );
-        const groupB = buildDispatchChildren(
+        ).workflowRows;
+        const groupB = buildDispatchBuckets(
             [mkDispatch({ dispatch_id: "wf_b" })],
             [mk({ agent_id: "b1", dispatch_id: "wf_b" })]
-        );
+        ).workflowRows;
         stabilizeGroupIdentity(cache, groupA);
         stabilizeGroupIdentity(cache, groupB);
         expect(cache.size).toBe(2);
@@ -549,26 +320,6 @@ describe("pruneGroupIdentityCache", () => {
         expect(cache.size).toBe(1);
         expect(cache.has("wf:wf_a")).toBe(true);
         expect(cache.has("wf:wf_b")).toBe(false);
-    });
-
-    it("drops entries for name groups no longer live, keeps the rest", () => {
-        const cache = new Map<string, WorkflowDispatch | NameGroup>();
-        const groupA = buildDispatchChildren(
-            [],
-            [mk({ agent_id: "a1", display_name: "A" }), mk({ agent_id: "a2", display_name: "A" })]
-        );
-        const groupB = buildDispatchChildren(
-            [],
-            [mk({ agent_id: "b1", display_name: "B" }), mk({ agent_id: "b2", display_name: "B" })]
-        );
-        stabilizeGroupIdentity(cache, groupA);
-        stabilizeGroupIdentity(cache, groupB);
-        expect(cache.size).toBe(2);
-
-        pruneGroupIdentityCache(cache, new Set(["name:block-1:A"]));
-        expect(cache.size).toBe(1);
-        expect(cache.has("name:block-1:A")).toBe(true);
-        expect(cache.has("name:block-1:B")).toBe(false);
     });
 });
 
