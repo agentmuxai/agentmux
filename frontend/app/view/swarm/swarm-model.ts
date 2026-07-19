@@ -218,9 +218,9 @@ export function buildDispatchBuckets(
  * grouping never entered the picture since neither had resolved yet).
  * Appending a short, always-unique `agent_id` suffix keeps same-slug
  * siblings visually distinct without claiming a uniqueness `slug` never
- * had — mirrors the existing pattern in `SubagentDetailPane`, which
- * already shows `agent_id.substring(0, 7)` as a separate meta chip next to
- * the name for exactly this reason.
+ * had — the same `agent_id.substring(0, 7)` disambiguator the now-retired
+ * `SubagentDetailPane` used to show as a separate meta chip, for the same
+ * reason.
  */
 export function subagentDisplayLabel(
     sub: Pick<ActiveSubagent, "display_name" | "slug" | "agent_id">
@@ -404,13 +404,22 @@ export function mergeDispatchActivityEntries(
  * explicitly open (eagerly fetching + merging thousands of prior events on
  * every expand would reintroduce the exact request/render volume problem
  * this redesign exists to fix), and there is no bulk-backfill RPC for a
- * whole workflow's history today. A SOLO dispatch's history, though, is
+ * whole workflow's history today. A single subagent's history, though, is
  * bounded (one member) and an RPC for it already exists — `subagent.
  * GetHistory` — so backfilling it here closes the one real regression this
  * unification would otherwise introduce (the retired `SubagentDetailPane`/
  * `createSubagentDetail` DID backfill via that same RPC).
+ *
+ * `backfillAgentId` (optional): the agent to backfill via `GetHistory`.
+ * Callers rendering a single-subagent row (any Agent Tool row, including an
+ * orphaned workflow member — see `getDispatchDetail`'s doc comment) should
+ * pass the subagent's own `agent_id` explicitly rather than relying on
+ * `dispatchId` happening to start with `"solo:"` — that prefix alone
+ * doesn't cover the orphaned-member case. Falls back to parsing the
+ * `"solo:"` prefix when omitted, for callers with no `ActiveSubagent` in
+ * scope. Omitted entirely for a genuine multi-member `WorkflowDispatchRow`.
  */
-export function createDispatchDetail(dispatchId: string): DispatchDetail {
+export function createDispatchDetail(dispatchId: string, backfillAgentId?: string): DispatchDetail {
     const [entries, setEntries] = createSignal<DispatchActivityEntry[]>([]);
 
     const mergeIncoming = (incoming: DispatchActivityEntry[]): void => {
@@ -428,8 +437,9 @@ export function createDispatchDetail(dispatchId: string): DispatchDetail {
         },
     });
 
-    if (dispatchId.startsWith("solo:")) {
-        const agentId = dispatchId.slice("solo:".length);
+    const soloAgentId = backfillAgentId ?? (dispatchId.startsWith("solo:") ? dispatchId.slice("solo:".length) : undefined);
+    if (soloAgentId) {
+        const agentId = soloAgentId;
         void (async () => {
             try {
                 const result = await callBackendService("subagent", "GetHistory", [agentId, MAX_DISPATCH_FEED_ENTRIES]);
@@ -755,10 +765,20 @@ export class SwarmViewModel implements ViewModel {
         }
     }
 
-    getDispatchDetail(dispatchId: string): DispatchDetail {
+    /** `backfillAgentId`: pass the row's own single `ActiveSubagent.agent_id`
+     *  whenever the caller is rendering exactly one subagent's row (an Agent
+     *  Tool row, including an orphaned workflow member falling back into
+     *  that bucket — see `buildDispatchBuckets`'s doc comment) — NOT just
+     *  when `dispatchId` happens to start with `"solo:"`. An orphaned
+     *  workflow member's `dispatch_id` is a real `"wf_..."` id even though
+     *  it renders as a single-subagent row, so gating backfill on the
+     *  `"solo:"` prefix alone silently dropped its `GetHistory` backfill
+     *  (reagent P1 on #2232). Omit it for a genuine `WorkflowDispatchRow`,
+     *  which represents many members and has no one agent to backfill. */
+    getDispatchDetail(dispatchId: string, backfillAgentId?: string): DispatchDetail {
         let detail = this.dispatchDetailCache.get(dispatchId);
         if (!detail) {
-            detail = createDispatchDetail(dispatchId);
+            detail = createDispatchDetail(dispatchId, backfillAgentId);
             this.dispatchDetailCache.set(dispatchId, detail);
         }
         return detail;

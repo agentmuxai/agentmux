@@ -405,8 +405,20 @@ function WorkflowDispatchRow({
  * why) — so an empty feed right after expand is expected for a Workflow row
  * and doesn't necessarily mean "no history", hence the kind-neutral copy.
  */
-function DispatchActivityFeed({ dispatchId, model }: { dispatchId: string; model: SwarmViewModel }): JSX.Element {
-    const detail = model.getDispatchDetail(dispatchId);
+function DispatchActivityFeed({
+    dispatchId,
+    model,
+    backfillAgentId,
+}: {
+    dispatchId: string;
+    model: SwarmViewModel;
+    /** Pass the row's own single subagent's `agent_id` for an Agent Tool row
+     *  (including an orphaned workflow member — see `getDispatchDetail`'s
+     *  doc comment in swarm-model.ts); omit for a genuine multi-member
+     *  `WorkflowDispatchRow`. */
+    backfillAgentId?: string;
+}): JSX.Element {
+    const detail = model.getDispatchDetail(dispatchId, backfillAgentId);
     const entries = detail.entriesAtom;
     return (
         <div class="swarm-dispatch-feed">
@@ -542,7 +554,7 @@ function SubagentRow({
                 <AgentStatusChip status={subagentDisplayStatus(sub, parentAgentStatus)} />
             </div>
             <Show when={expanded()}>
-                <DispatchActivityFeed dispatchId={sub.dispatch_id} model={model} />
+                <DispatchActivityFeed dispatchId={sub.dispatch_id} model={model} backfillAgentId={sub.agent_id} />
             </Show>
         </div>
     );
