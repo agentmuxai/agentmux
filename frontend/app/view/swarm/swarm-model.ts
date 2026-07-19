@@ -113,19 +113,23 @@ export interface WorkflowDispatch {
 
 /**
  * A group of solo-dispatch subagents (no Workflow-tool run — a Solo
- * `AgentDispatch` each) that independently earned the same Haiku-generated
- * `display_name`. A user repeatedly spawning similar tasks (e.g. "review this
- * file" across many files) legitimately gets the same/near-identical name for
- * each invocation — the naming model doing its job, not a malfunction — but
- * left flat that reads as "dozens of duplicate rows." A subagent belonging to
- * a Workflow dispatch never enters this grouping pass, regardless of name —
- * it's already represented by its one `WorkflowDispatch` row.
+ * `AgentDispatch` each) that share one grouping key: `display_name` once a
+ * client has resolved it (Haiku-generated, on-demand), or `slug` before that —
+ * see `groupKeyFor` below. A user repeatedly spawning similar tasks (e.g.
+ * "review this file" across many files) legitimately gets the same/
+ * near-identical name for each invocation — the naming model doing its job,
+ * not a malfunction — but left flat that reads as "dozens of duplicate rows."
+ * A subagent belonging to a Workflow dispatch never enters this grouping
+ * pass, regardless of name — it's already represented by its one
+ * `WorkflowDispatch` row.
  */
 export interface NameGroup {
     kind: "nameGroup";
-    /** The shared display_name — always non-empty; grouping only fires once
-     *  a name exists (display_name is null before subagent.GenerateName
-     *  resolves), so ungrouped/unnamed subagents never form a NameGroup. */
+    /** The shared grouping key (`display_name` if resolved, else `slug`) —
+     *  always non-empty; see `groupKeyFor`. A member that later gets its own
+     *  `display_name` resolved (via `subagent.GenerateName`) migrates out of
+     *  a slug-keyed group into a display_name-keyed one on the next
+     *  `buildDispatchChildren()` pass — no explicit "ungroup" step needed. */
     name: string;
     /** Every member's shared parent_block_id — buildDispatchChildren is
      *  always called with an already block-filtered subagent list (see
@@ -166,13 +170,30 @@ export interface AgentTreeNode {
 }
 
 /**
+ * A solo dispatch's grouping key: its resolved `display_name` if a client
+ * has already expanded it once (Haiku-generated via `subagent.GenerateName`),
+ * else its `slug`. Falling back to `slug` here — instead of leaving
+ * not-yet-named subagents ungrouped — matters because `slug` is itself
+ * usually shared across an entire CLI session/batch (see
+ * `subagentDisplayLabel`'s doc comment below), so a session that has spawned
+ * many solo Task-tool calls and never had any of them individually expanded
+ * would otherwise render every single one as its own top-level row — the
+ * exact "one line per Agent Tool call/workflow" goal (SPEC §5/§7) violated
+ * by omission, not by a grouping bug. Empty string is treated as "no key"
+ * (both fields can legitimately be empty before either resolves).
+ */
+function groupKeyFor(s: ActiveSubagent): string {
+    return s.display_name || s.slug;
+}
+
+/**
  * Build one block's tree children from its `AgentDispatch`es (already
  * block-filtered) and raw `SubAgent`s. Every Workflow-kind dispatch becomes
  * exactly one `WorkflowDispatch` row (SPEC §7 — never one row per member).
  * Every Solo-kind dispatch's one member renders as a plain `ActiveSubagent`
- * row, no wrapper (SPEC §5) — among those, two or more sharing an identical,
- * non-empty `display_name` still collapse into a `NameGroup` (grouping
- * solo DISPATCHES now, not raw subagents, but every subagent has exactly one
+ * row, no wrapper (SPEC §5) — among those, two or more sharing a
+ * `groupKeyFor` value still collapse into a `NameGroup` (grouping solo
+ * DISPATCHES now, not raw subagents, but every subagent has exactly one
  * dispatch so the input set is the same). Result is sorted by most recent
  * activity, mixing loose subagents and both group kinds in one recency order.
  */
@@ -211,10 +232,11 @@ export function buildDispatchChildren(
     const stillLoose: ActiveSubagent[] = [...orphanedWorkflowMembers];
     const byName = new Map<string, ActiveSubagent[]>();
     for (const s of solo) {
-        if (s.display_name) {
-            const members = byName.get(s.display_name) ?? [];
+        const key = groupKeyFor(s);
+        if (key) {
+            const members = byName.get(key) ?? [];
             members.push(s);
-            byName.set(s.display_name, members);
+            byName.set(key, members);
         } else {
             stillLoose.push(s);
         }
