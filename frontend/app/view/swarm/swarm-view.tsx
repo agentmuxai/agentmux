@@ -390,7 +390,7 @@ function WorkflowDispatchRow({
                 </span>
             </div>
             <Show when={expanded()}>
-                <DispatchActivityFeed dispatchId={group.dispatchId} model={model} />
+                <DispatchActivityFeed rowKey={group.dispatchId} dispatchId={group.dispatchId} model={model} />
             </Show>
         </div>
     );
@@ -406,10 +406,26 @@ function WorkflowDispatchRow({
  * and doesn't necessarily mean "no history", hence the kind-neutral copy.
  */
 function DispatchActivityFeed({
+    rowKey,
     dispatchId,
     model,
     backfillAgentId,
 }: {
+    /** Cache/expand-state identity for THIS row — must be unique per row.
+     *  For a `WorkflowDispatchRow` this is the same as `dispatchId` (a
+     *  workflow's own dispatch_id is always 1:1 with its row). For an Agent
+     *  Tool row it must NOT be `dispatchId`: an orphaned workflow member (a
+     *  real "wf_..." dispatch_id shared by every sibling member still
+     *  waiting on a stale/lagging `ListDispatches`) would otherwise collide
+     *  every sibling row onto the same cached `DispatchDetail` and the same
+     *  expand-state entry (reagent P1 on #2232) — pass a per-agent key like
+     *  `agent:${sub.agent_id}` instead, which is always unique. */
+    rowKey: string;
+    /** The dispatch_id to subscribe to for live `dispatch:activity` events —
+     *  the REAL dispatch_id, which may legitimately be shared with sibling
+     *  rows (the orphaned-member case above); `backfillAgentId` (below)
+     *  scopes both the live feed and the backfill down to one agent when
+     *  that's the case. */
     dispatchId: string;
     model: SwarmViewModel;
     /** Pass the row's own single subagent's `agent_id` for an Agent Tool row
@@ -418,7 +434,7 @@ function DispatchActivityFeed({
      *  `WorkflowDispatchRow`. */
     backfillAgentId?: string;
 }): JSX.Element {
-    const detail = model.getDispatchDetail(dispatchId, backfillAgentId);
+    const detail = model.getDispatchDetail(rowKey, dispatchId, backfillAgentId);
     const entries = detail.entriesAtom;
     return (
         <div class="swarm-dispatch-feed">
@@ -505,10 +521,16 @@ function SubagentRow({
     model: SwarmViewModel;
     parentAgentStatus: "running" | "idle";
 }): JSX.Element {
-    // Keyed by dispatch_id ("solo:<agent_id>"), not agent_id — unified with
-    // WorkflowDispatchRow onto the same expandedIds/dispatchDetailCache
-    // mechanism (SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 §4).
-    const expanded = createMemo(() => model.isExpanded(sub.dispatch_id));
+    // Unified with WorkflowDispatchRow onto the same expandedIds/
+    // dispatchDetailCache mechanism (SPEC_SWARM_DISPATCH_NAMING_AND_ROW_
+    // MODEL_2026_07_19 §4), but keyed by `agent_id`, NOT `dispatch_id`: an
+    // orphaned workflow member's `dispatch_id` is a real, possibly-shared
+    // "wf_..." id (every sibling still waiting on a stale/lagging
+    // `ListDispatches` shares it) — keying expand-state/cache off it would
+    // collide every sibling row's expand toggle and cached feed onto the
+    // first one (reagent P1 on #2232). `agent_id` is always unique per row.
+    const rowKey = createMemo(() => `agent:${sub.agent_id}`);
+    const expanded = createMemo(() => model.isExpanded(rowKey()));
     // See subagentDisplayLabel's doc comment (swarm-model.ts) — as of Phase A
     // this resolves eagerly at dispatch time for the common case; the
     // slug/agent_id fallback chain only matters for the brief window before
@@ -517,7 +539,7 @@ function SubagentRow({
 
     const handleToggle = () => {
         const wasExpanded = expanded();
-        model.toggleDispatchExpanded(sub.dispatch_id);
+        model.toggleDispatchExpanded(rowKey());
         if (!wasExpanded && !sub.display_name) {
             // Fallback safety net — eager naming (Phase A) should already
             // have resolved this by the time a user gets here, but fire the
@@ -554,7 +576,12 @@ function SubagentRow({
                 <AgentStatusChip status={subagentDisplayStatus(sub, parentAgentStatus)} />
             </div>
             <Show when={expanded()}>
-                <DispatchActivityFeed dispatchId={sub.dispatch_id} model={model} backfillAgentId={sub.agent_id} />
+                <DispatchActivityFeed
+                    rowKey={rowKey()}
+                    dispatchId={sub.dispatch_id}
+                    model={model}
+                    backfillAgentId={sub.agent_id}
+                />
             </Show>
         </div>
     );

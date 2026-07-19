@@ -410,14 +410,18 @@ export function mergeDispatchActivityEntries(
  * unification would otherwise introduce (the retired `SubagentDetailPane`/
  * `createSubagentDetail` DID backfill via that same RPC).
  *
- * `backfillAgentId` (optional): the agent to backfill via `GetHistory`.
- * Callers rendering a single-subagent row (any Agent Tool row, including an
- * orphaned workflow member — see `getDispatchDetail`'s doc comment) should
- * pass the subagent's own `agent_id` explicitly rather than relying on
- * `dispatchId` happening to start with `"solo:"` — that prefix alone
- * doesn't cover the orphaned-member case. Falls back to parsing the
- * `"solo:"` prefix when omitted, for callers with no `ActiveSubagent` in
- * scope. Omitted entirely for a genuine multi-member `WorkflowDispatchRow`.
+ * `backfillAgentId` (optional): scopes BOTH the `GetHistory` backfill AND
+ * the live `dispatch:activity` subscription down to this one agent's own
+ * events. Callers rendering a single-subagent row (any Agent Tool row,
+ * including an orphaned workflow member — see `getDispatchDetail`'s doc
+ * comment) should pass the subagent's own `agent_id` explicitly rather than
+ * relying on `dispatchId` happening to start with `"solo:"` — that prefix
+ * alone doesn't cover the orphaned-member case, AND an orphaned member's
+ * `dispatchId` can be shared with sibling rows, so without this filter a
+ * single-subagent row would render every sibling's live events too. Falls
+ * back to parsing the `"solo:"` prefix when omitted, for callers with no
+ * `ActiveSubagent` in scope. Omitted entirely for a genuine multi-member
+ * `WorkflowDispatchRow`, which legitimately wants every member's events.
  */
 export function createDispatchDetail(dispatchId: string, backfillAgentId?: string): DispatchDetail {
     const [entries, setEntries] = createSignal<DispatchActivityEntry[]>([]);
@@ -433,7 +437,8 @@ export function createDispatchDetail(dispatchId: string, backfillAgentId?: strin
             const data = event?.data as any;
             if (data?.dispatchId !== dispatchId) return;
             const members = (data?.members as { agentId: string; events: SubagentEvent[] }[]) ?? [];
-            mergeIncoming(members.flatMap((m) => (m.events ?? []).map((evt) => ({ agentId: m.agentId, event: evt }))));
+            const relevant = backfillAgentId ? members.filter((m) => m.agentId === backfillAgentId) : members;
+            mergeIncoming(relevant.flatMap((m) => (m.events ?? []).map((evt) => ({ agentId: m.agentId, event: evt }))));
         },
     });
 
@@ -750,36 +755,54 @@ export class SwarmViewModel implements ViewModel {
         });
     }
 
-    /** Every row's toggle (Agent Tool rows keyed by `solo:<agent_id>`,
-     *  Workflow rows by their own `dispatch_id`) — tears down the cached
-     *  DispatchDetail (and its WS subscriptions) on collapse, so a row a
-     *  user opened once and moved on from doesn't keep a live subscription
-     *  forever. Unified in SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19
-     *  §4 (was split into toggleSubagentExpanded/toggleDispatchExpanded). */
-    toggleDispatchExpanded(dispatchId: string): void {
-        const wasExpanded = this.isExpanded(dispatchId);
-        this.toggleExpanded(dispatchId);
+    /** Every row's toggle. `rowKey` must be a per-ROW-unique identity, NOT
+     *  necessarily the row's `dispatch_id` — a `WorkflowDispatchRow`'s own
+     *  `dispatch_id` is always 1:1 with its row, but an Agent Tool row's
+     *  `dispatch_id` is NOT: an orphaned workflow member (falling back into
+     *  the Agent Tool bucket while `ListDispatches` is stale/lagging) shares
+     *  its real `dispatch_id` with every sibling member still waiting on
+     *  the same lag. Callers rendering a single-subagent row must pass a
+     *  key derived from something per-row-unique instead (e.g.
+     *  `agent:${sub.agent_id}`) — see `getDispatchDetail`'s doc comment.
+     *  Tears down the cached DispatchDetail (and its WS subscriptions) on
+     *  collapse, so a row a user opened once and moved on from doesn't keep
+     *  a live subscription forever. Unified in
+     *  SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 §4 (was split
+     *  into toggleSubagentExpanded/toggleDispatchExpanded). */
+    toggleDispatchExpanded(rowKey: string): void {
+        const wasExpanded = this.isExpanded(rowKey);
+        this.toggleExpanded(rowKey);
         if (wasExpanded) {
-            this.dispatchDetailCache.get(dispatchId)?.dispose();
-            this.dispatchDetailCache.delete(dispatchId);
+            this.dispatchDetailCache.get(rowKey)?.dispose();
+            this.dispatchDetailCache.delete(rowKey);
         }
     }
 
-    /** `backfillAgentId`: pass the row's own single `ActiveSubagent.agent_id`
-     *  whenever the caller is rendering exactly one subagent's row (an Agent
-     *  Tool row, including an orphaned workflow member falling back into
-     *  that bucket — see `buildDispatchBuckets`'s doc comment) — NOT just
-     *  when `dispatchId` happens to start with `"solo:"`. An orphaned
-     *  workflow member's `dispatch_id` is a real `"wf_..."` id even though
-     *  it renders as a single-subagent row, so gating backfill on the
-     *  `"solo:"` prefix alone silently dropped its `GetHistory` backfill
-     *  (reagent P1 on #2232). Omit it for a genuine `WorkflowDispatchRow`,
-     *  which represents many members and has no one agent to backfill. */
-    getDispatchDetail(dispatchId: string, backfillAgentId?: string): DispatchDetail {
-        let detail = this.dispatchDetailCache.get(dispatchId);
+    /**
+     * `rowKey`: cache identity for THIS row — must be unique per row (see
+     * `toggleDispatchExpanded`'s doc comment for why this can't just be
+     * `dispatchId` for an Agent Tool row). Two sibling rows sharing one
+     * `dispatchId` but caching under distinct `rowKey`s previously each
+     * subscribed to the SAME live `dispatch:activity` broadcast unfiltered,
+     * so each would render every OTHER sibling's events too — fixed by
+     * `dispatchId`: the real dispatch_id to subscribe to for live
+     * `dispatch:activity` events (may legitimately be shared across sibling
+     * rows — `createDispatchDetail` itself filters live events down to
+     * `backfillAgentId` when one is given, so this is safe even then).
+     *
+     * `backfillAgentId`: pass the row's own single `ActiveSubagent.agent_id`
+     * whenever the caller is rendering exactly one subagent's row (an Agent
+     * Tool row, including an orphaned workflow member) — NOT just when
+     * `dispatchId` happens to start with `"solo:"`, which silently dropped
+     * an orphaned member's `GetHistory` backfill (reagent P1 on #2232).
+     * Omit it for a genuine `WorkflowDispatchRow`, which represents many
+     * members and has no one agent to backfill or filter to.
+     */
+    getDispatchDetail(rowKey: string, dispatchId: string, backfillAgentId?: string): DispatchDetail {
+        let detail = this.dispatchDetailCache.get(rowKey);
         if (!detail) {
             detail = createDispatchDetail(dispatchId, backfillAgentId);
-            this.dispatchDetailCache.set(dispatchId, detail);
+            this.dispatchDetailCache.set(rowKey, detail);
         }
         return detail;
     }
