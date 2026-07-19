@@ -35,7 +35,7 @@ When an agent hits a 401/auth error the user now sees it clearly (P1.3 inline er
 | Claude provider re-auth on auth failure | New-identity creation (handled by pre-launch OAuth modal — SPEC_PRE_LAUNCH_OAUTH_FLOW) |
 | Other providers via their auth method | Gemini-specific auth fix (#1250 — separate issue) |
 | CTA from failure banner and inline error node | API-key-only providers (no URL to open) |
-| URL fallback display | Trust Center binding (SPEC_TRUST_CENTER_CLI_AUTH_BINDING) |
+| URL fallback display | Armory binding (SPEC_TRUST_CENTER_CLI_AUTH_BINDING) |
 
 Triggers considered:
 - Failure banner "Login Again" action (already wired; behavior changes)

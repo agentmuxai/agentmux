@@ -221,7 +221,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                 loginAgain: opts.onLoginAgain,
                 useExistingLogin: opts.onUseExistingLogin,
                 loginViaTerminal: opts.onLoginViaTerminal,
-                trustCenter: opts.onTrustCenter,
+                openArmory: opts.onOpenArmory,
                 newSession: opts.onNewSession,
                 toggleDetails: () => setExpanded((v) => !v),
                 dismiss: () => opts.model.dispatchPane({ type: "FailureCleared" }),

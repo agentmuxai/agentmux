@@ -21,14 +21,14 @@ const mkView = (overrides: Partial<FailureViewState> = {}): FailureViewState => 
 });
 
 const mkActions = (): FailureActions & { _calls: Record<keyof FailureActions, number> } => {
-    const _calls = { retry: 0, loginAgain: 0, useExistingLogin: 0, loginViaTerminal: 0, trustCenter: 0, newSession: 0, toggleDetails: 0, dismiss: 0 };
+    const _calls = { retry: 0, loginAgain: 0, useExistingLogin: 0, loginViaTerminal: 0, openArmory: 0, newSession: 0, toggleDetails: 0, dismiss: 0 };
     return {
         _calls,
         retry: vi.fn(() => void _calls.retry++),
         loginAgain: vi.fn(() => void _calls.loginAgain++),
         useExistingLogin: vi.fn(() => void _calls.useExistingLogin++),
         loginViaTerminal: vi.fn(() => void _calls.loginViaTerminal++),
-        trustCenter: vi.fn(() => void _calls.trustCenter++),
+        openArmory: vi.fn(() => void _calls.openArmory++),
         newSession: vi.fn(() => void _calls.newSession++),
         toggleDetails: vi.fn(() => void _calls.toggleDetails++),
         dismiss: vi.fn(() => void _calls.dismiss++),
@@ -84,7 +84,7 @@ describe("failureToRow", () => {
         const trust = action(row, "Armory → Accounts");
         expect(trust).toBeTruthy();
         trust?.onClick();
-        expect(on._calls.trustCenter).toBe(1);
+        expect(on._calls.openArmory).toBe(1);
     });
 
     it("auth (Claude / canSeed) → Use existing login is primary, Login via terminal is secondary", () => {

@@ -89,7 +89,7 @@ so the two-phase CLI auth check finds valid creds in both phases.
 What it doesn't fix: tokens that are **genuinely expired or revoked**. Poal had no valid
 credentials at all (`apiKeySource: "none"` in every init frame). The seeder copies
 whatever is in `~/.claude` — if those tokens are expired, the agent still gets 401.
-The fix for that is the re-auth flow (Trust Center → Accounts → "Login Again"), but
+The fix for that is the re-auth flow (Armory → Accounts → "Login Again"), but
 that flow only kicks in if the failure surface is durable enough to be acted on.
 
 ### 1.4 Root Causes (ranked)
@@ -280,7 +280,7 @@ Not urgent — schedule after Phase 1 is stable.
 When `code: "auth"`:
 
 1. **Inline transcript node** (P1.3): `"Authentication failed — the agent's API credentials are no longer valid."`
-2. **Recovery banner** (SPEC_AGENT_FAILURE_RECOVERY_UI): primary = "Login Again" inline re-auth; secondary = "Trust Center → Accounts"
+2. **Recovery banner** (SPEC_AGENT_FAILURE_RECOVERY_UI): primary = "Login Again" inline re-auth; secondary = "Armory → Accounts"
 3. **System notification** (P1.5): if pane not focused — `"Poal needs to log in"`
 4. **Stale-agent guard**: if block is Dead with `code: "auth"` and user sends a message, show the auth error inline rather than accepting the message silently ("Worked") and failing invisibly
 
