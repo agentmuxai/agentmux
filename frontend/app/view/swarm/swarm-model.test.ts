@@ -224,13 +224,56 @@ describe("buildDispatchChildren", () => {
             expect(childId(result[0])).toBe("a1");
         });
 
-        it("leaves subagents with no display_name yet as loose, ungrouped rows even if several exist", () => {
+        it("leaves subagents with no display_name AND no slug as loose, ungrouped rows even if several exist", () => {
             const result = buildDispatchChildren(
                 [],
                 [mk({ agent_id: "a1", display_name: null }), mk({ agent_id: "a2", display_name: null })]
             );
             expect(result).toHaveLength(2);
             expect(result.every((c) => !isNameGroup(c))).toBe(true);
+        });
+
+        it("collapses 2+ solo dispatches sharing only a slug (no display_name resolved yet) into one NameGroup", () => {
+            // The common case: Claude Code stamps one slug per CLI session on
+            // every subagent it spawns (not per-subagent), and display_name
+            // only resolves once a client manually expands a row — so most
+            // solo dispatches are seen here with display_name: null and an
+            // identical slug. Without the slug fallback, a session with many
+            // solo Task-tool calls renders one row per call at the top level,
+            // which is the "dozens of copies of the same slug" regression.
+            const result = buildDispatchChildren(
+                [],
+                [
+                    mk({ agent_id: "a1", display_name: null, slug: "quizzical-tumbling-valiant" }),
+                    mk({ agent_id: "a2", display_name: null, slug: "quizzical-tumbling-valiant" }),
+                    mk({ agent_id: "a3", display_name: null, slug: "quizzical-tumbling-valiant" }),
+                ]
+            );
+            expect(result).toHaveLength(1);
+            const group = result[0];
+            expect(isNameGroup(group)).toBe(true);
+            if (isNameGroup(group)) {
+                expect(group.name).toBe("quizzical-tumbling-valiant");
+                expect(group.totalCount).toBe(3);
+            }
+        });
+
+        it("prefers display_name over slug as the grouping key — a named member does not join its same-slug siblings' slug-keyed group", () => {
+            const result = buildDispatchChildren(
+                [],
+                [
+                    mk({ agent_id: "a1", display_name: null, slug: "shared-slug" }),
+                    mk({ agent_id: "a2", display_name: null, slug: "shared-slug" }),
+                    mk({ agent_id: "a3", display_name: "Named Differently", slug: "shared-slug" }),
+                ]
+            );
+            const groups = result.filter(isNameGroup);
+            // a1/a2 collapse under the shared slug; a3 (resolved display_name)
+            // is its own loose row since nothing else shares "Named Differently".
+            expect(groups).toHaveLength(1);
+            expect(groups[0].name).toBe("shared-slug");
+            expect(groups[0].totalCount).toBe(2);
+            expect(result.some((c) => !isNameGroup(c) && !isWorkflowDispatch(c) && c.agent_id === "a3")).toBe(true);
         });
 
         it("workflow dispatches take priority — same-named subagents in a workflow never form a NameGroup", () => {
