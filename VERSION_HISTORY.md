@@ -1,5 +1,15 @@
 # AgentMux Version History
 
+## 0.54.0 — 2026-07-18
+
+- feat(editor): live-reload editor/preview panes on external file changes
+- style(agent): give tool-call previews a real, theme-aware background shade
+- fix(muxbus): cloud subscriber's WebSocket handshake never actually connects
+- fix(cef): ratio-aware memory-pressure thresholds (was absolute-MB)
+- fix(cef,srv): cascade-aware browser-pane teardown on tab/workspace delete
+- feat(cef): evict idle pane-pool window + tighten window-pool demote cap under memory pressure
+
+
 ## 0.53.7 — 2026-07-18
 
 - revert(cef): New Window color-flash fix (#2163) — introduced pool-promote failure on Windows
