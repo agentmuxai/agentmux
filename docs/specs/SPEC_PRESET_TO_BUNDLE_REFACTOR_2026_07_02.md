@@ -13,7 +13,7 @@
 
 - **Reference, don't copy.** A Bundle stores primitive **IDs**, not inline JSON.
 - **Compatibility window.** Keep `preset.*` / `db_memory_bundles` as **read aliases for one release**; new writes go to Bundle names.
-- **No user-visible regression.** The Trust Center IA gains no new required step; direct bindings remain the base, Bundle is optional sugar.
+- **No user-visible regression.** The Armory IA gains no new required step; direct bindings remain the base, Bundle is optional sugar.
 - **Contract-test discipline.** Renaming App API commands changes the rpc-contract surface (`test/contract/rpc-contract.test.ts`) — every phase updates the baselines in lockstep (this is the guard that caught the mcp/skill drift in #1896).
 
 ---
@@ -73,7 +73,7 @@ The proposal's "one real refactor" (§3.3, §7). Today: `instance → identity_b
 ### 3.2 Deprecate the identity-bundle App API + UI
 
 - Commands `listidentitybundles` / `getidentitybundle` / `upsertidentitybundle` / `deleteidentitybundle` / `bindidentityaccount` / `unbindidentityaccount` / `listidentitybindings` (commands.rs 164–170, incl. `COMMAND_DELETE_IDENTITY_BUNDLE` at 167) → mark deprecated; keep read paths for the compat window, stop new writes.
-- Trust Center: the **Identities** tab becomes a **derived view** ("what is this agent running as" over bound Accounts) — no stored identity-bundle object. Per the proposal IA (§5) there is **no Identities tab** in the target; fold it into the Accounts + Bundle surfaces. (This is a UI change — confirm the exact interim: hide the tab, or convert to read-only derived view for one release.)
+- Armory: the **Identities** tab becomes a **derived view** ("what is this agent running as" over bound Accounts) — no stored identity-bundle object. Per the proposal IA (§5) there is **no Identities tab** in the target; fold it into the Accounts + Bundle surfaces. (This is a UI change — confirm the exact interim: hide the tab, or convert to read-only derived view for one release.)
 
 ### 3.2b Agent-pane header: consolidate to a single icon (product-owner decision 2026-07-02)
 

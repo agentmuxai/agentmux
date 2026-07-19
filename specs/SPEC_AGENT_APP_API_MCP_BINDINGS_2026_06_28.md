@@ -155,7 +155,7 @@ two rules are mandatory:
 
 - The MCP tool description must **not** instruct the agent to paste a raw key
   inline in a way that ends up in conversation transcripts. Prefer a flow where
-  the secret is provided out-of-band (env var name reference, or the Trust Center
+  the secret is provided out-of-band (env var name reference, or the Armory
   UI) — see §7 open question.
 - Responses **never echo the secret back** — only `masked_tail` (already the
   handler's behavior). The REST layer must not add the plaintext to any response
@@ -200,13 +200,13 @@ see §7.
 
 1. **Do agents get *mutating* identity/preset tools at all, or stay read + memory-write?**
    Options: (a) read-only identity/preset for agents, mutations human-only via
-   Trust Center; (b) full agent CRUD with the S1 guards already implemented.
+   Armory; (b) full agent CRUD with the S1 guards already implemented.
    Recommendation: ship §6.1 + §6.2 read tools first; gate §6.3 mutations behind
    an explicit per-agent capability flag before exposing.
 
 2. **Secret-passing ergonomics for `IdentityUpsert`.** Inline key in the tool call
    lands in the transcript. Alternatives: reference an env-var name the MCP server
-   resolves; or keep credential creation in the Trust Center UI and let agents
+   resolves; or keep credential creation in the Armory UI and let agents
    only *link* / *validate* existing accounts. Recommendation: no inline-secret
    agent tool in the first wave.
 

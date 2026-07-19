@@ -60,7 +60,7 @@ export interface UseAgentFailureOptions {
     /** Open a real terminal window for browser-based OAuth (Claude v2.1.x). */
     onLoginViaTerminal: () => void;
     /** Open Armory → Accounts. */
-    onTrustCenter: () => void;
+    onOpenArmory: () => void;
     /** Start a fresh agent session (context-window overflow recovery). */
     onNewSession: () => void;
     /** True when the provider supports seed-from-global (Claude). Promotes
@@ -240,7 +240,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                 loginAgain: opts.onLoginAgain,
                 useExistingLogin: opts.onUseExistingLogin,
                 loginViaTerminal: opts.onLoginViaTerminal,
-                trustCenter: opts.onTrustCenter,
+                openArmory: opts.onOpenArmory,
                 newSession: opts.onNewSession,
                 toggleDetails: () => setExpanded((v) => !v),
                 dismiss: endEpisode,

@@ -1,3 +1,5 @@
+> **Archived 2026-07-19:** Session handoff — both PRs described here (#1584, #1585) merged long ago. "Trust Center" is this UI's pre-rename name (renamed to Armory, PR #1917, 2026-07-02) — left as written for historical accuracy. Kept for reference only.
+
 # Handoff — Memory/Identity Modal Redesign
 **Date:** 2026-06-19  
 **Branch:** `agenta/feat-memory-identity-modals`  
