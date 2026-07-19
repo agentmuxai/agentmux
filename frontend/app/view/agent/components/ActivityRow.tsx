@@ -25,10 +25,10 @@ import { KIND_SIGIL, type PinnedActivity } from "../activity/types";
 import type { ToolLogChunk } from "../types";
 
 /** One-line text summary per subagent event kind — deliberately simpler than
- *  the Swarm pane's own `SubagentDetailEvent` (no per-event expand/collapse,
- *  no dedicated CSS): the dock reuses the existing shell-log line chrome
- *  (`.agent-tool-log-line`) instead of depending on `swarm-view.scss`, which
- *  only loads once the user has opened a Swarm pane this session. */
+ *  the Swarm pane's own `DispatchActivityFeedEntry` (no per-event expand/
+ *  collapse, no dedicated CSS): the dock reuses the existing shell-log line
+ *  chrome (`.agent-tool-log-line`) instead of depending on `swarm-view.scss`,
+ *  which only loads once the user has opened a Swarm pane this session. */
 function subagentEventLine(e: SubagentEvent): string {
     const t = e.event_type;
     switch (t.type) {
@@ -143,7 +143,7 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
             setDispatchDetail(null);
             return;
         }
-        const detail = createDispatchDetail(sub.dispatch_id);
+        const detail = createDispatchDetail(sub.dispatch_id, sub.agent_id);
         setDispatchDetail(detail);
         onCleanup(() => detail.dispose());
     });
