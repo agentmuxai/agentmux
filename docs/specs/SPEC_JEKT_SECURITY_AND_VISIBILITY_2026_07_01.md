@@ -216,8 +216,8 @@ envelope. Srv validates tier on incoming network messages.
 
 **Files:** Armory keychain, muxbus consumer  
 **Change:** agent at spawn time loads its signing key from the keychain; signs all
-outgoing jekts; receiver verifies using sender's public identity from the trust
-center.  
+outgoing jekts; receiver verifies using sender's public identity from the
+Armory.  
 **Result:** spoofed jekts are detectable even on the host tier.
 
 ---
