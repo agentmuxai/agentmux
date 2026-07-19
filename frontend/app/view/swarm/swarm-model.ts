@@ -621,6 +621,16 @@ export class SwarmViewModel implements ViewModel {
         });
         if (unsubDispatchUpdated) this.unsubs.push(unsubDispatchUpdated);
 
+        // A closed block's subagents/dispatches were just pruned server-side
+        // (SubagentWatcher::prune_block, backstopped against BlockDeleted/
+        // TabDeleted/WorkspaceDeleted) — reload so the ghost row this used
+        // to leave behind (visible until srv restart) disappears promptly.
+        const unsubBlockPruned = waveEventSubscribe({
+            eventType: "subagent:block_pruned",
+            handler: () => this.scheduleLoadSubagents(),
+        });
+        if (unsubBlockPruned) this.unsubs.push(unsubBlockPruned);
+
         // Patch display_name in place (not a full loadSubagents() reload) so
         // every client watching this session picks up a generated name —
         // not just the one whose expand click triggered subagent.GenerateName.
