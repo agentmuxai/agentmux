@@ -816,6 +816,16 @@ impl SubagentWatcher {
         true
     }
 
+    /// Test-only accessor for `naming_triggered` — lets tests assert the
+    /// dedup gate claimed (or didn't claim) a given dispatch_id without
+    /// needing a real `Arc<Self>`/spawned task (see `trigger_eager_naming`'s
+    /// doc comment below for why `naming_triggered_contains` alone, not the
+    /// full eager-naming flow, is what unit tests can exercise).
+    #[cfg(test)]
+    pub(crate) fn naming_triggered_contains(&self, dispatch_id: &str) -> bool {
+        self.naming_triggered.lock().unwrap().contains(dispatch_id)
+    }
+
     /// Fire the one eager Haiku-naming call for a dispatch's first-observed
     /// live spawn (issue: SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19).
     /// Caller (`process_jsonl_change`) has already atomically claimed
@@ -827,11 +837,6 @@ impl SubagentWatcher {
     /// (most unit tests) rather than `spawn()` — there is no Arc to upgrade
     /// to in that case, matching this module's "untracked -> safe no-op"
     /// convention rather than panicking.
-    #[cfg(test)]
-    pub(crate) fn naming_triggered_contains(&self, dispatch_id: &str) -> bool {
-        self.naming_triggered.lock().unwrap().contains(dispatch_id)
-    }
-
     fn trigger_eager_naming(&self, dispatch_id: String, first_member_agent_id: String, is_workflow: bool) {
         let Some(watcher) = self.self_ref.lock().unwrap().as_ref().and_then(|w| w.upgrade()) else {
             return;
