@@ -240,12 +240,23 @@ What actually shipped from this catalog, 2026-07-18:
 
 | Item | PR | Status |
 |---|---|---|
-| Nightly macOS CEF wiring fix (the bug that started this whole investigation) | `agentmuxai/agentmux#2223` | Open, checks clean, awaiting merge approval |
-| Delete `input-bench-report.yml` + merge input-handler guardrails | `agentmuxai/agentmux#2225` | Open |
-| De-duplicate CEF-provisioning logic (`build-linux.yml`/`build-macos.yml` as reusable workflows called from `release.yml`) | `agentmuxai/agentmux` (branch `chore/dedupe-cef-provisioning`) | Open — smoke-tested `build-linux.yml`'s own `workflow_dispatch` path standalone before opening; the new `workflow_call` path from `release.yml` itself is **not** end-to-end validated (would require a real `release.yml` run, which touches production signing credentials and an existing release's assets — deferred to Asaf's judgment on when/how to validate before it's relied on for a real release) |
-| `gh-reporter` monitoring fix (watch both nightly workflows independently) | `a5af/shared-infrastructure#382` | Open, tests pass (76/76), `tsc` compiles clean |
+| Nightly macOS CEF wiring fix (the bug that started this whole investigation) | `agentmuxai/agentmux#2223` | **Merged** |
+| Delete `input-bench-report.yml` + merge input-handler guardrails + archive stale `WORKFLOW_AUDIT_2026_06_28.md` (reagent P2 findings, addressed during review) | `agentmuxai/agentmux#2225` | **Merged** |
+| De-duplicate CEF-provisioning logic (`build-linux.yml`/`build-macos.yml` as reusable workflows called from `release.yml`) | `agentmuxai/agentmux#2227` | **Merged**, reagent-approved. Smoke-tested `build-linux.yml`'s own `workflow_dispatch` path standalone before opening; the new `workflow_call` path from `release.yml` itself was **not** end-to-end validated with a real run before merge (would require touching production signing credentials and an existing release's assets) — worth a dry-run validation before the next real release, as a heads-up rather than a blocker |
+| `gh-reporter` monitoring fix (watch both nightly workflows independently) + version bump + timeout-comment fix (reagent P1/P2 findings, addressed during review) | `a5af/shared-infrastructure#382` | **Merged** |
 | Delete abandoned `agenty/kimi-community-reviewer` branch | — | Done directly (branch deleted) |
 | Delete `agentmuxai/agentmux-builder` | — | Done by Asaf directly on GitHub (my token lacked the `delete_repo` scope) |
 
-No merges happened without explicit approval — all four PRs above are open,
-pending review/merge decisions.
+All four PRs merged 2026-07-19 after explicit approval (reagent + green CI,
+with "merge on approval" authorization from Asaf for this batch) — none
+merged blind. Every reagent finding across all four PRs was investigated and
+fixed before merge, not dismissed:
+- #2225: a doc this PR's own commit referenced was never actually committed
+  (fixed), plus a separately-discovered pre-existing stale audit doc archived.
+- #382: missing version bump (fixed, matching repo precedent) + a timeout
+  comment invalidated by the PR's own change (fixed, with the underlying
+  Lambda timeout bumped for safety margin too, not just the comment).
+
+Nothing from this catalog remains open. The one deliberately-deferred item —
+keeping `ci-nightly-build.yml`'s full 3-platform matrix rather than narrowing
+to macOS-only — was a direct decision from Asaf, not an oversight.
