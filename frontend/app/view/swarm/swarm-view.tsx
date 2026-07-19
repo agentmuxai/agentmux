@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createMemo, createSignal, createEffect, onCleanup, For, onMount, Show, type JSX } from "solid-js";
-import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, WorkflowDispatch, NameGroup, SubagentDetail, SubagentEvent, DispatchActivityEntry } from "./swarm-model";
-import { isWorkflowDispatch, isNameGroup, groupCacheKey, subagentDisplayLabel } from "./swarm-model";
+import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, WorkflowDispatch, SubagentEvent, DispatchActivityEntry } from "./swarm-model";
+import { subagentDisplayLabel } from "./swarm-model";
 import { ProviderLogo } from "@/app/element/ProviderLogo";
 import { callBackendService } from "@/store/wos";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -233,7 +233,8 @@ function AgentRow({
         phaseToDisplayStatus(node.blockId, node.agentStatus)
     );
     const collapsed = createMemo(() => model.isAgentCollapsed(node.blockId));
-    const hasChildren = createMemo(() => node.subagents.length > 0);
+    const totalRows = createMemo(() => node.agentToolRows.length + node.workflowRows.length);
+    const hasChildren = createMemo(() => totalRows() > 0);
 
     const [summaryFlash, setSummaryFlash] = createSignal(false);
     let flashTimer: ReturnType<typeof setTimeout> | undefined;
@@ -282,7 +283,7 @@ function AgentRow({
                     </span>
                     <span class="swarm-agent-label">{node.agentName}</span>
                     <Show when={collapsed() && hasChildren()}>
-                        <span class="swarm-agent-collapsed-count">{node.subagents.length}</span>
+                        <span class="swarm-agent-collapsed-count">{totalRows()}</span>
                     </Show>
                     <Show when={node.contextTokens != null}>
                         <span class="swarm-ctx-size">{fmtCtx(node.contextTokens!)}</span>
@@ -297,16 +298,54 @@ function AgentRow({
             </div>
             <Show when={!collapsed()}>
                 <div class="swarm-children">
-                    <For each={node.subagents}>
-                        {(child) => isWorkflowDispatch(child)
-                            ? <WorkflowDispatchRow group={child} model={model} />
-                            : isNameGroup(child)
-                            ? <NameGroupRow group={child} model={model} parentAgentStatus={node.agentStatus} />
-                            : <SubagentRow sub={child} model={model} parentAgentStatus={node.agentStatus} />}
-                    </For>
+                    <AgentToolBucket rows={node.agentToolRows} model={model} parentAgentStatus={node.agentStatus} />
+                    <WorkflowBucket rows={node.workflowRows} model={model} />
                 </div>
             </Show>
         </div>
+    );
+}
+
+// ── Two fixed dispatch-kind buckets (SPEC_SWARM_DISPATCH_NAMING_AND_ROW_
+//    MODEL_2026_07_19 §4) — always exactly these two, never data-driven
+//    groups; each hides entirely when empty (no "always visible" precedent
+//    exists anywhere else in this codebase, see that spec's §6). ─────────
+
+function AgentToolBucket({
+    rows,
+    model,
+    parentAgentStatus,
+}: {
+    rows: ActiveSubagent[];
+    model: SwarmViewModel;
+    parentAgentStatus: "running" | "idle";
+}): JSX.Element {
+    return (
+        <Show when={rows.length > 0}>
+            <div class="swarm-bucket swarm-bucket--agent-tool">
+                <div class="swarm-bucket-header">
+                    <span class="swarm-bucket-label">Agent Tool</span>
+                    <span class="swarm-bucket-count">{rows.length}</span>
+                </div>
+                <For each={rows}>
+                    {(sub) => <SubagentRow sub={sub} model={model} parentAgentStatus={parentAgentStatus} />}
+                </For>
+            </div>
+        </Show>
+    );
+}
+
+function WorkflowBucket({ rows, model }: { rows: WorkflowDispatch[]; model: SwarmViewModel }): JSX.Element {
+    return (
+        <Show when={rows.length > 0}>
+            <div class="swarm-bucket swarm-bucket--workflow">
+                <div class="swarm-bucket-header">
+                    <span class="swarm-bucket-label">Workflow</span>
+                    <span class="swarm-bucket-count">{rows.length}</span>
+                </div>
+                <For each={rows}>{(group) => <WorkflowDispatchRow group={group} model={model} />}</For>
+            </div>
+        </Show>
     );
 }
 
@@ -351,28 +390,56 @@ function WorkflowDispatchRow({
                 </span>
             </div>
             <Show when={expanded()}>
-                <DispatchActivityFeed dispatchId={group.dispatchId} model={model} />
+                <DispatchActivityFeed rowKey={group.dispatchId} dispatchId={group.dispatchId} model={model} />
             </Show>
         </div>
     );
 }
 
 /**
- * Concatenated activity feed for an expanded `WorkflowDispatchRow` (SPEC
- * §7) — one chronological, member-tagged stream instead of nested member
- * rows, fed by `createDispatchDetail`'s `dispatch:activity` subscription.
- * Live-only: nothing to show until new activity arrives after expand (see
- * that function's doc comment for why there's no historical backfill).
+ * Concatenated activity feed for an expanded Agent Tool or Workflow row —
+ * one chronological, member-tagged stream instead of nested member rows,
+ * fed by `createDispatchDetail`'s `dispatch:activity` subscription. A solo
+ * (Agent Tool) dispatch also backfills history via `GetHistory`; a Workflow
+ * dispatch stays live-only (see `createDispatchDetail`'s doc comment for
+ * why) — so an empty feed right after expand is expected for a Workflow row
+ * and doesn't necessarily mean "no history", hence the kind-neutral copy.
  */
-function DispatchActivityFeed({ dispatchId, model }: { dispatchId: string; model: SwarmViewModel }): JSX.Element {
-    const detail = model.getDispatchDetail(dispatchId);
+function DispatchActivityFeed({
+    rowKey,
+    dispatchId,
+    model,
+    backfillAgentId,
+}: {
+    /** Cache/expand-state identity for THIS row — must be unique per row.
+     *  For a `WorkflowDispatchRow` this is the same as `dispatchId` (a
+     *  workflow's own dispatch_id is always 1:1 with its row). For an Agent
+     *  Tool row it must NOT be `dispatchId`: an orphaned workflow member (a
+     *  real "wf_..." dispatch_id shared by every sibling member still
+     *  waiting on a stale/lagging `ListDispatches`) would otherwise collide
+     *  every sibling row onto the same cached `DispatchDetail` and the same
+     *  expand-state entry (reagent P1 on #2232) — pass a per-agent key like
+     *  `agent:${sub.agent_id}` instead, which is always unique. */
+    rowKey: string;
+    /** The dispatch_id to subscribe to for live `dispatch:activity` events —
+     *  the REAL dispatch_id, which may legitimately be shared with sibling
+     *  rows (the orphaned-member case above); `backfillAgentId` (below)
+     *  scopes both the live feed and the backfill down to one agent when
+     *  that's the case. */
+    dispatchId: string;
+    model: SwarmViewModel;
+    /** Pass the row's own single subagent's `agent_id` for an Agent Tool row
+     *  (including an orphaned workflow member — see `getDispatchDetail`'s
+     *  doc comment in swarm-model.ts); omit for a genuine multi-member
+     *  `WorkflowDispatchRow`. */
+    backfillAgentId?: string;
+}): JSX.Element {
+    const detail = model.getDispatchDetail(rowKey, dispatchId, backfillAgentId);
     const entries = detail.entriesAtom;
     return (
         <div class="swarm-dispatch-feed">
             <Show when={entries().length === 0}>
-                <div class="swarm-dispatch-feed-empty">
-                    Waiting for activity — showing new events from now on, not history.
-                </div>
+                <div class="swarm-dispatch-feed-empty">No activity yet.</div>
             </Show>
             <For each={entries()}>{(entry) => <DispatchActivityFeedEntry entry={entry} />}</For>
         </div>
@@ -443,52 +510,7 @@ function DispatchActivityFeedEntry({ entry }: { entry: DispatchActivityEntry }):
     }
 }
 
-// ── Name group row (loose subagents sharing one display_name) ──────────
-
-function NameGroupRow({
-    group,
-    model,
-    parentAgentStatus,
-}: {
-    group: NameGroup;
-    model: SwarmViewModel;
-    parentAgentStatus: "running" | "idle";
-}): JSX.Element {
-    // Same expand-state-on-the-ViewModel rationale as WorkflowGroupRow —
-    // reuses groupCacheKey's "name:<name>" namespacing so this can never
-    // collide with a WorkflowGroupRow's workflowId or a SubagentRow's
-    // agent_id in the shared expandedIds set.
-    const key = groupCacheKey(group);
-    const expanded = createMemo(() => model.isExpanded(key));
-
-    return (
-        <div class={`swarm-workflow-group swarm-workflow-group--${group.status}`}>
-            <div
-                class="swarm-workflow-header"
-                onClick={() => model.toggleExpanded(key)}
-                title={group.name}
-            >
-                <i class={`fa-solid fa-${expanded() ? "chevron-down" : "chevron-right"} swarm-workflow-expand-icon`} />
-                <span class="swarm-workflow-name">{group.name}</span>
-                <span class="swarm-workflow-count">
-                    {group.status === "active" ? `${group.activeCount}/${group.totalCount} active` : `${group.totalCount} retired`}
-                </span>
-                <span class={`swarm-workflow-status-badge swarm-workflow-status-badge--${group.status}`}>
-                    {group.status === "active" ? "Active" : "Retired"}
-                </span>
-            </div>
-            <Show when={expanded()}>
-                <div class="swarm-workflow-members">
-                    <For each={group.subagents}>
-                        {(sub) => <SubagentRow sub={sub} model={model} parentAgentStatus={parentAgentStatus} />}
-                    </For>
-                </div>
-            </Show>
-        </div>
-    );
-}
-
-// ── Subagent child row ───────────────────────────────────────────────────
+// ── Agent Tool (solo dispatch) row ──────────────────────────────────────
 
 function SubagentRow({
     sub,
@@ -499,20 +521,32 @@ function SubagentRow({
     model: SwarmViewModel;
     parentAgentStatus: "running" | "idle";
 }): JSX.Element {
-    const expanded = createMemo(() => model.isExpanded(sub.agent_id));
-    // See subagentDisplayLabel's doc comment (swarm-model.ts) — slug is a
-    // shared per-batch codename, not a per-subagent identifier, so this
-    // disambiguates same-slug siblings with a short agent_id suffix instead
-    // of assuming slug alone is unique (task #44).
+    // Unified with WorkflowDispatchRow onto the same expandedIds/
+    // dispatchDetailCache mechanism (SPEC_SWARM_DISPATCH_NAMING_AND_ROW_
+    // MODEL_2026_07_19 §4), but keyed by `agent_id`, NOT `dispatch_id`: an
+    // orphaned workflow member's `dispatch_id` is a real, possibly-shared
+    // "wf_..." id (every sibling still waiting on a stale/lagging
+    // `ListDispatches` shares it) — keying expand-state/cache off it would
+    // collide every sibling row's expand toggle and cached feed onto the
+    // first one (reagent P1 on #2232). `agent_id` is always unique per row.
+    const rowKey = createMemo(() => `agent:${sub.agent_id}`);
+    const expanded = createMemo(() => model.isExpanded(rowKey()));
+    // See subagentDisplayLabel's doc comment (swarm-model.ts) — as of Phase A
+    // this resolves eagerly at dispatch time for the common case; the
+    // slug/agent_id fallback chain only matters for the brief window before
+    // that resolves (or if it never does).
     const displayLabel = createMemo(() => subagentDisplayLabel(sub));
 
     const handleToggle = () => {
         const wasExpanded = expanded();
-        model.toggleSubagentExpanded(sub.agent_id);
+        model.toggleDispatchExpanded(rowKey());
         if (!wasExpanded && !sub.display_name) {
-            // Fire-and-forget — the row's label/detail header picks up the
-            // name via the subagent:named event (swarm-model.ts), not this
-            // call's return; we only need the return here for cost accounting.
+            // Fallback safety net — eager naming (Phase A) should already
+            // have resolved this by the time a user gets here, but fire the
+            // on-demand call too in case it hasn't (still in flight, or
+            // failed). Fire-and-forget — the row's label picks up the name
+            // via the subagent:named event (swarm-model.ts), not this call's
+            // return; we only need the return here for cost accounting.
             void callBackendService("subagent", "GenerateName", [sub.agent_id]).then((result: any) => {
                 if (result?.tokens) recordTurn("ambient:subagent_name", result.tokens);
             });
@@ -542,103 +576,15 @@ function SubagentRow({
                 <AgentStatusChip status={subagentDisplayStatus(sub, parentAgentStatus)} />
             </div>
             <Show when={expanded()}>
-                <SubagentDetailPane sub={sub} detail={model.getSubagentDetail(sub.agent_id)} />
+                <DispatchActivityFeed
+                    rowKey={rowKey()}
+                    dispatchId={sub.dispatch_id}
+                    model={model}
+                    backfillAgentId={sub.agent_id}
+                />
             </Show>
         </div>
     );
-}
-
-// ── Subagent inline detail (expanded event log) ──────────────────────────
-
-function SubagentDetailPane({ sub, detail }: { sub: ActiveSubagent; detail: SubagentDetail }): JSX.Element {
-    const info = detail.infoAtom;
-    const events = detail.eventsAtom;
-    const status = detail.statusAtom;
-
-    // Same slug-is-not-unique reasoning as SubagentRow's displayLabel (see
-    // subagentDisplayLabel's doc comment in swarm-model.ts) — prefer the
-    // freshest info() read, falling back to the row's own `sub` fields.
-    const name = createMemo(() =>
-        subagentDisplayLabel({
-            display_name: info()?.display_name ?? sub.display_name,
-            slug: info()?.slug ?? sub.slug,
-            agent_id: sub.agent_id,
-        })
-    );
-    const modelName = createMemo(() => info()?.model ?? sub.model);
-    const eventCount = createMemo(() => info()?.event_count ?? sub.event_count);
-
-    return (
-        <div class="swarm-subagent-detail">
-            <div class="swarm-subagent-detail-header">
-                <span class="swarm-subagent-detail-name">{name()}</span>
-                <span class="swarm-subagent-detail-meta">{sub.agent_id.substring(0, 7)}</span>
-                <span class="swarm-subagent-detail-meta">{eventCount()} events</span>
-                <Show when={modelName()}>
-                    <span class="swarm-subagent-detail-meta">{modelName()}</span>
-                </Show>
-                <span class="swarm-subagent-detail-meta">{sub.parent_agent}</span>
-            </div>
-            <div class="swarm-subagent-detail-log">
-                <Show when={status() === "loading"}>
-                    <div class="swarm-subagent-detail-loading">Loading…</div>
-                </Show>
-                <Show when={events().length === 0 && status() !== "loading"}>
-                    <div class="swarm-subagent-detail-empty">No activity yet</div>
-                </Show>
-                <For each={events()}>{(event) => <SubagentDetailEvent event={event} />}</For>
-            </div>
-        </div>
-    );
-}
-
-function SubagentDetailEvent({ event }: { event: SubagentEvent }): JSX.Element {
-    const et = event.event_type;
-    const [expanded, setExpanded] = createSignal(false);
-
-    switch (et.type) {
-        case "text":
-        case "result":
-            return <pre class="swarm-subagent-detail-text">{et.content}</pre>;
-        case "tool_use":
-            return (
-                <div class="swarm-subagent-detail-tool">
-                    <div class="swarm-subagent-detail-tool-header" onClick={() => setExpanded(!expanded())}>
-                        <i class={`fa-solid fa-${expanded() ? "chevron-down" : "chevron-right"} swarm-subagent-detail-expand-icon`} />
-                        <span class="swarm-subagent-detail-tool-name">{et.name}</span>
-                    </div>
-                    <Show when={expanded()}>
-                        <pre class="swarm-subagent-detail-text">{et.input_summary}</pre>
-                    </Show>
-                </div>
-            );
-        case "tool_result":
-            return (
-                <div class="swarm-subagent-detail-tool">
-                    <div
-                        class={`swarm-subagent-detail-tool-header ${et.is_error ? "swarm-subagent-detail-tool-header--error" : ""}`}
-                        onClick={() => setExpanded(!expanded())}
-                    >
-                        <i class={`fa-solid fa-${expanded() ? "chevron-down" : "chevron-right"} swarm-subagent-detail-expand-icon`} />
-                        <span>{et.is_error ? "Error" : "Result"}</span>
-                    </div>
-                    <Show when={expanded()}>
-                        <pre class={`swarm-subagent-detail-text ${et.is_error ? "swarm-subagent-detail-text--error" : ""}`}>
-                            {et.preview}
-                        </pre>
-                    </Show>
-                </div>
-            );
-        case "progress":
-            return (
-                <div class="swarm-subagent-detail-progress">
-                    <i class="fa-solid fa-spinner fa-spin" />
-                    <span>{et.output}</span>
-                </div>
-            );
-        default:
-            return null;
-    }
 }
 
 // ── Status chip ──────────────────────────────────────────────────────────

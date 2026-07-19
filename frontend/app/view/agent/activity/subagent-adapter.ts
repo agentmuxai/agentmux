@@ -8,19 +8,26 @@
  * dock — proves the `PinnedActivity` abstraction generalizes beyond shells.
  *
  * Groups by `dispatch_id` (collapsing a Workflow dispatch's members into one
- * row, mirroring the Swarm pane's tree view), then by shared `display_name`
- * among the solo leftovers — `NameGroup`, reused directly from
- * swarm-model.ts. Deliberately NOT reusing swarm-model.ts's
- * `buildDispatchChildren`/`WorkflowDispatch` for the dispatch half: that
- * type intentionally drops the member list (SPEC_AGENT_DISPATCH_SUBAGENT_
- * HIERARCHY_2026_07_17 §7 — a Workflow dispatch can have thousands of
- * members, too many to hold in the Swarm pane's frequently-recomputed tree
- * atom), but this adapter needs each member's `spawned_at`/`status` to
- * compute one summary row — and the dock's own scale (pinned activity, not
- * a full tree) makes holding that list here safe. Without grouping at all,
- * the dock would show one row per `ActiveSubagent` instead of one row per
- * Agent-tool-or-Workflow-tool call (a single workflow run can spawn dozens
- * to hundreds at once).
+ * row, mirroring the Swarm pane's tree view) — 2+ members sharing one id
+ * (always a Workflow dispatch; a Solo dispatch is 1:1 with its one member)
+ * collapse into a `DispatchGroup`. Does NOT additionally group loose solo
+ * subagents by shared `display_name` — the `NameGroup` mechanism this used
+ * to reuse from swarm-model.ts was retired in
+ * SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 (superseded by eager
+ * per-dispatch Haiku naming, which removes the "many rows share one
+ * uninformative name" problem that grouping existed to paper over — see
+ * that spec §2). This dock mirrors the same simplification.
+ *
+ * Deliberately NOT reusing swarm-model.ts's `buildDispatchBuckets`/
+ * `WorkflowDispatch` for the dispatch half: that type intentionally drops
+ * the member list (SPEC_AGENT_DISPATCH_SUBAGENT_HIERARCHY_2026_07_17 §7 — a
+ * Workflow dispatch can have thousands of members, too many to hold in the
+ * Swarm pane's frequently-recomputed tree atom), but this adapter needs
+ * each member's `spawned_at`/`status` to compute one summary row — and the
+ * dock's own scale (pinned activity, not a full tree) makes holding that
+ * list here safe. Without grouping at all, the dock would show one row per
+ * `ActiveSubagent` instead of one row per Agent-tool-or-Workflow-tool call
+ * (a single workflow run can spawn dozens to hundreds at once).
  *
  * `canStop` is always `false`: no subagent-cancel RPC/UI exists anywhere in
  * the app today (confirmed — `AgentStopCommand` targets a pane's own agent
@@ -31,12 +38,7 @@
  * Spec: docs/specs/SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15.md (§3, §7)
  */
 
-import {
-    groupCacheKey,
-    isNameGroup,
-    type ActiveSubagent,
-    type NameGroup,
-} from "../../swarm/swarm-model";
+import type { ActiveSubagent } from "../../swarm/swarm-model";
 import type { ActivityStatus, PinnedActivity } from "./types";
 
 /** One dock row summarizing every member of a shared `dispatch_id` — the
@@ -52,19 +54,17 @@ interface DispatchGroup {
     lastEventAt: number;
 }
 
-function isDispatchGroup(x: ActiveSubagent | DispatchGroup | NameGroup): x is DispatchGroup {
+function isDispatchGroup(x: ActiveSubagent | DispatchGroup): x is DispatchGroup {
     return "kind" in x && x.kind === "dispatchGroup";
 }
 
 /** Group `subagents` (already filtered to one parent block) by `dispatch_id`
  *  — 2+ members sharing one id (always a Workflow dispatch; a Solo dispatch
  *  is 1:1 with its one member by construction) collapse into a
- *  `DispatchGroup`. Among what's left, 2+ subagents sharing an identical,
- *  non-empty `display_name` collapse into a `NameGroup`. A single subagent
- *  stays a loose, ungrouped row. */
+ *  `DispatchGroup`. A single subagent stays a loose, ungrouped row. */
 function groupSubagentsForDock(
     subagents: ActiveSubagent[]
-): (ActiveSubagent | DispatchGroup | NameGroup)[] {
+): (ActiveSubagent | DispatchGroup)[] {
     const byDispatch = new Map<string, ActiveSubagent[]>();
     for (const s of subagents) {
         const members = byDispatch.get(s.dispatch_id) ?? [];
@@ -92,38 +92,7 @@ function groupSubagentsForDock(
         });
     }
 
-    const stillLoose: ActiveSubagent[] = [];
-    const byName = new Map<string, ActiveSubagent[]>();
-    for (const s of loose) {
-        if (s.display_name) {
-            const members = byName.get(s.display_name) ?? [];
-            members.push(s);
-            byName.set(s.display_name, members);
-        } else {
-            stillLoose.push(s);
-        }
-    }
-    const nameGroups: NameGroup[] = [];
-    for (const [name, members] of byName) {
-        if (members.length < 2) {
-            stillLoose.push(...members);
-            continue;
-        }
-        const sorted = [...members].sort((a, b) => b.last_event_at - a.last_event_at);
-        const activeCount = sorted.filter((m) => m.status === "active").length;
-        nameGroups.push({
-            kind: "nameGroup",
-            name,
-            parentBlockId: sorted[0].parent_block_id,
-            subagents: sorted,
-            activeCount,
-            totalCount: sorted.length,
-            status: activeCount > 0 ? "active" : "retired",
-            lastEventAt: sorted[0]?.last_event_at ?? 0,
-        });
-    }
-
-    return [...stillLoose, ...dispatchGroups, ...nameGroups];
+    return [...loose, ...dispatchGroups];
 }
 
 function subagentStatusToActivity(s: ActiveSubagent["status"]): ActivityStatus {
@@ -158,17 +127,17 @@ export function subagentToActivity(s: ActiveSubagent): PinnedActivity {
     };
 }
 
-/** A `DispatchGroup`/`NameGroup` → one dock row summarizing every member,
- *  instead of one row per subagent. `startedAt` is the earliest member's
- *  spawn (the group's own lifetime, not just its most-recently-active
- *  member's); `endedAt` only lands once every member is terminal, matching
+/** A `DispatchGroup` → one dock row summarizing every member, instead of one
+ *  row per subagent. `startedAt` is the earliest member's spawn (the
+ *  group's own lifetime, not just its most-recently-active member's);
+ *  `endedAt` only lands once every member is terminal, matching
  *  `subagentToActivity`'s own "no member still running" rule. */
-function subagentGroupToActivity(group: DispatchGroup | NameGroup): PinnedActivity {
+function subagentGroupToActivity(group: DispatchGroup): PinnedActivity {
     const members = group.subagents;
     const anyAbandoned = members.some((m) => m.status === "abandoned");
     const status: ActivityStatus = group.activeCount > 0 ? "running" : anyAbandoned ? "stopped" : "done";
     return {
-        id: isDispatchGroup(group) ? group.dispatchId : groupCacheKey(group),
+        id: group.dispatchId,
         kind: "subagent",
         title: `${group.name} (${group.totalCount})`,
         status,
@@ -180,12 +149,11 @@ function subagentGroupToActivity(group: DispatchGroup | NameGroup): PinnedActivi
 }
 
 /** This pane's own subagents (`parent_block_id === blockId`), grouped by
- *  shared `dispatch_id` then by shared `display_name` among what's left,
- *  and mapped to activities. One dock row per Agent-tool-or-Workflow-tool
- *  call, not per individual subagent. */
+ *  shared `dispatch_id` and mapped to activities. One dock row per
+ *  Agent-tool-or-Workflow-tool call, not per individual subagent. */
 export function subagentActivities(all: ReadonlyArray<ActiveSubagent>, blockId: string): PinnedActivity[] {
     const mine = all.filter((s) => s.parent_block_id === blockId);
     return groupSubagentsForDock(mine).map((child) =>
-        isDispatchGroup(child) || isNameGroup(child) ? subagentGroupToActivity(child) : subagentToActivity(child)
+        isDispatchGroup(child) ? subagentGroupToActivity(child) : subagentToActivity(child)
     );
 }
