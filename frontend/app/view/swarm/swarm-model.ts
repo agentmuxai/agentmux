@@ -121,10 +121,6 @@ export interface WorkflowDispatch {
     lastEventAt: number;
 }
 
-export function isWorkflowDispatch(child: unknown): child is WorkflowDispatch {
-    return !!child && typeof child === "object" && "kind" in child && (child as WorkflowDispatch).kind === "workflowDispatch";
-}
-
 export interface AgentTreeNode {
     blockId: string | null;
     agentName: string;

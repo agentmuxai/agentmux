@@ -133,7 +133,7 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
     });
 
     // Expanded subagent transcript — created only while this row is actually
-    // expanded (mirrors SwarmViewModel's own lazy `getSubagentDetail` cache),
+    // expanded (mirrors SwarmViewModel's own lazy `getDispatchDetail` cache),
     // disposed on collapse/unmount so an idle dock isn't holding N live
     // event subscriptions for subagents nobody is looking at.
     const [dispatchDetail, setDispatchDetail] = createSignal<DispatchDetail | null>(null);
