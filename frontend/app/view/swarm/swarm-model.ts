@@ -67,12 +67,16 @@ export interface AgentDispatch {
     members_done: number;
     status: "running" | "completed";
     last_event_at: number;
-    /** Concise Haiku-generated name for a Workflow-kind dispatch, resolved
+    /** For a Workflow-kind dispatch: a concise Haiku-generated name, resolved
      *  EAGERLY (SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 Phase A)
      *  the first time its first member is observed live — not on-click like
-     *  `ActiveSubagent.display_name`. `null` until resolved (or always
-     *  `null` for a Solo-kind dispatch — a solo dispatch's name IS its one
-     *  member's `display_name`, this field is Workflow-only backend-side). */
+     *  `ActiveSubagent.display_name`. `null` until resolved.
+     *
+     *  For a Solo-kind dispatch: mirrors that one member's own
+     *  `display_name` directly (`subagent_watcher.rs`'s `solo_dispatch()`) —
+     *  there's no separate dispatch-level naming call for Solo, so this is
+     *  `null` until that member's `display_name` itself resolves, same
+     *  timing as `ActiveSubagent.display_name`, not always `null`. */
     dispatch_name: string | null;
 }
 
