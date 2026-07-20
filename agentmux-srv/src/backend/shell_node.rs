@@ -16,6 +16,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use parking_lot::Mutex;
+use serde::Serialize;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::sync::{mpsc, oneshot};
 
@@ -31,10 +32,37 @@ fn now_ms() -> u64 {
 
 /// Live status of a running (or recently exited) shell. Updated by
 /// `ShellNodeRunner` as output arrives and on exit.
+///
+/// `block_id`/`cmd`/`title`/`started_at` are populated once at spawn (see
+/// `ShellNodeRunner::run`) and never change — kept here (rather than a
+/// separate lookup) so `list_active` (SPEC_SWARM_LONG_RUNNING_PROCESS_
+/// ROWS_2026_07_20) can answer "which shells belong to block X" from the
+/// same map `get_status`/`ShellStatus` already query, with no new registry
+/// or second source of truth.
 #[derive(Clone, Default)]
 pub struct ShellStatusInfo {
     pub running: bool,
     pub exit_code: Option<i32>,
+    pub line_count: u64,
+    pub block_id: String,
+    pub cmd: String,
+    pub title: String,
+    pub started_at: u64,
+}
+
+/// Snapshot of one currently-running shell for the Swarm pane's per-agent
+/// long-running-process rows. See `ShellSessionRegistry::list_active`.
+/// Carries `block_id` (unfiltered list — same shape as `subagent.ListActive`/
+/// `ActiveSubagent.parent_block_id`) so the Swarm pane's `buildTree()` groups
+/// by block client-side in one pass, instead of one RPC call per tracked
+/// agent block.
+#[derive(Clone, Serialize)]
+pub struct ShellSummary {
+    pub shell_id: String,
+    pub block_id: String,
+    pub cmd: String,
+    pub title: String,
+    pub started_at: u64,
     pub line_count: u64,
 }
 
@@ -204,6 +232,36 @@ impl ShellSessionRegistry {
             .map(|arc| arc.lock().clone())
             .unwrap_or_default()
     }
+
+    /// List every currently-RUNNING shell across all blocks — the Swarm
+    /// pane's data source for its per-agent long-running-process rows
+    /// (SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20). Unfiltered, like
+    /// `subagent.ListActive`/`ListDispatches` — the Swarm pane fetches once
+    /// and groups by `block_id` client-side in `buildTree()`, rather than
+    /// one RPC per tracked agent block. Exited shells are intentionally
+    /// excluded: Phase 1's scope is "what's happening now," not a shell
+    /// history view.
+    pub fn list_active(&self) -> Vec<ShellSummary> {
+        self.status_map
+            .lock()
+            .iter()
+            .filter_map(|(shell_id, arc)| {
+                let s = arc.lock();
+                if s.running {
+                    Some(ShellSummary {
+                        shell_id: shell_id.clone(),
+                        block_id: s.block_id.clone(),
+                        cmd: s.cmd.clone(),
+                        title: s.title.clone(),
+                        started_at: s.started_at,
+                        line_count: s.line_count,
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
 }
 
 /// Kill the entire process tree rooted at `pid`. `Child::kill` / `kill_on_drop`
@@ -236,6 +294,10 @@ pub struct ShellNodeRunner {
     pub shell_id: String,
     pub block_id: String,
     pub cmd: String,
+    /// Caller-supplied display title, defaulting to `cmd` — mirrors
+    /// `handle_shell_create`'s own `title` local, threaded through so
+    /// `ShellStatusInfo`/`list_active` can show it without a second lookup.
+    pub title: String,
     pub cwd: Option<String>,
     pub extra_env: HashMap<String, String>,
     pub broker: Arc<Broker>,
@@ -347,7 +409,15 @@ impl ShellNodeRunner {
             None
         };
 
-        let status_arc = Arc::new(Mutex::new(ShellStatusInfo { running: true, exit_code: None, line_count: 0 }));
+        let status_arc = Arc::new(Mutex::new(ShellStatusInfo {
+            running: true,
+            exit_code: None,
+            line_count: 0,
+            block_id: block_id.clone(),
+            cmd: self.cmd.clone(),
+            title: self.title.clone(),
+            started_at: now_ms(),
+        }));
         let (cancel_tx, cancel_rx) = oneshot::channel::<()>();
         let evicted = self.registry.register_full(
             shell_id.clone(),
@@ -519,6 +589,7 @@ mod tests {
             running,
             exit_code: if running { None } else { Some(0) },
             line_count: 1,
+            ..Default::default()
         }));
         // _rx is intentionally dropped; we only exercise the status-map cap.
         reg.register_full(id.to_string(), tx, None, status);
@@ -550,6 +621,37 @@ mod tests {
         // Running shells exceed the exited cap but none are evicted.
         assert_eq!(reg.status_map.lock().len(), total);
         assert!(reg.get_status("r0").running);
+    }
+
+    fn register_running_for_block(reg: &ShellSessionRegistry, id: &str, block_id: &str, cmd: &str) {
+        let (tx, _rx) = oneshot::channel::<()>();
+        let status = Arc::new(Mutex::new(ShellStatusInfo {
+            running: true,
+            block_id: block_id.to_string(),
+            cmd: cmd.to_string(),
+            title: cmd.to_string(),
+            started_at: 1_000,
+            ..Default::default()
+        }));
+        reg.register_full(id.to_string(), tx, None, status);
+    }
+
+    #[tokio::test]
+    async fn list_active_returns_only_running_shells_across_all_blocks() {
+        let reg = ShellSessionRegistry::new();
+        register_running_for_block(&reg, "s1", "block-a", "npm run dev");
+        register_running_for_block(&reg, "s2", "block-b", "task dev");
+        register_exited(&reg, "s3", false); // exited — must not appear
+
+        let mut active = reg.list_active();
+        active.sort_by(|a, b| a.shell_id.cmp(&b.shell_id));
+
+        assert_eq!(active.len(), 2);
+        assert_eq!(active[0].shell_id, "s1");
+        assert_eq!(active[0].block_id, "block-a");
+        assert_eq!(active[0].cmd, "npm run dev");
+        assert_eq!(active[1].shell_id, "s2");
+        assert_eq!(active[1].block_id, "block-b");
     }
 }
 

@@ -52,6 +52,24 @@ export interface ActiveSubagent {
 }
 
 /**
+ * Mirrors the backend's `ShellSummary` (`shell_node.rs`) — one currently-
+ * RUNNING background shell the agent kicked off via the Shell MCP tool.
+ * Fetched via `shell.ListActive` (unfiltered, like `ActiveSubagent` above);
+ * `buildTree()` groups by `block_id` client-side. Exited shells never
+ * appear here — Phase 1's scope is "what's happening now," not history.
+ * See SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20.
+ */
+export interface ActiveShell {
+    shell_id: string;
+    block_id: string;
+    cmd: string;
+    /** Caller-supplied display title, defaulting to `cmd` server-side. */
+    title: string;
+    started_at: number;
+    line_count: number;
+}
+
+/**
  * Mirrors the backend's `AgentDispatch` (one per Agent-tool-or-Workflow-tool
  * call). Only Workflow-kind dispatches get their own tree row
  * (`WorkflowDispatch`, below) — a Solo-kind dispatch's one member renders as
@@ -143,6 +161,10 @@ export interface AgentTreeNode {
      *  member count (SPEC §7, unchanged from the pre-existing design).
      *  Sorted by most recent activity. */
     workflowRows: WorkflowDispatch[];
+    /** One row per currently-RUNNING background shell this agent started
+     *  (SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20 Phase 1). Sorted
+     *  newest-first, same convention as the other two buckets. */
+    shellRows: ActiveShell[];
 }
 
 /**
@@ -190,6 +212,19 @@ export function buildDispatchBuckets(
     );
 
     return { agentToolRows, workflowRows };
+}
+
+/**
+ * Build one block's Shell bucket rows (SPEC_SWARM_LONG_RUNNING_PROCESS_
+ * ROWS_2026_07_20 Phase 1) — every currently-running shell whose
+ * `block_id` matches, newest-first. Extracted as a pure function (matching
+ * `buildDispatchBuckets` above) purely so it's directly unit-testable
+ * without instantiating `SwarmViewModel`.
+ */
+export function buildShellRows(shells: ActiveShell[], blockId: string | null): ActiveShell[] {
+    return shells
+        .filter((s) => s.block_id === blockId)
+        .sort((a, b) => b.started_at - a.started_at);
 }
 
 /**
@@ -566,6 +601,13 @@ export class SwarmViewModel implements ViewModel {
     subagentsAtom: Accessor<ActiveSubagent[]> = this._subagents[0];
     private setSubagents: Setter<ActiveSubagent[]> = this._subagents[1];
 
+    // Active background shells (SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20
+    // Phase 1) — fetched separately via shell.ListActive; buildTree() groups
+    // by block_id the same way it does for subagents/dispatches above.
+    private _shells = createSignal<ActiveShell[]>([]);
+    shellsAtom: Accessor<ActiveShell[]> = this._shells[0];
+    private setShells: Setter<ActiveShell[]> = this._shells[1];
+
     // AgentDispatches (SPEC §5) — one per Agent-tool-or-Workflow-tool call.
     // Fetched separately from subagentsAtom via subagent.ListDispatches;
     // buildTree() cross-references the two by dispatch_id/parent_block_id.
@@ -663,6 +705,12 @@ export class SwarmViewModel implements ViewModel {
     private loadSubagentsDebounceTimer: ReturnType<typeof setTimeout> | undefined;
     private static readonly LOAD_SUBAGENTS_DEBOUNCE_MS = 150;
 
+    // Same debounce shape as loadSubagentsDebounceTimer above, kept separate
+    // since shell_node_create/shell_chunk bursts are unrelated to subagent/
+    // dispatch events — no reason to couple their reload timing.
+    private loadShellsDebounceTimer: ReturnType<typeof setTimeout> | undefined;
+    private static readonly LOAD_SHELLS_DEBOUNCE_MS = 150;
+
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
         this.nodeModel = nodeModel;
@@ -716,6 +764,26 @@ export class SwarmViewModel implements ViewModel {
             handler: () => this.scheduleLoadSubagents(),
         });
         if (unsubBlockPruned) this.unsubs.push(unsubBlockPruned);
+
+        // Shell bucket (SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20 Phase 1).
+        // shell_node_create — a new shell appeared, reload the active list.
+        const unsubShellCreate = waveEventSubscribe({
+            eventType: "shell_node_create",
+            handler: () => this.scheduleLoadShells(),
+        });
+        if (unsubShellCreate) this.unsubs.push(unsubShellCreate);
+
+        // shell_chunk fires per output line too — only reload on the
+        // terminal "exit" op, not every line of stdout/stderr (that would
+        // re-fetch the whole active-shells list on every chunk).
+        const unsubShellChunk = waveEventSubscribe({
+            eventType: "shell_chunk",
+            handler: (event: WaveEvent) => {
+                const data = event?.data as any;
+                if (data?.op === "exit") this.scheduleLoadShells();
+            },
+        });
+        if (unsubShellChunk) this.unsubs.push(unsubShellChunk);
 
         // Patch display_name in place (not a full loadSubagents() reload) so
         // every client watching this session picks up a generated name —
@@ -772,7 +840,12 @@ export class SwarmViewModel implements ViewModel {
     loadAll = async (): Promise<void> => {
         this.setLoading(true);
         try {
-            await Promise.all([this.loadTrackedBlocks(), this.loadSubagents(), this.loadDispatches()]);
+            await Promise.all([
+                this.loadTrackedBlocks(),
+                this.loadSubagents(),
+                this.loadDispatches(),
+                this.loadShells(),
+            ]);
             this.pruneRetiredRowKeys();
         } finally {
             this.setLoading(false);
@@ -809,6 +882,15 @@ export class SwarmViewModel implements ViewModel {
         }
     };
 
+    loadShells = async (): Promise<void> => {
+        try {
+            const result = await callBackendService("shell", "ListActive", []);
+            this.setShells((result as ActiveShell[]) ?? []);
+        } catch {
+            // silently ignore
+        }
+    };
+
     // Coalesces a burst of subagent:spawned/subagent:completed/dispatch:
     // updated events (e.g. a backfill scan on pane reopen, or a large
     // workflow dispatch spawning many members at once) into a single
@@ -822,6 +904,18 @@ export class SwarmViewModel implements ViewModel {
             this.loadSubagentsDebounceTimer = undefined;
             void Promise.all([this.loadSubagents(), this.loadDispatches()]).then(() => this.pruneRetiredRowKeys());
         }, SwarmViewModel.LOAD_SUBAGENTS_DEBOUNCE_MS);
+    };
+
+    // Coalesces a burst of shell_node_create/shell_chunk(exit) events (e.g.
+    // several shells starting/exiting close together) into a single reload.
+    scheduleLoadShells = (): void => {
+        if (this.loadShellsDebounceTimer !== undefined) {
+            clearTimeout(this.loadShellsDebounceTimer);
+        }
+        this.loadShellsDebounceTimer = setTimeout(() => {
+            this.loadShellsDebounceTimer = undefined;
+            void this.loadShells();
+        }, SwarmViewModel.LOAD_SHELLS_DEBOUNCE_MS);
     };
 
     /** Drop `_retiredRowKeys` entries for rows no longer present in live
@@ -991,6 +1085,7 @@ export class SwarmViewModel implements ViewModel {
         const blockIds = this.trackedBlockIdsAtom();
         const subagents = this.subagentsAtom();
         const dispatches = this.dispatchesAtom();
+        const shells = this.shellsAtom();
         const statuses = this.agentStatusesAtom();
 
         // Include parent block IDs from subagents as fallback for agent panes
@@ -1029,7 +1124,18 @@ export class SwarmViewModel implements ViewModel {
             // mechanism (SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20 §6).
             const agentToolRows = filterRetired(rawAgentToolRows, retired, (s) => subagentRowKey(s.agent_id), (s) => s.last_event_at);
             const visibleWorkflowRows = filterRetired(workflowRows, retired, (w) => w.dispatchId, (w) => w.lastEventAt);
-            return { blockId, agentName, agentProvider, activitySummary, contextTokens, agentStatus, agentToolRows, workflowRows: visibleWorkflowRows };
+            const shellRows = buildShellRows(shells, blockId);
+            return {
+                blockId,
+                agentName,
+                agentProvider,
+                activitySummary,
+                contextTokens,
+                agentStatus,
+                agentToolRows,
+                workflowRows: visibleWorkflowRows,
+                shellRows,
+            };
         });
 
         // Prune once per full pass (not per-block — see stabilizeGroupIdentity).
@@ -1045,6 +1151,10 @@ export class SwarmViewModel implements ViewModel {
         if (this.loadSubagentsDebounceTimer !== undefined) {
             clearTimeout(this.loadSubagentsDebounceTimer);
             this.loadSubagentsDebounceTimer = undefined;
+        }
+        if (this.loadShellsDebounceTimer !== undefined) {
+            clearTimeout(this.loadShellsDebounceTimer);
+            this.loadShellsDebounceTimer = undefined;
         }
         for (const detail of this.dispatchDetailCache.values()) detail.dispose();
         this.dispatchDetailCache.clear();

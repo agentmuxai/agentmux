@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createMemo, createSignal, createEffect, onCleanup, For, onMount, Show, type JSX } from "solid-js";
-import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, WorkflowDispatch, SubagentEvent, DispatchActivityEntry } from "./swarm-model";
+import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, ActiveShell, WorkflowDispatch, SubagentEvent, DispatchActivityEntry } from "./swarm-model";
 import { subagentDisplayLabel, subagentRowKey } from "./swarm-model";
 import { ProviderLogo } from "@/app/element/ProviderLogo";
 import { callBackendService } from "@/store/wos";
@@ -13,6 +13,7 @@ import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import { getBlockTurnPhase } from "@/app/store/agentActivity";
 import { WorkspaceService } from "@/app/store/services";
 import { recordTurn } from "@/app/store/token-usage";
+import { useTick } from "@/app/hook/useTick";
 import "./swarm-view.scss";
 
 // Navigate to the pane for a given block ID, switching tabs and windows as needed.
@@ -233,7 +234,9 @@ function AgentRow({
         phaseToDisplayStatus(node.blockId, node.agentStatus)
     );
     const collapsed = createMemo(() => model.isAgentCollapsed(node.blockId));
-    const totalRows = createMemo(() => node.agentToolRows.length + node.workflowRows.length);
+    const totalRows = createMemo(
+        () => node.agentToolRows.length + node.workflowRows.length + node.shellRows.length
+    );
     const hasChildren = createMemo(() => totalRows() > 0);
 
     const [summaryFlash, setSummaryFlash] = createSignal(false);
@@ -304,6 +307,7 @@ function AgentRow({
                 <div class="swarm-children">
                     <AgentToolBucket rows={node.agentToolRows} model={model} parentAgentStatus={node.agentStatus} />
                     <WorkflowBucket rows={node.workflowRows} model={model} />
+                    <ShellBucket rows={node.shellRows} />
                 </div>
             </Show>
         </div>
@@ -350,6 +354,60 @@ function WorkflowBucket({ rows, model }: { rows: WorkflowDispatch[]; model: Swar
                 <For each={rows}>{(group) => <WorkflowDispatchRow group={group} model={model} />}</For>
             </div>
         </Show>
+    );
+}
+
+// Shell bucket — Phase 1 of SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20.
+// Appended after Agent Tool/Workflow (spec's resolved open question 1):
+// those two are semantically-named, agent-level units of work; shells are
+// lower-level/mechanical (raw commands), so most-abstract-first reads best.
+// No expand-to-feed like the other two buckets — Phase 1 is deliberately
+// flat (title + elapsed + stop), matching the "good starting point" scope;
+// showing live shell output here is a larger follow-up, not attempted now.
+function ShellBucket({ rows }: { rows: ActiveShell[] }): JSX.Element {
+    return (
+        <Show when={rows.length > 0}>
+            <div class="swarm-bucket swarm-bucket--shell">
+                <div class="swarm-bucket-header">
+                    <span class="swarm-bucket-label">Shell</span>
+                    <span class="swarm-bucket-count">{rows.length}</span>
+                </div>
+                <For each={rows}>{(shell) => <ShellRow shell={shell} />}</For>
+            </div>
+        </Show>
+    );
+}
+
+function formatElapsed(ms: number): string {
+    const totalSec = Math.max(0, Math.floor(ms / 1000));
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function ShellRow({ shell }: { shell: ActiveShell }): JSX.Element {
+    const tick = useTick(1000);
+    const elapsed = createMemo(() => {
+        tick();
+        return formatElapsed(Date.now() - shell.started_at);
+    });
+
+    const handleStop = (e: MouseEvent) => {
+        e.stopPropagation();
+        RpcApi.ShellStopCommand(TabRpcClient, { shell_id: shell.shell_id }).catch(() => {
+            // best-effort — the exit event (shell_chunk op:"exit") reconciles
+            // the active list via scheduleLoadShells either way
+        });
+    };
+
+    return (
+        <div class="swarm-shell-row" title={shell.cmd}>
+            <span class="swarm-shell-title">{shell.title}</span>
+            <span class="swarm-shell-elapsed">{elapsed()}</span>
+            <button class="swarm-shell-stop" title="Stop" onClick={handleStop}>
+                <i class="fa-solid fa-stop" />
+            </button>
+        </div>
     );
 }
 
