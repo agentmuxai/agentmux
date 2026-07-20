@@ -197,41 +197,37 @@ describe("ToolBlock — panel mode", () => {
         // naive `if (props.disable)` early-return inside Tooltip's
         // component body would commit whichever branch was true at mount
         // and never re-select — these catch that regression.
-        it("reactively starts showing the tooltip once a running (auto-expanded) tool completes, without remounting", () => {
+        it("shows the tooltip once a running tool completes, with the cursor already stationary over it (no second mouseenter)", () => {
+            // The scenario a naive implementation misses: the user's cursor
+            // never moves, only `disable` (derived from the tool's own
+            // status) changes out from under it. If the anchor's hover
+            // handling only acted inside the mouseenter/mouseleave handlers
+            // themselves, this would require a SECOND mouseenter that never
+            // comes in real usage — a stationary cursor doesn't generate one
+            // just because an unrelated prop changed.
             const [node, setNode] = createSignal<ToolNode>({ ...baseTool, status: "running" });
             const { container, unmount } = render(() => (
                 <ToolBlock node={node()} pinned={false} onTogglePin={() => {}} />
             ));
-            const anchorWhileRunning = container.querySelector(".agent-tool-name-tooltip-anchor") as HTMLElement;
-            fireEvent.mouseEnter(anchorWhileRunning);
-            expect(document.body.querySelector(".agent-tool-cmd-tooltip")).toBeNull(); // still running, panel expanded
-            setNode({ ...baseTool, status: "success" }); // completes, panel collapses
-            // `disable` flipping swaps <Show>'s branch, which mounts a fresh
-            // DOM node for the anchor -- re-query rather than reuse the
-            // pre-transition element reference.
-            const anchorAfterComplete = container.querySelector(".agent-tool-name-tooltip-anchor") as HTMLElement;
-            fireEvent.mouseEnter(anchorAfterComplete);
+            const anchor = container.querySelector(".agent-tool-name-tooltip-anchor") as HTMLElement;
+            fireEvent.mouseEnter(anchor); // cursor arrives while still running (disabled, panel expanded)
+            expect(document.body.querySelector(".agent-tool-cmd-tooltip")).toBeNull();
+            setNode({ ...baseTool, status: "success" }); // completes; cursor never moves
             const tip = document.body.querySelector(".agent-tool-cmd-tooltip");
             expect(tip).not.toBeNull();
             expect(tip!.textContent).toBe("ls");
             unmount();
         });
 
-        it("reactively stops showing the tooltip once an already-mounted tool gets pinned open", () => {
+        it("hides the tooltip the instant an already-hovered tool gets pinned open, with no mouseleave", () => {
             const [pinned, setPinned] = createSignal(false);
             const { container, unmount } = render(() => (
                 <ToolBlock node={baseTool} pinned={pinned()} onTogglePin={() => {}} />
             ));
-            const queryAnchor = () => container.querySelector(".agent-tool-name-tooltip-anchor") as HTMLElement;
-            fireEvent.mouseEnter(queryAnchor());
+            const anchor = container.querySelector(".agent-tool-name-tooltip-anchor") as HTMLElement;
+            fireEvent.mouseEnter(anchor);
             expect(document.body.querySelector(".agent-tool-cmd-tooltip")).not.toBeNull();
-            fireEvent.mouseLeave(queryAnchor());
-            setPinned(true); // user clicks to pin the panel open
-            // `disable` flipping swaps <Show>'s branch, which mounts a fresh
-            // DOM node for the anchor -- re-query rather than reuse the
-            // pre-transition element reference (a stale reference would make
-            // this assertion pass vacuously against a detached node).
-            fireEvent.mouseEnter(queryAnchor());
+            setPinned(true); // user clicks elsewhere to pin the panel open; cursor stays put
             expect(document.body.querySelector(".agent-tool-cmd-tooltip")).toBeNull();
             unmount();
         });
