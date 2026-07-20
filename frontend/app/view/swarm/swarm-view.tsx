@@ -400,7 +400,7 @@ function WorkflowDispatchRow({
                     {group.status === "active" ? "Active" : "Retired"}
                 </span>
                 <Show when={group.status === "retired"}>
-                    <button class="swarm-subagent-retire" title="Dismiss" onClick={handleRetire}>
+                    <button class="swarm-subagent-retire" title="Retire" onClick={handleRetire}>
                         <i class="fa-solid fa-xmark" />
                     </button>
                 </Show>
