@@ -1,5 +1,18 @@
 # AgentMux Version History
 
+## 0.54.1 — 2026-07-20
+
+- fix(agent): Login Again always forces fresh OAuth, opens the system browser (which already has the user's session) instead of an in-app pane
+- fix(srv): clear a stale --resume session id when Claude Code reports it unreachable, instead of retrying it forever
+- fix(swarm): group solo dispatches by slug when display_name unresolved
+- fix(docs): Trust Center to Armory terminology sweep + jekt armory keyword
+- feat(srv): eager per-dispatch Haiku naming for Agent-tool/Workflow-tool calls
+- feat(swarm): two-bucket Agent Tool / Workflow row model with eager dispatch naming (Phase B, frontend)
+- fix(srv): prune a closed block's subagents/dispatches, fixing Swarm-pane ghost rows
+- feat(srv): reconcile stale subagents live on turn-end, not just pane reopen
+- feat(swarm): Retire action to dismiss a terminal-status Swarm pane row
+
+
 ## 0.54.0 — 2026-07-18
 
 - feat(editor): live-reload editor/preview panes on external file changes
