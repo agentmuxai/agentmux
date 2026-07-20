@@ -23,11 +23,14 @@ interface TooltipProps {
     divClassName?: string;
     divStyle?: CSSProperties;
     divOnClick?: (e: MouseEvent) => void;
+    /** Show/hide delay in ms. Defaults to 300 (existing behavior). */
+    delayMs?: number;
 }
 
 function TooltipInner(props: Omit<TooltipProps, "disable">): JSX.Element {
     const placement: Placement = props.placement ?? "top";
     const forceOpen = () => props.forceOpen ?? false;
+    const delayMs = () => props.delayMs ?? 300;
 
     const [isOpen, setIsOpen] = createSignal(forceOpen());
     const [isVisible, setIsVisible] = createSignal(false);
@@ -69,14 +72,14 @@ function TooltipInner(props: Omit<TooltipProps, "disable">): JSX.Element {
         if (forceOpen()) return;
         clearTimeouts();
         setIsOpen(true);
-        showTimeout = setTimeout(() => { setIsVisible(true); }, 300);
+        showTimeout = setTimeout(() => { setIsVisible(true); }, delayMs());
     };
 
     const handleMouseLeave = () => {
         if (forceOpen()) return;
         clearTimeouts();
         setIsVisible(false);
-        hideTimeout = setTimeout(() => { setIsOpen(false); }, 300);
+        hideTimeout = setTimeout(() => { setIsOpen(false); }, delayMs());
     };
 
     // React to forceOpen changes
@@ -144,6 +147,7 @@ export function Tooltip(props: TooltipProps): JSX.Element {
             divClassName={props.divClassName}
             divStyle={props.divStyle}
             divOnClick={props.divOnClick}
+            delayMs={props.delayMs}
         />
     );
 }
