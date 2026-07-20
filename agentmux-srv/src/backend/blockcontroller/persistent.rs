@@ -36,6 +36,7 @@ use super::health::{classify_output_line, HealthMonitor};
 use crate::backend::eventbus::EventBus;
 use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::store::Store;
+use crate::backend::subagent_watcher;
 use crate::backend::wps;
 
 /// WPS file subject name for persistent subprocess output.
@@ -941,6 +942,25 @@ impl PersistentSubprocessController {
                                 }
                             };
                             super::publish_controller_status(broker, &status);
+                        }
+                        // SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20
+                        // Phase A: reconcile any subagent still Active for this
+                        // block the instant its turn ends, not just at the next
+                        // pane reopen — closes SPEC_SUBAGENT_LIFECYCLE_
+                        // RECONCILIATION_2026_07_12.md's Open Question 1. A
+                        // subagent runs inside the parent's own CLI process (a
+                        // Task-tool call is synchronous within the parent's
+                        // turn), so this is the same "turn ended" signal
+                        // scan_session_subagents already reconciles against at
+                        // reopen — just fired live instead of waiting.
+                        // `global()` is `None` in tests that don't call
+                        // `subagent_watcher::set_global` — a safe no-op, same
+                        // pattern `process_tracker::registry` already uses.
+                        let session_id_snapshot = inner_read.lock().unwrap().session_id.clone();
+                        if let Some(sid) = session_id_snapshot {
+                            if let Some(watcher) = subagent_watcher::global() {
+                                watcher.reconcile_stale_subagents(&block_id_read, &sid);
+                            }
                         }
                     }
                     if let Some(sid) = parsed.get(&session_id_field).and_then(|v| v.as_str()) {

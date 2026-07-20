@@ -42,7 +42,7 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
@@ -306,6 +306,26 @@ impl PendingDispatchActivity {
 /// floated as a plausible range, not measured; 500ms is the midpoint,
 /// picked as a reasonable default pending real usage data).
 const DISPATCH_ACTIVITY_FLUSH_INTERVAL: Duration = Duration::from_millis(500);
+
+// Host-wide instance, set once at startup (`set_global`, called from
+// main.rs right after `SubagentWatcher::spawn`). Exposed as a global —
+// mirroring `process_tracker::registry`'s own doc comment for the exact
+// same problem — so callers that only occasionally need it (like
+// `blockcontroller/persistent.rs`'s turn-end reconciliation hook, SPEC_
+// SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20 Phase A) can reach it
+// without threading an `Arc` through `PersistentSubprocessController::new`
+// and every one of ITS callers up to `resync_controller`. Tests that don't
+// call `set_global` see `None` from `global()` and skip reconciliation —
+// a safe no-op, not a panic.
+static GLOBAL: OnceLock<Arc<SubagentWatcher>> = OnceLock::new();
+
+pub fn set_global(watcher: Arc<SubagentWatcher>) {
+    let _ = GLOBAL.set(watcher);
+}
+
+pub fn global() -> Option<Arc<SubagentWatcher>> {
+    GLOBAL.get().cloned()
+}
 
 pub struct SubagentWatcher {
     event_bus: Arc<EventBus>,
@@ -1055,11 +1075,13 @@ impl SubagentWatcher {
     /// other uncertainty as "assume active, don't touch it," matching the
     /// same conservative bias `ReconcileTurnActive` uses on the frontend
     /// (only ever promote/correct on positive evidence, never guess).
-    /// Scoped to the reopen/backfill path only — see
-    /// docs/specs/SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md
-    /// Open Question 1 for why real-time (mid-session) reconciliation is a
-    /// deliberate fast-follow, not this pass.
-    fn reconcile_stale_subagents(&self, parent_block_id: &str, session_id: &str) {
+    /// Called from two places as of SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_
+    /// RETIRE_2026_07_20 Phase A: `scan_session_subagents` (reopen/backfill,
+    /// unchanged) and `blockcontroller::persistent`'s turn-end hook (live —
+    /// closes docs/specs/SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md
+    /// Open Question 1, which deliberately deferred real-time wiring).
+    /// `pub(crate)` so the live call site (a different module) can reach it.
+    pub(crate) fn reconcile_stale_subagents(&self, parent_block_id: &str, session_id: &str) {
         let parent_turn_active =
             crate::backend::blockcontroller::get_block_controller_status(parent_block_id)
                 .map(|s| s.turn_active)
@@ -1077,49 +1099,83 @@ impl SubagentWatcher {
             return;
         }
 
-        let mut sessions = self.sessions.lock().unwrap();
-        let Some(session) = sessions.get_mut(session_id) else { return };
-        // A session's subagent map can hold entries from a DIFFERENT block —
-        // the watcher dedupes purely by agent_id (see watch_agent's doc
-        // comment), so two blocks that both ran the same underlying Claude
-        // session id (e.g. one reattached to a session another block also
-        // touched) can have subagents from both mixed into one
-        // `SessionWatch`. We only have a confirmed-idle read for THIS one
-        // `parent_block_id` — a sibling block's subagent could easily still
-        // be genuinely active, so only reconcile entries this block itself
-        // owns (mirrors unwatch_agent's own parent-scoped filter). Reagent
-        // P1 on PR #2131.
-        let mut reconciled = 0usize;
-        for state in session.subagents.values_mut() {
-            if state.info.parent_block_id != parent_block_id {
-                continue;
+        // Scoped so the `sessions` lock is released before broadcasting
+        // below — `broadcast_subagents_abandoned` doesn't need it, and this
+        // call site can now run live (Phase A), not just at reopen, so
+        // holding the lock any longer than the mutation itself is
+        // unnecessary contention against the live filesystem watcher.
+        let reconciled_agent_ids: Vec<String> = {
+            let mut sessions = self.sessions.lock().unwrap();
+            let Some(session) = sessions.get_mut(session_id) else { return };
+            // A session's subagent map can hold entries from a DIFFERENT block —
+            // the watcher dedupes purely by agent_id (see watch_agent's doc
+            // comment), so two blocks that both ran the same underlying Claude
+            // session id (e.g. one reattached to a session another block also
+            // touched) can have subagents from both mixed into one
+            // `SessionWatch`. We only have a confirmed-idle read for THIS one
+            // `parent_block_id` — a sibling block's subagent could easily still
+            // be genuinely active, so only reconcile entries this block itself
+            // owns (mirrors unwatch_agent's own parent-scoped filter). Reagent
+            // P1 on PR #2131.
+            let mut reconciled_agent_ids = Vec::new();
+            for state in session.subagents.values_mut() {
+                if state.info.parent_block_id != parent_block_id {
+                    continue;
+                }
+                if state.info.status == SubAgentStatus::Active {
+                    state.info.status = SubAgentStatus::Abandoned;
+                    reconciled_agent_ids.push(state.info.agent_id.clone());
+                    // Every field a NAME-based grouping/dedup bug needs to
+                    // reconstruct offline: which subagent, which dispatch,
+                    // which display_name it had already resolved (grouping is
+                    // keyed on this), and which block/session it's bound to.
+                    tracing::info!(
+                        agent_id = %state.info.agent_id,
+                        parent_block_id = %parent_block_id,
+                        session_id = %session_id,
+                        dispatch_id = %state.info.dispatch_id,
+                        display_name = ?state.info.display_name,
+                        slug = %state.info.slug,
+                        "subagent reconciled: active -> abandoned (parent turn ended)"
+                    );
+                }
             }
-            if state.info.status == SubAgentStatus::Active {
-                state.info.status = SubAgentStatus::Abandoned;
-                reconciled += 1;
-                // Every field a NAME-based grouping/dedup bug needs to
-                // reconstruct offline: which subagent, which dispatch,
-                // which display_name it had already resolved (grouping is
-                // keyed on this), and which block/session it's bound to.
-                tracing::info!(
-                    agent_id = %state.info.agent_id,
-                    parent_block_id = %parent_block_id,
-                    session_id = %session_id,
-                    dispatch_id = %state.info.dispatch_id,
-                    display_name = ?state.info.display_name,
-                    slug = %state.info.slug,
-                    "subagent reconciled: active -> abandoned (parent turn ended)"
-                );
-            }
-        }
-        if reconciled > 0 {
+            reconciled_agent_ids
+        };
+        if !reconciled_agent_ids.is_empty() {
             tracing::info!(
                 parent_block_id = %parent_block_id,
                 session_id = %session_id,
-                reconciled,
+                reconciled = reconciled_agent_ids.len(),
                 "reconcile_stale_subagents: pass complete"
             );
+            self.broadcast_subagents_abandoned(parent_block_id, &reconciled_agent_ids);
         }
+    }
+
+    /// One batched broadcast per reconciliation pass (not one per
+    /// subagent) — a pass can reconcile many subagents at once (e.g. a
+    /// workflow with dozens of members whose parent turn just ended), and
+    /// the frontend only needs "something changed, reload" (`swarm-model.ts`'s
+    /// `scheduleLoadSubagents`), not per-agent granularity. Mirrors the
+    /// batch-not-spam precedent `dispatch:activity` already established in
+    /// this file for the same reason.
+    fn broadcast_subagents_abandoned(&self, parent_block_id: &str, agent_ids: &[String]) {
+        let event = WSEventType {
+            eventtype: WS_EVENT_RPC.to_string(),
+            oref: String::new(),
+            data: Some(json!({
+                "command": "eventrecv",
+                "data": {
+                    "event": "subagent:abandoned",
+                    "data": {
+                        "parentBlockId": parent_block_id,
+                        "agentIds": agent_ids,
+                    }
+                }
+            })),
+        };
+        self.event_bus.broadcast_event(&event);
     }
 
     /// Process agent-*.jsonl directly in `dir`, plus workflow runs under
@@ -3492,6 +3548,56 @@ mod tests {
         assert_eq!(owned_info.status, SubAgentStatus::Abandoned, "this block's own subagent should still be reconciled");
         let sibling_info = watcher.get_info("sub-sibling").expect("sub-sibling should still exist");
         assert_eq!(sibling_info.status, SubAgentStatus::Active, "a sibling block's subagent must never be reconciled by an unrelated block's idle read");
+    }
+
+    /// SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20 §7 Open
+    /// Question 1: does live reconciliation racing a subagent's own
+    /// (not-yet-read) `Result` line permanently strand it at `Abandoned`?
+    /// No — `process_jsonl_change`'s completion check overwrites `status`
+    /// unconditionally on seeing `Result`, regardless of what it was before,
+    /// so a late-arriving completion always wins.
+    #[test]
+    fn reconcile_stale_subagents_then_late_result_line_ends_completed_not_stuck_abandoned() {
+        let block_id = format!("recon-late-result-{}", now_millis());
+        register_stub_controller(&block_id, false);
+
+        let dir = std::env::temp_dir().join(format!("amx-recon-late-result-{}", now_millis()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let jsonl_path = dir.join("agent-sub-a.jsonl");
+        // Turn ends before the subagent's own Result line has been written —
+        // only an assistant message is on disk so far.
+        std::fs::write(
+            &jsonl_path,
+            "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"working\"}]}}\n",
+        )
+        .unwrap();
+
+        let watcher = fixture_watcher();
+        watcher.process_jsonl_change("parent-1", &block_id, &jsonl_path, true);
+        let info = watcher.get_info("sub-a").expect("sub-a should be tracked");
+        assert_eq!(info.status, SubAgentStatus::Active);
+
+        // `derive_session_id` returns "unknown" for a flat (non-`subagents/`-
+        // nested) test path — matches this file's other flat-layout tests.
+        watcher.reconcile_stale_subagents(&block_id, "unknown");
+        let info = watcher.get_info("sub-a").expect("sub-a should still exist");
+        assert_eq!(info.status, SubAgentStatus::Abandoned);
+
+        // The Result line lands moments later (fs-watcher debounce, or the
+        // subagent process finishing its write just after the parent's own
+        // turn-end fired) — appended, not rewritten, so file_offset tracking
+        // from the first process_jsonl_change call stays valid.
+        {
+            use std::io::Write;
+            let mut f = std::fs::OpenOptions::new().append(true).open(&jsonl_path).unwrap();
+            f.write_all(b"{\"type\":\"result\",\"result\":\"done\"}\n").unwrap();
+        }
+        watcher.process_jsonl_change("parent-1", &block_id, &jsonl_path, true);
+
+        let info = watcher.get_info("sub-a").expect("sub-a should still exist");
+        assert_eq!(info.status, SubAgentStatus::Completed, "a late-arriving Result line must win over an earlier Abandoned reconciliation, not be stuck behind it");
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// End-to-end: a subagent JSONL with no terminal `result` line, backfilled
