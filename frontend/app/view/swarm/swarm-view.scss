@@ -369,6 +369,41 @@
     flex-shrink: 0;
 }
 
+// Retire/dismiss (SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20
+// §6) — offered only on a terminal-status row (SubagentRow gates this via
+// `canRetire`; WorkflowDispatchRow via `group.status === "retired"`).
+// Dim by default, full opacity + error tint on hover — same interaction
+// shape as the pinned-activity dock's `.agent-activity-dismiss`
+// (`_shell-node.scss`), scaled down for this row's compact 30px height.
+.swarm-subagent-retire {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    appearance: none;
+    border: none;
+    background: transparent;
+    color: var(--secondary-text-color);
+    font-size: 11px;
+    border-radius: 4px;
+    cursor: default;
+    opacity: 0;
+    transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.swarm-subagent-row:hover .swarm-subagent-retire,
+.swarm-workflow-header:hover .swarm-subagent-retire {
+    opacity: 0.75;
+}
+
+.swarm-subagent-retire:hover {
+    opacity: 1;
+    color: var(--error-color, #ff6b6b);
+    background: var(--hover-bg-color, rgba(255, 255, 255, 0.08));
+}
+
 // ── Subagent detail event rendering (shared by the concatenated dispatch
 // feed above — DispatchActivityFeedEntry, swarm-view.tsx) ────────────────
 

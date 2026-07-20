@@ -3,7 +3,7 @@
 
 import { createMemo, createSignal, createEffect, onCleanup, For, onMount, Show, type JSX } from "solid-js";
 import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, WorkflowDispatch, SubagentEvent, DispatchActivityEntry } from "./swarm-model";
-import { subagentDisplayLabel } from "./swarm-model";
+import { subagentDisplayLabel, subagentRowKey } from "./swarm-model";
 import { ProviderLogo } from "@/app/element/ProviderLogo";
 import { callBackendService } from "@/store/wos";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -371,6 +371,17 @@ function WorkflowDispatchRow({
     const expanded = createMemo(() => model.isExpanded(group.dispatchId));
     const activeCount = createMemo(() => group.memberCount - group.membersDone);
 
+    // `group.status === "retired"` here is the pre-existing "every member
+    // done" label (SPEC_AGENT_DISPATCH_SUBAGENT_HIERARCHY_2026_07_17) — NOT
+    // the same concept as the user-driven Retire action below (SPEC_
+    // SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20 §6), just a
+    // same-word coincidence. Retire is only offered once a dispatch is
+    // ALREADY (label-)retired — nothing to dismiss on one still running.
+    const handleRetire = (e: MouseEvent) => {
+        e.stopPropagation();
+        model.retireRow(group.dispatchId, group.lastEventAt);
+    };
+
     return (
         <div class={`swarm-workflow-group swarm-workflow-group--${group.status}`}>
             <div
@@ -388,6 +399,11 @@ function WorkflowDispatchRow({
                 <span class={`swarm-workflow-status-badge swarm-workflow-status-badge--${group.status}`}>
                     {group.status === "active" ? "Active" : "Retired"}
                 </span>
+                <Show when={group.status === "retired"}>
+                    <button class="swarm-subagent-retire" title="Retire" onClick={handleRetire}>
+                        <i class="fa-solid fa-xmark" />
+                    </button>
+                </Show>
             </div>
             <Show when={expanded()}>
                 <DispatchActivityFeed rowKey={group.dispatchId} dispatchId={group.dispatchId} model={model} />
@@ -529,7 +545,7 @@ function SubagentRow({
     // `ListDispatches` shares it) — keying expand-state/cache off it would
     // collide every sibling row's expand toggle and cached feed onto the
     // first one (reagent P1 on #2232). `agent_id` is always unique per row.
-    const rowKey = createMemo(() => `agent:${sub.agent_id}`);
+    const rowKey = createMemo(() => subagentRowKey(sub.agent_id));
     const expanded = createMemo(() => model.isExpanded(rowKey()));
     // See subagentDisplayLabel's doc comment (swarm-model.ts) — as of Phase A
     // this resolves eagerly at dispatch time for the common case; the
@@ -553,16 +569,27 @@ function SubagentRow({
         }
     };
 
+    const displayStatus = createMemo(() => subagentDisplayStatus(sub, parentAgentStatus));
+
     // Row/group dimming must track the same effective status as the chip
     // (reagent P2 on #2134) — otherwise a client-side "interrupted" backstop
     // shows the new chip/dot but the row stays full-opacity, since only a
     // backend-confirmed sub.status === "abandoned" would dim it directly.
     const dimVariant = createMemo(() => {
-        const displayStatus = subagentDisplayStatus(sub, parentAgentStatus);
-        if (displayStatus === "interrupted") return "abandoned";
-        if (displayStatus === "idle") return "completed";
+        const status = displayStatus();
+        if (status === "interrupted") return "abandoned";
+        if (status === "idle") return "completed";
         return "active";
     });
+
+    // Retire (SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20 §6):
+    // only a terminal-status row has anything to dismiss — a still-"working"
+    // row is legitimately in progress, nothing to retire yet.
+    const canRetire = createMemo(() => displayStatus() === "idle" || displayStatus() === "interrupted");
+    const handleRetire = (e: MouseEvent) => {
+        e.stopPropagation();
+        model.retireRow(rowKey(), sub.last_event_at);
+    };
 
     return (
         <div class={`swarm-subagent-group swarm-subagent-group--${dimVariant()}`}>
@@ -573,7 +600,12 @@ function SubagentRow({
             >
                 <i class={`fa-solid fa-${expanded() ? "chevron-down" : "chevron-right"} swarm-subagent-expand-icon`} />
                 <span class="swarm-subagent-slug">{displayLabel()}</span>
-                <AgentStatusChip status={subagentDisplayStatus(sub, parentAgentStatus)} />
+                <AgentStatusChip status={displayStatus()} />
+                <Show when={canRetire()}>
+                    <button class="swarm-subagent-retire" title="Retire" onClick={handleRetire}>
+                        <i class="fa-solid fa-xmark" />
+                    </button>
+                </Show>
             </div>
             <Show when={expanded()}>
                 <DispatchActivityFeed
