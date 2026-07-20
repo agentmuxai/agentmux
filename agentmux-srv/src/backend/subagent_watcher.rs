@@ -1160,6 +1160,17 @@ impl SubagentWatcher {
     /// `scheduleLoadSubagents`), not per-agent granularity. Mirrors the
     /// batch-not-spam precedent `dispatch:activity` already established in
     /// this file for the same reason.
+    ///
+    /// The frontend `waveEventSubscribe({ eventType: "subagent:abandoned",
+    /// ... })` listener lands in the immediately-following PR (Phase B,
+    /// #2235 — SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20),
+    /// not this one. Broadcasting with no subscriber yet is inert, not
+    /// harmful: this PR's actual goal (subagents resolving to `Completed`/
+    /// `Abandoned` correctly in the backend, live, not just at reopen) is
+    /// already fully achieved without it — the missing piece until #2235
+    /// merges is only "push the correction to an already-open Swarm pane
+    /// immediately" (an already-open pane still picks up the correction on
+    /// its next unrelated reload in the meantime).
     fn broadcast_subagents_abandoned(&self, parent_block_id: &str, agent_ids: &[String]) {
         let event = WSEventType {
             eventtype: WS_EVENT_RPC.to_string(),
