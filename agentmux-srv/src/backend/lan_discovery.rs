@@ -13,15 +13,71 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use tokio::net::UdpSocket;
+use tokio::sync::oneshot;
 
 use super::eventbus::{EventBus, WSEventType};
 
 const SERVICE_TYPE: &str = "_agentmux._tcp.local.";
 const LAN_AGENT_CACHE_TTL_SECS: u64 = 60;
 const LAN_PEER_QUERY_TIMEOUT_SECS: u64 = 2;
+
+/// UDP broadcast discovery fallback (Layer 2), for LANs where mDNS multicast
+/// is filtered (common on corporate/guest WiFi). Mobile clients broadcast a
+/// small JSON probe to this port; any listening desktop instance unicasts a
+/// response straight back to the sender's source address.
+///
+/// Port 47891 is picked from the "ephemeral-safe-but-memorable" range: above
+/// both the well-known (0-1023) and IANA-registered (1024-49151) ranges, so
+/// it never collides with a registered service, while still being a fixed,
+/// easy-to-grep value in logs and firewall rules (unlike a random ephemeral
+/// port, which a fixed-port broadcast probe cannot target).
+const UDP_DISCOVERY_PORT: u16 = 47891;
+
+/// Wire-protocol `type` value a probe datagram must carry.
+const UDP_PROBE_TYPE: &str = "agentmux_discover";
+/// Wire-protocol `type` value this responder replies with.
+const UDP_RESPONSE_TYPE: &str = "agentmux_discover_response";
+/// Wire-protocol version. Bump alongside the mobile client if the schema
+/// changes; `is_valid_probe` rejects anything else.
+const UDP_PROTOCOL_VERSION: u64 = 1;
+
+/// Build the JSON response payload for a valid probe. Pure/free function
+/// (no `&self`) so it is trivially testable without spinning up a full
+/// `LanDiscovery` (which owns a real mDNS `ServiceDaemon`). `LanDiscovery`'s
+/// production loop calls this via `build_probe_response`.
+fn probe_response_json(
+    instance_id: &str,
+    hostname: &str,
+    version: &str,
+    port: u16,
+    auth_key: &str,
+) -> serde_json::Value {
+    json!({
+        "type": UDP_RESPONSE_TYPE,
+        "v": UDP_PROTOCOL_VERSION,
+        "instance_id": instance_id,
+        "hostname": hostname,
+        "version": version,
+        "port": port,
+        "auth_key": auth_key,
+    })
+}
+
+/// Validate a received UDP datagram as an in-protocol discovery probe.
+/// Anything that fails to parse as JSON, or does not carry the exact
+/// `type`/`v` fields, is treated as noise (unrelated LAN traffic or a
+/// future/older protocol version) and silently ignored by the caller.
+fn is_valid_probe(bytes: &[u8]) -> bool {
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(bytes) else {
+        return false;
+    };
+    value.get("type").and_then(|t| t.as_str()) == Some(UDP_PROBE_TYPE)
+        && value.get("v").and_then(|v| v.as_u64()) == Some(UDP_PROTOCOL_VERSION)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LanInstance {
@@ -50,6 +106,15 @@ pub struct LanDiscovery {
     event_bus: Arc<EventBus>,
     service_fullname: String,
     auth_key: String,
+    hostname: String,
+    version: String,
+    port: u16,
+    /// Cancellation half for the UDP responder task spawned in `start()`.
+    /// `None` once `shutdown()` has fired (or if the UDP socket never bound
+    /// — see `spawn_udp_responder`). Guarded by a sync mutex since
+    /// `shutdown()` is `&self` and called from both an explicit live-toggle
+    /// path and `Drop`.
+    udp_cancel: Mutex<Option<oneshot::Sender<()>>>,
 }
 
 /// Normalize an OS hostname into a valid mDNS host name by appending the
@@ -118,12 +183,27 @@ impl LanDiscovery {
             event_bus: event_bus.clone(),
             service_fullname,
             auth_key,
+            hostname,
+            version,
+            port,
+            udp_cancel: Mutex::new(None),
         });
 
         // Spawn event receiver on a blocking thread to avoid starving the tokio runtime
         let disc = discovery.clone();
         tokio::task::spawn_blocking(move || {
             disc.event_loop(browse_receiver);
+        });
+
+        // Spawn the UDP broadcast-probe responder (Layer 2 fallback for
+        // filtered mDNS). `UdpSocket::recv_from` is natively async, so this
+        // uses `tokio::spawn` (not `spawn_blocking`, unlike the mdns-sd event
+        // loop above whose receiver is a sync channel).
+        let (cancel_tx, cancel_rx) = oneshot::channel();
+        *discovery.udp_cancel.lock() = Some(cancel_tx);
+        let disc_udp = discovery.clone();
+        tokio::spawn(async move {
+            disc_udp.udp_responder_loop(cancel_rx).await;
         });
 
         tracing::info!(
@@ -133,6 +213,92 @@ impl LanDiscovery {
         );
 
         Ok(discovery)
+    }
+
+    /// Build the JSON response payload for this instance's identity — see
+    /// `probe_response_json` for the pure field-assembly logic shared with
+    /// tests.
+    fn build_probe_response(&self) -> serde_json::Value {
+        probe_response_json(
+            &self.instance_id,
+            &self.hostname,
+            &self.version,
+            self.port,
+            &self.auth_key,
+        )
+    }
+
+    /// UDP broadcast-probe responder loop (Layer 2 discovery fallback).
+    ///
+    /// Binds `0.0.0.0:UDP_DISCOVERY_PORT` and answers valid probes with a
+    /// unicast response back to the sender's `recv_from` source address.
+    /// Deliberately does NOT set `SO_REUSEADDR`: this codebase supports
+    /// running multiple AgentMux instances on one host simultaneously, and
+    /// on Windows `SO_REUSEADDR` lets a second process silently steal a UDP
+    /// port already owned by another — an inappropriate risk for a socket
+    /// that hands out `auth_key`. If the bind fails (most likely because
+    /// another local instance already holds the port), this task logs and
+    /// exits quietly — mDNS discovery (already running via `event_loop`)
+    /// is unaffected, matching the "never fail `start()` over this" contract.
+    ///
+    /// We do not call `set_broadcast(true)`: that flag is only required to
+    /// *send* to a broadcast address, and this socket only receives (probes
+    /// arrive as broadcast/subnet-broadcast datagrams addressed to us, which
+    /// requires no special socket option on the receiving end) and replies
+    /// with a plain unicast send back to the probe's source address.
+    async fn udp_responder_loop(self: Arc<Self>, mut cancel_rx: oneshot::Receiver<()>) {
+        let socket = match UdpSocket::bind(("0.0.0.0", UDP_DISCOVERY_PORT)).await {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::debug!(
+                    port = UDP_DISCOVERY_PORT,
+                    "UDP discovery responder not started (bind failed, likely a second \
+                     local instance already holds this port): {e}"
+                );
+                return;
+            }
+        };
+
+        tracing::debug!(port = UDP_DISCOVERY_PORT, "UDP discovery responder listening");
+
+        let mut buf = [0u8; 1024];
+        loop {
+            tokio::select! {
+                _ = &mut cancel_rx => {
+                    tracing::debug!("UDP discovery responder stopping");
+                    break;
+                }
+                result = socket.recv_from(&mut buf) => {
+                    match result {
+                        Ok((len, src)) => {
+                            // Noise (unrelated LAN UDP traffic, malformed
+                            // packets) is expected on a live network — do
+                            // not log per-packet above debug.
+                            if !is_valid_probe(&buf[..len]) {
+                                continue;
+                            }
+                            tracing::debug!(src = %src, "UDP discovery probe received");
+                            let response = self.build_probe_response();
+                            match serde_json::to_vec(&response) {
+                                Ok(payload) => {
+                                    if let Err(e) = socket.send_to(&payload, src).await {
+                                        tracing::debug!("UDP discovery response send failed: {e}");
+                                    } else {
+                                        tracing::debug!(src = %src, "UDP discovery probe answered");
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::debug!("UDP discovery response serialize failed: {e}");
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::debug!("UDP discovery recv_from error: {e}");
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fn event_loop(&self, receiver: mdns_sd::Receiver<ServiceEvent>) {
@@ -250,16 +416,28 @@ impl LanDiscovery {
         self.instances.read().len()
     }
 
-    /// Stop the mDNS daemon — synchronously closes the daemon socket
-    /// (UDP:5353), causing the `browse_receiver` to return Err and the
-    /// event-loop thread spawned by `start()` to exit.
+    /// Stop the mDNS daemon and the UDP broadcast-probe responder.
     ///
-    /// Required for live-disable to actually stop discovery: the event-loop
-    /// thread holds its own `Arc<Self>` clone, so simply dropping the
+    /// The mDNS side synchronously closes the daemon socket (UDP:5353),
+    /// causing the `browse_receiver` to return Err and the event-loop thread
+    /// spawned by `start()` to exit. The UDP responder is stopped by firing
+    /// its cancellation channel, which the `tokio::select!` in
+    /// `udp_responder_loop` is racing against `recv_from` — this is what
+    /// makes a live setting toggle actually stop responding to probes, not
+    /// just stop the mDNS advertisement.
+    ///
+    /// Required for live-disable to actually stop discovery: both background
+    /// tasks hold their own `Arc<Self>` clone, so simply dropping the
     /// controller's Arc never reaches refcount zero and `Drop` does not
     /// run. Callers must invoke `shutdown()` before clearing their Arc.
     /// Idempotent — safe to call from both the explicit path and `Drop`.
     pub fn shutdown(&self) {
+        if let Some(tx) = self.udp_cancel.lock().take() {
+            // Ignore send errors: an `Err` here just means the responder
+            // task already exited on its own (e.g. the bind failed), which
+            // is a no-op we're happy with.
+            let _ = tx.send(());
+        }
         if let Err(e) = self.daemon.unregister(&self.service_fullname) {
             // Likely already unregistered; do not warn loudly.
             tracing::debug!("mDNS unregister returned: {e}");
@@ -481,7 +659,12 @@ impl LanDiscoveryController {
 
 #[cfg(test)]
 mod tests {
-    use super::mdns_hostname;
+    use super::{
+        is_valid_probe, mdns_hostname, probe_response_json, UDP_PROBE_TYPE,
+        UDP_PROTOCOL_VERSION, UDP_RESPONSE_TYPE,
+    };
+    use serde_json::json;
+    use tokio::net::UdpSocket;
 
     #[test]
     fn appends_local_dot_to_bare_hostname() {
@@ -510,5 +693,88 @@ mod tests {
         let once = mdns_hostname("claudius");
         let twice = mdns_hostname(&once);
         assert_eq!(twice, once);
+    }
+
+    // -- UDP broadcast-probe wire protocol (Layer 2 discovery fallback) --
+
+    #[test]
+    fn is_valid_probe_accepts_well_formed_probe() {
+        let bytes = serde_json::to_vec(&json!({"type": UDP_PROBE_TYPE, "v": 1})).unwrap();
+        assert!(is_valid_probe(&bytes));
+    }
+
+    #[test]
+    fn is_valid_probe_rejects_non_json() {
+        assert!(!is_valid_probe(b"not json at all"));
+    }
+
+    #[test]
+    fn is_valid_probe_rejects_wrong_type() {
+        let bytes = serde_json::to_vec(&json!({"type": "something_else", "v": 1})).unwrap();
+        assert!(!is_valid_probe(&bytes));
+    }
+
+    #[test]
+    fn is_valid_probe_rejects_wrong_version() {
+        let bytes = serde_json::to_vec(&json!({"type": UDP_PROBE_TYPE, "v": 2})).unwrap();
+        assert!(!is_valid_probe(&bytes));
+    }
+
+    #[test]
+    fn is_valid_probe_rejects_unrelated_json() {
+        // Simulates non-AgentMux JSON noise landing on the port.
+        let bytes = serde_json::to_vec(&json!({"hello": "world"})).unwrap();
+        assert!(!is_valid_probe(&bytes));
+    }
+
+    #[test]
+    fn probe_response_json_populates_all_fields() {
+        let response = probe_response_json("inst-1", "myhost", "1.2.3", 9999, "secret-key");
+        assert_eq!(response["type"], UDP_RESPONSE_TYPE);
+        assert_eq!(response["v"], UDP_PROTOCOL_VERSION);
+        assert_eq!(response["instance_id"], "inst-1");
+        assert_eq!(response["hostname"], "myhost");
+        assert_eq!(response["version"], "1.2.3");
+        assert_eq!(response["port"], 9999);
+        assert_eq!(response["auth_key"], "secret-key");
+    }
+
+    /// End-to-end probe/response round trip over real loopback sockets
+    /// (ephemeral ports, NOT the fixed UDP_DISCOVERY_PORT — avoids CI port
+    /// collisions and avoids needing a full `LanDiscovery` + real mDNS
+    /// `ServiceDaemon` just to exercise the wire format). Exercises the same
+    /// `is_valid_probe` / `probe_response_json` functions the production
+    /// `udp_responder_loop` calls.
+    #[tokio::test]
+    async fn udp_probe_round_trip_returns_valid_response() {
+        let responder = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let responder_addr = responder.local_addr().unwrap();
+        let prober = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+
+        let probe = json!({"type": UDP_PROBE_TYPE, "v": UDP_PROTOCOL_VERSION});
+        prober
+            .send_to(&serde_json::to_vec(&probe).unwrap(), responder_addr)
+            .await
+            .unwrap();
+
+        let mut buf = [0u8; 1024];
+        let (len, src) = responder.recv_from(&mut buf).await.unwrap();
+        assert!(is_valid_probe(&buf[..len]));
+
+        let response = probe_response_json("inst-1", "myhost", "1.2.3", 9999, "secret-key");
+        responder
+            .send_to(&serde_json::to_vec(&response).unwrap(), src)
+            .await
+            .unwrap();
+
+        let (len, _) = prober.recv_from(&mut buf).await.unwrap();
+        let received: serde_json::Value = serde_json::from_slice(&buf[..len]).unwrap();
+        assert_eq!(received["type"], UDP_RESPONSE_TYPE);
+        assert_eq!(received["v"], UDP_PROTOCOL_VERSION);
+        assert_eq!(received["instance_id"], "inst-1");
+        assert_eq!(received["hostname"], "myhost");
+        assert_eq!(received["version"], "1.2.3");
+        assert_eq!(received["port"], 9999);
+        assert_eq!(received["auth_key"], "secret-key");
     }
 }
