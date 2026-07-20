@@ -85,6 +85,28 @@ export function useAgentDefinitions(): () => AgentDefinition[] {
     return agents;
 }
 
+/**
+ * Reactive definitionId → open blockId map. Refreshes on pane register/
+ * unregister (`subscribeToPaneLifecycle`) AND on `agents:changed` so newly-
+ * forked definitions also appear. Extracted from what was AgentPicker's own
+ * inline signal so other consumers (the agent-pane fork tab strip,
+ * SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md §4.1) can share it
+ * instead of re-deriving the same map.
+ */
+export function useOpenDefinitionMap(): [() => Map<string, string>, () => void] {
+    const [openDefinitions, setOpenDefinitions] = createSignal<Map<string, string>>(new Map());
+    const refresh = () => setOpenDefinitions(getOpenDefinitionMap());
+    onMount(refresh);
+    const unsubAgentsChanged = waveEventSubscribe({
+        eventType: "agents:changed",
+        handler: refresh,
+    });
+    const unsubPaneLifecycle = subscribeToPaneLifecycle(refresh);
+    onCleanup(unsubAgentsChanged);
+    onCleanup(unsubPaneLifecycle);
+    return [openDefinitions, refresh];
+}
+
 // ── AgentPicker component ───────────────────────────────────────────────────────
 
 interface AgentPickerProps {
@@ -98,18 +120,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     const modalLayer = useModalLayer();
 
     // Reactive map of definition_id → blockId for panes currently open.
-    // Refreshes on pane register/unregister (via subscribeToPaneLifecycle)
-    // AND on agents:changed so newly-forked definitions also appear.
-    const [openDefinitions, setOpenDefinitions] = createSignal<Map<string, string>>(new Map());
-    const refreshOpenDefinitions = () => setOpenDefinitions(getOpenDefinitionMap());
-    onMount(refreshOpenDefinitions);
-    const unsubOpenDefs = waveEventSubscribe({
-        eventType: "agents:changed",
-        handler: refreshOpenDefinitions,
-    });
-    const unsubPaneLifecycle = subscribeToPaneLifecycle(refreshOpenDefinitions);
-    onCleanup(unsubOpenDefs);
-    onCleanup(unsubPaneLifecycle);
+    const [openDefinitions, refreshOpenDefinitions] = useOpenDefinitionMap();
 
     // Per-agent install state, keyed by agent.id.
     //   undefined = not yet checked / non-npm provider (no install needed)
