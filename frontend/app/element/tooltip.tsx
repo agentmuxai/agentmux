@@ -126,28 +126,37 @@ function TooltipInner(props: Omit<TooltipProps, "disable">): JSX.Element {
 }
 
 export function Tooltip(props: TooltipProps): JSX.Element {
-    if (props.disable) {
-        return (
-            <div
-                class={props.divClassName}
-                style={props.divStyle as any}
-                onClick={props.divOnClick}
-            >
-                {props.children}
-            </div>
-        );
-    }
-
+    // `disable` must be reactive, not a one-time JS `if` in the component
+    // body — Solid component setup functions run ONCE; a plain early
+    // `return` commits whichever branch was true at first invocation and
+    // never re-selects on a later `props.disable` change. Callers whose
+    // instance persists across a `disable` flip (e.g. ToolBlock's virtualized
+    // rows, reused across status transitions rather than remounted) would
+    // get permanently stuck on the branch chosen at first render. `<Show>`
+    // re-evaluates its `when` reactively, same as any other signal read.
     return (
-        <TooltipInner
-            children={props.children}
-            content={props.content}
-            placement={props.placement}
-            forceOpen={props.forceOpen}
-            divClassName={props.divClassName}
-            divStyle={props.divStyle}
-            divOnClick={props.divOnClick}
-            delayMs={props.delayMs}
-        />
+        <Show
+            when={!props.disable}
+            fallback={
+                <div
+                    class={props.divClassName}
+                    style={props.divStyle as any}
+                    onClick={props.divOnClick}
+                >
+                    {props.children}
+                </div>
+            }
+        >
+            <TooltipInner
+                children={props.children}
+                content={props.content}
+                placement={props.placement}
+                forceOpen={props.forceOpen}
+                divClassName={props.divClassName}
+                divStyle={props.divStyle}
+                divOnClick={props.divOnClick}
+                delayMs={props.delayMs}
+            />
+        </Show>
     );
 }

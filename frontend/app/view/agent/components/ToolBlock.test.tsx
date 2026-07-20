@@ -189,6 +189,52 @@ describe("ToolBlock — panel mode", () => {
             expect(document.body.querySelector(".agent-tool-cmd-tooltip")).toBeNull();
             unmount();
         });
+
+        // ToolBlock instances are reused across status transitions via
+        // index-based virtualization (no remount) -- these two assert the
+        // suppression is reactive to a live `disable` change on an
+        // ALREADY-MOUNTED instance, not just correct on first render. A
+        // naive `if (props.disable)` early-return inside Tooltip's
+        // component body would commit whichever branch was true at mount
+        // and never re-select — these catch that regression.
+        it("reactively starts showing the tooltip once a running (auto-expanded) tool completes, without remounting", () => {
+            const [node, setNode] = createSignal<ToolNode>({ ...baseTool, status: "running" });
+            const { container, unmount } = render(() => (
+                <ToolBlock node={node()} pinned={false} onTogglePin={() => {}} />
+            ));
+            const anchorWhileRunning = container.querySelector(".agent-tool-name-tooltip-anchor") as HTMLElement;
+            fireEvent.mouseEnter(anchorWhileRunning);
+            expect(document.body.querySelector(".agent-tool-cmd-tooltip")).toBeNull(); // still running, panel expanded
+            setNode({ ...baseTool, status: "success" }); // completes, panel collapses
+            // `disable` flipping swaps <Show>'s branch, which mounts a fresh
+            // DOM node for the anchor -- re-query rather than reuse the
+            // pre-transition element reference.
+            const anchorAfterComplete = container.querySelector(".agent-tool-name-tooltip-anchor") as HTMLElement;
+            fireEvent.mouseEnter(anchorAfterComplete);
+            const tip = document.body.querySelector(".agent-tool-cmd-tooltip");
+            expect(tip).not.toBeNull();
+            expect(tip!.textContent).toBe("ls");
+            unmount();
+        });
+
+        it("reactively stops showing the tooltip once an already-mounted tool gets pinned open", () => {
+            const [pinned, setPinned] = createSignal(false);
+            const { container, unmount } = render(() => (
+                <ToolBlock node={baseTool} pinned={pinned()} onTogglePin={() => {}} />
+            ));
+            const queryAnchor = () => container.querySelector(".agent-tool-name-tooltip-anchor") as HTMLElement;
+            fireEvent.mouseEnter(queryAnchor());
+            expect(document.body.querySelector(".agent-tool-cmd-tooltip")).not.toBeNull();
+            fireEvent.mouseLeave(queryAnchor());
+            setPinned(true); // user clicks to pin the panel open
+            // `disable` flipping swaps <Show>'s branch, which mounts a fresh
+            // DOM node for the anchor -- re-query rather than reuse the
+            // pre-transition element reference (a stale reference would make
+            // this assertion pass vacuously against a detached node).
+            fireEvent.mouseEnter(queryAnchor());
+            expect(document.body.querySelector(".agent-tool-cmd-tooltip")).toBeNull();
+            unmount();
+        });
     });
 
     // ── Result-pill one-shot fade-in (reagent P2 on PR #1975) ────────────
