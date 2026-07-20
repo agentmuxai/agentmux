@@ -325,6 +325,30 @@ export function filterRetired<T>(
 }
 
 /**
+ * Drop `retired` entries whose key is no longer in `liveKeys` at all — a row
+ * gone from live state entirely (block closed, dispatch pruned — #2233) can
+ * never un-retire itself (`filterRetired`'s lastEventAt-snapshot comparison
+ * has nothing left to compare against), so keeping its retired entry around
+ * is pure unbounded growth for the life of the session (reagent P2 on
+ * #2235). A row still genuinely live keeps its entry regardless of this
+ * pass — only entries for keys absent from `liveKeys` are dropped. Returns
+ * `retired` unchanged (same reference) if nothing was actually dropped, so
+ * callers using this in a signal setter don't trigger a no-op update.
+ */
+export function pruneRetiredEntries(retired: Map<string, number>, liveKeys: Set<string>): Map<string, number> {
+    let changed = false;
+    const next = new Map<string, number>();
+    for (const [key, lastEventAt] of retired) {
+        if (liveKeys.has(key)) {
+            next.set(key, lastEventAt);
+        } else {
+            changed = true;
+        }
+    }
+    return changed ? next : retired;
+}
+
+/**
  * Stabilize `WorkflowDispatch` wrapper identity across `buildTree()` calls,
  * mirroring `mergeSubagentsPreservingIdentity` one level up.
  * `buildDispatchBuckets` is a pure function — it unconditionally builds
@@ -746,6 +770,7 @@ export class SwarmViewModel implements ViewModel {
         this.setLoading(true);
         try {
             await Promise.all([this.loadTrackedBlocks(), this.loadSubagents(), this.loadDispatches()]);
+            this.pruneRetiredRowKeys();
         } finally {
             this.setLoading(false);
         }
@@ -792,10 +817,26 @@ export class SwarmViewModel implements ViewModel {
         }
         this.loadSubagentsDebounceTimer = setTimeout(() => {
             this.loadSubagentsDebounceTimer = undefined;
-            void this.loadSubagents();
-            void this.loadDispatches();
+            void Promise.all([this.loadSubagents(), this.loadDispatches()]).then(() => this.pruneRetiredRowKeys());
         }, SwarmViewModel.LOAD_SUBAGENTS_DEBOUNCE_MS);
     };
+
+    /** Drop `_retiredRowKeys` entries for rows no longer present in live
+     *  state at all (block closed, dispatch pruned — #2233) — those can
+     *  never un-retire themselves (`filterRetired`'s lastEventAt-snapshot
+     *  comparison has nothing left to compare against), so keeping them
+     *  around is pure unbounded growth for the life of the session (reagent
+     *  P2 on #2235). Called after `loadSubagents`/`loadDispatches` settle
+     *  (a plain state update, not from inside `buildTree()`'s own read of
+     *  `retiredRowKeysAtom`, which would be a reactive write-during-read). */
+    private pruneRetiredRowKeys(): void {
+        const liveKeys = new Set<string>();
+        for (const s of this.subagentsAtom()) liveKeys.add(subagentRowKey(s.agent_id));
+        for (const d of this.dispatchesAtom()) {
+            if (d.kind === "workflow") liveKeys.add(d.dispatch_id);
+        }
+        this.setRetiredRowKeys((prev) => pruneRetiredEntries(prev, liveKeys));
+    }
 
     // ── Row expand/collapse (workflow groups + subagent detail) ──────────
 
