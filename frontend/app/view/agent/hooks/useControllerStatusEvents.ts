@@ -36,6 +36,26 @@ export function deriveTurnActive(data: unknown): boolean | null {
     return d.turn_active === true;
 }
 
+/**
+ * True exactly when a turn genuinely just ended: the last-known state was
+ * confirmed `true` (busy) and this event reports `false` (idle). `prev` is
+ * `undefined` before any turn_active-bearing event has ever been seen for
+ * this pane's current mount — a fresh pane opened onto an already-idle agent
+ * reports `false` with `prev === undefined`, which must NOT count as a
+ * just-ended turn (there's nothing new to summarize).
+ *
+ * This is the trigger for `useAgentActivitySummary`/`useNextPromptSuggestion`
+ * (their `turnJustEndedAtom`, see agent-view.tsx's `reconcileTurnActive`) —
+ * deliberately independent of the frontend's own `TurnPhase.kind === "Done"`,
+ * which fires on several non-terminal transitions (a premature per-round
+ * `session_end`, bounded-timeout force-transitions) that don't correspond to
+ * a real backend turn_active flip. See
+ * docs/specs/REPORT_AMBIENT_SUMMARY_OVERTRIGGER_2026_07_20.md.
+ */
+export function didTurnJustEnd(prev: boolean | undefined, next: boolean): boolean {
+    return prev === true && next === false;
+}
+
 export interface UseControllerStatusEventsOptions {
     blockId: string;
     log: LogFn;
