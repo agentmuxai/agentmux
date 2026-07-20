@@ -267,6 +267,35 @@ fn flatten_rows(stages: &[StageRow], total_ms: Option<u64>) -> Vec<FlatRow> {
         }
     }
     if let Some(ms) = total_ms {
+        // "other" — the gap between `total` (a wall-clock stopwatch running
+        // from splash-window creation to first-paint-detected) and the sum
+        // of top-level stage durations. Only completed (`done`) stages are
+        // summed: they're already exclusive of each other (a stage's own
+        // duration already covers whatever its subs took), and an
+        // undone stage would inflate the sum with an ever-changing partial
+        // count. Any residual is genuinely uncovered by any instrumented
+        // stage — e.g. cef_init-end -> first-paint, or process-spawn
+        // scheduling gaps between stages — not a double-count or a bug; see
+        // docs/analysis/ANALYSIS_SPLASH_SCREEN_TIMING_2026_07_20.md §5.
+        // saturating_sub guards the (should-be-impossible, but not worth a
+        // panic over) case where accounted time exceeds total_ms.
+        let accounted_ms: u64 = stages
+            .iter()
+            .filter_map(|s| s.done.as_ref().map(|(dur, _, _)| *dur))
+            .sum();
+        let other_ms = ms.saturating_sub(accounted_ms);
+        // "total" is the existing, higher-priority row: only add "other"
+        // when there's room for both, so a nearly-full panel still shows the
+        // total rather than silently dropping it for the new row.
+        if out.len() + 2 <= MAX_STAGE_ROWS {
+            out.push(FlatRow {
+                indented: false,
+                label: String::new(),
+                time_text: format!("other: {}", format_ms(other_ms)),
+                label_color: (SUB_R, SUB_G, SUB_B),
+                time_color: (SUB_R, SUB_G, SUB_B),
+            });
+        }
         if out.len() < MAX_STAGE_ROWS {
             out.push(FlatRow {
                 indented: false,
@@ -1054,4 +1083,123 @@ unsafe fn build_window() -> (id, id, Vec<(id, id)>) {
     send_void_bool(app, sel(b"activateIgnoringOtherApps:\0"), 1);
     send_void(window, sel(b"orderFrontRegardless\0"));
     (window, image_view, stage_fields)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn done_stage(stage: &'static str, label: &'static str, ms: u64) -> StageRow {
+        StageRow {
+            stage,
+            label,
+            started_at: Instant::now(),
+            done: Some((ms, StartupStatus::Ok, None)),
+            subs: Vec::new(),
+        }
+    }
+
+    fn running_stage(stage: &'static str, label: &'static str) -> StageRow {
+        StageRow {
+            stage,
+            label,
+            started_at: Instant::now(),
+            done: None,
+            subs: Vec::new(),
+        }
+    }
+
+    /// Pulls the "other: ..." row's time_text out of a flatten_rows() result,
+    /// if present.
+    fn other_row_text(rows: &[FlatRow]) -> Option<&str> {
+        rows.iter()
+            .find(|r| r.time_text.starts_with("other: "))
+            .map(|r| r.time_text.as_str())
+    }
+
+    fn total_row_text(rows: &[FlatRow]) -> Option<&str> {
+        rows.iter()
+            .find(|r| r.time_text.starts_with("total: "))
+            .map(|r| r.time_text.as_str())
+    }
+
+    #[test]
+    fn no_other_or_total_row_while_total_ms_is_none() {
+        let stages = vec![done_stage("prep", "Prep", 100)];
+        let rows = flatten_rows(&stages, None);
+        assert!(other_row_text(&rows).is_none());
+        assert!(total_row_text(&rows).is_none());
+    }
+
+    #[test]
+    fn other_row_is_the_gap_between_total_and_summed_stages() {
+        let stages = vec![
+            done_stage("prep", "Prep", 100),
+            done_stage("migrations", "Migrations", 250),
+        ];
+        // 100 + 250 = 350 accounted; total is 500 -> 150ms unaccounted.
+        let rows = flatten_rows(&stages, Some(500));
+        assert_eq!(other_row_text(&rows), Some("other: 150ms"));
+        assert_eq!(total_row_text(&rows), Some("total: 500ms"));
+    }
+
+    #[test]
+    fn other_row_excludes_a_still_running_stage_from_the_sum() {
+        // A stage with no StageEnd yet must not be counted as 0 duration
+        // *or* as its still-changing partial elapsed time — it's simply
+        // excluded from `accounted_ms`, same treatment either way here
+        // since we only ever fold `done` stages.
+        let stages = vec![done_stage("prep", "Prep", 100), running_stage("host", "Host")];
+        let rows = flatten_rows(&stages, Some(300));
+        assert_eq!(other_row_text(&rows), Some("other: 200ms"));
+    }
+
+    #[test]
+    fn other_row_saturates_at_zero_rather_than_underflowing() {
+        // Pathological: reported stage durations sum to more than the
+        // wall-clock total (e.g. a race at the ready-detection instant).
+        // Must not panic or wrap around via unsigned subtraction.
+        let stages = vec![done_stage("prep", "Prep", 900)];
+        let rows = flatten_rows(&stages, Some(500));
+        assert_eq!(other_row_text(&rows), Some("other: 0ms"));
+    }
+
+    #[test]
+    fn sub_row_durations_are_not_double_counted_into_other() {
+        // A sub's time is already inside its parent stage's own reported
+        // duration_ms (the stage spans stage-begin to stage-end, which
+        // wraps its subs) — summing subs separately would double-count and
+        // shrink "other" incorrectly. accounted_ms must come from top-level
+        // stages only.
+        let mut migrations = done_stage("migrations", "Migrations", 250);
+        migrations.subs.push(SubRow {
+            id: "001".into(),
+            label: "001_init".into(),
+            started_at: Instant::now(),
+            done: Some((90, StartupStatus::Ok, None)),
+        });
+        let stages = vec![done_stage("prep", "Prep", 100), migrations];
+        let rows = flatten_rows(&stages, Some(500));
+        // If subs were double-counted this would be 500 - (100+250+90) = 60,
+        // not 150.
+        assert_eq!(other_row_text(&rows), Some("other: 150ms"));
+    }
+
+    #[test]
+    fn total_row_still_shown_when_panel_is_nearly_full() {
+        // MAX_STAGE_ROWS(12) - 1 stage rows leaves exactly one slot: "total"
+        // must win that slot over "other" per the priority documented at
+        // the call site.
+        let stages: Vec<StageRow> = (0..MAX_STAGE_ROWS - 1)
+            .map(|i| {
+                let label: &'static str = Box::leak(format!("s{i}").into_boxed_str());
+                let stage: &'static str = label;
+                done_stage(stage, label, 10)
+            })
+            .collect();
+        let rows = flatten_rows(&stages, Some(1000));
+        assert_eq!(rows.len(), MAX_STAGE_ROWS);
+        assert!(other_row_text(&rows).is_none());
+        assert!(total_row_text(&rows).is_some());
+    }
 }
