@@ -921,6 +921,11 @@ async fn main() {
 
     // Subagent watcher — monitors Claude Code session dirs for spawned subagents
     let subagent_watcher = backend::subagent_watcher::SubagentWatcher::spawn(event_bus.clone(), wstore.clone());
+    // Registered as a global so blockcontroller/persistent.rs's turn-end
+    // reconciliation hook (SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_
+    // 2026_07_20 Phase A) can reach it without threading an Arc through
+    // PersistentSubprocessController::new and every one of its callers.
+    backend::subagent_watcher::set_global(subagent_watcher.clone());
 
     // History service — discovers and indexes past CLI agent conversations
     let history_service = Arc::new(backend::history::HistoryService::new());
