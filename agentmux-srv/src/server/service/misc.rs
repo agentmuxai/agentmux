@@ -43,6 +43,13 @@ pub(super) async fn handle_misc_service(state: &AppState, call: &WebCallType) ->
             WebReturnType::success_empty()
         }
 
+        // ---- ShellService (Swarm-pane long-running-process rows,
+        // SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20) ----
+        ("shell", "ListActive") => {
+            let shells = state.shell_sessions.list_active();
+            WebReturnType::success(serde_json::to_value(&shells).unwrap_or_default())
+        }
+
         // ---- SubagentService ----
         ("subagent", "ListActive") => {
             let subagents = state.subagent_watcher.list_active();
