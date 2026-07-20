@@ -8,6 +8,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { createEffect, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import { useMuxBusStatus } from "@/app/view/accounts/AgentMuxConnectPanel";
 import { RuntimeBadge } from "@/app/view/agent/components/RuntimeBadge";
+import QRCode from "qrcode";
 
 type HostInfo = {
     hostname: string;
@@ -38,6 +39,47 @@ const HostPopover = (): JSX.Element => {
     const lanDiscoveryEnabled = () => !!settingsAtom()?.["network:lan_discovery"];
     const lanDiscoveryError = lanDiscoveryErrorAtom;
 
+    // QR fallback for mobile pairing (Phase C). Off by default — only rendered
+    // when the user explicitly clicks "Show QR code" while LAN discovery is on.
+    const [showQr, setShowQr] = createSignal(false);
+    let qrCanvasRef: HTMLCanvasElement | undefined;
+
+    // Builds the `agentmux://connect` deep link the mobile app scans to pair.
+    // `token` is this instance's auth_key — the SAME value the backend already
+    // broadcasts in plaintext in its mDNS TXT record whenever LAN discovery is
+    // on (agentmux-srv/src/backend/lan_discovery.rs), and the same value this
+    // frontend process already holds via the existing `get_auth_key` IPC
+    // bootstrap call (getApi().getAuthKey(), used for every local RPC/WS call).
+    // This helper only reads that already-cached value to build a string handed
+    // straight to the QR renderer below — it is never logged and never sent
+    // anywhere else.
+    const connectUri = (): string | null => {
+        const info = hostInfo();
+        if (!info || !info.localIp || info.localIp === "127.0.0.1") return null;
+        // Prefer the WS port (mobile's live connection); fall back to the web
+        // port if WS somehow isn't available. Both endpoints are reported as
+        // "127.0.0.1:<port>" — only the port number is meaningful for a LAN peer.
+        const port = (info.ports.ws || info.ports.web || "").split(":").pop();
+        const authKey = getApi()?.getAuthKey?.();
+        if (!port || !authKey) return null;
+        const params = new URLSearchParams({ host: info.localIp, port, token: authKey });
+        return `agentmux://connect?${params.toString()}`;
+    };
+
+    // Render the QR code onto the canvas whenever the panel is opened (and
+    // re-render if the underlying host info changes while it's open).
+    createEffect(() => {
+        if (!showQr()) return;
+        const uri = connectUri();
+        if (!uri || !qrCanvasRef) return;
+        QRCode.toCanvas(qrCanvasRef, uri, { width: 176, margin: 1 }, (err) => {
+            if (err) {
+                // Never log `uri` here — it embeds the auth key.
+                console.error("[HostPopover] failed to render pairing QR code:", err.message);
+            }
+        });
+    });
+
     // Toggle the network:lan_discovery setting. The backend's setconfig handler
     // calls LanDiscoveryController.apply, which starts/stops the mDNS daemon
     // live — no restart. On Windows, the first enable triggers the firewall
@@ -58,6 +100,7 @@ const HostPopover = (): JSX.Element => {
     const handleClick = async () => {
         if (popoverOpen()) {
             setPopoverOpen(false);
+            setShowQr(false);
             return;
         }
         try {
@@ -76,6 +119,7 @@ const HostPopover = (): JSX.Element => {
         const handleOutsideClick = (e: MouseEvent) => {
             if (popoverRef && !popoverRef.contains(e.target as Node)) {
                 setPopoverOpen(false);
+                setShowQr(false);
             }
         };
         document.addEventListener("mousedown", handleOutsideClick);
@@ -189,6 +233,32 @@ const HostPopover = (): JSX.Element => {
                                 >
                                     <span>Searching for peers…</span>
                                 </div>
+                            </Show>
+
+                            {/* QR fallback for mobile pairing when mDNS discovery
+                                doesn't reach the phone (corporate/guest wifi,
+                                VPN, different subnet, etc). Encodes the same
+                                agentmux://connect deep link a peer would reach
+                                via mDNS. Spec: Phase C, LAN-discovery reliability. */}
+                            <Show when={lanDiscoveryEnabled()}>
+                                <div class="status-bar-popover-row" style={{ "padding-left": "12px" }}>
+                                    <button
+                                        type="button"
+                                        class="status-bar-qr-toggle-btn"
+                                        onClick={() => setShowQr((v) => !v)}
+                                    >
+                                        {showQr() ? "Hide QR code" : "Show QR code"}
+                                    </button>
+                                </div>
+                                <Show when={showQr()}>
+                                    <div class="status-bar-qr-panel">
+                                        <canvas ref={qrCanvasRef} class="status-bar-qr-canvas" />
+                                        <div class="status-bar-qr-note">
+                                            For pairing the AgentMux mobile app on this network only —
+                                            don&apos;t share this code outside your local network.
+                                        </div>
+                                    </div>
+                                </Show>
                             </Show>
 
                             {/* MuxBus Cloud */}
