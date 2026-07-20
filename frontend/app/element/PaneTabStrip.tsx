@@ -22,7 +22,6 @@
  * Spec: docs/specs/SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md §3.1.
  */
 
-import clsx from "clsx";
 import { For, Show, type JSX } from "solid-js";
 import { Tooltip } from "./tooltip";
 import "./PaneTabStrip.scss";

@@ -71,7 +71,7 @@ export function EditorTabStrip(props: Props): JSX.Element {
                         onCancel={props.onSaveAsCancel ?? (() => undefined)}
                     />
                 ) : (
-                    <span class="editor-tab-label">{basenameOf(tab)}</span>
+                    <span class="pane-tab-label">{basenameOf(tab)}</span>
                 )
             }
             onAdd={() => void props.model.openScratch()}
