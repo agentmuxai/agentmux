@@ -656,9 +656,14 @@ export class SwarmViewModel implements ViewModel {
 
         // One or more subagents just reconciled active -> abandoned, either
         // live (SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20
-        // Phase A — the instant their parent's turn ends) or at reopen —
-        // reload so the row's display status (subagentDisplayStatus)
-        // updates without waiting for an unrelated event.
+        // Phase A, #2234 — the instant their parent's turn ends) or at
+        // reopen — reload so the row's display status
+        // (subagentDisplayStatus) updates without waiting for an unrelated
+        // event. The backend broadcast for this event lives in #2234, a
+        // separate PR from this one (Phase B) — if this merges first, the
+        // listener is simply inert until #2234 lands (subagent:abandoned
+        // is never emitted yet), not broken; #2234's own PR description
+        // covers the same sequencing from the backend side.
         const unsubAbandoned = waveEventSubscribe({
             eventType: "subagent:abandoned",
             handler: () => this.scheduleLoadSubagents(),
