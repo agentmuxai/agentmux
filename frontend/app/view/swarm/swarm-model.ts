@@ -294,6 +294,60 @@ export function groupCacheKey(child: WorkflowDispatch): string {
     return `wf:${child.dispatchId}`;
 }
 
+/** Row identity for an Agent Tool row — the same `agent:${agent_id}` key
+ *  `swarm-view.tsx`'s `SubagentRow` already computes locally for expand-
+ *  state/`DispatchActivityFeed` identity (SPEC_SWARM_DISPATCH_NAMING_AND_
+ *  ROW_MODEL_2026_07_19 §4, decoupled from `dispatch_id` in the reagent
+ *  P1 fix on #2232 — see `getDispatchDetail`'s doc comment). Exported so
+ *  `SwarmViewModel`'s retire filter (§ below) and the row's own Retire
+ *  button compute the identical key rather than two independently-written
+ *  string templates drifting apart. */
+export function subagentRowKey(agentId: string): string {
+    return `agent:${agentId}`;
+}
+
+/**
+ * Drop any row whose key is in `retired` AND whose own `lastEventAt` still
+ * matches the snapshot taken at retire time — genuinely new activity for
+ * that same key (a later `lastEventAt`) makes the row visible again
+ * automatically, without a separate un-retire action
+ * (SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20 §6). Shared by
+ * both `AgentTreeNode` buckets in `buildTree()` — parameterized over `T`
+ * rather than duplicated per row type.
+ */
+export function filterRetired<T>(
+    rows: T[],
+    retired: Map<string, number>,
+    rowKey: (row: T) => string,
+    lastEventAt: (row: T) => number
+): T[] {
+    return rows.filter((row) => retired.get(rowKey(row)) !== lastEventAt(row));
+}
+
+/**
+ * Drop `retired` entries whose key is no longer in `liveKeys` at all — a row
+ * gone from live state entirely (block closed, dispatch pruned — #2233) can
+ * never un-retire itself (`filterRetired`'s lastEventAt-snapshot comparison
+ * has nothing left to compare against), so keeping its retired entry around
+ * is pure unbounded growth for the life of the session (reagent P2 on
+ * #2235). A row still genuinely live keeps its entry regardless of this
+ * pass — only entries for keys absent from `liveKeys` are dropped. Returns
+ * `retired` unchanged (same reference) if nothing was actually dropped, so
+ * callers using this in a signal setter don't trigger a no-op update.
+ */
+export function pruneRetiredEntries(retired: Map<string, number>, liveKeys: Set<string>): Map<string, number> {
+    let changed = false;
+    const next = new Map<string, number>();
+    for (const [key, lastEventAt] of retired) {
+        if (liveKeys.has(key)) {
+            next.set(key, lastEventAt);
+        } else {
+            changed = true;
+        }
+    }
+    return changed ? next : retired;
+}
+
 /**
  * Stabilize `WorkflowDispatch` wrapper identity across `buildTree()` calls,
  * mirroring `mergeSubagentsPreservingIdentity` one level up.
@@ -560,6 +614,19 @@ export class SwarmViewModel implements ViewModel {
     collapsedAgentIdsAtom: Accessor<Set<string>> = this._collapsedAgentIds[0];
     private setCollapsedAgentIds: Setter<Set<string>> = this._collapsedAgentIds[1];
 
+    // Rows the user has retired (dismissed) — client-local, ephemeral (no
+    // backend write, resets on reload/restart, same as memory-pressure-
+    // banner.tsx's dismissedAt). Maps rowKey -> the row's own lastEventAt
+    // AT THE MOMENT it was retired, not just a bare membership set: this is
+    // what lets a row un-retire itself automatically the moment genuinely
+    // new activity arrives for that same key (buildTree()'s filter only
+    // suppresses a row whose CURRENT lastEventAt still matches the
+    // snapshot) instead of requiring an explicit un-retire action — see
+    // SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20 §6.
+    private _retiredRowKeys = createSignal<Map<string, number>>(new Map());
+    retiredRowKeysAtom: Accessor<Map<string, number>> = this._retiredRowKeys[0];
+    private setRetiredRowKeys: Setter<Map<string, number>> = this._retiredRowKeys[1];
+
     // One DispatchDetail (concatenated activity feed) per currently-expanded
     // row — Agent Tool (solo) rows and Workflow rows alike, unified in
     // SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 §4 (retired the
@@ -610,6 +677,22 @@ export class SwarmViewModel implements ViewModel {
             handler: () => this.scheduleLoadSubagents(),
         });
         if (unsubCompleted) this.unsubs.push(unsubCompleted);
+
+        // One or more subagents just reconciled active -> abandoned, either
+        // live (SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20
+        // Phase A, #2234 — the instant their parent's turn ends) or at
+        // reopen — reload so the row's display status
+        // (subagentDisplayStatus) updates without waiting for an unrelated
+        // event. The backend broadcast for this event lives in #2234, a
+        // separate PR from this one (Phase B) — if this merges first, the
+        // listener is simply inert until #2234 lands (subagent:abandoned
+        // is never emitted yet), not broken; #2234's own PR description
+        // covers the same sequencing from the backend side.
+        const unsubAbandoned = waveEventSubscribe({
+            eventType: "subagent:abandoned",
+            handler: () => this.scheduleLoadSubagents(),
+        });
+        if (unsubAbandoned) this.unsubs.push(unsubAbandoned);
 
         // dispatch:updated fires for both Solo and Workflow kinds (SPEC §5) —
         // a member count/status change on either warrants the same reload
@@ -687,6 +770,7 @@ export class SwarmViewModel implements ViewModel {
         this.setLoading(true);
         try {
             await Promise.all([this.loadTrackedBlocks(), this.loadSubagents(), this.loadDispatches()]);
+            this.pruneRetiredRowKeys();
         } finally {
             this.setLoading(false);
         }
@@ -733,10 +817,26 @@ export class SwarmViewModel implements ViewModel {
         }
         this.loadSubagentsDebounceTimer = setTimeout(() => {
             this.loadSubagentsDebounceTimer = undefined;
-            void this.loadSubagents();
-            void this.loadDispatches();
+            void Promise.all([this.loadSubagents(), this.loadDispatches()]).then(() => this.pruneRetiredRowKeys());
         }, SwarmViewModel.LOAD_SUBAGENTS_DEBOUNCE_MS);
     };
+
+    /** Drop `_retiredRowKeys` entries for rows no longer present in live
+     *  state at all (block closed, dispatch pruned — #2233) — those can
+     *  never un-retire themselves (`filterRetired`'s lastEventAt-snapshot
+     *  comparison has nothing left to compare against), so keeping them
+     *  around is pure unbounded growth for the life of the session (reagent
+     *  P2 on #2235). Called after `loadSubagents`/`loadDispatches` settle
+     *  (a plain state update, not from inside `buildTree()`'s own read of
+     *  `retiredRowKeysAtom`, which would be a reactive write-during-read). */
+    private pruneRetiredRowKeys(): void {
+        const liveKeys = new Set<string>();
+        for (const s of this.subagentsAtom()) liveKeys.add(subagentRowKey(s.agent_id));
+        for (const d of this.dispatchesAtom()) {
+            if (d.kind === "workflow") liveKeys.add(d.dispatch_id);
+        }
+        this.setRetiredRowKeys((prev) => pruneRetiredEntries(prev, liveKeys));
+    }
 
     // ── Row expand/collapse (workflow groups + subagent detail) ──────────
 
@@ -765,6 +865,22 @@ export class SwarmViewModel implements ViewModel {
             const next = new Set(prev);
             if (next.has(blockId)) next.delete(blockId);
             else next.add(blockId);
+            return next;
+        });
+    }
+
+    /** Retire (dismiss) a row — `rowKey` is `subagentRowKey(agent_id)` for
+     *  an Agent Tool row or the raw `dispatchId` for a `WorkflowDispatchRow`
+     *  (same keys `buildTree()`'s filter checks against). `lastEventAt` is
+     *  the row's own value at the moment of retiring — see `_retiredRowKeys`
+     *  for why this snapshot, not a bare membership set, is what makes a
+     *  row un-retire itself automatically on new activity. Callers should
+     *  only expose this for a terminal-status row (`"idle"`/`"interrupted"`)
+     *  — nothing to dismiss on a row still genuinely `"working"`. */
+    retireRow(rowKey: string, lastEventAt: number): void {
+        this.setRetiredRowKeys((prev) => {
+            const next = new Map(prev);
+            next.set(rowKey, lastEventAt);
             return next;
         });
     }
@@ -884,6 +1000,7 @@ export class SwarmViewModel implements ViewModel {
         // pass — same "harmless either way, but this is the precise set"
         // rationale the pre-two-bucket design used for NameGroup keys.
         const liveGroupKeys = new Set<string>();
+        const retired = this.retiredRowKeysAtom();
         const nodes = allBlockIds.map((blockId) => {
             const blockAtom = WOS.getWaveObjectAtom<Block>(`block:${blockId}`);
             const block = blockAtom();
@@ -896,13 +1013,19 @@ export class SwarmViewModel implements ViewModel {
             const rawCtx = block?.meta?.["term:ctx-tokens"];
             const contextTokens = typeof rawCtx === "number" ? rawCtx : null;
             const agentStatus = statuses.get(blockId) ?? "idle";
-            const { agentToolRows, workflowRows: rawWorkflowRows } = buildDispatchBuckets(
+            const { agentToolRows: rawAgentToolRows, workflowRows: rawWorkflowRows } = buildDispatchBuckets(
                 dispatches.filter((d) => d.parent_block_id === blockId),
                 subagents.filter((s) => s.parent_block_id === blockId)
             );
             for (const w of rawWorkflowRows) liveGroupKeys.add(groupCacheKey(w));
             const workflowRows = stabilizeGroupIdentity(this.groupIdentityCache, rawWorkflowRows);
-            return { blockId, agentName, agentProvider, activitySummary, contextTokens, agentStatus, agentToolRows, workflowRows };
+            // Retired rows are filtered here, not inside buildDispatchBuckets
+            // (kept a pure, ViewModel-independent function) — see
+            // filterRetired's doc comment for the un-retire-on-new-activity
+            // mechanism (SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20 §6).
+            const agentToolRows = filterRetired(rawAgentToolRows, retired, (s) => subagentRowKey(s.agent_id), (s) => s.last_event_at);
+            const visibleWorkflowRows = filterRetired(workflowRows, retired, (w) => w.dispatchId, (w) => w.lastEventAt);
+            return { blockId, agentName, agentProvider, activitySummary, contextTokens, agentStatus, agentToolRows, workflowRows: visibleWorkflowRows };
         });
 
         // Prune once per full pass (not per-block — see stabilizeGroupIdentity).
