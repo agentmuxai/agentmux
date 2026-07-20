@@ -54,9 +54,9 @@ below already follow.
 ## 1. Accounts
 
 **Table:** `db_accounts` (`agentmux-srv/src/backend/storage/identities.rs`).
-`IdentityAccount { id, name, provider, kind, secret_ref, context, status }`,
-`secret_ref` an enum: `Env | SecretsManager | PlaintextDev | OAuthConfigDir |
-Keychain`.
+`IdentityAccount { id, name, provider, kind, display_name, secret_ref, context,
+status }`, `secret_ref` an enum: `Env | SecretsManager | PlaintextDev |
+OAuthConfigDir | Keychain`.
 
 **RPC:** `agentmux-srv/src/server/agent_handlers/identity.rs` — account CRUD
 (`listidentityaccounts`, `upsertidentityaccount`, etc.) plus
@@ -123,13 +123,23 @@ stack shared with Skills and MCP Servers (§3, §4). The edit form has **no**
 `GlobalBrainManager`). `sort_order` is likewise invisible here — owned
 exclusively by `reorderglobalbrain`.
 
-**Binding mechanism: the weakest of the four.** `is_global=1` blanket-injects a
-bundle's `instructions` into **every** agent's CLAUDE.md — there is no
-per-agent opt-in/opt-out and no ref/join table. A per-agent
-`db_agent_instances.memory_id` field exists (populated by the launch modal's
-"Memory" bundle picker) but **nothing consumes it** — it's write-only
-bookkeeping today, not wired into any injection path. So non-global bundles
-are effectively inert once created; only `is_global` bundles do anything.
+**Binding mechanism: the weakest of the four, but not inert.** `is_global=1`
+blanket-injects a bundle's `instructions` into **every** agent's CLAUDE.md at
+launch — there is no per-agent opt-in/opt-out and no ref/join table for that
+path. Separately, a per-agent `db_agent_instances.memory_id` field (populated
+by the launch modal's "Memory" bundle picker) selects one non-global bundle,
+but it is **pull-only, not push/auto-injected**: it's read by the `bundle.self.get`
+App-API RPC (`agentmux-srv/src/server/app_api/mod.rs:579-600`, resolves the
+instance's bound bundle for a caller to fetch on demand) and surfaced as a
+`memory_name` for display in a couple of agent-handler paths
+(`agentmux-srv/src/server/agent_handlers/identity.rs`,
+`agentmux-srv/src/server/agent_handlers/session.rs`) — but nothing reads
+`memory_id` at `write_agent_config_files()` time to inject that bundle's
+`instructions` into CLAUDE.md or Session Context the way `is_global` bundles
+get injected automatically. So a non-global bundle bound via `memory_id` is
+consumable (an agent/caller can explicitly pull it), just not automatically
+materialized into the agent's own context the way every other entity's
+binding is.
 
 **Materialization at spawn:** `format_global_brain_block()`
 (`agentmux-srv/src/backend/storage/memory_bundles.rs:74-87`) filters to
