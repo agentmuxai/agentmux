@@ -258,25 +258,19 @@ function AgentRow({
                     [`swarm-agent-card--${node.agentStatus}`]: true,
                     "swarm-agent-card--active": focusedBlockId() === node.blockId,
                 }}
-                onClick={() => node.blockId && void focusBlock(node.blockId)}
+                onClick={() => node.blockId && model.toggleAgentCollapsed(node.blockId)}
                 title={node.agentName}
             >
                 <div class="swarm-agent-row">
                     {/* Chevron only when there's a subtree to collapse; a
                         fixed-width spacer otherwise so labels stay aligned
-                        across rows with and without children. stopPropagation:
-                        the enclosing card's click focuses the block. */}
+                        across rows with and without children. No own click
+                        handler — the enclosing card's click already toggles. */}
                     <Show
                         when={hasChildren()}
                         fallback={<span class="swarm-agent-expand-spacer" />}
                     >
-                        <i
-                            class={`fa-solid fa-${collapsed() ? "chevron-right" : "chevron-down"} swarm-agent-expand-icon`}
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                model.toggleAgentCollapsed(node.blockId);
-                            }}
-                        />
+                        <i class={`fa-solid fa-${collapsed() ? "chevron-right" : "chevron-down"} swarm-agent-expand-icon`} />
                     </Show>
                     <span class="swarm-agent-icon">
                         <ProviderLogo provider={node.agentProvider ?? "agentmux"} size={16} />
@@ -289,6 +283,16 @@ function AgentRow({
                         <span class="swarm-ctx-size">{fmtCtx(node.contextTokens!)}</span>
                     </Show>
                     <AgentStatusChip status={displayStatus()} />
+                    <button
+                        class="swarm-agent-focus"
+                        title="Focus"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            if (node.blockId) void focusBlock(node.blockId);
+                        }}
+                    >
+                        <i class="fa-solid fa-arrow-up-right-from-square" />
+                    </button>
                 </div>
                 <Show when={node.activitySummary}>
                     <div classList={{ "swarm-activity-summary": true, "swarm-activity-summary--flash": summaryFlash() }}>
