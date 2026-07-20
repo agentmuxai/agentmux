@@ -1,0 +1,131 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Shared tab-strip chrome, promoted from the editor's original
+// .editor-tab-strip/.editor-tab (editor-view.scss) so agent-pane forks and
+// terminal-pane shell tabs can reuse the identical box model, active-state
+// underline, and hover/close behavior instead of each pane type growing
+// its own copy. See PaneTabStrip.tsx and
+// docs/specs/SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md §3.1.
+
+.pane-tab-strip {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    height: 28px;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--secondary-bg-color, var(--block-bg-color));
+    overflow-x: hidden;
+}
+
+// Tooltip wrapper (shared Tooltip component) — carries the flex sizing the
+// tab used to own, so wrapping the tab for a hover tooltip doesn't change
+// layout.
+.pane-tab-tip {
+    flex: 1 1 140px;
+    min-width: 80px;
+    max-width: 200px;
+    display: flex;
+    align-items: stretch;
+}
+
+.pane-tab {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: 0 var(--space-1) 0 var(--space-2);
+    border-right: 1px solid var(--border-color);
+    background: transparent;
+    color: var(--secondary-text-color);
+    cursor: default;
+    user-select: none;
+    font-size: 11px;
+    overflow: hidden;
+    transition: background 80ms ease, color 80ms ease;
+
+    &:hover {
+        background: rgba(255, 255, 255, 0.03);
+        color: var(--main-text-color);
+
+        .pane-tab-close {
+            opacity: 1;
+        }
+    }
+
+    &--active {
+        background: var(--block-bg-color);
+        color: var(--main-text-color);
+        // Subtle bottom-border that visually connects the active tab to the
+        // pane content below (the strip's own border-bottom is hidden under
+        // the active tab via the negative margin trick).
+        box-shadow: inset 0 -2px 0 0 var(--accent-color);
+    }
+
+    // "Attention" tabs (unsaved changes, needs-review, …) always show their
+    // × so the user knows a close may need confirmation.
+    &--attention {
+        .pane-tab-close {
+            opacity: 1;
+        }
+    }
+}
+
+.pane-tab-label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pane-tab-close {
+    flex: 0 0 16px;
+    width: 16px;
+    height: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    border-radius: 3px;
+    background: transparent;
+    color: inherit;
+    cursor: default;
+    font-size: 14px;
+    line-height: 1;
+    opacity: 0;
+    transition: opacity 80ms ease, background 80ms ease;
+
+    &:hover {
+        background: rgba(255, 255, 255, 0.1);
+    }
+}
+
+// The far-right "+" — always the strip's last flex child (rendered after
+// the <For> in PaneTabStrip.tsx), so it stays pinned at the visual end of
+// the row regardless of tab count.
+.pane-tab-strip-add {
+    flex: 0 0 auto;
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    border-left: 1px solid var(--border-color);
+    background: transparent;
+    color: var(--secondary-text-color);
+    cursor: default;
+    font-size: 15px;
+    line-height: 1;
+    transition: background 80ms ease, color 80ms ease;
+
+    &:hover {
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--main-text-color);
+    }
+}
