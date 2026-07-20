@@ -4,12 +4,14 @@
 import { describe, expect, it } from "vitest";
 import {
     buildDispatchBuckets,
+    filterRetired,
     groupCacheKey,
     mergeDispatchActivityEntries,
     mergeSubagentsPreservingIdentity,
     pruneGroupIdentityCache,
     stabilizeGroupIdentity,
     subagentDisplayLabel,
+    subagentRowKey,
     type ActiveSubagent,
     type AgentDispatch,
     type DispatchActivityEntry,
@@ -351,6 +353,43 @@ describe("groupCacheKey", () => {
             [mk({ agent_id: "a1", dispatch_id: "wf_1" })]
         ).workflowRows;
         expect(groupCacheKey(wf)).toBe("wf:wf_1");
+    });
+});
+
+describe("subagentRowKey", () => {
+    it("prefixes with 'agent:'", () => {
+        expect(subagentRowKey("abc123")).toBe("agent:abc123");
+    });
+});
+
+describe("filterRetired", () => {
+    const keyFn = (n: number) => `row-${n}`;
+
+    it("keeps a row whose key is not in the retired map", () => {
+        const retired = new Map<string, number>();
+        const rows = filterRetired([1, 2], retired, keyFn, () => 100);
+        expect(rows).toEqual([1, 2]);
+    });
+
+    it("drops a row whose key is retired and lastEventAt still matches the retired snapshot", () => {
+        const retired = new Map<string, number>([["row-1", 100]]);
+        const rows = filterRetired([1, 2], retired, keyFn, () => 100);
+        expect(rows).toEqual([2]);
+    });
+
+    it("un-retires automatically once the row's own lastEventAt moves past the retired snapshot", () => {
+        // Same key as a retired row, but new activity has since advanced
+        // lastEventAt past what was snapshotted at retire time — SPEC_
+        // SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20 §6: no
+        // separate un-retire action needed, the row just reappears.
+        const retired = new Map<string, number>([["row-1", 100]]);
+        const rows = filterRetired([1], retired, keyFn, () => 200);
+        expect(rows).toEqual([1]);
+    });
+
+    it("is a no-op (identity semantics aside) when nothing is retired", () => {
+        const rows = filterRetired([1, 2, 3], new Map(), keyFn, () => 0);
+        expect(rows).toEqual([1, 2, 3]);
     });
 });
 
