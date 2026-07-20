@@ -48,9 +48,14 @@ from the `a5af/dev-tools` secrets CLI.
   (`agentId` field in the block meta).
 - `AGENTMUX_AUTH_KEY` and `AGENTMUX_LOCAL_URL` are injected into every agent's
   environment at spawn time, so the WS call works without additional setup.
-- `GH_TOKEN` / `GITHUB_TOKEN` env vars may be stale at spawn; prefix `gh`
-  commands with `env -u GH_TOKEN -u GITHUB_TOKEN` until the spawn config is
-  fixed.
+- Don't call `gh` directly — with no token override it falls back to whichever
+  account last ran `gh auth login` in the shared, machine-wide keyring config
+  (almost never your own identity on a multi-agent machine). Use
+  `scripts/gh-agent.sh <gh args...>` instead: it resolves your own PAT from
+  `gh-token-<agent>` (falling back to the shared `gh-token-genericagentx`)
+  fresh on every call and scopes it to just that invocation via `GH_TOKEN` —
+  no bootstrap/registration required, works before or independently of the
+  identity-account steps below.
 - Once PR #1840 (`feat(app-api): MCP bindings`) ships, the write path will
   move to an `IdentityUpsert` MCP tool — no raw WS call needed.
 

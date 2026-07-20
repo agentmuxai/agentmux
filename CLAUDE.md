@@ -277,13 +277,37 @@ git push -u origin feature-name
 # IMPORTANT: Always include the agentmux agent ID comment in the PR body.
 # This enables MuxBus to route GitHub review notifications back to this agent.
 # $AGENTMUX_AGENT_ID is injected at spawn time (matches block.meta.agentName).
-gh pr create --title "Feature" --body "$(cat <<EOF
+scripts/gh-agent.sh pr create --title "Feature" --body "$(cat <<EOF
 Description of the change.
 
 <!-- agentmux:agent_id=${AGENTMUX_AGENT_ID,,} -->
 EOF
 )"
 ```
+
+### Which GitHub account am I acting as?
+
+This machine runs multiple agents. Plain `gh` (with no token override) falls
+back to whichever account last ran `gh auth login` in the **shared, machine-wide**
+keyring config — that is almost never your own identity, and using it silently
+attributes your PRs/comments to the wrong account.
+
+**Always invoke `gh` through `scripts/gh-agent.sh` instead of calling `gh` directly**
+— e.g. `scripts/gh-agent.sh pr create ...`, `scripts/gh-agent.sh pr view 123`. It:
+
+1. Reads your own identity from `$AGENTMUX_AGENT_ID` (injected at spawn).
+2. Looks up a dedicated PAT at `services/infra`'s `gh-token-<your-id-lowercased>`
+   key via the `@a5af/secrets` CLI (`dev-tools`/`secrets-cli` — see
+   `docs/agent-identity-bootstrap.md`).
+3. Falls back to the shared `gh-token-genericagentx` key (account
+   `GenericAgentX-asaf`) if you don't have a dedicated PAT registered.
+4. Passes the resolved token as `GH_TOKEN`, scoped to that one `gh` invocation
+   only — it is never written to disk and never touches the shared keyring
+   session other agents are using.
+
+Since `GH_TOKEN` is resolved fresh on every call, this always reflects whichever
+agent is currently running — no login/logout step needed, and nothing to keep in
+sync when a new dedicated PAT is registered for you later.
 
 ---
 
