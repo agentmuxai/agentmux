@@ -13,12 +13,16 @@
  * second Ambient Model Call gateway purpose. See
  * docs/specs/SPEC_AMBIENT_GHOST_TEXT_NEXT_PROMPT_2026_07_03.md.
  *
- * On every completed agent turn, sends recent session output to
- * claude-haiku-4-5-20251001 and asks for a short, natural next user message.
- * The result is written to `term:next_prompt_suggestion` block meta, which
- * the composer reads as ghost text (dimmed, shown only while the input is
- * empty; Tab accepts it into the real input; any other keystroke dismisses
- * it — see AgentFooter.tsx).
+ * Fires exactly once per genuine, backend-confirmed turn completion — see
+ * `turnJustEndedAtom` below, NOT on `TurnPhase.kind === "Done"` (mirrors
+ * useAgentActivitySummary.ts's identical fix — see that module's doc
+ * comment and docs/specs/REPORT_AMBIENT_SUMMARY_OVERTRIGGER_2026_07_20.md
+ * for the full diagnosis of why `Done` over-triggers). Sends recent session
+ * output to claude-haiku-4-5-20251001 and asks for a short, natural next
+ * user message. The result is written to `term:next_prompt_suggestion`
+ * block meta, which the composer reads as ghost text (dimmed, shown only
+ * while the input is empty; Tab accepts it into the real input; any other
+ * keystroke dismisses it — see AgentFooter.tsx).
  *
  * Unlike the read-only activity summary (which persists across turns), a
  * stale suggestion here is a correctness bug, not a cosmetic one — it can
@@ -59,6 +63,9 @@ import type { TurnPhase } from "@/app/store/agent-pane-state/types";
 export interface UseNextPromptSuggestionOptions {
     blockId: string;
     turnPhase: Accessor<TurnPhase>;
+    /** See useAgentActivitySummary.ts's identically-named option for what
+     *  this is and why it replaces a `TurnPhase.kind === "Done"` trigger. */
+    turnJustEndedAtom: Accessor<number>;
     /** Checked at write time — see the module doc comment, guard 3. */
     isComposerEmpty: () => boolean;
 }
@@ -72,7 +79,7 @@ function clearSuggestion(blockId: string): void {
 }
 
 export function useNextPromptSuggestion(opts: UseNextPromptSuggestionOptions): void {
-    const { blockId, turnPhase, isComposerEmpty } = opts;
+    const { blockId, turnPhase, turnJustEndedAtom, isComposerEmpty } = opts;
 
     // Scoped to this mount — see useAgentActivitySummary.ts's doc comment for
     // why the wire `generation` is Date.now() instead of this counter.
@@ -82,31 +89,32 @@ export function useNextPromptSuggestion(opts: UseNextPromptSuggestionOptions): v
         if (phase.kind === "Submitting") {
             activeTurnId++;
             clearSuggestion(blockId); // guard 1 — see module doc comment
-            return;
-        }
-
-        if (phase.kind === "Done") {
-            const myTurnId = activeTurnId;
-
-            RpcApi.NextPromptSuggestionCommand(
-                TabRpcClient,
-                { block_id: blockId, generation: Date.now() },
-                { timeout: 20_000 },
-            ).then((result) => {
-                if (activeTurnId !== myTurnId) return; // superseded by a newer turn
-                if (result.tokens) {
-                    recordTurn("ambient:next_prompt_suggestion", result.tokens);
-                }
-                if (result.suggestion && isComposerEmpty()) {
-                    fireAndForget(() =>
-                        ObjectService.UpdateObjectMeta(makeORef("block", blockId), {
-                            "term:next_prompt_suggestion": result.suggestion,
-                        } as any)
-                    );
-                }
-            }).catch(() => {
-                // Silently ignore — no ghost text shows.
-            });
         }
     }));
+
+    // `defer: true` — skip the run at mount, same reasoning as
+    // useAgentActivitySummary.ts.
+    createEffect(on(turnJustEndedAtom, () => {
+        const myTurnId = activeTurnId;
+
+        RpcApi.NextPromptSuggestionCommand(
+            TabRpcClient,
+            { block_id: blockId, generation: Date.now() },
+            { timeout: 20_000 },
+        ).then((result) => {
+            if (activeTurnId !== myTurnId) return; // superseded by a newer turn
+            if (result.tokens) {
+                recordTurn("ambient:next_prompt_suggestion", result.tokens);
+            }
+            if (result.suggestion && isComposerEmpty()) {
+                fireAndForget(() =>
+                    ObjectService.UpdateObjectMeta(makeORef("block", blockId), {
+                        "term:next_prompt_suggestion": result.suggestion,
+                    } as any)
+                );
+            }
+        }).catch(() => {
+            // Silently ignore — no ghost text shows.
+        });
+    }, { defer: true }));
 }

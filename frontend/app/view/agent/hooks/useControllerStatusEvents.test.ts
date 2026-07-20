@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { deriveTurnActive } from "./useControllerStatusEvents";
+import { deriveTurnActive, didTurnJustEnd } from "./useControllerStatusEvents";
 
 // Guards the exact wire contract that a P0 review caught: BlockControllerRuntime
 // Status.is_agent_pane and .turn_active are both serialized
@@ -37,5 +37,37 @@ describe("deriveTurnActive (controllerstatus wire-shape guard)", () => {
         expect(deriveTurnActive(undefined)).toBe(null);
         expect(deriveTurnActive(null)).toBe(null);
         expect(deriveTurnActive("nope")).toBe(null);
+    });
+});
+
+// Guards the trigger for the Haiku ambient-summary/next-prompt-suggestion
+// hooks (docs/specs/REPORT_AMBIENT_SUMMARY_OVERTRIGGER_2026_07_20.md) — must
+// fire on a genuine busy→idle edge only, never on other transitions or on a
+// pane's first-ever turn_active reading.
+describe("didTurnJustEnd (ambient-summary trigger edge)", () => {
+    it("true -> false is a genuine turn-end", () => {
+        expect(didTurnJustEnd(true, false)).toBe(true);
+    });
+
+    it("false -> true (turn starting) is not a turn-end", () => {
+        expect(didTurnJustEnd(false, true)).toBe(false);
+    });
+
+    it("true -> true (still busy, e.g. a mid-turn tool-call round) is not a turn-end", () => {
+        expect(didTurnJustEnd(true, true)).toBe(false);
+    });
+
+    it("false -> false (still idle) is not a turn-end", () => {
+        expect(didTurnJustEnd(false, false)).toBe(false);
+    });
+
+    it("undefined -> false (first reading ever, pane opened onto an already-idle agent) is NOT a turn-end", () => {
+        // No prior "busy" was ever observed this mount, so there's nothing
+        // new to summarize — must not fire on every pane open/tab switch.
+        expect(didTurnJustEnd(undefined, false)).toBe(false);
+    });
+
+    it("undefined -> true (first reading ever, agent already mid-turn) is not a turn-end", () => {
+        expect(didTurnJustEnd(undefined, true)).toBe(false);
     });
 });

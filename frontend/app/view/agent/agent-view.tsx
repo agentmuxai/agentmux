@@ -44,7 +44,7 @@ import { useAgentKeyboard } from "./hooks/useAgentKeyboard";
 import { useProcessCount } from "./hooks/useProcessCount";
 import { usePtyWidth, computeTermSizeFromEl } from "./hooks/usePtyWidth";
 import { useSubagentEvents } from "./hooks/useSubagentEvents";
-import { useControllerStatusEvents } from "./hooks/useControllerStatusEvents";
+import { useControllerStatusEvents, didTurnJustEnd } from "./hooks/useControllerStatusEvents";
 import { useBlockActivity } from "./hooks/useBlockActivity";
 import { useAgentActivitySummary } from "./hooks/useAgentActivitySummary";
 import { useNextPromptSuggestion } from "./hooks/useNextPromptSuggestion";
@@ -441,6 +441,50 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // before onMount fires). Also consumed by dropAttach + usePtyWidth below.
     let rootRef: HTMLDivElement | undefined;
 
+    // Bumped exactly once per genuine, backend-confirmed turn completion —
+    // the `turn_active: true -> false` edge, fed ONLY by live controllerstatus
+    // events (see trackTurnJustEnded below, and NOT reconcileTurnActive — the
+    // mount-time one-shot deliberately does not participate; reagent P1 on
+    // PR #2241). This is the trigger useAgentActivitySummary/
+    // useNextPromptSuggestion use instead of TurnPhase.kind === "Done" (which
+    // over-triggers — see
+    // docs/specs/REPORT_AMBIENT_SUMMARY_OVERTRIGGER_2026_07_20.md).
+    // `wasTurnActive` is plain (non-reactive) — it only exists to detect the
+    // edge, not to be read anywhere.
+    let wasTurnActive: boolean | undefined;
+    const [turnJustEndedAtom, setTurnJustEndedAtom] = createSignal(0);
+
+    // Dispatches ReconcileTurnActive to the pane reducer so TurnPhase follows
+    // the backend's live turn state — used by BOTH the mount-time one-shot
+    // (useAgentControllerStatus's Phase 3 GetControllerStatus) and every live
+    // controllerstatus event. Does NOT touch turnJustEndedAtom — see
+    // trackTurnJustEnded for why that's kept separate.
+    function reconcileTurnActive(active: boolean): void {
+        dispatchPaneIfRegistered(
+            model.blockId,
+            { type: "ReconcileTurnActive", at: Date.now(), active },
+            "system",
+        );
+    }
+
+    // Feeds the turnJustEndedAtom edge-detector. Deliberately called ONLY
+    // from the live useControllerStatusEvents subscription (up from onMount,
+    // always current), never from the mount-time GetControllerStatus
+    // one-shot. That one-shot can resolve up to ~300s late — after Phase 1/2's
+    // auth wait — by which point the live subscription may have already
+    // tracked a real turn starting AND ending. Letting the stale snapshot
+    // also drive wasTurnActive could clobber the correct live-tracked state
+    // back to a value that no longer reflects reality, making the next live
+    // event compute a spurious edge and re-fire the Haiku RPC for a turn that
+    // isn't actually ending — reintroducing the over-trigger bug this fix
+    // closes (reagent P1 on PR #2241).
+    function trackTurnJustEnded(active: boolean): void {
+        if (didTurnJustEnd(wasTurnActive, active)) {
+            setTurnJustEndedAtom((n) => n + 1);
+        }
+        wasTurnActive = active;
+    }
+
     const status = useAgentControllerStatus({
         blockId: model.blockId,
         provider,
@@ -471,11 +515,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         // this can resolve before registerPane() has run for a pane still
         // mid-mount.
         onControllerStatus: (rts) => {
-            dispatchPaneIfRegistered(
-                model.blockId,
-                { type: "ReconcileTurnActive", at: Date.now(), active: !!rts.turn_active },
-                "system",
-            );
+            reconcileTurnActive(!!rts.turn_active);
         },
     });
 
@@ -499,11 +539,8 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         blockId: model.blockId,
         log,
         onTurnActive: (active) => {
-            dispatchPaneIfRegistered(
-                model.blockId,
-                { type: "ReconcileTurnActive", at: Date.now(), active },
-                "system",
-            );
+            reconcileTurnActive(active);
+            trackTurnJustEnded(active);
             // A real controllerstatus event for this pane is independent
             // proof the CLI is alive and running turns — clear any stale
             // "Retry Login" / auth notice left over from the mount-time
@@ -522,13 +559,16 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     useBlockActivity({ blockId: model.blockId });
 
     // Haiku-powered live mini-summary: generates a fresh phrase in
-    // term:ambient_summary on every completed agent turn, preferred over
+    // term:ambient_summary on every genuine, backend-confirmed turn
+    // completion (turnJustEndedAtom, declared above — NOT TurnPhase.Done,
+    // which over-triggers, see that atom's doc comment), preferred over
     // the OSC title above when both are present. Routed through the
     // backend's Ambient Model Call gateway — see
     // docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md.
     useAgentActivitySummary({
         blockId: model.blockId,
         turnPhase: agentAtoms().turnPhaseAtom[0],
+        turnJustEndedAtom,
         getRootWidth: () => rootRef?.offsetWidth,
     });
 
@@ -540,6 +580,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     useNextPromptSuggestion({
         blockId: model.blockId,
         turnPhase: agentAtoms().turnPhaseAtom[0],
+        turnJustEndedAtom,
         isComposerEmpty: () => composerIsEmptyFn?.() ?? true,
     });
 
