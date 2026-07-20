@@ -210,7 +210,41 @@ pub fn prune_dangling_block_refs(
             let _ = delete_node(t, &dangling_id);
         }
     }
+    // In-pane tabs (SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md §4.3):
+    // a surviving leaf's ACTIVE block (`data.block_id`) is already
+    // guaranteed live by the loop above, but a non-active `block_stack`
+    // member's block can independently be deleted without ever making the
+    // leaf itself dangling — the leaf still renders fine via its active
+    // member. Without this pass those ids would linger in `block_stack`
+    // forever, so a later tab-switch could try to activate a block that no
+    // longer exists.
+    if let Some(tree) = root.as_mut() {
+        pruned += prune_dangling_stack_members(tree, live_block_ids);
+    }
     pruned
+}
+
+/// Recursively drop dead entries from every leaf's `block_stack`. The
+/// active member (`data.block_id`) is never removed here — by the time
+/// this runs, the caller's whole-leaf pruning loop has already guaranteed
+/// it's live. Returns the number of stack entries removed.
+fn prune_dangling_stack_members(
+    node: &mut LayoutNode,
+    live_block_ids: &std::collections::HashSet<String>,
+) -> usize {
+    let mut removed = 0;
+    if let Some(data) = node.data.as_mut() {
+        if !data.block_stack.is_empty() {
+            let before = data.block_stack.len();
+            data.block_stack
+                .retain(|id| id == &data.block_id || live_block_ids.contains(id));
+            removed += before - data.block_stack.len();
+        }
+    }
+    for child in &mut node.children {
+        removed += prune_dangling_stack_members(child, live_block_ids);
+    }
+    removed
 }
 
 /// A minimize-locked node: a minimized leaf (`minimizedSize`), a slipped
