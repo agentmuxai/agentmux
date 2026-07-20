@@ -381,6 +381,44 @@
     right: 0;
 }
 
+// ── QR fallback for mobile pairing (LAN-discovery reliability, Phase C) ────
+
+.status-bar-qr-toggle-btn {
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 0;
+    color: var(--main-text-color);
+    cursor: default;
+    font-size: 0.85em;
+    padding: 2px 8px;
+    opacity: 0.8;
+
+    &:hover {
+        opacity: 1;
+        border-color: var(--accent-color);
+    }
+}
+
+.status-bar-qr-panel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-1);
+    padding: var(--space-2) 12px;
+}
+
+.status-bar-qr-canvas {
+    background: #fff; // stylelint-disable-line color-no-hex -- QR codes need a fixed white quiet zone regardless of theme
+    padding: 6px;
+}
+
+.status-bar-qr-note {
+    font-size: 0.8em;
+    opacity: 0.6;
+    text-align: center;
+    max-width: 190px;
+}
+
 .status-bar-restart-btn {
     width: 100%;
     padding: var(--space-1) var(--space-2);
