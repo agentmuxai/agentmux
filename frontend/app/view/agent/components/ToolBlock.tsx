@@ -16,11 +16,16 @@
  *     off the top. This replaced the old fixed post-completion timer; see
  *     docs/specs/PLAN_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md.
  *   - Click summary: pins the expanded state. Clicking again unpins.
- *   - Hover: nothing happens. No browser-native tooltip, no panel
- *     expand, no time popup. The hover-to-peek model from the prior
- *     `tool-collapse.md` spec was removed — three overlapping visuals
- *     (browser title tooltip, larger log panel, fast expand/collapse)
- *     collapsed into a single auto-expand panel.
+ *   - Hover (collapsed only): no panel expand, no time popup — the
+ *     hover-to-peek model from the prior `tool-collapse.md` spec is still
+ *     gone (that removed three overlapping visuals: browser title tooltip,
+ *     larger log panel, fast expand/collapse — collapsed into the single
+ *     auto-expand panel above). What DOES still show on hover is a small,
+ *     separate tooltip over just the command/summary text — the full
+ *     word-wrapped string, nothing else (no output, no expand trigger).
+ *     Suppressed once the panel is already expanded, since the command is
+ *     visible in context there. This is intentionally narrower than what
+ *     was removed: static text only, no state change.
  *
  * SolidJS reactivity note:
  *   Props are accessed via `props.X` (never destructured in the function
@@ -40,6 +45,8 @@ import type { BashResult, EditResult, GlobResult, GrepResult, WriteResult } from
 import { createBlock } from "@/store/global";
 import type { ToolNode } from "../types";
 import { ToolBlockOverlay } from "./ToolBlockOverlay";
+import { Tooltip } from "@/app/element/tooltip";
+import { extractToolDetail } from "../stream-parser";
 
 /**
  * Ref callback that plays a one-shot fade-in animation ONLY on a genuine
@@ -261,6 +268,13 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
 
     const statusIcon = (): string => STATUS_ICON[props.node.status] || "•";
 
+    // Bare command/detail text for the hover tooltip — same per-tool-kind
+    // extraction generateToolSummary() uses for the decorated `summary`
+    // string, so the two never drift out of sync. Suppressed once the
+    // panel is already expanded (command visible in context there) or
+    // when there's nothing tool-kind-specific to show.
+    const cmdText = createMemo(() => extractToolDetail(props.node.tool, (props.node.params as Record<string, any>) ?? {}));
+
     return (
         <div
             class={clsx("agent-tool-block", {
@@ -281,7 +295,15 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
         >
             <div class="agent-tool-summary" onClick={props.onTogglePin}>
                 <span class="agent-tool-status-icon">{statusIcon()}</span>
-                <span class="agent-tool-name">{props.node.summary}</span>
+                <Tooltip
+                    disable={expanded() || !cmdText()}
+                    delayMs={150}
+                    placement="bottom"
+                    divClassName="agent-tool-name-tooltip-anchor"
+                    content={<div class="agent-tool-cmd-tooltip">{cmdText()}</div>}
+                >
+                    <span class="agent-tool-name">{props.node.summary}</span>
+                </Tooltip>
                 <Show when={props.node.duration}>
                     <span class="agent-tool-duration">({props.node.duration.toFixed(1)}s)</span>
                 </Show>

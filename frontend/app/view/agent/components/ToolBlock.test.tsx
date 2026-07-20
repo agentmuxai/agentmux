@@ -152,6 +152,87 @@ describe("ToolBlock — panel mode", () => {
         expect(panel.style.maxHeight).toBe("");
     });
 
+    // ── Command tooltip — narrower than the removed hover-to-peek system:
+    // static text only (the bare command), no expansion, suppressed once
+    // the panel is already expanded. See ToolBlock.tsx's header comment.
+    describe("command tooltip", () => {
+        it("collapsed: hovering the name shows the bare command, not the decorated summary", () => {
+            const { container, unmount } = render(() => (
+                <ToolBlock node={baseTool} pinned={false} onTogglePin={() => {}} />
+            ));
+            const anchor = container.querySelector(".agent-tool-name-tooltip-anchor") as HTMLElement;
+            expect(anchor).not.toBeNull();
+            fireEvent.mouseEnter(anchor);
+            const tip = document.body.querySelector(".agent-tool-cmd-tooltip");
+            expect(tip).not.toBeNull();
+            expect(tip!.textContent).toBe("ls"); // bare params.command, not "Bash ls"
+            unmount();
+        });
+
+        it("expanded (pinned): hovering the name shows no tooltip — command is visible in the panel already", () => {
+            const { container, unmount } = render(() => (
+                <ToolBlock node={baseTool} pinned={true} onTogglePin={() => {}} />
+            ));
+            const anchor = container.querySelector(".agent-tool-name-tooltip-anchor") as HTMLElement;
+            fireEvent.mouseEnter(anchor);
+            expect(document.body.querySelector(".agent-tool-cmd-tooltip")).toBeNull();
+            unmount();
+        });
+
+        it("a tool kind with no extractable detail (e.g. an untyped tool) shows no tooltip", () => {
+            const opaque: ToolNode = { ...baseTool, tool: "Other", params: {} };
+            const { container, unmount } = render(() => (
+                <ToolBlock node={opaque} pinned={false} onTogglePin={() => {}} />
+            ));
+            const anchor = container.querySelector(".agent-tool-name-tooltip-anchor") as HTMLElement;
+            fireEvent.mouseEnter(anchor);
+            expect(document.body.querySelector(".agent-tool-cmd-tooltip")).toBeNull();
+            unmount();
+        });
+
+        // ToolBlock instances are reused across status transitions via
+        // index-based virtualization (no remount) -- these two assert the
+        // suppression is reactive to a live `disable` change on an
+        // ALREADY-MOUNTED instance, not just correct on first render. A
+        // naive `if (props.disable)` early-return inside Tooltip's
+        // component body would commit whichever branch was true at mount
+        // and never re-select — these catch that regression.
+        it("shows the tooltip once a running tool completes, with the cursor already stationary over it (no second mouseenter)", () => {
+            // The scenario a naive implementation misses: the user's cursor
+            // never moves, only `disable` (derived from the tool's own
+            // status) changes out from under it. If the anchor's hover
+            // handling only acted inside the mouseenter/mouseleave handlers
+            // themselves, this would require a SECOND mouseenter that never
+            // comes in real usage — a stationary cursor doesn't generate one
+            // just because an unrelated prop changed.
+            const [node, setNode] = createSignal<ToolNode>({ ...baseTool, status: "running" });
+            const { container, unmount } = render(() => (
+                <ToolBlock node={node()} pinned={false} onTogglePin={() => {}} />
+            ));
+            const anchor = container.querySelector(".agent-tool-name-tooltip-anchor") as HTMLElement;
+            fireEvent.mouseEnter(anchor); // cursor arrives while still running (disabled, panel expanded)
+            expect(document.body.querySelector(".agent-tool-cmd-tooltip")).toBeNull();
+            setNode({ ...baseTool, status: "success" }); // completes; cursor never moves
+            const tip = document.body.querySelector(".agent-tool-cmd-tooltip");
+            expect(tip).not.toBeNull();
+            expect(tip!.textContent).toBe("ls");
+            unmount();
+        });
+
+        it("hides the tooltip the instant an already-hovered tool gets pinned open, with no mouseleave", () => {
+            const [pinned, setPinned] = createSignal(false);
+            const { container, unmount } = render(() => (
+                <ToolBlock node={baseTool} pinned={pinned()} onTogglePin={() => {}} />
+            ));
+            const anchor = container.querySelector(".agent-tool-name-tooltip-anchor") as HTMLElement;
+            fireEvent.mouseEnter(anchor);
+            expect(document.body.querySelector(".agent-tool-cmd-tooltip")).not.toBeNull();
+            setPinned(true); // user clicks elsewhere to pin the panel open; cursor stays put
+            expect(document.body.querySelector(".agent-tool-cmd-tooltip")).toBeNull();
+            unmount();
+        });
+    });
+
     // ── Result-pill one-shot fade-in (reagent P2 on PR #1975) ────────────
     // The fade-in must be a one-shot class added by a `ref` callback at
     // genuine mount time, NOT a persistent CSS `animation:` on the

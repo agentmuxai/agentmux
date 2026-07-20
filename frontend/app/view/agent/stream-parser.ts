@@ -104,6 +104,47 @@ function stripJektEnvelope(body: string, tier: JektTier): string {
 }
 
 /**
+ * Extract relevant detail from tool params for summary/tooltip display.
+ * Returns the full text, untruncated — callers decide how to clip/wrap it
+ * (the .agent-tool-name CSS rule clips with `text-overflow: ellipsis` based
+ * on actual row width, so the ellipsis position recomputes for free on zoom
+ * and pane resize; a hover tooltip instead word-wraps the same full string).
+ * Pre-truncating here would freeze either presentation at a fixed character
+ * count. (See SPEC_DYNAMIC_TOOL_SUMMARY_TRUNCATION.md.) Exported so both
+ * generateToolSummary and a tool-block tooltip share one per-tool-kind
+ * switch instead of drifting out of sync.
+ */
+export function extractToolDetail(tool: string, params: Record<string, any>): string {
+    switch (tool) {
+        case "Read":
+        case "Edit":
+        case "Write":
+            return params.file_path || "";
+        case "Bash":
+            return params.command || "";
+        case "Grep":
+            return params.pattern || "";
+        case "Glob":
+            return params.pattern || "";
+        case "Agent":
+            return params.description || params.prompt || "";
+        case "web_search":
+        case "WebSearch":
+            return params.query || "";
+        case "WebFetch":
+        case "web_fetch":
+            try {
+                const u = new URL(params.url || "");
+                return u.host + (u.pathname === "/" ? "" : u.pathname);
+            } catch {
+                return params.url || "";
+            }
+        default:
+            return "";
+    }
+}
+
+/**
  * Shared default skip-callback — returns the same empty `Set`
  * reference each call so the no-op path stays allocation-free.
  */
@@ -613,48 +654,9 @@ export class ClaudeCodeStreamParser {
         const durationStr = duration ? ` (${duration.toFixed(1)}s)` : "";
 
         // Extract relevant param for display
-        const detail = this.extractToolDetail(tool, params);
+        const detail = extractToolDetail(tool, params);
 
         return `${icon} ${tool} ${detail}${durationStr} ${statusIcon}`.trim();
-    }
-
-    /**
-     * Extract relevant detail from tool params for summary. Returns the
-     * full text — the .agent-tool-name CSS rule clips with
-     * `text-overflow: ellipsis` based on actual row width, so the
-     * ellipsis position recomputes for free on zoom and pane resize.
-     * Pre-truncating here would freeze the ellipsis at a fixed character
-     * count and leave blank space when the row is wider than the
-     * truncated string. (See SPEC_DYNAMIC_TOOL_SUMMARY_TRUNCATION.md.)
-     */
-    private extractToolDetail(tool: string, params: Record<string, any>): string {
-        switch (tool) {
-            case "Read":
-            case "Edit":
-            case "Write":
-                return params.file_path || "";
-            case "Bash":
-                return params.command || "";
-            case "Grep":
-                return params.pattern || "";
-            case "Glob":
-                return params.pattern || "";
-            case "Agent":
-                return params.description || params.prompt || "";
-            case "web_search":
-            case "WebSearch":
-                return params.query || "";
-            case "WebFetch":
-            case "web_fetch":
-                try {
-                    const u = new URL(params.url || "");
-                    return u.host + (u.pathname === "/" ? "" : u.pathname);
-                } catch {
-                    return params.url || "";
-                }
-            default:
-                return "";
-        }
     }
 
     /**
