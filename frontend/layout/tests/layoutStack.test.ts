@@ -212,6 +212,23 @@ describe("layoutStack", () => {
             expect(onNodeDelete).toHaveBeenCalledWith(expect.objectContaining({ blockId: "b1" }));
         });
 
+        it("is a no-op — does NOT close the pane — when blockId doesn't match a non-stacked leaf's block", async () => {
+            // Review finding: the stack.length<=1 branch used to delegate to
+            // closeNode(nodeId) unconditionally, without checking blockId
+            // actually belongs to this leaf — a stale/wrong id from a caller
+            // could silently close a pane it doesn't own.
+            const model = createLayoutModel();
+            const nodeId = insertRootBlock(model, "b1");
+            const onNodeDelete = vi.fn().mockResolvedValue(undefined);
+            model.onNodeDelete = onNodeDelete;
+
+            await closeBlockInStack(model, nodeId, "wrong-block-id");
+
+            expect(model.treeState.rootNode).toBeDefined(); // pane survives
+            expect(model.treeState.rootNode!.data!.blockId).toBe("b1");
+            expect(onNodeDelete).not.toHaveBeenCalled();
+        });
+
         it("delegates to closeNode when closing the last remaining stack member", async () => {
             const model = createLayoutModel();
             const nodeId = insertRootBlock(model, "b1");

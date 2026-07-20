@@ -104,12 +104,17 @@ export async function closeBlockInStack(model: LayoutModel, nodeId: string, bloc
         return;
     }
     const stack = effectiveStack(node.data);
+    const idx = stack.indexOf(blockId);
+    if (idx < 0) return; // not a member — nothing to do, matches the >1 branch below
+
     if (stack.length <= 1) {
+        // The only/last member — this IS closing the pane. Only reachable
+        // once `idx >= 0` has confirmed `blockId` actually matches the
+        // leaf's block, so a stale/wrong id from a caller can't
+        // accidentally close a pane it doesn't belong to.
         await closeNode(model, nodeId);
         return;
     }
-    const idx = stack.indexOf(blockId);
-    if (idx < 0) return; // not a member — nothing to do
 
     const nextStack = stack.filter((id) => id !== blockId);
     node.data.blockStack = nextStack;
