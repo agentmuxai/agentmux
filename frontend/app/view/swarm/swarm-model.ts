@@ -294,6 +294,36 @@ export function groupCacheKey(child: WorkflowDispatch): string {
     return `wf:${child.dispatchId}`;
 }
 
+/** Row identity for an Agent Tool row — the same `agent:${agent_id}` key
+ *  `swarm-view.tsx`'s `SubagentRow` already computes locally for expand-
+ *  state/`DispatchActivityFeed` identity (SPEC_SWARM_DISPATCH_NAMING_AND_
+ *  ROW_MODEL_2026_07_19 §4, decoupled from `dispatch_id` in the reagent
+ *  P1 fix on #2232 — see `getDispatchDetail`'s doc comment). Exported so
+ *  `SwarmViewModel`'s retire filter (§ below) and the row's own Retire
+ *  button compute the identical key rather than two independently-written
+ *  string templates drifting apart. */
+export function subagentRowKey(agentId: string): string {
+    return `agent:${agentId}`;
+}
+
+/**
+ * Drop any row whose key is in `retired` AND whose own `lastEventAt` still
+ * matches the snapshot taken at retire time — genuinely new activity for
+ * that same key (a later `lastEventAt`) makes the row visible again
+ * automatically, without a separate un-retire action
+ * (SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20 §6). Shared by
+ * both `AgentTreeNode` buckets in `buildTree()` — parameterized over `T`
+ * rather than duplicated per row type.
+ */
+export function filterRetired<T>(
+    rows: T[],
+    retired: Map<string, number>,
+    rowKey: (row: T) => string,
+    lastEventAt: (row: T) => number
+): T[] {
+    return rows.filter((row) => retired.get(rowKey(row)) !== lastEventAt(row));
+}
+
 /**
  * Stabilize `WorkflowDispatch` wrapper identity across `buildTree()` calls,
  * mirroring `mergeSubagentsPreservingIdentity` one level up.
@@ -560,6 +590,19 @@ export class SwarmViewModel implements ViewModel {
     collapsedAgentIdsAtom: Accessor<Set<string>> = this._collapsedAgentIds[0];
     private setCollapsedAgentIds: Setter<Set<string>> = this._collapsedAgentIds[1];
 
+    // Rows the user has retired (dismissed) — client-local, ephemeral (no
+    // backend write, resets on reload/restart, same as memory-pressure-
+    // banner.tsx's dismissedAt). Maps rowKey -> the row's own lastEventAt
+    // AT THE MOMENT it was retired, not just a bare membership set: this is
+    // what lets a row un-retire itself automatically the moment genuinely
+    // new activity arrives for that same key (buildTree()'s filter only
+    // suppresses a row whose CURRENT lastEventAt still matches the
+    // snapshot) instead of requiring an explicit un-retire action — see
+    // SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20 §6.
+    private _retiredRowKeys = createSignal<Map<string, number>>(new Map());
+    retiredRowKeysAtom: Accessor<Map<string, number>> = this._retiredRowKeys[0];
+    private setRetiredRowKeys: Setter<Map<string, number>> = this._retiredRowKeys[1];
+
     // One DispatchDetail (concatenated activity feed) per currently-expanded
     // row — Agent Tool (solo) rows and Workflow rows alike, unified in
     // SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 §4 (retired the
@@ -610,6 +653,17 @@ export class SwarmViewModel implements ViewModel {
             handler: () => this.scheduleLoadSubagents(),
         });
         if (unsubCompleted) this.unsubs.push(unsubCompleted);
+
+        // One or more subagents just reconciled active -> abandoned, either
+        // live (SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20
+        // Phase A — the instant their parent's turn ends) or at reopen —
+        // reload so the row's display status (subagentDisplayStatus)
+        // updates without waiting for an unrelated event.
+        const unsubAbandoned = waveEventSubscribe({
+            eventType: "subagent:abandoned",
+            handler: () => this.scheduleLoadSubagents(),
+        });
+        if (unsubAbandoned) this.unsubs.push(unsubAbandoned);
 
         // dispatch:updated fires for both Solo and Workflow kinds (SPEC §5) —
         // a member count/status change on either warrants the same reload
@@ -769,6 +823,22 @@ export class SwarmViewModel implements ViewModel {
         });
     }
 
+    /** Retire (dismiss) a row — `rowKey` is `subagentRowKey(agent_id)` for
+     *  an Agent Tool row or the raw `dispatchId` for a `WorkflowDispatchRow`
+     *  (same keys `buildTree()`'s filter checks against). `lastEventAt` is
+     *  the row's own value at the moment of retiring — see `_retiredRowKeys`
+     *  for why this snapshot, not a bare membership set, is what makes a
+     *  row un-retire itself automatically on new activity. Callers should
+     *  only expose this for a terminal-status row (`"idle"`/`"interrupted"`)
+     *  — nothing to dismiss on a row still genuinely `"working"`. */
+    retireRow(rowKey: string, lastEventAt: number): void {
+        this.setRetiredRowKeys((prev) => {
+            const next = new Map(prev);
+            next.set(rowKey, lastEventAt);
+            return next;
+        });
+    }
+
     /** Every row's toggle. `rowKey` must be a per-ROW-unique identity, NOT
      *  necessarily the row's `dispatch_id` — a `WorkflowDispatchRow`'s own
      *  `dispatch_id` is always 1:1 with its row, but an Agent Tool row's
@@ -884,6 +954,7 @@ export class SwarmViewModel implements ViewModel {
         // pass — same "harmless either way, but this is the precise set"
         // rationale the pre-two-bucket design used for NameGroup keys.
         const liveGroupKeys = new Set<string>();
+        const retired = this.retiredRowKeysAtom();
         const nodes = allBlockIds.map((blockId) => {
             const blockAtom = WOS.getWaveObjectAtom<Block>(`block:${blockId}`);
             const block = blockAtom();
@@ -896,13 +967,19 @@ export class SwarmViewModel implements ViewModel {
             const rawCtx = block?.meta?.["term:ctx-tokens"];
             const contextTokens = typeof rawCtx === "number" ? rawCtx : null;
             const agentStatus = statuses.get(blockId) ?? "idle";
-            const { agentToolRows, workflowRows: rawWorkflowRows } = buildDispatchBuckets(
+            const { agentToolRows: rawAgentToolRows, workflowRows: rawWorkflowRows } = buildDispatchBuckets(
                 dispatches.filter((d) => d.parent_block_id === blockId),
                 subagents.filter((s) => s.parent_block_id === blockId)
             );
             for (const w of rawWorkflowRows) liveGroupKeys.add(groupCacheKey(w));
             const workflowRows = stabilizeGroupIdentity(this.groupIdentityCache, rawWorkflowRows);
-            return { blockId, agentName, agentProvider, activitySummary, contextTokens, agentStatus, agentToolRows, workflowRows };
+            // Retired rows are filtered here, not inside buildDispatchBuckets
+            // (kept a pure, ViewModel-independent function) — see
+            // filterRetired's doc comment for the un-retire-on-new-activity
+            // mechanism (SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20 §6).
+            const agentToolRows = filterRetired(rawAgentToolRows, retired, (s) => subagentRowKey(s.agent_id), (s) => s.last_event_at);
+            const visibleWorkflowRows = filterRetired(workflowRows, retired, (w) => w.dispatchId, (w) => w.lastEventAt);
+            return { blockId, agentName, agentProvider, activitySummary, contextTokens, agentStatus, agentToolRows, workflowRows: visibleWorkflowRows };
         });
 
         // Prune once per full pass (not per-block — see stabilizeGroupIdentity).
