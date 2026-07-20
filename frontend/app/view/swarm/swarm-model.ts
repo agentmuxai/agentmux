@@ -603,16 +603,19 @@ export class SwarmViewModel implements ViewModel {
     expandedIdsAtom: Accessor<Set<string>> = this._expandedIds[0];
     private setExpandedIds: Setter<Set<string>> = this._expandedIds[1];
 
-    // Top-level agent rows collapse with the OPPOSITE default from the group/
-    // subagent rows above: agents default EXPANDED, so this tracks the
-    // exception set (collapsed blockIds) rather than reusing expandedIds
-    // (whose absent-means-collapsed semantics would flip every agent shut on
-    // mount). Same ViewModel-residency rationale as _expandedIds: tree()
-    // rebuilds wrapper objects on every status tick, so row-local state would
+    // Top-level agent rows now share the SAME default (collapsed) and
+    // polarity (absent-means-collapsed) as the group/subagent _expandedIds
+    // set above — this tracks which agent blockIds have been explicitly
+    // expanded, so the empty default set means every agent starts
+    // collapsed. Kept as its own signal rather than folded into
+    // _expandedIds since agent blockIds and subagent/workflow row keys are
+    // different id spaces that could theoretically collide. Same
+    // ViewModel-residency rationale as _expandedIds: tree() rebuilds
+    // wrapper objects on every status tick, so row-local state would
     // silently reset on unrelated refreshes.
-    private _collapsedAgentIds = createSignal<Set<string>>(new Set());
-    collapsedAgentIdsAtom: Accessor<Set<string>> = this._collapsedAgentIds[0];
-    private setCollapsedAgentIds: Setter<Set<string>> = this._collapsedAgentIds[1];
+    private _expandedAgentIds = createSignal<Set<string>>(new Set());
+    expandedAgentIdsAtom: Accessor<Set<string>> = this._expandedAgentIds[0];
+    private setExpandedAgentIds: Setter<Set<string>> = this._expandedAgentIds[1];
 
     // Rows the user has retired (dismissed) — client-local, ephemeral (no
     // backend write, resets on reload/restart, same as memory-pressure-
@@ -854,14 +857,15 @@ export class SwarmViewModel implements ViewModel {
         });
     }
 
-    /** Top-level AgentRow collapse — see _collapsedAgentIds for the
-     *  inverted (default-expanded) semantics vs isExpanded/toggleExpanded. */
+    /** Top-level AgentRow collapse — same default-collapsed,
+     *  absent-means-collapsed semantics as isExpanded/toggleExpanded above,
+     *  backed by its own _expandedAgentIds set (see there for why). */
     isAgentCollapsed(blockId: string): boolean {
-        return this.collapsedAgentIdsAtom().has(blockId);
+        return !this.expandedAgentIdsAtom().has(blockId);
     }
 
     toggleAgentCollapsed(blockId: string): void {
-        this.setCollapsedAgentIds((prev) => {
+        this.setExpandedAgentIds((prev) => {
             const next = new Set(prev);
             if (next.has(blockId)) next.delete(blockId);
             else next.add(blockId);
