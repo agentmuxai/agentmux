@@ -289,8 +289,7 @@ than in isolation.
 - `CLAUDE.md`'s "Not widgets" table described an Armory "Identities" tab that
   no longer exists (removed in Phase 5, §0 above) — corrected in this same PR
   to describe the current location (agent pane's own Identity tab).
-- `buildStartupPayload.ts`'s "Assigned Accounts" section reads the stale
+- `buildStartupPayload.ts`'s "Assigned Accounts" section read the stale
   `AgentDefinition.accounts` blob (§1) instead of `db_agent_identity_links` —
-  tracked as a separate, standalone follow-up fix (no migration needed, just
-  a different read path) so it can be reviewed and verified independently of
-  this doc.
+  fixed as a separate, standalone PR (#2239, merged) so it could be reviewed
+  and verified independently of this doc.
