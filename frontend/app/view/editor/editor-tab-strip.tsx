@@ -5,9 +5,17 @@
 // Renders above CodeMirror; one tab per open file. Click to activate,
 // × (hover-shown) to close, middle-click to close. No overflow chip yet
 // (tabs compress to min-width when crowded); chip lands in Phase 2.
+//
+// Chrome/behavior (click/middle-click/hover-close/tooltip/active-underline)
+// is the shared <PaneTabStrip> (frontend/app/element/PaneTabStrip.tsx),
+// promoted out of this file so agent-pane forks and terminal-pane shell
+// tabs can reuse the identical strip instead of each pane type growing its
+// own copy. Only the editor-specific bits (preview italics, pin-on-
+// double-click, the inline Save-As path input, the "+" → new scratch
+// buffer) stay local. See docs/specs/SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md.
 
-import { createSignal, For, onMount, Show, type JSX } from "solid-js";
-import { Tooltip } from "@/app/element/tooltip";
+import { createSignal, onMount, type JSX } from "solid-js";
+import { PaneTabStrip } from "@/app/element/PaneTabStrip";
 import type { EditorViewModel } from "./editor-model";
 import type { EditorTab } from "@/app/store/editor-pane-state-store";
 
@@ -19,127 +27,56 @@ interface Props {
     onSaveAsCancel?: () => void;
 }
 
+function basenameOf(tab: EditorTab): string {
+    if (tab.displayName) return tab.displayName;
+    const fp = tab.filePath;
+    const i = Math.max(fp.lastIndexOf("/"), fp.lastIndexOf("\\"));
+    return i >= 0 ? fp.slice(i + 1) : fp;
+}
+
 export function EditorTabStrip(props: Props): JSX.Element {
     const tabs = props.model.tabsAtom;
     const activeId = props.model.activeIdAtom;
 
+    const isSaveAsMode = (tab: EditorTab) =>
+        props.saveAsTabId != null && props.saveAsTabId === tab.id;
+
     return (
-        <div
-            class="editor-tab-strip"
-            // Double-click inside the strip should not maximize the pane —
-            // matches the icon-toggle pattern from blockframe.tsx.
-            onDblClick={(e) => e.stopPropagation()}
-        >
-            <For each={tabs()}>
-                {(tab) => (
-                    <Tab
-                        tab={tab}
-                        active={activeId() === tab.id}
-                        model={props.model}
-                        saveAsTabId={props.saveAsTabId}
-                        onSaveAsConfirm={props.onSaveAsConfirm}
-                        onSaveAsCancel={props.onSaveAsCancel}
-                    />
-                )}
-            </For>
-        </div>
-    );
-}
-
-interface TabProps {
-    tab: EditorTab;
-    active: boolean;
-    model: EditorViewModel;
-    saveAsTabId?: string | null;
-    onSaveAsConfirm?: (path: string) => void;
-    onSaveAsCancel?: () => void;
-}
-
-function Tab(props: TabProps): JSX.Element {
-    const basename = () => {
-        if (props.tab.displayName) return props.tab.displayName;
-        const fp = props.tab.filePath;
-        const i = Math.max(fp.lastIndexOf("/"), fp.lastIndexOf("\\"));
-        return i >= 0 ? fp.slice(i + 1) : fp;
-    };
-
-    const isSaveAsMode = () => props.saveAsTabId != null && props.saveAsTabId === props.tab.id;
-
-    const onMouseDown = (e: MouseEvent) => {
-        // Middle-click → close (matches VS Code / Chrome convention).
-        if (e.button === 1) {
-            e.preventDefault();
-            props.model.closeTab(props.tab.id);
-        }
-    };
-
-    const onClick = (e: MouseEvent) => {
-        // Ignore middle-click here — onMouseDown already handled it.
-        if (e.button !== 0) return;
-        if (!props.active) props.model.switchTab(props.tab.id);
-    };
-
-    const onDblClick = (e: MouseEvent) => {
-        e.stopPropagation();
-        // Double-clicking a preview tab pins it (matches VS Code). For an
-        // already-pinned tab, dblclick is a no-op at the strip layer
-        // (.editor-tab-strip already stops the dblclick from reaching the
-        // pane header, so the pane won't maximize either).
-        if (props.tab.isPreview) {
-            props.model.pinActiveTab();
-        }
-    };
-
-    const onCloseClick = (e: MouseEvent) => {
-        e.stopPropagation();
-        props.model.closeTab(props.tab.id);
-    };
-
-    // Full path on hover. Uses the shared Tooltip (Portal-based) rather than a
-    // native `title` — the strip + tab both have `overflow:hidden`, which would
-    // clip a CSS tooltip, and native `title` is slow/inconsistent in CEF. The
-    // Tooltip's wrapper div carries the flex sizing (.editor-tab-tip); the tab
-    // keeps its own mousedown/click/dblclick handlers.
-    return (
-        <Tooltip
-            placement="bottom"
-            divClassName="editor-tab-tip"
-            content={
-                props.tab.isPreview
-                    ? `${props.tab.filePath} (preview — double-click to pin)`
-                    : props.tab.filePath
+        <PaneTabStrip<EditorTab>
+            tabs={tabs()}
+            activeId={activeId()}
+            getId={(tab) => tab.id}
+            getLabel={basenameOf}
+            getTooltip={(tab) =>
+                tab.isPreview
+                    ? `${tab.filePath} (preview — double-click to pin)`
+                    : tab.filePath
             }
-        >
-            <div
-                class="editor-tab"
-                classList={{
-                    "editor-tab--active": props.active,
-                    "editor-tab--dirty": props.tab.dirty,
-                    "editor-tab--preview": props.tab.isPreview,
-                    "editor-tab--saveas": isSaveAsMode(),
-                }}
-                onMouseDown={onMouseDown}
-                onClick={onClick}
-                onDblClick={onDblClick}
-            >
-                <Show when={isSaveAsMode()} fallback={<span class="editor-tab-label">{basename()}</span>}>
+            getAttention={(tab) => tab.dirty}
+            getTabClass={(tab) => ({
+                "editor-tab--preview": tab.isPreview,
+                "editor-tab--saveas": isSaveAsMode(tab),
+            })}
+            onActivate={(id) => props.model.switchTab(id)}
+            onClose={(id) => props.model.closeTab(id)}
+            onTabDoubleClick={(tab) => {
+                // Double-clicking a preview tab pins it (matches VS Code).
+                // No-op for an already-pinned tab.
+                if (tab.isPreview) props.model.pinActiveTab();
+            }}
+            renderLabel={(tab) =>
+                isSaveAsMode(tab) ? (
                     <SaveAsInput
                         onConfirm={props.onSaveAsConfirm ?? (() => undefined)}
                         onCancel={props.onSaveAsCancel ?? (() => undefined)}
                     />
-                </Show>
-                <button
-                    class="editor-tab-close"
-                    onClick={onCloseClick}
-                    title={props.tab.dirty ? "Close (unsaved changes)" : "Close"}
-                    aria-label="Close tab"
-                >
-                    {/* The × always renders for dirty tabs (since closing prompts
-                        the user in a follow-up commit); hover-shown otherwise. */}
-                    ×
-                </button>
-            </div>
-        </Tooltip>
+                ) : (
+                    <span class="editor-tab-label">{basenameOf(tab)}</span>
+                )
+            }
+            onAdd={() => void props.model.openScratch()}
+            addTitle="New scratch buffer"
+        />
     );
 }
 
