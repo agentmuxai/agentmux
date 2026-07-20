@@ -144,7 +144,9 @@ export function findNode(node: LayoutNode, id: string): LayoutNode | undefined {
  */
 export function findNodeByBlockId(node: LayoutNode, blockId: string): LayoutNode | undefined {
     if (!node) return;
-    if (node.data?.blockId === blockId) return node;
+    // In-pane tabs: `blockId` may be a dormant (non-active) member of a
+    // stacked leaf, not just its currently-active one.
+    if (node.data?.blockId === blockId || node.data?.blockStack?.includes(blockId)) return node;
     if (!node.children) return;
     for (const child of node.children) {
         const result = findNodeByBlockId(child, blockId);

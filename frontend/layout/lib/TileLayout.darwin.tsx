@@ -17,6 +17,7 @@ import { Key } from "@solid-primitives/keyed";
 import { debounce, throttle } from "throttle-debounce";
 import { LayoutModel } from "./layoutModel";
 import { useNodeModel, useTileLayout } from "./layoutModelHooks";
+import { activeKeyFor } from "./layoutNodeModels";
 import "./tilelayout.scss";
 import {
     DropDirection,
@@ -310,7 +311,7 @@ const DisplayNodesWrapper = (props: DisplayNodesWrapperProps) => {
     const leafs = () => props.layoutModel.leafs();
 
     return (
-        <Key each={leafs()} by={(node) => node.id}>
+        <Key each={leafs()} by={activeKeyFor}>
             {(node) => <DisplayNode layoutModel={props.layoutModel} node={node()} />}
         </Key>
     );
@@ -671,7 +672,7 @@ const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
 
     return (
         <div ref={overlayContainerRef} class="overlay-container" style={overlayStyle()}>
-            <Key each={leafs()} by={(node) => node.id}>
+            <Key each={leafs()} by={activeKeyFor}>
                 {(node) => <OverlayNode layoutModel={props.layoutModel} node={node()} />}
             </Key>
         </div>

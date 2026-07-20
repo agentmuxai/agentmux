@@ -1325,3 +1325,169 @@ fn prune_leaves_container_nodes_alone() {
     assert_eq!(pruned, 0);
     assert_eq!(root.unwrap().id, "root");
 }
+
+// ── prune, in-pane-tabs stack-member awareness ──────────────────────────────
+// SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md §4.3.
+
+fn leaf_with_stack(id: &str, active: &str, stack: &[&str], size: f32) -> LayoutNode {
+    LayoutNode {
+        id: id.into(),
+        flex_direction: FlexDirection::Row,
+        size,
+        data: Some(LayoutNodeData {
+            block_id: active.into(),
+            active_block_id: active.into(),
+            block_stack: stack.iter().map(|s| s.to_string()).collect(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn prune_is_a_noop_when_every_stack_member_is_live() {
+    let mut root = Some(leaf_with_stack("a", "b1", &["b1", "b2", "b3"], 1.0));
+    let pruned = prune_dangling_block_refs(&mut root, &live(&["b1", "b2", "b3"]));
+    assert_eq!(pruned, 0);
+    assert_eq!(
+        root.unwrap().data.unwrap().block_stack,
+        vec!["b1".to_string(), "b2".to_string(), "b3".to_string()]
+    );
+}
+
+#[test]
+fn prune_drops_dangling_non_active_stack_members_without_touching_the_leaf() {
+    // b2's underlying block was deleted independently — the leaf itself
+    // stays fully intact (still renders fine via its active member b1),
+    // only the stale stack entry is removed.
+    let mut root = Some(leaf_with_stack("a", "b1", &["b1", "b2", "b3"], 1.0));
+    let pruned = prune_dangling_block_refs(&mut root, &live(&["b1", "b3"]));
+    assert_eq!(pruned, 1);
+    let r = root.unwrap();
+    assert_eq!(r.id, "a"); // leaf survives untouched
+    let data = r.data.unwrap();
+    assert_eq!(data.block_id, "b1");
+    assert_eq!(data.block_stack, vec!["b1".to_string(), "b3".to_string()]);
+}
+
+#[test]
+fn prune_never_removes_the_active_member_from_its_own_stack() {
+    // The active member is guaranteed live by the whole-leaf pass before
+    // stack-member pruning ever runs, but this asserts the invariant
+    // directly rather than only indirectly via that ordering.
+    let mut root = Some(leaf_with_stack("a", "b1", &["b1", "b2"], 1.0));
+    let pruned = prune_dangling_block_refs(&mut root, &live(&["b1"]));
+    assert_eq!(pruned, 1);
+    let data = root.unwrap().data.unwrap();
+    assert_eq!(data.block_stack, vec!["b1".to_string()]);
+}
+
+#[test]
+fn prune_stack_members_recurses_into_group_children() {
+    let mut root = Some(group(
+        "root",
+        FlexDirection::Row,
+        10.0,
+        vec![
+            leaf("a", "ba", 5.0),
+            leaf_with_stack("b", "b1", &["b1", "gone"], 5.0),
+        ],
+    ));
+    let pruned = prune_dangling_block_refs(&mut root, &live(&["ba", "b1"]));
+    assert_eq!(pruned, 1);
+    let r = root.unwrap();
+    let stacked_leaf = &r.children[1];
+    assert_eq!(
+        stacked_leaf.data.as_ref().unwrap().block_stack,
+        vec!["b1".to_string()]
+    );
+}
+
+#[test]
+fn prune_whole_leaf_pass_and_stack_member_pass_compose_in_one_call() {
+    // A leaf whose ACTIVE block is gone (whole-leaf pruning fires) alongside
+    // a sibling whose non-active stack member is gone (stack-member pruning
+    // fires) — one prune_dangling_block_refs call must catch both, with the
+    // combined count.
+    let mut root = Some(group(
+        "root",
+        FlexDirection::Row,
+        10.0,
+        vec![
+            leaf("a", "deleted-active", 5.0),
+            leaf_with_stack("b", "b1", &["b1", "deleted-member"], 5.0),
+        ],
+    ));
+    let pruned = prune_dangling_block_refs(&mut root, &live(&["b1"]));
+    assert_eq!(pruned, 2);
+    // "a" was the dangling leaf and got collapsed away; "b" survives with
+    // its dangling stack member removed.
+    let r = root.unwrap();
+    assert_eq!(r.id, "b");
+    assert_eq!(
+        r.data.unwrap().block_stack,
+        vec!["b1".to_string()]
+    );
+}
+
+// ── prune, dangling ACTIVE member with a live sibling (review finding) ──────
+// A leaf's active block can go dangling through a path other than
+// closeBlockInStack (which always reactivates a live neighbor first) — the
+// whole-leaf pass must not delete the leaf out from under still-live
+// sibling blocks; it must reactivate one of them instead.
+
+#[test]
+fn prune_reactivates_a_live_sibling_when_the_active_member_goes_dangling() {
+    // active = "b1" (dangling); stack still lists both b1 and the live b2.
+    let mut root = Some(leaf_with_stack("a", "b1", &["b1", "b2"], 1.0));
+    let pruned = prune_dangling_block_refs(&mut root, &live(&["b2"]));
+    assert_eq!(pruned, 1);
+    let r = root.unwrap();
+    assert_eq!(r.id, "a"); // leaf survives, not deleted
+    let data = r.data.unwrap();
+    assert_eq!(data.block_id, "b2");
+    assert_eq!(data.active_block_id, "b2");
+    assert_eq!(data.block_stack, vec!["b2".to_string()]); // dangling b1 dropped
+}
+
+#[test]
+fn prune_reactivates_the_first_live_member_when_several_siblings_are_also_dangling() {
+    let mut root = Some(leaf_with_stack("a", "b1", &["b1", "gone", "b3"], 1.0));
+    let pruned = prune_dangling_block_refs(&mut root, &live(&["b3"]));
+    // 1 for the active-member reactivation + 1 for "gone" pruned from the
+    // stack by the (still-running) non-active stack-member pass.
+    assert_eq!(pruned, 2);
+    let data = root.unwrap().data.unwrap();
+    assert_eq!(data.block_id, "b3");
+    assert_eq!(data.block_stack, vec!["b3".to_string()]);
+}
+
+#[test]
+fn prune_deletes_the_leaf_when_the_active_member_dangles_and_no_sibling_is_live() {
+    // Every member of the stack (including the active one) is dead — the
+    // whole leaf is genuinely gone, same as if it had no stack at all.
+    let mut root = Some(leaf_with_stack("only", "b1", &["b1", "b2"], 1.0));
+    let pruned = prune_dangling_block_refs(&mut root, &live(&[]));
+    assert_eq!(pruned, 1);
+    assert!(root.is_none());
+}
+
+#[test]
+fn prune_active_member_repair_composes_with_a_sibling_leaf_that_is_fully_dangling() {
+    let mut root = Some(group(
+        "root",
+        FlexDirection::Row,
+        10.0,
+        vec![
+            leaf("a", "deleted-active", 5.0),
+            leaf_with_stack("b", "b1", &["b1", "b2"], 5.0),
+        ],
+    ));
+    let pruned = prune_dangling_block_refs(&mut root, &live(&["b2"]));
+    assert_eq!(pruned, 2); // "a" deleted + "b" repaired
+    let r = root.unwrap();
+    assert_eq!(r.id, "b");
+    let data = r.data.unwrap();
+    assert_eq!(data.block_id, "b2");
+    assert_eq!(data.block_stack, vec!["b2".to_string()]);
+}

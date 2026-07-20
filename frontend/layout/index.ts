@@ -12,6 +12,7 @@ import {
 import { newLayoutNode } from "./lib/layoutNode";
 import { clearCrossTabDrop, redockDraggedPane } from "./lib/crossTabDrag";
 import { markBlockRecentlyCreated } from "./lib/layoutPersistence";
+import { closeBlockInStack, pushBlockOntoStack, setActiveBlockInStack } from "./lib/layoutStack";
 import type {
     ContentRenderer,
     LayoutNode,
@@ -38,6 +39,7 @@ import { DropDirection, LayoutTreeActionType, NavigateDirection } from "./lib/ty
 
 export {
     clearCrossTabDrop,
+    closeBlockInStack,
     deleteLayoutModelForTab,
     DropDirection,
     getLayoutModelForStaticTab,
@@ -47,7 +49,9 @@ export {
     markBlockRecentlyCreated,
     NavigateDirection,
     newLayoutNode,
+    pushBlockOntoStack,
     redockDraggedPane,
+    setActiveBlockInStack,
     tileItemType,
     TileLayout,
     useDebouncedNodeInnerRect,

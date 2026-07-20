@@ -77,7 +77,17 @@ declare global {
     };
 
     type TabLayoutData = {
+        /** The currently-rendered block for this leaf. Always kept in sync
+         *  with `activeBlockId` when `blockStack` is non-empty. */
         blockId: string;
+        /** In-pane tabs (SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md
+         *  §4.3): every blockId hosted by this leaf, ordered; absent/empty
+         *  means "no stack, just `blockId`" — 100% back-compat with every
+         *  layout written before this field existed. */
+        blockStack?: string[];
+        /** The active member of `blockStack`. Unused when `blockStack` is
+         *  absent/empty. */
+        activeBlockId?: string;
     };
 
     type AgentMuxInitOpts = {

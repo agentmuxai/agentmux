@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { assert, test } from "vitest";
-import { addChildAt, addIntermediateNode, balanceNode, findNextInsertLocation, newLayoutNode } from "../lib/layoutNode";
+import { addChildAt, addIntermediateNode, balanceNode, findNextInsertLocation, findNodeByBlockId, newLayoutNode } from "../lib/layoutNode";
 import { FlexDirection, LayoutNode } from "../lib/types";
 
 test("newLayoutNode", () => {
@@ -353,4 +353,24 @@ test("addIntermediateNode moves a leaf's minimized flag onto the intermediate ch
     assert(leaf.minimized === undefined, "the promoted node is now a branch — minimized must not stay on it");
     assert(intermediate.minimized === true, "the intermediate child holding the original data must carry the flag");
     assert(intermediate.data?.blockId === "block", "the intermediate child holds the original leaf's data");
+});
+
+test("findNodeByBlockId finds a leaf by a dormant (non-active) block-stack member", () => {
+    // In-pane tabs (SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md §4.3):
+    // a blockId can live in blockStack without being the leaf's current
+    // (active) blockId — callers looking up "which pane holds this block"
+    // must still find it.
+    const leaf = newLayoutNode(FlexDirection.Row, undefined, undefined, {
+        blockId: "b2",
+        blockStack: ["b1", "b2"],
+        activeBlockId: "b2",
+    });
+    const root = newLayoutNode(FlexDirection.Row, undefined, [
+        leaf,
+        newLayoutNode(FlexDirection.Row, undefined, undefined, { blockId: "other" }),
+    ]);
+
+    assert(findNodeByBlockId(root, "b2") === leaf, "finds by the active blockId");
+    assert(findNodeByBlockId(root, "b1") === leaf, "finds by a dormant stack member");
+    assert(findNodeByBlockId(root, "nope") === undefined, "returns undefined for an unknown blockId");
 });
