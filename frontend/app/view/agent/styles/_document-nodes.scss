@@ -245,9 +245,19 @@
                 transition: color 150ms ease;
             }
 
-            .agent-tool-name {
+            // Tooltip wrapper div sits between the flex row and the actual
+            // text — takes over the flex-sizing role the <span> used to
+            // have directly, so the ellipsis-clip math below still works
+            // unchanged with one extra element in between.
+            .agent-tool-name-tooltip-anchor {
                 flex: 1 1 auto;
                 min-width: 0;
+                overflow: hidden;
+            }
+
+            .agent-tool-name {
+                display: block;
+                width: 100%;
                 font-weight: 500;
                 overflow: hidden;
                 text-overflow: ellipsis;
@@ -1836,4 +1846,18 @@
         font-size: 11px;
         color: var(--tertiary-text-color, rgba(255, 255, 255, 0.3));
     }
+}
+
+// Tool-command hover tooltip content (ToolBlock.tsx's Tooltip over
+// .agent-tool-name). Portal-rendered outside .agent-tool-block, so this is
+// a standalone top-level rule, not nested. Unlike the collapsed row's
+// single-line ellipsis clip, this shows the FULL command, word-wrapped —
+// that's the point of the tooltip.
+.agent-tool-cmd-tooltip {
+    max-width: 480px;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    font-family: var(--fixed-font, monospace);
+    font-size: 11px;
+    line-height: 1.5;
 }
