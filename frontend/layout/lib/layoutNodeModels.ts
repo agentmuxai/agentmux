@@ -15,7 +15,15 @@ import type { LayoutModel } from "./layoutModel";
  */
 export function getNodeModel(model: LayoutModel, node: LayoutNode): NodeModel {
     const nodeid = node.id;
-    const blockId = node.data.blockId;
+    // In-pane tabs: a leaf with a block stack renders its ACTIVE member, not
+    // necessarily `data.blockId` alone (the two are kept in sync by
+    // layoutStack.ts's mutators, but activeBlockId is the field of intent).
+    // Absent/no-stack falls back to the legacy field — zero behavior change
+    // for every pane that never gets a stack. See layoutStack.ts's header
+    // comment for why this is captured once (not reactive) here: switching
+    // the active member works via a remount, driven by the tile renderer's
+    // key function, not by this value changing under a live NodeModel.
+    const blockId = node.data.activeBlockId || node.data.blockId;
     const addlPropsAtom = getNodeAdditionalPropertiesAtom(model, nodeid);
     if (!model.nodeModels.has(nodeid)) {
         // Create memos inside the model's own reactive root so they survive
@@ -112,11 +120,27 @@ export function cleanupNodeModels(model: LayoutModel, leafOrder: LeafOrderEntry[
  */
 export function getNodeByBlockId(model: LayoutModel, blockId: string): LayoutNode {
     for (const leaf of model.leafs()) {
-        if (leaf.data.blockId === blockId) {
+        // In-pane tabs: `blockId` may be a dormant (non-active) member of a
+        // stacked leaf, not just its currently-active one.
+        if (leaf.data.blockId === blockId || leaf.data.blockStack?.includes(blockId)) {
             return leaf;
         }
     }
     return null;
+}
+
+/** The key `<Key each={leafs()} by={...}>` uses to identify a leaf's
+ *  rendered subtree in the tile renderer (`TileLayout.{win32,linux,darwin}.tsx`).
+ *  Ordinary leaves key on `node.id` alone, unchanged from before block
+ *  stacks existed. A stacked leaf's key also incorporates `activeBlockId`,
+ *  so switching the active member changes the key — which makes `<Key>`
+ *  tear down and remount the leaf's subtree, giving the new active block a
+ *  freshly-constructed `NodeModel`/`ViewModel` exactly the way every other
+ *  blockId transition in this codebase already works (see layoutStack.ts's
+ *  header comment for why a remount, not a reactive update, is correct
+ *  here). Zero-cost / zero-behavior-change for every non-stacked leaf. */
+export function activeKeyFor(node: LayoutNode): string {
+    return node.data?.activeBlockId ? `${node.id}:${node.data.activeBlockId}` : node.id;
 }
 
 /**
