@@ -215,6 +215,12 @@
     &--workflow .swarm-bucket-label {
         color: var(--warning-color, #f5a623);
     }
+    // Shell (SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20 Phase 1) — a
+    // third, distinct hue from the two above so all three read apart at a
+    // glance; --success-color is otherwise unused elsewhere in this file.
+    &--shell .swarm-bucket-label {
+        color: var(--success-color);
+    }
 }
 
 .swarm-bucket-header {
@@ -432,6 +438,74 @@
 .swarm-subagent-retire:hover {
     opacity: 1;
     color: var(--error-color, #ff6b6b);
+    background: var(--hover-bg-color, rgba(255, 255, 255, 0.08));
+}
+
+// ── Shell row (SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20 Phase 1) —
+// flat, no expand (Phase 1 doesn't surface live shell output here). Same
+// 30px-row / hover-reveal-stop shape as .swarm-subagent-row/-retire above,
+// deliberately not click-to-expand — the whole row has no toggle target,
+// so cursor stays default and there's no :hover background wash to imply
+// one exists. ────────────────────────────────────────────────────────────
+
+.swarm-shell-row {
+    display: flex;
+    align-items: center;
+    height: 30px;
+    padding: 0 6px 0 30px;
+    gap: 8px;
+    user-select: none;
+}
+
+.swarm-shell-title {
+    flex: 1;
+    font-size: 12px;
+    font-family: var(--monospace-font, monospace);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--main-text-color);
+}
+
+.swarm-shell-elapsed {
+    flex-shrink: 0;
+    font-size: 10px;
+    color: var(--secondary-text-color);
+    opacity: 0.6;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.swarm-shell-stop {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    appearance: none;
+    border: none;
+    background: transparent;
+    color: var(--secondary-text-color);
+    font-size: 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.swarm-shell-row:hover .swarm-shell-stop {
+    opacity: 0.75;
+}
+
+.swarm-shell-stop:hover {
+    opacity: 1;
+    // --error-color is unconditionally defined in theme.scss — no hex
+    // fallback needed (unlike the pre-existing .swarm-subagent-retire:hover
+    // this was modeled on, which carries one; not copied here to avoid
+    // adding a new color-no-hex lint violation for a fallback that never
+    // actually applies).
+    color: var(--error-color);
     background: var(--hover-bg-color, rgba(255, 255, 255, 0.08));
 }
 

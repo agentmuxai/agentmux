@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest";
 import {
     buildDispatchBuckets,
+    buildShellRows,
     filterRetired,
     groupCacheKey,
     mergeDispatchActivityEntries,
@@ -13,11 +14,22 @@ import {
     stabilizeGroupIdentity,
     subagentDisplayLabel,
     subagentRowKey,
+    type ActiveShell,
     type ActiveSubagent,
     type AgentDispatch,
     type DispatchActivityEntry,
     type WorkflowDispatch,
 } from "./swarm-model";
+
+function mkShell(overrides: Partial<ActiveShell> & Pick<ActiveShell, "shell_id" | "block_id">): ActiveShell {
+    return {
+        cmd: "npm run dev",
+        title: "npm run dev",
+        started_at: 0,
+        line_count: 0,
+        ...overrides,
+    };
+}
 
 function mkEntry(opts: { agentId?: string; timestamp: number; content?: string }): DispatchActivityEntry {
     const agentId = opts.agentId ?? "a1";
@@ -500,5 +512,38 @@ describe("subagentDisplayLabel", () => {
         expect(subagentDisplayLabel({ display_name: null, slug: "solo-run", agent_id: "zzzz999yyyy" })).toBe(
             "solo-run · zzzz999"
         );
+    });
+});
+
+describe("buildShellRows", () => {
+    it("keeps only shells matching the given block_id", () => {
+        const shells = [
+            mkShell({ shell_id: "s1", block_id: "block-a" }),
+            mkShell({ shell_id: "s2", block_id: "block-b" }),
+            mkShell({ shell_id: "s3", block_id: "block-a" }),
+        ];
+        const rows = buildShellRows(shells, "block-a");
+        expect(new Set(rows.map((r) => r.shell_id))).toEqual(new Set(["s1", "s3"]));
+        expect(rows.every((r) => r.block_id === "block-a")).toBe(true);
+    });
+
+    it("sorts newest-first by started_at", () => {
+        const shells = [
+            mkShell({ shell_id: "old", block_id: "block-a", started_at: 100 }),
+            mkShell({ shell_id: "new", block_id: "block-a", started_at: 300 }),
+            mkShell({ shell_id: "mid", block_id: "block-a", started_at: 200 }),
+        ];
+        const rows = buildShellRows(shells, "block-a");
+        expect(rows.map((r) => r.shell_id)).toEqual(["new", "mid", "old"]);
+    });
+
+    it("returns an empty array when no shells match", () => {
+        const shells = [mkShell({ shell_id: "s1", block_id: "block-a" })];
+        expect(buildShellRows(shells, "block-z")).toEqual([]);
+    });
+
+    it("returns an empty array for a null blockId", () => {
+        const shells = [mkShell({ shell_id: "s1", block_id: "block-a" })];
+        expect(buildShellRows(shells, null)).toEqual([]);
     });
 });

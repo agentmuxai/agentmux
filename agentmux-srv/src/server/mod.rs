@@ -645,6 +645,7 @@ async fn handle_shell_create(
         shell_id: shell_id.clone(),
         block_id: req.agent_block_id,
         cmd: req.cmd,
+        title,
         cwd: effective_cwd,
         extra_env: effective_env,
         broker: Arc::clone(&state.broker),
