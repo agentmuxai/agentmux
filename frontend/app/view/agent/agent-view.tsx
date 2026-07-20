@@ -84,7 +84,7 @@ import { ConfirmModal } from "@/element/modal";
 import { ModalLayer } from "@/element/ModalLayer";
 import { useModalLayer } from "@/element/modal-layer";
 import { ContextMenuModel } from "@/app/store/contextmenu";
-import { parseAgentAccounts, loadAccounts } from "@/app/view/identity/identity-model";
+import { loadAccounts, type AgentAccounts } from "@/app/view/identity/identity-model";
 import { buildStartupPayload, resolveAccounts } from "./startup/buildStartupPayload";
 import "./agent-view.scss";
 
@@ -754,16 +754,24 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             if (!agent) return;
 
             // Gather inputs in parallel where possible
-            const [startupContentResult, version] = await Promise.all([
+            const [startupContentResult, version, identityLinks] = await Promise.all([
                 RpcApi.GetAgentContentCommand(TabRpcClient, {
                     agent_id: agentId,
                     content_type: "startup",
                 }).catch(() => null),
                 Promise.resolve(getApi().getAboutModalDetails().version),
+                RpcApi.ListAgentIdentitiesCommand(TabRpcClient, { agent_id: agentId }).catch(() => []),
             ]);
 
-            // Resolve assigned accounts from Identity localStorage
-            const agentAccounts = parseAgentAccounts(agent);
+            // Resolve assigned accounts from the same db_agent_identity_links
+            // rows spawn-time credential resolution and the agent pane's own
+            // Identity tab already use — NOT the legacy AgentDefinition.accounts
+            // JSON blob, which can silently diverge from what the agent
+            // actually launches with (see docs/specs/ARCHITECTURE_ARMORY_2026_07_20.md §1).
+            const agentAccounts: AgentAccounts = {};
+            for (const link of identityLinks) {
+                agentAccounts[link.provider as keyof AgentAccounts] = link.account_id;
+            }
             const accounts = resolveAccounts(agentAccounts, loadAccounts());
 
             const payload = buildStartupPayload({
