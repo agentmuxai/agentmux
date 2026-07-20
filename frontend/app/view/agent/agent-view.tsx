@@ -158,6 +158,15 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         openBlockByDef: openDefinitions,
         activeDefinitionId: () => agentId,
     });
+    // Review finding: a fork with no open blockId anywhere rendered as a
+    // normal-looking clickable tab that silently no-op'd on click (no
+    // feedback, looked broken). "Read-only switch" only makes sense for
+    // forks that ARE currently open somewhere — opening a not-yet-open fork
+    // is a launch action, correctly out of scope until Phase 4. Filter to
+    // switchable forks (open elsewhere, or the pane's own active one) so an
+    // unopenable fork simply isn't offered as a tab at all, rather than
+    // being offered and then silently doing nothing.
+    const switchableForks = createMemo(() => forks().filter((f) => f.isActive || !!f.blockId));
     // Activating a fork tab has two cases, both "switch," neither "create":
     // (1) the fork's block already lives in THIS pane's own block-stack
     //     (only possible once Phase 4 ships pushBlockOntoStack) — swap the
@@ -166,7 +175,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     //     pane — jump focus to it via the pre-existing refocusNode, same as
     //     the picker's "Switch to existing" flow already does.
     const handleForkSwitch = (definitionId: string) => {
-        const entry = forks().find((f) => f.definitionId === definitionId);
+        const entry = switchableForks().find((f) => f.definitionId === definitionId);
         if (!entry || entry.isActive || !entry.blockId) return;
         const layoutModel = getLayoutModelForStaticTab();
         const myNode = layoutModel.getNodeByBlockId(model.blockId);
@@ -1017,9 +1026,9 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 tabbed-UI convention. Zero cost for the common case (a single
                 conversation, no related open forks): the strip doesn't
                 render at all. See SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md §3.3. */}
-            <Show when={forks().length > 1}>
+            <Show when={switchableForks().length > 1}>
                 <PaneTabStrip
-                    tabs={forks()}
+                    tabs={switchableForks()}
                     activeId={agentId}
                     getId={(f) => f.definitionId}
                     getLabel={(f) => f.title}
