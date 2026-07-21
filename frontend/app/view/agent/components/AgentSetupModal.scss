@@ -9,18 +9,25 @@
 .agent-setup-modal {
     display: flex;
     flex-direction: column;
-    // One fixed size for the whole modal so the frame doesn't resize between
-    // tabs. Sized to fit the widest/tallest embedded panel (the Memory panel,
-    // which is 780×520 in its standalone form) plus the tab bar.
-    width: 780px;
-    max-width: 92vw;
-    height: 560px;
-    max-height: 85vh;
+    // Target size for the widest/tallest embedded panel (the Memory panel,
+    // 780×520 in its standalone form) plus the tab bar — but fluid via
+    // min(), not a raw px + vw/vh combo. This modal opens pane-scoped
+    // (ModalLayer's mount node sits inside the originating agent pane, not
+    // the browser window), so a vw/vh cap resolves against the wrong
+    // ancestor and doesn't actually constrain anything on a narrow pane in
+    // a wide window — the modal then renders at its literal 780×560 and
+    // .modal-panel's own overflow:auto produces exactly the horizontal
+    // scrollbar this fix addresses. min(target, 100%) is the same
+    // fluid-width technique modal.scss's own .modal-panel[data-size] rules
+    // already use (Layer B, MODAL_COMPACT_VARIANT_ARCHITECTURE_2026_05_26 §7)
+    // — 100% here resolves against .modal-panel, which correctly clamps to
+    // the pane's real width via its own max-width: 100%.
+    // See docs/specs/SPEC_AGENT_PANE_ARMORY_HEADER_ICON_2026_07_20.md §7.1.
+    width: min(780px, 100%);
+    height: min(560px, 100%);
     min-width: 0;
     // Container-query context for .agent-setup-modal-tab below (a
-    // descendant) — same technique as armory-view.scss's .armory-container,
-    // needed here on the modal itself since max-width: 92vw means this can
-    // genuinely get narrow on a small window.
+    // descendant) — same technique as armory-view.scss's .armory-container.
     container-type: inline-size;
     container-name: agent-setup;
 }
@@ -68,12 +75,27 @@
     }
 }
 
-// Narrow modal (a real possibility since the modal caps at 92vw of the app
-// window, not a fixed pane) — icon-only tabs, same "hide the label, keep the
-// icon" compression armory-view.scss's rail does at its 767px breakpoint.
+// Narrow modal — icon-only tabs, same "hide the label, keep the icon"
+// compression armory-view.scss's rail does at its 767px breakpoint.
 @container agent-setup (max-width: 560px) {
     .agent-setup-modal-tab span {
         display: none;
+    }
+}
+
+// Same min-width:0 rescue modal.scss's Layer C already provides for
+// .modal-panel-body descendants (@container modal-mount, modal.scss:141-146)
+// — scoped to our own classes instead of adopting that shared class, which
+// also carries generic .modal-panel-body padding/font-size we don't want
+// here. .modal-layer-mount (ModalLayer.tsx) is the ancestor that establishes
+// the `modal-mount` container, so this fires correctly regardless of the
+// `agent-setup` container above (flex children default to min-width:auto,
+// which this overrides once the real mount node — the pane, ultimately —
+// is this narrow).
+@container modal-mount (max-width: 400px) {
+    .agent-setup-modal-tabs,
+    .agent-setup-modal-panel {
+        min-width: 0;
     }
 }
 

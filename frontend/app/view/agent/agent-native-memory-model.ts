@@ -109,9 +109,14 @@ export class AgentNativeMemoryModel {
         void this.loadFiles();
     }
 
-    /** Re-fetch the file list. Auto-selects MEMORY.md (or the first file)
-     *  if nothing is selected yet, so the modal never opens to an empty
-     *  right pane when files exist. */
+    /** Re-fetch the file list. No longer auto-selects a file on load (see
+     *  SPEC_AGENT_PANE_ARMORY_HEADER_ICON_2026_07_20.md §7.2) — the modal
+     *  moved to a single-pane list/detail layout (PrimitiveListDetail),
+     *  where opening straight to the list is the norm for every sibling
+     *  tab (MCP Servers, Skills, Startup); the old auto-select existed only
+     *  to avoid an empty right pane in the previous two-column layout, and
+     *  keeping it would make this tab the one inconsistent case that jumps
+     *  straight into an item's detail. */
     async loadFiles(): Promise<void> {
         this.setLoading(true);
         try {
@@ -120,14 +125,17 @@ export class AgentNativeMemoryModel {
             });
             this.setFiles(res.files);
             this.setError(null);
-            if (this.selectedFilenameAtom() === null && res.files.length > 0) {
-                void this.selectFile(res.files[0].filename);
-            }
         } catch (e) {
             this.setError(`Failed to list memory files: ${(e as Error).message ?? e}`);
         } finally {
             this.setLoading(false);
         }
+    }
+
+    /** Clear the current selection — returns to the list view. */
+    clearSelection(): void {
+        this.setSelected(null);
+        this.setContent(null);
     }
 
     /** Select a file and fetch its content. Cancels any in-flight edit so
