@@ -840,14 +840,33 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             if (!agent) return;
 
             // Gather inputs in parallel where possible
-            const [startupContentResult, version, identityLinks] = await Promise.all([
+            const [startupContentResult, startupBundleIdResult, version, identityLinks] = await Promise.all([
                 RpcApi.GetAgentContentCommand(TabRpcClient, {
                     agent_id: agentId,
                     content_type: "startup",
                 }).catch(() => null),
+                RpcApi.GetAgentContentCommand(TabRpcClient, {
+                    agent_id: agentId,
+                    content_type: "startup_bundle_id",
+                }).catch(() => null),
                 Promise.resolve(getApi().getAboutModalDetails().version),
                 RpcApi.ListAgentIdentitiesCommand(TabRpcClient, { agent_id: agentId }).catch(() => []),
             ]);
+
+            // If this agent has a Bundle selected as its startup source
+            // (AgentStartupModal, Armory → Bundles content), its
+            // `instructions` take precedence over the legacy freeform
+            // "startup" blob — which has no live authoring UI anywhere, see
+            // docs/specs/ARCHITECTURE_ARMORY_2026_07_20.md §5. Falls back to
+            // the freeform blob when no bundle is selected (or it no longer
+            // resolves, e.g. deleted), preserving any seed-manifest content.
+            const startupBundleId = startupBundleIdResult?.content?.trim() || null;
+            const startupBundle = startupBundleId
+                ? await RpcApi.GetMemoryCommand(TabRpcClient, { id: startupBundleId }).catch(() => null)
+                : null;
+            const startupContent = startupBundle?.instructions?.trim()
+                ? startupBundle.instructions
+                : (startupContentResult?.content ?? null);
 
             // Resolve assigned accounts from the same db_agent_identity_links
             // rows spawn-time credential resolution and the agent pane's own
@@ -867,7 +886,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 version,
                 accounts,
                 peerAgents: agentDefinitions(),
-                startupContent: startupContentResult?.content ?? null,
+                startupContent,
             });
 
             if (payload) {
