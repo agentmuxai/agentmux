@@ -195,6 +195,56 @@ likely rely on. But it needs an implementer to confirm CEF's "temporary zoom" se
 (exact API surface, whether `cef-rs`'s binding exposes the temporary/non-persisted variant
 distinctly) before committing to it — flagged rather than assumed.
 
+**Update 2026-07-21 — Option B investigated, then superseded by Option C. Recorded here rather than
+silently rewriting the history above, since the investigation itself is useful evidence for future
+zoom/CEF-patch work.**
+
+Chased Option B far enough to learn two real things, both worth recording:
+
+1. **CEF's public API has no distinct "temporary, non-`HostZoomMap`" zoom method** — verified
+   against upstream Chromium source (`chromium.googlesource.com/chromium/src/+/main/components/zoom/zoom_controller.h`).
+   What it *does* have is `zoom::ZoomController::SetZoomMode(ZOOM_MODE_ISOLATED)` — a per-`WebContents`
+   mode switch, after which the *existing* `SetZoomLevel`/`GetZoomLevel` (already reachable from the
+   Rust binding, no patch needed for those two) become per-browser-scoped automatically. `SetZoomMode`
+   itself isn't exposed through CEF's C API at all, so implementing this genuinely required a real,
+   small CEF source patch (`CefBrowserHost::SetZoomIsolated()`) plus a matching Rust binding-fork
+   patch. Both were written and opened for review — `agentmuxai/cef#6` (C++, includes a self-caught
+   fix: the new struct field was initially inserted mid-struct, which would have silently shifted
+   every subsequent field's hard-coded offset assertion in the Rust binding; moved to an append-only
+   position at the end of the struct instead, matching the existing `BeginWindowDrag` precedent) and
+   `AgentU-asaf/cef-rs#2` (Rust `cef-dll-sys` binding, same fix applied). **Both closed, superseded —
+   left open on GitHub as a record of the investigation, not merged.**
+2. **Building a patched libcef is per-platform, and Windows has no precedent at all.** The C++ source
+   patch itself is plain, `#ifdef`-free Chromium code — identical on every platform as written. But
+   each OS ships its own separately-compiled `libcef` binary, and `docs/cef-build/build-patched-libcef.md`
+   (Linux, tested, ~3-6h/~99GB) and `docs/cef-build/build-patched-framework-macos.md` (macOS) are the
+   *only* documented build paths in this repo — there is no Windows equivalent, and nothing suggests
+   one has ever been produced for this project (the existing `BeginWindowDrag`/transparency patches
+   are Linux+macOS only; Windows apparently ships the vanilla published `cef-dll-sys` crate because
+   Windows's native title-bar drag doesn't need a CEF-level patch the way Wayland/X11 did). Attempting
+   a Windows build here would have been a from-scratch, unprecedented undertaking — including
+   devising a Windows-equivalent of the Linux runbook's `systemd-run`-based OOM-safety mechanism,
+   which has no Windows analog — on a machine simultaneously hosting a live, in-use AgentMux instance.
+   Flagged as a real safety concern before attempting it; not pursued.
+
+**Option C — CSS-injection zoom via `ExecuteJavaScript`, entirely bypassing Chromium's native zoom
+system.** AgentMux browser panes already have both pieces this needs, already exercised elsewhere in
+this exact codebase: `ExecuteJavaScript` (used in `commands/drag.rs`, `events.rs`, `ipc.rs`,
+`launcher_event_bridge.rs`) and a per-pane post-navigation hook, `on_load_end_browser_pane`
+(`browser_pane/callbacks.rs`), which the code's own comment says fires "after every navigation."
+Injecting `document.documentElement.style.zoom = "<factor>"` on a pane's own `CefFrame` — Chromium's
+own CSS `zoom` property, not a `transform: scale()` approximation — never touches `HostZoomMap` or
+`RequestContext` at all, so it sidesteps the cookie/session-sharing tradeoff entirely rather than
+choosing a side of it, needs no native CEF patch, no libcef build on any platform, and is
+identical Windows/Linux/macOS by construction (it's JS, not native code).
+
+**Real tradeoff, stated plainly:** not pixel-identical to Chromium's own native page zoom in every
+edge case, and needs re-injection handling for client-side (SPA-style) navigation that doesn't
+trigger a fresh `on_load_end` — a case native `HostZoomMap` zoom doesn't have to think about, since
+it persists per-origin automatically regardless of navigation type. Judged an acceptable, minor cost
+against Option B's now-demonstrated build-pipeline risk and cross-platform effort. **This is the
+implemented approach — see §6 below, updated accordingly.**
+
 ---
 
 ## 4. Interaction between the two fixes
@@ -213,25 +263,28 @@ ship as fully independent PRs in either order.
 (`frontend/app/store/zoom.win32.ts`) is already a genuinely *per-pane-instance* mechanism — adding
 Armory to its allow-list (Issue 1) is exactly reusing it as designed. But that whole pipeline is DOM/
 JS-side and cannot reach browser-pane content at all (§3.1) — Issue 2 is unfixable through it no
-matter how it's extended. Issue 2 needs its own, CEF-native per-pane state (§3.4 Option B), which
-has no reason to route through the JS zoom store at all (no metadata persistence requirement was
-mentioned in the request — "must be individual" only requires per-instance independence, not
-persistence across restarts, though that's a reasonable follow-up question for the implementer to
-confirm).
+matter how it's extended. Issue 2's implemented fix (Option C, §3.4 update) also doesn't route
+through the JS zoom store — it's fully native-Rust-side (`ExecuteJavaScript` + a per-pane state map
+in `agentmux-cef`), for the same reason: browser-pane content is unreachable from the frontend DOM
+entirely, regardless of which native-side fix is chosen.
 
 ---
 
-## 6. Suggested scope for implementation (not started — analysis only)
+## 6. Implementation scope
 
 1. **PR A — Armory zoom.** Add `"armory"` to `getBlockZoom`'s allow-list, add `armory:zoom` block
    metadata + a CSS `zoom` rule on Armory's root container (`armory-view.scss`), following
    `zoom-architecture.md`'s already-recommended Option A pattern. Frontend-only, low risk.
-2. **PR B — Per-pane browser zoom.** CEF-side: intercept `WM_MOUSEWHEEL`/`WM_MOUSEHWHEEL` in
-   `hwnd.rs` for Ctrl+Wheel, apply CEF's temporary (non-`HostZoomMap`-persisting) per-`CefBrowser`
-   zoom level, re-apply on navigation. Needs the `ThemeService` crash context re-verified before
-   ruling out Option A (isolated `RequestContext`) as an alternative. Rust-side, higher risk/effort,
-   should get its own investigation into CEF's exact temporary-zoom API before implementation
-   starts.
+   **Shipped:** `agentmuxai/agentmux#2251`.
+2. **PR B — Per-pane browser zoom, via CSS injection (Option C).** Entirely within
+   `agentmux-cef/`, no frontend changes (browser-pane content is unreachable from the DOM regardless
+   of native-side approach — see §5). Intercept Ctrl+`WM_MOUSEWHEEL` in `hwnd.rs` (currently
+   logged-only, §3.1), maintain a per-pane zoom-factor map, inject `document.documentElement.style.zoom`
+   via `ExecuteJavaScript` on wheel and re-inject on `on_load_end_browser_pane` so it survives
+   navigation. No CEF patch, no libcef build, no platform-specific work.
+   **Superseded/abandoned CEF-patch attempt, left open as a record:** `agentmuxai/cef#6`,
+   `AgentU-asaf/cef-rs#2` — see the Option B investigation write-up above for why this path was
+   dropped.
 
 ---
 
