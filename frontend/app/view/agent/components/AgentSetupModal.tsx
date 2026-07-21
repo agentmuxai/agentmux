@@ -10,10 +10,12 @@
  *   - Memory      — the native-memory browser (AgentNativeMemoryModal).
  *   - MCP Servers — the standalone MCP Server primitive (AgentMcpModal).
  *   - Skills      — the standalone Skill primitive (AgentSkillsModal).
+ *   - Startup     — select an existing Bundle as Session Context's
+ *                   "Startup Instructions" (AgentStartupModal).
  *
  * The tab list is a data array so future primitives slot in trivially.
- * Briefs · Bundle are not wired here — Briefs has no backend primitive at
- * all yet (tracked separately); Bundle already has its own Armory tab.
+ * Briefs is not wired here — it has no backend primitive at all yet
+ * (tracked separately).
  *
  * Spec: SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md §3.2b +
  *       docs/specs/archive/EXPLAINER_COMPOSABLE_MODEL_AND_AGENT_PANE_2026_07_02.md §4.
@@ -24,9 +26,10 @@ import { AgentIdentityModalPanel } from "./AgentIdentityModal";
 import { AgentMcpModal } from "./AgentMcpModal";
 import { AgentNativeMemoryModal } from "./AgentNativeMemoryModal";
 import { AgentSkillsModal } from "./AgentSkillsModal";
+import { AgentStartupModal } from "./AgentStartupModal";
 import "./AgentSetupModal.scss";
 
-type SetupTabId = "accounts" | "memory" | "mcp" | "skills";
+type SetupTabId = "accounts" | "memory" | "mcp" | "skills" | "startup";
 
 interface AgentSetupModalProps {
     /** Agent definition for the Accounts tab. Null for quick-launch panes
@@ -46,13 +49,14 @@ interface SetupTabDef {
 }
 
 export const AgentSetupModal = (props: AgentSetupModalProps): JSX.Element => {
-    // Data-driven tab list — Briefs · Bundle slot in here later (Briefs has
-    // no backend primitive yet; Bundle has its own Armory tab already).
+    // Data-driven tab list — Briefs slots in here later (no backend
+    // primitive yet).
     const tabs: SetupTabDef[] = [
         { id: "accounts", label: "Accounts" },
         { id: "memory", label: "Memories" },
         { id: "mcp", label: "MCP Servers" },
         { id: "skills", label: "Skills" },
+        { id: "startup", label: "Startup" },
     ];
 
     const [activeTab, setActiveTab] = createSignal<SetupTabId>(props.initialTab ?? "accounts");
@@ -113,7 +117,11 @@ export const AgentSetupModal = (props: AgentSetupModalProps): JSX.Element => {
                     <AgentSkillsModal agentId={props.agentId} />
                 </Show>
 
-                {/* Future primitives: Briefs · Bundle */}
+                <Show when={activeTab() === "startup"}>
+                    <AgentStartupModal agentId={props.agentId} />
+                </Show>
+
+                {/* Future primitives: Briefs */}
             </div>
         </div>
     );
