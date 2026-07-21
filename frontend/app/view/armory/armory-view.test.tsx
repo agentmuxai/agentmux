@@ -34,6 +34,13 @@ vi.mock("@/app/view/skill/skill-manager", () => ({
     SkillManager: () => <div data-testid="skill-manager" />,
 }));
 
+const setMetaMock = vi.fn().mockResolvedValue(undefined);
+vi.mock("@/app/store/rpc-api", () => ({
+    RpcApi: {
+        SetMetaCommand: (...args: unknown[]) => setMetaMock(...args),
+    },
+}));
+
 import { ArmoryView } from "./armory-view";
 import { ArmoryViewModel } from "./armory-model";
 
@@ -80,6 +87,76 @@ describe("ArmoryView rail", () => {
         const rail = screen.getByLabelText("Armory section", { selector: "nav.bundle-manager-rail" });
         const labels = Array.from(rail.querySelectorAll("button span")).map((el) => el.textContent);
         expect(labels).toEqual(["Accounts", "Memories", "Skills", "MCP Servers", "Bundles"]);
+    });
+});
+
+describe("ArmoryView zoom", () => {
+    afterEach(() => {
+        cleanup();
+        setMetaMock.mockClear();
+    });
+
+    function renderArmory() {
+        const model = new ArmoryViewModel("test-block", null as any);
+        const result = render(() => (
+            <ArmoryView
+                blockId="test-block"
+                model={model}
+                blockRef={{ current: null }}
+                contentRef={{ current: null }}
+            />
+        ));
+        return { ...result, model };
+    }
+
+    it("applies model.zoomAtom() as a CSS zoom style on the root", () => {
+        const { container } = renderArmory();
+        const view = container.querySelector(".armory-view") as HTMLElement;
+        expect(view.style.zoom).toBe("1");
+    });
+
+    it("Ctrl+Wheel down writes a decreased term:zoom via SetMetaCommand", () => {
+        const { container } = renderArmory();
+        const view = container.querySelector(".armory-view") as HTMLElement;
+        view.dispatchEvent(new WheelEvent("wheel", { ctrlKey: true, deltaY: 100, bubbles: true, cancelable: true }));
+        expect(setMetaMock).toHaveBeenCalledWith(
+            undefined,
+            { oref: "block:test-block", meta: { "term:zoom": 0.9 } },
+        );
+    });
+
+    it("Ctrl+Wheel up writes an increased term:zoom via SetMetaCommand", () => {
+        const { container } = renderArmory();
+        const view = container.querySelector(".armory-view") as HTMLElement;
+        view.dispatchEvent(new WheelEvent("wheel", { ctrlKey: true, deltaY: -100, bubbles: true, cancelable: true }));
+        expect(setMetaMock).toHaveBeenCalledWith(
+            undefined,
+            { oref: "block:test-block", meta: { "term:zoom": 1.1 } },
+        );
+    });
+
+    it("plain wheel (no Ctrl) does not trigger a zoom RPC call", () => {
+        const { container } = renderArmory();
+        const view = container.querySelector(".armory-view") as HTMLElement;
+        view.dispatchEvent(new WheelEvent("wheel", { ctrlKey: false, deltaY: 100, bubbles: true, cancelable: true }));
+        expect(setMetaMock).not.toHaveBeenCalled();
+    });
+
+    it("returning to 1.0 clears the metadata key (writes null)", () => {
+        const model = new ArmoryViewModel("test-block", null as any);
+        // model.zoomAtom is what the wheel handler and render path both read;
+        // overriding it directly (rather than the underlying blockAtom signal
+        // it's derived from) sidesteps reactive-system timing entirely.
+        (model as any).zoomAtom = () => 0.9;
+        const { container } = render(() => (
+            <ArmoryView blockId="test-block" model={model} blockRef={{ current: null }} contentRef={{ current: null }} />
+        ));
+        const view = container.querySelector(".armory-view") as HTMLElement;
+        view.dispatchEvent(new WheelEvent("wheel", { ctrlKey: true, deltaY: -100, bubbles: true, cancelable: true }));
+        expect(setMetaMock).toHaveBeenCalledWith(
+            undefined,
+            { oref: "block:test-block", meta: { "term:zoom": null } },
+        );
     });
 });
 
