@@ -46,3 +46,31 @@ export async function seedGlobalLogin(
     }
     return false;
 }
+
+/**
+ * Poll `seedGlobalLogin` on an interval until it succeeds, the deadline
+ * passes, or `isCancelled` reports true. Shared by "Login via terminal"
+ * (useAgentControllerStatus) and the terminal-fallback tier of
+ * `runProviderLogin` (retro-headless-login-browser-open-2026-07-20) — both
+ * open a real terminal window for the user to complete an OAuth flow in,
+ * then need to notice the credential landing on disk without the user
+ * having to click anything else.
+ */
+export async function pollForGlobalLoginSeed(
+    providerId: string,
+    configDir: string | undefined,
+    isCancelled: () => boolean,
+    opts: { pollMs?: number; timeoutMs?: number } = {},
+): Promise<boolean> {
+    const pollMs = opts.pollMs ?? 5_000;
+    const timeoutMs = opts.timeoutMs ?? 5 * 60 * 1_000;
+    const deadline = performance.now() + timeoutMs;
+    const silentLog: LogFn = () => {};
+    while (performance.now() < deadline) {
+        if (isCancelled()) return false;
+        await new Promise<void>((r) => setTimeout(r, pollMs));
+        if (isCancelled()) return false;
+        if (await seedGlobalLogin(providerId, silentLog, configDir)) return true;
+    }
+    return false;
+}

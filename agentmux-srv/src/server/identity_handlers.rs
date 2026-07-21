@@ -37,6 +37,15 @@ pub const COMMAND_AUTH_POLL: &str = "auth.poll";
 pub const COMMAND_AUTH_SUBMIT_CALLBACK: &str = "auth.submitcallback";
 pub const COMMAND_AUTH_CANCEL: &str = "auth.cancel";
 pub const COMMAND_AUTH_SUBMIT_API_KEY: &str = "auth.submitapikey";
+/// Mints (or reuses) a per-account isolated config dir without spawning any
+/// CLI — a standalone entry point onto `compute_and_ensure_account_dir` for
+/// callers that seed a credential file directly (`seed_provider_auth_from_global`)
+/// instead of driving a fresh OAuth handshake through `auth.start`. See
+/// `docs/specs/PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md` §7 —
+/// "single point, not global": every credential-bearing dir a running agent
+/// reads from must belong to a real `IdentityAccount` row, never the shared
+/// default dir.
+pub const COMMAND_ENSURE_ACCOUNT_DIR: &str = "identity.ensureaccountdir";
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -129,6 +138,27 @@ struct AckResp {
     success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EnsureAccountDirReq {
+    provider_id: String,
+    /// Non-empty to resolve an already-minted account's own dir
+    /// (reconnect-in-place); empty mints a fresh account id.
+    #[serde(default)]
+    existing_account_id: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EnsureAccountDirResp {
+    account_id: String,
+    /// `None` when the provider isn't oauth-class or the dir couldn't be
+    /// resolved/created — same soft-failure contract as `auth.start`'s
+    /// internal use of `compute_and_ensure_account_dir`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dir: Option<String>,
 }
 
 pub fn register_identity_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -293,6 +323,24 @@ pub fn register_identity_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) 
                     "auth.submitapikey: bundle persistence lands in PR C"
                         .to_string(),
                 )
+            })
+        }),
+    );
+
+    engine.register_handler(
+        COMMAND_ENSURE_ACCOUNT_DIR,
+        Box::new(move |data, _ctx| {
+            Box::pin(async move {
+                let req: EnsureAccountDirReq = serde_json::from_value(data)
+                    .map_err(|e| format!("identity.ensureaccountdir: {e}"))?;
+                let mut auth_env = std::collections::HashMap::new();
+                let (account_id, dir) = compute_and_ensure_account_dir(
+                    &req.existing_account_id,
+                    &req.provider_id,
+                    &mut auth_env,
+                );
+                let resp = EnsureAccountDirResp { account_id, dir };
+                Ok(Some(serde_json::to_value(&resp).unwrap_or_default()))
             })
         }),
     );
