@@ -1,9 +1,11 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createSignal, For, type JSX } from "solid-js";
+import { createSignal, For, onCleanup, onMount, type JSX } from "solid-js";
 
 import { Tooltip } from "@/app/element/tooltip";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { MemoryManager } from "@/app/view/memory/memory-manager";
 import { AccountsManager } from "@/app/view/accounts/accounts-manager";
 import { GlobalBrainManager } from "@/app/view/brain/global-brain-manager";
@@ -20,15 +22,42 @@ const RAIL: { id: ArmorySection; label: string; icon: string }[] = [
     { id: "memories", label: "Bundles",     icon: "layer-group" },
 ];
 
-export function ArmoryView(_props: ViewComponentProps<ArmoryViewModel>): JSX.Element {
+export function ArmoryView(props: ViewComponentProps<ArmoryViewModel>): JSX.Element {
     const [section, setSection] = createSignal<ArmorySection>("accounts");
+    const model = props.model;
+    let viewRef: HTMLDivElement | undefined;
+
+    // Ctrl+Wheel zoom — same term:zoom-on-block-meta pipeline as editor/term/
+    // agent/swarm (editor-view.tsx is the direct precedent for this exact
+    // capture-phase-listener + CSS-zoom-on-root shape). Capture phase so we
+    // intercept before any scrollable content inside Armory (rail/section
+    // panes use plain overflow:auto, no wheel handling of their own to
+    // conflict with); preventDefault suppresses CEF's native Ctrl+Scroll
+    // page zoom the same way it already does for every other pane type.
+    onMount(() => {
+        if (!viewRef) return;
+        const handleCtrlWheel = (ev: WheelEvent) => {
+            if (!ev.ctrlKey) return;
+            ev.preventDefault();
+            ev.stopPropagation();
+            const STEP = 0.1;
+            const current = model.zoomAtom();
+            const next = Math.max(0.5, Math.min(2.0, Math.round((current + (ev.deltaY > 0 ? -STEP : STEP)) * 100) / 100));
+            void RpcApi.SetMetaCommand(TabRpcClient, {
+                oref: `block:${model.blockId}`,
+                meta: { "term:zoom": next === 1.0 ? null : next },
+            });
+        };
+        viewRef.addEventListener("wheel", handleCtrlWheel, { passive: false, capture: true });
+        onCleanup(() => viewRef?.removeEventListener("wheel", handleCtrlWheel, { capture: true }));
+    });
 
     return (
         // armory-container carries container-type so that .armory-view
         // (a descendant) can be targeted by @container armory queries.
         // A container element cannot respond to its own container query.
         <div class="armory-container">
-            <div class="armory-view">
+            <div class="armory-view" ref={viewRef} style={{ zoom: model.zoomAtom() }}>
                 <nav class="bundle-manager-rail" aria-label="Armory section">
                     <For each={RAIL}>
                         {(item) => (
