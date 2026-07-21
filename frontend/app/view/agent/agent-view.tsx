@@ -215,7 +215,14 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             // fork will inherit verbatim) as the modal's display source.
             agent: source,
             originBlockId: model.blockId,
-            initialFormState: suggestedLabel ? ({ instanceName: suggestedLabel } as Partial<LaunchFormStateWire>) : undefined,
+            // Review finding: field is `name`, not `instanceName` — the
+            // form's actual field name (LaunchFormState.name /
+            // LaunchFormStateWire.name). The prior `as Partial<...>` cast
+            // bypassed TS's excess-property check, which silently masked
+            // the typo instead of catching it. Using a properly-typed
+            // literal (no cast) here so a future field-name mismatch is a
+            // compile error, not a silently-broken pre-fill.
+            initialFormState: suggestedLabel ? { name: suggestedLabel } satisfies Partial<LaunchFormStateWire> : undefined,
             onSubmit: async (overrides: LaunchOverrides) => {
                 // Review finding: this check must run BEFORE
                 // ForkAgentDefinitionCommand — resolving it after would let
