@@ -253,6 +253,20 @@ export const IdentityApi = {
         return client.rpcCall("resolve.prereqs", data, opts);
     },
 
+    // command "identity.ensureaccountdir" — mints (or resolves, when
+    // existingAccountId is set) a per-account isolated config dir without
+    // spawning a CLI or an OAuth handshake. Used by the seed-from-global
+    // recovery path so a seeded credential lands under a real account's own
+    // dir instead of the shared/global one — "single point, not global",
+    // PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md §7.
+    EnsureAccountDirCommand(
+        client: RpcClient,
+        data: { providerId: string; existingAccountId?: string },
+        opts?: RpcOpts,
+    ): Promise<{ accountId: string; dir?: string }> {
+        return client.rpcCall("identity.ensureaccountdir", data, opts);
+    },
+
     AuthSubmitApiKeyCommand(
         client: RpcClient,
         data: {
