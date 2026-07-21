@@ -274,7 +274,19 @@ export class AgentViewModel implements ViewModel {
      * to the working directory via WriteAgentConfigCommand, then creates
      * a SubprocessController ready for user input.
      */
-    launchAgentDefinition = async (agent: AgentDefinition, overrides?: LaunchOverrides): Promise<void> => {
+    /**
+     * @param targetBlockId In-pane tabs, Phase 4 — when set, launches INTO
+     *   that block instead of `this.blockId`. Used for the fork-tab-strip
+     *   `+` action, which spawns the fork into a freshly-created,
+     *   not-yet-placed block (see `pane.open`'s `skip_placement`) rather
+     *   than reconfiguring the current pane's own block. Every other
+     *   caller omits this and gets today's behavior unchanged.
+     */
+    launchAgentDefinition = async (
+        agent: AgentDefinition,
+        overrides?: LaunchOverrides,
+        targetBlockId?: string,
+    ): Promise<void> => {
         const provider = PROVIDERS[agent.provider] ?? PROVIDERS[resolveProviderAlias(agent.provider)];
         if (!provider) {
             Logger.error("agent", "Unknown provider in agent definition", { agentId: agent.id, provider: agent.provider });
@@ -360,6 +372,14 @@ export class AgentViewModel implements ViewModel {
         if (agent.provider_flags) {
             cliArgs.push(...agent.provider_flags.split(/\s+/).filter(Boolean));
         }
+        // In-pane tabs, Phase 4 — see LaunchOverrides.forkSession's own doc
+        // comment. Gated on the provider actually having a resume flag: a
+        // provider with none has no fork-session concept either, so this
+        // silently no-ops for it (graceful "fresh definition, fresh start"
+        // fallback per SPEC_AGENT_PANE_FORKS_AND_AUX_PINS_2026_06_15 §6.4).
+        if (overrides?.forkSession && provider.resumeFlag) {
+            cliArgs.push("--fork-session");
+        }
 
         // Build env vars from provider unsetEnv + agent env content + per-agent isolation
         const envVars: Record<string, string> = {};
@@ -439,8 +459,8 @@ export class AgentViewModel implements ViewModel {
         // instance name (caught by codex on PR #504).
         const configFiles = buildConfigFiles(contentMap, skills, agent, instanceName);
 
-        const oref = WOS.makeORef("block", this.blockId);
-        const blockId = this.blockId;
+        const blockId = targetBlockId ?? this.blockId;
+        const oref = WOS.makeORef("block", blockId);
         try {
             // Whether the work_dir was constructed by us (and is thus
             // eligible for `<base>-N` collision suffixing) or was

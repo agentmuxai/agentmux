@@ -70,6 +70,15 @@ export interface LaunchOverrides {
      *  reattached pane starts a fresh CLI session and re-injects the
      *  startup context. */
     continueSessionId?: string;
+    /** In-pane tabs, Phase 4 (SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md
+     *  §4.1) — when set alongside `continueSessionId`, appends `--fork-session`
+     *  to the spawned CLI's args so it inherits history up to the resume
+     *  point and then diverges with a NEW session id, instead of continuing
+     *  the same session (which `continueSessionId` alone would do). Only
+     *  applied when the provider actually has a `resumeFlag` — providers
+     *  with no resume mechanism naturally fall back to "fork = fresh
+     *  definition, fresh start" by simply not getting the flag. */
+    forkSession?: boolean;
 }
 
 interface AgentLaunchModalPanelProps {

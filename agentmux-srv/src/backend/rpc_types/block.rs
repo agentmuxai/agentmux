@@ -364,6 +364,16 @@ pub struct CommandPaneOpenData {
     /// `build_pane_meta` enforces. `view` must still be set to the canonical
     /// view string so the block is routed to the correct renderer.
     pub meta: Option<MetaMapType>,
+    /// `Some(true)` creates the block through the reducer (same as the docked
+    /// path) but skips BOTH the layout-placement step AND the floating path's
+    /// `tear_off_block` saga — the block exists (and the frontend's WOS cache
+    /// knows about it) but isn't rendered anywhere yet. `split_direction` /
+    /// `split_reference_block_id` / `floating` are ignored when set. For a
+    /// caller that's about to attach the new block to an existing pane's
+    /// block-stack instead of giving it its own tile (in-pane tabs —
+    /// see `frontend/layout/lib/layoutStack.ts`'s `pushBlockOntoStack`,
+    /// docs/specs/SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md §4.2).
+    pub skip_placement: Option<bool>,
 }
 
 /// Response from pane.open.

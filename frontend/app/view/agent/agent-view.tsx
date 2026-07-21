@@ -53,7 +53,7 @@ import { useAgentFailure } from "./hooks/useAgentFailure";
 import { PaneRow } from "./components/PaneRow";
 import { PaneTabStrip } from "@/app/element/PaneTabStrip";
 import { useForkSet } from "./fork/useForkSet";
-import { getLayoutModelForStaticTab, setActiveBlockInStack } from "@/layout/index";
+import { getLayoutModelForStaticTab, pushBlockOntoStack, setActiveBlockInStack } from "@/layout/index";
 import { useAgentDropAttach } from "./hooks/useAgentDropAttach";
 import { useSnapshotPersistence } from "./hooks/useSnapshotPersistence";
 import { useAgentDecisions } from "./hooks/useAgentDecisions";
@@ -85,7 +85,8 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { createBlock, getApi, openOrFocusPaneByView, refocusNode, WOS } from "@/app/store/global";
 import { ConfirmModal } from "@/element/modal";
 import { ModalLayer } from "@/element/ModalLayer";
-import { useModalLayer } from "@/element/modal-layer";
+import { useModalLayer, type LaunchFormStateWire } from "@/element/modal-layer";
+import type { LaunchOverrides } from "./components/AgentLaunchModal";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { loadAccounts, type AgentAccounts } from "@/app/view/identity/identity-model";
 import { buildStartupPayload, resolveAccounts } from "./startup/buildStartupPayload";
@@ -144,11 +145,11 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     const agentDefinitions = useAgentDefinitions();
     const currentAgent = createMemo(() => agentDefinitions().find((a) => a.id === agentId));
 
-    // Fork tab strip — Phase 3 of SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md.
-    // "Read-only switch": no new fork can be created from here yet (that's
-    // Phase 4's `+`/`/btw` action) — this only lets the user jump between
-    // forks that already exist and are already open somewhere. Replaces the
-    // unwired ForkBar/PaneRegions/PaneRow fork-bar path from
+    // Fork tab strip — Phases 3+4 of SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md.
+    // Phase 3 ("read-only switch") let the user jump between forks that
+    // already exist and are already open somewhere. Phase 4 adds the "+"
+    // action that actually creates one. Replaces the unwired ForkBar/
+    // PaneRegions/PaneRow fork-bar path from
     // SPEC_AGENT_PANE_FORKS_AND_AUX_PINS_2026_06_15 (which never shipped);
     // `computeForkSet`'s derivation logic is reused as-is, only its
     // PaneRow-based rendering is retired.
@@ -184,6 +185,67 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         } else {
             refocusNode(entry.blockId);
         }
+    };
+    // "+" on the fork tab strip — Phase 4. Reuses the existing launch
+    // modal (same "launch-agent" request kind AgentPicker's own fork/launch
+    // flows use) so the user confirms instance name / identity / memory
+    // exactly like any other launch, rather than silently auto-launching —
+    // this also means the real AgentDefinition fork only gets created
+    // inside onSubmit, so cancelling the modal never leaves an orphan
+    // forked definition behind. The suggested branch label is fetched
+    // up front (ForkAgentDefinitionSuggestCommand) purely to pre-fill the
+    // form; the actual fork (ForkAgentDefinitionCommand) happens at submit.
+    const handleForkCreate = async (): Promise<void> => {
+        const source = currentAgent();
+        if (!source) return;
+        let suggestedLabel = "";
+        try {
+            const suggestion = await RpcApi.ForkAgentDefinitionSuggestCommand(TabRpcClient, { source_id: agentId });
+            suggestedLabel = suggestion?.suggested_label ?? "";
+        } catch {
+            // Non-fatal — the modal's instance-name field just starts blank.
+        }
+        const currentSessionId = (block()?.meta?.["agent:sessionid"] as string | undefined) ?? "";
+        const currentInstanceId = (block()?.meta?.["agentInstanceId"] as string | undefined) ?? "";
+        modalLayer.open({
+            kind: "launch-agent" as const,
+            // The real forked definition doesn't exist until submit — show
+            // the source definition's config (provider/model/etc, which the
+            // fork will inherit verbatim) as the modal's display source.
+            agent: source,
+            originBlockId: model.blockId,
+            initialFormState: suggestedLabel ? ({ instanceName: suggestedLabel } as Partial<LaunchFormStateWire>) : undefined,
+            onSubmit: async (overrides: LaunchOverrides) => {
+                const forkedDef = await RpcApi.ForkAgentDefinitionCommand(TabRpcClient, {
+                    source_id: agentId,
+                    branch_label: overrides.instanceName,
+                });
+                const layoutModel = getLayoutModelForStaticTab();
+                const myNode = layoutModel.getNodeByBlockId(model.blockId);
+                if (!myNode) return;
+                // Create the new block without placing it anywhere — it's
+                // going onto THIS pane's stack, not its own tile. See
+                // pane.open's skip_placement + layoutStack.ts's
+                // pushBlockOntoStack doc comments.
+                const paneOpenResult = await TabRpcClient.rpcCall(
+                    "pane.open",
+                    { view: "agent", skip_placement: true, meta: { view: "agent" } },
+                    {},
+                ) as { block_id: string };
+                const newBlockId = paneOpenResult.block_id;
+                await model.launchAgentDefinition(
+                    forkedDef,
+                    {
+                        ...overrides,
+                        continueOfInstanceId: currentInstanceId || undefined,
+                        continueSessionId: currentSessionId || undefined,
+                        forkSession: true,
+                    },
+                    newBlockId,
+                );
+                pushBlockOntoStack(layoutModel, myNode.id, newBlockId);
+            },
+        });
     };
 
     // Wire the pane-scoped modal callback into the model so the single
@@ -1023,18 +1085,23 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
 
             {/* Fork tab strip — top region, above everything else, matching
                 the editor's own tab-strip placement and every general
-                tabbed-UI convention. Zero cost for the common case (a single
-                conversation, no related open forks): the strip doesn't
-                render at all. See SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md §3.3. */}
-            <Show when={switchableForks().length > 1}>
-                <PaneTabStrip
-                    tabs={switchableForks()}
-                    activeId={agentId}
-                    getId={(f) => f.definitionId}
-                    getLabel={(f) => f.title}
-                    onActivate={handleForkSwitch}
-                />
-            </Show>
+                tabbed-UI convention. Phase 4 note: unlike Phase 3's
+                read-only bar (which hid itself entirely with only one
+                conversation, since there was nothing to switch to), the
+                strip is now always shown once an agent is running — the
+                "+" is exactly how you'd get to a second conversation, so
+                hiding the whole strip until a second one already exists
+                would make that action undiscoverable. See
+                SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md §3.3. */}
+            <PaneTabStrip
+                tabs={switchableForks()}
+                activeId={agentId}
+                getId={(f) => f.definitionId}
+                getLabel={(f) => f.title}
+                onActivate={handleForkSwitch}
+                onAdd={() => void handleForkCreate()}
+                addTitle="Fork this conversation"
+            />
 
             <AgentSearchBar
                 visible={search.visible}
