@@ -79,6 +79,43 @@ fn is_valid_probe(bytes: &[u8]) -> bool {
         && value.get("v").and_then(|v| v.as_u64()) == Some(UDP_PROTOCOL_VERSION)
 }
 
+/// Trust-boundary check for the UDP responder: is `addr` reachable only from
+/// a private/link-local network, i.e. plausibly on this LAN? Unlike mDNS
+/// (link-local multicast, structurally non-routable off-subnet), this socket
+/// binds `0.0.0.0` and would otherwise answer *any* routable unicast probe
+/// with `auth_key` — an internet-facing disclosure oracle / UDP reflection
+/// vector if the port is ever reachable externally (port forward, hairpin
+/// NAT). Mirrors the private/loopback/link-local classification used for the
+/// opposite purpose (SSRF egress checks) in
+/// `drone/executor/blocks/api.rs::is_reserved_v4`/`is_reserved_v6`, minus the
+/// broadcast/unspecified/multicast cases that don't apply to a source addr.
+fn is_lan_source(addr: &std::net::SocketAddr) -> bool {
+    match addr.ip() {
+        IpAddr::V4(v4) => v4.is_loopback() || v4.is_private() || v4.is_link_local(),
+        IpAddr::V6(v6) => {
+            if v6.is_loopback()
+                // unique-local fc00::/7
+                || (v6.segments()[0] & 0xfe00) == 0xfc00
+                // link-local fe80::/10
+                || (v6.segments()[0] & 0xffc0) == 0xfe80
+            {
+                return true;
+            }
+            // IPv4-mapped/-compatible v6 literals route to the embedded v4
+            // address on most kernels — delegate so a private v4 source
+            // wearing a v6 wrapper isn't misclassified as public.
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return v4.is_loopback() || v4.is_private() || v4.is_link_local();
+            }
+            #[allow(deprecated)]
+            if let Some(v4) = v6.to_ipv4() {
+                return v4.is_loopback() || v4.is_private() || v4.is_link_local();
+            }
+            false
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LanInstance {
     pub instance_id: String,
@@ -230,7 +267,8 @@ impl LanDiscovery {
 
     /// UDP broadcast-probe responder loop (Layer 2 discovery fallback).
     ///
-    /// Binds `0.0.0.0:UDP_DISCOVERY_PORT` and answers valid probes with a
+    /// Binds `0.0.0.0:UDP_DISCOVERY_PORT` and answers valid probes from
+    /// private/link-local source addresses (see `is_lan_source`) with a
     /// unicast response back to the sender's `recv_from` source address.
     /// Deliberately does NOT set `SO_REUSEADDR`: this codebase supports
     /// running multiple AgentMux instances on one host simultaneously, and
@@ -277,6 +315,17 @@ impl LanDiscovery {
                             if !is_valid_probe(&buf[..len]) {
                                 continue;
                             }
+                            // Trust boundary: never hand out auth_key to a
+                            // source address outside the private/link-local
+                            // ranges, even if the packet is a well-formed
+                            // probe (see is_lan_source doc comment).
+                            if !is_lan_source(&src) {
+                                tracing::debug!(
+                                    src = %src,
+                                    "UDP discovery probe from non-LAN source, ignoring"
+                                );
+                                continue;
+                            }
                             tracing::debug!(src = %src, "UDP discovery probe received");
                             let response = self.build_probe_response();
                             match serde_json::to_vec(&response) {
@@ -293,7 +342,13 @@ impl LanDiscovery {
                             }
                         }
                         Err(e) => {
+                            // A persistent OS-level error (e.g. Windows
+                            // WSAECONNRESET/10054 from an ICMP
+                            // port-unreachable triggered by our own prior
+                            // send_to) would otherwise spin this loop at
+                            // full CPU with no delay between retries.
                             tracing::debug!("UDP discovery recv_from error: {e}");
+                            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
                         }
                     }
                 }
@@ -660,11 +715,59 @@ impl LanDiscoveryController {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_valid_probe, mdns_hostname, probe_response_json, UDP_PROBE_TYPE,
+        is_lan_source, is_valid_probe, mdns_hostname, probe_response_json, UDP_PROBE_TYPE,
         UDP_PROTOCOL_VERSION, UDP_RESPONSE_TYPE,
     };
     use serde_json::json;
+    use std::net::SocketAddr;
     use tokio::net::UdpSocket;
+
+    #[test]
+    fn is_lan_source_accepts_private_v4_ranges() {
+        for addr in [
+            "127.0.0.1:1234",
+            "10.0.0.5:1234",
+            "172.16.4.4:1234",
+            "192.168.1.50:1234",
+            "169.254.1.1:1234", // link-local / APIPA
+        ] {
+            let addr: SocketAddr = addr.parse().unwrap();
+            assert!(is_lan_source(&addr), "{addr} should be treated as LAN");
+        }
+    }
+
+    #[test]
+    fn is_lan_source_rejects_public_v4() {
+        for addr in ["8.8.8.8:1234", "1.1.1.1:1234", "203.0.113.7:1234"] {
+            let addr: SocketAddr = addr.parse().unwrap();
+            assert!(!is_lan_source(&addr), "{addr} should NOT be treated as LAN");
+        }
+    }
+
+    #[test]
+    fn is_lan_source_accepts_v6_loopback_and_local_ranges() {
+        for addr in ["[::1]:1234", "[fe80::1]:1234", "[fc00::1]:1234"] {
+            let addr: SocketAddr = addr.parse().unwrap();
+            assert!(is_lan_source(&addr), "{addr} should be treated as LAN");
+        }
+    }
+
+    #[test]
+    fn is_lan_source_rejects_public_v6() {
+        let addr: SocketAddr = "[2001:4860:4860::8888]:1234".parse().unwrap();
+        assert!(!is_lan_source(&addr));
+    }
+
+    #[test]
+    fn is_lan_source_unwraps_v4_mapped_v6() {
+        // A private v4 address wearing a v6 mapped-address wrapper must
+        // still be classified by its embedded v4 range, not treated as an
+        // opaque public v6 address.
+        let addr: SocketAddr = "[::ffff:10.0.0.5]:1234".parse().unwrap();
+        assert!(is_lan_source(&addr));
+        let addr: SocketAddr = "[::ffff:8.8.8.8]:1234".parse().unwrap();
+        assert!(!is_lan_source(&addr));
+    }
 
     #[test]
     fn appends_local_dot_to_bare_hostname() {
