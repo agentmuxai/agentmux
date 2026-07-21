@@ -57,6 +57,12 @@ pub const EVENT_SHELL_CHUNK: &str = "shell_chunk";
 /// so the frontend can surface it as a `term:osc_title` tab label.
 /// Payload: `{ "blockId": "...", "activity": "auth refactor" }`.
 pub const EVENT_BLOCK_ACTIVITY: &str = "block:activity";
+/// Fired whenever a cron job is created, fires, is paused/resumed, or
+/// deleted (SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20 Phase 2).
+/// Payload-free, unscoped — the Swarm pane just reloads the full list via
+/// `cron.ListActive` on receipt, the same "any event of this type ⇒ refetch"
+/// pattern `shell_node_create`/`shell_chunk(op:"exit")` already use.
+pub const EVENT_CRON_CHANGED: &str = "cron_changed";
 
 // File operation constants
 #[allow(dead_code)]

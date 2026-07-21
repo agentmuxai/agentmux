@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createMemo, createSignal, createEffect, onCleanup, For, onMount, Show, type JSX } from "solid-js";
-import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, ActiveShell, WorkflowDispatch, SubagentEvent, DispatchActivityEntry } from "./swarm-model";
+import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, ActiveShell, ActiveCron, WorkflowDispatch, SubagentEvent, DispatchActivityEntry } from "./swarm-model";
 import { subagentDisplayLabel, subagentRowKey } from "./swarm-model";
 import { ProviderLogo } from "@/app/element/ProviderLogo";
 import { callBackendService } from "@/store/wos";
@@ -235,7 +235,7 @@ function AgentRow({
     );
     const collapsed = createMemo(() => model.isAgentCollapsed(node.blockId));
     const totalRows = createMemo(
-        () => node.agentToolRows.length + node.workflowRows.length + node.shellRows.length
+        () => node.agentToolRows.length + node.workflowRows.length + node.shellRows.length + node.cronRows.length
     );
     const hasChildren = createMemo(() => totalRows() > 0);
 
@@ -308,6 +308,7 @@ function AgentRow({
                     <AgentToolBucket rows={node.agentToolRows} model={model} parentAgentStatus={node.agentStatus} />
                     <WorkflowBucket rows={node.workflowRows} model={model} />
                     <ShellBucket rows={node.shellRows} />
+                    <CronBucket rows={node.cronRows} />
                 </div>
             </Show>
         </div>
@@ -407,6 +408,62 @@ function ShellRow({ shell }: { shell: ActiveShell }): JSX.Element {
             <button class="swarm-shell-stop" title="Stop" onClick={handleStop}>
                 <i class="fa-solid fa-stop" />
             </button>
+        </div>
+    );
+}
+
+// Cron bucket — Phase 2 of SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20.
+// Appended last (after Shell) — the spec's resolved ordering question is
+// most-abstract-first; a recurring scheduled job sits at the same
+// "mechanical" tier as a shell, so it's grouped alongside rather than
+// interleaved with Agent Tool/Workflow. Flat rows, same shape as
+// ShellBucket — no pause/resume/delete action here; Phase 2 is read-only
+// visibility, matching the spec's stated row content (no action button).
+function CronBucket({ rows }: { rows: ActiveCron[] }): JSX.Element {
+    return (
+        <Show when={rows.length > 0}>
+            <div class="swarm-bucket swarm-bucket--cron">
+                <div class="swarm-bucket-header">
+                    <span class="swarm-bucket-label">Cron</span>
+                    <span class="swarm-bucket-count">{rows.length}</span>
+                </div>
+                <For each={rows}>{(cron) => <CronRow cron={cron} />}</For>
+            </div>
+        </Show>
+    );
+}
+
+function formatLastFired(unixSec: number | null): string {
+    if (unixSec == null) return "never fired";
+    const deltaMin = Math.floor((Date.now() - unixSec * 1000) / 60_000);
+    if (deltaMin < 1) return "just now";
+    if (deltaMin < 60) return `${deltaMin}m ago`;
+    const deltaHr = Math.floor(deltaMin / 60);
+    if (deltaHr < 24) return `${deltaHr}h ago`;
+    return `${Math.floor(deltaHr / 24)}d ago`;
+}
+
+function CronRow({ cron }: { cron: ActiveCron }): JSX.Element {
+    // 60s tick — "last fired" doesn't need per-second granularity like a
+    // shell's live elapsed counter.
+    const tick = useTick(60_000);
+    const lastFired = createMemo(() => {
+        tick();
+        return formatLastFired(cron.last_fired);
+    });
+    const fireCountLabel = createMemo(() =>
+        cron.max_fires != null ? `${cron.fire_count}/${cron.max_fires}` : `${cron.fire_count}`
+    );
+
+    return (
+        <div class="swarm-cron-row" title={`${cron.expression} → ${cron.target}`}>
+            <span class="swarm-cron-name">{cron.name}</span>
+            <span class="swarm-cron-expression">{cron.expression}</span>
+            <span class="swarm-cron-last-fired">{lastFired()}</span>
+            <span class="swarm-cron-fire-count">{fireCountLabel()}</span>
+            <span class={`swarm-cron-status-badge swarm-cron-status-badge--${cron.enabled ? "active" : "paused"}`}>
+                {cron.enabled ? "Active" : "Paused"}
+            </span>
         </div>
     );
 }
