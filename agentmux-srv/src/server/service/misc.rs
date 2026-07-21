@@ -50,6 +50,30 @@ pub(super) async fn handle_misc_service(state: &AppState, call: &WebCallType) ->
             WebReturnType::success(serde_json::to_value(&shells).unwrap_or_default())
         }
 
+        // ---- CronService (Swarm-pane Cron bucket, Phase 2 of the same
+        // spec) — unfiltered like `shell.ListActive`/`subagent.ListActive`
+        // above: every job whose `created_by` resolves to a live agent
+        // block, frontend groups by block_id in buildTree(). A job whose
+        // creator has no live registration (agent pane closed, or created
+        // via a raw HTTP call with no matching reactive registration) is
+        // silently omitted — nothing to attach it to in a per-agent tree. ----
+        ("cron", "ListActive") => {
+            let jobs = match &state.shared_store {
+                Some(s) => s.cron_list().unwrap_or_default(),
+                None => Vec::new(),
+            };
+            let summaries: Vec<_> = jobs
+                .iter()
+                .filter_map(|job| {
+                    state
+                        .reactive_handler
+                        .get_agent(&job.created_by)
+                        .map(|agent| super::super::cron::to_summary(job, agent.block_id))
+                })
+                .collect();
+            WebReturnType::success(serde_json::to_value(&summaries).unwrap_or_default())
+        }
+
         // ---- SubagentService ----
         ("subagent", "ListActive") => {
             let subagents = state.subagent_watcher.list_active();

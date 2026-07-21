@@ -21,6 +21,7 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::backend::storage::cron::CronJob;
+use crate::backend::wps::{WaveEvent, EVENT_CRON_CHANGED};
 use super::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -88,6 +89,57 @@ fn next_fire_utc(expression: &str) -> Option<String> {
     Some(next.to_rfc3339())
 }
 
+/// Swarm-pane row shape for one cron job (SPEC_SWARM_LONG_RUNNING_PROCESS_
+/// ROWS_2026_07_20 Phase 2) — `CronJobView` plus the `created_by` agent's
+/// resolved `block_id`, so the frontend can group it under that agent's row
+/// the same way `ShellSummary` does for the Shell bucket.
+#[derive(Debug, Serialize)]
+pub struct CronSummary {
+    pub id: String,
+    pub block_id: String,
+    pub name: String,
+    pub expression: String,
+    pub target: String,
+    pub created_by: String,
+    pub enabled: bool,
+    pub last_fired: Option<i64>,
+    pub fire_count: i64,
+    pub max_fires: Option<i64>,
+    /// ISO-8601 string of the next scheduled fire (UTC), or null if disabled.
+    pub next_fire: Option<String>,
+}
+
+pub(crate) fn to_summary(job: &CronJob, block_id: String) -> CronSummary {
+    let next_fire = if job.enabled {
+        next_fire_utc(&job.expression)
+    } else {
+        None
+    };
+    CronSummary {
+        id: job.id.clone(),
+        block_id,
+        name: job.name.clone(),
+        expression: job.expression.clone(),
+        target: job.target.clone(),
+        created_by: job.created_by.clone(),
+        enabled: job.enabled,
+        last_fired: job.last_fired,
+        fire_count: job.fire_count,
+        max_fires: job.max_fires,
+        next_fire,
+    }
+}
+
+fn publish_cron_changed(state: &AppState) {
+    state.broker.publish(WaveEvent {
+        event: EVENT_CRON_CHANGED.to_string(),
+        scopes: vec![],
+        sender: String::new(),
+        persist: 0,
+        data: None,
+    });
+}
+
 pub(super) async fn handle_cron_create(
     State(state): State<AppState>,
     Json(req): Json<CronCreateRequest>,
@@ -126,6 +178,7 @@ pub(super) async fn handle_cron_create(
 
     // Register the new job with the live scheduler.
     state.cron_scheduler.schedule_job(&job);
+    publish_cron_changed(&state);
 
     (StatusCode::CREATED, Json(json!({"job": to_view(&job)})))
 }
@@ -160,7 +213,10 @@ pub(super) async fn handle_cron_delete(
     state.cron_scheduler.cancel_job(&id);
 
     match store.cron_delete(&id) {
-        Ok(true) => (StatusCode::OK, Json(json!({"ok": true}))),
+        Ok(true) => {
+            publish_cron_changed(&state);
+            (StatusCode::OK, Json(json!({"ok": true})))
+        }
         Ok(false) => (StatusCode::NOT_FOUND, Json(json!({"error": "job not found"}))),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
     }
@@ -195,6 +251,55 @@ pub(super) async fn handle_cron_patch(
     } else {
         state.cron_scheduler.cancel_job(&id);
     }
+    publish_cron_changed(&state);
 
     (StatusCode::OK, Json(json!({"ok": true, "enabled": enabled})))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mk_job(enabled: bool, max_fires: Option<i64>, fire_count: i64) -> CronJob {
+        CronJob {
+            id: "job-1".to_string(),
+            name: "nightly build".to_string(),
+            expression: "0 9 * * *".to_string(),
+            prompt: "run the build".to_string(),
+            target: "target-agent".to_string(),
+            created_by: "creator-agent".to_string(),
+            enabled,
+            last_fired: Some(1_700_000_000),
+            fire_count,
+            max_fires,
+            created_at: 1_699_000_000,
+        }
+    }
+
+    #[test]
+    fn to_summary_carries_the_resolved_block_id() {
+        let job = mk_job(true, None, 3);
+        let summary = to_summary(&job, "block-42".to_string());
+        assert_eq!(summary.id, "job-1");
+        assert_eq!(summary.block_id, "block-42");
+        assert_eq!(summary.created_by, "creator-agent");
+        assert_eq!(summary.fire_count, 3);
+        assert_eq!(summary.max_fires, None);
+    }
+
+    #[test]
+    fn to_summary_omits_next_fire_when_disabled() {
+        let job = mk_job(false, Some(5), 5);
+        let summary = to_summary(&job, "block-1".to_string());
+        assert!(!summary.enabled);
+        assert_eq!(summary.next_fire, None);
+    }
+
+    #[test]
+    fn to_summary_computes_next_fire_when_enabled() {
+        let job = mk_job(true, None, 0);
+        let summary = to_summary(&job, "block-1".to_string());
+        assert!(summary.enabled);
+        assert!(summary.next_fire.is_some());
+    }
 }

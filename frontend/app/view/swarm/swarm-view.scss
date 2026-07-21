@@ -221,6 +221,13 @@
     &--shell .swarm-bucket-label {
         color: var(--success-color);
     }
+    // Cron (Phase 2 of the same spec) — a fourth, distinct hue; --info-color
+    // was added to theme.scss specifically for this (no existing semantic
+    // var was free to reuse without misleading connotations — see that
+    // var's own doc comment).
+    &--cron .swarm-bucket-label {
+        color: var(--info-color);
+    }
 }
 
 .swarm-bucket-header {
@@ -507,6 +514,66 @@
     // actually applies).
     color: var(--error-color);
     background: var(--hover-bg-color, rgba(255, 255, 255, 0.08));
+}
+
+// ── Cron row (SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20 Phase 2) —
+// same flat 30px-row shape as .swarm-shell-row, but no hover-reveal action
+// (Phase 2 is read-only — see CronBucket's doc comment in swarm-view.tsx).
+
+.swarm-cron-row {
+    display: flex;
+    align-items: center;
+    height: 30px;
+    padding: 0 6px 0 30px;
+    gap: 8px;
+    user-select: none;
+}
+
+.swarm-cron-name {
+    flex: 1;
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--main-text-color);
+}
+
+.swarm-cron-expression {
+    flex-shrink: 0;
+    font-size: 10px;
+    font-family: var(--monospace-font, monospace);
+    color: var(--secondary-text-color);
+    opacity: 0.8;
+    white-space: nowrap;
+}
+
+.swarm-cron-last-fired,
+.swarm-cron-fire-count {
+    flex-shrink: 0;
+    font-size: 10px;
+    color: var(--secondary-text-color);
+    opacity: 0.6;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.swarm-cron-status-badge {
+    flex-shrink: 0;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    padding: 1px 6px;
+    border-radius: 3px;
+
+    &--active {
+        color: var(--info-color);
+        background: color-mix(in srgb, var(--info-color) 15%, transparent);
+    }
+    &--paused {
+        color: var(--secondary-text-color);
+        background: var(--highlight-bg-color);
+    }
 }
 
 // ── Subagent detail event rendering (shared by the concatenated dispatch
