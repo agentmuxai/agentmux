@@ -282,15 +282,24 @@ export class AgentViewModel implements ViewModel {
      *   than reconfiguring the current pane's own block. Every other
      *   caller omits this and gets today's behavior unchanged.
      */
+    /**
+     * @returns Whether the launch actually succeeded. This method never
+     *   THROWS (every failure path is caught and logged internally, by
+     *   design — most callers fire-and-forget and don't want a launch
+     *   failure to crash their UI), but callers that need to react to
+     *   failure (e.g. the fork-tab-strip "+" action, which must not push a
+     *   permanently-broken tab onto the pane's stack) can check the
+     *   returned boolean instead of relying on a rejected promise.
+     */
     launchAgentDefinition = async (
         agent: AgentDefinition,
         overrides?: LaunchOverrides,
         targetBlockId?: string,
-    ): Promise<void> => {
+    ): Promise<boolean> => {
         const provider = PROVIDERS[agent.provider] ?? PROVIDERS[resolveProviderAlias(agent.provider)];
         if (!provider) {
             Logger.error("agent", "Unknown provider in agent definition", { agentId: agent.id, provider: agent.provider });
-            return;
+            return false;
         }
 
         // Check Node.js availability for npm-based providers
@@ -298,7 +307,7 @@ export class AgentViewModel implements ViewModel {
         if (nodejsError) {
             this.nodejsError = nodejsError;
             Logger.error("agent", "Node.js not available for agent definition", { agentId: agent.id, error: nodejsError });
-            return;
+            return false;
         }
 
         const version = getApi().getAboutModalDetails().version;
@@ -643,8 +652,10 @@ export class AgentViewModel implements ViewModel {
                     `direct identity link write-through failed: ${e?.message ?? String(e)}`,
                 );
             }
+            return true;
         } catch (e: any) {
             Logger.error("agent", "Failed to launch agent definition", { error: String(e) });
+            return false;
         }
     };
 

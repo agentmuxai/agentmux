@@ -82,7 +82,8 @@ import { SlashCommandPicker } from "./components/SlashCommandPicker";
 import { SlashHelpPanel } from "./components/SlashHelpPanel";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { createBlock, getApi, openOrFocusPaneByView, refocusNode, WOS } from "@/app/store/global";
+import { createBlock, getApi, openOrFocusPaneByView, pushNotification, refocusNode, WOS } from "@/app/store/global";
+import { ObjectService } from "@/app/store/services";
 import { ConfirmModal } from "@/element/modal";
 import { ModalLayer } from "@/element/ModalLayer";
 import { useModalLayer, type LaunchFormStateWire } from "@/element/modal-layer";
@@ -233,7 +234,17 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     {},
                 ) as { block_id: string };
                 const newBlockId = paneOpenResult.block_id;
-                await model.launchAgentDefinition(
+                // Review finding: launchAgentDefinition never throws (every
+                // failure path is caught + logged internally, by design —
+                // most callers fire-and-forget). Check its boolean result
+                // explicitly: a failed launch must NOT get pushed onto the
+                // pane's stack as a permanently-broken tab with no
+                // indication anything went wrong. Clean up the orphaned
+                // skip_placement block on failure — the forked
+                // AgentDefinition itself is left alone (it's a real,
+                // reusable definition; the picker can retry launching it
+                // later, same as any other launch failure).
+                const launched = await model.launchAgentDefinition(
                     forkedDef,
                     {
                         ...overrides,
@@ -243,6 +254,18 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     },
                     newBlockId,
                 );
+                if (!launched) {
+                    await ObjectService.DeleteBlock(newBlockId).catch(() => {});
+                    pushNotification({
+                        icon: "fa-triangle-exclamation",
+                        title: "Fork failed",
+                        message: `Could not launch the fork of "${source.name}" — see logs for details.`,
+                        timestamp: new Date().toISOString(),
+                        type: "error",
+                        expiration: Date.now() + 8000,
+                    });
+                    return;
+                }
                 pushBlockOntoStack(layoutModel, myNode.id, newBlockId);
             },
         });
