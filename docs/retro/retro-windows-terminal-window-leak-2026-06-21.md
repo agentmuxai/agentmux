@@ -176,3 +176,10 @@ Windows Terminal window. ConPTY terminal panes are unaffected (already headless)
 - **2026-06-21** — diagnosis: inventory → EnumWindows → spawn audit; killed instances
   + WindowsTerminal (54→1 windows); root-caused to missing `CREATE_NO_WINDOW` in
   `persistent.rs`/`runner.rs`/`supervisor.rs`; fix applied + verified; PR opened.
+
+**Side effect flagged later:** the `CREATE_NO_WINDOW` fix here makes every agent
+pane's CLI spawn permanently headless — which is also exactly the spawn shape
+that silently defeats Claude Code v2.1.x's browser-based OAuth login. See
+`docs/retro/retro-headless-login-browser-open-2026-07-20.md` §2 — that retro's
+fix (auto-fallback to a real visible terminal window when a login needs one)
+is the reconciliation; this fix itself was correct and should not be reverted.

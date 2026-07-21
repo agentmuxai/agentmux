@@ -286,7 +286,7 @@ async fn connect_and_run(
     token: &str,
     agents: Arc<Mutex<HashSet<String>>>,
     ctrl_rx: &mut mpsc::UnboundedReceiver<CtrlMsg>,
-    _wstore: &Arc<Store>,
+    wstore: &Arc<Store>,
     http: &reqwest::Client,
 ) -> Result<(), String> {
     use tokio_tungstenite::tungstenite::ClientRequestBuilder;
@@ -337,8 +337,37 @@ async fn connect_and_run(
 
     loop {
         tokio::select! {
-            // Keepalive — see CLIENT_PING_INTERVAL_SECS.
+            // Keepalive — see CLIENT_PING_INTERVAL_SECS. Also the only
+            // standing check on the stored credential's freshness: a
+            // healthy WS session never otherwise revisits `db_muxbus_credentials`
+            // (the crate's own reconnect-triggered `load_valid_token` is the
+            // sole other caller of the refresh path). Without this, a
+            // long-lived session leaves the STORED token to expire in place —
+            // still fine for this connection (it doesn't re-present the
+            // token after handshake), but every OTHER consumer reading the
+            // same row (e.g. `inject_muxbus_env` at agent spawn) sees a
+            // correctly-but-avoidably expired credential and skips
+            // injection, even though a valid refresh_token has been sitting
+            // right there the whole time. Piggybacking the check on the
+            // existing ping tick (240s) against a 300s "nearly expired"
+            // window leaves a full cycle of margin to complete the refresh
+            // before the stored token actually lapses.
             _ = ping_interval.tick() => {
+                if let Ok(Some(creds)) = wstore.muxbus_load() {
+                    if creds.nearly_expired() {
+                        tracing::info!("cloud_subscriber: stored token nearing expiry, proactively refreshing");
+                        match crate::muxbus::pkce::refresh_token(&creds, http).await {
+                            Ok(refreshed) => {
+                                if let Err(e) = wstore.muxbus_save(&refreshed) {
+                                    tracing::warn!(error = %e, "cloud_subscriber: failed to save proactively refreshed credentials");
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!(error = %e, "cloud_subscriber: proactive mid-session refresh failed — will retry next tick");
+                            }
+                        }
+                    }
+                }
                 let ping_msg = serde_json::to_string(&ClientMsg::Ping)
                     .map_err(|e| format!("serialize ping: {e}"))?;
                 if let Err(e) = write.send(Message::Text(ping_msg.into())).await {
