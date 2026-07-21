@@ -70,6 +70,29 @@ export interface ActiveShell {
 }
 
 /**
+ * Mirrors the backend's `CronSummary` (`server/cron.rs`) — one persistent
+ * cron job whose `created_by` agent currently resolves to a live block.
+ * Fetched via `cron.ListActive` (unfiltered, like `ActiveShell` above);
+ * `buildTree()` groups by `block_id` client-side. Unlike Shell, a job stays
+ * visible whether `enabled` or paused — Phase 2's scope is "does this agent
+ * have a recurring job", not just "is it firing right now". See
+ * SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20 Phase 2.
+ */
+export interface ActiveCron {
+    id: string;
+    block_id: string;
+    name: string;
+    expression: string;
+    target: string;
+    created_by: string;
+    enabled: boolean;
+    last_fired: number | null;
+    fire_count: number;
+    max_fires: number | null;
+    next_fire: string | null;
+}
+
+/**
  * Mirrors the backend's `AgentDispatch` (one per Agent-tool-or-Workflow-tool
  * call). Only Workflow-kind dispatches get their own tree row
  * (`WorkflowDispatch`, below) — a Solo-kind dispatch's one member renders as
@@ -165,6 +188,10 @@ export interface AgentTreeNode {
      *  (SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20 Phase 1). Sorted
      *  newest-first, same convention as the other two buckets. */
     shellRows: ActiveShell[];
+    /** One row per cron job this agent created (SPEC_SWARM_LONG_RUNNING_
+     *  PROCESS_ROWS_2026_07_20 Phase 2), enabled or paused. Sorted
+     *  newest-first by `last_fired` (nulls — never fired — last). */
+    cronRows: ActiveCron[];
 }
 
 /**
@@ -225,6 +252,19 @@ export function buildShellRows(shells: ActiveShell[], blockId: string | null): A
     return shells
         .filter((s) => s.block_id === blockId)
         .sort((a, b) => b.started_at - a.started_at);
+}
+
+/**
+ * Build one block's Cron bucket rows (SPEC_SWARM_LONG_RUNNING_PROCESS_
+ * ROWS_2026_07_20 Phase 2) — every cron job whose `block_id` matches,
+ * newest-last-fired-first; a job that has never fired sorts last (nulls
+ * carry no recency signal). Extracted as a pure function for the same
+ * reason as `buildShellRows` — directly unit-testable, no ViewModel needed.
+ */
+export function buildCronRows(crons: ActiveCron[], blockId: string | null): ActiveCron[] {
+    return crons
+        .filter((c) => c.block_id === blockId)
+        .sort((a, b) => (b.last_fired ?? -1) - (a.last_fired ?? -1));
 }
 
 /**
@@ -608,6 +648,13 @@ export class SwarmViewModel implements ViewModel {
     shellsAtom: Accessor<ActiveShell[]> = this._shells[0];
     private setShells: Setter<ActiveShell[]> = this._shells[1];
 
+    // Cron jobs (SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20 Phase 2) —
+    // fetched separately via cron.ListActive; buildTree() groups by
+    // block_id the same way it does for shells above.
+    private _crons = createSignal<ActiveCron[]>([]);
+    cronsAtom: Accessor<ActiveCron[]> = this._crons[0];
+    private setCrons: Setter<ActiveCron[]> = this._crons[1];
+
     // AgentDispatches (SPEC §5) — one per Agent-tool-or-Workflow-tool call.
     // Fetched separately from subagentsAtom via subagent.ListDispatches;
     // buildTree() cross-references the two by dispatch_id/parent_block_id.
@@ -711,6 +758,11 @@ export class SwarmViewModel implements ViewModel {
     private loadShellsDebounceTimer: ReturnType<typeof setTimeout> | undefined;
     private static readonly LOAD_SHELLS_DEBOUNCE_MS = 150;
 
+    // Same debounce shape as loadShellsDebounceTimer above, for cron_changed
+    // bursts (e.g. several jobs firing close together).
+    private loadCronsDebounceTimer: ReturnType<typeof setTimeout> | undefined;
+    private static readonly LOAD_CRONS_DEBOUNCE_MS = 150;
+
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
         this.nodeModel = nodeModel;
@@ -785,6 +837,15 @@ export class SwarmViewModel implements ViewModel {
         });
         if (unsubShellChunk) this.unsubs.push(unsubShellChunk);
 
+        // Cron bucket (SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20 Phase 2).
+        // Payload-free — any create/fire/pause/resume/delete just triggers a
+        // full reload of the (already-cheap, unfiltered) active list.
+        const unsubCronChanged = waveEventSubscribe({
+            eventType: "cron_changed",
+            handler: () => this.scheduleLoadCrons(),
+        });
+        if (unsubCronChanged) this.unsubs.push(unsubCronChanged);
+
         // Patch display_name in place (not a full loadSubagents() reload) so
         // every client watching this session picks up a generated name —
         // not just the one whose expand click triggered subagent.GenerateName.
@@ -845,6 +906,7 @@ export class SwarmViewModel implements ViewModel {
                 this.loadSubagents(),
                 this.loadDispatches(),
                 this.loadShells(),
+                this.loadCrons(),
             ]);
             this.pruneRetiredRowKeys();
         } finally {
@@ -891,6 +953,15 @@ export class SwarmViewModel implements ViewModel {
         }
     };
 
+    loadCrons = async (): Promise<void> => {
+        try {
+            const result = await callBackendService("cron", "ListActive", []);
+            this.setCrons((result as ActiveCron[]) ?? []);
+        } catch {
+            // silently ignore
+        }
+    };
+
     // Coalesces a burst of subagent:spawned/subagent:completed/dispatch:
     // updated events (e.g. a backfill scan on pane reopen, or a large
     // workflow dispatch spawning many members at once) into a single
@@ -916,6 +987,17 @@ export class SwarmViewModel implements ViewModel {
             this.loadShellsDebounceTimer = undefined;
             void this.loadShells();
         }, SwarmViewModel.LOAD_SHELLS_DEBOUNCE_MS);
+    };
+
+    // Coalesces a burst of cron_changed events into a single reload.
+    scheduleLoadCrons = (): void => {
+        if (this.loadCronsDebounceTimer !== undefined) {
+            clearTimeout(this.loadCronsDebounceTimer);
+        }
+        this.loadCronsDebounceTimer = setTimeout(() => {
+            this.loadCronsDebounceTimer = undefined;
+            void this.loadCrons();
+        }, SwarmViewModel.LOAD_CRONS_DEBOUNCE_MS);
     };
 
     /** Drop `_retiredRowKeys` entries for rows no longer present in live
@@ -1086,6 +1168,7 @@ export class SwarmViewModel implements ViewModel {
         const subagents = this.subagentsAtom();
         const dispatches = this.dispatchesAtom();
         const shells = this.shellsAtom();
+        const crons = this.cronsAtom();
         const statuses = this.agentStatusesAtom();
 
         // Include parent block IDs from subagents as fallback for agent panes
@@ -1125,6 +1208,7 @@ export class SwarmViewModel implements ViewModel {
             const agentToolRows = filterRetired(rawAgentToolRows, retired, (s) => subagentRowKey(s.agent_id), (s) => s.last_event_at);
             const visibleWorkflowRows = filterRetired(workflowRows, retired, (w) => w.dispatchId, (w) => w.lastEventAt);
             const shellRows = buildShellRows(shells, blockId);
+            const cronRows = buildCronRows(crons, blockId);
             return {
                 blockId,
                 agentName,
@@ -1135,6 +1219,7 @@ export class SwarmViewModel implements ViewModel {
                 agentToolRows,
                 workflowRows: visibleWorkflowRows,
                 shellRows,
+                cronRows,
             };
         });
 
@@ -1155,6 +1240,10 @@ export class SwarmViewModel implements ViewModel {
         if (this.loadShellsDebounceTimer !== undefined) {
             clearTimeout(this.loadShellsDebounceTimer);
             this.loadShellsDebounceTimer = undefined;
+        }
+        if (this.loadCronsDebounceTimer !== undefined) {
+            clearTimeout(this.loadCronsDebounceTimer);
+            this.loadCronsDebounceTimer = undefined;
         }
         for (const detail of this.dispatchDetailCache.values()) detail.dispose();
         this.dispatchDetailCache.clear();

@@ -324,7 +324,7 @@ mod recent_sessions_tests {
             filestore: filestore.clone(),
             global_transcript_store: None,
             event_bus: event_bus.clone(),
-            broker,
+            broker: broker.clone(),
             reactive_handler,
             poller,
             config_watcher,
@@ -356,6 +356,7 @@ mod recent_sessions_tests {
                 reqwest::Client::new(),
                 String::new(),
                 "test".to_string(),
+                broker,
             ),
             editor_file_watcher: None,
         };
@@ -635,7 +636,7 @@ mod recent_sessions_tests {
             filestore: filestore.clone(),
             global_transcript_store: None,
             event_bus: event_bus.clone(),
-            broker,
+            broker: broker.clone(),
             reactive_handler,
             poller,
             config_watcher,
@@ -667,6 +668,7 @@ mod recent_sessions_tests {
                 reqwest::Client::new(),
                 String::new(),
                 "test".to_string(),
+                broker,
             ),
             editor_file_watcher: None,
         };

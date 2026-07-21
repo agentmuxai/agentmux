@@ -89,6 +89,11 @@
     --error-color: rgb(229, 77, 46);
     --warning-color: rgb(224, 185, 86);
     --success-color: rgb(78, 154, 6);
+    // Fourth semantic tone — used by the Swarm pane's Cron bucket
+    // (SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20 Phase 2) to stay
+    // visually distinct from Agent Tool (accent/blue), Workflow (warning/
+    // yellow), and Shell (success/green).
+    --info-color: rgb(155, 108, 224);
     --hover-bg-color: rgba(255, 255, 255, 0.1);
     --block-bg-color: rgba(0, 0, 0, 0.5);
     --block-bg-solid-color: rgb(0, 0, 0);
