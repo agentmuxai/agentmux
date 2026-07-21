@@ -225,15 +225,16 @@ pub enum SpawnGateError {
 impl std::fmt::Display for SpawnGateError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            // The quoted toggle name must match AgentIdentityModal.tsx's
-            // label VERBATIM so users can find it (reagent P2, PR #2164
-            // round 2).
+            // "Bind an account in the Armory" is now the ONLY path — the
+            // ambient/"use global CLI login" opt-in this used to also
+            // suggest was retired (PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_
+            // 2026_07_20.md §7): it let a credential the app couldn't
+            // attribute to any account run indefinitely, invisible to
+            // Armory. Don't point users at a toggle that no longer works.
             SpawnGateError::MissingCredentials { provider } => write!(
                 f,
                 "no credentials for {}: the bound account was deleted or is \
-                 unresolvable. Bind an account in the Armory, or enable \
-                 \"Use global CLI login when no account is bound\" in this \
-                 agent's settings.",
+                 unresolvable. Bind an account for this provider in the Armory.",
                 provider,
             ),
             SpawnGateError::InjectionUnavailable { detail } => write!(
@@ -682,35 +683,36 @@ pub fn inject_identity_env_with_broker(
     let mut injected_oauth: std::collections::HashSet<String> =
         std::collections::HashSet::new();
 
-    // Gate helper for an unresolvable oauth-class binding/provider.
-    // Returns Ok(()) when the agent opted into ambient (caller skips the
-    // binding), Err(SpawnGateError) otherwise (caller aborts the spawn).
+    // Gate helper for an unresolvable oauth-class binding/provider. Always
+    // blocks the spawn — an oauth-class provider must resolve to a real
+    // bound IdentityAccount, full stop.
+    //
+    // `use_ambient_login` used to let this fall through to the user's
+    // global/ambient CLI login instead of blocking. That escape hatch is
+    // retired (PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md §7,
+    // "single point, not global"): a credential the app can't attribute to
+    // a specific Armory account is exactly the state that left Marks
+    // silently working with an untracked, unrefreshed shared-dir credential
+    // and no visible account anywhere in Armory. `use_ambient` is kept as a
+    // parameter (read below only for the log line) rather than deleted
+    // outright, so the still-live `use_ambient_login` DB column and its
+    // callers don't need a synchronized migration to compile — it no longer
+    // has any effect on the outcome.
     let gate_oauth_failure = |provider: &str, detail: &str| -> Result<(), SpawnGateError> {
-        if use_ambient {
-            tracing::info!(
-                target: "identity",
-                "identity.spawn.ambient: using global CLI login (per-agent opt-in) — \
-                 provider {}, definition {} ({})",
-                provider,
-                instance.definition_id,
-                detail,
-            );
-            Ok(())
-        } else {
-            tracing::warn!(
-                target: "identity",
-                "identity.spawn.blocked: no credentials for provider {} \
-                 (definition {}, identity {}) — {}; spawn refused \
-                 (use_ambient_login=false)",
-                provider,
-                instance.definition_id,
-                instance.identity_id,
-                detail,
-            );
-            Err(SpawnGateError::MissingCredentials {
-                provider: provider.to_string(),
-            })
-        }
+        tracing::warn!(
+            target: "identity",
+            "identity.spawn.blocked: no credentials for provider {} \
+             (definition {}, identity {}) — {}; spawn refused \
+             (single-point enforcement — use_ambient_login={}, ignored)",
+            provider,
+            instance.definition_id,
+            instance.identity_id,
+            detail,
+            use_ambient,
+        );
+        Err(SpawnGateError::MissingCredentials {
+            provider: provider.to_string(),
+        })
     };
 
     for binding in &bindings {
@@ -1273,16 +1275,17 @@ mod tests {
         // wording) — pin the load-bearing pieces.
         let msg = res.unwrap_err().to_string();
         assert!(msg.contains("no credentials for claude"), "got: {msg}");
-        assert!(msg.contains("Armory"), "got: {msg}");
-        assert!(msg.contains("Use global CLI login when no account is bound"), "got: {msg}");
+        assert!(msg.contains("Bind an account for this provider in the Armory"), "got: {msg}");
     }
 
     #[test]
-    fn spawn_proceeds_ambient_when_bound_oauth_account_missing_and_flag_true() {
-        // Spec §2.5 test 2: binding → missing account → flag true → no
-        // injection + spawn proceeds (the sanctioned ambient path; the
-        // `identity.spawn.ambient:` info line is asserted-by-return-value
-        // here since this codebase has no tracing capture).
+    fn spawn_still_blocked_when_bound_oauth_account_missing_and_flag_true() {
+        // Was spawn_proceeds_ambient_when_bound_oauth_account_missing_and_flag_true
+        // — the ambient opt-in it exercised is retired
+        // (PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md §7). A missing
+        // account now blocks the spawn unconditionally; `use_ambient_login`
+        // no longer changes the outcome. This test pins that the flag is
+        // truly inert, not just untested.
         let store = make_store();
         let mut def = gate_def(1);
         store.agent_def_insert(&mut def).unwrap();
@@ -1305,11 +1308,12 @@ mod tests {
         store.instance_create(&inst).unwrap();
 
         let mut env: HashMap<String, String> = HashMap::new();
-        inject_identity_env(store.clone(), store, "block-gate-2", &mut env).unwrap();
+        let res = inject_identity_env(store.clone(), store, "block-gate-2", &mut env);
 
-        // No config dir injected — the CLI uses its global login, by
-        // explicit opt-in, never silently.
-        assert!(env.get("CLAUDE_CONFIG_DIR").is_none());
+        assert_eq!(
+            res,
+            Err(SpawnGateError::MissingCredentials { provider: "claude".to_string() }),
+        );
         assert!(env.is_empty());
     }
 
@@ -1432,7 +1436,11 @@ mod tests {
             slug: String::new(),
             name: "T".to_string(),
             icon: "✦".to_string(),
-            provider: "claude".to_string(),
+            // Not oauth-class (§4.3) — the layer-3 gate only applies to
+            // claude/codex/openclaw definitions, so a non-oauth def here
+            // keeps this test focused on the api-key round trip below
+            // without a claude account fixture it doesn't otherwise need.
+            provider: "kimi".to_string(),
             description: String::new(),
             working_directory: String::new(),
             shell: String::new(),
@@ -1453,11 +1461,7 @@ mod tests {
             container_image: String::new(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
-            // Ambient opt-in: this test exercises api-key / zero-link behavior,
-            // not the layer-3 oauth gate. The def provider (claude) has no
-            // oauth binding here, so without the opt-in the gate would
-            // block the spawn (covered by the spawn_blocked_* tests).
-            use_ambient_login: 1,
+            use_ambient_login: 0,
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1517,7 +1521,9 @@ mod tests {
             slug: String::new(),
             name: "T".to_string(),
             icon: "✦".to_string(),
-            provider: "claude".to_string(),
+            // Not oauth-class (§4.3) — see the identical note in
+            // inject_full_round_trip_plaintext_dev above.
+            provider: "kimi".to_string(),
             description: String::new(),
             working_directory: String::new(),
             shell: String::new(),
@@ -1538,11 +1544,7 @@ mod tests {
             container_image: String::new(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
-            // Ambient opt-in: this test exercises api-key / zero-link behavior,
-            // not the layer-3 oauth gate. The def provider (claude) has no
-            // oauth binding here, so without the opt-in the gate would
-            // block the spawn (covered by the spawn_blocked_* tests).
-            use_ambient_login: 1,
+            use_ambient_login: 0,
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1582,7 +1584,11 @@ mod tests {
             slug: String::new(),
             name: "T".to_string(),
             icon: "✦".to_string(),
-            provider: "claude".to_string(),
+            // Not oauth-class (§4.3) — this test targets the zero-direct-
+            // links path itself, which is a distinct concern from the
+            // layer-3 oauth gate (covered separately by the spawn_blocked_*
+            // tests below).
+            provider: "kimi".to_string(),
             description: String::new(),
             working_directory: String::new(),
             shell: String::new(),
@@ -1603,11 +1609,7 @@ mod tests {
             container_image: String::new(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
-            // Ambient opt-in: this test exercises api-key / zero-link behavior,
-            // not the layer-3 oauth gate. The def provider (claude) has no
-            // oauth binding here, so without the opt-in the gate would
-            // block the spawn (covered by the spawn_blocked_* tests).
-            use_ambient_login: 1,
+            use_ambient_login: 0,
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1647,7 +1649,9 @@ mod tests {
             slug: String::new(),
             name: "T".to_string(),
             icon: "✦".to_string(),
-            provider: "claude".to_string(),
+            // Not oauth-class (§4.3) — same rationale as
+            // inject_no_direct_links_injects_nothing above.
+            provider: "kimi".to_string(),
             description: String::new(),
             working_directory: String::new(),
             shell: String::new(),
@@ -1668,11 +1672,7 @@ mod tests {
             container_image: String::new(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
-            // Ambient opt-in: this test exercises api-key / zero-link behavior,
-            // not the layer-3 oauth gate. The def provider (claude) has no
-            // oauth binding here, so without the opt-in the gate would
-            // block the spawn (covered by the spawn_blocked_* tests).
-            use_ambient_login: 1,
+            use_ambient_login: 0,
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1721,7 +1721,10 @@ mod tests {
             slug: String::new(),
             name: "T".to_string(),
             icon: "✦".to_string(),
-            provider: "claude".to_string(),
+            // Not oauth-class (§4.3) — this test targets partial-success
+            // skip behavior across api-key bindings, unrelated to the
+            // layer-3 oauth gate.
+            provider: "kimi".to_string(),
             description: String::new(),
             working_directory: String::new(),
             shell: String::new(),
@@ -1742,11 +1745,7 @@ mod tests {
             container_image: String::new(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
-            // Ambient opt-in: this test exercises api-key / zero-link behavior,
-            // not the layer-3 oauth gate. The def provider (claude) has no
-            // oauth binding here, so without the opt-in the gate would
-            // block the spawn (covered by the spawn_blocked_* tests).
-            use_ambient_login: 1,
+            use_ambient_login: 0,
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1800,7 +1799,9 @@ mod tests {
             slug: String::new(),
             name: "T".to_string(),
             icon: "✦".to_string(),
-            provider: "claude".to_string(),
+            // Not oauth-class (§4.3) — this test targets the unknown-
+            // provider skip path, unrelated to the layer-3 oauth gate.
+            provider: "kimi".to_string(),
             description: String::new(),
             working_directory: String::new(),
             shell: String::new(),
@@ -1821,11 +1822,7 @@ mod tests {
             container_image: String::new(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
-            // Ambient opt-in: this test exercises api-key / zero-link behavior,
-            // not the layer-3 oauth gate. The def provider (claude) has no
-            // oauth binding here, so without the opt-in the gate would
-            // block the spawn (covered by the spawn_blocked_* tests).
-            use_ambient_login: 1,
+            use_ambient_login: 0,
         };
         store.agent_def_insert(&mut def).unwrap();
 

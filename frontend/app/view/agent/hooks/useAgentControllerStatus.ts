@@ -39,8 +39,9 @@ import { RpcApi } from "@/app/store/rpc-api";
 import * as WOS from "@/app/store/wos";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { runLaunchFlow } from "../flows/launch-flow";
-import { forceProviderLogin } from "../flows/force-login";
-import { seedGlobalLogin } from "../flows/seed-global-login";
+import { runProviderLogin } from "../flows/run-provider-login";
+import { pollForGlobalLoginSeed } from "../flows/seed-global-login";
+import { ensureAccountDir, persistSeededAccount, registerSeededAccount } from "../flows/register-seeded-account";
 import type { ProviderDefinition } from "../providers";
 
 import type { LogFn } from "../types";
@@ -110,8 +111,9 @@ export interface UseAgentControllerStatus {
      * Open a real terminal window (CREATE_NEW_CONSOLE on Windows) running the
      * provider's login command so the OS can open the browser — the piped/PTY
      * paths that `runCliLogin` uses are headless and block the browser. After
-     * spawning, polls `seedGlobalLogin` every 5s for up to 5 minutes; seeds
-     * the isolated dir as soon as credentials appear.
+     * spawning, polls every 5s for up to 5 minutes; once credentials appear,
+     * seeds a real per-account isolated dir and registers/links the account
+     * (not just a file — PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md §7).
      */
     loginViaTerminal: () => Promise<void>;
     cancelLogin: () => void;
@@ -278,9 +280,10 @@ export function useAgentControllerStatus(
         }
         setAuthNotice(null);
         // Clear any OAuth URL box left by a PRIOR attempt before starting a
-        // fresh one — otherwise a subsequent "no-url" outcome would stack the
-        // error notice below a stale, contradictory URL box (reagent P2).
+        // fresh one — otherwise a subsequent no-progress outcome would stack
+        // the error notice below a stale, contradictory URL box (reagent P2).
         setAuthUrl(null);
+        loginCancelled = false;
         // The CLI path + auth env are written to block meta at launch; reuse
         // them instead of re-resolving (the agent is already running, so the
         // CLI is installed). If `cmd` is missing, resolve it directly — see
@@ -295,15 +298,53 @@ export function useAgentControllerStatus(
                 if (!cliPath) return;
             }
             const authEnv = await recoveryAuthEnv(prov);
-            const outcome = await forceProviderLogin({ provider: prov, cliPath, authEnv, setAuthUrl, log: opts.log });
-            if (outcome === "no-url") {
-                // Never fail silently (retro §5.1): tell the user nothing
-                // opened and point at the recovery paths that do work.
-                setAuthNotice(
-                    "Couldn't start a browser login — the CLI didn't produce a login URL, so nothing was opened. " +
-                    "Use “Login via terminal” to complete the login in a real terminal window" +
-                    (prov.id === "claude" ? ", or “Use existing login” to copy your global Claude login into this agent." : "."),
-                );
+            // runProviderLogin falls through URL-capture -> global-login-copy ->
+            // real-terminal-with-poll before giving up (retro-headless-login-
+            // browser-open-2026-07-20) — "Login Again" used to dead-end the
+            // instant the CLI produced no URL, which is every time for Claude
+            // Code v2.1.x. linkTarget lets a tier-2/3 success register a real
+            // Armory account and bind it to THIS agent (single-point
+            // enforcement, PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md
+            // §7) instead of just seeding a file nothing tracks.
+            const agentDefinitionId = getBlockMetaKeyAtom(opts.blockId, "agentId")() as string | undefined;
+            const outcome = await runProviderLogin({
+                provider: prov,
+                cliPath,
+                authEnv,
+                setAuthUrl,
+                log: opts.log,
+                isCancelled: () => loginCancelled,
+                linkTarget: agentDefinitionId
+                    ? { blockId: opts.blockId, agentDefinitionId }
+                    : undefined,
+            });
+            switch (outcome) {
+                case "opened":
+                    break;
+                case "seeded":
+                    opts.log("auth", "Signed in from your global login — retrying…");
+                    setAuthNotice(null);
+                    opts.onRecovered?.();
+                    break;
+                case "terminal-success":
+                    opts.log("auth", "Login successful — retrying…");
+                    setAuthNotice(null);
+                    opts.onRecovered?.();
+                    break;
+                case "terminal-timeout":
+                    // Never fail silently (retro §5.1): tell the user nothing
+                    // completed and point at the recovery path that's left.
+                    setAuthNotice(
+                        "Opened a terminal window for login, but no login was detected within 5 minutes. " +
+                        "Complete the login there, then click “Use existing login”.",
+                    );
+                    break;
+                case "terminal-unavailable":
+                    setAuthNotice(
+                        "Couldn't start a browser login or open a terminal window on this platform." +
+                        (prov.id === "claude" ? " Try “Use existing login” if you're already signed in elsewhere." : ""),
+                    );
+                    break;
             }
         } catch (err: any) {
             const msg = `Re-login failed: ${err?.message ?? String(err)}`;
@@ -330,17 +371,46 @@ export function useAgentControllerStatus(
         setAuthNotice(null);
         seedInFlight = true;
         try {
-            // Seed into the agent's RESOLVED auth dir (from cmd:env), not a
-            // guessed one; the host guards it to ~/.agentmux so the seed never
-            // writes the user's ~/.claude (SPEC_PROVIDER_ISOLATION §4.5).
-            const envMeta = getBlockMetaKeyAtom(opts.blockId, "cmd:env")();
-            let configDir: string | undefined;
-            if (prov.authConfigDirEnvVar && envMeta && typeof envMeta === "object") {
-                const v = (envMeta as Record<string, unknown>)[prov.authConfigDirEnvVar];
-                if (typeof v === "string") configDir = v;
-            }
-            const seeded = await seedGlobalLogin(prov.id, opts.log, configDir);
-            if (seeded) {
+            // Mint a REAL per-account isolated dir and persist an
+            // IdentityAccount row — not just a seed into whatever dir was
+            // already resolved. The resolver's spawn gate now requires a
+            // real bound account for oauth-class providers, no ambient
+            // exception (PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md
+            // §7), so a bare file-copy into the old shared/resolved dir
+            // would leave this agent blocked on its next turn regardless of
+            // how valid the credential file itself is.
+            const reg = await registerSeededAccount(prov.id, opts.log);
+            if (reg.ok && reg.accountId && reg.dir) {
+                const agentDefinitionId = getBlockMetaKeyAtom(opts.blockId, "agentId")() as string | undefined;
+                if (agentDefinitionId) {
+                    try {
+                        await RpcApi.LinkAgentIdentityCommand(TabRpcClient, {
+                            agent_id: agentDefinitionId,
+                            account_id: reg.accountId,
+                            provider: prov.id,
+                        });
+                        if (prov.authConfigDirEnvVar) {
+                            const envMeta = getBlockMetaKeyAtom(opts.blockId, "cmd:env")();
+                            const prevEnv: Record<string, string> = {};
+                            if (envMeta && typeof envMeta === "object") {
+                                for (const [k, v] of Object.entries(envMeta as Record<string, unknown>)) {
+                                    if (typeof v === "string") prevEnv[k] = v;
+                                }
+                            }
+                            const oref = WOS.makeORef("block", opts.blockId);
+                            await RpcApi.SetMetaCommand(TabRpcClient, {
+                                oref,
+                                meta: { "cmd:env": { ...prevEnv, [prov.authConfigDirEnvVar]: reg.dir } },
+                            });
+                        }
+                    } catch (e: any) {
+                        opts.log(
+                            "auth",
+                            `account created but couldn't be linked to this agent: ${e?.message ?? String(e)}`,
+                            "warn",
+                        );
+                    }
+                }
                 // Credential is now valid on disk — but the agent spawns fresh
                 // per turn and the failure row only clears on the next turn, so
                 // a successful seed looks like it "did nothing". Drive the
@@ -390,11 +460,20 @@ export function useAgentControllerStatus(
                 if (!cliPath) return;
             }
             const authEnv = await recoveryAuthEnv(prov);
-            const configDir = prov.authConfigDirEnvVar ? authEnv[prov.authConfigDirEnvVar] : undefined;
+
+            // Mint a real per-account isolated dir to seed into — not the
+            // agent's already-resolved dir, which (for an unlinked/ambient
+            // agent) is the shared default dir the resolver's spawn gate no
+            // longer honors (PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md
+            // §7). Falls back to the resolved dir only if minting fails, so
+            // this button still does SOMETHING rather than hard-erroring.
+            const minted = prov.id === "claude" ? await ensureAccountDir(prov.id, opts.log) : null;
+            const configDir = minted?.dir
+                ?? (prov.authConfigDirEnvVar ? authEnv[prov.authConfigDirEnvVar] : undefined);
 
             // Strip CLAUDE_CONFIG_DIR (and equivalents) from the terminal env so the
             // login writes to the user's global ~/.claude instead of the isolated dir.
-            // seedGlobalLogin polls the global dir and copies on success — if we kept
+            // The poll below watches the global dir and copies on success — if we kept
             // the isolated dir key the poll would look in global but the creds would
             // land in isolated, and a terminal-fresh login would never be detected.
             const terminalEnv: Record<string, string> = { ...authEnv };
@@ -403,18 +482,33 @@ export function useAgentControllerStatus(
             await getApi().openLoginTerminal(cliPath, prov.authLoginCommand, terminalEnv);
             opts.log("auth", "A terminal window opened — complete the login there, then come back.");
 
-            // Poll silently every 5s for up to 5 minutes; seed on first hit.
-            const POLL_MS = 5_000;
-            const TIMEOUT_MS = 5 * 60 * 1_000;
-            const deadline = performance.now() + TIMEOUT_MS;
-            const silentLog: typeof opts.log = () => {};
-            let seeded = false;
-            while (!seeded && performance.now() < deadline && !loginCancelled) {
-                await new Promise<void>((r) => setTimeout(r, POLL_MS));
-                if (loginCancelled) break;
-                seeded = await seedGlobalLogin(prov.id, silentLog, configDir);
-            }
+            const seeded = await pollForGlobalLoginSeed(prov.id, configDir, () => loginCancelled);
             if (seeded) {
+                if (minted && (await persistSeededAccount(prov.id, minted.accountId, minted.dir, opts.log))) {
+                    const agentDefinitionId = getBlockMetaKeyAtom(opts.blockId, "agentId")() as string | undefined;
+                    if (agentDefinitionId) {
+                        try {
+                            await RpcApi.LinkAgentIdentityCommand(TabRpcClient, {
+                                agent_id: agentDefinitionId,
+                                account_id: minted.accountId,
+                                provider: prov.id,
+                            });
+                            if (prov.authConfigDirEnvVar) {
+                                const oref = WOS.makeORef("block", opts.blockId);
+                                await RpcApi.SetMetaCommand(TabRpcClient, {
+                                    oref,
+                                    meta: { "cmd:env": { ...authEnv, [prov.authConfigDirEnvVar]: minted.dir } },
+                                });
+                            }
+                        } catch (e: any) {
+                            opts.log(
+                                "auth",
+                                `account created but couldn't be linked to this agent: ${e?.message ?? String(e)}`,
+                                "warn",
+                            );
+                        }
+                    }
+                }
                 opts.log("auth", "Login successful — retrying…");
                 setAuthNotice(null);
                 opts.onRecovered?.();
