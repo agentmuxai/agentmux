@@ -217,13 +217,29 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             originBlockId: model.blockId,
             initialFormState: suggestedLabel ? ({ instanceName: suggestedLabel } as Partial<LaunchFormStateWire>) : undefined,
             onSubmit: async (overrides: LaunchOverrides) => {
+                // Review finding: this check must run BEFORE
+                // ForkAgentDefinitionCommand — resolving it after would let
+                // a failed lookup return silently (no cleanup, no error)
+                // with the real forked AgentDefinition already created and
+                // never launched or surfaced anywhere, and the modal's
+                // onSubmit promise resolving as if the fork succeeded.
+                const layoutModel = getLayoutModelForStaticTab();
+                const myNode = layoutModel.getNodeByBlockId(model.blockId);
+                if (!myNode) {
+                    pushNotification({
+                        icon: "fa-triangle-exclamation",
+                        title: "Fork failed",
+                        message: "Could not find this pane in the layout — try again after the pane finishes loading.",
+                        timestamp: new Date().toISOString(),
+                        type: "error",
+                        expiration: Date.now() + 8000,
+                    });
+                    return;
+                }
                 const forkedDef = await RpcApi.ForkAgentDefinitionCommand(TabRpcClient, {
                     source_id: agentId,
                     branch_label: overrides.instanceName,
                 });
-                const layoutModel = getLayoutModelForStaticTab();
-                const myNode = layoutModel.getNodeByBlockId(model.blockId);
-                if (!myNode) return;
                 // Create the new block without placing it anywhere — it's
                 // going onto THIS pane's stack, not its own tile. See
                 // pane.open's skip_placement + layoutStack.ts's

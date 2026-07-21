@@ -382,11 +382,16 @@ export class AgentViewModel implements ViewModel {
             cliArgs.push(...agent.provider_flags.split(/\s+/).filter(Boolean));
         }
         // In-pane tabs, Phase 4 — see LaunchOverrides.forkSession's own doc
-        // comment. Gated on the provider actually having a resume flag: a
-        // provider with none has no fork-session concept either, so this
-        // silently no-ops for it (graceful "fresh definition, fresh start"
-        // fallback per SPEC_AGENT_PANE_FORKS_AND_AUX_PINS_2026_06_15 §6.4).
-        if (overrides?.forkSession && provider.resumeFlag) {
+        // comment. Review finding: `--fork-session` is Claude Code CLI
+        // syntax, validated ONLY for Claude
+        // (SPEC_AGENT_PANE_FORKS_AND_AUX_PINS_2026_06_15 §6.4's empirical
+        // gate) — gating on "any provider with a resumeFlag" wrongly also
+        // matched gemini (`-r`) and muxcode (`--resume`), passing an
+        // unsupported flag to CLIs that were never validated to accept it.
+        // Every other provider (including those two) silently falls back
+        // to "fork = fresh definition, fresh start" — no flag, no error,
+        // exactly the graceful fallback §6.4 called for.
+        if (overrides?.forkSession && provider.id === "claude") {
             cliArgs.push("--fork-session");
         }
 
