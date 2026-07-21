@@ -75,8 +75,19 @@ fn is_valid_probe(bytes: &[u8]) -> bool {
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(bytes) else {
         return false;
     };
-    value.get("type").and_then(|t| t.as_str()) == Some(UDP_PROBE_TYPE)
-        && value.get("v").and_then(|v| v.as_u64()) == Some(UDP_PROTOCOL_VERSION)
+    value.get("type").and_then(|t| t.as_str()) == Some(UDP_PROBE_TYPE) && is_probe_version_match(&value)
+}
+
+/// Match the probe's `v` field against `UDP_PROTOCOL_VERSION`, accepting
+/// either JSON integer or float encoding. Some JSON serializers (e.g. a
+/// client whose numeric type is inferred as `double`) emit a whole number
+/// like `1` as `1.0`; `Value::as_u64()` alone returns `None` for that
+/// representation, which would silently drop an otherwise-conformant probe.
+fn is_probe_version_match(value: &serde_json::Value) -> bool {
+    let Some(v) = value.get("v") else {
+        return false;
+    };
+    v.as_u64() == Some(UDP_PROTOCOL_VERSION) || v.as_f64() == Some(UDP_PROTOCOL_VERSION as f64)
 }
 
 /// Trust-boundary check for the UDP responder: is `addr` reachable only from
@@ -820,6 +831,20 @@ mod tests {
     #[test]
     fn is_valid_probe_rejects_wrong_version() {
         let bytes = serde_json::to_vec(&json!({"type": UDP_PROBE_TYPE, "v": 2})).unwrap();
+        assert!(!is_valid_probe(&bytes));
+    }
+
+    #[test]
+    fn is_valid_probe_accepts_version_encoded_as_float() {
+        // A client whose JSON serializer infers a `double` type for the
+        // version field emits `1.0` rather than `1` — both must validate.
+        let bytes = serde_json::to_vec(&json!({"type": UDP_PROBE_TYPE, "v": 1.0})).unwrap();
+        assert!(is_valid_probe(&bytes));
+    }
+
+    #[test]
+    fn is_valid_probe_rejects_version_encoded_as_non_integral_float() {
+        let bytes = serde_json::to_vec(&json!({"type": UDP_PROBE_TYPE, "v": 1.5})).unwrap();
         assert!(!is_valid_probe(&bytes));
     }
 
