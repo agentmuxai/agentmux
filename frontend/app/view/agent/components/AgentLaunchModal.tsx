@@ -75,9 +75,11 @@ export interface LaunchOverrides {
      *  to the spawned CLI's args so it inherits history up to the resume
      *  point and then diverges with a NEW session id, instead of continuing
      *  the same session (which `continueSessionId` alone would do). Only
-     *  applied when the provider actually has a `resumeFlag` — providers
-     *  with no resume mechanism naturally fall back to "fork = fresh
-     *  definition, fresh start" by simply not getting the flag. */
+     *  applied for the Claude provider specifically — the only one
+     *  `--fork-session` was ever validated against
+     *  (SPEC_AGENT_PANE_FORKS_AND_AUX_PINS_2026_06_15 §6.4). Every other
+     *  provider naturally falls back to "fork = fresh definition, fresh
+     *  start" by simply not getting the flag. */
     forkSession?: boolean;
 }
 
