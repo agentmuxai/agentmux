@@ -856,6 +856,18 @@ mod tests {
     }
 
     #[test]
+    fn is_valid_probe_rejects_missing_version_field() {
+        let bytes = serde_json::to_vec(&json!({"type": UDP_PROBE_TYPE})).unwrap();
+        assert!(!is_valid_probe(&bytes));
+    }
+
+    #[test]
+    fn is_valid_probe_rejects_missing_type_field() {
+        let bytes = serde_json::to_vec(&json!({"v": UDP_PROTOCOL_VERSION})).unwrap();
+        assert!(!is_valid_probe(&bytes));
+    }
+
+    #[test]
     fn probe_response_json_populates_all_fields() {
         let response = probe_response_json("inst-1", "myhost", "1.2.3", 9999, "secret-key");
         assert_eq!(response["type"], UDP_RESPONSE_TYPE);
