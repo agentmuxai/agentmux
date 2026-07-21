@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+    buildCronRows,
     buildDispatchBuckets,
     buildShellRows,
     filterRetired,
@@ -14,6 +15,7 @@ import {
     stabilizeGroupIdentity,
     subagentDisplayLabel,
     subagentRowKey,
+    type ActiveCron,
     type ActiveShell,
     type ActiveSubagent,
     type AgentDispatch,
@@ -27,6 +29,20 @@ function mkShell(overrides: Partial<ActiveShell> & Pick<ActiveShell, "shell_id" 
         title: "npm run dev",
         started_at: 0,
         line_count: 0,
+        ...overrides,
+    };
+}
+
+function mkCron(overrides: Partial<ActiveCron> & Pick<ActiveCron, "id" | "block_id">): ActiveCron {
+    return {
+        name: "nightly build",
+        expression: "0 9 * * *",
+        target: "target-agent",
+        created_by: "creator-agent",
+        enabled: true,
+        last_fired: null,
+        fire_count: 0,
+        max_fires: null,
         ...overrides,
     };
 }
@@ -545,5 +561,47 @@ describe("buildShellRows", () => {
     it("returns an empty array for a null blockId", () => {
         const shells = [mkShell({ shell_id: "s1", block_id: "block-a" })];
         expect(buildShellRows(shells, null)).toEqual([]);
+    });
+});
+
+describe("buildCronRows", () => {
+    it("keeps only cron jobs matching the given block_id", () => {
+        const crons = [
+            mkCron({ id: "c1", block_id: "block-a" }),
+            mkCron({ id: "c2", block_id: "block-b" }),
+            mkCron({ id: "c3", block_id: "block-a" }),
+        ];
+        const rows = buildCronRows(crons, "block-a");
+        expect(new Set(rows.map((r) => r.id))).toEqual(new Set(["c1", "c3"]));
+        expect(rows.every((r) => r.block_id === "block-a")).toBe(true);
+    });
+
+    it("sorts newest-last_fired-first", () => {
+        const crons = [
+            mkCron({ id: "old", block_id: "block-a", last_fired: 100 }),
+            mkCron({ id: "new", block_id: "block-a", last_fired: 300 }),
+            mkCron({ id: "mid", block_id: "block-a", last_fired: 200 }),
+        ];
+        const rows = buildCronRows(crons, "block-a");
+        expect(rows.map((r) => r.id)).toEqual(["new", "mid", "old"]);
+    });
+
+    it("sorts a never-fired (null last_fired) job last", () => {
+        const crons = [
+            mkCron({ id: "never", block_id: "block-a", last_fired: null }),
+            mkCron({ id: "fired", block_id: "block-a", last_fired: 100 }),
+        ];
+        const rows = buildCronRows(crons, "block-a");
+        expect(rows.map((r) => r.id)).toEqual(["fired", "never"]);
+    });
+
+    it("returns an empty array when no cron jobs match", () => {
+        const crons = [mkCron({ id: "c1", block_id: "block-a" })];
+        expect(buildCronRows(crons, "block-z")).toEqual([]);
+    });
+
+    it("returns an empty array for a null blockId", () => {
+        const crons = [mkCron({ id: "c1", block_id: "block-a" })];
+        expect(buildCronRows(crons, null)).toEqual([]);
     });
 });

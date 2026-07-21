@@ -23,6 +23,7 @@ use cron::Schedule;
 
 use crate::backend::storage::store::Store;
 use crate::backend::storage::cron::CronJob;
+use crate::backend::wps::{Broker, WaveEvent, EVENT_CRON_CHANGED};
 
 /// Abort handles for every currently scheduled cron task.
 type HandleMap = Mutex<HashMap<String, tokio::task::AbortHandle>>;
@@ -33,6 +34,7 @@ pub struct CronScheduler {
     http_client: reqwest::Client,
     local_url: String,
     auth_key: String,
+    broker: Arc<Broker>,
 }
 
 impl CronScheduler {
@@ -41,6 +43,7 @@ impl CronScheduler {
         http_client: reqwest::Client,
         local_url: String,
         auth_key: String,
+        broker: Arc<Broker>,
     ) -> Arc<Self> {
         Arc::new(Self {
             handles: Mutex::new(HashMap::new()),
@@ -48,7 +51,18 @@ impl CronScheduler {
             http_client,
             local_url,
             auth_key,
+            broker,
         })
+    }
+
+    fn publish_changed(&self) {
+        self.broker.publish(WaveEvent {
+            event: EVENT_CRON_CHANGED.to_string(),
+            scopes: vec![],
+            sender: String::new(),
+            persist: 0,
+            data: None,
+        });
     }
 
     /// Load all enabled jobs from the DB and schedule them. Call once at startup.
@@ -136,6 +150,7 @@ impl CronScheduler {
                             let _ = store.cron_set_enabled(&job_id, false);
                         }
                         sched.handles.lock().unwrap().remove(&job_id);
+                        sched.publish_changed();
                         break;
                     }
                 }
@@ -157,6 +172,7 @@ impl CronScheduler {
                             let _ = store.cron_set_enabled(&job_id, false);
                         }
                         sched.handles.lock().unwrap().remove(&job_id);
+                        sched.publish_changed();
                         break;
                     }
                 }
@@ -205,6 +221,7 @@ impl CronScheduler {
                 tracing::warn!(id, error = %e, "cron: failed to record fire in DB");
             }
         }
+        self.publish_changed();
     }
 }
 

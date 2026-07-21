@@ -1121,7 +1121,7 @@ async fn main() {
         filestore,
         global_transcript_store,
         event_bus,
-        broker,
+        broker: broker.clone(),
         reactive_handler,
         poller,
         config_watcher,
@@ -1177,6 +1177,7 @@ async fn main() {
             reqwest::Client::new(),
             local_web_url.clone(),
             config.auth_key.clone(),
+            Arc::clone(&broker),
         ),
         editor_file_watcher,
     };
