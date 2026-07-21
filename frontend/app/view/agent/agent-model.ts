@@ -144,7 +144,13 @@ export class AgentViewModel implements ViewModel {
             return [
                 {
                     elemtype: "iconbutton",
-                    icon: "id-card",
+                    // Same "vault" FontAwesome icon as the global Armory pane
+                    // (hamburger menu, failure-accessory banner) — visual
+                    // parity, since this opens the per-agent analogue of it
+                    // (AgentSetupModal: Accounts/Memories/MCP Servers/Skills
+                    // scoped to this one agent). Was "id-card"; same click
+                    // handler, icon only.
+                    icon: "vault",
                     title: "Agent setup",
                     click: () => { this._openAgentSetupModal?.(); },
                 },

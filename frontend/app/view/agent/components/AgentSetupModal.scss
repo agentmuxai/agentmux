@@ -17,6 +17,12 @@
     height: 560px;
     max-height: 85vh;
     min-width: 0;
+    // Container-query context for .agent-setup-modal-tab below (a
+    // descendant) — same technique as armory-view.scss's .armory-container,
+    // needed here on the modal itself since max-width: 92vw means this can
+    // genuinely get narrow on a small window.
+    container-type: inline-size;
+    container-name: agent-setup;
 }
 
 .agent-setup-modal-tabs {
@@ -27,6 +33,9 @@
 }
 
 .agent-setup-modal-tab {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
     padding: var(--space-2) var(--space-3);
     font-size: var(--text-sm);
     font-weight: var(--font-weight-medium);
@@ -35,6 +44,14 @@
     border: none;
     border-bottom: 2px solid transparent;
     cursor: default;
+
+    // Same icon treatment as the global Armory rail (bundle-manager-rail-item
+    // in armory-view.scss) — width-pinned, slightly dimmed.
+    i {
+        width: 16px;
+        text-align: center;
+        opacity: 0.8;
+    }
 
     &:hover:not(.is-active) {
         color: var(--main-text-color);
@@ -48,6 +65,15 @@
     &:focus-visible {
         outline: none;
         box-shadow: var(--shadow-focus-ring);
+    }
+}
+
+// Narrow modal (a real possibility since the modal caps at 92vw of the app
+// window, not a fixed pane) — icon-only tabs, same "hide the label, keep the
+// icon" compression armory-view.scss's rail does at its 767px breakpoint.
+@container agent-setup (max-width: 560px) {
+    .agent-setup-modal-tab span {
+        display: none;
     }
 }
 
