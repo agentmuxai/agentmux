@@ -81,6 +81,51 @@ pub async fn open_pane(state: &AppState, cmd: CommandPaneOpenData) -> Result<Pan
         return pane::open_pane_floating(state, &wstore, &event_bus, cmd.view, tab_id, meta).await;
     }
 
+    // Skip-placement path (in-pane tabs — SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md
+    // §4.2): create the block through the reducer, same as the docked path
+    // below, but return immediately — no layout action, no tear_off_block
+    // saga. The caller attaches it to an existing pane's block-stack instead
+    // (`pushBlockOntoStack`), so it must never render docked or floating
+    // first.
+    if cmd.skip_placement == Some(true) {
+        let meta_val = serde_json::to_value(&meta)
+            .map_err(|e| format!("pane.open: skip_placement: meta serialize: {e}"))?;
+        let create_events = crate::server::service::dispatch_to_reducer(
+            state,
+            agentmux_common::ipc::Command::CreateBlock {
+                tab_id: tab_id.clone(),
+                meta: meta_val,
+            },
+        )
+        .await;
+        if let Some(msg) = create_events.iter().find_map(|e| match e {
+            agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+            _ => None,
+        }) {
+            return Err(format!("pane.open: skip_placement: CreateBlock: {msg}"));
+        }
+        let block_id = create_events
+            .iter()
+            .find_map(|e| match e {
+                agentmux_common::ipc::Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
+                _ => None,
+            })
+            .ok_or_else(|| "pane.open: skip_placement: CreateBlock emitted no BlockCreated".to_string())?;
+        for ev in &create_events {
+            if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, &wstore) {
+                tracing::warn!("pane.open: skip_placement: CreateBlock wstore apply failed: {e}");
+            }
+        }
+        crate::server::service::publish_events(state, &create_events);
+        tracing::info!(block_id = %block_id, view = %cmd.view, "pane.open: block created, placement skipped");
+        return Ok(PaneOpenResult {
+            block_id,
+            tab_id,
+            view: cmd.view,
+            created: true,
+        });
+    }
+
     // Create block (docked path) THROUGH THE REDUCER (#1681), not wcore-direct.
     // A store-only `create_block` lands the block in SQLite but never in the
     // reducer-canonical `state.blocks` map — and this RPC runs after bootstrap,
@@ -1083,6 +1128,7 @@ mod pane_open_reducer_tests {
             tree_expanded: None,
             floating: None,
             meta: None,
+            skip_placement: None,
         };
         let res = open_pane(&state, cmd).await.expect("open_pane docked");
 
@@ -1104,6 +1150,76 @@ mod pane_open_reducer_tests {
         )
         .await;
         assert!(r.is_ok(), "tear-off of an opened pane must succeed, got: {:?}", r.err());
+    }
+
+    /// In-pane tabs (SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md §4.2):
+    /// `skip_placement` must create a reducer-tracked block (same as the
+    /// docked path) but leave the tab's layout tree completely untouched —
+    /// the caller is about to attach it to an existing leaf's block-stack,
+    /// not give it its own tile.
+    #[tokio::test]
+    async fn skip_placement_creates_block_without_touching_the_layout_tree() {
+        let state = test_state();
+
+        let ws_evs = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() }).await;
+        let ws_id = ws_evs
+            .iter()
+            .find_map(|e| match e {
+                Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let tab_evs = dispatch_apply(
+            &state,
+            Command::CreateTab { workspace_id: ws_id.clone(), name: "t".into() },
+        )
+        .await;
+        let tab_id = tab_evs
+            .iter()
+            .find_map(|e| match e {
+                Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+
+        // A fresh tab has no layout tree yet — confirm that baseline before
+        // asserting skip_placement doesn't add one.
+        {
+            let s = state.srv_state.lock().await;
+            assert!(s.tabs.get(&tab_id).unwrap().rootnode.is_none());
+        }
+
+        let cmd = CommandPaneOpenData {
+            view: "agent".into(),
+            file: None,
+            url: None,
+            cwd: None,
+            title: None,
+            tab_id: Some(tab_id.clone()),
+            split_direction: None,
+            split_reference_block_id: None,
+            focus: None,
+            tree_expanded: None,
+            floating: None,
+            meta: Some({
+                let mut m = MetaMapType::new();
+                m.insert("view".to_string(), serde_json::json!("agent"));
+                m
+            }),
+            skip_placement: Some(true),
+        };
+        let res = open_pane(&state, cmd).await.expect("open_pane skip_placement");
+        assert!(res.created);
+
+        let s = state.srv_state.lock().await;
+        assert!(
+            s.blocks.contains_key(&res.block_id),
+            "skip_placement block must still be tracked in srv_state"
+        );
+        assert!(
+            s.tabs.get(&tab_id).unwrap().rootnode.is_none(),
+            "skip_placement must not place the block into the tab's layout tree"
+        );
     }
 }
 
