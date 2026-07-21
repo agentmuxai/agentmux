@@ -274,11 +274,32 @@ export class AgentViewModel implements ViewModel {
      * to the working directory via WriteAgentConfigCommand, then creates
      * a SubprocessController ready for user input.
      */
-    launchAgentDefinition = async (agent: AgentDefinition, overrides?: LaunchOverrides): Promise<void> => {
+    /**
+     * @param targetBlockId In-pane tabs, Phase 4 — when set, launches INTO
+     *   that block instead of `this.blockId`. Used for the fork-tab-strip
+     *   `+` action, which spawns the fork into a freshly-created,
+     *   not-yet-placed block (see `pane.open`'s `skip_placement`) rather
+     *   than reconfiguring the current pane's own block. Every other
+     *   caller omits this and gets today's behavior unchanged.
+     */
+    /**
+     * @returns Whether the launch actually succeeded. This method never
+     *   THROWS (every failure path is caught and logged internally, by
+     *   design — most callers fire-and-forget and don't want a launch
+     *   failure to crash their UI), but callers that need to react to
+     *   failure (e.g. the fork-tab-strip "+" action, which must not push a
+     *   permanently-broken tab onto the pane's stack) can check the
+     *   returned boolean instead of relying on a rejected promise.
+     */
+    launchAgentDefinition = async (
+        agent: AgentDefinition,
+        overrides?: LaunchOverrides,
+        targetBlockId?: string,
+    ): Promise<boolean> => {
         const provider = PROVIDERS[agent.provider] ?? PROVIDERS[resolveProviderAlias(agent.provider)];
         if (!provider) {
             Logger.error("agent", "Unknown provider in agent definition", { agentId: agent.id, provider: agent.provider });
-            return;
+            return false;
         }
 
         // Check Node.js availability for npm-based providers
@@ -286,7 +307,7 @@ export class AgentViewModel implements ViewModel {
         if (nodejsError) {
             this.nodejsError = nodejsError;
             Logger.error("agent", "Node.js not available for agent definition", { agentId: agent.id, error: nodejsError });
-            return;
+            return false;
         }
 
         const version = getApi().getAboutModalDetails().version;
@@ -359,6 +380,19 @@ export class AgentViewModel implements ViewModel {
             : [...provider.launchArgs];
         if (agent.provider_flags) {
             cliArgs.push(...agent.provider_flags.split(/\s+/).filter(Boolean));
+        }
+        // In-pane tabs, Phase 4 — see LaunchOverrides.forkSession's own doc
+        // comment. Review finding: `--fork-session` is Claude Code CLI
+        // syntax, validated ONLY for Claude
+        // (SPEC_AGENT_PANE_FORKS_AND_AUX_PINS_2026_06_15 §6.4's empirical
+        // gate) — gating on "any provider with a resumeFlag" wrongly also
+        // matched gemini (`-r`) and muxcode (`--resume`), passing an
+        // unsupported flag to CLIs that were never validated to accept it.
+        // Every other provider (including those two) silently falls back
+        // to "fork = fresh definition, fresh start" — no flag, no error,
+        // exactly the graceful fallback §6.4 called for.
+        if (overrides?.forkSession && provider.id === "claude") {
+            cliArgs.push("--fork-session");
         }
 
         // Build env vars from provider unsetEnv + agent env content + per-agent isolation
@@ -439,8 +473,8 @@ export class AgentViewModel implements ViewModel {
         // instance name (caught by codex on PR #504).
         const configFiles = buildConfigFiles(contentMap, skills, agent, instanceName);
 
-        const oref = WOS.makeORef("block", this.blockId);
-        const blockId = this.blockId;
+        const blockId = targetBlockId ?? this.blockId;
+        const oref = WOS.makeORef("block", blockId);
         try {
             // Whether the work_dir was constructed by us (and is thus
             // eligible for `<base>-N` collision suffixing) or was
@@ -623,8 +657,10 @@ export class AgentViewModel implements ViewModel {
                     `direct identity link write-through failed: ${e?.message ?? String(e)}`,
                 );
             }
+            return true;
         } catch (e: any) {
             Logger.error("agent", "Failed to launch agent definition", { error: String(e) });
+            return false;
         }
     };
 
