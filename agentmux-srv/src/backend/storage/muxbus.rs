@@ -333,6 +333,13 @@ impl Store {
     }
 
     pub fn muxbus_clear(&self) -> Result<(), StoreError> {
+        // reagent P1 on #2260: without this lock, a concurrent muxbus_save
+        // (broker refresh or muxbus.login) can commit its keychain + SQL
+        // write after this function's own delete runs, silently
+        // resurrecting a credential right after the user disconnected —
+        // same race class muxbus_save/muxbus_load_impl already serialize
+        // against each other for.
+        let _clear_guard = self.muxbus_save_lock.lock().unwrap();
         // Best-effort — a missing/inaccessible keychain entry must not block
         // clearing the (still-useful) SQL row.
         let _ = secret_store::delete(MUXBUS_KEYCHAIN_ID);
