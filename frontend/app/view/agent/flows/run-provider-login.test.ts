@@ -135,6 +135,50 @@ describe("runProviderLogin", () => {
         expect(hub.cancelCliLogin).toHaveBeenCalledTimes(1);
     });
 
+    it("retries persistSeededAccount once on a transient failure after a successful seed, instead of silently falling through to tier 3 for a login that already succeeded (reagent P2)", async () => {
+        hub.runCliLogin.mockResolvedValue(null);
+        hub.seedProviderAuthFromGlobal.mockResolvedValue({ seeded: true });
+        hub.upsertIdentityAccount
+            .mockRejectedValueOnce(new Error("transient RPC error"))
+            .mockResolvedValueOnce({});
+
+        const outcome = await runProviderLogin({
+            provider: claude,
+            cliPath: "x",
+            authEnv: { CLAUDE_CONFIG_DIR: "C:/auth" },
+            setAuthUrl: vi.fn(),
+            log: vi.fn(),
+        });
+
+        expect(outcome).toBe("seeded");
+        expect(hub.upsertIdentityAccount).toHaveBeenCalledTimes(2);
+        expect(hub.openLoginTerminal).not.toHaveBeenCalled();
+    });
+
+    it("falls through to terminal (with a clear error logged) if persistSeededAccount fails on both attempts", async () => {
+        hub.runCliLogin.mockResolvedValue(null);
+        hub.seedProviderAuthFromGlobal.mockResolvedValue({ seeded: true });
+        hub.upsertIdentityAccount.mockRejectedValue(new Error("persistent RPC error"));
+        const log = vi.fn();
+
+        const outcome = await runProviderLogin({
+            provider: claude,
+            cliPath: "x",
+            authEnv: { CLAUDE_CONFIG_DIR: "C:/auth" },
+            setAuthUrl: vi.fn(),
+            log,
+            isCancelled: () => true,
+        });
+
+        expect(hub.upsertIdentityAccount).toHaveBeenCalledTimes(2);
+        expect(outcome).toBe("terminal-timeout");
+        expect(log).toHaveBeenCalledWith(
+            "auth",
+            expect.stringMatching(/login succeeded, but AgentMux couldn't save the account record/i),
+            "error",
+        );
+    });
+
     it("tier 2 mints the account dir exactly once (ensureAccountDir called once, not once per tier)", async () => {
         hub.runCliLogin.mockResolvedValue(null);
         hub.seedProviderAuthFromGlobal.mockResolvedValue({ seeded: true });
