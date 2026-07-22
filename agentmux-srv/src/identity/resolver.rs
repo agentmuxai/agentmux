@@ -334,9 +334,21 @@ pub fn provider_class(provider: &str) -> Option<ProviderClass> {
         // source of truth per CLI for which env var redirects its
         // config / auth directory. The match arm enumerates which
         // providers we currently treat as OAuth-class for identity
-        // bundles (claude / codex / openclaw — per spec §4.3); the
-        // env-var string is read from the registry, not duplicated.
-        "claude" | "codex" | "openclaw" => {
+        // bundles. Originally just claude / codex / openclaw (spec
+        // §4.3) — gemini and copilot were added later
+        // (REPORT_AUTH_ARCHITECTURE_STATE_AND_RETHINK_2026_07_21.md
+        // §2.5 / §6, Phase C) to close a drift gap: the frontend's
+        // `ProviderDefinition` table already marked both
+        // `authType: "oauth"`, but this match arm (the actual gate
+        // for the spawn-time enforcement AND the per-account
+        // isolation-dir minting in identity_handlers.rs, both of
+        // which key off this single function) hadn't caught up —
+        // meaning neither actually applied to them despite the UI
+        // already presenting them as oauth-class. See
+        // `oauth_class_matches_frontend_authtype_oauth_set` below,
+        // which pins this set staying in sync with the frontend going
+        // forward so this doesn't silently drift again.
+        "claude" | "codex" | "openclaw" | "gemini" | "copilot" => {
             crate::backend::providers::get_provider(provider).map(|cfg| {
                 ProviderClass::OAuth {
                     config_dir_env_var: cfg.auth_config_dir_env_var,
@@ -1027,12 +1039,11 @@ mod tests {
 
     #[test]
     fn provider_class_oauth_providers() {
-        // Spec §4.3 — the three known oauth providers must classify
-        // as OAuth with the SAME config-dir env vars the CLI provider
-        // registry defines (single source of truth). Pinning the
-        // expected strings here catches drift in either direction —
-        // if the registry changes a value, this test fails and the
-        // change becomes deliberate.
+        // The known oauth providers must classify as OAuth with the SAME
+        // config-dir env vars the CLI provider registry defines (single
+        // source of truth). Pinning the expected strings here catches drift
+        // in either direction — if the registry changes a value, this test
+        // fails and the change becomes deliberate.
         assert_eq!(
             provider_class("claude"),
             Some(ProviderClass::OAuth { config_dir_env_var: "CLAUDE_CONFIG_DIR" }),
@@ -1045,6 +1056,44 @@ mod tests {
             provider_class("openclaw"),
             Some(ProviderClass::OAuth { config_dir_env_var: "OPENCLAW_HOME" }),
         );
+        assert_eq!(
+            provider_class("gemini"),
+            Some(ProviderClass::OAuth { config_dir_env_var: "GEMINI_CLI_HOME" }),
+        );
+        assert_eq!(
+            provider_class("copilot"),
+            Some(ProviderClass::OAuth { config_dir_env_var: "COPILOT_HOME" }),
+        );
+    }
+
+    #[test]
+    fn oauth_class_matches_frontend_authtype_oauth_set() {
+        // REPORT_AUTH_ARCHITECTURE_STATE_AND_RETHINK_2026_07_21.md §2.5
+        // found gemini/copilot marked `authType: "oauth"` in the frontend's
+        // `ProviderDefinition` table (frontend/app/view/agent/providers/
+        // index.ts) while this function — the actual gate for both the
+        // spawn-time enforcement AND the per-account isolation-dir minting
+        // — hadn't caught up, so neither mechanism applied to them despite
+        // the UI already presenting them as oauth-class. This pins the two
+        // sets staying equal going forward. There's no automated cross-
+        // language check available, so this list is a manually-maintained
+        // mirror of the frontend table — if you add a new `authType:
+        // "oauth"` provider there, update FRONTEND_OAUTH_TYPED here too, in
+        // the SAME change, not as a follow-up.
+        const FRONTEND_OAUTH_TYPED: &[&str] = &["claude", "codex", "gemini", "openclaw", "copilot"];
+        const ALL_KNOWN_PROVIDERS: &[&str] = &[
+            "claude", "codex", "muxcode", "gemini", "qwen", "openclaw", "kimi", "copilot", "pi",
+        ];
+        for p in ALL_KNOWN_PROVIDERS {
+            let is_oauth_class = matches!(provider_class(p), Some(ProviderClass::OAuth { .. }));
+            let is_frontend_oauth_typed = FRONTEND_OAUTH_TYPED.contains(p);
+            assert_eq!(
+                is_oauth_class, is_frontend_oauth_typed,
+                "provider '{p}': backend OAuth-class ({is_oauth_class}) must match \
+                 frontend authType:\"oauth\" ({is_frontend_oauth_typed}) — see this \
+                 test's doc comment",
+            );
+        }
     }
 
     #[cfg(debug_assertions)]
