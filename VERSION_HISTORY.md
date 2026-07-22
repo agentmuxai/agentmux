@@ -2,6 +2,8 @@
 
 ## 0.54.3 — 2026-07-22
 
+- fix(identity): restore resolve_provider_alias deleted by #2267's dead-code sweep
+- fix(deps): raise ws/vite/vitest version floors to patched minimums
 - feat(lan-discovery): UDP broadcast probe fallback for filtered mDNS
 - feat(layout): block-stack mechanism for in-pane tabs (Phase 2)
 - feat(agent): fork tab strip -- read-only switch between related forks (Phase 3)
