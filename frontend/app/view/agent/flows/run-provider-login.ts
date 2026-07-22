@@ -87,6 +87,16 @@ export interface RunProviderLoginParams extends ForceLoginParams {
      *  agent). Omit for a pre-launch flow with no agent yet; that flow's own
      *  launch-time reconcile links the account once one is created. */
     linkTarget?: { blockId: string; agentDefinitionId: string };
+    /** Skip tier 1 (headless URL-capture) entirely and go straight to tier 2.
+     *  For providers where tier 1 is a documented, unconditional dead end —
+     *  e.g. `requiresLoginTty` providers, whose CLI opens its own browser
+     *  in-process and needs a real console no piped/PTY spawn has — skipping
+     *  avoids a pointless ~15s wait for an attempt that cannot succeed.
+     *  Also the right default for a caller whose UI already explicitly says
+     *  "login via terminal" (the user has already opted into a real console,
+     *  no point trying headless first). Default false — existing callers
+     *  are unaffected. */
+    skipTier1?: boolean;
 }
 
 export type ProviderLoginOutcome =
@@ -167,8 +177,10 @@ async function pollForCliAuthReady(
 }
 
 export async function runProviderLogin(p: RunProviderLoginParams): Promise<ProviderLoginOutcome> {
-    const tier1 = await forceProviderLogin(p);
-    if (tier1 === "opened") return "opened";
+    if (!p.skipTier1) {
+        const tier1 = await forceProviderLogin(p);
+        if (tier1 === "opened") return "opened";
+    }
 
     // Tier 1's login CLI child (piped/PTY, spawned by forceProviderLogin's
     // getApi().runCliLogin) is left running/abandoned when it doesn't
