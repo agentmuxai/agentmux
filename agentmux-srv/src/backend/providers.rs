@@ -419,6 +419,21 @@ static ALIASES: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(||
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 
+/// Resolve a provider alias to its canonical ID.
+///
+/// Returns `id` unchanged if it is not a known alias.
+pub fn resolve_provider_alias(id: &str) -> &'static str {
+    ALIASES.get(id).copied().unwrap_or_else(|| {
+        // If the id itself is a canonical key return the interned key, otherwise
+        // return a best-effort static ref. The caller should treat the return
+        // value as a lookup key only.
+        REGISTRY
+            .get_key_value(id)
+            .map(|(k, _)| *k)
+            .unwrap_or("") // unknown — get_provider will return None
+    })
+}
+
 /// Look up a provider by canonical ID or alias.
 ///
 /// Returns `None` when the ID (and any resolved alias) does not match a known
