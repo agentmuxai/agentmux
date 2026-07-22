@@ -90,8 +90,9 @@ afterEach(() => {
 });
 
 describe("runProviderLogin", () => {
-    it("returns 'opened' when tier 1 captures a URL — no fallback tier runs", async () => {
+    it("returns 'opened' when tier 1 captures a URL — no fallback tier runs, but the account dir is STILL minted up front and reported via onAccountRegistered (reagent P0 on #2263: a provider whose tier 1 succeeds, e.g. gemini/copilot, must still land in an isolated dir with a real account behind it)", async () => {
         hub.runCliLogin.mockResolvedValue("https://claude.ai/oauth/authorize");
+        const onAccountRegistered = vi.fn();
 
         const outcome = await runProviderLogin({
             provider: claude,
@@ -99,15 +100,40 @@ describe("runProviderLogin", () => {
             authEnv: { CLAUDE_CONFIG_DIR: "C:/auth" },
             setAuthUrl: vi.fn(),
             log: vi.fn(),
+            onAccountRegistered,
         });
 
         expect(outcome).toBe("opened");
-        expect(hub.ensureAccountDir).not.toHaveBeenCalled();
+        expect(hub.ensureAccountDir).toHaveBeenCalledTimes(1);
+        // Tier 1 doesn't confirm completion — so it must NOT persist/link
+        // the account itself (nothing has actually logged in yet); it only
+        // reports the minted (not-yet-persisted) account to the caller.
+        expect(hub.upsertIdentityAccount).not.toHaveBeenCalled();
+        expect(onAccountRegistered).toHaveBeenCalledWith(MINTED.accountId, MINTED.dir);
         expect(hub.seedProviderAuthFromGlobal).not.toHaveBeenCalled();
         expect(hub.openLoginTerminal).not.toHaveBeenCalled();
         // Tier 1 succeeded — nothing to cancel, and no fallback tier ran
         // that could race against a still-live tier-1 child.
         expect(hub.cancelCliLogin).not.toHaveBeenCalled();
+    });
+
+    it("tier 1 points the login at the minted isolated dir, not whatever authEnv the caller originally passed", async () => {
+        hub.runCliLogin.mockResolvedValue("https://claude.ai/oauth/authorize");
+
+        await runProviderLogin({
+            provider: claude,
+            cliPath: "x",
+            authEnv: { CLAUDE_CONFIG_DIR: "C:/some-other-dir" },
+            setAuthUrl: vi.fn(),
+            log: vi.fn(),
+        });
+
+        expect(hub.runCliLogin).toHaveBeenCalledWith(
+            "x",
+            ["auth", "login"],
+            { CLAUDE_CONFIG_DIR: MINTED.dir },
+            true,
+        );
     });
 
     it("falls through to tier 2 — mints a real account dir, seeds it, and registers the account — when tier 1 captures no URL, for claude", async () => {
