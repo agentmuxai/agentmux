@@ -67,8 +67,33 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 .await
                 {
                     Ok(result) => {
-                        if let Err(e) = wstore.muxbus_save(&result.credentials) {
+                        // reagent P1: previously this only logged a warning on a
+                        // save failure and still reported success — now that
+                        // MuxBus tokens live in the OS keychain (which can
+                        // genuinely fail: locked, no Secret Service daemon on
+                        // headless Linux, permission denied), that meant the UI
+                        // could show "logged in" for a credential that was never
+                        // actually persisted anywhere. Report the real outcome.
+                        // spawn_blocking — reagent P1 on #2260: muxbus_save
+                        // does a synchronous OS-keychain write, which can
+                        // hang on a slow/unresponsive Secret Service D-Bus
+                        // daemon (headless Linux) and must not stall this
+                        // tokio worker thread.
+                        let email = result.credentials.user_email.clone();
+                        let save_store = wstore.clone();
+                        let save_result = tokio::task::spawn_blocking(move || {
+                            save_store.muxbus_save(&result.credentials)
+                        })
+                        .await
+                        .map_err(|e| format!("muxbus.login: save task: {e}"))?;
+                        if let Err(e) = save_result {
                             tracing::warn!(error = %e, "muxbus.login: failed to save credentials");
+                            let resp = MuxBusLoginResp {
+                                success: false,
+                                email: String::new(),
+                                error: Some(format!("login succeeded but credentials couldn't be saved: {e}")),
+                            };
+                            return Ok(Some(serde_json::to_value(resp).unwrap()));
                         }
                         // Kick the cloud subscriber to open a WS with the new token
                         if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
@@ -76,7 +101,7 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         }
                         let resp = MuxBusLoginResp {
                             success: true,
-                            email: result.credentials.user_email,
+                            email,
                             error: None,
                         };
                         Ok(Some(serde_json::to_value(resp).unwrap()))
@@ -102,7 +127,13 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         Box::new(move |_data, _ctx| {
             let wstore = wstore_status.clone();
             Box::pin(async move {
-                match wstore.muxbus_load() {
+                // spawn_blocking — reagent P1 on #2260: same
+                // synchronous-keychain-read concern as muxbus.login's save.
+                let load_store = wstore.clone();
+                let load_result = tokio::task::spawn_blocking(move || load_store.muxbus_load())
+                    .await
+                    .map_err(|e| format!("muxbus.status: load task: {e}"))?;
+                match load_result {
                     Ok(Some(creds)) => {
                         let valid = creds.is_valid();
                         let resp = MuxBusStatusResp {
@@ -137,8 +168,12 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         Box::new(move |_data, _ctx| {
             let wstore = wstore_disconnect.clone();
             Box::pin(async move {
-                wstore
-                    .muxbus_clear()
+                // spawn_blocking — reagent P1 on #2260: muxbus_clear does a
+                // synchronous OS-keychain delete, same concern as every
+                // other muxbus call site in this module.
+                tokio::task::spawn_blocking(move || wstore.muxbus_clear())
+                    .await
+                    .map_err(|e| format!("muxbus.disconnect: task: {e}"))?
                     .map_err(|e| format!("muxbus.disconnect: {e}"))?;
                 Ok(Some(serde_json::json!({})))
             })
@@ -149,15 +184,26 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
 /// Inject MUXBUS_TOKEN into spawn env if credentials are stored and valid.
 /// Token refresh is async — this path just injects whatever is currently stored.
 /// Agents should re-spawn after the user refreshes via muxbus.login if the token expires.
-pub fn inject_muxbus_env(
-    wstore: &crate::backend::storage::store::Store,
+///
+/// `async` (not sync) and `spawn_blocking` internally — reagent P1 on #2260:
+/// muxbus_load does a synchronous OS-keychain read, which can hang on a
+/// slow/unresponsive Secret Service D-Bus daemon (headless Linux) and must
+/// not stall the caller's tokio worker thread.
+pub async fn inject_muxbus_env(
+    wstore: &Arc<crate::backend::storage::store::Store>,
     env_vars: &mut std::collections::HashMap<String, String>,
 ) {
-    let creds = match wstore.muxbus_load() {
-        Ok(Some(c)) => c,
-        Ok(None) => return,
-        Err(e) => {
+    let load_store = wstore.clone();
+    let load_result = tokio::task::spawn_blocking(move || load_store.muxbus_load()).await;
+    let creds = match load_result {
+        Ok(Ok(Some(c))) => c,
+        Ok(Ok(None)) => return,
+        Ok(Err(e)) => {
             tracing::warn!(error = %e, "muxbus inject: failed to load credentials");
+            return;
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "muxbus inject: load task panicked");
             return;
         }
     };

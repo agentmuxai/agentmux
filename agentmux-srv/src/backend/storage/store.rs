@@ -65,6 +65,18 @@ pub struct Store {
     /// `AGENTMUX_AGENTS_DIR`. See
     /// `docs/specs/SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md` (P0.3).
     registry_agents_base: Mutex<Option<PathBuf>>,
+    /// Serializes `muxbus_save` end-to-end (keychain read, keychain write,
+    /// SQL write, and any rollback) — reagent P1 on #2260: two concurrent
+    /// `muxbus_save` calls (the `muxbus.login` RPC handler and the broker's
+    /// registered refresh closure can each call it independently) would
+    /// otherwise race on the keychain's "previous state" snapshot; if the
+    /// second call's SQL write then failed, its rollback could restore a
+    /// stale pre-first-call blob, silently reverting a credential the first
+    /// call already committed. `self.conn`'s own lock only covers the SQL
+    /// portion, not the keychain read/write either side of it, so a
+    /// dedicated lock is needed rather than reusing that one. `pub(super)`
+    /// like `conn` — `muxbus.rs` is a sibling module under `backend::storage`.
+    pub(super) muxbus_save_lock: Mutex<()>,
 }
 
 impl Store {
@@ -108,6 +120,7 @@ impl Store {
             registry: Mutex::new(None),
             def_registry: Mutex::new(None),
             registry_agents_base: Mutex::new(None),
+            muxbus_save_lock: Mutex::new(()),
         })
     }
 
@@ -131,6 +144,7 @@ impl Store {
             registry: Mutex::new(None),
             def_registry: Mutex::new(None),
             registry_agents_base: Mutex::new(None),
+            muxbus_save_lock: Mutex::new(()),
         })
     }
 
@@ -205,6 +219,7 @@ impl Store {
             registry: Mutex::new(None),
             def_registry: Mutex::new(None),
             registry_agents_base: Mutex::new(None),
+            muxbus_save_lock: Mutex::new(()),
         })
     }
 
