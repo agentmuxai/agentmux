@@ -231,11 +231,28 @@ export async function runProviderLogin(p: RunProviderLoginParams): Promise<Provi
     if (minted && p.provider.id === "claude") {
         p.log("auth", "no login URL captured — checking for an existing global Claude login…");
         if (await seedGlobalLogin(p.provider.id, p.log, minted.dir)) {
-            if (await persistSeededAccount(p.provider.id, minted.accountId, minted.dir, p.log)) {
+            // The credential is now valid and sitting in minted.dir — a
+            // persist failure here is a bookkeeping problem, not an auth
+            // one, and is usually transient (a momentary RPC hiccup). One
+            // retry (reagent P2) avoids silently falling through to
+            // "opening a terminal window for a fresh login…" for a login
+            // that already succeeded, which just confuses the user into
+            // thinking they still need to do something.
+            let persisted = await persistSeededAccount(p.provider.id, minted.accountId, minted.dir, p.log);
+            if (!persisted) {
+                p.log("auth", "account registration failed — retrying once…", "warn");
+                persisted = await persistSeededAccount(p.provider.id, minted.accountId, minted.dir, p.log);
+            }
+            if (persisted) {
                 p.onAccountRegistered?.(minted.accountId, minted.dir);
                 await finalizeAccount(p, minted.accountId, minted.dir);
                 return "seeded";
             }
+            p.log(
+                "auth",
+                "your login succeeded, but AgentMux couldn't save the account record — try again in a moment",
+                "error",
+            );
         }
     }
 
