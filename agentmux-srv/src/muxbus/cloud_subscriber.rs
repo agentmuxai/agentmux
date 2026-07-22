@@ -205,19 +205,39 @@ async fn run_loop(
             .register(
                 crate::muxbus::CREDENTIAL_ID,
                 // muxbus_is_fresh, not muxbus_load — reagent P2 on #2260:
-                // register()'s own contract requires is_fresh to be cheap
-                // and side-effect-free (called under the per-id lock on
-                // every ensure_fresh/sweep tick), but muxbus_load's
-                // lazy-migration branch can perform a keychain write + SQL
-                // update for a legacy row. muxbus_is_fresh shares the same
-                // read logic with that branch disabled.
-                move || wstore_fresh.muxbus_is_fresh(),
+                // register()'s own contract requires is_fresh to be
+                // side-effect-free (called under the per-id lock on every
+                // ensure_fresh/sweep tick), but muxbus_load's lazy-migration
+                // branch can perform a keychain write + SQL update for a
+                // legacy row. muxbus_is_fresh shares the same read logic
+                // with that branch disabled.
+                //
+                // spawn_blocking, not a direct call — reagent P1 on #2260:
+                // muxbus_is_fresh does a synchronous OS-keychain read, which
+                // can hang on a slow/unresponsive Secret Service D-Bus
+                // daemon (a scenario headless Linux specifically has to
+                // handle). Without this, that hang stalls the tokio worker
+                // thread `run_sweep_loop` runs on, and via the scheduler's
+                // held per-id lock, can block OTHER credentials' refreshes
+                // too — the exact convention this codebase already applies
+                // to keychain reads elsewhere (see
+                // app_api/mod.rs's account_validate_impl).
+                move || {
+                    let wstore = wstore_fresh.clone();
+                    Box::pin(async move {
+                        tokio::task::spawn_blocking(move || wstore.muxbus_is_fresh())
+                            .await
+                            .unwrap_or(false)
+                    })
+                },
                 move || {
                     let wstore = wstore_refresh.clone();
                     let http = http_refresh.clone();
                     Box::pin(async move {
-                        let current = wstore
-                            .muxbus_load()
+                        let load_store = wstore.clone();
+                        let current = tokio::task::spawn_blocking(move || load_store.muxbus_load())
+                            .await
+                            .map_err(|e| format!("muxbus_load task: {e}"))?
                             .map_err(|e| e.to_string())?
                             .ok_or_else(|| "no muxbus credentials stored".to_string())?;
                         if current.refresh_token.is_empty() {
@@ -229,7 +249,11 @@ async fn run_loop(
                         // left untouched rather than overwritten with a
                         // failed/partial result.
                         let refreshed = crate::muxbus::pkce::refresh_token(&current, &http).await?;
-                        wstore.muxbus_save(&refreshed).map_err(|e| e.to_string())
+                        let save_store = wstore.clone();
+                        tokio::task::spawn_blocking(move || save_store.muxbus_save(&refreshed))
+                            .await
+                            .map_err(|e| format!("muxbus_save task: {e}"))?
+                            .map_err(|e| e.to_string())
                     })
                 },
             )
@@ -252,11 +276,23 @@ async fn run_loop(
         // has_stored_creds=false: that would park indefinitely waiting for a
         // muxbus.login the user was never actually missing, instead of
         // backing off and retrying once the transient failure clears.
-        let has_stored_creds = match wstore.muxbus_load() {
-            Ok(Some(c)) => !c.access_token.is_empty() && (c.is_valid() || !c.refresh_token.is_empty()),
-            Ok(None) => false,
-            Err(e) => {
+        // spawn_blocking — reagent P1 on #2260: muxbus_load does a
+        // synchronous OS-keychain read; a hang there (slow/unresponsive
+        // Secret Service D-Bus daemon) must not stall this loop's tokio
+        // worker thread.
+        let has_stored_creds_load = {
+            let wstore = wstore.clone();
+            tokio::task::spawn_blocking(move || wstore.muxbus_load()).await
+        };
+        let has_stored_creds = match has_stored_creds_load {
+            Ok(Ok(Some(c))) => !c.access_token.is_empty() && (c.is_valid() || !c.refresh_token.is_empty()),
+            Ok(Ok(None)) => false,
+            Ok(Err(e)) => {
                 tracing::warn!(error = %e, "cloud_subscriber: muxbus_load failed — assuming credentials exist and retrying with backoff");
+                true
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "cloud_subscriber: muxbus_load task panicked — assuming credentials exist and retrying with backoff");
                 true
             }
         };
@@ -693,7 +729,7 @@ async fn handle_server_msg(
 /// concurrently with the broker's background sweep for the same credential
 /// without either one duplicating the other's refresh attempt.
 async fn load_valid_token(
-    wstore: &Store,
+    wstore: &Arc<Store>,
     scheduler: &crate::broker::RefreshScheduler,
 ) -> Option<String> {
     if let Err(e) = scheduler.ensure_fresh(crate::muxbus::CREDENTIAL_ID).await {
@@ -704,7 +740,15 @@ async fn load_valid_token(
     // fall back to it if it's still within its validity window, matching the
     // pre-broker behavior: a transient refresh failure should not prevent
     // connecting with a token that's still technically valid.
-    let creds = wstore.muxbus_load().ok().flatten();
+    //
+    // spawn_blocking — reagent P1 on #2260: same synchronous-keychain-read
+    // concern as every other muxbus_load call site in this file.
+    let load_store = wstore.clone();
+    let creds = tokio::task::spawn_blocking(move || load_store.muxbus_load())
+        .await
+        .ok()
+        .and_then(|r| r.ok())
+        .flatten();
     match creds {
         Some(c) if c.is_valid() => Some(c.access_token),
         _ => None,
