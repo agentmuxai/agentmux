@@ -30,8 +30,24 @@ pub enum FlexDirection {
 /// Group nodes (those with `children`) carry no `data`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct LayoutNodeData {
+    /// The currently-rendered block for this leaf. Always kept in sync with
+    /// `active_block_id` when `block_stack` is non-empty — this field is
+    /// what every existing (pre-tabs) reader/pruner cares about, so a leaf
+    /// with no stack behaves identically to before this field existed.
     #[serde(rename = "blockId")]
     pub block_id: String,
+    /// In-pane tabs (SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md §4.3):
+    /// every blockId hosted by this leaf, ordered; empty/absent means "no
+    /// stack, just `block_id`" — 100% back-compat with every layout written
+    /// before this field existed. When non-empty, `block_id` MUST equal
+    /// `active_block_id` and MUST be a member of this list.
+    #[serde(rename = "blockStack", default, skip_serializing_if = "Vec::is_empty")]
+    pub block_stack: Vec<String>,
+    /// The active member of `block_stack`. Empty/unused when `block_stack`
+    /// is empty. Kept as an explicit field (rather than only ever reading
+    /// `block_id`) so intent is unambiguous in the wire format.
+    #[serde(rename = "activeBlockId", default, skip_serializing_if = "String::is_empty")]
+    pub active_block_id: String,
     /// Catch-all for unknown fields — preserves forward-compat when the
     /// frontend writes additional fields we don't yet model. Uses
     /// `serde_json::Map` (insertion-ordered) for deterministic round-trips.
@@ -140,4 +156,56 @@ pub struct ResizeOp {
 pub enum SplitPosition {
     Before,
     After,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn layout_node_data_old_json_without_stack_fields_deserializes() {
+        // A layout leaf written before blockStack/activeBlockId existed —
+        // must still deserialize cleanly, with the new fields defaulting to
+        // "no stack".
+        let json = r#"{"blockId":"blk-1"}"#;
+        let data: LayoutNodeData = serde_json::from_str(json).unwrap();
+        assert_eq!(data.block_id, "blk-1");
+        assert!(data.block_stack.is_empty());
+        assert!(data.active_block_id.is_empty());
+    }
+
+    #[test]
+    fn layout_node_data_old_json_without_stack_fields_reserializes_without_them() {
+        // Round-tripping a non-stacked leaf must not introduce blockStack/
+        // activeBlockId into the JSON — byte-equal-compat with prior output
+        // for the overwhelming majority (every non-tabbed pane) case.
+        let json = r#"{"blockId":"blk-1"}"#;
+        let data: LayoutNodeData = serde_json::from_str(json).unwrap();
+        let out = serde_json::to_string(&data).unwrap();
+        assert_eq!(out, json);
+    }
+
+    #[test]
+    fn layout_node_data_with_stack_round_trips() {
+        let data = LayoutNodeData {
+            block_id: "blk-2".to_string(),
+            block_stack: vec!["blk-1".to_string(), "blk-2".to_string()],
+            active_block_id: "blk-2".to_string(),
+            extra: serde_json::Map::new(),
+        };
+        let json = serde_json::to_string(&data).unwrap();
+        let parsed: LayoutNodeData = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, data);
+        assert!(json.contains("\"blockStack\":[\"blk-1\",\"blk-2\"]"));
+        assert!(json.contains("\"activeBlockId\":\"blk-2\""));
+    }
+
+    #[test]
+    fn layout_node_data_preserves_unknown_extra_fields() {
+        let json = r#"{"blockId":"blk-1","someFutureField":42}"#;
+        let data: LayoutNodeData = serde_json::from_str(json).unwrap();
+        assert_eq!(data.extra.get("someFutureField").and_then(|v| v.as_i64()), Some(42));
+        let out = serde_json::to_string(&data).unwrap();
+        assert!(out.contains("\"someFutureField\":42"));
+    }
 }

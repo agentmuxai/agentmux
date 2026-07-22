@@ -1,5 +1,20 @@
 # AgentMux Version History
 
+## 0.54.2 — 2026-07-20
+
+- feat(scripts): resolve per-agent GitHub PAT via gh-agent.sh instead of shared gh session
+- docs: add Armory architecture reference doc, fix stale Identities tab note
+- fix(agent): Session Context assigned-accounts reads db_agent_identity_links, not the stale AgentDefinition.accounts blob
+- feat(agent): word-wrapped command tooltip on tool-call hover
+- docs: correct memory_id consumption claim and IdentityAccount field list in Armory architecture doc
+- fix(agent): only refresh Haiku ghost-text summaries on genuine turn completion
+- fix(swarm): separate row collapse-toggle from focus, default collapsed
+- feat(lan): show QR code for mobile pairing when LAN discovery is enabled
+- feat(launcher): macOS splash — add an "other" row closing the total-vs-items gap
+- feat(editor): extract shared PaneTabStrip component, add + new-tab button
+- feat(swarm): show active background shells as a per-agent row bucket
+
+
 ## 0.54.1 — 2026-07-20
 
 - fix(agent): Login Again always forces fresh OAuth, opens the system browser (which already has the user's session) instead of an in-app pane

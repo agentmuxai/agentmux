@@ -191,6 +191,19 @@ pub fn prune_dangling_block_refs(
     live_block_ids: &std::collections::HashSet<String>,
 ) -> usize {
     let mut pruned = 0;
+    // In-pane tabs: if a leaf's ACTIVE block went dangling through some
+    // path other than `closeBlockInStack` (which always reactivates a live
+    // neighbor before removing a block), but a live sibling still sits in
+    // `block_stack`, reactivate that sibling in place rather than letting
+    // the whole-leaf scan below delete the entire leaf — that would
+    // silently discard the still-live sibling blocks along with it. MUST
+    // run before the whole-leaf loop so that loop sees the repaired
+    // `block_id`. Leaves with no live sibling are left untouched here —
+    // `block_id` still points at the dangling id, so the loop below
+    // correctly identifies and deletes the (genuinely fully-dead) leaf.
+    if let Some(tree) = root.as_mut() {
+        pruned += reactivate_dangling_active_stack_members(tree, live_block_ids);
+    }
     loop {
         let Some(tree) = root.as_ref() else { break };
         let Some(dangling_id) = first_dangling_leaf_id(tree, live_block_ids) else { break };
@@ -210,7 +223,78 @@ pub fn prune_dangling_block_refs(
             let _ = delete_node(t, &dangling_id);
         }
     }
+    // In-pane tabs (SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md §4.3):
+    // a surviving leaf's ACTIVE block (`data.block_id`) is already
+    // guaranteed live by the loop above, but a non-active `block_stack`
+    // member's block can independently be deleted without ever making the
+    // leaf itself dangling — the leaf still renders fine via its active
+    // member. Without this pass those ids would linger in `block_stack`
+    // forever, so a later tab-switch could try to activate a block that no
+    // longer exists.
+    if let Some(tree) = root.as_mut() {
+        pruned += prune_dangling_stack_members(tree, live_block_ids);
+    }
     pruned
+}
+
+/// Recursively repair leaves whose ACTIVE block (`data.block_id`) is
+/// dangling but a live sibling still exists in `block_stack`: drop the
+/// dead entry from the stack and reactivate the first remaining live
+/// member (`block_id`/`active_block_id` both updated). Leaves with no live
+/// sibling are left with `block_id` still pointing at the dangling id —
+/// the caller's whole-leaf pass then correctly deletes them, same as
+/// before this function existed. Returns the number of leaves repaired.
+fn reactivate_dangling_active_stack_members(
+    node: &mut LayoutNode,
+    live_block_ids: &std::collections::HashSet<String>,
+) -> usize {
+    let mut repaired = 0;
+    if let Some(data) = node.data.as_mut() {
+        if !data.block_stack.is_empty() && !live_block_ids.contains(&data.block_id) {
+            // Drop the dangling active member from the stack — it's gone
+            // either way, whether or not a live sibling survives it.
+            data.block_stack.retain(|id| id != &data.block_id);
+            if let Some(replacement) = data
+                .block_stack
+                .iter()
+                .find(|id| live_block_ids.contains(*id))
+                .cloned()
+            {
+                data.block_id = replacement.clone();
+                data.active_block_id = replacement;
+                repaired += 1;
+            }
+            // else: block_id is untouched (still the dangling id) — no live
+            // sibling to fall back to, so this leaf is genuinely fully dead.
+        }
+    }
+    for child in &mut node.children {
+        repaired += reactivate_dangling_active_stack_members(child, live_block_ids);
+    }
+    repaired
+}
+
+/// Recursively drop dead entries from every leaf's `block_stack`. The
+/// active member (`data.block_id`) is never removed here — by the time
+/// this runs, the caller's whole-leaf pruning loop has already guaranteed
+/// it's live. Returns the number of stack entries removed.
+fn prune_dangling_stack_members(
+    node: &mut LayoutNode,
+    live_block_ids: &std::collections::HashSet<String>,
+) -> usize {
+    let mut removed = 0;
+    if let Some(data) = node.data.as_mut() {
+        if !data.block_stack.is_empty() {
+            let before = data.block_stack.len();
+            data.block_stack
+                .retain(|id| id == &data.block_id || live_block_ids.contains(id));
+            removed += before - data.block_stack.len();
+        }
+    }
+    for child in &mut node.children {
+        removed += prune_dangling_stack_members(child, live_block_ids);
+    }
+    removed
 }
 
 /// A minimize-locked node: a minimized leaf (`minimizedSize`), a slipped
