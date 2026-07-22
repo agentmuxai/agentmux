@@ -87,6 +87,25 @@ export interface RunProviderLoginParams extends ForceLoginParams {
      *  agent). Omit for a pre-launch flow with no agent yet; that flow's own
      *  launch-time reconcile links the account once one is created. */
     linkTarget?: { blockId: string; agentDefinitionId: string };
+    /** Reconnect (not fresh-connect) into this account id, if set — threaded
+     *  through to tier 2/3's account-dir minting so the SAME account's
+     *  isolated dir is reused/refreshed instead of a new one being minted.
+     *  Omit for a genuinely fresh connect. Callers that already know this
+     *  agent has a bound account for this provider (e.g. a retry after a
+     *  failed login) should always pass it — otherwise every retry mints
+     *  and orphans a brand-new account instead of refreshing the one
+     *  already in use. */
+    existingAccountId?: string;
+    /** Fired as soon as tier 2 or 3 registers a real IdentityAccount row —
+     *  before `linkTarget`'s own linking (if any). Callers that need to know
+     *  the resulting account id/dir for their own purposes (e.g. rebuilding
+     *  a local `authEnv` copy to recheck auth status against the NEW
+     *  isolated dir, since `finalizeAccount` only updates the persisted
+     *  block meta — a caller's own in-memory `authEnv` variable is never
+     *  refreshed by this function) should use this instead of threading a
+     *  new return shape through `runProviderLogin` — `linkTarget`-driven
+     *  pane callers that don't need the value don't have to care it exists. */
+    onAccountRegistered?: (accountId: string, dir: string) => void;
     /** Skip tier 1 (headless URL-capture) entirely and go straight to tier 2.
      *  For providers where tier 1 is a documented, unconditional dead end —
      *  e.g. `requiresLoginTty` providers, whose CLI opens its own browser
@@ -203,7 +222,7 @@ export async function runProviderLogin(p: RunProviderLoginParams): Promise<Provi
     // real IdentityAccount at all, so the agent reported "Login successful"
     // but stayed permanently blocked by the resolver's unconditional
     // oauth-class spawn gate on its very next spawn.
-    const minted = await ensureAccountDir(p.provider.id, p.log);
+    const minted = await ensureAccountDir(p.provider.id, p.log, p.existingAccountId);
 
     // Claude-only: seed-from-global. seed_provider_auth_from_global
     // hard-rejects every other provider server-side, so this tier is
@@ -213,6 +232,7 @@ export async function runProviderLogin(p: RunProviderLoginParams): Promise<Provi
         p.log("auth", "no login URL captured — checking for an existing global Claude login…");
         if (await seedGlobalLogin(p.provider.id, p.log, minted.dir)) {
             if (await persistSeededAccount(p.provider.id, minted.accountId, minted.dir, p.log)) {
+                p.onAccountRegistered?.(minted.accountId, minted.dir);
                 await finalizeAccount(p, minted.accountId, minted.dir);
                 return "seeded";
             }
@@ -262,6 +282,7 @@ export async function runProviderLogin(p: RunProviderLoginParams): Promise<Provi
 
     if (minted) {
         if (await persistSeededAccount(p.provider.id, minted.accountId, minted.dir, p.log)) {
+            p.onAccountRegistered?.(minted.accountId, minted.dir);
             await finalizeAccount(p, minted.accountId, minted.dir);
         }
     }

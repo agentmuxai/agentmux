@@ -213,6 +213,33 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
             // §7 — required now that the resolver's spawn gate has no
             // ambient exception).
             const agentDefinitionId = blockData?.meta?.agentId as string | undefined;
+
+            // Reuse the account already bound to this agent for this
+            // provider, if any — reagent P1: without this, every retry
+            // through this flow minted a brand-new account+dir instead of
+            // refreshing the one already in use, orphaning an unlinked
+            // IdentityAccount row/dir on every failed "Retry Login" click.
+            let existingAccountId: string | undefined;
+            if (agentDefinitionId) {
+                try {
+                    const links = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, {
+                        agent_id: agentDefinitionId,
+                    });
+                    existingAccountId = links.find((l) => l.provider === provider.id)?.account_id;
+                } catch {
+                    // Best-effort — a fresh account still gets minted below if this lookup fails.
+                }
+            }
+
+            // Tier 2/3 mint (or reuse) an isolated account dir that's
+            // DIFFERENT from the pre-login `authEnv` closure above — this
+            // local copy is what the post-login recheck below actually
+            // queries, so it must be refreshed. reagent P0: without this,
+            // the "seeded"/"terminal-success" recheck queried the OLD
+            // directory (nothing had ever been written there) and reported
+            // authenticated: false even though the login just succeeded,
+            // defeating the entire "Retry Login" flow this file exists for.
+            let recheckAuthEnv = authEnv ?? {};
             const outcome = await runProviderLogin({
                 provider,
                 cliPath: cliResult.cli_path,
@@ -221,6 +248,12 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
                 log,
                 isCancelled,
                 linkTarget: agentDefinitionId ? { blockId, agentDefinitionId } : undefined,
+                existingAccountId,
+                onAccountRegistered: (_accountId, dir) => {
+                    if (provider.authConfigDirEnvVar) {
+                        recheckAuthEnv = { ...(authEnv ?? {}), [provider.authConfigDirEnvVar]: dir };
+                    }
+                },
             });
 
             let authenticated = false;
@@ -238,7 +271,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
                         const recheck = await RpcApi.CheckCliAuthCommand(TabRpcClient, {
                             cli_path: cliResult.cli_path,
                             auth_check_args: provider.authCheckCommand,
-                            auth_env: authEnv,
+                            auth_env: recheckAuthEnv,
                         }, { timeout: 10000 });
                         if (recheck.authenticated) {
                             authenticated = true;
@@ -257,7 +290,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
                     const recheck = await RpcApi.CheckCliAuthCommand(TabRpcClient, {
                         cli_path: cliResult.cli_path,
                         auth_check_args: provider.authCheckCommand,
-                        auth_env: authEnv,
+                        auth_env: recheckAuthEnv,
                     }, { timeout: 10000 });
                     authenticated = recheck.authenticated;
                     authedEmail = recheck.email ?? null;
