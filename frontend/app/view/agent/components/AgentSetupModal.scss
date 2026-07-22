@@ -6,17 +6,49 @@
 // (_identity-panel.scss / AgentNativeMemoryModal.scss); this file only styles
 // the top tab bar + panel wrapper.
 
+// This modal opens through the shared ModalLayer with `size="fit"` (the
+// same host every other modal kind uses), so `.modal-panel` is deliberately
+// `width: auto; max-width: 100%` (modal.scss:116) — shrink-to-fit, sized BY
+// its content, not a definite box. Two earlier attempts tried to size
+// *this* element (a CHILD of that shrink-to-fit panel) directly:
+//   - `min(780px, 100%)` — the % has no definite containing block to
+//     resolve against (the parent's own width depends on OUR width — a
+//     circular dependency), so Chromium collapsed both this element and
+//     .modal-panel to ~0. Confirmed live via CDP DOM inspection: modal
+//     fully rendered (all tabs/content present) but computed width: 0px —
+//     invisible, not broken.
+//   - `min(780px, 100cqw)` — container query units resolve against the
+//     nearest `container-type` ancestor (.modal-layer-mount, "modal-mount"
+//     — modal.scss:30-38) instead of the immediate parent, which fixed the
+//     collapse-to-zero — but that mount tracks the full pane, which is
+//     WIDER than .modal-panel's own shrink-wrapped, backdrop-clamped box.
+//     Result: this element asserted a width bigger than its actual parent,
+//     re-overflowing past .modal-panel's edge (confirmed via CDP: child
+//     595px inside a 547px parent).
+//
+// The fix instead sizes `.modal-panel` itself, via `:has()` scoped to when
+// it's hosting us — exactly the pattern modal.scss's own `[data-size]`
+// rules already use (min(Npx, 100%), resolving against `.modal-panel`'s
+// own parent `.modal-root`, which is `position: fixed|absolute; inset: 0`
+// — genuinely definite, unlike `.modal-panel` itself). This element then
+// just fills whatever `.modal-panel` resolves to.
+// See docs/specs/SPEC_AGENT_PANE_ARMORY_HEADER_ICON_2026_07_20.md §7.1.
+.modal-panel:has(.agent-setup-modal) {
+    width: min(780px, 100%);
+    height: 560px;
+    max-height: 85vh;
+}
+
 .agent-setup-modal {
     display: flex;
     flex-direction: column;
-    // One fixed size for the whole modal so the frame doesn't resize between
-    // tabs. Sized to fit the widest/tallest embedded panel (the Memory panel,
-    // which is 780×520 in its standalone form) plus the tab bar.
-    width: 780px;
-    max-width: 92vw;
-    height: 560px;
-    max-height: 85vh;
+    width: 100%;
+    height: 100%;
     min-width: 0;
+    // Container-query context for .agent-setup-modal-tab below (a
+    // descendant) — same technique as armory-view.scss's .armory-container.
+    container-type: inline-size;
+    container-name: agent-setup;
 }
 
 .agent-setup-modal-tabs {
@@ -27,6 +59,9 @@
 }
 
 .agent-setup-modal-tab {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
     padding: var(--space-2) var(--space-3);
     font-size: var(--text-sm);
     font-weight: var(--font-weight-medium);
@@ -35,6 +70,14 @@
     border: none;
     border-bottom: 2px solid transparent;
     cursor: default;
+
+    // Same icon treatment as the global Armory rail (bundle-manager-rail-item
+    // in armory-view.scss) — width-pinned, slightly dimmed.
+    i {
+        width: 16px;
+        text-align: center;
+        opacity: 0.8;
+    }
 
     &:hover:not(.is-active) {
         color: var(--main-text-color);
@@ -48,6 +91,30 @@
     &:focus-visible {
         outline: none;
         box-shadow: var(--shadow-focus-ring);
+    }
+}
+
+// Narrow modal — icon-only tabs, same "hide the label, keep the icon"
+// compression armory-view.scss's rail does at its 767px breakpoint.
+@container agent-setup (max-width: 560px) {
+    .agent-setup-modal-tab span {
+        display: none;
+    }
+}
+
+// Same min-width:0 rescue modal.scss's Layer C already provides for
+// .modal-panel-body descendants (@container modal-mount, modal.scss:141-146)
+// — scoped to our own classes instead of adopting that shared class, which
+// also carries generic .modal-panel-body padding/font-size we don't want
+// here. .modal-layer-mount (ModalLayer.tsx) is the ancestor that establishes
+// the `modal-mount` container, so this fires correctly regardless of the
+// `agent-setup` container above (flex children default to min-width:auto,
+// which this overrides once the real mount node — the pane, ultimately —
+// is this narrow).
+@container modal-mount (max-width: 400px) {
+    .agent-setup-modal-tabs,
+    .agent-setup-modal-panel {
+        min-width: 0;
     }
 }
 
