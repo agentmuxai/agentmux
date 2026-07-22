@@ -88,7 +88,19 @@ impl Store {
         // logout. get_optional distinguishes the two: `Ok(None)` really
         // means no entry exists; `Err` means the read itself failed.
         let tokens = match secret_store::get_optional(MUXBUS_KEYCHAIN_ID) {
-            Ok(Some(blob)) => serde_json::from_str::<MuxBusTokens>(&blob).unwrap_or_default(),
+            Ok(Some(blob)) => {
+                // reagent P2: a corrupted/unparseable keychain blob used to
+                // silently collapse to MuxBusTokens::default() via
+                // unwrap_or_default() — presenting as a full logout instead
+                // of surfacing that something is actually corrupted,
+                // inconsistent with this same match's handling of real
+                // keychain READ errors below (which correctly propagates).
+                // A malformed blob here means something wrote bad data, not
+                // "no credential" — treat it the same way: a real error.
+                serde_json::from_str::<MuxBusTokens>(&blob).map_err(|e| {
+                    StoreError::Other(format!("muxbus: stored keychain blob is corrupted: {e}"))
+                })?
+            }
             Ok(None) if !legacy_access.is_empty() => {
                 // Lazy migration: this row predates keychain-backed storage.
                 // Use the plaintext columns this one time, and self-heal by
