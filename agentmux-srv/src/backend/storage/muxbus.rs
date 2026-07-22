@@ -178,23 +178,55 @@ impl Store {
             id_token: creds.id_token.clone(),
         };
         let blob = serde_json::to_string(&tokens)?;
+
+        // Captured so a SQL failure below can restore the keychain to
+        // exactly what it held before this call (reagent P2 on #2260):
+        // without this, a keychain write that succeeds followed by a SQL
+        // write that then fails (e.g. a transient lock) leaves the FRESH
+        // tokens paired with the OLD SQL metadata (expires_at/user_email —
+        // that INSERT never committed, so it's untouched), a mismatch that
+        // previously only self-healed on the next successful save. Best-
+        // effort read — if it fails, fall back to deleting on rollback
+        // (see below) rather than blocking the save over it.
+        let previous_blob = secret_store::get_optional(MUXBUS_KEYCHAIN_ID)
+            .ok()
+            .flatten();
+
         secret_store::put(MUXBUS_KEYCHAIN_ID, &blob)
             .map_err(|e| StoreError::Other(format!("muxbus: keychain write failed: {e}")))?;
 
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "INSERT OR REPLACE INTO db_muxbus_credentials
-                 (id, cognito_domain, client_id, access_token, refresh_token, id_token,
-                  expires_at, user_email, user_sub)
-             VALUES ('global', ?1, ?2, '', '', '', ?3, ?4, ?5)",
-            params![
-                creds.cognito_domain,
-                creds.client_id,
-                creds.expires_at,
-                creds.user_email,
-                creds.user_sub,
-            ],
-        )?;
+        let sql_result = {
+            let conn = self.conn.lock().unwrap();
+            conn.execute(
+                "INSERT OR REPLACE INTO db_muxbus_credentials
+                     (id, cognito_domain, client_id, access_token, refresh_token, id_token,
+                      expires_at, user_email, user_sub)
+                 VALUES ('global', ?1, ?2, '', '', '', ?3, ?4, ?5)",
+                params![
+                    creds.cognito_domain,
+                    creds.client_id,
+                    creds.expires_at,
+                    creds.user_email,
+                    creds.user_sub,
+                ],
+            )
+        };
+        if let Err(e) = sql_result {
+            let rollback = match &previous_blob {
+                Some(old) => secret_store::put(MUXBUS_KEYCHAIN_ID, old),
+                None => secret_store::delete(MUXBUS_KEYCHAIN_ID),
+            };
+            if let Err(re) = rollback {
+                tracing::warn!(
+                    error = %re,
+                    sql_error = %e,
+                    "muxbus_save: SQL write failed AND rolling back the keychain write also \
+                     failed — keychain may now hold fresh tokens with no matching SQL metadata \
+                     until the next successful save"
+                );
+            }
+            return Err(e.into());
+        }
         Ok(())
     }
 
