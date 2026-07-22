@@ -4,6 +4,7 @@
 mod agents;
 mod ambient;
 mod backend;
+mod broker;
 mod config;
 mod event_log;
 mod identity;
