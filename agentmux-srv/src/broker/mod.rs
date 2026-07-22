@@ -19,8 +19,10 @@
 //! (Phase C+), not touched here.
 
 pub mod scheduler;
+pub mod state;
 
 pub use scheduler::RefreshScheduler;
+pub use state::{CredentialState, RefreshErrorKind};
 
 use std::sync::{Arc, OnceLock};
 

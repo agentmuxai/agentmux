@@ -17,11 +17,17 @@
 //!    production issues from exactly this failure mode (concurrent CLI
 //!    sessions racing to refresh a shared credentials file with no lock).
 //!    `ensure_fresh` collapses concurrent callers for the same id onto one
-//!    in-flight refresh via a per-id async mutex with a double-checked
-//!    freshness read after acquiring it.
+//!    in-flight refresh.
 //! 2. **Reactive-only refresh.** `run_sweep_loop` proactively walks every
 //!    registered credential on a timer instead of only refreshing when
 //!    something happens to ask for one.
+//!
+//! Coordination state (fresh / refreshing / failed / needs-reauth) is owned
+//! by the pure reducer in `super::state` — this module is a thin async
+//! orchestrator: dispatch a command, execute whatever the returned events
+//! say to do (call `is_fresh()`/`refresh()`), dispatch the result back in.
+//! Same split as every other reducer in this codebase (e.g. `agentmux-cef`'s
+//! host reducer emitting `HostEvent::Effect` for `AppState` to execute).
 //!
 //! Preserve-on-failure (never overwrite a valid stored credential with a
 //! failed/partial refresh result) is NOT enforced here — it's the
@@ -31,21 +37,30 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use tokio::sync::Mutex as AsyncMutex;
+use tokio::sync::{Mutex as AsyncMutex, Notify};
+
+use super::state::{self, Command, CredentialState, Event, RefreshErrorKind};
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
-struct Entry {
+struct RegisteredClosures {
     is_fresh: Box<dyn Fn() -> BoxFuture<'static, bool> + Send + Sync>,
-    refresh: Box<dyn Fn() -> BoxFuture<'static, Result<(), String>> + Send + Sync>,
-    lock: Arc<AsyncMutex<()>>,
+    refresh: Box<dyn Fn() -> BoxFuture<'static, Result<(), RefreshErrorKind>> + Send + Sync>,
 }
 
 pub struct RefreshScheduler {
-    entries: AsyncMutex<HashMap<String, Arc<Entry>>>,
+    closures: AsyncMutex<HashMap<String, Arc<RegisteredClosures>>>,
+    // Reducer-owned coordination state. std::sync::Mutex, not AsyncMutex —
+    // the reducer never awaits, every hold is sub-millisecond, matching the
+    // discipline every other reducer in this codebase follows.
+    states: Mutex<HashMap<String, CredentialState>>,
+    // Per-id wake signal for concurrent `ensure_fresh` callers waiting on an
+    // in-flight check/refresh (the reducer decides single-flight; this just
+    // wakes waiters once that decision resolves).
+    notifiers: Mutex<HashMap<String, Arc<Notify>>>,
 }
 
 impl Default for RefreshScheduler {
@@ -56,78 +71,216 @@ impl Default for RefreshScheduler {
 
 impl RefreshScheduler {
     pub fn new() -> Self {
-        Self { entries: AsyncMutex::new(HashMap::new()) }
+        Self {
+            closures: AsyncMutex::new(HashMap::new()),
+            states: Mutex::new(HashMap::new()),
+            notifiers: Mutex::new(HashMap::new()),
+        }
     }
 
     /// Register (or replace) a credential for proactive management.
-    /// `is_fresh` must be side-effect-free (called under the per-id lock on
-    /// every `ensure_fresh`/sweep tick) — async so a caller whose freshness
-    /// check needs a blocking read (e.g. an OS keychain call, which can hang
-    /// on a slow/unresponsive Secret Service D-Bus daemon on headless Linux)
-    /// can route it through `tokio::task::spawn_blocking` instead of
-    /// stalling the tokio worker thread this scheduler's own async tasks
-    /// run on (reagent P1 on #2260). `refresh` performs the actual refresh
-    /// and is responsible for persisting the result itself (and for NOT
-    /// persisting anything on failure).
+    /// `is_fresh` must be side-effect-free (may be called on every
+    /// `ensure_fresh`/sweep tick) — async so a caller whose freshness check
+    /// needs a blocking read (e.g. an OS keychain call, which can hang on a
+    /// slow/unresponsive Secret Service D-Bus daemon on headless Linux) can
+    /// route it through `tokio::task::spawn_blocking` instead of stalling
+    /// the tokio worker thread this scheduler's own async tasks run on
+    /// (reagent P1 on #2260). `refresh` performs the actual refresh and is
+    /// responsible for persisting the result itself (and for NOT persisting
+    /// anything on failure) — and for classifying a failure as
+    /// `RefreshErrorKind::Transient` (worth retrying) vs
+    /// `::PermanentAuthFailure` (the credential itself is rejected; only a
+    /// fresh login can fix it — see that type's own doc comment).
     pub async fn register(
         &self,
         credential_id: impl Into<String>,
         is_fresh: impl Fn() -> BoxFuture<'static, bool> + Send + Sync + 'static,
-        refresh: impl Fn() -> BoxFuture<'static, Result<(), String>> + Send + Sync + 'static,
+        refresh: impl Fn() -> BoxFuture<'static, Result<(), RefreshErrorKind>> + Send + Sync + 'static,
     ) {
-        let mut entries = self.entries.lock().await;
-        entries.insert(
-            credential_id.into(),
-            Arc::new(Entry {
-                is_fresh: Box::new(is_fresh),
-                refresh: Box::new(refresh),
-                lock: Arc::new(AsyncMutex::new(())),
-            }),
-        );
+        let id: String = credential_id.into();
+        {
+            let mut closures = self.closures.lock().await;
+            closures.insert(
+                id.clone(),
+                Arc::new(RegisteredClosures {
+                    is_fresh: Box::new(is_fresh),
+                    refresh: Box::new(refresh),
+                }),
+            );
+        }
+        {
+            let mut states = self.states.lock().unwrap();
+            state::update(&mut states, Command::Register { id: id.clone() });
+        }
+        self.notifiers
+            .lock()
+            .unwrap()
+            .entry(id)
+            .or_insert_with(|| Arc::new(Notify::new()));
     }
 
     pub async fn unregister(&self, credential_id: &str) {
-        self.entries.lock().await.remove(credential_id);
+        self.closures.lock().await.remove(credential_id);
+        let mut states = self.states.lock().unwrap();
+        state::update(&mut states, Command::Unregister { id: credential_id.to_string() });
+    }
+
+    /// The credential's current coordination state, if registered —
+    /// diagnostics/future-UI hook (e.g. surfacing `NeedsReauth` distinctly
+    /// from a routine in-progress refresh). Not used by `ensure_fresh`
+    /// itself, which always dispatches through the reducer regardless.
+    pub fn state(&self, credential_id: &str) -> Option<CredentialState> {
+        self.states.lock().unwrap().get(credential_id).cloned()
     }
 
     /// Ensure `credential_id` is fresh, single-flight-guarded. If another
     /// caller is already mid-refresh for this id, this waits for that
-    /// refresh's lock to release, then re-checks freshness rather than
-    /// starting a second refresh. Returns `Err` if the id was never
-    /// registered.
+    /// attempt to finish, then re-checks freshness rather than starting a
+    /// second refresh. Returns `Err` if the id was never registered.
     pub async fn ensure_fresh(&self, credential_id: &str) -> Result<(), String> {
-        let entry = {
-            let entries = self.entries.lock().await;
-            entries
-                .get(credential_id)
-                .cloned()
-                .ok_or_else(|| format!("no credential registered as '{credential_id}'"))?
-        };
-        let _guard = entry.lock.lock().await;
-        // Double-checked: another caller may have refreshed this credential
-        // while we were waiting for the lock above.
-        if (entry.is_fresh)().await {
-            return Ok(());
+        let id = credential_id.to_string();
+        loop {
+            let events = {
+                let mut states = self.states.lock().unwrap();
+                state::update(&mut states, Command::CheckRequested { id: id.clone() })
+            };
+            match events.as_slice() {
+                [Event::Unregistered { .. }] => {
+                    return Err(format!("no credential registered as '{id}'"));
+                }
+                [Event::AlreadyInFlight { .. }] => {
+                    self.notifier_for(&id).notified().await;
+                    continue;
+                }
+                [Event::RunFreshnessCheck { .. }] => {
+                    let Some(closures) = self.closures.lock().await.get(&id).cloned() else {
+                        // Unregistered concurrently between the dispatch
+                        // above and this lookup.
+                        return Err(format!("no credential registered as '{id}'"));
+                    };
+                    let is_fresh = (closures.is_fresh)().await;
+                    let events = {
+                        let mut states = self.states.lock().unwrap();
+                        state::update(&mut states, Command::FreshnessChecked { id: id.clone(), is_fresh })
+                    };
+                    self.trace(&events);
+                    if is_fresh {
+                        self.wake(&id);
+                        return Ok(());
+                    }
+                    debug_assert!(matches!(events.as_slice(), [Event::RunRefresh { .. }]));
+                    let result = (closures.refresh)().await;
+                    let (msg, cmd) = match result {
+                        Ok(()) => (None, Command::RefreshSucceeded { id: id.clone() }),
+                        Err(error) => {
+                            let msg = match &error {
+                                RefreshErrorKind::Transient(m) | RefreshErrorKind::PermanentAuthFailure(m) => {
+                                    m.clone()
+                                }
+                            };
+                            (Some(msg), Command::RefreshFailed { id: id.clone(), error })
+                        }
+                    };
+                    let events = {
+                        let mut states = self.states.lock().unwrap();
+                        state::update(&mut states, cmd)
+                    };
+                    self.trace(&events);
+                    self.wake(&id);
+                    return match msg {
+                        None => Ok(()),
+                        Some(m) => Err(m),
+                    };
+                }
+                other => unreachable!("unexpected reducer events for CheckRequested: {other:?}"),
+            }
         }
-        (entry.refresh)().await
     }
 
     /// Background sweep — checks every registered credential every
-    /// `interval` and proactively refreshes anything stale. Spawn once via
-    /// `tokio::spawn`; runs until the process exits.
+    /// `interval` and proactively refreshes anything stale. Skips entries
+    /// currently `NeedsReauth`: retrying a credential already known to
+    /// require a fresh human login is pointless and just hammers the
+    /// backing server; `ensure_fresh` called on-demand still re-checks
+    /// those (see `state`'s own doc comment). Spawn once via `tokio::spawn`;
+    /// runs until the process exits.
     pub async fn run_sweep_loop(self: Arc<Self>, interval: Duration) {
         let mut tick = tokio::time::interval(interval);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tick.tick().await;
             let ids: Vec<String> = {
-                let entries = self.entries.lock().await;
-                entries.keys().cloned().collect()
+                let closures = self.closures.lock().await;
+                closures.keys().cloned().collect()
             };
             for id in ids {
+                let needs_reauth = matches!(
+                    self.states.lock().unwrap().get(&id),
+                    Some(CredentialState::NeedsReauth { .. })
+                );
+                if needs_reauth {
+                    continue;
+                }
                 if let Err(e) = self.ensure_fresh(&id).await {
                     tracing::warn!(credential_id = %id, error = %e, "broker: proactive refresh failed");
                 }
+            }
+        }
+    }
+
+    fn notifier_for(&self, id: &str) -> Arc<Notify> {
+        self.notifiers
+            .lock()
+            .unwrap()
+            .entry(id.to_string())
+            .or_insert_with(|| Arc::new(Notify::new()))
+            .clone()
+    }
+
+    fn wake(&self, id: &str) {
+        if let Some(n) = self.notifiers.lock().unwrap().get(id) {
+            n.notify_waiters();
+        }
+    }
+
+    /// Map diagnostics-only reducer events to `tracing` — `auth.broker.*`
+    /// message prefixes land in `muxlog auth`'s existing filter regex
+    /// (`\bauth\.\w+|...`) with zero changes needed there. Control-flow
+    /// events (`RunFreshnessCheck`/`RunRefresh`/`AlreadyInFlight`/
+    /// `Unregistered`) are acted on directly by callers and not
+    /// double-logged here — every `ensure_fresh` call would otherwise emit
+    /// noise even when nothing changed.
+    fn trace(&self, events: &[Event]) {
+        for event in events {
+            match event {
+                Event::BecameFresh { id } => {
+                    tracing::info!(target: "identity", credential_id = %id, "auth.broker.fresh: credential is fresh");
+                }
+                Event::BecameFailed {
+                    id,
+                    consecutive_failures,
+                    error,
+                } => {
+                    tracing::warn!(
+                        target: "identity",
+                        credential_id = %id,
+                        consecutive_failures,
+                        error = %error,
+                        "auth.broker.failed: refresh attempt failed, will retry"
+                    );
+                }
+                Event::BecameNeedsReauth { id, reason } => {
+                    tracing::warn!(
+                        target: "identity",
+                        credential_id = %id,
+                        reason = %reason,
+                        "auth.broker.needs_reauth: credential needs a fresh login, no longer auto-retrying"
+                    );
+                }
+                Event::RunFreshnessCheck { .. }
+                | Event::RunRefresh { .. }
+                | Event::AlreadyInFlight { .. }
+                | Event::Unregistered { .. } => {}
             }
         }
     }
@@ -185,6 +338,7 @@ mod tests {
             1,
             "10 concurrent callers for the same credential must collapse onto exactly one refresh"
         );
+        assert_eq!(scheduler.state("test:cred"), Some(CredentialState::Fresh));
     }
 
     #[tokio::test]
@@ -218,7 +372,13 @@ mod tests {
             .register(
                 "test:cred",
                 || Box::pin(async { false }), // never becomes fresh in this test — refresh always fails
-                || Box::pin(async { Err("simulated refresh failure".to_string()) }),
+                || {
+                    Box::pin(async {
+                        Err(RefreshErrorKind::Transient(
+                            "simulated refresh failure".to_string(),
+                        ))
+                    })
+                },
             )
             .await;
 
@@ -228,6 +388,10 @@ mod tests {
         // failed attempt as having succeeded).
         let result2 = scheduler.ensure_fresh("test:cred").await;
         assert!(result2.is_err());
+        assert!(matches!(
+            scheduler.state("test:cred"),
+            Some(CredentialState::Failed { consecutive_failures: 2, .. })
+        ));
     }
 
     #[tokio::test]
@@ -235,5 +399,100 @@ mod tests {
         let scheduler = RefreshScheduler::new();
         let result = scheduler.ensure_fresh("nope").await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn permanent_auth_failure_stops_the_sweep_loop_retrying_but_ensure_fresh_still_rechecks() {
+        let scheduler = Arc::new(RefreshScheduler::new());
+        let refresh_calls = Arc::new(AtomicUsize::new(0));
+        let calls = refresh_calls.clone();
+        scheduler
+            .register(
+                "test:cred",
+                || Box::pin(async { false }),
+                move || {
+                    let calls = calls.clone();
+                    Box::pin(async move {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        Err(RefreshErrorKind::PermanentAuthFailure("invalid_grant".into()))
+                    })
+                },
+            )
+            .await;
+
+        assert!(scheduler.ensure_fresh("test:cred").await.is_err());
+        assert!(matches!(
+            scheduler.state("test:cred"),
+            Some(CredentialState::NeedsReauth { .. })
+        ));
+
+        // An on-demand ensure_fresh call still re-attempts (a human may
+        // have logged in again out-of-band) — this is call #2.
+        assert!(scheduler.ensure_fresh("test:cred").await.is_err());
+        assert_eq!(refresh_calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn re_registering_a_credential_mid_refresh_does_not_orphan_a_waiting_second_caller() {
+        // Pre-refactor latent race: register() on an already-registered id
+        // replaced the Entry (including its per-id lock), so a SECOND
+        // caller already blocked waiting on the OLD entry's lock waited
+        // forever — the replacement entry's lock was a different object
+        // nothing would ever signal for that waiter. Here, single-flight is
+        // reducer-state-driven and waiting goes through a per-id Notify
+        // that `register()` never replaces (only ensures exists), so a
+        // second caller that observed AlreadyInFlight is woken regardless
+        // of a concurrent re-register.
+        let scheduler = Arc::new(RefreshScheduler::new());
+        let gate = Arc::new(tokio::sync::Notify::new());
+        let gate_wait = gate.clone();
+        scheduler
+            .register(
+                "test:cred",
+                || Box::pin(async { false }),
+                move || {
+                    let gate_wait = gate_wait.clone();
+                    Box::pin(async move {
+                        gate_wait.notified().await;
+                        Ok(())
+                    })
+                },
+            )
+            .await;
+
+        let s1 = scheduler.clone();
+        let first = tokio::spawn(async move { s1.ensure_fresh("test:cred").await });
+        // Give the first call time to reach the gated refresh closure and
+        // land the credential in `Refreshing`.
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(
+            scheduler.state("test:cred"),
+            Some(CredentialState::Refreshing { prior_failures: 0 })
+        );
+
+        // A second caller now dispatches while still Refreshing — gets
+        // AlreadyInFlight and waits on the id's Notify.
+        let s2 = scheduler.clone();
+        let second = tokio::spawn(async move { s2.ensure_fresh("test:cred").await });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(!second.is_finished(), "second caller must be waiting, not returned yet");
+
+        // Re-register while BOTH the first call is gated inside `refresh`
+        // AND the second call is waiting on AlreadyInFlight.
+        scheduler
+            .register("test:cred", || Box::pin(async { true }), || Box::pin(async { Ok(()) }))
+            .await;
+
+        gate.notify_waiters();
+        let first_result = tokio::time::timeout(Duration::from_secs(2), first)
+            .await
+            .expect("first caller must not hang after a concurrent re-register")
+            .unwrap();
+        assert!(first_result.is_ok());
+        let second_result = tokio::time::timeout(Duration::from_secs(2), second)
+            .await
+            .expect("second (waiting) caller must not be orphaned by a concurrent re-register")
+            .unwrap();
+        assert!(second_result.is_ok());
     }
 }
