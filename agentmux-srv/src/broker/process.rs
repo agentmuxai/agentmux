@@ -184,15 +184,22 @@ impl ProcessBroker {
     }
 
     /// Recompute and return one block's status. Single-flight-guarded by
-    /// virtue of going through the cache's own lock — concurrent callers
-    /// (e.g. an Agent pane mount and Swarm's refresh landing
-    /// near-simultaneously) serialize on the same short critical section
-    /// instead of each independently querying `blockcontroller`/
-    /// `process_tracker` and potentially observing/publishing
-    /// inconsistent snapshots.
+    /// holding the cache lock across the *entire* read-compare-write
+    /// sequence, not just the write — `compute_status` must run inside the
+    /// critical section, not before it. reagent P1 on #2273 caught this:
+    /// with the read outside the lock, two concurrent callers (e.g. an
+    /// Agent pane mount and Swarm's refresh landing near-simultaneously)
+    /// could interleave so the thread that *read* first but *wrote*
+    /// second overwrites a fresher value the other thread already wrote —
+    /// the cache regresses to a stale snapshot even though a newer read
+    /// already happened. Locking around the whole sequence (safe here
+    /// because `compute_status` is synchronous and cheap — see the `cache`
+    /// field's own doc comment) makes "last writer wins" and "last reader
+    /// wins" the same thing, which is what single-flight is supposed to
+    /// guarantee.
     pub fn status(&self, block_id: &str) -> ProcessStatus {
-        let fresh = compute_status(block_id);
         let mut cache = self.cache.lock();
+        let fresh = compute_status(block_id);
         let changed = cache
             .get(block_id)
             .map(|prev| {
