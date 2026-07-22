@@ -132,8 +132,17 @@ export class AgentNativeMemoryModel {
         }
     }
 
-    /** Clear the current selection — returns to the list view. */
+    /** Clear the current selection — returns to the list view. Refuses
+     *  while an edit is in flight, mirroring `selectFile`'s guard below, so
+     *  the always-visible Back button can't silently discard an unsaved
+     *  draft (and can't leave `editingAtom` stuck true with `selected`
+     *  cleared, which would permanently fail every future `selectFile`
+     *  guard check until the modal is closed and reopened). */
     clearSelection(): void {
+        if (this.editingAtom()) {
+            this.setError("Finish editing (Save or Cancel) before going back.");
+            return;
+        }
         this.setSelected(null);
         this.setContent(null);
     }

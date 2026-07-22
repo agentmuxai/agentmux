@@ -130,7 +130,7 @@ export class AgentViewModel implements ViewModel {
             await RpcApi.SetMetaCommand(TabRpcClient, { oref, meta: { agentName: name.trim() } });
         };
 
-        // Pane-frame header button: a single "Agent setup" (id-card) icon
+        // Pane-frame header button: a single "Agent setup" (vault) icon
         // when an agent is loaded — opens the unified tabbed modal
         // (Accounts + Memory). Hidden when no agent is loaded (picker
         // screen). Always shown when agentId exists: quick-launch panes

@@ -3,7 +3,7 @@
 
 /**
  * AgentSetupModal — unified tabbed container for per-agent setup surfaces,
- * opened by the single "Agent setup" (id-card) icon in the agent pane
+ * opened by the single "Agent setup" (vault) icon in the agent pane
  * header. Consolidates the former two icons (identity + native memory)
  * into one modal with tabs:
  *   - Accounts    — the former Identity panel (AgentIdentityModalPanel).
