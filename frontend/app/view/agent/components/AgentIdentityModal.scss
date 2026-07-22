@@ -13,90 +13,10 @@
     max-width: 560px;
 }
 
-// Layer-3 ambient-login opt-in row (spec §2.3 —
-// SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md). Local switch
-// styling mirrors the settings pane's .setting-toggle (that stylesheet
-// isn't loaded in the agent-pane modal context).
-.agent-ambient-login-section {
-    padding: var(--space-3) var(--space-5);
-    border-top: 1px solid var(--border-color);
-}
-
-.agent-ambient-login-row {
-    display: flex;
-    align-items: center;
-    gap: var(--space-4);
-}
-
-.agent-ambient-login-text {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-    flex: 1;
-    min-width: 0;
-}
-
-.agent-ambient-login-label {
-    font-size: var(--text-sm);
-    font-weight: var(--font-weight-medium);
-    color: var(--main-text-color);
-}
-
-.agent-ambient-login-help {
-    font-size: var(--text-xs);
-    color: var(--secondary-text-color);
-    line-height: 1.4;
-}
-
-.agent-ambient-login-toggle {
-    flex: none;
-    position: relative;
-    width: 34px;
-    height: 18px;
-    padding: 0;
-    border: 1px solid var(--border-color);
-    border-radius: 9px;
-    background: color-mix(in srgb, var(--main-text-color) 10%, transparent);
-    cursor: default;
-
-    &:disabled {
-        opacity: 0.6;
-    }
-
-    &:focus-visible {
-        outline: none;
-        box-shadow: var(--shadow-focus-ring);
-    }
-
-    .agent-ambient-login-toggle-thumb {
-        position: absolute;
-        top: 1px;
-        left: 1px;
-        width: 14px;
-        height: 14px;
-        border-radius: 50%;
-        background: var(--main-text-color);
-        opacity: 0.7;
-        transition: transform 120ms ease;
-    }
-
-    &--on {
-        background: var(--accent-color);
-        border-color: var(--accent-color);
-
-        .agent-ambient-login-toggle-thumb {
-            transform: translateX(16px);
-            background: var(--button-text-color);
-            opacity: 1;
-        }
-    }
-}
-
-.agent-ambient-login-error {
-    margin-top: var(--space-2);
-    font-size: var(--text-xs);
-    color: var(--error-color);
-}
+// The ambient-login opt-in row that used to live here was removed (reagent
+// P1 on #2262 — see AgentIdentityModal.tsx's doc comment): the layer-3
+// spawn gate no longer honors use_ambient_login at all, so the toggle was
+// dead UI promising a fallback that no longer existed.
 
 .agent-modal-footer {
     display: flex;

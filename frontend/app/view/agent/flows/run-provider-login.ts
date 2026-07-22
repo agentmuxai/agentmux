@@ -27,7 +27,17 @@
  *      provider whose CLI prints one. Claude Code v2.1.x never does: its
  *      OAuth flow opens the browser itself from inside the CLI process, and
  *      a piped/PTY spawn has no attached console for that call to succeed
- *      from — see retro-headless-login-browser-open-2026-07-20 §1.
+ *      from — see retro-headless-login-browser-open-2026-07-20 §1. The
+ *      account dir is minted (see below) and pointed at BEFORE this tier
+ *      runs, for every oauth-class provider, so a provider whose tier 1
+ *      DOES succeed (not `requiresLoginTty` — e.g. gemini/copilot) lands
+ *      the credential in an isolated dir too, not an untracked shared one.
+ *      Tier 1 doesn't confirm completion itself — it returns "opened"
+ *      immediately so its caller can show the auth-url box and poll at its
+ *      own pace — so the caller MUST call the exported
+ *      `persistAndLinkAccount` once its own poll confirms success, or the
+ *      minted account never actually gets persisted/linked (reagent P0 on
+ *      #2263 — see that function's doc comment).
  *   2. `seedGlobalLogin` + `persistSeededAccount` — Claude only: check
  *      whether the user already has a VALID login in their global
  *      `~/.claude` (common: the CLI installed outside AgentMux, or a prior
@@ -158,6 +168,32 @@ async function finalizeAccount(
     }
 }
 
+/** For the tier-1 ("opened") outcome specifically: `runProviderLogin` mints
+ *  the account dir and fires `onAccountRegistered` with it up front, but
+ *  does NOT persist or link it — tier 1 doesn't confirm completion itself
+ *  (it returns immediately so the caller can show the auth-url box), and
+ *  persisting an account row before anything has actually logged in would
+ *  be premature. A caller that does its own completion polling for the
+ *  "opened" case (launch-flow.ts's Phase 2, useAgentControllerStatus.ts's
+ *  relogin()) must call this once ITS OWN poll confirms `authenticated:
+ *  true` — using the `accountId`/`dir` it captured from
+ *  `onAccountRegistered` — to actually persist and link the account.
+ *  Without this call, a tier-1 login that appears to succeed still leaves
+ *  no real IdentityAccount behind, and the resolver's spawn gate blocks
+ *  the agent on its very next spawn regardless of how the CLI's own
+ *  check reports it now (reagent P0 on #2263). */
+export async function persistAndLinkAccount(
+    p: RunProviderLoginParams,
+    accountId: string,
+    dir: string,
+): Promise<boolean> {
+    if (await persistSeededAccount(p.provider.id, accountId, dir, p.log)) {
+        await finalizeAccount(p, accountId, dir);
+        return true;
+    }
+    return false;
+}
+
 /** Poll `CheckCliAuthCommand` against a login that was told to write
  *  DIRECTLY into `authEnv`'s isolated dir, until it reports authenticated,
  *  the deadline passes, or `isCancelled` reports true. The provider-agnostic
@@ -196,9 +232,48 @@ async function pollForCliAuthReady(
 }
 
 export async function runProviderLogin(p: RunProviderLoginParams): Promise<ProviderLoginOutcome> {
+    // Mint the account dir ONCE, up front — before ANY tier runs — for
+    // EVERY oauth-class provider, not just Claude. Account minting itself
+    // (ensureAccountDir / persistSeededAccount) has always been
+    // provider-agnostic; the backend RPC it calls (identity.ensureaccountdir)
+    // already gates on the real oauth-class check (resolver::provider_class),
+    // so a non-oauth-class id reaching this function just gets `null` back
+    // here. existingAccountId threads through so a Reconnect (not a fresh
+    // Connect) refreshes the SAME account's dir.
+    //
+    // reagent P0 (#2260, then #2263 for gemini/copilot specifically): a
+    // prior version only minted for tiers 2/3, gated on
+    // `provider.id === "claude"`. That meant ANY provider whose tier 1
+    // (headless URL-capture) actually succeeds — not `requiresLoginTty`,
+    // so not claude/openclaw, but plausibly gemini/copilot — returned
+    // "opened" without ever minting an account or pointing the login at an
+    // isolated dir. Once gemini/copilot became oauth-class (#2263), a
+    // successful tier-1 login for them landed in a NON-isolated dir with no
+    // IdentityAccount behind it, and the resolver's unconditional spawn
+    // gate then permanently blocked the agent on its next spawn — "Login
+    // successful" for a login that could never actually be used again.
+    //
+    // Minting now happens before tier 1, and every tier's authEnv is
+    // pointed at the SAME isolated dir. Tier 1 doesn't confirm completion
+    // itself (unlike tiers 2/3) — it returns "opened" immediately by
+    // design, so its caller can show the auth-url box and poll at its own
+    // pace. Persisting the account row before that confirmation would be
+    // premature (nothing has actually logged in yet), so tier 1 only fires
+    // `onAccountRegistered` with the minted (not-yet-persisted) account —
+    // a caller that does its own completion polling for the "opened" case
+    // (launch-flow.ts, relogin()) is responsible for calling the exported
+    // `persistAndLinkAccount` once ITS OWN poll confirms success.
+    const minted = await ensureAccountDir(p.provider.id, p.log, p.existingAccountId);
+    const authEnvForTiers = minted
+        ? { ...p.authEnv, [p.provider.authConfigDirEnvVar]: minted.dir }
+        : p.authEnv;
+
     if (!p.skipTier1) {
-        const tier1 = await forceProviderLogin(p);
-        if (tier1 === "opened") return "opened";
+        const tier1 = await forceProviderLogin({ ...p, authEnv: authEnvForTiers });
+        if (tier1 === "opened") {
+            if (minted) p.onAccountRegistered?.(minted.accountId, minted.dir);
+            return "opened";
+        }
     }
 
     // Tier 1's login CLI child (piped/PTY, spawned by forceProviderLogin's
@@ -209,20 +284,6 @@ export async function runProviderLogin(p: RunProviderLoginParams): Promise<Provi
     // call even if nothing is running — see useAgentControllerStatus.ts's
     // and launch-flow.ts's existing best-effort uses of the same call).
     await getApi().cancelCliLogin().catch(() => {});
-
-    // Mint the account dir ONCE, up front, for EVERY oauth-class provider —
-    // not just Claude. Account minting itself (ensureAccountDir /
-    // persistSeededAccount) has always been provider-agnostic; the backend
-    // RPC it calls (identity.ensureaccountdir) already gates on the real
-    // oauth-class check (resolver::provider_class), so a non-oauth-class id
-    // reaching this function just gets `null` back here, same as before.
-    // A prior version of this code additionally gated the CALL on
-    // `provider.id === "claude"` — reagent P0: that meant a successful
-    // tier-3 terminal login for codex/openclaw never minted or persisted a
-    // real IdentityAccount at all, so the agent reported "Login successful"
-    // but stayed permanently blocked by the resolver's unconditional
-    // oauth-class spawn gate on its very next spawn.
-    const minted = await ensureAccountDir(p.provider.id, p.log, p.existingAccountId);
 
     // Claude-only: seed-from-global. seed_provider_auth_from_global
     // hard-rejects every other provider server-side, so this tier is
