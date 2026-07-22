@@ -10,6 +10,11 @@ running live today). PR #2255 (`agenta/login-single-point-enforcement-clean`, **
 this writing) reworks part of this system; its changes are described separately in §3 and never blended
 into the "current state" sections, since it isn't real yet.
 
+**Implementation status (updated same day):** Phases A–C of §6's target architecture shipped as PRs
+#2260, #2262, #2263. Phase D (the device-flow shim) was **not built** — a dedicated feasibility spike
+found it's not viable for any of the three target providers (Anthropic, OpenAI, Gemini). See §8 for the
+spike's findings and the resulting scope decision.
+
 ---
 
 ## 0. Executive summary
@@ -398,6 +403,92 @@ bypassed on, no matter how many future login-trigger code paths get added.
    report as the next phase of work, or fold its remaining scope directly into the broker rewrite and skip
    an intermediate consolidation step? Recommendation: land #2255 — the fragmentation fix is independently
    valuable and de-risks the broker work by reducing five call sites to migrate down to one.
+
+---
+
+## 8. Phase D conclusion — device-flow shim is not viable for any target provider, confirmed by direct evidence
+
+§6.2 recommended building AgentMux's own RFC 8628 device-flow shim rather than waiting on native CLI
+support, scoped to the three providers that motivated it — "Claude Code/Codex/Gemini." Before building it,
+a dedicated feasibility spike checked the one thing the original research flagged as unresolved for each of
+those three: independent of the CLI's own command-line UX, does the provider's underlying OAuth
+**authorization server** support the Device Authorization Grant at the protocol level — i.e. could AgentMux
+call a `device_authorization_endpoint` directly, bypassing the CLI's UX entirely?
+
+**Anthropic: no.** `claude.ai/.well-known/openid-configuration` returns only the SPA shell (no JSON);
+`platform.claude.com/.well-known/openid-configuration` 404s; `console.anthropic.com` redirects to
+`platform.claude.com`. The reverse-engineered `querymt/anthropic-auth` project and Claude Code's own
+documented flow show PKCE + `authorization_code` + `refresh_token` only, against
+`console.anthropic.com/oauth/authorize` (auth) and `platform.claude.com/v1/oauth/token` (token) — no
+device grant anywhere. Claude Code's own client code already *probes* for a `device_authorization_endpoint`
+in server metadata (the mechanism behind open feature requests anthropics/claude-code#22992/#20215), and
+those requests stay open precisely because the server never advertises one. Anthropic's own Feb-2026 legal
+update further restricts OAuth usage to Claude Code/Claude.ai and actively blocks third-party clients
+(cited case: OpenCode). **A device-flow shim against Anthropic's server is not just hard, it's currently
+impossible** — there is nothing to call.
+
+**OpenAI: a real endpoint exists, but the gate is server-side, so a shim gains nothing.** A working device
+endpoint exists at `https://auth.openai.com/codex/device` (Codex-specific, not advertised in the standard
+OIDC discovery doc, which lists `grant_types_supported: ["authorization_code","refresh_token"]` only). The
+community project `tumf/opencode-openai-device-auth` already drives it from outside the Codex CLI, reusing
+Codex's own public client id — confirming AgentMux wouldn't need its own registered client. **But** the
+opt-in gate (Settings → Security → "Allow device code login", or workspace-admin-enabled) is enforced by
+the **server**, not the CLI: Codex issue #9418 shows the *server itself* returns "Please contact your
+workspace admin to enable device code authentication" for un-opted-in accounts. A custom AgentMux shim
+calling the same endpoint would hit the identical gate for the identical users the existing gated
+`codex login --device-auth` flag already fails for — zero net benefit over what's already there.
+
+**Gemini: the protocol-level endpoint is real, but the existing client can't use it — a shim means
+registering and maintaining a new Google OAuth app, not reusing what's there.** Google publishes a fully
+documented, general-purpose device authorization endpoint at `https://oauth2.googleapis.com/device/code`
+(token exchange at `https://oauth2.googleapis.com/token`) as part of its standard "TV and Limited-Input
+Device" OAuth flow — the strongest starting position of the three providers, since this is official, stable
+Google infrastructure rather than a reverse-engineered or CLI-specific mechanism. The blocker is the OAuth
+**client**, not the server: Google ties device-grant eligibility to how a client is registered (it must be
+created as a "TV and Limited Input" client type, distinct from the "Desktop app" type), and Gemini CLI's own
+public client id (`681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com`) is not
+registered that way — corroborated by an open, unresolved feature request in Gemini CLI's own repo asking
+for exactly this headless/device-code capability, which would already be closed if their existing client
+supported it. That means AgentMux cannot reuse Gemini CLI's client id the way `tumf/opencode-openai-device-auth`
+reused Codex's; a Gemini shim would require registering and operating AgentMux's own Google Cloud OAuth
+client configured for limited-input devices, which pulls in Google's app-verification/consent-screen review
+for the scopes Gemini CLI needs. That is a standalone, ongoing product commitment (a Google-verified
+AgentMux-branded OAuth app), not a lightweight shim over infrastructure that already exists for AgentMux's
+use — a materially different (and larger) lift than the two-line client-id reuse that works for OpenAI.
+
+### Decision: do not build the device-flow shim
+
+Confirmed with concrete, cited evidence for all three originally-scoped providers — not a hedge. §6.2's
+recommendation is superseded by this finding: Anthropic has no endpoint to call, OpenAI's endpoint is
+gated server-side with zero net benefit over the CLI's own gated flag, and Gemini's endpoint would require
+standing up and maintaining a new, independently-verified Google OAuth client rather than reusing existing
+infrastructure — none of the three clears the bar for "build our own shim" today.
+
+**On the plan's own fallback clause** ("wire each CLI's own documented non-interactive bypass —
+`claude setup-token`, `codex login --with-api-key` — instead"): on closer inspection this is not the small
+follow-up task it first looked like, either:
+
+- `claude setup-token` still requires a real browser-capable environment to complete — it doesn't remove
+  the headless problem, it just produces a different artifact (a portable long-lived token string, printed
+  to stdout, instead of a token file written to disk). AgentMux's existing `open_login_terminal` fallback
+  (a real, visible, un-piped console) already provides that browser-capable environment for regular
+  `login`/`auth login` today; running `setup-token` there instead would work identically for completing the
+  OAuth handshake, but the resulting **printed token** can't be captured the way `run_cli_login`'s piped
+  stdout scrape captures a URL — `open_login_terminal` is deliberately un-piped (piped is exactly what
+  breaks the browser-open in the first place). Consuming a `setup-token` output would need a genuinely new
+  UI mechanism (e.g. generalizing the existing URL-paste box into a token-paste box) — a legitimate,
+  separately-scoped enhancement, not a natural extension of Phases A–C.
+- `codex login --with-api-key` isn't a drop-in fallback either: it forfeits ChatGPT-subscription-tier
+  access in favor of pay-per-token API billing — a real tradeoff the user should choose explicitly, not
+  something AgentMux should silently substitute when OAuth is inconvenient.
+
+**Recommendation:** treat Phase D as concluded, not deferred. The terminal-window fallback that Phases A–C
+already build on (and that predates this rethink) remains the correct primary mechanism for headless-login
+recovery for all three providers going forward. A "paste a pre-generated long-lived token" feature (for
+Claude/Codex) and a "register AgentMux's own verified Google OAuth client" project (for Gemini) are both
+legitimate ideas for future, independently-scoped work if either keeps coming up in practice — neither is
+part of this rethink's core deliverable, and building either now, rushed, without its own design pass,
+would be worse than not building it.
 
 ---
 
