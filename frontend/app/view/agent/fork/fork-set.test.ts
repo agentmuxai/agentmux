@@ -8,6 +8,7 @@ const def = (id: string, over: Partial<ForkDefinition> = {}): ForkDefinition => 
     id,
     name: id,
     created_at: 0,
+    is_seeded: 0,
     ...over,
 });
 

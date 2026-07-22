@@ -67,18 +67,22 @@ function titleOf(d: ForkDefinition): string {
 /**
  * Is `parent_id` a usable link to a definition that exists in the set?
  *
- * Excludes template parents (`is_seeded === 1`): `parent_id` doubles as
- * "cloned from this template" provenance (see the `ForkDefinition.parent_id`
- * doc comment), which is not a fork lineage. Without this check, every
- * definition ever created from the same template would walk up to that
- * template as a shared lineage root and appear as forks of each other —
- * even when they have no fork relationship at all.
+ * Excludes template parents: `parent_id` doubles as "cloned from this
+ * template" provenance (see the `ForkDefinition.parent_id` doc comment),
+ * which is not a fork lineage. Without this check, every definition ever
+ * created from the same template would walk up to that template as a
+ * shared lineage root and appear as forks of each other — even when they
+ * have no fork relationship at all.
+ *
+ * Requires `is_seeded === 0` (not just `!== 1`) so a parent with an
+ * unpopulated `is_seeded` — e.g. a legacy row predating the column — is
+ * excluded too, rather than defaulting to "trusted as a real fork parent."
  */
 function hasParent(d: ForkDefinition, byId: Map<string, ForkDefinition>): boolean {
     const p = d.parent_id;
     if (!p || p.length === 0) return false;
     const parent = byId.get(p);
-    return !!parent && parent.is_seeded !== 1;
+    return !!parent && parent.is_seeded === 0;
 }
 
 /**
