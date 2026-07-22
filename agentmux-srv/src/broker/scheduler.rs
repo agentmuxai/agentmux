@@ -39,7 +39,7 @@ use tokio::sync::Mutex as AsyncMutex;
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 struct Entry {
-    is_fresh: Box<dyn Fn() -> bool + Send + Sync>,
+    is_fresh: Box<dyn Fn() -> BoxFuture<'static, bool> + Send + Sync>,
     refresh: Box<dyn Fn() -> BoxFuture<'static, Result<(), String>> + Send + Sync>,
     lock: Arc<AsyncMutex<()>>,
 }
@@ -60,14 +60,19 @@ impl RefreshScheduler {
     }
 
     /// Register (or replace) a credential for proactive management.
-    /// `is_fresh` must be cheap and side-effect-free (called under the
-    /// per-id lock on every `ensure_fresh`/sweep tick); `refresh` performs
-    /// the actual refresh and is responsible for persisting the result
-    /// itself (and for NOT persisting anything on failure).
+    /// `is_fresh` must be side-effect-free (called under the per-id lock on
+    /// every `ensure_fresh`/sweep tick) — async so a caller whose freshness
+    /// check needs a blocking read (e.g. an OS keychain call, which can hang
+    /// on a slow/unresponsive Secret Service D-Bus daemon on headless Linux)
+    /// can route it through `tokio::task::spawn_blocking` instead of
+    /// stalling the tokio worker thread this scheduler's own async tasks
+    /// run on (reagent P1 on #2260). `refresh` performs the actual refresh
+    /// and is responsible for persisting the result itself (and for NOT
+    /// persisting anything on failure).
     pub async fn register(
         &self,
         credential_id: impl Into<String>,
-        is_fresh: impl Fn() -> bool + Send + Sync + 'static,
+        is_fresh: impl Fn() -> BoxFuture<'static, bool> + Send + Sync + 'static,
         refresh: impl Fn() -> BoxFuture<'static, Result<(), String>> + Send + Sync + 'static,
     ) {
         let mut entries = self.entries.lock().await;
@@ -101,7 +106,7 @@ impl RefreshScheduler {
         let _guard = entry.lock.lock().await;
         // Double-checked: another caller may have refreshed this credential
         // while we were waiting for the lock above.
-        if (entry.is_fresh)() {
+        if (entry.is_fresh)().await {
             return Ok(());
         }
         (entry.refresh)().await
@@ -145,7 +150,10 @@ mod tests {
         scheduler
             .register(
                 "test:cred",
-                move || fresh_flag_check.load(Ordering::SeqCst),
+                move || {
+                    let fresh = fresh_flag_check.load(Ordering::SeqCst);
+                    Box::pin(async move { fresh })
+                },
                 move || {
                     let calls = calls.clone();
                     let fresh_flag = fresh_flag.clone();
@@ -187,7 +195,7 @@ mod tests {
         scheduler
             .register(
                 "test:cred",
-                || true,
+                || Box::pin(async { true }),
                 move || {
                     let calls = calls.clone();
                     Box::pin(async move {
@@ -209,7 +217,7 @@ mod tests {
         scheduler
             .register(
                 "test:cred",
-                || false, // never becomes fresh in this test — refresh always fails
+                || Box::pin(async { false }), // never becomes fresh in this test — refresh always fails
                 || Box::pin(async { Err("simulated refresh failure".to_string()) }),
             )
             .await;
