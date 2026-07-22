@@ -139,18 +139,27 @@ pub fn on_before_close_browser_pane(state: &Arc<AppState>, label: &str) {
     state.browser_panes.drain_closed_label(state, label);
 
     // Labels are `browser-pane-<uuid>-<seq>`; strip prefix + trailing `-<seq>`
-    // to recover the block_id, then:
+    // to recover the block_id.
+    let block_id = label
+        .strip_prefix("browser-pane-")
+        .and_then(|rest| rest.rfind('-').map(|dash| &rest[..dash]));
+
+    // Cross-platform: drop this pane's zoom-factor entry so
+    // `browser_pane_zoom` doesn't grow unboundedly as panes are opened and
+    // closed over a session.
+    if let Some(block_id) = block_id {
+        state.browser_pane_zoom.lock().remove(block_id);
+    }
+
+    // Windows only:
     //   1. Restore WndProcs for all subclassed HWNDs (must run first, before
     //      remove_contexts_for_block wipes the outer-HWND lookup).
     //   2. Wipe BROWSER_PANE_HWND_CONTEXT entries for the block.
     #[cfg(target_os = "windows")]
     {
-        if let Some(rest) = label.strip_prefix("browser-pane-") {
-            if let Some(dash) = rest.rfind('-') {
-                let block_id = &rest[..dash];
-                crate::browser_pane::hwnd::uninstall_focus_redirect_for_block(block_id);
-                crate::browser_pane::hwnd::remove_contexts_for_block(block_id);
-            }
+        if let Some(block_id) = block_id {
+            crate::browser_pane::hwnd::uninstall_focus_redirect_for_block(block_id);
+            crate::browser_pane::hwnd::remove_contexts_for_block(block_id);
         }
     }
 }
@@ -177,6 +186,14 @@ pub fn on_load_end_browser_pane(state: &Arc<AppState>, browser: &Browser) {
                 .unwrap_or_default()
         };
         crate::browser_pane::trace::pane_trace(&block_id, "load-end", &format!("url={url}"));
+
+        // Every navigation replaces the page's own DOM/inline-style state,
+        // so any CSS `zoom` injected before this load is gone with it --
+        // re-apply this pane's stored factor (no-op if it's never been
+        // zoomed away from the 1.0 default). See BrowserPaneManager::
+        // reapply_zoom's own doc comment for why this is CSS injection and
+        // not Chromium's native per-host zoom.
+        state.browser_panes.reapply_zoom(&block_id, state);
     }
 
     #[cfg(target_os = "windows")]
