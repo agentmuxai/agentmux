@@ -81,9 +81,15 @@ impl Store {
         };
         let (cognito_domain, client_id, legacy_access, legacy_refresh, legacy_id, expires_at, user_email, user_sub) = row;
 
-        let tokens = match secret_store::get(MUXBUS_KEYCHAIN_ID) {
-            Ok(blob) => serde_json::from_str::<MuxBusTokens>(&blob).unwrap_or_default(),
-            Err(_) if !legacy_access.is_empty() => {
+        // reagent P1 on #2260: the old code collapsed EVERY keychain-read
+        // failure (locked, no Secret Service daemon, permission denied — not
+        // just "no entry stored") into the same branch as "no credential at
+        // all," so a transient storage failure silently looked like a full
+        // logout. get_optional distinguishes the two: `Ok(None)` really
+        // means no entry exists; `Err` means the read itself failed.
+        let tokens = match secret_store::get_optional(MUXBUS_KEYCHAIN_ID) {
+            Ok(Some(blob)) => serde_json::from_str::<MuxBusTokens>(&blob).unwrap_or_default(),
+            Ok(None) if !legacy_access.is_empty() => {
                 // Lazy migration: this row predates keychain-backed storage.
                 // Use the plaintext columns this one time, and self-heal by
                 // writing them into the keychain + blanking the SQL columns
@@ -112,7 +118,33 @@ impl Store {
                 }
                 tokens
             }
-            Err(_) => MuxBusTokens::default(),
+            Ok(None) => MuxBusTokens::default(),
+            Err(e) if !legacy_access.is_empty() => {
+                // Keychain is transiently broken, but the legacy plaintext
+                // columns are still sitting right there — serve from them
+                // rather than hard-failing when we actually have usable
+                // data. Deliberately do NOT attempt the self-heal write in
+                // this branch: writing to a keychain we just confirmed is
+                // failing would just fail again, noisily, for no benefit.
+                tracing::warn!(
+                    error = %e,
+                    "muxbus: keychain read failed, falling back to legacy plaintext columns"
+                );
+                MuxBusTokens {
+                    access_token: legacy_access,
+                    refresh_token: legacy_refresh,
+                    id_token: legacy_id,
+                }
+            }
+            Err(e) => {
+                // No legacy fallback available either — this IS a real
+                // failure, not "no credentials stored." Propagate it so
+                // callers (e.g. cloud_subscriber's has_stored_creds check)
+                // don't mistake a transient storage failure for a full
+                // logout and park indefinitely waiting for a fresh login
+                // that was never actually needed.
+                return Err(StoreError::Other(format!("muxbus: keychain read failed: {e}")));
+            }
         };
 
         Ok(Some(MuxBusCredentials {
