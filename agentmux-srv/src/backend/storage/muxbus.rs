@@ -55,6 +55,36 @@ impl MuxBusCredentials {
 
 impl Store {
     pub fn muxbus_load(&self) -> Result<Option<MuxBusCredentials>, StoreError> {
+        self.muxbus_load_impl(true)
+    }
+
+    /// Side-effect-free freshness check: valid, non-empty access token that
+    /// isn't nearing expiry. Safe for `RefreshScheduler::register`'s
+    /// `is_fresh` closure (reagent P2 on #2260: that closure was calling the
+    /// full `muxbus_load`, whose lazy-migration branch below can perform a
+    /// keychain write + SQL update for a legacy row — violating
+    /// `register`'s own documented "must be cheap and side-effect-free"
+    /// contract, called as it is under the per-id lock on every
+    /// `ensure_fresh`/sweep tick). Any error (including a genuinely
+    /// corrupted keychain blob) is treated as "not fresh" rather than
+    /// propagated — a freshness *check* has no error channel to propagate
+    /// through, and "not fresh" just means the broker will attempt a
+    /// refresh, which surfaces the real problem through THAT path instead.
+    pub fn muxbus_is_fresh(&self) -> bool {
+        self.muxbus_load_impl(false)
+            .ok()
+            .flatten()
+            .map(|c| !c.access_token.is_empty() && c.is_valid() && !c.nearly_expired())
+            .unwrap_or(false)
+    }
+
+    /// `allow_migration` gates the lazy-migration self-heal write below —
+    /// `false` for `muxbus_is_fresh`'s side-effect-free contract, `true`
+    /// for the normal `muxbus_load` path. When migration is disallowed and
+    /// only the legacy plaintext columns have data, they're read and
+    /// returned directly (same as the transient-keychain-failure fallback
+    /// already does) without ever touching the keychain or SQL columns.
+    fn muxbus_load_impl(&self, allow_migration: bool) -> Result<Option<MuxBusCredentials>, StoreError> {
         let row = {
             let conn = self.conn.lock().unwrap();
             let mut stmt = conn.prepare(
@@ -101,7 +131,7 @@ impl Store {
                     StoreError::Other(format!("muxbus: stored keychain blob is corrupted: {e}"))
                 })?
             }
-            Ok(None) if !legacy_access.is_empty() => {
+            Ok(None) if !legacy_access.is_empty() && allow_migration => {
                 // Lazy migration: this row predates keychain-backed storage.
                 // Use the plaintext columns this one time, and self-heal by
                 // writing them into the keychain + blanking the SQL columns
@@ -130,6 +160,15 @@ impl Store {
                 }
                 tokens
             }
+            // Migration disallowed (muxbus_is_fresh's side-effect-free
+            // contract) but legacy plaintext columns still have the data —
+            // read-only, same values a migration would have written, just
+            // without touching the keychain or SQL columns to get there.
+            Ok(None) if !legacy_access.is_empty() => MuxBusTokens {
+                access_token: legacy_access,
+                refresh_token: legacy_refresh,
+                id_token: legacy_id,
+            },
             Ok(None) => MuxBusTokens::default(),
             Err(e) if !legacy_access.is_empty() => {
                 // Keychain is transiently broken, but the legacy plaintext
@@ -172,6 +211,15 @@ impl Store {
     }
 
     pub fn muxbus_save(&self, creds: &MuxBusCredentials) -> Result<(), StoreError> {
+        // Held for the ENTIRE keychain-read/write + SQL-write + rollback
+        // sequence below, not just the SQL portion `self.conn`'s own lock
+        // covers — reagent P1 on #2260: `muxbus.login` and the broker's
+        // refresh closure can each call muxbus_save independently, and
+        // without this a race between two concurrent calls could make one
+        // call's rollback restore a stale snapshot over the OTHER call's
+        // already-committed credential.
+        let _save_guard = self.muxbus_save_lock.lock().unwrap();
+
         let tokens = MuxBusTokens {
             access_token: creds.access_token.clone(),
             refresh_token: creds.refresh_token.clone(),
