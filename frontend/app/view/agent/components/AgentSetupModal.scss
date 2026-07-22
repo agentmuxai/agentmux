@@ -9,22 +9,35 @@
 .agent-setup-modal {
     display: flex;
     flex-direction: column;
-    // Target size for the widest/tallest embedded panel (the Memory panel,
-    // 780×520 in its standalone form) plus the tab bar — but fluid via
-    // min(), not a raw px + vw/vh combo. This modal opens pane-scoped
-    // (ModalLayer's mount node sits inside the originating agent pane, not
-    // the browser window), so a vw/vh cap resolves against the wrong
-    // ancestor and doesn't actually constrain anything on a narrow pane in
-    // a wide window — the modal then renders at its literal 780×560 and
-    // .modal-panel's own overflow:auto produces exactly the horizontal
-    // scrollbar this fix addresses. min(target, 100%) is the same
-    // fluid-width technique modal.scss's own .modal-panel[data-size] rules
-    // already use (Layer B, MODAL_COMPACT_VARIANT_ARCHITECTURE_2026_05_26 §7)
-    // — 100% here resolves against .modal-panel, which correctly clamps to
-    // the pane's real width via its own max-width: 100%.
+    // Target size for the widest embedded panel (the Memory panel, 780px
+    // wide in its standalone form) plus the tab bar — but fluid via min(),
+    // not a raw px + vw combo. This modal opens pane-scoped (ModalLayer's
+    // mount node sits inside the originating agent pane, not the browser
+    // window), so a vw cap resolves against the wrong ancestor and doesn't
+    // actually constrain anything on a narrow pane in a wide window — the
+    // modal then renders at its literal 780px wide and .modal-panel's own
+    // overflow:auto produces exactly the horizontal scrollbar this fix
+    // addresses. min(target, 100%) is the same fluid-width technique
+    // modal.scss's own .modal-panel[data-size] rules already use (Layer B,
+    // MODAL_COMPACT_VARIANT_ARCHITECTURE_2026_05_26 §7) — 100% here resolves
+    // against .modal-panel, which correctly clamps to the pane's real width
+    // via its own max-width: 100%.
     // See docs/specs/SPEC_AGENT_PANE_ARMORY_HEADER_ICON_2026_07_20.md §7.1.
     width: min(780px, 100%);
-    height: min(560px, 100%);
+    // Height deliberately stays a plain px + vh cap, NOT the same min()
+    // treatment as width above. .modal-panel never gets an explicit height
+    // (only max-height — modal.scss:151-154's pane-scoped override caps it
+    // at 100% of a real ancestor, but that's still a *max*, not a definite
+    // height), so a percentage height here has no definite containing-block
+    // height to resolve against and computes to `auto` per spec — mixing
+    // that into min(560px, 100%) produced a genuinely broken, stuck-blurry,
+    // unrenderable modal in live testing (reagent-caught-in-practice, not
+    // hypothetical). The original bug report was horizontal scrolling only;
+    // height was never reported broken, so this reverts to the simple,
+    // known-working px+vh form rather than fixing something that wasn't
+    // asked for and didn't need it.
+    height: 560px;
+    max-height: 85vh;
     min-width: 0;
     // Container-query context for .agent-setup-modal-tab below (a
     // descendant) — same technique as armory-view.scss's .armory-container.

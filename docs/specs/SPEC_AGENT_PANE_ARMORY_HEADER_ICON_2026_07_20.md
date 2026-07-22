@@ -254,12 +254,38 @@ this one outer shell.
   (`modal.tsx:626-628`) applies. `AgentSetupModal`'s root div never carries
   this class, so this rescue doesn't reach it either.
 
-**Fix:** change `.agent-setup-modal` to `width: min(780px, 100%); height:
-min(560px, 100%);` (dropping `max-width`/`max-height`'s vw/vh values
-entirely — `min()` subsumes them), and add `modal-panel-body` to its class
-list so Layer C's existing `min-width: 0` rescue applies to its direct
-children (`.agent-setup-modal-tabs`, `.agent-setup-modal-panel`) below 400px.
-Same underlying bug independently affects the still-live standalone
+**Fix, as actually implemented (revised once — see the live-bug note
+below):** change `.agent-setup-modal`'s `width` to `min(780px, 100%)`,
+dropping the `max-width: 92vw` — `min()` subsumes it. **Height stays a plain
+`height: 560px; max-height: 85vh;`, unchanged from before.** The first
+attempt applied the same `min(560px, 100%)` treatment to height, symmetric
+with width — this was untested scope creep (the reported bug was
+horizontal-only) and broke the modal outright in live testing: stuck on a
+blurred backdrop with unrenderable/unreachable content, no way to dismiss
+it. Root cause: unlike width, `.modal-panel` never gets an *explicit*
+height — only `max-height` (`modal.scss:151-154`'s pane-scoped override caps
+it at `100% - 48px` of a real ancestor, but a max is not a definite height).
+Per CSS, a percentage height with no definite containing-block height
+resolves to `auto`; mixing that into `min(560px, 100%)` is undefined/
+inconsistent across engines in practice, and in this codebase's actual CEF
+renderer it broke. Width doesn't have this problem — percentage-width
+resolution against a shrink-to-fit ancestor is well-defined and works.
+
+For the `min-width: 0` rescue, rather than adopting the `modal-panel-body`
+class (which also carries generic padding/font-size from `modal.scss:217-221`
+that don't belong on this component), the same rule was written scoped to
+`AgentSetupModal`'s own classes directly, targeting the same `modal-mount`
+container `ModalLayer.tsx`'s mount node already establishes:
+```scss
+@container modal-mount (max-width: 400px) {
+    .agent-setup-modal-tabs,
+    .agent-setup-modal-panel {
+        min-width: 0;
+    }
+}
+```
+
+Same underlying width bug independently affects the still-live standalone
 `agent-identity`/`agent-memory` modal-dispatch paths
 (`AgentIdentityModal.scss:12-13`, `AgentNativeMemoryModal.scss:13-14`) — out
 of scope here (they're superseded by the tabbed modal per
