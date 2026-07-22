@@ -213,6 +213,49 @@ describe("AuthFlowController", () => {
         });
     });
 
+    describe("currentActionToken() / isStaleAction()", () => {
+        it("a token captured before selected()/cancel()/dispose() reads as stale afterward (reagent P1 on #2262)", async () => {
+            await createRoot(async (dispose) => {
+                const timers = fakeTimers();
+                const ctrl = new AuthFlowController({
+                    rpc: fakeRpc({ start: async () => ({ sessionId: "s1" }) }),
+                    timers,
+                });
+                ctrl.selected("claude", "", "needs-account");
+                const token = ctrl.currentActionToken();
+                expect(ctrl.isStaleAction(token)).toBe(false);
+
+                // Changing selection mid-flight is the exact scenario
+                // PreLaunchAuthPanel.tsx's requiresLoginTty branch guards
+                // against: a login already in flight for the OLD selection
+                // must not have its outcome dispatched once it resolves.
+                ctrl.selected("openai", "", "needs-account");
+                expect(ctrl.isStaleAction(token)).toBe(true);
+
+                // Fresh capture after the new selection reads as current again.
+                const token2 = ctrl.currentActionToken();
+                expect(ctrl.isStaleAction(token2)).toBe(false);
+
+                await ctrl.connect({ cliPath: "/x", authLoginArgs: [], authCheckArgs: [] });
+                await ctrl.cancel();
+                expect(ctrl.isStaleAction(token2)).toBe(true);
+
+                dispose();
+            });
+        });
+
+        it("dispose() also invalidates a captured token", async () => {
+            await createRoot(async (dispose) => {
+                const ctrl = new AuthFlowController({ rpc: fakeRpc({}) });
+                ctrl.selected("claude", "", "needs-account");
+                const token = ctrl.currentActionToken();
+                ctrl.dispose();
+                expect(ctrl.isStaleAction(token)).toBe(true);
+                dispose();
+            });
+        });
+    });
+
     it("selected() during waiting cancels the backend session", async () => {
         // Reagent + Codex P2 on #850 round 6: switching selection
         // mid-OAuth must fire auth.cancel for the live sessionId so

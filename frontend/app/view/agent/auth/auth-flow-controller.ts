@@ -404,6 +404,30 @@ export class AuthFlowController {
         this.ttyLoginInFlight = false;
     }
 
+    /** Snapshot the current action generation — capture this before
+     *  starting work whose completion should be ignored if the user moves
+     *  on (changes selection, cancels, disposes) before it resolves. Same
+     *  mechanism `connect()`/`submitCallback()` already use internally
+     *  (`actionToken`), exposed for callers outside the class that drive
+     *  their own async flow around the controller — specifically
+     *  `PreLaunchAuthPanel.tsx`'s `requiresLoginTty` branch (reagent P1 on
+     *  #2262): `runProviderLogin` there isn't gated through `connect()`'s
+     *  own actionToken check at all, so a `Selected` dispatch mid-flight
+     *  (the account/provider dropdown isn't disabled during a tty login)
+     *  used to let the ABANDONED login's `Seeded`/`ConnectFailed` outcome
+     *  land on top of whatever the user selected next. */
+    currentActionToken(): number {
+        return this.actionToken;
+    }
+
+    /** True if `token` (from an earlier `currentActionToken()`) no longer
+     *  matches — i.e. `selected()`/`cancel()`/`dispose()` ran since it was
+     *  captured, so whatever produced this result is stale and its outcome
+     *  must not be dispatched. */
+    isStaleAction(token: number): boolean {
+        return token !== this.actionToken;
+    }
+
     async submitCallback(callbackUrl: string): Promise<void> {
         const s = this.state();
         if (s.kind !== "waiting" || s.sessionId === "") return;

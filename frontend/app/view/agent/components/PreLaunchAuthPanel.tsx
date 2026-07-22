@@ -414,6 +414,17 @@ async function startConnect(
         }
         try {
             controller.dispatch({ type: "ConnectClicked" });
+            // reagent P1 on #2262: this branch isn't gated through
+            // connect()'s own actionToken staleness check at all (it
+            // bypasses connect() entirely for requiresLoginTty providers).
+            // The account/provider dropdown isn't disabled while a tty
+            // login is in flight (only `disabled`/`submitting()` gates it),
+            // so a `Selected` dispatch mid-flight resets state to the new
+            // selection — but without this snapshot, the ABANDONED login's
+            // eventual markSeeded/failConnect would still land on top of
+            // it once runProviderLogin resolves, clobbering the new
+            // selection's state with the old attempt's outcome.
+            const actionToken = controller.currentActionToken();
             let registeredAccountId = "";
             const outcome = await runProviderLogin({
                 provider,
@@ -442,6 +453,14 @@ async function startConnect(
                 // only the frontend's wait for it.
                 isCancelled: () => controller.wasCancelled(),
             });
+            if (controller.isStaleAction(actionToken)) {
+                // The user moved on (changed selection, cancelled, or the
+                // modal closed) while this login was in flight — its
+                // outcome belongs to an abandoned attempt and must not
+                // touch whatever the controller is doing now.
+                console.warn(`[auth-diag] startConnect: requiresLoginTty login outcome (${outcome}) is stale, discarding`);
+                return;
+            }
             switch (outcome) {
                 case "seeded":
                 case "terminal-success":
