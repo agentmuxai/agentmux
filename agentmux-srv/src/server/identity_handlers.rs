@@ -1025,7 +1025,9 @@ fn spawn_auth_cli_pty(
 ///   - `into_bundle_id` is `Some` and non-empty AND
 ///   - the provider is registered in the CLI provider registry AND
 ///   - the provider declares an `auth_config_dir_env_var` (oauth-class
-///     providers — claude / codex / openclaw — per spec §4.3) AND
+///     providers per `identity::resolver::provider_class` — claude / codex /
+///     openclaw / gemini / copilot as of
+///     REPORT_AUTH_ARCHITECTURE_STATE_AND_RETHINK_2026_07_21.md §2.5/§6) AND
 ///   - `DataPaths::from_env()` resolves AND
 ///   - `create_dir_all` succeeds.
 ///
@@ -1048,8 +1050,10 @@ fn compute_and_ensure_bundle_dir(
     // Gate on provider_class so api-key-class providers (which have a
     // registry entry with a non-empty `auth_config_dir_env_var` —
     // e.g. kimi's `KIMI_SHARE_DIR`) never go through the per-bundle
-    // OAuth-dir path. Only claude / codex / openclaw — the spec §4.3
-    // oauth-class providers — get the per-bundle override.
+    // OAuth-dir path. Only providers `provider_class` classifies as
+    // OAuth-class (claude / codex / openclaw / gemini / copilot) get the
+    // per-bundle override — see that function's own doc comment for the
+    // current, authoritative set.
     match crate::identity::resolver::provider_class(provider_id) {
         Some(crate::identity::resolver::ProviderClass::OAuth { .. }) => {}
         _ => return None,
@@ -1158,8 +1162,11 @@ fn compute_and_ensure_account_dir(
         existing_account_id.to_string()
     };
 
-    // Same provider_class gate as the bundle path — only oauth-class
-    // providers (claude/codex/openclaw) get a per-account isolation dir.
+    // Same provider_class gate as the bundle path — only providers
+    // `provider_class` classifies as OAuth-class (claude / codex /
+    // openclaw / gemini / copilot as of
+    // REPORT_AUTH_ARCHITECTURE_STATE_AND_RETHINK_2026_07_21.md §2.5/§6)
+    // get a per-account isolation dir.
     match crate::identity::resolver::provider_class(provider_id) {
         Some(crate::identity::resolver::ProviderClass::OAuth { .. }) => {}
         _ => return (account_id, None),
