@@ -160,7 +160,7 @@ wrap_task! {
                     }
                 };
 
-                let handler = crate::client::AgentMuxHandler::new_with_browser_pane(self.state.clone(), 0, true);
+                let handler = crate::client::AgentMuxHandler::new_with_browser_pane(self.state.clone(), true);
                 let mut client = Some(crate::client::AgentMuxClient::new(handler, true));
 
                 let url_cef = CefString::from(self.url.as_str());

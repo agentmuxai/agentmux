@@ -80,10 +80,6 @@ impl TeardownBackstop {
         self.armed_since.take().is_some()
     }
 
-    pub fn is_armed(&self) -> bool {
-        self.armed_since.is_some()
-    }
-
     /// The teardown decision: armed for longer than `grace`, AND the
     /// UI-thread prober has accumulated at least `required_misses`
     /// consecutive unanswered probes. Pure read — the caller executes.

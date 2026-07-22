@@ -44,8 +44,6 @@ pub struct WebhookMessage {
     /// Sender's WhatsApp phone number (no `+`, e.g. "14155552671").
     pub from: String,
     pub id: String,
-    #[serde(rename = "type", default)]
-    pub msg_type: String,
     #[serde(default)]
     pub text: Option<WebhookText>,
 }
