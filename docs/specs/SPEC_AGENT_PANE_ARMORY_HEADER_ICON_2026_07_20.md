@@ -268,8 +268,73 @@ it at `100% - 48px` of a real ancestor, but a max is not a definite height).
 Per CSS, a percentage height with no definite containing-block height
 resolves to `auto`; mixing that into `min(560px, 100%)` is undefined/
 inconsistent across engines in practice, and in this codebase's actual CEF
-renderer it broke. Width doesn't have this problem — percentage-width
-resolution against a shrink-to-fit ancestor is well-defined and works.
+renderer it broke.
+
+**Third correction — width had the same collapse bug, just not caught until
+live DOM inspection.** After the height revert shipped, Asaf reported the
+modal *still* stuck on a blurred backdrop, unrecoverable, even after a full
+process restart (ruling out stale HMR). The claim above — "percentage-width
+resolution against a shrink-to-fit ancestor is well-defined and works" — was
+wrong. Verified live via Chrome DevTools Protocol against the running CEF
+renderer (`--remote-debugging-port`, `Runtime.evaluate` reading
+`getComputedStyle()`/`getBoundingClientRect()` on the actual stuck modal):
+the full DOM tree rendered correctly (tabs, Accounts panel, provider rows,
+all present in `outerHTML`) but `.agent-setup-modal` computed to `width:
+0px` and `.modal-panel` to `width: 2px` (just its border) — invisible, not
+broken. Root cause: `min(780px, 100%)` on `.agent-setup-modal` is a
+percentage on a *child* of `.modal-panel[data-size="fit"]`
+(`width: auto; max-width: 100%` — shrink-to-fit, sized *by* its content).
+The parent's width depends on the child's preferred size; the child's `%`
+depends on the (not-yet-resolved) parent's size — a circular dependency
+that Chromium resolves by treating the percentage as ~0, collapsing both
+boxes.
+
+A first attempt at fixing this swapped `100%` for `100cqw` (a CSS
+container-query length unit, resolving against the nearest
+`container-type` ancestor — `.modal-layer-mount`, `container-name:
+modal-mount`, `ModalLayer.tsx:104-107` — instead of the immediate parent).
+That did stop the collapse (confirmed live: non-zero width), but introduced
+a *different* live-confirmed bug: `modal-mount` tracks the full pane, which
+is wider than `.modal-panel`'s own shrink-wrapped, backdrop-clamped box, so
+the child (595px) ended up wider than its actual parent (547px) —
+re-overflowing past `.modal-panel`'s edge from the other direction.
+
+**Final fix:** stop trying to size `.agent-setup-modal` (the child)
+independently at all. Instead put the `min(780px, 100%)` sizing on
+`.modal-panel` itself, scoped with a `:has()` selector to only apply when
+it's hosting this modal (`:has()` is already precedented in this codebase —
+`_document.scss:107-120` — and supported by the pinned CEF version, Chromium
+105+):
+
+```scss
+.modal-panel:has(.agent-setup-modal) {
+    width: min(780px, 100%);
+    height: 560px;
+    max-height: 85vh;
+}
+
+.agent-setup-modal {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    container-type: inline-size;
+    container-name: agent-setup;
+}
+```
+
+This is the exact same technique `modal.scss`'s own `[data-size="sm"|"md"|
+"lg"|"xl"]` rules already use — the percentage lives on `.modal-panel`,
+resolving against *its* parent `.modal-root` (`position: fixed|absolute;
+inset: 0` — genuinely definite, unlike `.modal-panel` itself). The child
+then just fills whatever `.modal-panel` resolves to; no circular dependency,
+no independent sizing that can disagree with the parent. Re-verified live
+via the same CDP DOM-inspection technique across all 5 tabs at the pane's
+actual (narrow) width: `.modal-panel` / `.agent-setup-modal` both resolve to
+547px / 545px (2px border), `scrollWidth === clientWidth` on every tab
+(no horizontal scroll), and the icon-only tab-label breakpoint fires
+correctly at that width.
 
 For the `min-width: 0` rescue, rather than adopting the `modal-panel-body`
 class (which also carries generic padding/font-size from `modal.scss:217-221`
