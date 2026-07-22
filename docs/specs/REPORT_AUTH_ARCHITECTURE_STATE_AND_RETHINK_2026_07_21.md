@@ -12,8 +12,8 @@ into the "current state" sections, since it isn't real yet.
 
 **Implementation status (updated same day):** Phases A–C of §6's target architecture shipped as PRs
 #2260, #2262, #2263. Phase D (the device-flow shim) was **not built** — a dedicated feasibility spike
-found it's not viable for either target provider. See §10 for the spike's findings and the resulting
-scope decision.
+found it's not viable for any of the three target providers (Anthropic, OpenAI, Gemini). See §8 for the
+spike's findings and the resulting scope decision.
 
 ---
 
