@@ -392,6 +392,14 @@ pub unsafe fn install_browser_pane_focus_redirect(
         // (return 0, never call the original WndProc) and apply zoom
         // ourselves via CSS injection instead — see
         // BrowserPaneManager::zoom_in/zoom_out.
+        //
+        // KNOWN LIMITATION: this interception is Windows-only (this whole
+        // file is `#![cfg(target_os = "windows")]`-gated, see the top of the
+        // file). No macOS/Linux equivalent hook exists yet, so on those
+        // platforms Ctrl+Wheel over a browser pane still falls through to
+        // CEF's native, HostZoomMap-shared zoom (the original shared-zoom
+        // bug this feature fixes). Tracked as a follow-up, not silently
+        // dropped — see the PR description / REPORT_ARMORY_ZOOM_AND_PER_PANE_BROWSER_ZOOM_2026_07_20.md.
         if msg == WM_MOUSEWHEEL {
             let ctrl_held = (wparam & 0x0008) != 0; // MK_CONTROL, low word of wParam
             if ctrl_held {

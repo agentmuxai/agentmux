@@ -281,7 +281,11 @@ entirely, regardless of which native-side fix is chosen.
    of native-side approach — see §5). Intercept Ctrl+`WM_MOUSEWHEEL` in `hwnd.rs` (currently
    logged-only, §3.1), maintain a per-pane zoom-factor map, inject `document.documentElement.style.zoom`
    via `ExecuteJavaScript` on wheel and re-inject on `on_load_end_browser_pane` so it survives
-   navigation. No CEF patch, no libcef build, no platform-specific work.
+   navigation. No CEF patch, no libcef build required for the CSS-injection mechanism itself, which
+   is identical Windows/Linux/macOS by construction (it's JS). **Known gap:** the Ctrl+Wheel
+   *interception* point (`hwnd.rs`'s WndProc subclass hook) is Windows-only — no macOS/Linux
+   equivalent hook exists yet, so the shared-zoom bug this fixes is only fixed on Windows for now.
+   Tracked as a follow-up rather than implemented blind for platforms unavailable in this environment.
    **Superseded/abandoned CEF-patch attempt, left open as a record:** `agentmuxai/cef#6`,
    `AgentU-asaf/cef-rs#2` — see the Option B investigation write-up above for why this path was
    dropped.
