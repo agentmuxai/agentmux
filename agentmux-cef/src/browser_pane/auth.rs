@@ -157,9 +157,3 @@ pub fn cancel_for_block(block_id: &str) -> usize {
     }
     n
 }
-
-/// Pending request count. Useful for diagnostics and leak checks in
-/// tests.
-pub fn pending_count() -> usize {
-    pending().lock().len()
-}

@@ -245,7 +245,6 @@ wrap_task! {
 
             let handler = crate::client::AgentMuxHandler::new_with_browser_pane(
                 self.state.clone(),
-                0,
                 true,
             );
             let mut client = Some(crate::client::AgentMuxClient::new(handler, true));
@@ -468,7 +467,6 @@ wrap_task! {
             };
             let handler = crate::client::AgentMuxHandler::new_with_browser_pane(
                 self.state.clone(),
-                0,
                 true,
             );
             let mut client = Some(crate::client::AgentMuxClient::new(handler, true));
@@ -829,10 +827,9 @@ fn create_popup(
     // this, DWM keeps drawing the standard Win32 title bar (and the
     // minimize/maximize/close caption buttons that come with it) on top
     // of our client area, even though our `WM_NCCALCSIZE → 0` says the
-    // client area fills the window. Mirrors the main-window setup in
-    // `client/wndproc.rs::setup_native_frameless` — combined with our
-    // WndProc's `WM_NCCALCSIZE`/`WM_NCACTIVATE`/`WM_NCHITTEST`, this
-    // gives a truly chrome-free outer HWND. The docked-pane's standard
+    // client area fills the window. Combined with our WndProc's
+    // `WM_NCCALCSIZE`/`WM_NCACTIVATE`/`WM_NCHITTEST`, this gives a truly
+    // chrome-free outer HWND. The docked-pane's standard
     // `BlockFrame_Header` (33 CSS px, `--header-height` in theme.scss:97)
     // is the sole chrome — drag is JS-driven from
     // `frontend/app/workspace/floating-pane-workspace.tsx`.

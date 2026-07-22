@@ -149,7 +149,6 @@ pub struct AgentMuxHandler {
     browser_list: Vec<Browser>,
     is_closing: bool,
     state: Arc<AppState>,
-    ipc_port: u16,
     is_browser_pane: bool,
     /// Per-browser ring of renderer-crash timestamps used by
     /// `on_render_process_terminated` to enforce `CRASH_BUDGET` within
@@ -168,33 +167,25 @@ pub struct AgentMuxHandler {
 }
 
 impl AgentMuxHandler {
-    pub fn new(state: Arc<AppState>, ipc_port: u16) -> Arc<Mutex<Self>> {
-        Self::new_with_browser_pane(state, ipc_port, false)
+    pub fn new(state: Arc<AppState>) -> Arc<Mutex<Self>> {
+        Self::new_with_browser_pane(state, false)
     }
 
-    pub fn new_with_browser_pane(state: Arc<AppState>, ipc_port: u16, is_browser_pane: bool) -> Arc<Mutex<Self>> {
+    pub fn new_with_browser_pane(state: Arc<AppState>, is_browser_pane: bool) -> Arc<Mutex<Self>> {
         Arc::new(Mutex::new(Self {
             browser_list: Vec::new(),
             is_closing: false,
             state,
-            ipc_port,
             is_browser_pane,
             crash_history: HashMap::new(),
             memory_pause_history: HashMap::new(),
         }))
     }
 
-    /// The authoritative IPC port for URL / cred construction.
-    ///
-    /// The handler's own `self.ipc_port` field is ZERO for floating-pane /
-    /// pool window handlers — they are built via
-    /// `new_with_browser_pane(state, 0, true)`. Any URL or cred built from
-    /// that 0 (bridge re-injection, crash-recovery navigation URL, base-URL
-    /// resolve) yields `…:0`, which the frontend's `invokeCommand` rejects
-    /// (`if (!port)`) → the backend-never-starts lock-out (#52). `AppState`
-    /// holds the real port (set at startup), so read it there. For non-pane
-    /// windows `self.ipc_port` already equals `state.ipc_port`, so this is a
-    /// no-op change for them.
+    /// The authoritative IPC port for URL / cred construction. `AppState`
+    /// holds the real port (set at startup); this always reads it there —
+    /// see #52 (backend-never-starts lock-out from a floating-pane/pool
+    /// handler building a `…:0` URL from a stale local port).
     fn resolved_ipc_port(&self) -> u16 {
         *self.state.ipc_port.lock()
     }

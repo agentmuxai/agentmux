@@ -4,46 +4,8 @@
 //! Win32 frameless window setup + wndproc subclass. Extracted from
 //! client/mod.rs in task #182 PR-G.
 
-/// Set up a native frameless window: extend client area over the thick frame
-/// border so the resize handle is invisible, then subclass the window to
-/// handle WM_NCHITTEST for edge resize.
-///
-/// DwmExtendFrameIntoClientArea(-1) makes the entire frame transparent, but
-/// it also removes the non-client hit-test region. Without the subclass,
-/// Windows can't tell which part of the window edge should be a resize handle.
-/// The subclass returns HT{LEFT,RIGHT,TOP,BOTTOM,TOPLEFT,...} when the cursor
-/// is within RESIZE_BORDER pixels of the window edge.
-#[cfg(target_os = "windows")]
-pub(super) unsafe fn setup_native_frameless(hwnd: *mut std::ffi::c_void) {
-    use windows_sys::Win32::Graphics::Dwm::DwmExtendFrameIntoClientArea;
-    use windows_sys::Win32::UI::Controls::MARGINS;
-
-    let margins = MARGINS {
-        cxLeftWidth: -1,
-        cxRightWidth: -1,
-        cyTopHeight: -1,
-        cyBottomHeight: -1,
-    };
-    let result = DwmExtendFrameIntoClientArea(hwnd, &margins);
-    if result == 0 {
-        tracing::info!("Applied DwmExtendFrameIntoClientArea to hide resize border");
-    } else {
-        tracing::warn!("DwmExtendFrameIntoClientArea failed: hr={:#x}", result);
-    }
-}
-
-/// Map of HWND -> original WndProc for secondary windows with edge resize hooks.
-/// Stored here instead of GWLP_USERDATA to avoid clobbering CEF's data.
-#[cfg(target_os = "windows")]
-static ORIGINAL_WNDPROCS: std::sync::LazyLock<
-    std::sync::Mutex<std::collections::HashMap<usize, isize>>,
-> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
-
 /// Map of top-level HWND -> original WndProc for the focus-restore subclass
-/// installed by `install_top_level_focus_restore_hook`. Kept separate from
-/// `ORIGINAL_WNDPROCS` so the two hooks can coexist on the same HWND in
-/// either order (the focus-restore hook always passes through to its own
-/// recorded original, which transitively walks back through any other hook).
+/// installed by `install_top_level_focus_restore_hook`.
 #[cfg(target_os = "windows")]
 static FOCUS_RESTORE_WNDPROCS: std::sync::LazyLock<
     std::sync::Mutex<std::collections::HashMap<usize, isize>>,
@@ -52,88 +14,6 @@ static FOCUS_RESTORE_WNDPROCS: std::sync::LazyLock<
 // Pane Win32 focus-redirect subclass + ALLOW_BROWSER_PANE_FOCUS_ONCE flag moved to
 // `crate::browser_pane::hwnd` in Phase 2 of the modularization split. See
 // `docs/specs/SPEC_BROWSER_PANE_MODULARIZATION.md`.
-
-/// Install a WndProc hook on a SECONDARY window that handles:
-/// - WM_NCCALCSIZE: returns 0 to eliminate the non-client area (removes the
-///   wide title bar / top border that WS_THICKFRAME + DWM extension creates)
-/// - WM_NCHITTEST: returns HT{LEFT,RIGHT,...} for resize zones at window edges
-///
-/// MUST NOT be installed on the main CEF Views window — that window handles
-/// resize through its delegate, and hooking it clobbers CEF internals.
-#[cfg(target_os = "windows")]
-pub(super) unsafe fn install_frameless_resize_hook(hwnd: *mut std::ffi::c_void) {
-    use windows_sys::Win32::UI::WindowsAndMessaging::*;
-
-    const RESIZE_BORDER: i32 = 6;
-
-    unsafe extern "system" fn wndproc_hook(
-        hwnd: *mut std::ffi::c_void,
-        msg: u32,
-        wparam: usize,
-        lparam: isize,
-    ) -> isize {
-        match msg {
-            // Remove the non-client area entirely — this eliminates the wide
-            // top border that WS_THICKFRAME normally reserves for the title bar.
-            WM_NCCALCSIZE if wparam == 1 => {
-                // Returning 0 with wparam=1 tells Windows the client area
-                // fills the entire window rect. No title bar, no borders.
-                return 0;
-            }
-
-            // Suppress the DWM activation border — return TRUE without
-            // calling DefWindowProc so Windows doesn't repaint the frame.
-            WM_NCACTIVATE => {
-                return 1; // TRUE = allow activation, but skip default border paint
-            }
-
-            WM_NCHITTEST => {
-                let x = (lparam & 0xFFFF) as i16 as i32;
-                let y = ((lparam >> 16) & 0xFFFF) as i16 as i32;
-
-                let mut rect = std::mem::zeroed::<windows_sys::Win32::Foundation::RECT>();
-                GetWindowRect(hwnd, &mut rect);
-
-                let left = x - rect.left < RESIZE_BORDER;
-                let right = rect.right - x < RESIZE_BORDER;
-                let top = y - rect.top < RESIZE_BORDER;
-                let bottom = rect.bottom - y < RESIZE_BORDER;
-
-                if top && left { return HTTOPLEFT as isize; }
-                if top && right { return HTTOPRIGHT as isize; }
-                if bottom && left { return HTBOTTOMLEFT as isize; }
-                if bottom && right { return HTBOTTOMRIGHT as isize; }
-                if left { return HTLEFT as isize; }
-                if right { return HTRIGHT as isize; }
-                if top { return HTTOP as isize; }
-                if bottom { return HTBOTTOM as isize; }
-                // Not on an edge — fall through to original WndProc.
-            }
-
-            _ => {}
-        }
-
-        // Delegate to the original WndProc.
-        let key = hwnd as usize;
-        let original = ORIGINAL_WNDPROCS
-            .lock()
-            .ok()
-            .and_then(|map| map.get(&key).copied())
-            .unwrap_or(0);
-        if original != 0 {
-            CallWindowProcW(Some(std::mem::transmute(original)), hwnd, msg, wparam, lparam)
-        } else {
-            DefWindowProcW(hwnd, msg, wparam, lparam)
-        }
-    }
-
-    let original = GetWindowLongPtrW(hwnd, GWLP_WNDPROC);
-    if let Ok(mut map) = ORIGINAL_WNDPROCS.lock() {
-        map.insert(hwnd as usize, original);
-    }
-    SetWindowLongPtrW(hwnd, GWLP_WNDPROC, wndproc_hook as *const () as isize);
-    tracing::info!("Installed frameless resize hook (WM_NCCALCSIZE + WM_NCHITTEST)");
-}
 
 /// Subclass a top-level window's WndProc to handle `WM_ACTIVATE`: when the
 /// window is being activated (`wparam != WA_INACTIVE`), look up the last
@@ -146,9 +26,7 @@ pub(super) unsafe fn install_frameless_resize_hook(hwnd: *mut std::ffi::c_void) 
 ///
 /// SAFE on the main CEF Views window: this hook ONLY observes `WM_ACTIVATE`
 /// and ALWAYS passes the message through to the original WndProc. No
-/// message is short-circuited. That is the crucial difference from
-/// `install_frameless_resize_hook`, which returns early for
-/// `WM_NCCALCSIZE` / `WM_NCACTIVATE` and so MUST NOT be installed on main.
+/// message is short-circuited.
 ///
 /// Idempotent: re-calling on an already-hooked HWND is a no-op.
 #[cfg(target_os = "windows")]

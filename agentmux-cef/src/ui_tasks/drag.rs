@@ -311,9 +311,6 @@ unsafe fn run_macos_native_drag_loop(window: &Window, label: &str) {
     tracing::info!("[start_window_drag] macOS: drag loop ended label={}", label);
 }
 
-#[cfg(target_os = "windows")]
-pub fn post_start_drag(_state: &Arc<AppState>, _label: &str) {}
-
 // ── Win32 host-side manual native move loop ───────────────────────────────
 //
 // The raw `WM_NCLBUTTONDOWN(HTCAPTION)` trick does NOT work with a CEF/Chromium

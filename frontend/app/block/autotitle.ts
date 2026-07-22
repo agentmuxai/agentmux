@@ -234,18 +234,6 @@ export function detectAgentFromWorkspacesPath(path: string | undefined): string 
 }
 
 /**
- * Detect agent identity from a directory path
- * Only checks for explicit agent-workspaces pattern - no hostname inference.
- * Agent identity should come from explicit env vars (AGENTMUX_AGENT_ID), not system context.
- * @deprecated Use detectAgentFromWorkspacesPath instead
- */
-export function detectAgentFromPath(path: string | undefined, _connName?: string): string | null {
-    // Delegate to the explicit workspaces-only detection
-    // The connName parameter is ignored - we no longer infer from SSH hostnames
-    return detectAgentFromWorkspacesPath(path);
-}
-
-/**
  * Generate an automatic title for a block based on its metadata and type
  * @param block - The block to generate a title for
  * @param settingsEnv - Optional global settings cmd:env to check for agent identity
