@@ -5,7 +5,17 @@
 // Canonical modal chrome (backdrop, panel, ESC) lives in
 // frontend/app/element/modal.scss; this file styles the body only.
 // The hosting <Modal> is size="fit", so the root sets explicit
-// dimensions to give the two-column browser a bounded box.
+// dimensions to give the single-pane browser a bounded box (when used via
+// the standalone agent-memory dispatch; neutralized to 100%/100% when
+// embedded in AgentSetupModal — see that file's override).
+//
+// Single-pane list/detail via PrimitiveListDetail (element/primitive-list-
+// detail.scss) — was a fixed two-column split with a non-shrinking 220px
+// list rail; migrated per SPEC_AGENT_PANE_ARMORY_HEADER_ICON_2026_07_20.md
+// §7.2 to eliminate horizontal scroll on narrow panes. .agent-memory-modal-list
+// and .agent-memory-modal-detail below are now full-width/full-height
+// content for PrimitiveListDetail's own .primitive-list-detail-list /
+// .primitive-list-detail-detail-body wrappers, not a fixed sidebar.
 
 .agent-memory-modal {
     display: flex;
@@ -60,22 +70,19 @@
     font-size: var(--text-sm);
 }
 
-// ── Body: two columns ──────────────────────────────────────────────────────
-
-.agent-memory-modal-body {
-    flex: 1;
-    min-height: 0;
-    display: flex;
-    margin-top: var(--space-2);
-    border: 1px solid var(--border-color);
-}
+// ── Body: single-pane list/detail (PrimitiveListDetail) ────────────────────
+// PrimitiveListDetail (the component wrapping these) provides its own
+// full-height flex-column container + scroll handling — see
+// primitive-list-detail.scss. This file only needs to style the content.
 
 .agent-memory-modal-list {
-    flex-shrink: 0;
-    width: 220px;
+    flex: 1;
+    min-height: 0;
+    width: 100%;
     display: flex;
     flex-direction: column;
-    border-right: 1px solid var(--border-color);
+    margin-top: var(--space-2);
+    border: 1px solid var(--border-color);
     overflow-y: auto;
 }
 
@@ -205,8 +212,13 @@
 .agent-memory-modal-detail {
     flex: 1;
     min-width: 0;
+    min-height: 0;
     display: flex;
     flex-direction: column;
+    // Matches .agent-memory-modal-list's margin/border so the frame looks
+    // consistent whichever of the two PrimitiveListDetail shows.
+    margin-top: var(--space-2);
+    border: 1px solid var(--border-color);
 }
 
 .agent-memory-modal-view,
