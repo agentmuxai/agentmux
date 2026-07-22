@@ -1331,11 +1331,26 @@ pub fn open_login_terminal(args: &serde_json::Value) -> Result<serde_json::Value
         // CREATE_NEW_CONSOLE (0x10): the child gets its own visible console
         // window, separate from the host's hidden console. This is what allows
         // the Claude CLI to open the OS default browser for OAuth.
+        //
+        // Deliberately NOT setting .stdin()/.stdout()/.stderr() here (was
+        // .stdin(Stdio::null()) — confirmed live, root-caused this session:
+        // the CLI opened a real browser and completed OAuth correctly when
+        // run manually with normal stdio, but silently failed to open a
+        // browser under this exact spawn once stdin was forced to NUL).
+        // Rust only sets STARTF_USESTDHANDLES (which overrides whatever
+        // handles CREATE_NEW_CONSOLE would otherwise wire up for the new
+        // console) when a stdio method is explicitly called; leaving all
+        // three untouched lets CreateProcess give the child fresh handles
+        // tied to its own new console, exactly like a normal interactively-
+        // launched console app gets. That's required for two things: the
+        // CLI's own TTY detection (gates whether it attempts the browser-
+        // open call at all) AND the "Paste code here if prompted >" manual
+        // fallback this same command prints — impossible to use with a
+        // NUL'd stdin regardless of the browser-open outcome.
         const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
         std::process::Command::new("cmd.exe")
             .args(["/k", &cmd_str])
             .envs(&auth_env)
-            .stdin(std::process::Stdio::null())
             .creation_flags(CREATE_NEW_CONSOLE)
             .spawn()
             .map_err(|e| format!("open_login_terminal: spawn failed: {e}"))?;
