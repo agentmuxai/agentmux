@@ -30,8 +30,9 @@
 //! it needs per-provider subprocess plumbing this module doesn't have.
 
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
-use crate::backend::storage::store::{IdentityAccount, SecretRef};
+use crate::backend::storage::store::{IdentityAccount, SecretRef, Store};
 
 /// What `cleanup_account_secrets` did, for callers/tests to assert on.
 /// Logging already happened inside the function.
@@ -178,6 +179,106 @@ fn cleanup_oauth_dir(
             SecretCleanup::OAuthDirFailed { dir: dir.to_path_buf(), error: e.to_string() }
         }
     }
+}
+
+/// Canonicalizes both `dir` and `root`, then removes `dir`'s tree only if
+/// it resolves strictly inside `root` (never the root itself) — the same
+/// escape guard `cleanup_oauth_dir` uses for a single account's credential
+/// dir, generalized for `sweep_orphaned_account_dirs` below, which removes
+/// a whole per-account dir rather than one provider's subdir within it.
+fn remove_tree_if_contained(dir: &Path, root: &Path) -> Result<(), String> {
+    let canon_root =
+        std::fs::canonicalize(root).map_err(|e| format!("root not canonicalizable: {e}"))?;
+    let canon_dir =
+        std::fs::canonicalize(dir).map_err(|e| format!("dir not canonicalizable: {e}"))?;
+    if canon_dir == canon_root || !canon_dir.starts_with(&canon_root) {
+        return Err(format!(
+            "{} is not strictly inside {}",
+            canon_dir.display(),
+            canon_root.display()
+        ));
+    }
+    std::fs::remove_dir_all(&canon_dir).map_err(|e| e.to_string())
+}
+
+/// Sweep `identities_root`'s direct children for orphaned per-account
+/// dirs: `compute_and_ensure_account_dir` mints a fresh `<account_id>/`
+/// dir and writes real credential files into it BEFORE the login that
+/// dir belongs to ever completes, so no `IdentityAccount` row exists yet
+/// to reference it. A login that's abandoned, times out, or crashes the
+/// app mid-flow leaves that directory behind forever — reagent's finding
+/// on #2260: "abandoned/failed attempts leave orphaned directories with
+/// no cleanup path."
+///
+/// Called opportunistically from `compute_and_ensure_account_dir` right
+/// before every FRESH mint (never on a reconnect — reusing an existing
+/// account's dir needs no sweep). Age-gated via `min_age_secs` so a
+/// login that's still genuinely in progress — which legitimately has no
+/// DB row yet either — is never swept out from under it; callers should
+/// pick a margin comfortably above every frontend poll timeout (5
+/// minutes as of this writing) to leave room for a slow user plus retry.
+///
+/// Best-effort and silent-safe: `identity_get` failures or an unreadable
+/// root skip that candidate (or the whole sweep) rather than risk
+/// deleting a real, in-use account's dir on a false read. Returns the
+/// dirs actually removed, mainly for tests to assert on.
+pub fn sweep_orphaned_account_dirs(
+    store: &Store,
+    identities_root: &Path,
+    min_age_secs: u64,
+) -> Vec<PathBuf> {
+    let mut removed = Vec::new();
+    let entries = match std::fs::read_dir(identities_root) {
+        Ok(e) => e,
+        Err(_) => return removed, // root doesn't exist yet — nothing to sweep
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let Some(account_id) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        match store.identity_get(account_id) {
+            // A real, persisted account — never touch it.
+            Ok(Some(_)) => continue,
+            Ok(None) => {}
+            Err(e) => {
+                tracing::warn!(
+                    account_id,
+                    error = %e,
+                    "identity.sweep: identity_get failed — skipping candidate rather than risk a false orphan"
+                );
+                continue;
+            }
+        }
+        let age_secs = match entry.metadata().and_then(|m| m.modified()) {
+            Ok(mtime) => SystemTime::now()
+                .duration_since(mtime)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
+            Err(_) => continue, // can't determine age — skip, don't guess
+        };
+        if age_secs < min_age_secs {
+            continue; // could still be a login in progress
+        }
+        match remove_tree_if_contained(&path, identities_root) {
+            Ok(()) => {
+                tracing::info!(
+                    account_id,
+                    dir = %path.display(),
+                    age_secs,
+                    "identity.sweep: orphaned account dir removed (no matching account row, past age threshold)"
+                );
+                removed.push(path);
+            }
+            Err(e) => {
+                tracing::debug!(account_id, dir = %path.display(), error = %e, "identity.sweep: candidate not removed");
+            }
+        }
+    }
+    removed
 }
 
 #[cfg(test)]
@@ -342,5 +443,90 @@ mod tests {
             "got {out:?}"
         );
         assert!(canary.exists(), "keychain cleanup must not touch the filesystem");
+    }
+
+    fn make_store() -> Store {
+        Store::open_in_memory().unwrap()
+    }
+
+    /// An orphaned dir (no matching `IdentityAccount` row) past the age
+    /// threshold is removed and reported.
+    #[test]
+    fn sweep_removes_orphaned_dir_past_age_threshold() {
+        let store = make_store();
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("identities");
+        let orphan = root.join("orphan-uuid").join("claude");
+        std::fs::create_dir_all(&orphan).unwrap();
+        std::fs::write(orphan.join(".credentials.json"), "{}").unwrap();
+
+        let removed = sweep_orphaned_account_dirs(&store, &root, 0);
+
+        assert_eq!(removed, vec![root.join("orphan-uuid")]);
+        assert!(!root.join("orphan-uuid").exists(), "orphaned dir must be gone");
+    }
+
+    /// A dir with a real, persisted `IdentityAccount` row is never swept,
+    /// no matter the age threshold — this is the guard that keeps an
+    /// in-use account's credentials safe.
+    #[test]
+    fn sweep_never_removes_a_dir_with_a_real_account_row() {
+        let store = make_store();
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("identities");
+        let real = root.join("real-account-id").join("claude");
+        std::fs::create_dir_all(&real).unwrap();
+
+        store
+            .identity_upsert(&IdentityAccount {
+                id: "real-account-id".to_string(),
+                name: "asaf-claude".to_string(),
+                provider: "claude".to_string(),
+                kind: "oauth".to_string(),
+                display_name: String::new(),
+                secret_ref: SecretRef::OAuthConfigDir {
+                    dir: real.to_string_lossy().to_string(),
+                },
+                context: serde_json::json!({}),
+                status: "valid".to_string(),
+                created_at: 0,
+                updated_at: 0,
+            })
+            .unwrap();
+
+        let removed = sweep_orphaned_account_dirs(&store, &root, 0);
+
+        assert!(removed.is_empty());
+        assert!(real.exists(), "a real account's dir must survive the sweep");
+    }
+
+    /// An orphaned dir younger than `min_age_secs` is left alone — it
+    /// could be a login that's still genuinely in progress.
+    #[test]
+    fn sweep_never_removes_a_dir_younger_than_the_age_threshold() {
+        let store = make_store();
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("identities");
+        let fresh = root.join("fresh-uuid").join("claude");
+        std::fs::create_dir_all(&fresh).unwrap();
+
+        // Effectively "just created" vs. an implausibly high age floor.
+        let removed = sweep_orphaned_account_dirs(&store, &root, 999_999);
+
+        assert!(removed.is_empty());
+        assert!(root.join("fresh-uuid").exists(), "a fresh in-progress dir must survive");
+    }
+
+    /// The identities root not existing yet (fresh install, nothing ever
+    /// minted) is a normal state, not an error — empty result, no panic.
+    #[test]
+    fn sweep_on_missing_root_returns_empty_without_panicking() {
+        let store = make_store();
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("identities-never-created");
+
+        let removed = sweep_orphaned_account_dirs(&store, &root, 0);
+
+        assert!(removed.is_empty());
     }
 }
