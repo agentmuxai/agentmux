@@ -112,19 +112,24 @@ export interface RunProviderLoginParams extends ForceLoginParams {
      *  a local `authEnv` copy to recheck auth status against the NEW
      *  isolated dir, since `finalizeAccount` only updates the persisted
      *  block meta — a caller's own in-memory `authEnv` variable is never
-     *  refreshed by this function) should use this instead of threading a
-     *  new return shape through `runProviderLogin` — `linkTarget`-driven
-     *  pane callers that don't need the value don't have to care it exists. */
+     *  refreshed by this function; or the New Agent modal selecting the
+     *  newly-created account in its dropdown) should use this instead of
+     *  threading a new return shape through `runProviderLogin` —
+     *  `linkTarget`-driven pane callers that don't need the value don't
+     *  have to care it exists. */
     onAccountRegistered?: (accountId: string, dir: string) => void;
     /** Skip tier 1 (headless URL-capture) entirely and go straight to tier 2.
      *  For providers where tier 1 is a documented, unconditional dead end —
      *  e.g. `requiresLoginTty` providers, whose CLI opens its own browser
      *  in-process and needs a real console no piped/PTY spawn has — skipping
-     *  avoids a pointless ~15s wait for an attempt that cannot succeed.
-     *  Also the right default for a caller whose UI already explicitly says
-     *  "login via terminal" (the user has already opted into a real console,
-     *  no point trying headless first). Default false — existing callers
-     *  are unaffected. */
+     *  avoids a pointless ~15s wait for an attempt that cannot succeed, and
+     *  (for callers that need a completion signal, which tier 1 alone doesn't
+     *  provide) keeps the "opened, now what?" case structurally unreachable
+     *  rather than something every caller has to defend against. Also the
+     *  right default for a caller whose UI already explicitly says "login
+     *  via terminal" (the user has already opted into a real console, no
+     *  point trying headless first). Default false — existing callers are
+     *  unaffected. */
     skipTier1?: boolean;
 }
 

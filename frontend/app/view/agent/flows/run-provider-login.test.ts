@@ -407,7 +407,24 @@ describe("runProviderLogin", () => {
         expect(log).toHaveBeenCalledWith("auth", expect.stringMatching(/couldn't open a terminal/i), "error");
     });
 
-    it("existingAccountId is threaded through to account minting — reconnects the SAME account instead of minting a new one (reagent P1: retries were orphaning a new account every time)", async () => {
+    it("skipTier1 skips the headless URL-capture attempt entirely and goes straight to tier 2", async () => {
+        hub.seedProviderAuthFromGlobal.mockResolvedValue({ seeded: true });
+
+        const outcome = await runProviderLogin({
+            provider: claude,
+            cliPath: "x",
+            authEnv: { CLAUDE_CONFIG_DIR: "C:/auth" },
+            setAuthUrl: vi.fn(),
+            log: vi.fn(),
+            skipTier1: true,
+        });
+
+        expect(outcome).toBe("seeded");
+        expect(hub.runCliLogin).not.toHaveBeenCalled();
+        expect(hub.openPane).not.toHaveBeenCalled();
+    });
+
+    it("existingAccountId is threaded through to tier 2's account minting — reconnects the SAME account instead of minting a new one (reagent P1: retries were orphaning a new account every time)", async () => {
         hub.runCliLogin.mockResolvedValue(null);
         hub.seedProviderAuthFromGlobal.mockResolvedValue({ seeded: true });
 
@@ -419,6 +436,30 @@ describe("runProviderLogin", () => {
             log: vi.fn(),
             existingAccountId: "acct-existing",
         });
+
+        expect(hub.ensureAccountDir).toHaveBeenCalledWith(
+            {},
+            { providerId: "claude", existingAccountId: "acct-existing" },
+        );
+    });
+
+    it("existingAccountId is threaded through to tier 3's account minting too", async () => {
+        vi.useFakeTimers();
+        hub.runCliLogin.mockResolvedValue(null);
+        hub.seedProviderAuthFromGlobal
+            .mockResolvedValueOnce({ seeded: false, status: "missing" })
+            .mockResolvedValueOnce({ seeded: true });
+
+        const promise = runProviderLogin({
+            provider: claude,
+            cliPath: "x",
+            authEnv: { CLAUDE_CONFIG_DIR: "C:/auth" },
+            setAuthUrl: vi.fn(),
+            log: vi.fn(),
+            existingAccountId: "acct-existing",
+        });
+        await vi.advanceTimersByTimeAsync(5_000);
+        await promise;
 
         expect(hub.ensureAccountDir).toHaveBeenCalledWith(
             {},
@@ -442,6 +483,47 @@ describe("runProviderLogin", () => {
 
         expect(outcome).toBe("seeded");
         expect(onAccountRegistered).toHaveBeenCalledWith(MINTED.accountId, MINTED.dir);
+    });
+
+    it("onAccountRegistered fires on tier 3 success too, and NOT at all if persistSeededAccount fails", async () => {
+        vi.useFakeTimers();
+        hub.runCliLogin.mockResolvedValue(null);
+        hub.seedProviderAuthFromGlobal
+            .mockResolvedValueOnce({ seeded: false, status: "missing" })
+            .mockResolvedValueOnce({ seeded: true });
+        const onAccountRegistered = vi.fn();
+
+        const promise = runProviderLogin({
+            provider: claude,
+            cliPath: "x",
+            authEnv: { CLAUDE_CONFIG_DIR: "C:/auth" },
+            setAuthUrl: vi.fn(),
+            log: vi.fn(),
+            onAccountRegistered,
+        });
+        await vi.advanceTimersByTimeAsync(5_000);
+        await promise;
+
+        expect(onAccountRegistered).toHaveBeenCalledWith(MINTED.accountId, MINTED.dir);
+
+        onAccountRegistered.mockClear();
+        hub.upsertIdentityAccount.mockRejectedValueOnce(new Error("db error"));
+        hub.seedProviderAuthFromGlobal
+            .mockReset()
+            .mockResolvedValueOnce({ seeded: false, status: "missing" })
+            .mockResolvedValueOnce({ seeded: true });
+
+        const promise2 = runProviderLogin({
+            provider: claude,
+            cliPath: "x",
+            authEnv: { CLAUDE_CONFIG_DIR: "C:/auth" },
+            setAuthUrl: vi.fn(),
+            log: vi.fn(),
+            onAccountRegistered,
+        });
+        await vi.advanceTimersByTimeAsync(5_000);
+        await promise2;
+        expect(onAccountRegistered).not.toHaveBeenCalled();
     });
 
     it("onAccountRegistered fires on non-claude tier 3 success too", async () => {
