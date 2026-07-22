@@ -19,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const hub = vi.hoisted(() => ({
     runCliLogin: vi.fn(),
     checkCliAuth: vi.fn(),
+    cancelCliLogin: vi.fn(),
     openPane: vi.fn(),
     seedProviderAuthFromGlobal: vi.fn(),
     openLoginTerminal: vi.fn(),
@@ -32,6 +33,7 @@ vi.mock("@/app/store/global", () => ({
     getApi: () => ({
         runCliLogin: hub.runCliLogin,
         checkCliAuth: hub.checkCliAuth,
+        cancelCliLogin: hub.cancelCliLogin,
         seedProviderAuthFromGlobal: hub.seedProviderAuthFromGlobal,
         openLoginTerminal: hub.openLoginTerminal,
     }),
@@ -68,6 +70,7 @@ const MINTED = { accountId: "acct-new", dir: "C:/agentmux/identities/acct-new/cl
 beforeEach(() => {
     hub.runCliLogin.mockReset();
     hub.checkCliAuth.mockReset();
+    hub.cancelCliLogin.mockReset().mockResolvedValue(undefined);
     hub.openPane.mockReset().mockResolvedValue("pane");
     hub.seedProviderAuthFromGlobal.mockReset();
     hub.openLoginTerminal.mockReset().mockResolvedValue({ opened: true });
@@ -97,6 +100,9 @@ describe("runProviderLogin", () => {
         expect(hub.ensureAccountDir).not.toHaveBeenCalled();
         expect(hub.seedProviderAuthFromGlobal).not.toHaveBeenCalled();
         expect(hub.openLoginTerminal).not.toHaveBeenCalled();
+        // Tier 1 succeeded — nothing to cancel, and no fallback tier ran
+        // that could race against a still-live tier-1 child.
+        expect(hub.cancelCliLogin).not.toHaveBeenCalled();
     });
 
     it("falls through to tier 2 — mints a real account dir, seeds it, and registers the account — when tier 1 captures no URL, for claude", async () => {
@@ -119,6 +125,53 @@ describe("runProviderLogin", () => {
             expect.objectContaining({ id: MINTED.accountId, provider: "claude", kind: "oauth" }),
         );
         expect(hub.openLoginTerminal).not.toHaveBeenCalled();
+        // Tier 1 timed out with no URL — its abandoned CLI child must be
+        // cancelled before tier 2 mints/seeds an account.
+        expect(hub.cancelCliLogin).toHaveBeenCalledTimes(1);
+    });
+
+    it("tier 2 mints the account dir exactly once (ensureAccountDir called once, not once per tier)", async () => {
+        hub.runCliLogin.mockResolvedValue(null);
+        hub.seedProviderAuthFromGlobal.mockResolvedValue({ seeded: true });
+
+        await runProviderLogin({
+            provider: claude,
+            cliPath: "x",
+            authEnv: { CLAUDE_CONFIG_DIR: "C:/auth" },
+            setAuthUrl: vi.fn(),
+            log: vi.fn(),
+        });
+
+        expect(hub.ensureAccountDir).toHaveBeenCalledTimes(1);
+    });
+
+    it("when tier 2's seed fails partway (dir minted but not seeded), tier 3 reuses the SAME minted account instead of minting a second one", async () => {
+        vi.useFakeTimers();
+        hub.runCliLogin.mockResolvedValue(null);
+        hub.seedProviderAuthFromGlobal
+            .mockResolvedValueOnce({ seeded: false, status: "missing" }) // tier 2: no global login to copy
+            .mockResolvedValueOnce({ seeded: true }); // tier 3's first poll: user finished the browser login
+
+        const promise = runProviderLogin({
+            provider: claude,
+            cliPath: "x",
+            authEnv: { CLAUDE_CONFIG_DIR: "C:/auth" },
+            setAuthUrl: vi.fn(),
+            log: vi.fn(),
+        });
+        await vi.advanceTimersByTimeAsync(5_000);
+        const outcome = await promise;
+
+        expect(outcome).toBe("terminal-success");
+        // Exactly one mint for the whole call, not one per tier — the same
+        // MINTED.accountId/dir is what both tier 2's seed attempt and tier
+        // 3's terminal poll operate against.
+        expect(hub.ensureAccountDir).toHaveBeenCalledTimes(1);
+        expect(hub.upsertIdentityAccount).toHaveBeenCalledTimes(1);
+        expect(hub.upsertIdentityAccount).toHaveBeenCalledWith(
+            {},
+            expect.objectContaining({ id: MINTED.accountId }),
+        );
     });
 
     it("links the new account and updates block meta when a linkTarget is given", async () => {
