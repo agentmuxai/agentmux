@@ -400,63 +400,88 @@ async function startConnect(
     // entirely since it's a documented, unconditional dead end for these
     // providers — see run-provider-login.ts's tier-1 doc comment.
     if (provider.requiresLoginTty) {
-        controller.dispatch({ type: "ConnectClicked" });
-        let registeredAccountId = "";
-        const outcome = await runProviderLogin({
-            provider,
-            cliPath,
-            authEnv,
-            existingAccountId: existingAccountId || undefined,
-            skipTier1: true,
-            onAccountRegistered: (accountId) => {
-                registeredAccountId = accountId;
-            },
-            // Unreachable in practice with skipTier1: true (forceProviderLogin
-            // is the only setAuthUrl caller, and it's skipped) — provided
-            // because ForceLoginParams requires it.
-            setAuthUrl: (url) =>
-                controller.dispatch({ type: "SessionStarted", sessionId: "provider-login", authUrl: url ?? undefined }),
-            log: (_cat, msg) => console.log(`[auth-diag] ${msg}`),
-            // The user's Cancel click dispatches CancelClicked (moving state
-            // out of `waiting`) AND sets controller.wasCancelled() — tier 3's
-            // poll loop watches the latter specifically (reagent P2: state
-            // could leave `waiting` for a reason other than a user cancel,
-            // which `kind !== "waiting"` alone can't distinguish, misreporting
-            // a non-cancel exit as "wasn't completed within 5 minutes"). This
-            // doesn't kill the terminal process itself (a known,
-            // separately-tracked gap — see
-            // PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md §7 Phase 4),
-            // only the frontend's wait for it.
-            isCancelled: () => controller.wasCancelled(),
-        });
-        switch (outcome) {
-            case "seeded":
-            case "terminal-success":
-                if (registeredAccountId) {
-                    controller.markSeeded(registeredAccountId);
-                } else {
-                    // The credential landed but the Armory account row
-                    // couldn't be persisted — don't show fake-ready state
-                    // (same reasoning as handleUseExistingLogin's failure
-                    // path above: the resolver's spawn gate requires a real
-                    // bound account, so a fake-ready panel would let Launch
-                    // enable and then have the agent immediately fail).
+        // reagent P1 on #2262: the Reconnect arm (stale needs_reauth/expired
+        // account) leaves the reducer in `ready` for this whole call —
+        // `ConnectClicked` below is silently dropped by connect()'s own
+        // unauthenticated/expired/failed guard, so `state().kind` never
+        // moves to `waiting` and can't distinguish "first click" from "a
+        // second click while the first login is still running." Without an
+        // explicit guard, a double-click spawned two concurrent
+        // terminal-login processes against the same account dir.
+        if (!controller.beginTtyLogin()) {
+            console.warn("[auth-diag] startConnect: requiresLoginTty login already in flight, ignoring click");
+            return;
+        }
+        try {
+            controller.dispatch({ type: "ConnectClicked" });
+            let registeredAccountId = "";
+            const outcome = await runProviderLogin({
+                provider,
+                cliPath,
+                authEnv,
+                existingAccountId: existingAccountId || undefined,
+                skipTier1: true,
+                onAccountRegistered: (accountId) => {
+                    registeredAccountId = accountId;
+                },
+                // Unreachable in practice with skipTier1: true (forceProviderLogin
+                // is the only setAuthUrl caller, and it's skipped) — provided
+                // because ForceLoginParams requires it.
+                setAuthUrl: (url) =>
+                    controller.dispatch({ type: "SessionStarted", sessionId: "provider-login", authUrl: url ?? undefined }),
+                log: (_cat, msg) => console.log(`[auth-diag] ${msg}`),
+                // The user's Cancel click dispatches CancelClicked (moving state
+                // out of `waiting`) AND sets controller.wasCancelled() — tier 3's
+                // poll loop watches the latter specifically (reagent P2: state
+                // could leave `waiting` for a reason other than a user cancel,
+                // which `kind !== "waiting"` alone can't distinguish, misreporting
+                // a non-cancel exit as "wasn't completed within 5 minutes"). This
+                // doesn't kill the terminal process itself (a known,
+                // separately-tracked gap — see
+                // PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md §7 Phase 4),
+                // only the frontend's wait for it.
+                isCancelled: () => controller.wasCancelled(),
+            });
+            switch (outcome) {
+                case "seeded":
+                case "terminal-success":
+                    if (registeredAccountId) {
+                        controller.markSeeded(registeredAccountId);
+                    } else {
+                        // The credential landed but the Armory account row
+                        // couldn't be persisted — don't show fake-ready state
+                        // (same reasoning as handleUseExistingLogin's failure
+                        // path above: the resolver's spawn gate requires a real
+                        // bound account, so a fake-ready panel would let Launch
+                        // enable and then have the agent immediately fail).
+                        controller.failConnect(
+                            new Error("Login completed but the account couldn't be registered. Try again."),
+                        );
+                    }
+                    break;
+                case "terminal-timeout":
+                    // reagent P1 on #2262: an explicit user Cancel already
+                    // reset state to unauthenticated via CancelClicked —
+                    // showing a "wasn't completed within 5 minutes" failure
+                    // banner on top of that would be actively misleading
+                    // about what actually happened (mirrors relogin()'s
+                    // same wasCancelled() guard on its own "opened" timeout
+                    // message).
+                    if (!controller.wasCancelled()) {
+                        controller.failConnect(
+                            new Error("Login wasn't completed within 5 minutes. Click Connect to try again."),
+                        );
+                    }
+                    break;
+                case "terminal-unavailable":
+                case "opened": // structurally unreachable with skipTier1 — defensive only
                     controller.failConnect(
-                        new Error("Login completed but the account couldn't be registered. Try again."),
+                        new Error(`Couldn't open a terminal for ${provider.displayName} login on this platform.`),
                     );
-                }
-                break;
-            case "terminal-timeout":
-                controller.failConnect(
-                    new Error("Login wasn't completed within 5 minutes. Click Connect to try again."),
-                );
-                break;
-            case "terminal-unavailable":
-            case "opened": // structurally unreachable with skipTier1 — defensive only
-                controller.failConnect(
-                    new Error(`Couldn't open a terminal for ${provider.displayName} login on this platform.`),
-                );
-                break;
+                    break;
+            }
+        } finally {
+            controller.endTtyLogin();
         }
         return;
     }

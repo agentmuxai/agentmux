@@ -374,6 +374,36 @@ export class AuthFlowController {
         return this.userCancelled;
     }
 
+    /** Set only while a `requiresLoginTty` provider's login (routed through
+     *  `runProviderLogin` in `PreLaunchAuthPanel.tsx`, bypassing `connect()`
+     *  entirely) is in flight. reagent P1 on #2262: the Reconnect arm for a
+     *  stale (`needs_reauth`/`expired`) account leaves the reducer in
+     *  `ready` the whole time — `connect()`'s own guard only accepts
+     *  `ConnectClicked` from `unauthenticated`/`expired`/`failed`, so
+     *  dispatching it from `ready` is silently dropped and `state().kind`
+     *  never changes to `waiting`. That means the state machine has no way
+     *  to represent "already in flight" for this specific origin state, so
+     *  a second click while the first login is still running looked
+     *  identical to the first click and spawned a second, concurrent
+     *  terminal-login process against the same account dir. This flag is
+     *  the explicit, state-machine-independent guard that gap needs. */
+    private ttyLoginInFlight = false;
+
+    /** Returns `false` (and leaves the flag untouched) if a tty-login is
+     *  already in flight — the caller should treat that as "ignore this
+     *  click," not retry or queue it. Returns `true` (and sets the flag) to
+     *  claim the slot; the caller MUST call `endTtyLogin()` when done,
+     *  success or failure, typically from a `finally` block. */
+    beginTtyLogin(): boolean {
+        if (this.ttyLoginInFlight) return false;
+        this.ttyLoginInFlight = true;
+        return true;
+    }
+
+    endTtyLogin(): void {
+        this.ttyLoginInFlight = false;
+    }
+
     async submitCallback(callbackUrl: string): Promise<void> {
         const s = this.state();
         if (s.kind !== "waiting" || s.sessionId === "") return;

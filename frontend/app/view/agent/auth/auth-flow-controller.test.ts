@@ -194,6 +194,25 @@ describe("AuthFlowController", () => {
         });
     });
 
+    describe("beginTtyLogin() / endTtyLogin()", () => {
+        it("beginTtyLogin() claims the slot once and rejects a second concurrent call, until endTtyLogin() releases it (reagent P1 on #2262)", () => {
+            const ctrl = new AuthFlowController({ rpc: fakeRpc({}) });
+
+            expect(ctrl.beginTtyLogin()).toBe(true);
+            // A second click while the first is still in flight — must be
+            // rejected, not queued or silently allowed through, since a
+            // requiresLoginTty Reconnect leaves state().kind stuck at
+            // "ready" the whole time and can't itself signal "in flight."
+            expect(ctrl.beginTtyLogin()).toBe(false);
+            expect(ctrl.beginTtyLogin()).toBe(false);
+
+            ctrl.endTtyLogin();
+            // Released — a fresh attempt can claim it again.
+            expect(ctrl.beginTtyLogin()).toBe(true);
+            ctrl.endTtyLogin();
+        });
+    });
+
     it("selected() during waiting cancels the backend session", async () => {
         // Reagent + Codex P2 on #850 round 6: switching selection
         // mid-OAuth must fire auth.cancel for the live sessionId so
