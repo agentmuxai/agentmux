@@ -1271,6 +1271,13 @@ pub fn cancel_cli_login(state: &Arc<AppState>) -> Result<serde_json::Value, Stri
     Ok(serde_json::Value::Null)
 }
 
+/// Single-quote a value for embedding in the POSIX launch script
+/// `open_login_terminal` writes on macOS.
+#[cfg(target_os = "macos")]
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
 /// Spawn the CLI login command in a NEW visible console window so the OS can
 /// open a browser (the piped/PTY paths used by `run_cli_login` are headless
 /// and block the browser from launching — confirmed for Claude v2.1.x).
@@ -1334,11 +1341,103 @@ pub fn open_login_terminal(args: &serde_json::Value) -> Result<serde_json::Value
             .map_err(|e| format!("open_login_terminal: spawn failed: {e}"))?;
     }
 
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
     {
-        // macOS / Linux: xterm / open -a Terminal. Tracked follow-up.
-        let _ = (cmd_str, auth_env);
-        return Err("open_login_terminal: not yet implemented on this platform".to_string());
+        // `open -a Terminal` can't carry env vars or a shell command directly,
+        // so write a disposable script and open Terminal.app on that instead.
+        // The script self-deletes on exit so repeated logins don't litter tmp.
+        //
+        // reagent P1 on #2255: the old name (`agentmux-login-{pid}.command`,
+        // just the host process's own PID) is CONSTANT for the process's
+        // whole lifetime — a second login attempt (a different agent, or a
+        // retry) before the first script finishes executing overwrote the
+        // same path, so a running/about-to-run shell could execute mixed or
+        // wrong content, or the self-delete (`rm -f -- "$0"`) could remove
+        // the file out from under a concurrent attempt. A UUID per call
+        // makes every attempt's script path unique regardless of timing.
+        let script_path = std::env::temp_dir().join(format!(
+            "agentmux-login-{}-{}.command",
+            std::process::id(),
+            uuid::Uuid::new_v4(),
+        ));
+        let mut script = String::from("#!/bin/sh\n");
+        for (k, v) in &auth_env {
+            script.push_str(&format!("export {}={}\n", k, shell_quote(v)));
+        }
+        script.push_str(&format!("{}\nrm -f -- \"$0\"\n", cmd_str));
+        // reagent P1 on #2260 (surfaced via this file's inclusion in that
+        // PR's diff, but the code — and the fix — belong here): the old
+        // `fs::write` then `set_permissions(0o700)` sequence left a TOCTOU
+        // window where the pid-named script, containing exported auth_env
+        // values, was briefly world-readable in the shared temp dir under a
+        // default umask. Setting the mode AT CREATION via OpenOptions closes
+        // that window — the file never exists with broader permissions.
+        use std::os::unix::fs::OpenOptionsExt;
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o700)
+            .open(&script_path)
+            .map_err(|e| format!("open_login_terminal: failed to create launch script: {e}"))?;
+        file.write_all(script.as_bytes())
+            .map_err(|e| format!("open_login_terminal: failed to write launch script: {e}"))?;
+        drop(file);
+        std::process::Command::new("open")
+            .args(["-a", "Terminal", script_path.to_string_lossy().as_ref()])
+            .spawn()
+            .map_err(|e| format!("open_login_terminal: spawn failed: {e}"))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // No single terminal emulator is guaranteed present; try common ones
+        // in order and use whichever spawns successfully. `-e` runs the
+        // command and the shell stays open after exit so any CLI error is
+        // visible instead of the window vanishing immediately.
+        //
+        // reagent P2 on #2255: single-instance terminal emulators like
+        // gnome-terminal proxy the "open a window" request to an
+        // already-running server process via D-Bus — the freshly spawned
+        // client process just sends that message and exits, so `.envs()`
+        // on THIS Command never reaches the shell the server process
+        // actually runs. Embed the env vars as `export` lines in the shell
+        // command text itself instead (same approach the macOS branch
+        // already uses) — that text is what actually gets relayed to the
+        // server-owned shell, regardless of which process env it came from.
+        let mut export_prelude = String::new();
+        for (k, v) in &auth_env {
+            export_prelude.push_str(&format!("export {}='{}'; ", k, v.replace('\'', "'\\''")));
+        }
+        let sh_cmd = format!(
+            "{}{}; echo; echo '[login finished — press Enter to close]'; read _",
+            export_prelude, cmd_str,
+        );
+        let candidates: [(&str, &[&str]); 4] = [
+            ("x-terminal-emulator", &["-e", "sh", "-c"]),
+            ("gnome-terminal", &["--", "sh", "-c"]),
+            ("konsole", &["-e", "sh", "-c"]),
+            ("xterm", &["-e", "sh", "-c"]),
+        ];
+        let mut spawned = false;
+        for (bin, prefix_args) in candidates {
+            let mut command = std::process::Command::new(bin);
+            // Still set .envs() too — harmless for emulators that DON'T
+            // proxy via a persistent server (xterm, konsole typically
+            // fork a fresh process per invocation and would inherit it),
+            // and costs nothing for the ones that ignore it.
+            command.args(prefix_args).arg(&sh_cmd).envs(&auth_env);
+            if command.spawn().is_ok() {
+                spawned = true;
+                break;
+            }
+        }
+        if !spawned {
+            return Err(
+                "open_login_terminal: no terminal emulator found (tried x-terminal-emulator, gnome-terminal, konsole, xterm)"
+                    .to_string(),
+            );
+        }
     }
 
     Ok(serde_json::json!({ "opened": true }))

@@ -43,7 +43,7 @@ import {
     type SelectionOutcome,
 } from "../auth";
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
-import { seedGlobalLogin } from "../flows/seed-global-login";
+import { registerSeededAccount } from "../flows/register-seeded-account";
 import type { ProviderDefinition } from "../providers";
 import type { LogFn } from "../types";
 import "./PreLaunchAuthPanel.scss";
@@ -170,28 +170,25 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
 
     // "Use my existing login" — the PRIMARY path for Claude v2.1.x, whose
     // in-app OAuth can't open a browser when WE spawn it (a dead end —
-    // SPEC_HOST_CLI_LOGIN_CAPTURE §0). Copies the user's valid GLOBAL login
-    // into the agent's isolated dir, then marks the controller `ready` so
-    // Launch enables — no in-app browser, no OAuth.
+    // SPEC_HOST_CLI_LOGIN_CAPTURE §0). Mints a real per-account isolated dir,
+    // copies the user's valid GLOBAL login into it, and persists a real
+    // IdentityAccount row (not just a file in the shared dir — this used to
+    // call `seedGlobalLogin` directly against `ensureAuthDir`'s SHARED
+    // default dir and only fake local "ready" state via `markSeeded`,
+    // leaving Armory with no record the account ever existed. See
+    // PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md §7 — the resolver's
+    // spawn gate now requires a real bound account, so a fake-ready panel
+    // would have let Launch enable and then had the agent immediately fail
+    // its first turn). No in-app browser, no OAuth. `props.accountId()` is
+    // passed through as `existingAccountId` so a Reconnect (not a fresh
+    // Connect) refreshes the SAME account's dir in place.
     const seedLog: LogFn = (_cat, msg) => console.log(`[auth-diag] seed: ${msg}`);
     const handleUseExistingLogin = async (): Promise<void> => {
         const prov = props.provider;
         if (!prov) return;
-        // Resolve the agent's isolated auth dir so the seed lands where the
-        // agent reads it (host falls back to the shared dir if absent/invalid).
-        let configDir: string | undefined;
-        if (prov.authConfigDirEnvVar) {
-            try {
-                configDir = await getApi().ensureAuthDir(prov.id);
-            } catch (e) {
-                console.warn(
-                    `[auth-diag] seed ensureAuthDir failed: ${(e as Error)?.message ?? String(e)}`,
-                );
-            }
-        }
-        const ok = await seedGlobalLogin(prov.id, seedLog, configDir);
-        if (ok) {
-            controller.markSeeded(props.accountId());
+        const reg = await registerSeededAccount(prov.id, seedLog, props.accountId() || undefined);
+        if (reg.ok && reg.accountId) {
+            controller.markSeeded(reg.accountId);
         } else {
             controller.failConnect(
                 new Error(
