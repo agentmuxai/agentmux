@@ -249,24 +249,41 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                     //    Cross-block continuation needs a unified per-agent log; until
                     //    that lands (follow-up to PR #1361) we fall through to NDJSON
                     //    replay on this block rather than restore a fragmented/blank view.
-                    const v2SameBlock = (snapshot?.schemaVersion ?? 0) >= SNAPSHOT_SCHEMA_VERSION_V2
+                    const hasUsableHwm = (snapshot?.schemaVersion ?? 0) >= SNAPSHOT_SCHEMA_VERSION_V2
                         && typeof snapshot.highWaterMark === "number"
-                        && snapshot.highWaterMark > 0
-                        && (typeof snapshot.sourceBlockId !== "string"
-                            || snapshot.sourceBlockId === ""
-                            || snapshot.sourceBlockId === opts.blockId);
+                        && snapshot.highWaterMark > 0;
+                    const sourceMatchesThisBlock = typeof snapshot.sourceBlockId !== "string"
+                        || snapshot.sourceBlockId === ""
+                        || snapshot.sourceBlockId === opts.blockId;
+                    // A genuine cross-block continuation (a NEW block opened for the same
+                    // agent definition, after the block that wrote this snapshot) can also
+                    // take the fast path below when a definitionId is available: `Blockfile
+                    // LineCountCommand`/`BlockfileReadRangeCommand` resolve to the agent's
+                    // GLOBAL output zone by THIS block's own `agentId` meta
+                    // (`global_output_source`, server/app_api/mod.rs) — not by the
+                    // snapshot's recorded sourceBlockId — so scoping those reads to
+                    // opts.blockId already returns the full cross-block history. Without a
+                    // definitionId there's no way to resolve the write-side mirror, so that
+                    // case still falls through to NDJSON replay below. Closes #1397.
+                    const v2SameBlock = hasUsableHwm && (sourceMatchesThisBlock || !!opts.definitionId);
                     if (v2SameBlock) {
-                        // When the snapshot is agent-anchored (sourceBlockId=""), the stored
-                        // highWaterMark was written by a *prior* block's local line count and
-                        // can be far smaller than the global zone (e.g. hwm=15 from a short
-                        // accidental session while the real conversation has 5000+ lines). Re-
-                        // derive the live count via line_count, which transparently returns the
-                        // global-zone total for a fresh empty block. Only take the larger value
-                        // so a genuinely new/short agent (hwm=5, live=5) isn't widened.
+                        const isForeignBlock = !sourceMatchesThisBlock;
+                        if (isForeignBlock) {
+                            // This pane didn't write the snapshot's documentState overlay —
+                            // suppress this pane from later clobbering it (see
+                            // setSnapshotIsForeignBlock's own declaration for why).
+                            setSnapshotIsForeignBlock(true);
+                        }
+                        // When the snapshot isn't sourced from THIS block (agent-anchored, or
+                        // a genuine cross-block continuation), the stored highWaterMark was
+                        // written by a *different* block's local line count and can be far
+                        // smaller than the global zone (e.g. hwm=15 from a short accidental
+                        // session while the real conversation has 5000+ lines). Re-derive the
+                        // live count via line_count, which transparently returns the
+                        // global-zone total. Only take the larger value so a genuinely new/
+                        // short agent (hwm=5, live=5) isn't widened.
                         let hwm: number = snapshot.highWaterMark;
-                        const isAgentAnchored = typeof snapshot.sourceBlockId !== "string"
-                            || snapshot.sourceBlockId === "";
-                        if (isAgentAnchored && snapshot.sourceBlockId !== opts.blockId) {
+                        if (isForeignBlock) {
                             try {
                                 const liveCount = await RpcApi.BlockfileLineCountCommand(TabRpcClient, {
                                     block_id: opts.blockId,
@@ -338,10 +355,12 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                         return;
                     }
                     if ((snapshot?.schemaVersion ?? 0) >= SNAPSHOT_SCHEMA_VERSION_V2) {
-                        // v2+ snapshot we deliberately didn't fast-path: either hwm<=0
-                        // (write-time count failure) or a cross-block continuation
-                        // (sourceBlockId !== this block). Don't render empty — fall
-                        // through to NDJSON replay on this block.
+                        // v2+ snapshot we deliberately didn't fast-path (v2SameBlock was
+                        // false above): either hwm<=0 (write-time count failure), or a
+                        // cross-block continuation with no definitionId to resolve the
+                        // global zone through (legacy/picker callers only — #1397's fix
+                        // covers every definitionId-bearing caller above). Don't render
+                        // empty — fall through to NDJSON replay on this block.
                         const crossBlock = typeof snapshot.sourceBlockId === "string"
                             && snapshot.sourceBlockId !== ""
                             && snapshot.sourceBlockId !== opts.blockId;
@@ -355,7 +374,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                         opts.log(
                             "history",
                             crossBlock
-                                ? "v2 snapshot is from another block (cross-block continuation not yet supported); falling back to NDJSON replay"
+                                ? "v2 snapshot is from another block and no definitionId is available to resolve it; falling back to NDJSON replay"
                                 : "v2 snapshot has no usable highWaterMark; falling back to NDJSON replay",
                             "warn",
                         );

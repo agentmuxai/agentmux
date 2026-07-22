@@ -185,6 +185,31 @@
           "type": "boolean",
           "description": "Enable mDNS-based discovery of other AgentMux instances on the same host and LAN. Defaults to false to avoid the Windows Firewall prompt; toggle from the HostPopover panel. See specs/lan-discovery-toggle.md."
         },
+        "voice:enabled": {
+          "type": "boolean",
+          "description": "Globally controls whether the per-pane microphone button is rendered. Default true (absent means enabled) — set false to fully hide the buttons across all panes. See docs/specs/SPEC_VOICE_INPUT_PER_PANE_2026_05_19.md."
+        },
+        "voice:engine": {
+          "type": "string",
+          "enum": ["whisper", "whisper-local", "webspeech"],
+          "description": "Speech-to-text engine. 'whisper' (default, absent means whisper) captures audio and sends it to the server-side Whisper backend (Groq-hosted); 'whisper-local' uses a local whisper.cpp binary; 'webspeech' uses the browser API (dev / real-Chromium only, not viable in packaged CEF builds). See docs/specs/SPEC_VOICE_STT_ENGINE_2026_06_20.md."
+        },
+        "voice:groqApiKey": {
+          "type": "string",
+          "description": "Groq API key for the hosted Whisper backend (voice:engine = 'whisper'). Read server-side only, never sent to the renderer. The AGENTMUX_GROQ_API_KEY env var takes precedence."
+        },
+        "voice:whisperCliPath": {
+          "type": "string",
+          "description": "Path to a local whisper.cpp CLI binary (voice:engine = 'whisper-local'). Env override: AGENTMUX_WHISPER_CLI."
+        },
+        "voice:whisperModel": {
+          "type": "string",
+          "description": "GGML model name to auto-download on first use for the local whisper.cpp backend (default 'base.en'). Ignored when voice:whisperModelPath is set. Env override: AGENTMUX_WHISPER_MODEL."
+        },
+        "voice:whisperModelPath": {
+          "type": "string",
+          "description": "Explicit path to a GGML model file for the local whisper.cpp backend, skipping the auto-download. Env override: AGENTMUX_WHISPER_MODEL."
+        },
         "notify:*": {
           "type": "boolean"
         },
@@ -224,6 +249,17 @@
           "type": "boolean",
           "description": "Play a sound when the backend rejects a queued pending message. Default true."
         },
+        "notify:sound:agent.waiting.for.input": {
+          "type": "boolean",
+          "description": "Play a sound when an agent has been idle and waiting for user input for a while. Default true."
+        },
+        "notify:sounds:waiting:volume": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.25,
+          "description": "Independent gain for the waiting-for-input sound, 0.0 (silent) to 1.0. Layered below the shared master gain. Default 0.25."
+        },
         "notify:tooltones:enabled": {
           "type": "boolean",
           "default": true,
@@ -241,6 +277,21 @@
           "enum": ["all", "focused"],
           "default": "all",
           "description": "Which panes play tool-call tones. 'all' (default) plays for every pane in every window; 'focused' plays only for the focused pane in the focused OS window."
+        },
+        "dnd:enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable drag-and-drop file attach onto an agent pane. Default true."
+        },
+        "dnd:concurrency": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Max number of files uploaded/attached concurrently on a multi-file drop. Absent means unlimited."
+        },
+        "dnd:agentinserttoken": {
+          "type": "boolean",
+          "default": true,
+          "description": "Insert a file-reference token into the composer on drop (in addition to attaching the file). Default true."
         }
       },
       "additionalProperties": false,
