@@ -1388,22 +1388,6 @@ impl AppState {
         out
     }
 
-    /// Phase F.1 — non-mutating peek at the back of the
-    /// `pending_window_creations` queue.
-    ///
-    /// Used by `wrr/win_event.rs::handle_event` to label OS-level
-    /// `WM_CREATE` events with the upcoming window's label. CEF's
-    /// `OnAfterCreated` (which becomes the dequeue) fires AFTER this
-    /// OS event, but the host pushed the entry BEFORE calling
-    /// `post_create_window`, so back-of-queue is the right answer at
-    /// this moment.
-    ///
-    /// Snapshot-and-drop: takes the lock, clones the entry, drops
-    /// the lock. Callers never hold the lock past this call.
-    pub fn peek_back_pending_window_creation(&self) -> Option<PendingWindowCreation> {
-        self.host_state.lock().pending_window_creations.back().cloned()
-    }
-
     // ── Phase H.2 — browser read helpers (reducer-only, post-flip) ──────
     //
     // After PR #4's flip step (H.1.c + H.2.c), `HostState.browsers` /
@@ -1426,26 +1410,9 @@ impl AppState {
             .map(|h| h.browser.clone())
     }
 
-    /// Check whether a browser is registered under the given label.
-    pub fn has_browser(&self, label: &str) -> bool {
-        self.host_state.lock().browsers.contains_key(label)
-    }
-
     /// Are there any registered browsers?
     pub fn browsers_is_empty(&self) -> bool {
         self.host_state.lock().browsers.is_empty()
-    }
-
-    /// Snapshot of all registered browser labels (HashMap iteration order;
-    /// stable per-HashMap-instance, same characteristics as the original
-    /// `state.browsers.lock().keys()` pattern these helpers replaced).
-    pub fn list_browser_labels(&self) -> Vec<String> {
-        self.host_state
-            .lock()
-            .browsers
-            .keys()
-            .cloned()
-            .collect()
     }
 
     /// Snapshot of all registered browsers as (label, Browser) pairs.

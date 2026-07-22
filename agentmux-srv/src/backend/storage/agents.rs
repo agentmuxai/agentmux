@@ -189,22 +189,6 @@ impl InstanceStatus {
     }
 }
 
-/// Optional context describing which GitHub-side unit of work a specific
-/// instance is operating on. Stored as JSON in
-/// `db_agent_instances.github_context` (empty string when unset).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GitHubContext {
-    pub repo: String, // "owner/repo"
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pr_number: Option<u32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub branch: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub issue_number: Option<u32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub workflow_run_id: Option<u64>,
-}
-
 /// Partial-update payload for [`Store::instance_update_partial`]. Each
 /// `Some` field is written; `None` leaves the column untouched. Mirrors
 /// the mutable subset of `CommandUpdateAgentInstanceData`

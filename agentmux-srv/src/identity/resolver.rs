@@ -46,8 +46,6 @@ pub mod oauth_status {
     pub const EXPIRED: &str = "expired";
     /// Refresh rejected / file missing / parse error; user must Reconnect.
     pub const NEEDS_REAUTH: &str = "needs_reauth";
-    /// Never probed (initial state on bundle import / unprobed provider).
-    pub const UNKNOWN: &str = "unknown";
 }
 
 /// Result of probing a per-bundle OAuth token directory.

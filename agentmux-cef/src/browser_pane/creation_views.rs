@@ -120,7 +120,7 @@ pub fn create_browser_pane_view(
     );
 
     // 3. Build the per-pane CEF Client (handler with is_browser_pane = true).
-    let handler = crate::client::AgentMuxHandler::new_with_browser_pane(state.clone(), 0, true);
+    let handler = crate::client::AgentMuxHandler::new_with_browser_pane(state.clone(), true);
     let mut client = Some(crate::client::AgentMuxClient::new(handler, true));
 
     // 4. BrowserViewDelegate. Reuse the same delegate as the main browser —
