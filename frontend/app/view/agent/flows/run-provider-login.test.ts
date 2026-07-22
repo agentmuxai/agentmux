@@ -27,6 +27,7 @@ const hub = vi.hoisted(() => ({
     upsertIdentityAccount: vi.fn(),
     linkAgentIdentity: vi.fn(),
     setMeta: vi.fn(),
+    checkCliAuthCommand: vi.fn(),
 }));
 
 vi.mock("@/app/store/global", () => ({
@@ -45,6 +46,7 @@ vi.mock("@/app/store/rpc-api", () => ({
         UpsertIdentityAccountCommand: (...args: unknown[]) => hub.upsertIdentityAccount(...args),
         LinkAgentIdentityCommand: (...args: unknown[]) => hub.linkAgentIdentity(...args),
         SetMetaCommand: (...args: unknown[]) => hub.setMeta(...args),
+        CheckCliAuthCommand: (...args: unknown[]) => hub.checkCliAuthCommand(...args),
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -56,6 +58,7 @@ const claude = {
     id: "claude",
     authLoginCommand: ["auth", "login"],
     authConfigDirEnvVar: "CLAUDE_CONFIG_DIR",
+    authCheckCommand: ["auth", "status"],
     requiresLoginTty: true,
 } as any;
 
@@ -63,6 +66,7 @@ const codex = {
     id: "codex",
     authLoginCommand: ["login"],
     authConfigDirEnvVar: "CODEX_HOME",
+    authCheckCommand: ["auth", "status"],
 } as any;
 
 const MINTED = { accountId: "acct-new", dir: "C:/agentmux/identities/acct-new/claude" };
@@ -78,6 +82,7 @@ beforeEach(() => {
     hub.upsertIdentityAccount.mockReset().mockResolvedValue({});
     hub.linkAgentIdentity.mockReset().mockResolvedValue(undefined);
     hub.setMeta.mockReset().mockResolvedValue(undefined);
+    hub.checkCliAuthCommand.mockReset();
 });
 afterEach(() => {
     vi.clearAllMocks();
@@ -199,8 +204,9 @@ describe("runProviderLogin", () => {
         });
     });
 
-    it("skips tier 2 for non-claude providers (host rejects seed-from-global for them) and opens a terminal with the config-dir env stripped", async () => {
+    it("skips tier 2 for non-claude providers (host rejects seed-from-global for them) but STILL mints an account dir and points the terminal at it directly (not stripped — codex has no seed-from-global to copy back from)", async () => {
         hub.runCliLogin.mockResolvedValue(null);
+        hub.checkCliAuthCommand.mockResolvedValue({ authenticated: false });
 
         const outcome = await runProviderLogin({
             provider: codex,
@@ -211,10 +217,61 @@ describe("runProviderLogin", () => {
             isCancelled: () => true, // abort tier 3's poll immediately, we only care it was opened
         });
 
-        expect(hub.ensureAccountDir).not.toHaveBeenCalled(); // non-claude tier 3 doesn't mint either
+        expect(hub.ensureAccountDir).toHaveBeenCalledTimes(1); // reagent P0: used to skip minting for non-claude entirely
         expect(hub.seedProviderAuthFromGlobal).not.toHaveBeenCalled();
-        expect(hub.openLoginTerminal).toHaveBeenCalledWith("x", ["login"], { OTHER: "keep" });
+        // The env var is KEPT and points at the minted isolated dir — not
+        // stripped the way Claude's tier 3 strips it (codex has no global
+        // login to copy back from, so the login must land directly here).
+        expect(hub.openLoginTerminal).toHaveBeenCalledWith("x", ["login"], { OTHER: "keep", CODEX_HOME: MINTED.dir });
         expect(outcome).toBe("terminal-timeout");
+    });
+
+    it("non-claude tier 3 success: polls CheckCliAuthCommand against the isolated dir (not seedGlobalLogin) and persists the account once authenticated", async () => {
+        vi.useFakeTimers();
+        hub.runCliLogin.mockResolvedValue(null);
+        hub.checkCliAuthCommand
+            .mockResolvedValueOnce({ authenticated: false }) // first poll: not yet
+            .mockResolvedValueOnce({ authenticated: true }); // second poll: user finished in the terminal
+
+        const promise = runProviderLogin({
+            provider: codex,
+            cliPath: "x",
+            authEnv: { CODEX_HOME: "C:/auth" },
+            setAuthUrl: vi.fn(),
+            log: vi.fn(),
+        });
+        await vi.advanceTimersByTimeAsync(10_000);
+        const outcome = await promise;
+
+        expect(outcome).toBe("terminal-success");
+        expect(hub.seedProviderAuthFromGlobal).not.toHaveBeenCalled();
+        expect(hub.checkCliAuthCommand).toHaveBeenCalledWith(
+            {},
+            { cli_path: "x", auth_check_args: ["auth", "status"], auth_env: { CODEX_HOME: MINTED.dir } },
+            { timeout: 10000 },
+        );
+        expect(hub.upsertIdentityAccount).toHaveBeenCalledWith(
+            {},
+            expect.objectContaining({ id: MINTED.accountId, provider: "codex" }),
+        );
+    });
+
+    it("a non-claude tier-3 login that never authenticates times out cleanly instead of crashing (reagent P0: seedGlobalLogin used to be called unconditionally and threw for non-claude providers)", async () => {
+        hub.runCliLogin.mockResolvedValue(null);
+        hub.checkCliAuthCommand.mockResolvedValue({ authenticated: false });
+
+        const outcome = await runProviderLogin({
+            provider: codex,
+            cliPath: "x",
+            authEnv: { CODEX_HOME: "C:/auth" },
+            setAuthUrl: vi.fn(),
+            log: vi.fn(),
+            isCancelled: () => true,
+        });
+
+        expect(outcome).toBe("terminal-timeout");
+        expect(hub.seedProviderAuthFromGlobal).not.toHaveBeenCalled();
+        expect(hub.upsertIdentityAccount).not.toHaveBeenCalled();
     });
 
     it("falls through to tier 3 (real terminal), mints an account dir up front, and registers it once the login lands on disk", async () => {
