@@ -92,4 +92,30 @@ describe("computeForkSet", () => {
         expect(r.filter((e) => e.isActive)).toHaveLength(1);
         expect(r.find((e) => e.isActive)?.definitionId).toBe("f2");
     });
+
+    it("does not treat two unrelated agents cloned from the same template as forks of each other", () => {
+        // agentdefcreatefromtemplate stamps parent_id = template.id on every
+        // clone for template-provenance, not fork lineage. AgentX and AgentY
+        // below share no fork relationship — only the same template parent.
+        const defs = [
+            def("tpl-claude", { name: "Claude Code", is_seeded: 1 }),
+            def("agent-x", { name: "AgentX", parent_id: "tpl-claude", is_seeded: 0 }),
+            def("agent-y", { name: "AgentY", parent_id: "tpl-claude", is_seeded: 0 }),
+        ];
+        const rX = computeForkSet(defs, new Map(), "agent-x");
+        expect(rX.map((e) => e.definitionId)).toEqual(["agent-x"]);
+        const rY = computeForkSet(defs, new Map(), "agent-y");
+        expect(rY.map((e) => e.definitionId)).toEqual(["agent-y"]);
+    });
+
+    it("still walks a real fork lineage rooted at a user-owned (non-template) definition", () => {
+        const defs = [
+            def("tpl-claude", { name: "Claude Code", is_seeded: 1 }),
+            def("agent-x", { name: "AgentX", parent_id: "tpl-claude", is_seeded: 0 }),
+            def("agent-x-fork", { name: "AgentX #2", parent_id: "agent-x", is_seeded: 0 }),
+        ];
+        const r = computeForkSet(defs, new Map(), "agent-x-fork");
+        expect(r.map((e) => e.definitionId)).toEqual(["agent-x", "agent-x-fork"]);
+        expect(r.find((e) => e.definitionId === "agent-x")?.isRoot).toBe(true);
+    });
 });

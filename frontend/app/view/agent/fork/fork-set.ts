@@ -21,12 +21,24 @@
 export interface ForkDefinition {
     id: string;
     name: string;
-    /** Forked-from definition id; empty/undefined for a root. */
+    /**
+     * Forked-from definition id; empty/undefined for a root.
+     *
+     * NOTE: the backend also writes this field when a definition is
+     * instantiated from a catalog template (`agentdefcreatefromtemplate`
+     * sets it to the template's id — `db_agents.parent_template_id`,
+     * wire-mapped to `parent_id` for back-compat). That's template
+     * *provenance*, not a conversation fork — two unrelated agents cloned
+     * from the same template must NOT be treated as forks of each other.
+     * `hasParent` below excludes template parents for exactly this reason.
+     */
     parent_id?: string;
     /** Free-form branch label (e.g. "pr-422-review"); empty for a root. */
     branch_label?: string;
     /** Epoch ms — orders siblings oldest-first under the root. */
     created_at: number;
+    /** 1 for a seeded catalog template, 0 for a user-owned agent. */
+    is_seeded?: number;
 }
 
 /** One row in the fork bar. */
@@ -52,10 +64,21 @@ function titleOf(d: ForkDefinition): string {
     return label && label.length > 0 ? label : d.name;
 }
 
-/** Is `parentId` a usable link to a definition that exists in the set? */
+/**
+ * Is `parent_id` a usable link to a definition that exists in the set?
+ *
+ * Excludes template parents (`is_seeded === 1`): `parent_id` doubles as
+ * "cloned from this template" provenance (see the `ForkDefinition.parent_id`
+ * doc comment), which is not a fork lineage. Without this check, every
+ * definition ever created from the same template would walk up to that
+ * template as a shared lineage root and appear as forks of each other —
+ * even when they have no fork relationship at all.
+ */
 function hasParent(d: ForkDefinition, byId: Map<string, ForkDefinition>): boolean {
     const p = d.parent_id;
-    return !!p && p.length > 0 && byId.has(p);
+    if (!p || p.length === 0) return false;
+    const parent = byId.get(p);
+    return !!parent && parent.is_seeded !== 1;
 }
 
 /**
