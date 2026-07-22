@@ -178,23 +178,92 @@ impl Store {
             id_token: creds.id_token.clone(),
         };
         let blob = serde_json::to_string(&tokens)?;
+
+        // Captured so a SQL failure below can restore the keychain to
+        // exactly what it held before this call (reagent P2 on #2260):
+        // without this, a keychain write that succeeds followed by a SQL
+        // write that then fails (e.g. a transient lock) leaves the FRESH
+        // tokens paired with the OLD SQL metadata (expires_at/user_email —
+        // that INSERT never committed, so it's untouched), a mismatch that
+        // previously only self-healed on the next successful save.
+        //
+        // Three-way, not a bool: reagent P1 caught a first version of this
+        // that collapsed `Ok(None)` ("genuinely no prior entry") and `Err`
+        // ("the read itself failed, prior state UNKNOWN") into the same
+        // `None`, so an unrelated transient read failure would make the
+        // rollback branch below `delete()` a real, valid, previously-stored
+        // credential it simply couldn't read — turning a transient glitch
+        // into a forced full re-login. `Unknown` gets neither restore nor
+        // delete: we truly don't know what was there, so the only safe
+        // move is to leave whatever `put(&blob)` just wrote and log loudly,
+        // same as the pre-existing self-heals-next-save behavior for this
+        // one sub-case specifically.
+        enum PriorKeychainState {
+            Existed(zeroize::Zeroizing<String>),
+            Absent,
+            Unknown,
+        }
+        let previous = match secret_store::get_optional(MUXBUS_KEYCHAIN_ID) {
+            Ok(Some(blob)) => PriorKeychainState::Existed(blob),
+            Ok(None) => PriorKeychainState::Absent,
+            Err(_) => PriorKeychainState::Unknown,
+        };
+
         secret_store::put(MUXBUS_KEYCHAIN_ID, &blob)
             .map_err(|e| StoreError::Other(format!("muxbus: keychain write failed: {e}")))?;
 
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "INSERT OR REPLACE INTO db_muxbus_credentials
-                 (id, cognito_domain, client_id, access_token, refresh_token, id_token,
-                  expires_at, user_email, user_sub)
-             VALUES ('global', ?1, ?2, '', '', '', ?3, ?4, ?5)",
-            params![
-                creds.cognito_domain,
-                creds.client_id,
-                creds.expires_at,
-                creds.user_email,
-                creds.user_sub,
-            ],
-        )?;
+        let sql_result = {
+            let conn = self.conn.lock().unwrap();
+            conn.execute(
+                "INSERT OR REPLACE INTO db_muxbus_credentials
+                     (id, cognito_domain, client_id, access_token, refresh_token, id_token,
+                      expires_at, user_email, user_sub)
+                 VALUES ('global', ?1, ?2, '', '', '', ?3, ?4, ?5)",
+                params![
+                    creds.cognito_domain,
+                    creds.client_id,
+                    creds.expires_at,
+                    creds.user_email,
+                    creds.user_sub,
+                ],
+            )
+        };
+        if let Err(e) = sql_result {
+            match previous {
+                PriorKeychainState::Existed(old) => {
+                    if let Err(re) = secret_store::put(MUXBUS_KEYCHAIN_ID, &old) {
+                        tracing::warn!(
+                            error = %re,
+                            sql_error = %e,
+                            "muxbus_save: SQL write failed AND restoring the prior keychain blob \
+                             also failed — keychain may now hold fresh tokens with no matching \
+                             SQL metadata until the next successful save"
+                        );
+                    }
+                }
+                PriorKeychainState::Absent => {
+                    if let Err(de) = secret_store::delete(MUXBUS_KEYCHAIN_ID) {
+                        tracing::warn!(
+                            error = %de,
+                            sql_error = %e,
+                            "muxbus_save: SQL write failed AND rolling back the keychain write \
+                             also failed — keychain may now hold fresh tokens with no matching \
+                             SQL metadata until the next successful save"
+                        );
+                    }
+                }
+                PriorKeychainState::Unknown => {
+                    tracing::warn!(
+                        sql_error = %e,
+                        "muxbus_save: SQL write failed after a keychain write whose prior state \
+                         couldn't be read — leaving the just-written tokens in place rather than \
+                         risk deleting a real credential; SQL metadata may be stale until the \
+                         next successful save"
+                    );
+                }
+            }
+            return Err(e.into());
+        }
         Ok(())
     }
 

@@ -381,6 +381,45 @@ pub unsafe fn install_browser_pane_focus_redirect(
         const WM_MOUSEHWHEEL: u32 = 0x020E;
         const WM_KEYDOWN: u32 = 0x0100;
         const WM_CHAR: u32 = 0x0102;
+        // Ctrl+Wheel over a browser pane's HWND is delivered here, not to any
+        // DOM listener — AppZoomHandler (app.tsx) is pure JS/DOM and cannot
+        // see it. Left unhandled (the pre-existing behavior: log only, fall
+        // through), Windows/Chromium's default handling is CEF's own native
+        // page zoom, which is scoped per-host via a RequestContext-shared
+        // HostZoomMap and therefore visually affects every browser pane on
+        // the same host at once (see the module doc on
+        // AppState::browser_pane_zoom). Handled here, we consume the message
+        // (return 0, never call the original WndProc) and apply zoom
+        // ourselves via CSS injection instead — see
+        // BrowserPaneManager::zoom_in/zoom_out.
+        //
+        // KNOWN LIMITATION: this interception is Windows-only (this whole
+        // file is `#![cfg(target_os = "windows")]`-gated, see the top of the
+        // file). No macOS/Linux equivalent hook exists yet, so on those
+        // platforms Ctrl+Wheel over a browser pane still falls through to
+        // CEF's native, HostZoomMap-shared zoom (the original shared-zoom
+        // bug this feature fixes). Tracked as a follow-up, not silently
+        // dropped — see the PR description / REPORT_ARMORY_ZOOM_AND_PER_PANE_BROWSER_ZOOM_2026_07_20.md.
+        if msg == WM_MOUSEWHEEL {
+            let ctrl_held = (wparam & 0x0008) != 0; // MK_CONTROL, low word of wParam
+            if ctrl_held {
+                // High word of wParam, signed: positive = wheel rotated
+                // forward/away from the user (the conventional "zoom in"
+                // direction), negative = toward the user ("zoom out").
+                let raw_delta = (wparam >> 16) as u16 as i16;
+                if let Some(ctx) = find_context(hwnd) {
+                    if let Some(state) = ctx.state.upgrade() {
+                        if raw_delta > 0 {
+                            state.browser_panes.zoom_in(&ctx.block_id, &state);
+                        } else if raw_delta < 0 {
+                            state.browser_panes.zoom_out(&ctx.block_id, &state);
+                        }
+                    }
+                }
+                return 0;
+            }
+        }
+
         match msg {
             WM_MOUSEWHEEL | WM_MOUSEHWHEEL => {
                 tracing::info!("[pane-wndproc] mouse-wheel hwnd={:p} msg=0x{:x}", hwnd, msg);
