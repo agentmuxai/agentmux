@@ -44,6 +44,7 @@ import {
 } from "../auth";
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
 import { registerSeededAccount } from "../flows/register-seeded-account";
+import { runProviderLogin } from "../flows/run-provider-login";
 import type { ProviderDefinition } from "../providers";
 import type { LogFn } from "../types";
 import "./PreLaunchAuthPanel.scss";
@@ -165,7 +166,7 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
     const handleConnect = (): void => {
         const prov = props.provider;
         if (!prov) return;
-        void startConnect(controller, prov);
+        void startConnect(controller, prov, props.accountId());
     };
 
     // "Use my existing login" — the PRIMARY path for Claude v2.1.x, whose
@@ -311,6 +312,7 @@ function outcomeFor(
 async function startConnect(
     controller: AuthFlowController,
     provider: ProviderDefinition | undefined,
+    existingAccountId: string,
 ): Promise<void> {
     console.log(`[auth-diag] startConnect entry: provider=${provider?.id ?? "(undefined)"} requiresLoginTty=${provider?.requiresLoginTty}`);
     if (!provider) {
@@ -378,6 +380,83 @@ async function startConnect(
         console.warn("[auth-diag] startConnect: controller closed mid-prep, bailing");
         return;
     }
+
+    // requiresLoginTty providers (Claude, OpenClaw) route through
+    // `runProviderLogin` instead of `controller.connect()`'s `auth.start`/
+    // `auth.poll` RPC path. That path only ever spawns the login command
+    // piped/PTY-without-console (`spawn_auth_cli`/`spawn_auth_cli_pty`),
+    // which for a CLI whose OAuth flow opens the browser itself from inside
+    // its own process — exactly what `requiresLoginTty` means — has no
+    // console to open a browser from and cannot succeed. It's currently a
+    // structural dead end reachable today via OpenClaw's Connect button
+    // (Claude's own Connect button happens to be masked by the `canSeed`
+    // branch in ConnectCta above, which routes it to "Use my existing
+    // login" instead — but the underlying `controller.connect()` call this
+    // function makes is unconditionally broken for BOTH providers, so this
+    // fixes the live bug and forecloses it for Claude too against any
+    // future change to that UI gate). `runProviderLogin` already has a real
+    // terminal fallback (tier 3) plus seed-from-global (tier 2, Claude
+    // only); `skipTier1: true` skips its headless URL-capture attempt
+    // entirely since it's a documented, unconditional dead end for these
+    // providers — see run-provider-login.ts's tier-1 doc comment.
+    if (provider.requiresLoginTty) {
+        controller.dispatch({ type: "ConnectClicked" });
+        let registeredAccountId = "";
+        const outcome = await runProviderLogin({
+            provider,
+            cliPath,
+            authEnv,
+            existingAccountId: existingAccountId || undefined,
+            skipTier1: true,
+            onAccountRegistered: (accountId) => {
+                registeredAccountId = accountId;
+            },
+            // Unreachable in practice with skipTier1: true (forceProviderLogin
+            // is the only setAuthUrl caller, and it's skipped) — provided
+            // because ForceLoginParams requires it.
+            setAuthUrl: (url) =>
+                controller.dispatch({ type: "SessionStarted", sessionId: "provider-login", authUrl: url ?? undefined }),
+            log: (_cat, msg) => console.log(`[auth-diag] ${msg}`),
+            // The user's Cancel click dispatches CancelClicked, which moves
+            // state out of `waiting` — that's the signal tier 3's poll loop
+            // watches to stop waiting early. This doesn't kill the terminal
+            // process itself (a known, separately-tracked gap — see
+            // PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md §7 Phase 4),
+            // only the frontend's wait for it.
+            isCancelled: () => controller.state().kind !== "waiting",
+        });
+        switch (outcome) {
+            case "seeded":
+            case "terminal-success":
+                if (registeredAccountId) {
+                    controller.markSeeded(registeredAccountId);
+                } else {
+                    // The credential landed but the Armory account row
+                    // couldn't be persisted — don't show fake-ready state
+                    // (same reasoning as handleUseExistingLogin's failure
+                    // path above: the resolver's spawn gate requires a real
+                    // bound account, so a fake-ready panel would let Launch
+                    // enable and then have the agent immediately fail).
+                    controller.failConnect(
+                        new Error("Login completed but the account couldn't be registered. Try again."),
+                    );
+                }
+                break;
+            case "terminal-timeout":
+                controller.failConnect(
+                    new Error("Login wasn't completed within 5 minutes. Click Connect to try again."),
+                );
+                break;
+            case "terminal-unavailable":
+            case "opened": // structurally unreachable with skipTier1 — defensive only
+                controller.failConnect(
+                    new Error(`Couldn't open a terminal for ${provider.displayName} login on this platform.`),
+                );
+                break;
+        }
+        return;
+    }
+
     console.log(`[auth-diag] calling controller.connect(); kind=${controller.state().kind}`);
     await controller.connect({
         cliPath,

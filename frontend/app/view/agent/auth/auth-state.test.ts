@@ -157,10 +157,20 @@ describe("auth-state reducer", () => {
             expect(r.state.error).toBe("");
         });
 
-        it("is dropped from non-connect-able kinds (never clobbers ready/waiting/saving)", () => {
+        it("is honored from `waiting` too — the runProviderLogin-driven connect path (PreLaunchAuthPanel's requiresLoginTty branch) dispatches ConnectClicked up front so the panel shows progress during tier 3's terminal wait, then Seeded on success", () => {
+            const r = update(seed({ kind: "waiting", bundleId: "keep", sessionId: "provider-login" }), {
+                type: "Seeded",
+                bundleId: "new-account",
+            });
+            expect(r.state.kind).toBe("ready");
+            expect(r.state.bundleId).toBe("new-account");
+            expect(r.state.sessionId).toBe("");
+            expect(r.events[0]).toMatchObject({ type: "seeded", bundleId: "new-account" });
+        });
+
+        it("is dropped from non-connect-able kinds (never clobbers ready/saving/authenticated/idle)", () => {
             for (const kind of [
                 "ready",
-                "waiting",
                 "saving",
                 "authenticated",
                 "idle",

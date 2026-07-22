@@ -74,6 +74,29 @@ export interface RunProviderLoginParams extends ForceLoginParams {
      *  agent). Omit for a pre-launch flow with no agent yet; that flow's own
      *  launch-time reconcile links the account once one is created. */
     linkTarget?: { blockId: string; agentDefinitionId: string };
+    /** Reconnect (not fresh-connect) into this account id, if set — threaded
+     *  through to tier 2/3's account-dir minting so the SAME account's
+     *  isolated dir is reused/refreshed instead of a new one being minted.
+     *  Omit for a genuinely fresh connect. */
+    existingAccountId?: string;
+    /** Fired as soon as tier 2 or 3 registers a real IdentityAccount row —
+     *  before `linkTarget`'s own linking (if any). Callers that need to know
+     *  the resulting account id for their own purposes (e.g. the New Agent
+     *  modal selecting the newly-created account in its dropdown) should use
+     *  this instead of threading a new return shape through `runProviderLogin`
+     *  — `linkTarget`-driven pane callers don't need it and shouldn't have to
+     *  care that it exists. */
+    onAccountRegistered?: (accountId: string, dir: string) => void;
+    /** Skip tier 1 (headless URL-capture) entirely and go straight to tier 2.
+     *  For providers where tier 1 is a documented, unconditional dead end —
+     *  e.g. `requiresLoginTty` providers, whose CLI opens its own browser
+     *  in-process and needs a real console no piped/PTY spawn has — skipping
+     *  avoids a pointless ~15s wait for an attempt that cannot succeed, and
+     *  (for callers that need a completion signal, which tier 1 alone doesn't
+     *  provide) keeps the "opened, now what?" case structurally unreachable
+     *  rather than something every caller has to defend against. Default
+     *  false — existing callers are unaffected. */
+    skipTier1?: boolean;
 }
 
 export type ProviderLoginOutcome =
@@ -117,13 +140,16 @@ async function finalizeAccount(
 }
 
 export async function runProviderLogin(p: RunProviderLoginParams): Promise<ProviderLoginOutcome> {
-    const tier1 = await forceProviderLogin(p);
-    if (tier1 === "opened") return "opened";
+    if (!p.skipTier1) {
+        const tier1 = await forceProviderLogin(p);
+        if (tier1 === "opened") return "opened";
+    }
 
     if (p.provider.id === "claude") {
         p.log("auth", "no login URL captured — checking for an existing global Claude login…");
-        const reg = await registerSeededAccount(p.provider.id, p.log);
+        const reg = await registerSeededAccount(p.provider.id, p.log, p.existingAccountId);
         if (reg.ok && reg.accountId && reg.dir) {
+            p.onAccountRegistered?.(reg.accountId, reg.dir);
             await finalizeAccount(p, reg.accountId, reg.dir);
             return "seeded";
         }
@@ -135,7 +161,7 @@ export async function runProviderLogin(p: RunProviderLoginParams): Promise<Provi
     // (Claude only; other providers have no seed-from-global detection path
     // at all, so they fall back to whatever dir was already resolved, same
     // as before this account-registration change).
-    const minted = p.provider.id === "claude" ? await ensureAccountDir(p.provider.id, p.log) : null;
+    const minted = p.provider.id === "claude" ? await ensureAccountDir(p.provider.id, p.log, p.existingAccountId) : null;
     const configDir = minted?.dir ?? p.authEnv[p.provider.authConfigDirEnvVar];
 
     const terminalEnv: Record<string, string> = { ...p.authEnv };
@@ -154,6 +180,7 @@ export async function runProviderLogin(p: RunProviderLoginParams): Promise<Provi
 
     if (minted) {
         if (await persistSeededAccount(p.provider.id, minted.accountId, minted.dir, p.log)) {
+            p.onAccountRegistered?.(minted.accountId, minted.dir);
             await finalizeAccount(p, minted.accountId, minted.dir);
         }
     }

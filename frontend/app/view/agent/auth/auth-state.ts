@@ -589,12 +589,20 @@ export function update(state: AuthState, command: AuthCommand): ReducerResult {
         }
 
         case "Seeded": {
-            // Honored only from connect-able kinds, so a stale dispatch can't
-            // clobber a newer `ready`/`waiting`/`saving`/`idle`.
+            // Honored from connect-able kinds AND `waiting` — the latter
+            // covers `runProviderLogin`-driven connects (PreLaunchAuthPanel's
+            // requiresLoginTty path), which dispatch ConnectClicked (→
+            // `waiting`) up front so the panel shows progress during tier 3's
+            // up-to-5-minute terminal wait, then `Seeded` on success. The
+            // original single-phase "Use my existing login" caller never
+            // enters `waiting` at all, so this widening doesn't change its
+            // behavior. Still guards against a stale dispatch clobbering a
+            // newer `ready`/`saving`/`idle`.
             if (
                 state.kind !== "unauthenticated" &&
                 state.kind !== "expired" &&
-                state.kind !== "failed"
+                state.kind !== "failed" &&
+                state.kind !== "waiting"
             ) {
                 return {
                     state,
