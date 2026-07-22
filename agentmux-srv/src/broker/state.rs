@@ -160,6 +160,14 @@ pub fn update(states: &mut HashMap<String, CredentialState>, cmd: Command) -> Ve
             }
         },
         Command::FreshnessChecked { id, is_fresh } => {
+            if !states.contains_key(&id) {
+                // Unregistered while this in-flight check's is_fresh() was
+                // still awaiting — don't resurrect a phantom entry for a
+                // credential nothing still owns; the sweep loop only walks
+                // registered closures, so a resurrected entry would leak
+                // forever (reagent re-review on #2275).
+                return Vec::new();
+            }
             if is_fresh {
                 let became_fresh = !matches!(states.get(&id), Some(CredentialState::Fresh));
                 states.insert(id.clone(), CredentialState::Fresh);
@@ -174,10 +182,18 @@ pub fn update(states: &mut HashMap<String, CredentialState>, cmd: Command) -> Ve
             }
         }
         Command::RefreshSucceeded { id } => {
+            if !states.contains_key(&id) {
+                // Same phantom-entry hazard as FreshnessChecked above.
+                return Vec::new();
+            }
             states.insert(id.clone(), CredentialState::Fresh);
             vec![Event::BecameFresh { id }]
         }
         Command::RefreshFailed { id, error } => {
+            if !states.contains_key(&id) {
+                // Same phantom-entry hazard as FreshnessChecked above.
+                return Vec::new();
+            }
             let reason = error.message().to_string();
             let permanent = matches!(error, RefreshErrorKind::PermanentAuthFailure(_));
             let prior_failures = match states.get(&id) {
@@ -456,5 +472,41 @@ mod tests {
         assert_eq!(m.get("cred"), Some(&CredentialState::Fresh));
         let events = update(&mut m, Command::CheckRequested { id: "cred".into() });
         assert_eq!(events, vec![Event::RunFreshnessCheck { id: "cred".into() }]);
+    }
+
+    #[test]
+    fn a_stale_completion_after_unregister_does_not_resurrect_a_phantom_entry() {
+        // reagent re-review on #2275: an in-flight check/refresh that loses
+        // a race with a concurrent unregister() must not reinsert an entry
+        // for an id nothing owns anymore — the sweep loop only walks
+        // registered closures, so a resurrected entry would leak forever
+        // and scheduler.state(id) would misreport it as still registered.
+        for stale_completion in [
+            Command::FreshnessChecked {
+                id: "cred".into(),
+                is_fresh: true,
+            },
+            Command::FreshnessChecked {
+                id: "cred".into(),
+                is_fresh: false,
+            },
+            Command::RefreshSucceeded { id: "cred".into() },
+            Command::RefreshFailed {
+                id: "cred".into(),
+                error: RefreshErrorKind::Transient("late".into()),
+            },
+        ] {
+            let mut m = registered();
+            update(&mut m, Command::CheckRequested { id: "cred".into() });
+            update(&mut m, Command::Unregister { id: "cred".into() });
+            assert!(!m.contains_key("cred"));
+
+            let events = update(&mut m, stale_completion);
+            assert_eq!(events, Vec::new());
+            assert!(
+                !m.contains_key("cred"),
+                "a stale completion must not resurrect the entry"
+            );
+        }
     }
 }
