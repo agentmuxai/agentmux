@@ -18,7 +18,9 @@
  * is the exception. See spec §4.4 dispatcher note.
  */
 
-import { runProviderLogin } from "../../flows/run-provider-login";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
+import { persistAndLinkAccount, runProviderLogin } from "../../flows/run-provider-login";
 import type { SlashCommand, SlashResult } from "../types";
 
 export const loginCommand: SlashCommand = {
@@ -49,20 +51,71 @@ export const loginCommand: SlashCommand = {
             // linkTarget lets a tier-2/3 success register a real Armory account
             // bound to this agent (PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md §7).
             const agentDefinitionId = ctx.block()?.meta?.["agentId"] as string | undefined;
+            const linkTarget = agentDefinitionId
+                ? { blockId: ctx.blockId, agentDefinitionId }
+                : undefined;
+            // Tier 1 mints the account dir but does NOT persist/link it (it
+            // returns "opened" before confirming completion) — captured here
+            // so the poll below can call persistAndLinkAccount once IT
+            // confirms the login actually finished. reagent P1: without
+            // this, a tier-1 login that succeeds for any provider whose CLI
+            // actually prints a URL (not requiresLoginTty, e.g. codex) via
+            // /login left the minted account unpersisted/unlinked — the
+            // resolver's spawn gate then blocks the agent on its very next
+            // spawn even though this handler just reported "run /cost to
+            // verify" as if the login were already usable.
+            let openedAccountId: string | undefined;
+            let openedAccountDir: string | undefined;
+            let recheckAuthEnv = authEnv;
             const outcome = await runProviderLogin({
                 provider: prov,
                 cliPath,
                 authEnv,
                 setAuthUrl: ctx.setAuthUrl,
                 log: ctx.log,
-                linkTarget: agentDefinitionId
-                    ? { blockId: ctx.blockId, agentDefinitionId }
-                    : undefined,
+                linkTarget,
+                onAccountRegistered: (accountId, dir) => {
+                    openedAccountId = accountId;
+                    openedAccountDir = dir;
+                    if (prov.authConfigDirEnvVar) {
+                        recheckAuthEnv = { ...authEnv, [prov.authConfigDirEnvVar]: dir };
+                    }
+                },
             });
             switch (outcome) {
-                case "opened":
-                    ctx.log("auth", "run /cost to verify authentication once logged in");
-                    return { kind: "ok" };
+                case "opened": {
+                    ctx.log("auth", "waiting for login to complete...");
+                    let authenticated = false;
+                    const deadline = Date.now() + 5 * 60 * 1000;
+                    while (Date.now() < deadline && !authenticated) {
+                        await new Promise<void>((r) => setTimeout(r, 2000));
+                        try {
+                            const recheck = await RpcApi.CheckCliAuthCommand(TabRpcClient, {
+                                cli_path: cliPath,
+                                auth_check_args: prov.authCheckCommand,
+                                auth_env: recheckAuthEnv,
+                            }, { timeout: 10000 });
+                            if (recheck.authenticated) authenticated = true;
+                        } catch {
+                            // keep polling on transient RPC errors
+                        }
+                    }
+                    if (authenticated && openedAccountId && openedAccountDir) {
+                        await persistAndLinkAccount(
+                            { provider: prov, cliPath, authEnv, setAuthUrl: ctx.setAuthUrl, log: ctx.log, linkTarget },
+                            openedAccountId,
+                            openedAccountDir,
+                        );
+                        ctx.log("auth", "login complete — run /cost to verify");
+                        return { kind: "ok" };
+                    }
+                    return {
+                        kind: "error",
+                        message:
+                            "/login: opened a login page, but no login was detected within 5 minutes. " +
+                            "Complete the login there, then run /login again.",
+                    };
+                }
                 case "seeded":
                     return { kind: "ok" };
                 case "terminal-success":
