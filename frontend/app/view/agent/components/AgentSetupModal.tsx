@@ -3,7 +3,7 @@
 
 /**
  * AgentSetupModal — unified tabbed container for per-agent setup surfaces,
- * opened by the single "Agent setup" (id-card) icon in the agent pane
+ * opened by the single "Agent setup" (vault) icon in the agent pane
  * header. Consolidates the former two icons (identity + native memory)
  * into one modal with tabs:
  *   - Accounts    — the former Identity panel (AgentIdentityModalPanel).
@@ -46,22 +46,32 @@ interface AgentSetupModalProps {
 interface SetupTabDef {
     id: SetupTabId;
     label: string;
+    /** FontAwesome icon name — same choice as the matching section in the
+     *  global Armory pane (armory-view.tsx's RAIL), for visual parity since
+     *  this modal is the per-agent-scoped analogue of it. */
+    icon: string;
 }
 
 export const AgentSetupModal = (props: AgentSetupModalProps): JSX.Element => {
     // Data-driven tab list — Briefs slots in here later (no backend
     // primitive yet).
     const tabs: SetupTabDef[] = [
-        { id: "accounts", label: "Accounts" },
-        { id: "memory", label: "Memories" },
-        { id: "mcp", label: "MCP Servers" },
-        { id: "skills", label: "Skills" },
-        { id: "startup", label: "Startup" },
+        { id: "accounts", label: "Accounts", icon: "key" },
+        { id: "memory", label: "Memories", icon: "brain" },
+        { id: "mcp", label: "MCP Servers", icon: "plug" },
+        { id: "skills", label: "Skills", icon: "wand-magic-sparkles" },
+        // layer-group: same icon armory-view.tsx's RAIL uses for "Bundles" —
+        // this tab picks a Bundle as startup instructions, so it's the same
+        // concept scoped to one agent.
+        { id: "startup", label: "Startup", icon: "layer-group" },
     ];
 
     const [activeTab, setActiveTab] = createSignal<SetupTabId>(props.initialTab ?? "accounts");
 
     return (
+        // agent-setup-modal carries container-type so the tabs below (a
+        // descendant) can be targeted by @container agent-setup queries —
+        // same technique as armory-view.tsx's .armory-container wrapper.
         <div class="agent-setup-modal">
             <div class="agent-setup-modal-tabs" role="tablist">
                 <For each={tabs}>
@@ -71,9 +81,11 @@ export const AgentSetupModal = (props: AgentSetupModalProps): JSX.Element => {
                             classList={{ "is-active": activeTab() === tab.id }}
                             role="tab"
                             aria-selected={activeTab() === tab.id}
+                            title={tab.label}
                             onClick={() => setActiveTab(tab.id)}
                         >
-                            {tab.label}
+                            <i class={`fa-sharp fa-solid fa-${tab.icon}`} aria-hidden="true" />
+                            <span>{tab.label}</span>
                         </button>
                     )}
                 </For>

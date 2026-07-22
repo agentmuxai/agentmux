@@ -25,6 +25,7 @@ import { FileTree } from "./file-tree";
 import { LspClient, type LspState } from "./lsp/lsp-client";
 import { lspDiagnosticsExtension } from "./lsp/lsp-extensions";
 import { installHintFor, isLspSupportedLanguage } from "./lsp/install-hints";
+import { writeText as clipboardWriteText } from "@/util/clipboard";
 import "./editor-view.scss";
 
 // ── Language loader ─────────────────────────────────────────────────────────
@@ -666,11 +667,11 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
         setDismissedLanguages(next);
     };
     const copyToClipboard = (text: string) => {
-        try {
-            void navigator.clipboard?.writeText(text);
-        } catch {
+        // Route through the CEF clipboard wrapper — navigator.clipboard is
+        // blocked under CEF's Permissions-Policy. See SPEC_UNIFIED_CLIPBOARD_2026_05_18.md §3.3.
+        void clipboardWriteText(text).catch(() => {
             // Clipboard might not be available — silently ignore
-        }
+        });
     };
     const statusChipText = (): string => {
         const s = lspState();
