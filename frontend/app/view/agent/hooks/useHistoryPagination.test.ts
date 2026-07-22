@@ -182,3 +182,90 @@ describe("useHistoryPagination — Option E agent-anchored snapshot read", () =>
         expect(RpcApi.BlockfileLineCountCommand).toHaveBeenCalled();
     });
 });
+
+describe("useHistoryPagination — cross-block continuation restore (#1397)", () => {
+    it("restores via the fast path (not NDJSON) for a v2 snapshot from a DIFFERENT block, when definitionId is set", async () => {
+        const snapshot = {
+            schemaVersion: 2,
+            savedAt: "2026-07-21T00:00:00Z",
+            highWaterMark: 5,
+            sourceBlockId: "blk-OLD",
+            documentState: {},
+        };
+        vi.mocked(RpcApi.AgentSessionReadCommand).mockResolvedValue({
+            content: JSON.stringify(snapshot),
+            modts: Date.now() - 3_600_000,
+        });
+        // BlockfileLineCountCommand resolves to the agent's global output
+        // zone by this block's own agentId meta (server-side), independent
+        // of the snapshot's sourceBlockId — simulate that returning the
+        // full cross-block history, larger than the stored hwm.
+        vi.mocked(RpcApi.BlockfileLineCountCommand).mockResolvedValue({ count: 40 });
+        vi.mocked(RpcApi.BlockfileReadRangeCommand).mockResolvedValue({
+            lines: ['{"type":"user","message":{"content":[{"type":"text","text":"hi"}]}}'],
+            total: 40,
+        });
+
+        const model = makeMockModel();
+        createRoot((d) => {
+            dispose = d;
+            useHistoryPagination({
+                blockId: "blk-NEW",
+                model,
+                outputFormat: () => "claude-stream-json",
+                definitionId: "def-claude",
+                log: () => {},
+            });
+        });
+
+        await flushMicrotasks();
+        await flushMicrotasks();
+        await flushMicrotasks();
+
+        // Fast path taken: line-count widening + range read scoped to THIS
+        // (new) block, not a fall-through to legacy NDJSON replay.
+        expect(RpcApi.BlockfileLineCountCommand).toHaveBeenCalledWith(
+            {},
+            { block_id: "blk-NEW", filename: "output" },
+            { timeout: 5000 },
+        );
+        expect(RpcApi.BlockfileReadRangeCommand).toHaveBeenCalledWith(
+            {},
+            expect.objectContaining({ block_id: "blk-NEW", filename: "output" }),
+            { timeout: 30_000 },
+        );
+        const restored = model.docEvents.find((e) => e.type === "HistoryRestored");
+        expect(restored).toBeTruthy();
+        expect(restored.fromSnapshot).toBe(true);
+        expect(model.paneEvents.some((e) => e.type === "InitReady")).toBe(true);
+    });
+
+    it("still falls back to NDJSON replay for a cross-block v2 snapshot when no definitionId is available", async () => {
+        // No definitionId passed below, so AgentSessionReadCommand's own
+        // gate (opts.definitionId) is never reached — assert the hook falls
+        // straight to the legacy line-count probe, same as the existing
+        // "skips the snapshot fast-path entirely" case above. A cross-block
+        // v2 snapshot has no way to resolve the global zone without a
+        // definitionId to key it, so this path is unchanged by #1397's fix.
+        vi.mocked(RpcApi.BlockfileLineCountCommand).mockResolvedValue({ count: 0 });
+
+        const model = makeMockModel();
+        createRoot((d) => {
+            dispose = d;
+            useHistoryPagination({
+                blockId: "blk-NEW",
+                model,
+                outputFormat: () => "claude-stream-json",
+                // no definitionId
+                log: () => {},
+            });
+        });
+
+        await flushMicrotasks();
+        await flushMicrotasks();
+
+        expect(RpcApi.AgentSessionReadCommand).not.toHaveBeenCalled();
+        expect(RpcApi.BlockfileLineCountCommand).toHaveBeenCalled();
+        expect(model.docEvents.find((e) => e.type === "HistoryRestored")).toBeFalsy();
+    });
+});

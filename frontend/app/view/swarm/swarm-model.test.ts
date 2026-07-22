@@ -43,6 +43,7 @@ function mkCron(overrides: Partial<ActiveCron> & Pick<ActiveCron, "id" | "block_
         last_fired: null,
         fire_count: 0,
         max_fires: null,
+        next_fire: null,
         ...overrides,
     };
 }
