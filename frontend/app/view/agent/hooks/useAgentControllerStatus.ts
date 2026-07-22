@@ -39,7 +39,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import * as WOS from "@/app/store/wos";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { runLaunchFlow } from "../flows/launch-flow";
-import { runProviderLogin } from "../flows/run-provider-login";
+import { persistAndLinkAccount, runProviderLogin } from "../flows/run-provider-login";
 import { registerSeededAccount } from "../flows/register-seeded-account";
 import type { ProviderDefinition } from "../providers";
 
@@ -324,6 +324,19 @@ export function useAgentControllerStatus(
             // enforcement, PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md
             // §7) instead of just seeding a file nothing tracks.
             const agentDefinitionId = getBlockMetaKeyAtom(opts.blockId, "agentId")() as string | undefined;
+            // Tier 1 mints the account dir but does NOT persist/link it (it
+            // returns "opened" before confirming completion) — captured here
+            // so a poll below can call persistAndLinkAccount once IT confirms
+            // the login actually finished. reagent P1: without this, a tier-1
+            // login that succeeds for any provider whose CLI actually prints
+            // a URL (not requiresLoginTty, e.g. codex) via "Login Again" left
+            // the minted account unpersisted/unlinked — the resolver's spawn
+            // gate then blocks the agent on its very next spawn with no error
+            // ever surfaced, since relogin's own "opened" case used to just
+            // `break` and report nothing.
+            let openedAccountId: string | undefined;
+            let openedAccountDir: string | undefined;
+            let recheckAuthEnv = authEnv;
             const outcome = await runProviderLogin({
                 provider: prov,
                 cliPath,
@@ -335,10 +348,62 @@ export function useAgentControllerStatus(
                     ? { blockId: opts.blockId, agentDefinitionId }
                     : undefined,
                 existingAccountId: await existingAccountIdFor(prov.id),
+                onAccountRegistered: (accountId, dir) => {
+                    openedAccountId = accountId;
+                    openedAccountDir = dir;
+                    if (prov.authConfigDirEnvVar) {
+                        recheckAuthEnv = { ...authEnv, [prov.authConfigDirEnvVar]: dir };
+                    }
+                },
             });
             switch (outcome) {
-                case "opened":
+                case "opened": {
+                    // A real OAuth URL was captured and opened — poll until
+                    // the user finishes there, cancels, or 5 minutes elapse
+                    // (same pattern as launch-flow.ts's own "opened" case).
+                    opts.log("auth", "waiting for login to complete...");
+                    let authenticated = false;
+                    const deadline = Date.now() + 5 * 60 * 1000;
+                    while (!loginCancelled && Date.now() < deadline && !authenticated) {
+                        await new Promise<void>((r) => setTimeout(r, 2000));
+                        if (loginCancelled) break;
+                        try {
+                            const recheck = await RpcApi.CheckCliAuthCommand(TabRpcClient, {
+                                cli_path: cliPath,
+                                auth_check_args: prov.authCheckCommand,
+                                auth_env: recheckAuthEnv,
+                            }, { timeout: 10000 });
+                            if (recheck.authenticated) authenticated = true;
+                        } catch {
+                            // keep polling on transient RPC errors
+                        }
+                    }
+                    if (authenticated && openedAccountId && openedAccountDir) {
+                        await persistAndLinkAccount(
+                            {
+                                provider: prov,
+                                cliPath,
+                                authEnv,
+                                setAuthUrl,
+                                log: opts.log,
+                                linkTarget: agentDefinitionId
+                                    ? { blockId: opts.blockId, agentDefinitionId }
+                                    : undefined,
+                            },
+                            openedAccountId,
+                            openedAccountDir,
+                        );
+                        opts.log("auth", "Login successful — retrying…");
+                        setAuthNotice(null);
+                        opts.onRecovered?.();
+                    } else if (!loginCancelled) {
+                        setAuthNotice(
+                            "Opened a login page, but no login was detected within 5 minutes. " +
+                            "Complete the login there, then click “Login Again”.",
+                        );
+                    }
                     break;
+                }
                 case "seeded":
                     opts.log("auth", "Signed in from your global login — retrying…");
                     setAuthNotice(null);
