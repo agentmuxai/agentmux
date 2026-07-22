@@ -306,7 +306,25 @@ pub enum ProviderClass {
 
 /// Classify a provider id. `None` for unknown providers — the
 /// resolver logs and skips them.
+///
+/// reagent P1 on #2263: this used to match only canonical IDs directly, but
+/// `backend/providers.rs` registers aliases (`gemini-cli`→`gemini`,
+/// `copilot-cli`/`github-copilot`→`copilot`, `claude-code`→`claude`, etc.)
+/// that `get_provider` already resolves — meaning `provider_class` and
+/// `get_provider` could disagree on a definition/link still using an alias
+/// ID, silently skipping both the spawn gate and config-dir injection for
+/// it. Resolve to the canonical ID first so the two can never drift.
+///
+/// `resolve_provider_alias` only knows the CLI-tool registry (claude/codex/
+/// gemini/etc.) — it returns `""` as a sentinel for anything outside that
+/// registry, which includes the api-key-class service identifiers below
+/// ("github"/"anthropic"/"openai"/"kimi"/"aws" — a completely different
+/// namespace, not CLI tools). Only substitute the resolved value when it's
+/// non-empty; otherwise keep matching on the original id so that namespace
+/// is untouched.
 pub fn provider_class(provider: &str) -> Option<ProviderClass> {
+    let resolved = crate::backend::providers::resolve_provider_alias(provider);
+    let provider = if resolved.is_empty() { provider } else { resolved };
     match provider {
         // ── API-key class ─────────────────────────────────────────
         // ApiKey.env_vars values match the legacy provider_env_vars
@@ -1094,6 +1112,24 @@ mod tests {
                  test's doc comment",
             );
         }
+    }
+
+    #[test]
+    fn provider_class_resolves_aliases_to_the_same_result_as_canonical() {
+        // reagent P1 on #2263: provider_class used to match only canonical
+        // IDs, silently disagreeing with get_provider (which already
+        // resolves aliases) for any definition/link still using one.
+        assert_eq!(provider_class("claude-code"), provider_class("claude"));
+        assert_eq!(provider_class("claude_code"), provider_class("claude"));
+        assert_eq!(provider_class("codex-cli"), provider_class("codex"));
+        assert_eq!(provider_class("openclaw-cli"), provider_class("openclaw"));
+        assert_eq!(provider_class("open-claw"), provider_class("openclaw"));
+        // Api-key-class aliases must resolve identically too — this isn't
+        // gated on oauth-class providers specifically.
+        assert_eq!(provider_class("kimi-cli"), provider_class("kimi"));
+        // A truly unknown id must still classify as None, not panic or
+        // silently match something via an empty-string fallback.
+        assert_eq!(provider_class("totally-unknown-provider-xyz"), None);
     }
 
     #[cfg(debug_assertions)]
