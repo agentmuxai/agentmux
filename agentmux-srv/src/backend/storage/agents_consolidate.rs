@@ -164,9 +164,9 @@ pub fn run_consolidate_migration(
                     ?11, ?12, ?13,
                     ?14, ?15, ?16,
                     ?17, ?18,
-                    '', '', '', '',
+                    '', '', ?19, '',
                     '',
-                    ?19, ?20, ?21, 0
+                    ?20, ?21, ?22, 0
                  )",
                 params![
                     def.id,
@@ -187,6 +187,7 @@ pub fn run_consolidate_migration(
                     def.idle_timeout_minutes,
                     def.slug,
                     def.branch_label,
+                    def.working_directory,
                     def.created_at,
                     def.updated_at,
                     def.is_seeded,
@@ -938,5 +939,48 @@ mod tests {
             )
             .unwrap();
         assert_eq!(hidden, 1);
+    }
+
+    #[test]
+    fn definition_working_directory_survives_the_pass_1_2_backfill() {
+        // Regression: the Pass 1/2 INSERT (templates + user-cloned
+        // definitions with no instance to fold) used to hardcode
+        // working_directory as '' instead of binding def.working_directory,
+        // silently discarding it during consolidation — audit finding,
+        // docs/reports/REPORT_REPO_HEALTH_AUDIT_2026_07_20.md §1.2. A
+        // definition that was never instantiated (no db_agent_instances
+        // row) only ever goes through this path — Pass 3/4 (instances)
+        // never touches it — so this case wasn't covered by any existing
+        // test here.
+        let mut conn = fresh_conn();
+        conn.execute(
+            "INSERT INTO db_agent_definitions
+                (id, slug, name, icon, provider, description, working_directory, shell,
+                 provider_flags, auto_start, restart_on_crash, idle_timeout_minutes,
+                 created_at, agent_type, environment, agent_bus_id, is_seeded, accounts,
+                 parent_id, branch_label, updated_at)
+             VALUES ('tpl-wd', 'tpl-wd', 'Coder', '✦', 'claude', 'desc',
+                     '/home/user/my-project', 'bash',
+                     '', 0, 0, 0,
+                     1000, 'standalone', '', '', 1, '',
+                     '', '', 1000)",
+            [],
+        )
+        .unwrap();
+
+        run_consolidate_migration(&mut conn, None).unwrap();
+
+        let working_directory: String = conn
+            .query_row(
+                "SELECT working_directory FROM db_agents WHERE id = 'tpl-wd'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            working_directory, "/home/user/my-project",
+            "a definition's working_directory must survive Pass 1/2 consolidation \
+             even when it was never instantiated (no instance row to fold bindings from)"
+        );
     }
 }
