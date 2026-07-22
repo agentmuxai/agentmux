@@ -84,6 +84,10 @@ pub struct ProcessStatus {
     /// "is it alive."
     pub processes: Vec<TrackedProcess>,
     pub liveness_confidence: TrackingConfidence,
+    /// Controller type string (`"shell"`, `"cmd"`, `"subprocess"`,
+    /// `"persistent"`, `"acp"`, `"tsunami"`) — see `is_agent()` for why this
+    /// matters beyond being informational.
+    pub controller_type: String,
     pub is_agent_pane: bool,
     pub last_computed_ms: u64,
 }
@@ -95,8 +99,32 @@ impl ProcessStatus {
             lifecycle: Lifecycle::Unknown,
             processes: Vec::new(),
             liveness_confidence: TrackingConfidence::None,
+            controller_type: String::new(),
             is_agent_pane: false,
             last_computed_ms: now_ms(),
+        }
+    }
+
+    /// True if this block is an agent pane rather than a plain terminal.
+    ///
+    /// `is_agent_pane` alone is NOT sufficient: `subprocess`/`persistent`/
+    /// `acp` controllers exist *only* for agent CLIs (one-shot-per-turn,
+    /// long-lived stream-json, and JSON-RPC/ACP agents respectively — see
+    /// `blockcontroller/mod.rs`'s controller-type doc), but
+    /// `SubprocessController` unconditionally reports `is_agent_pane:
+    /// false` in its runtime status regardless (reagent/codex P1 on
+    /// #2273 — filtering on the flag alone would wrongly exclude every
+    /// `subprocess`-type agent pane). Only `shell`/`cmd` controllers can
+    /// legitimately be either a plain terminal or an agent running inside
+    /// one, so `is_agent_pane` (set dynamically at PTY spawn time — see
+    /// `shell/lifecycle.rs`) is the correct signal for exactly those two
+    /// types, and only those two.
+    pub fn is_agent(&self) -> bool {
+        match self.controller_type.as_str() {
+            blockcontroller::BLOCK_CONTROLLER_SUBPROCESS
+            | blockcontroller::BLOCK_CONTROLLER_PERSISTENT
+            | blockcontroller::BLOCK_CONTROLLER_ACP => true,
+            _ => self.is_agent_pane,
         }
     }
 }
@@ -138,21 +166,23 @@ fn lifecycle_from(status: &BlockControllerRuntimeStatus) -> Lifecycle {
 /// CONTROLLER_REGISTRY are both `parking_lot`/`std` sync locks guarding
 /// plain maps).
 fn compute_status(block_id: &str) -> ProcessStatus {
-    let controller_status = blockcontroller::get_block_controller_status(block_id);
+    let controller = blockcontroller::get_controller(block_id);
+    let controller_status = controller.as_ref().map(|c| c.get_runtime_status());
     let (processes, liveness_confidence) = process_tracker::registry::global()
         .map(|r| (r.list_block(block_id), r.confidence_of(block_id)))
         .unwrap_or((Vec::new(), TrackingConfidence::None));
 
-    match controller_status {
-        Some(status) => ProcessStatus {
+    match (controller, controller_status) {
+        (Some(controller), Some(status)) => ProcessStatus {
             block_id: block_id.to_string(),
             lifecycle: lifecycle_from(&status),
             processes,
             liveness_confidence,
+            controller_type: controller.controller_type().to_string(),
             is_agent_pane: status.is_agent_pane,
             last_computed_ms: now_ms(),
         },
-        None => ProcessStatus::unknown(block_id),
+        _ => ProcessStatus::unknown(block_id),
     }
 }
 
@@ -221,11 +251,31 @@ impl ProcessBroker {
     /// Discovery source is `blockcontroller::get_all_controllers` —
     /// authoritative for every controller type, closing the coverage gap
     /// `process_tracker` alone has for `shell`/`acp` blocks (report §1).
+    ///
+    /// Returns EVERY controller-backed block — plain `shell`/`cmd`
+    /// terminals included, not just agent panes. Use `list_agent_panes()`
+    /// for the agent-scoped subset (which is what `agent.tracked-blocks`
+    /// actually needs — see that method's doc comment).
     pub fn list(&self) -> Vec<ProcessStatus> {
         blockcontroller::get_all_controllers()
             .into_keys()
             .map(|block_id| self.status(&block_id))
             .collect()
+    }
+
+    /// Agent-scoped subset of `list()`. `agent.tracked-blocks`'s original
+    /// (pre-broker) implementation was implicitly agent-only — the two
+    /// registries it unioned (`process_tracker`, populated only by
+    /// agent-CLI controller types, and `reactive`'s registration list,
+    /// populated only via `register_agent`) never included a plain
+    /// terminal. `list()` alone loses that scoping because
+    /// `get_all_controllers()` is controller-type-agnostic by design
+    /// (reagent/codex P1 on #2273 — an earlier version of this PR fed
+    /// `list()` straight into `agent.tracked-blocks`, which made every
+    /// open terminal pane show up in Swarm mislabeled as an "Agent").
+    /// See `ProcessStatus::is_agent` for the exact classification rule.
+    pub fn list_agent_panes(&self) -> Vec<ProcessStatus> {
+        self.list().into_iter().filter(|s| s.is_agent()).collect()
     }
 
     /// Drop a block from the cache. Call on pane close so `list()` doesn't
@@ -273,6 +323,62 @@ mod tests {
             shellprocexitcode: exit_code,
             ..Default::default()
         }
+    }
+
+    fn process_status_with(controller_type: &str, is_agent_pane: bool) -> ProcessStatus {
+        ProcessStatus {
+            block_id: "test-block".to_string(),
+            lifecycle: Lifecycle::Idle,
+            processes: Vec::new(),
+            liveness_confidence: TrackingConfidence::None,
+            controller_type: controller_type.to_string(),
+            is_agent_pane,
+            last_computed_ms: 0,
+        }
+    }
+
+    #[test]
+    fn subprocess_controller_is_always_agent_even_when_is_agent_pane_is_false() {
+        // reagent/codex P1 on #2273: SubprocessController unconditionally
+        // reports is_agent_pane: false in its own runtime status (see
+        // subprocess.rs) despite existing only for agent CLIs — is_agent()
+        // must not rely on the flag for this controller type.
+        let status = process_status_with(blockcontroller::BLOCK_CONTROLLER_SUBPROCESS, false);
+        assert!(status.is_agent());
+    }
+
+    #[test]
+    fn persistent_and_acp_controllers_are_always_agent() {
+        for ty in [
+            blockcontroller::BLOCK_CONTROLLER_PERSISTENT,
+            blockcontroller::BLOCK_CONTROLLER_ACP,
+        ] {
+            let status = process_status_with(ty, false);
+            assert!(status.is_agent(), "{ty} should always classify as agent");
+        }
+    }
+
+    #[test]
+    fn shell_and_cmd_controllers_defer_to_the_real_is_agent_pane_flag() {
+        for ty in [
+            blockcontroller::BLOCK_CONTROLLER_SHELL,
+            blockcontroller::BLOCK_CONTROLLER_CMD,
+        ] {
+            assert!(
+                !process_status_with(ty, false).is_agent(),
+                "{ty} with is_agent_pane=false must not classify as agent (this is the exact regression reagent/codex caught — a plain terminal wrongly showing up in Swarm as an agent)"
+            );
+            assert!(
+                process_status_with(ty, true).is_agent(),
+                "{ty} with is_agent_pane=true (agent running inside a terminal) must classify as agent"
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_block_is_never_classified_as_agent() {
+        let status = ProcessStatus::unknown("no-such-block");
+        assert!(!status.is_agent());
     }
 
     #[test]
