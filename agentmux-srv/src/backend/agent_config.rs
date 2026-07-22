@@ -38,6 +38,7 @@ pub fn build_config_files(
     agent_name: &str,
     agent_id: &str,
     agent_slug: &str,
+    working_directory: &str,
 ) -> Vec<AgentConfigFile> {
     let mut files: Vec<AgentConfigFile> = Vec::new();
 
@@ -45,11 +46,11 @@ pub fn build_config_files(
     let mut template_vars: HashMap<String, String> = HashMap::new();
     template_vars.insert("AGENT".to_string(), agent_name.to_string());
     template_vars.insert("AGENT_DISPLAY".to_string(), agent_name.to_string());
+    template_vars.insert("AGENT_SLUG".to_string(), agent_slug.to_string());
     template_vars.insert("AGENT_ID".to_string(), agent_id.to_string());
+    template_vars.insert("WORKING_DIR".to_string(), working_directory.to_string());
     // DATE in YYYY-MM-DD format, UTC
     template_vars.insert("DATE".to_string(), Utc::now().format("%Y-%m-%d").to_string());
-    // WORKING_DIR is not available in this signature; leave it empty for callers
-    // that don't pass it — expansion will leave {{WORKING_DIR}} intact if absent.
 
     // ----------------------------------------------------------------
     // Build CLAUDE.md: Soul + AgentMD + Memory + Skills index
@@ -136,99 +137,6 @@ pub fn build_config_files(
     // or use the variant below.
     let mcp_content = content_map.get("mcp").map(|s| s.as_str());
     if let Some(mcp_json) = build_mcp_config(mcp_content, agent_slug, "") {
-        files.push(AgentConfigFile {
-            filename: ".mcp.json".to_string(),
-            content: mcp_json,
-        });
-    }
-
-    files
-}
-
-/// Build the list of config files with a known `agent_bus_id`.
-///
-/// Same as [`build_config_files`] but also accepts an `agent_bus_id` so the
-/// MCP server entry can include `AGENTMUX_AGENT_BUS_ID`.  Prefer this overload
-/// when the caller has the full `AgentDefinition` available.
-pub fn build_config_files_with_bus(
-    content_map: &HashMap<String, String>,
-    skills: &[AgentSkill],
-    agent_name: &str,
-    agent_id: &str,
-    agent_bus_id: &str,
-    working_directory: &str,
-    agent_slug: &str,
-) -> Vec<AgentConfigFile> {
-    let mut files: Vec<AgentConfigFile> = Vec::new();
-
-    let mut template_vars: HashMap<String, String> = HashMap::new();
-    template_vars.insert("AGENT".to_string(), agent_name.to_string());
-    template_vars.insert("AGENT_DISPLAY".to_string(), agent_name.to_string());
-    template_vars.insert("AGENT_ID".to_string(), agent_id.to_string());
-    template_vars.insert("WORKING_DIR".to_string(), working_directory.to_string());
-    template_vars.insert("DATE".to_string(), Utc::now().format("%Y-%m-%d").to_string());
-
-    // CLAUDE.md
-    let mut claude_md_parts: Vec<String> = Vec::new();
-    if let Some(soul) = content_map.get("soul") {
-        claude_md_parts.push(expand_template(soul, &template_vars));
-    }
-    if let Some(agentmd) = content_map.get("agentmd") {
-        if !claude_md_parts.is_empty() {
-            claude_md_parts.push("\n---\n".to_string());
-        }
-        claude_md_parts.push(expand_template(agentmd, &template_vars));
-    }
-    if let Some(memory) = content_map.get("memory") {
-        claude_md_parts.push("\n# Memory\n".to_string());
-        claude_md_parts.push(memory.clone());
-    }
-    if !skills.is_empty() {
-        claude_md_parts.push("\n# Available Skills\n\n".to_string());
-        claude_md_parts.push("Use `/<trigger>` to invoke a skill.\n\n".to_string());
-        for skill in skills {
-            let trigger_part = if skill.trigger.is_empty() {
-                String::new()
-            } else {
-                format!(" (trigger: /{})", skill.trigger)
-            };
-            let desc_part = if skill.description.is_empty() {
-                String::new()
-            } else {
-                format!(" \u{2014} {}", skill.description)
-            };
-            claude_md_parts.push(format!("- **{}**{}{}\n", skill.name, trigger_part, desc_part));
-        }
-    }
-    if !claude_md_parts.is_empty() {
-        files.push(AgentConfigFile {
-            filename: "CLAUDE.md".to_string(),
-            content: claude_md_parts.join(""),
-        });
-    }
-
-    // Skill slash commands
-    for skill in skills {
-        if !skill.trigger.is_empty() && !skill.content.is_empty() {
-            let content = expand_template(&skill.content, &template_vars);
-            files.push(AgentConfigFile {
-                filename: format!(".claude/commands/{}.md", skill.trigger),
-                content,
-            });
-        }
-    }
-
-    // Hooks
-    if let Some(hooks) = content_map.get("hooks") {
-        files.push(AgentConfigFile {
-            filename: ".claude/hooks.json".to_string(),
-            content: hooks.clone(),
-        });
-    }
-
-    // MCP — use full bus_id variant
-    let mcp_content = content_map.get("mcp").map(|s| s.as_str());
-    if let Some(mcp_json) = build_mcp_config(mcp_content, agent_slug, agent_bus_id) {
         files.push(AgentConfigFile {
             filename: ".mcp.json".to_string(),
             content: mcp_json,
@@ -706,7 +614,7 @@ mod tests {
         content_map.insert("soul".to_string(), "You are {{AGENT}}.".to_string());
         content_map.insert("agentmd".to_string(), "## Instructions\nDo stuff.".to_string());
 
-        let files = build_config_files(&content_map, &[], "Aria", "agent-1", "aria");
+        let files = build_config_files(&content_map, &[], "Aria", "agent-1", "aria", "/tmp/aria");
         let claude_md = files.iter().find(|f| f.filename == "CLAUDE.md").unwrap();
         assert!(claude_md.content.contains("You are Aria."));
         assert!(claude_md.content.contains("---"));
@@ -721,7 +629,7 @@ mod tests {
             make_skill("Test", "test", "Run tests", "Run: test suite"),
         ];
 
-        let files = build_config_files(&content_map, &skills, "Aria", "agent-1", "aria");
+        let files = build_config_files(&content_map, &skills, "Aria", "agent-1", "aria", "/tmp/aria");
 
         // CLAUDE.md should have the skills index
         let claude_md = files.iter().find(|f| f.filename == "CLAUDE.md").unwrap();
@@ -748,7 +656,7 @@ mod tests {
             r#"{"PreToolUse":[{"matcher":"Read","hooks":[{"type":"command","command":"my-audit"}]}]}"#
                 .to_string(),
         );
-        let files = build_config_files(&content_map, &[], "Aria", "agent-1", "aria");
+        let files = build_config_files(&content_map, &[], "Aria", "agent-1", "aria", "/tmp/aria");
         let settings = files
             .iter()
             .find(|f| f.filename == ".claude/settings.json")
@@ -775,9 +683,32 @@ mod tests {
     #[test]
     fn test_build_config_files_mcp_written() {
         let content_map = HashMap::new();
-        let files = build_config_files(&content_map, &[], "Aria", "agent-1", "aria");
+        let files = build_config_files(&content_map, &[], "Aria", "agent-1", "aria", "/tmp/aria");
         let mcp = files.iter().find(|f| f.filename == ".mcp.json").unwrap();
         let parsed: Value = serde_json::from_str(&mcp.content).unwrap();
         assert!(parsed["mcpServers"]["agentmux"].is_object());
+    }
+
+    #[test]
+    fn test_build_config_files_expands_agent_slug_and_working_dir() {
+        // REPORT_REPO_HEALTH_AUDIT_2026_07_20.md §1.3: AGENT_SLUG/WORKING_DIR
+        // were missing from build_config_files's template vars (present in
+        // the TS mirror, agent-model.ts:747-748), so any soul/agentmd content
+        // using {{AGENT_SLUG}} or {{WORKING_DIR}} was left unexpanded.
+        let mut content_map = HashMap::new();
+        content_map.insert(
+            "soul".to_string(),
+            "I am {{AGENT_SLUG}}, working in {{WORKING_DIR}}.".to_string(),
+        );
+        let files = build_config_files(
+            &content_map,
+            &[],
+            "Aria",
+            "agent-1",
+            "aria",
+            "/home/user/my-project",
+        );
+        let claude_md = files.iter().find(|f| f.filename == "CLAUDE.md").unwrap();
+        assert!(claude_md.content.contains("I am aria, working in /home/user/my-project."));
     }
 }
