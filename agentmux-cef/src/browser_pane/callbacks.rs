@@ -177,6 +177,14 @@ pub fn on_load_end_browser_pane(state: &Arc<AppState>, browser: &Browser) {
                 .unwrap_or_default()
         };
         crate::browser_pane::trace::pane_trace(&block_id, "load-end", &format!("url={url}"));
+
+        // Every navigation replaces the page's own DOM/inline-style state,
+        // so any CSS `zoom` injected before this load is gone with it --
+        // re-apply this pane's stored factor (no-op if it's never been
+        // zoomed away from the 1.0 default). See BrowserPaneManager::
+        // reapply_zoom's own doc comment for why this is CSS injection and
+        // not Chromium's native per-host zoom.
+        state.browser_panes.reapply_zoom(&block_id, state);
     }
 
     #[cfg(target_os = "windows")]
