@@ -38,6 +38,7 @@
 .agent-identity-provider-row {
     display: grid;
     grid-template-columns: 16px 72px 1fr auto;
+    grid-template-areas: "icon label assign actions";
     align-items: center;
     gap: var(--space-2);
     padding: var(--space-1) var(--space-1-5);
@@ -48,19 +49,53 @@
     }
 }
 
+// Narrow modal — the actions cell (a <select> + up to two buttons) has an
+// irreducible min-content width (~370-420px for the whole row) that no
+// ancestor min-width:0 can rescue, since it's a *grid* track's own sizing,
+// not a flex item's. Reflow to a 2-row stack instead of trying to compress
+// content that has no room left to give — the assignment info and the
+// actions cell each get a full-width row of their own.
+// See SPEC_AGENT_PANE_ARMORY_HEADER_ICON_2026_07_20.md §7.3.
+@container agent-setup (max-width: 460px) {
+    .agent-identity-provider-row {
+        grid-template-columns: 16px 1fr;
+        grid-template-areas:
+            "icon label"
+            "assign assign"
+            "actions actions";
+        row-gap: var(--space-1);
+    }
+
+    .agent-identity-provider-assignment {
+        justify-content: flex-start;
+    }
+
+    .agent-identity-provider-actions {
+        justify-content: flex-start;
+    }
+}
+
 .agent-identity-provider-icon {
+    grid-area: icon;
     font-size: 13px;
     text-align: center;
     opacity: 0.6;
 }
 
 .agent-identity-provider-label {
+    grid-area: label;
     font-size: 11px;
     color: color-mix(in srgb, var(--secondary-text-color) 80%, transparent);
+    // nowrap is safe today (short labels, fixed 72px column at the wide
+    // breakpoint) but doesn't truncate — pair with ellipsis so a future
+    // longer label degrades instead of forcing the row wider.
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .agent-identity-provider-assignment {
+    grid-area: assign;
     display: flex;
     align-items: center;
     gap: var(--space-1-5);
@@ -89,6 +124,7 @@
 }
 
 .agent-identity-provider-actions {
+    grid-area: actions;
     display: flex;
     align-items: center;
     gap: var(--space-1);

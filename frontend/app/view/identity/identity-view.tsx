@@ -487,7 +487,6 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
     const [awsRegion, setAwsRegion] = createSignal(editing()?.context.aws_region ?? "");
     const [anthropicModel, setAnthropicModel] = createSignal(editing()?.context.anthropic_model ?? "");
     const [description, setDescription] = createSignal(editing()?.context.description ?? "");
-    const [assignedAgents, setAssignedAgents] = createSignal(editing()?.assigned_agents.join(", ") ?? "");
 
     // ── Armory secure-key lifecycle (SPEC_TRUST_CENTER §5) ──
     // Active when secretBackend === "keychain": the user pastes a key and
@@ -568,11 +567,6 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
 
         const context = buildContext();
 
-        const agents = assignedAgents()
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean);
-
         return {
             name: n,
             provider: provider(),
@@ -580,7 +574,10 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
             display_name: displayName().trim() || undefined,
             secret_ref: secretRef,
             context,
-            assigned_agents: agents,
+            // assigned_agents is deprecated and never read by the backend —
+            // see identity-model.ts's Account.assigned_agents doc comment.
+            // Real assignment happens via the agent-side reverse index.
+            assigned_agents: [],
         };
     };
 
@@ -898,10 +895,6 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
                             <input class="identity-input" type="text" value={anthropicModel()} onInput={(e) => setAnthropicModel(e.currentTarget.value)} placeholder="claude-sonnet-4-6" />
                         </FormField>
                     </Show>
-
-                    <FormField label="Assigned agents (comma-separated IDs)">
-                        <input class="identity-input" type="text" value={assignedAgents()} onInput={(e) => setAssignedAgents(e.currentTarget.value)} placeholder="AgentY, Agent1, Agent2" />
-                    </FormField>
 
                     <FormField label="Notes">
                         <input class="identity-input" type="text" value={description()} onInput={(e) => setDescription(e.currentTarget.value)} placeholder="Optional description" />

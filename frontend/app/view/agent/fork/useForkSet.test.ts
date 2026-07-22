@@ -13,12 +13,16 @@ const def = (id: string, over: Partial<ForkDefinition> = {}): ForkDefinition => 
     ...over,
 });
 
+/** A def with a real fork link — branch_label always set, as ForkAgentDefinitionCommand does. */
+const fork = (id: string, parent_id: string, over: Partial<ForkDefinition> = {}): ForkDefinition =>
+    def(id, { parent_id, branch_label: over.branch_label ?? `${id} branch`, ...over });
+
 describe("useForkSet", () => {
     it("derives the fork set from its reactive sources", () => {
         createRoot((dispose) => {
             const [defs] = createSignal<ForkDefinition[]>([
                 def("root"),
-                def("f1", { parent_id: "root", branch_label: "side" }),
+                fork("f1", "root", { branch_label: "side" }),
             ]);
             const [open] = createSignal(new Map<string, string>());
             const [active] = createSignal("root");
@@ -33,7 +37,7 @@ describe("useForkSet", () => {
         createRoot((dispose) => {
             const [defs] = createSignal<ForkDefinition[]>([
                 def("root"),
-                def("f1", { parent_id: "root" }),
+                fork("f1", "root"),
             ]);
             const [open] = createSignal(new Map<string, string>());
             const [active, setActive] = createSignal("root");
@@ -47,7 +51,7 @@ describe("useForkSet", () => {
 
     it("recomputes when the open-block map changes", () => {
         createRoot((dispose) => {
-            const [defs] = createSignal<ForkDefinition[]>([def("root"), def("f1", { parent_id: "root" })]);
+            const [defs] = createSignal<ForkDefinition[]>([def("root"), fork("f1", "root")]);
             const [open, setOpen] = createSignal<ReadonlyMap<string, string>>(new Map());
             const [active] = createSignal("root");
             const forks = useForkSet({ definitions: defs, openBlockByDef: open, activeDefinitionId: active });
@@ -65,7 +69,7 @@ describe("useForkSet", () => {
             const [active] = createSignal("root");
             const forks = useForkSet({ definitions: defs, openBlockByDef: open, activeDefinitionId: active });
             expect(forks()).toHaveLength(1);
-            setDefs([def("root"), def("f1", { parent_id: "root" })]);
+            setDefs([def("root"), fork("f1", "root")]);
             expect(forks().map((e) => e.definitionId)).toEqual(["root", "f1"]);
             dispose();
         });
