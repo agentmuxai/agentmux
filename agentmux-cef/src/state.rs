@@ -884,6 +884,20 @@ pub struct AppState {
     /// Embedded browser panes (native CefBrowserView per pane).
     pub browser_panes: crate::browser_panes::BrowserPaneManager,
 
+    /// Per-pane Ctrl+Wheel zoom factor, keyed by block_id. Applied as CSS
+    /// `zoom` via `ExecuteJavaScript` (`BrowserPaneManager::apply_zoom`),
+    /// deliberately NOT Chromium's native page zoom — every browser pane
+    /// shares its parent window's RequestContext (see
+    /// docs/specs/pane-shares-window-request-context-linux-2026-05-13.md),
+    /// so native zoom is scoped to HostZoomMap and shared across every pane
+    /// on the same host/profile. CSS injection sidesteps that entirely: no
+    /// RequestContext/HostZoomMap involvement, so no cookie/session sharing
+    /// tradeoff, and it's per-CefFrame by construction. Absent entry means
+    /// default (1.0, no injected style). Re-applied on every
+    /// `on_load_end_browser_pane` (see browser_pane/callbacks.rs) since a
+    /// fresh navigation replaces the page's own DOM/style state.
+    pub browser_pane_zoom: Mutex<std::collections::HashMap<String, f64>>,
+
     /// Browser DOM API state — CDP target cache + future connection
     /// pool. See `crate::browser_api`.
     pub browser_api: crate::browser_api::BrowserApiState,
@@ -1337,6 +1351,7 @@ impl Default for AppState {
             user_home_dir: Mutex::new(None),
             // active_drag deleted (PR #5 H.3) — see HostState.active_drag.
             browser_panes: crate::browser_panes::BrowserPaneManager::new(),
+            browser_pane_zoom: Mutex::new(std::collections::HashMap::new()),
             browser_api: crate::browser_api::BrowserApiState::new(),
             debug_port: Mutex::new(0),
             cef_cache_dir: Mutex::new(None),
