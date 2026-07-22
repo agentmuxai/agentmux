@@ -11,6 +11,7 @@ import { CORE_TOOLS, cliCommandForPlatform, currentPlatform } from "@/app/view/a
 import { EXTERNAL_WIDGETS, widgetCliCommandForPlatform } from "@/app/view/agent/providers/widget-catalog";
 import { getProviderList } from "@/app/view/agent/providers";
 import { ensureCapability, getCapability, isAvailable, watchCapability } from "@/app/store/toolchain-capabilities";
+import { writeText as clipboardWriteText } from "@/util/clipboard";
 import type { ToolchainViewModel } from "./toolchain-model";
 import "./toolchain-view.scss";
 
@@ -243,7 +244,9 @@ export function ToolchainView(_props: ViewComponentProps<ToolchainViewModel>): J
     };
 
     const open = (url?: string) => { if (url) getApi().openExternal(url); };
-    const copy = (cmd?: string) => { if (cmd) void navigator.clipboard?.writeText(cmd); };
+    // Route through the CEF clipboard wrapper — navigator.clipboard is
+    // blocked under CEF's Permissions-Policy. See SPEC_UNIFIED_CLIPBOARD_2026_05_18.md §3.3.
+    const copy = (cmd?: string) => { if (cmd) void clipboardWriteText(cmd).catch(() => {}); };
 
     const renderRow = (row: ToolRow): JSX.Element => (
         <div class="toolchain-row" classList={{ "toolchain-row--missing": !row.loading && !row.found }}>

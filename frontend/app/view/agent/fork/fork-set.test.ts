@@ -11,6 +11,10 @@ const def = (id: string, over: Partial<ForkDefinition> = {}): ForkDefinition => 
     ...over,
 });
 
+/** A def with a real fork link — branch_label always set, as ForkAgentDefinitionCommand does. */
+const fork = (id: string, parent_id: string, over: Partial<ForkDefinition> = {}): ForkDefinition =>
+    def(id, { parent_id, branch_label: over.branch_label ?? `${id} branch`, ...over });
+
 describe("computeForkSet", () => {
     it("returns [] when the active definition is unknown", () => {
         expect(computeForkSet([def("a")], new Map(), "missing")).toEqual([]);
@@ -39,8 +43,8 @@ describe("computeForkSet", () => {
     it("walks up from a deep fork to the lineage root", () => {
         const defs = [
             def("root"),
-            def("mid", { parent_id: "root" }),
-            def("leaf", { parent_id: "mid" }),
+            fork("mid", "root"),
+            fork("leaf", "mid"),
         ];
         const r = computeForkSet(defs, new Map(), "leaf");
         expect(r.map((e) => e.definitionId)).toEqual(["root", "mid", "leaf"]);
@@ -57,7 +61,7 @@ describe("computeForkSet", () => {
     });
 
     it("attaches the open blockId for currently-open forks only", () => {
-        const defs = [def("root"), def("f1", { parent_id: "root" })];
+        const defs = [def("root"), fork("f1", "root")];
         const open = new Map([["f1", "block-xyz"]]);
         const r = computeForkSet(defs, open, "root");
         expect(r.find((e) => e.definitionId === "root")?.blockId).toBeUndefined();
@@ -72,8 +76,8 @@ describe("computeForkSet", () => {
     it("does not loop forever on a parent_id cycle", () => {
         // a → b → a (corrupt data). Must terminate and include both once.
         const defs = [
-            def("a", { parent_id: "b" }),
-            def("b", { parent_id: "a" }),
+            fork("a", "b"),
+            fork("b", "a"),
         ];
         const r = computeForkSet(defs, new Map(), "a");
         const ids = r.map((e) => e.definitionId).sort();
@@ -85,11 +89,51 @@ describe("computeForkSet", () => {
     it("the active fork is always present and flagged exactly once", () => {
         const defs = [
             def("root"),
-            def("f1", { parent_id: "root" }),
-            def("f2", { parent_id: "root" }),
+            fork("f1", "root"),
+            fork("f2", "root"),
         ];
         const r = computeForkSet(defs, new Map(), "f2");
         expect(r.filter((e) => e.isActive)).toHaveLength(1);
         expect(r.find((e) => e.isActive)?.definitionId).toBe("f2");
+    });
+
+    it("does not treat two unrelated agents cloned from the same template as forks of each other", () => {
+        // agentdefcreatefromtemplate stamps parent_id = template.id on every
+        // clone for template-provenance, leaving branch_label empty — unlike
+        // a real fork. AgentX and AgentY below share no fork relationship,
+        // only the same template parent.
+        const defs = [
+            def("tpl-claude", { name: "Claude Code" }),
+            def("agent-x", { name: "AgentX", parent_id: "tpl-claude" }),
+            def("agent-y", { name: "AgentY", parent_id: "tpl-claude" }),
+        ];
+        const rX = computeForkSet(defs, new Map(), "agent-x");
+        expect(rX.map((e) => e.definitionId)).toEqual(["agent-x"]);
+        const rY = computeForkSet(defs, new Map(), "agent-y");
+        expect(rY.map((e) => e.definitionId)).toEqual(["agent-y"]);
+    });
+
+    it("still walks a real fork lineage rooted at a user-owned (non-template) definition", () => {
+        const defs = [
+            def("tpl-claude", { name: "Claude Code" }),
+            def("agent-x", { name: "AgentX", parent_id: "tpl-claude" }),
+            fork("agent-x-fork", "agent-x", { name: "AgentX #2" }),
+        ];
+        const r = computeForkSet(defs, new Map(), "agent-x-fork");
+        expect(r.map((e) => e.definitionId)).toEqual(["agent-x", "agent-x-fork"]);
+        expect(r.find((e) => e.definitionId === "agent-x")?.isRoot).toBe(true);
+    });
+
+    it("keeps the lineage link for a genuine fork whose source is itself a template row", () => {
+        // forkagentdefinition doesn't reject a template as source_id; the
+        // resulting fork gets branch_label set like any other fork, so its
+        // parent_id (the template) must still count as a real link.
+        const defs = [
+            def("tpl-claude", { name: "Claude Code" }),
+            fork("direct-fork", "tpl-claude", { name: "Claude Code #2" }),
+        ];
+        const r = computeForkSet(defs, new Map(), "direct-fork");
+        expect(r.map((e) => e.definitionId)).toEqual(["tpl-claude", "direct-fork"]);
+        expect(r.find((e) => e.definitionId === "tpl-claude")?.isRoot).toBe(true);
     });
 });

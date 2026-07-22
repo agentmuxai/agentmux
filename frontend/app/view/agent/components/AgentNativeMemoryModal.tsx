@@ -2,10 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AgentNativeMemoryModal — the agent pane's brain modal. A two-column
+ * AgentNativeMemoryModal — the agent pane's brain modal. Single-pane
  * browser/editor over the agent's native memory folder
- * (`~/.claude/projects/<sanitized>/memory/`): file list on the left,
- * read/edit view on the right.
+ * (`~/.claude/projects/<sanitized>/memory/`) — list, or one file's
+ * read/edit view, never both at once (PrimitiveListDetail; matches the MCP
+ * Servers / Skills tabs' convention). Was a fixed two-column split with a
+ * 220px list rail; migrated to eliminate horizontal scroll on narrow panes
+ * — see SPEC_AGENT_PANE_ARMORY_HEADER_ICON_2026_07_20.md §7.2.
  *
  * Replaces the Phase 1 placeholder (AgentMemoryModalPanel). Backend RPCs
  * live in native_memory_handlers.rs.
@@ -14,6 +17,7 @@
  */
 
 import { createSignal, For, onCleanup, Show, type JSX } from "solid-js";
+import { PrimitiveListDetail } from "@/app/element/primitive-list-detail";
 import { AgentNativeMemoryModel, normalizeMemoryFilename, validateMemoryFilename } from "../agent-native-memory-model";
 import "./AgentNativeMemoryModal.scss";
 
@@ -82,6 +86,157 @@ export const AgentNativeMemoryModal = (props: AgentNativeMemoryModalProps): JSX.
         if (e.key === "Escape") { e.preventDefault(); cancelNewInput(); }
     };
 
+    // Single-pane — see docs/specs/SPEC_ARMORY_RESPONSIVE_SINGLE_PANE_LAYOUT_2026_07_15.md,
+    // adopted here per SPEC_AGENT_PANE_ARMORY_HEADER_ICON_2026_07_20.md §7.2.
+    const inDetail = () => model.selectedFilenameAtom() !== null;
+    const [creatingIndex, setCreatingIndex] = createSignal(false);
+
+    const listView = (
+        <div class="agent-memory-modal-list">
+            <Show
+                when={model.filesAtom().length > 0}
+                fallback={
+                    <Show
+                        when={!model.loadingAtom()}
+                        fallback={<div class="agent-memory-modal-list-empty">Loading…</div>}
+                    >
+                        <div class="agent-memory-modal-empty">
+                            <p class="agent-memory-modal-empty-heading">No memory files yet.</p>
+                            <p class="agent-memory-modal-empty-desc">
+                                Claude Code creates this folder when it first saves a memory for
+                                this agent. You can also create files manually — they'll be
+                                available at the next session start.
+                            </p>
+                            <button
+                                class="agent-memory-modal-btn agent-memory-modal-btn-primary"
+                                disabled={creatingIndex()}
+                                onClick={() => {
+                                    setCreatingIndex(true);
+                                    void model.createMemoryIndex().finally(() => setCreatingIndex(false));
+                                }}
+                            >
+                                + Create MEMORY.md
+                            </button>
+                        </div>
+                    </Show>
+                }
+            >
+                <For each={model.filesAtom()}>
+                    {(file) => (
+                        <button
+                            class="agent-memory-modal-list-item"
+                            classList={{
+                                "is-selected": model.selectedFilenameAtom() === file.filename,
+                                "is-index": file.is_index,
+                            }}
+                            onClick={() => void model.selectFile(file.filename)}
+                            title={fileRoleLabel(file)}
+                        >
+                            <span class="agent-memory-modal-list-item-name">
+                                {file.filename}
+                            </span>
+                            <Show when={file.is_index}>
+                                <span
+                                    class="agent-memory-modal-list-item-badge"
+                                    title="Loaded into every new Claude session for this agent. Edits take effect on the next session start."
+                                >
+                                    index
+                                </span>
+                            </Show>
+                            <Show when={!file.is_index && file.metadata_type}>
+                                <span class="agent-memory-modal-list-item-type">
+                                    {file.metadata_type}
+                                </span>
+                            </Show>
+                        </button>
+                    )}
+                </For>
+            </Show>
+
+            <Show when={showNewInput()}>
+                <div class="agent-memory-modal-new-input-row">
+                    <input
+                        class="agent-memory-modal-new-input"
+                        classList={{ "is-error": newFileError() !== null }}
+                        type="text"
+                        placeholder="filename.md"
+                        value={newFileName()}
+                        autofocus
+                        onInput={(e) => { setNewFileName(e.currentTarget.value); setNewFileError(null); }}
+                        onKeyDown={onNewFileKeyDown}
+                    />
+                    <Show when={newFileError()}>
+                        <div class="agent-memory-modal-new-input-error">{newFileError()}</div>
+                    </Show>
+                    <div class="agent-memory-modal-new-input-actions">
+                        <button class="agent-memory-modal-btn" onClick={cancelNewInput}>Cancel</button>
+                        <button class="agent-memory-modal-btn agent-memory-modal-btn-primary" onClick={commitNewFile}>Create</button>
+                    </div>
+                </div>
+            </Show>
+
+            <button
+                class="agent-memory-modal-new-btn"
+                classList={{ "is-hidden": showNewInput() }}
+                onClick={openNewInput}
+            >
+                + New file
+            </button>
+        </div>
+    );
+
+    // Only rendered when inDetail() is true (a file is selected) —
+    // PrimitiveListDetail never shows list and detail at once, so there's
+    // no "nothing selected" case to handle here anymore.
+    const detailView = (
+        <div class="agent-memory-modal-detail">
+            <Show
+                when={model.editingAtom()}
+                fallback={
+                    <div class="agent-memory-modal-view">
+                        <pre class="agent-memory-modal-content">
+                            {model.contentAtom() ?? "Loading…"}
+                        </pre>
+                        <div class="agent-memory-modal-detail-actions">
+                            <button
+                                class="agent-memory-modal-btn"
+                                disabled={model.contentAtom() === null}
+                                onClick={() => model.startEdit()}
+                            >
+                                Edit
+                            </button>
+                        </div>
+                    </div>
+                }
+            >
+                <div class="agent-memory-modal-edit">
+                    <textarea
+                        class="agent-memory-modal-textarea"
+                        value={model.draftContentAtom()}
+                        onInput={(e) => model.setDraftContent(e.currentTarget.value)}
+                        spellcheck={false}
+                    />
+                    <div class="agent-memory-modal-detail-actions">
+                        <button
+                            class="agent-memory-modal-btn"
+                            disabled={model.savingAtom()}
+                            onClick={() => model.cancelEdit()}
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            class="agent-memory-modal-btn agent-memory-modal-btn-primary"
+                            disabled={model.savingAtom()}
+                            onClick={() => void model.saveEdit()}
+                        >
+                            {model.savingAtom() ? "Saving…" : "Save"}
+                        </button>
+                    </div>
+                </div>
+            </Show>
+        </div>
+    );
+
     return (
         <div class="agent-memory-modal">
             <div class="agent-memory-modal-header">
@@ -98,134 +253,13 @@ export const AgentNativeMemoryModal = (props: AgentNativeMemoryModalProps): JSX.
                 <div class="agent-memory-modal-error">{model.errorAtom()}</div>
             </Show>
 
-            <div class="agent-memory-modal-body">
-                <div class="agent-memory-modal-list">
-                    <Show
-                        when={model.filesAtom().length > 0}
-                        fallback={
-                            <Show
-                                when={!model.loadingAtom()}
-                                fallback={<div class="agent-memory-modal-list-empty">Loading…</div>}
-                            >
-                                <div class="agent-memory-modal-list-empty">No files</div>
-                            </Show>
-                        }
-                    >
-                        <For each={model.filesAtom()}>
-                            {(file) => (
-                                <button
-                                    class="agent-memory-modal-list-item"
-                                    classList={{
-                                        "is-selected": model.selectedFilenameAtom() === file.filename,
-                                        "is-index": file.is_index,
-                                    }}
-                                    onClick={() => void model.selectFile(file.filename)}
-                                    title={fileRoleLabel(file)}
-                                >
-                                    <span class="agent-memory-modal-list-item-name">
-                                        {file.filename}
-                                    </span>
-                                    <Show when={file.is_index}>
-                                        <span
-                                            class="agent-memory-modal-list-item-badge"
-                                            title="Loaded into every new Claude session for this agent. Edits take effect on the next session start."
-                                        >
-                                            index
-                                        </span>
-                                    </Show>
-                                    <Show when={!file.is_index && file.metadata_type}>
-                                        <span class="agent-memory-modal-list-item-type">
-                                            {file.metadata_type}
-                                        </span>
-                                    </Show>
-                                </button>
-                            )}
-                        </For>
-                    </Show>
-
-                    <Show when={showNewInput()}>
-                        <div class="agent-memory-modal-new-input-row">
-                            <input
-                                class="agent-memory-modal-new-input"
-                                classList={{ "is-error": newFileError() !== null }}
-                                type="text"
-                                placeholder="filename.md"
-                                value={newFileName()}
-                                autofocus
-                                onInput={(e) => { setNewFileName(e.currentTarget.value); setNewFileError(null); }}
-                                onKeyDown={onNewFileKeyDown}
-                            />
-                            <Show when={newFileError()}>
-                                <div class="agent-memory-modal-new-input-error">{newFileError()}</div>
-                            </Show>
-                            <div class="agent-memory-modal-new-input-actions">
-                                <button class="agent-memory-modal-btn" onClick={cancelNewInput}>Cancel</button>
-                                <button class="agent-memory-modal-btn agent-memory-modal-btn-primary" onClick={commitNewFile}>Create</button>
-                            </div>
-                        </div>
-                    </Show>
-
-                    <button
-                        class="agent-memory-modal-new-btn"
-                        classList={{ "is-hidden": showNewInput() }}
-                        onClick={openNewInput}
-                    >
-                        + New file
-                    </button>
-                </div>
-
-                <div class="agent-memory-modal-detail">
-                    <Show
-                        when={model.selectedFilenameAtom()}
-                        fallback={<EmptyState model={model} hasFiles={model.filesAtom().length > 0} />}
-                    >
-                        <Show
-                            when={model.editingAtom()}
-                            fallback={
-                                <div class="agent-memory-modal-view">
-                                    <pre class="agent-memory-modal-content">
-                                        {model.contentAtom() ?? "Loading…"}
-                                    </pre>
-                                    <div class="agent-memory-modal-detail-actions">
-                                        <button
-                                            class="agent-memory-modal-btn"
-                                            disabled={model.contentAtom() === null}
-                                            onClick={() => model.startEdit()}
-                                        >
-                                            Edit
-                                        </button>
-                                    </div>
-                                </div>
-                            }
-                        >
-                            <div class="agent-memory-modal-edit">
-                                <textarea
-                                    class="agent-memory-modal-textarea"
-                                    value={model.draftContentAtom()}
-                                    onInput={(e) => model.setDraftContent(e.currentTarget.value)}
-                                    spellcheck={false}
-                                />
-                                <div class="agent-memory-modal-detail-actions">
-                                    <button
-                                        class="agent-memory-modal-btn"
-                                        disabled={model.savingAtom()}
-                                        onClick={() => model.cancelEdit()}
-                                    >
-                                        Cancel
-                                    </button>
-                                    <button
-                                        class="agent-memory-modal-btn agent-memory-modal-btn-primary"
-                                        disabled={model.savingAtom()}
-                                        onClick={() => void model.saveEdit()}
-                                    >
-                                        {model.savingAtom() ? "Saving…" : "Save"}
-                                    </button>
-                                </div>
-                            </div>
-                        </Show>
-                    </Show>
-                </div>
-            </div>
+            <PrimitiveListDetail
+                showDetail={inDetail()}
+                backLabel="Memories"
+                onBack={() => model.clearSelection()}
+                list={listView}
+                detail={detailView}
+            />
 
             <div class="agent-memory-modal-footer">
                 <button class="agent-memory-modal-btn" data-modal-dismiss onClick={props.onClose}>
@@ -237,38 +271,3 @@ export const AgentNativeMemoryModal = (props: AgentNativeMemoryModalProps): JSX.
 };
 
 AgentNativeMemoryModal.displayName = "AgentNativeMemoryModal";
-
-/** Right-pane empty state: differs depending on whether the folder has any
- *  files at all. */
-function EmptyState(props: { model: AgentNativeMemoryModel; hasFiles: boolean }): JSX.Element {
-    const [creating, setCreating] = createSignal(false);
-    return (
-        <Show
-            when={!props.hasFiles}
-            fallback={
-                <div class="agent-memory-modal-empty">
-                    Select a file from the list to view it.
-                </div>
-            }
-        >
-            <div class="agent-memory-modal-empty">
-                <p class="agent-memory-modal-empty-heading">No memory files yet.</p>
-                <p class="agent-memory-modal-empty-desc">
-                    Claude Code creates this folder when it first saves a memory for this
-                    agent. You can also create files manually — they'll be available at the
-                    next session start.
-                </p>
-                <button
-                    class="agent-memory-modal-btn agent-memory-modal-btn-primary"
-                    disabled={creating()}
-                    onClick={() => {
-                        setCreating(true);
-                        void props.model.createMemoryIndex().finally(() => setCreating(false));
-                    }}
-                >
-                    + Create MEMORY.md
-                </button>
-            </div>
-        </Show>
-    );
-}
