@@ -39,7 +39,7 @@ import { WpsEvent } from "@/app/store/wps-events";
 import * as WOS from "@/app/store/wos";
 import { BlockService } from "@/app/store/services";
 import { getApi, staticTabId } from "@/app/store/global";
-import { runProviderLogin } from "./run-provider-login";
+import { persistAndLinkAccount, runProviderLogin } from "./run-provider-login";
 import type { ProviderDefinition } from "../providers";
 
 import type { LogFn } from "../types";
@@ -240,6 +240,19 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
             // authenticated: false even though the login just succeeded,
             // defeating the entire "Retry Login" flow this file exists for.
             let recheckAuthEnv = authEnv ?? {};
+            // Captured for the "opened" case specifically — tier 1 mints
+            // and reports the account but does NOT persist/link it (it
+            // returns before confirming completion); once THIS function's
+            // own poll below confirms authenticated: true, it must call
+            // persistAndLinkAccount itself using these. reagent P0 on
+            // #2263: without this, a tier-1 login that succeeds for any
+            // provider whose CLI actually prints a URL (not
+            // requiresLoginTty — e.g. gemini/copilot) never gets a real
+            // IdentityAccount, and the resolver's spawn gate blocks the
+            // agent on its very next spawn regardless of what this poll
+            // reports now.
+            let openedAccountId: string | undefined;
+            let openedAccountDir: string | undefined;
             const outcome = await runProviderLogin({
                 provider,
                 cliPath: cliResult.cli_path,
@@ -249,7 +262,9 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
                 isCancelled,
                 linkTarget: agentDefinitionId ? { blockId, agentDefinitionId } : undefined,
                 existingAccountId,
-                onAccountRegistered: (_accountId, dir) => {
+                onAccountRegistered: (accountId, dir) => {
+                    openedAccountId = accountId;
+                    openedAccountDir = dir;
                     if (provider.authConfigDirEnvVar) {
                         recheckAuthEnv = { ...(authEnv ?? {}), [provider.authConfigDirEnvVar]: dir };
                     }
@@ -280,6 +295,24 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
                     } catch {
                         // keep polling on transient RPC errors
                     }
+                }
+                // Tier 1 minted the account but deliberately didn't persist
+                // it (see run-provider-login.ts's persistAndLinkAccount doc
+                // comment) — now that THIS poll has confirmed the login
+                // actually completed, persist and link it for real.
+                if (authenticated && openedAccountId && openedAccountDir) {
+                    await persistAndLinkAccount(
+                        {
+                            provider,
+                            cliPath: cliResult.cli_path,
+                            authEnv: authEnv ?? {},
+                            setAuthUrl,
+                            log,
+                            linkTarget: agentDefinitionId ? { blockId, agentDefinitionId } : undefined,
+                        },
+                        openedAccountId,
+                        openedAccountDir,
+                    );
                 }
             } else if (outcome === "seeded" || outcome === "terminal-success") {
                 // A credential already landed on disk (copied from a valid
