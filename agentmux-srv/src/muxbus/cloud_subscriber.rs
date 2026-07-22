@@ -772,13 +772,18 @@ async fn load_valid_token(
 /// Classify a `pkce::refresh_token` failure for the broker's
 /// `RefreshErrorKind` — `NoRefreshToken`/`Rejected` in the 4xx range mean
 /// the credential itself is the problem (only a fresh `muxbus.login` fixes
-/// it); everything else (network blips, 5xx, response parse failures) is
-/// worth retrying on the next sweep tick.
+/// it) *except* 408/429, which mean the request itself was throttled or
+/// timed out, not that the refresh_token was rejected — treating those as
+/// permanent would strand the credential in `NeedsReauth` past a temporary
+/// rate limit (reagent P2 on #2275). Everything else (network blips, 5xx,
+/// response parse failures) is worth retrying on the next sweep tick.
 fn classify_refresh_token_error(e: crate::muxbus::pkce::RefreshTokenError) -> RefreshErrorKind {
     use crate::muxbus::pkce::RefreshTokenError;
     match &e {
         RefreshTokenError::NoRefreshToken => RefreshErrorKind::PermanentAuthFailure(e.to_string()),
-        RefreshTokenError::Rejected { status, .. } if (400..500).contains(status) => {
+        RefreshTokenError::Rejected { status, .. }
+            if (400..500).contains(status) && !matches!(status, 408 | 429) =>
+        {
             RefreshErrorKind::PermanentAuthFailure(e.to_string())
         }
         RefreshTokenError::Rejected { .. }
@@ -820,6 +825,27 @@ mod tests {
             classify_refresh_token_error(RefreshTokenError::Rejected {
                 status: 503,
                 body: "unavailable".into(),
+            }),
+            RefreshErrorKind::Transient(_)
+        ));
+    }
+
+    #[test]
+    fn rate_limit_and_timeout_rejections_are_transient_not_permanent() {
+        // A 429/408 means the request was throttled/timed out, not that the
+        // refresh_token itself was rejected — must not strand the
+        // credential in NeedsReauth past a temporary rate limit.
+        assert!(matches!(
+            classify_refresh_token_error(RefreshTokenError::Rejected {
+                status: 429,
+                body: "rate limited".into(),
+            }),
+            RefreshErrorKind::Transient(_)
+        ));
+        assert!(matches!(
+            classify_refresh_token_error(RefreshTokenError::Rejected {
+                status: 408,
+                body: "request timeout".into(),
             }),
             RefreshErrorKind::Transient(_)
         ));

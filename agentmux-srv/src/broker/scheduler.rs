@@ -140,6 +140,19 @@ impl RefreshScheduler {
     pub async fn ensure_fresh(&self, credential_id: &str) -> Result<(), String> {
         let id = credential_id.to_string();
         loop {
+            // Create the Notified future *before* dispatching CheckRequested
+            // (and thus before releasing the states lock that gates whether
+            // we're about to become the AlreadyInFlight waiter). Tokio
+            // guarantees a Notified future observes any notify_waiters()
+            // issued after it is created, even before its first poll — so
+            // creating it here closes the lost-wakeup window where the
+            // in-flight refresh finishes and calls wake() between our
+            // CheckRequested dispatch and a `.notified()` call made only
+            // after we see AlreadyInFlight (reagent P1 on #2275: notify_
+            // waiters() retains no permit for a waiter not yet registered).
+            let notify = self.notifier_for(&id);
+            let notified = notify.notified();
+
             let events = {
                 let mut states = self.states.lock().unwrap();
                 state::update(&mut states, Command::CheckRequested { id: id.clone() })
@@ -149,7 +162,7 @@ impl RefreshScheduler {
                     return Err(format!("no credential registered as '{id}'"));
                 }
                 [Event::AlreadyInFlight { .. }] => {
-                    self.notifier_for(&id).notified().await;
+                    notified.await;
                     continue;
                 }
                 [Event::RunFreshnessCheck { .. }] => {
