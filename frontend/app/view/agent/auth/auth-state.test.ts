@@ -115,8 +115,8 @@ describe("auth-state reducer", () => {
             expect(r.state.error).toBe("");
         });
 
-        it("is dropped (no transition) from ready / waiting / idle", () => {
-            for (const kind of ["ready", "waiting", "idle"] as const) {
+        it("is dropped (no transition) from waiting / idle", () => {
+            for (const kind of ["waiting", "idle"] as const) {
                 const seeded = seed({ kind });
                 const r = update(seeded, { type: "ConnectClicked" });
                 expect(r.state).toBe(seeded);
@@ -124,6 +124,31 @@ describe("auth-state reducer", () => {
                     type: "post-close-command-dropped",
                 });
             }
+        });
+
+        it("transitions ready → waiting — the Reconnect CTA for a stale needs_reauth/expired account (reagent P0 on #2262)", () => {
+            // outcomeFor() only ever returns "needs-account"/"ready" — a
+            // bound-but-stale account still lands in `ready`, with
+            // PreLaunchAuthPanel.tsx's separate accountStatus check
+            // deciding whether to show the Reconnect wording. Without this
+            // transition, ConnectClicked from `ready` was a silent no-op:
+            // runProviderLogin still ran the real backend login/refresh,
+            // but its outcome dispatches (Seeded, ConnectFailed) were ALSO
+            // dropped from `ready`, since they only accept `waiting` as an
+            // origin besides the fresh-connect kinds — the UI just sat on
+            // the same CTA forever regardless of success or failure.
+            const seeded = seed({
+                kind: "ready",
+                providerId: "openclaw",
+                bundleId: "acct-existing",
+            });
+            const r = update(seeded, { type: "ConnectClicked" });
+            expect(r.state.kind).toBe("waiting");
+            expect(r.state.bundleId).toBe("acct-existing");
+            expect(r.events[0]).toMatchObject({
+                type: "start-requested",
+                providerId: "openclaw",
+            });
         });
     });
 

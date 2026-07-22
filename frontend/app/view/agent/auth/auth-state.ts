@@ -357,10 +357,32 @@ export function update(state: AuthState, command: AuthCommand): ReducerResult {
         }
 
         case "ConnectClicked": {
-            if (state.kind !== "unauthenticated" && state.kind !== "expired" && state.kind !== "failed") {
-                // No-op — can't start auth from `ready` / `waiting` /
-                // `idle`. Surface it via the dropped event so a misfire
-                // shows up in the audit ring.
+            // reagent P0 on #2262: `ready` is now accepted too — the
+            // Reconnect CTA (PreLaunchAuthPanel.tsx's requiresLoginTty
+            // branch) dispatches ConnectClicked from EXACTLY this state
+            // (stale needs_reauth/expired account, still `ready` per
+            // outcomeFor()'s "needs-account"/"ready" split). Without this,
+            // the dispatch was a silent no-op: state never left `ready`, so
+            // runProviderLogin ran the real backend login/refresh, but
+            // every one of its outcome dispatches (Seeded, ConnectFailed)
+            // was ALSO dropped from `ready` — the UI just sat on the same
+            // Reconnect CTA forever regardless of success or failure. No
+            // other caller dispatches ConnectClicked from a plain `ready`
+            // (a healthy account renders `<ReadyBanner/>` with no Connect
+            // affordance at all), so this widening is scoped to exactly
+            // the reconnect flow it's meant for. `Seeded`/`ConnectFailed`
+            // already accept `waiting` as an origin (see their own doc
+            // comments) — this is the missing first hop into `waiting`
+            // that lets those existing guards actually fire.
+            if (
+                state.kind !== "unauthenticated" &&
+                state.kind !== "expired" &&
+                state.kind !== "failed" &&
+                state.kind !== "ready"
+            ) {
+                // No-op — can't start auth from `waiting` / `idle` /
+                // `authenticated` / `saving`. Surface it via the dropped
+                // event so a misfire shows up in the audit ring.
                 return {
                     state,
                     events: [
