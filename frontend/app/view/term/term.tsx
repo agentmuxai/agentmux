@@ -17,10 +17,12 @@ import { makeTerminalModel, setTerminalViewComponent, TermViewModel } from "./te
 import { TermWrap } from "./termwrap";
 import "./xterm.css";
 import { DragOverlay } from "@/app/element/dragoverlay";
+import { PaneTabStrip } from "@/app/element/PaneTabStrip";
 import { detectHost, invokeCommand } from "@/app/platform/ipc";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { baseName, consumeDragPaths, copyFilesToDir } from "@/util/dnd";
+import { closeBlockInStack, getLayoutModelForStaticTab, pushBlockOntoStack, setActiveBlockInStack } from "@/layout/index";
 
 // TermResyncHandler: watches connection status changes and resyncs the terminal controller.
 // Also resyncs when the backend restarts — local terminals have no connStatus change on restart,
@@ -69,6 +71,82 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
     let connectElemRef!: HTMLDivElement;
 
     const [blockData] = WOS.useWaveObjectValue<Block>(WOS.makeORef("block", blockId));
+
+    // In-pane tabs — Phase 5 of SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md.
+    // Unlike the agent pane's fork strip (Phase 3/4, which derives its tab
+    // list from a cross-pane definition/lineage lookup — a fork can exist as
+    // its own separate top-level pane before ever joining a stack), a
+    // terminal "tab" has no equivalent prior existence: it's only ever
+    // created fresh, directly into THIS pane's own blockStack (there is no
+    // multi-session concept for shell panes anywhere else in the app — one
+    // block = one PTY = one ShellController, always). So the tab list here
+    // is simply "whatever's in this pane's own blockStack right now" — no
+    // cross-pane derivation needed.
+    const layoutModel = getLayoutModelForStaticTab();
+    interface TermTab { blockId: string; label: string }
+    const termTabs = createMemo<TermTab[]>(() => {
+        // Reactive dependency: re-derive whenever ANY layout mutation
+        // happens (matches the pattern getNodeModel's own isFocused/
+        // isMagnified memos already use in layoutNodeModels.ts).
+        layoutModel.localTreeStateAtom();
+        const node = layoutModel.getNodeByBlockId(blockId);
+        // No stack yet (the common default case — a single, never-forked
+        // terminal) → synthesize this pane's own one-tab list rather than
+        // returning empty. An empty list would render the strip as a bare
+        // "+" with no visible tab for the terminal that's actually open —
+        // confusing; every other pane type's strip always shows at least
+        // its own active entry (see agent-view.tsx's switchableForks).
+        const stack = node?.data?.blockStack?.length ? node.data.blockStack : [blockId];
+        // Position-based labels ("Terminal 1", "Terminal 2", …) — matches
+        // common terminal-app convention for an unnamed session. A dormant
+        // (non-active) tab's own block isn't mounted (no live TermViewModel
+        // to read a richer title from — see layoutStack.ts's header comment
+        // on why switching is a remount, not a reactive update), so a
+        // cwd-derived or user-renamable label is a follow-up, not something
+        // cheaply available here yet.
+        return stack.map((id, i) => ({ blockId: id, label: `Terminal ${i + 1}` }));
+    });
+    const activeBlockId = createMemo(() => {
+        layoutModel.localTreeStateAtom();
+        return layoutModel.getNodeByBlockId(blockId)?.data?.activeBlockId ?? blockId;
+    });
+    const handleTermTabSwitch = (targetBlockId: string) => {
+        if (targetBlockId === activeBlockId()) return;
+        const node = layoutModel.getNodeByBlockId(blockId);
+        if (!node) return;
+        setActiveBlockInStack(layoutModel, node.id, targetBlockId);
+    };
+    const handleTermTabClose = (targetBlockId: string) => {
+        const node = layoutModel.getNodeByBlockId(blockId);
+        if (!node) return;
+        void closeBlockInStack(layoutModel, node.id, targetBlockId);
+    };
+    const handleTermTabAdd = async () => {
+        const node = layoutModel.getNodeByBlockId(blockId);
+        if (!node) return;
+        // New tab inherits the CURRENT tab's cwd, matching how a real
+        // terminal's "new tab" usually starts in the same directory rather
+        // than some unrelated default.
+        const cwd = blockData()?.meta?.["cmd:cwd"] as string | undefined;
+        try {
+            const paneOpenResult = await TabRpcClient.rpcCall(
+                "pane.open",
+                { view: "term", cwd: cwd || undefined, skip_placement: true },
+                {},
+            ) as { block_id: string };
+            pushBlockOntoStack(layoutModel, node.id, paneOpenResult.block_id);
+        } catch (e: unknown) {
+            pushNotification({
+                icon: "fa-triangle-exclamation",
+                title: "New terminal tab failed",
+                message: e instanceof Error ? e.message : String(e),
+                timestamp: new Date().toISOString(),
+                type: "error",
+                expiration: Date.now() + 8000,
+            });
+        }
+    };
+
     const termSettingsAtom = getSettingsPrefixAtom("term");
     const termSettings = createMemo(() => termSettingsAtom());
     const termMode = createMemo(() => blockData()?.meta?.["term:mode"] ?? "term");
@@ -394,6 +472,23 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
             class={clsx("view-term", "term-mode-" + termMode())}
             style={{ position: "relative" }}
         >
+            {/* Tab strip — top region, above everything else, matching the
+                editor's and agent pane's own tab-strip placement. Always
+                shown once >0 tabs exist (i.e. always, since the active tab
+                is always one) — the "+" is exactly how you'd get a second
+                tab, so hiding the whole strip until a second one already
+                exists would make that action undiscoverable (same
+                reasoning as the agent-pane fork strip, Phase 4). */}
+            <PaneTabStrip
+                tabs={termTabs()}
+                activeId={activeBlockId()}
+                getId={(t) => t.blockId}
+                getLabel={(t) => t.label}
+                onActivate={handleTermTabSwitch}
+                onClose={handleTermTabClose}
+                onAdd={() => void handleTermTabAdd()}
+                addTitle="New terminal tab"
+            />
             <DragOverlay message={dropMessage()} visible={isDragOver()} />
             <Show when={termBg()}>
                 <div class="absolute inset-0 z-0 pointer-events-none" style={termBg()} />
