@@ -3,6 +3,7 @@
 
 import { Search, useSearch } from "@/app/element/search";
 import { atoms, getOverrideConfigAtom, getSettingsKeyAtom, getSettingsPrefixAtom, pushNotification, WOS } from "@/store/global";
+import { ObjectService } from "@/store/services";
 import { backendStatusAtom } from "@/store/backendStatus";
 import { fireAndForget } from "@/util/util";
 import { computeBgStyleFromMeta } from "@/util/waveutil";
@@ -122,8 +123,7 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
         void closeBlockInStack(layoutModel, node.id, targetBlockId);
     };
     const handleTermTabAdd = async () => {
-        const node = layoutModel.getNodeByBlockId(blockId);
-        if (!node) return;
+        if (!layoutModel.getNodeByBlockId(blockId)) return;
         // New tab inherits the CURRENT tab's cwd, matching how a real
         // terminal's "new tab" usually starts in the same directory rather
         // than some unrelated default.
@@ -134,6 +134,17 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
                 { view: "term", cwd: cwd || undefined, skip_placement: true },
                 {},
             ) as { block_id: string };
+            // Review finding (Codex): this pane could have closed while the
+            // RPC above was in flight — re-resolve the node fresh rather
+            // than trusting a pre-await reference. If it's gone, the
+            // skip_placement block we just created has nowhere to attach
+            // to; delete it instead of leaving an orphaned, unreachable
+            // PTY/block behind.
+            const node = layoutModel.getNodeByBlockId(blockId);
+            if (!node) {
+                await ObjectService.DeleteBlock(paneOpenResult.block_id).catch(() => {});
+                return;
+            }
             pushBlockOntoStack(layoutModel, node.id, paneOpenResult.block_id);
         } catch (e: unknown) {
             pushNotification({
