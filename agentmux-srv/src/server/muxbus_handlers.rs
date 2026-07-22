@@ -67,8 +67,21 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 .await
                 {
                     Ok(result) => {
+                        // reagent P1: previously this only logged a warning on a
+                        // save failure and still reported success — now that
+                        // MuxBus tokens live in the OS keychain (which can
+                        // genuinely fail: locked, no Secret Service daemon on
+                        // headless Linux, permission denied), that meant the UI
+                        // could show "logged in" for a credential that was never
+                        // actually persisted anywhere. Report the real outcome.
                         if let Err(e) = wstore.muxbus_save(&result.credentials) {
                             tracing::warn!(error = %e, "muxbus.login: failed to save credentials");
+                            let resp = MuxBusLoginResp {
+                                success: false,
+                                email: String::new(),
+                                error: Some(format!("login succeeded but credentials couldn't be saved: {e}")),
+                            };
+                            return Ok(Some(serde_json::to_value(resp).unwrap()));
                         }
                         // Kick the cloud subscriber to open a WS with the new token
                         if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
