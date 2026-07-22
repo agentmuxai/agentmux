@@ -85,6 +85,23 @@ impl Store {
     /// returned directly (same as the transient-keychain-failure fallback
     /// already does) without ever touching the keychain or SQL columns.
     fn muxbus_load_impl(&self, allow_migration: bool) -> Result<Option<MuxBusCredentials>, StoreError> {
+        // reagent P1 on #2260: the migration branch below reads the
+        // keychain, then (on a cache miss) writes fresh tokens to it and
+        // updates SQL — the same read-then-write shape `muxbus_save`
+        // guards with this lock. Without it here too, a concurrent
+        // muxbus_save (e.g. the broker's refresh closure) can commit a
+        // real refresh between this thread's stale SQL read and its own
+        // keychain write, so the migration then overwrites the
+        // freshly-refreshed keychain blob with old pre-migration plaintext
+        // — SQL metadata paired with a stale, possibly-already-rotated
+        // refresh_token. Only taken when migration is actually possible
+        // (`allow_migration`); `muxbus_is_fresh`'s read-only path never
+        // writes anything, so it needs no lock.
+        let _migration_guard = if allow_migration {
+            Some(self.muxbus_save_lock.lock().unwrap())
+        } else {
+            None
+        };
         let row = {
             let conn = self.conn.lock().unwrap();
             let mut stmt = conn.prepare(
