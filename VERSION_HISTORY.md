@@ -1,5 +1,57 @@
 # AgentMux Version History
 
+## 0.54.3 — 2026-07-22
+
+- feat(lan-discovery): UDP broadcast probe fallback for filtered mDNS
+- feat(layout): block-stack mechanism for in-pane tabs (Phase 2)
+- feat(agent): fork tab strip -- read-only switch between related forks (Phase 3)
+- fix(auth): single-point login enforcement — every oauth-class agent requires a real bound Armory account
+- feat(armory): Ctrl+Wheel zoom, reusing the per-block term:zoom pipeline
+- feat(agent): select an Armory Bundle as an agent's Startup Instructions
+- feat(agent): vault icon on the Agent-setup button, responsive tabs in the per-agent armory modal
+- feat(agent): fork creation action -- + on the fork tab strip (Phase 4)
+- feat(swarm): show cron jobs as a per-agent row bucket
+- fix(agents): stop dropping working_directory in agent consolidation migration and surface Claude API errors/tool-results correctly in the translator
+- fix(agent-config): expand AGENT_SLUG/WORKING_DIR template vars, delete dead build_config_files_with_bus
+- fix(clipboard): route Editor/Toolchain panes through the CEF-safe clipboard wrapper
+- fix(identity): remove non-functional Assigned agents field from AccountForm
+- feat(browser-pane): individual Ctrl+Wheel zoom per pane via CSS injection
+- feat(auth): credential broker skeleton — single-flight-guarded proactive refresh, MuxBus tokens moved to OS keychain
+- feat(term): in-pane tabs for terminal panes (Phase 5)
+- fix(auth): New Agent modal Connect button — real terminal fallback for requiresLoginTty providers
+- fix(identity): gemini/copilot now get real OAuth isolation-dir + spawn-gate treatment, closing a frontend/backend drift gap
+- docs(auth): Phase D device-flow shim spike — not viable for Claude or Codex, decision recorded
+- fix(auth): runProviderLogin cancels abandoned tier-1 login child, dedupes tier2/3 account minting; open_login_terminal fixes on macOS/Linux
+- fix(auth): muxbus_load no longer collapses a real keychain failure into 'no credentials'
+- fix(auth): non-Claude oauth providers were permanently unable to log in via terminal fallback
+- fix(auth): loginViaTerminal consolidated onto runProviderLogin — was a sibling duplicate of the tier-2/3 P0 bug just fixed
+- docs: correct stale ambient-creds claim in PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION — was reverted, doc never updated
+- fix(auth): Retry Login reported failure right after a successful login, and orphaned an account on every retry
+- fix(auth): retry account persist once after a successful seed instead of confusingly falling through to a terminal prompt
+- fix(auth): muxbus.login no longer reports success on a keychain save failure; corrupted token blob surfaces as an error, not a logout
+- fix(agent): remove the dead 'Use global CLI login' toggle — the spawn gate stopped honoring it, but the UI kept promising it works
+- fix(agent): fork tab strip no longer leaks unrelated agents cloned from the same template
+- fix(auth): tier-1 login success never bound an account for any oauth-class provider whose CLI actually prints a URL
+- chore(cleanup): delete ~20 confirmed-dead Rust items (zero-caller functions, vestigial fields, superseded helpers)
+- chore(cleanup): delete dead agent-def directory, FilterControls/NewAgentCard, dead IdentityView export, legacy scss/icon field/detectAgentFromPath
+- docs(identity): fix stale claude/codex/openclaw comment in per-account isolation-dir gate
+- docs(auth): fix Phase D report — section numbering gap and unevaluated Gemini device-flow scope
+- fix(auth): address reagent P1 review on #2260 — relogin() and /login left tier-1 'opened' logins unpersisted
+- docs(identity): fix 4th stale claude/codex/openclaw comment in resolver test
+- fix(auth): sweep orphaned account dirs from abandoned/failed logins
+- docs(auth): fix stale §10 cross-reference and provider count in Phase D report intro
+- fix(agent): distinguish user Cancel from any other exit from waiting in PreLaunchAuthPanel's tier-3 poll
+- fix(auth): muxbus_save rolls back the keychain write if the paired SQL write fails
+- fix(auth): muxbus_save rollback no longer deletes a real credential it just couldn't read
+- fix(auth): serialize muxbus_save against concurrent callers, make is_fresh side-effect-free
+- fix(agent): guard PreLaunchAuthPanel's requiresLoginTty Reconnect against double-click and misleading timeout-after-cancel
+- fix(agent): ConnectClicked now honored from ready — fixes the Reconnect flow never showing success or failure
+- fix(auth): route every blocking muxbus keychain call through spawn_blocking
+- fix(auth): muxbus_load's lazy-migration write is now covered by muxbus_save_lock too
+- fix(auth): muxbus_clear now serializes against muxbus_save too
+- fix(agent): requiresLoginTty login outcome is now discarded if the user moved on before it resolved
+
+
 ## 0.54.2 — 2026-07-20
 
 - feat(scripts): resolve per-agent GitHub PAT via gh-agent.sh instead of shared gh session
