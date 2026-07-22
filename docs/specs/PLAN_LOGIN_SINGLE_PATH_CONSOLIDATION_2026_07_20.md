@@ -240,7 +240,25 @@ same files, or ship standalone.
   fallback fix as a follow-up once spike item 2 (state-machine needs) is
   answered, not bundled into phases 1/2.
 
-### Resolved — implemented same-day, ahead of the phase 3 merge design
+### Superseded same-day — the "ambient creds" relaxation below was reverted
+
+**Correction (2026-07-22, reagent P2 on #2255):** the section below describes
+a same-day fix that was real and did ship — briefly. Later the same session,
+the policy changed: "the claude agent should not work if there is no armory
+account for claude... same for all providers... close it everywhere, now."
+`identity/resolver.rs`'s layer-3 spawn gate's `use_ambient_login` escape
+hatch was removed entirely (unconditional block on a missing bound account,
+no per-agent opt-out), and `AgentLaunchModal.tsx`'s `authBlocksLaunch()`/
+`canSubmit()` were reverted back to requiring `accountId() !== ""` for every
+oauth-class provider — see the `2026-07-20: reverted...` comment directly
+above `authBlocksLaunch()` in that file for the actual, current reasoning.
+**The "leaving Identity blank is now fully supported" claim below is
+therefore false as of the code actually shipped in commit 721f9c5 (the same
+commit this plan doc itself landed in) — reagent caught the doc and the code
+contradicting each other in the same commit.** Left the original text
+below, struck through in spirit if not in markdown, as a record of what was
+tried and why it didn't stick — not as current guidance. Do not implement
+against this section; read the code's own comment instead.
 
 The user clarified: they want the New Agent create screen to stay simple —
 create the session and let it authenticate with vanilla/ambient settings,
@@ -259,19 +277,13 @@ already renders `"(ambient creds)"` for exactly this state
 recognized state elsewhere in the same file — just not honored at the
 launch gate.
 
-**Fix shipped:** `authBlocksLaunch()` now only blocks when an account was
-*explicitly selected* but doesn't supply the provider — not merely because
-none was picked. `canSubmit()` dropped its `accountId() !== ""`
-requirement. Net effect: leaving the "Identity" field blank at agent
-creation is now a fully supported path — `PreLaunchAuthPanel` (the OAuth
-Connect/"Use existing login" sub-flow) doesn't even mount, and the newly
-created pane authenticates the same way an existing pane does, through the
-already-fixed `runLaunchFlow` Phase 2 → `runProviderLogin`. This is also a
-"single path" win in its own right: it makes the New Agent modal's default
-flow reuse the SAME already-working mechanism instead of needing phase 3's
-merge to be functional for the common case. The account `<select>`/"+ Add
-account" UI (`:749-767`) stays visible and optional for users who do want
-to bind a specific account now — not removed, just no longer required.
+**Fix shipped, then reverted:** `authBlocksLaunch()` briefly only blocked
+when an account was *explicitly selected* but doesn't supply the provider —
+not merely because none was picked, and `canSubmit()` briefly dropped its
+`accountId() !== ""` requirement. **This was reverted later the same
+session** once the policy shifted to unconditional enforcement (see the
+correction note above) — both functions require a bound account again,
+for every oauth-class provider, no exception.
 
 Phase 3 (merging `PreLaunchAuthPanel`'s OAuth-Connect path itself, for
 users who explicitly want a dedicated bound account) is unaffected by this
