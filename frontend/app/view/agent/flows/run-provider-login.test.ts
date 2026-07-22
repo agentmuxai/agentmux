@@ -336,4 +336,63 @@ describe("runProviderLogin", () => {
         expect(outcome).toBe("terminal-unavailable");
         expect(log).toHaveBeenCalledWith("auth", expect.stringMatching(/couldn't open a terminal/i), "error");
     });
+
+    it("existingAccountId is threaded through to account minting — reconnects the SAME account instead of minting a new one (reagent P1: retries were orphaning a new account every time)", async () => {
+        hub.runCliLogin.mockResolvedValue(null);
+        hub.seedProviderAuthFromGlobal.mockResolvedValue({ seeded: true });
+
+        await runProviderLogin({
+            provider: claude,
+            cliPath: "x",
+            authEnv: { CLAUDE_CONFIG_DIR: "C:/auth" },
+            setAuthUrl: vi.fn(),
+            log: vi.fn(),
+            existingAccountId: "acct-existing",
+        });
+
+        expect(hub.ensureAccountDir).toHaveBeenCalledWith(
+            {},
+            { providerId: "claude", existingAccountId: "acct-existing" },
+        );
+    });
+
+    it("onAccountRegistered fires with the account id + dir on tier 2 success — before finalizeAccount, so a caller can rebuild its own authEnv to recheck the NEW dir (reagent P0: a caller's stale authEnv otherwise reports authenticated:false right after a successful login)", async () => {
+        hub.runCliLogin.mockResolvedValue(null);
+        hub.seedProviderAuthFromGlobal.mockResolvedValue({ seeded: true });
+        const onAccountRegistered = vi.fn();
+
+        const outcome = await runProviderLogin({
+            provider: claude,
+            cliPath: "x",
+            authEnv: { CLAUDE_CONFIG_DIR: "C:/auth" },
+            setAuthUrl: vi.fn(),
+            log: vi.fn(),
+            onAccountRegistered,
+        });
+
+        expect(outcome).toBe("seeded");
+        expect(onAccountRegistered).toHaveBeenCalledWith(MINTED.accountId, MINTED.dir);
+    });
+
+    it("onAccountRegistered fires on non-claude tier 3 success too", async () => {
+        vi.useFakeTimers();
+        hub.runCliLogin.mockResolvedValue(null);
+        hub.checkCliAuthCommand
+            .mockResolvedValueOnce({ authenticated: false })
+            .mockResolvedValueOnce({ authenticated: true });
+        const onAccountRegistered = vi.fn();
+
+        const promise = runProviderLogin({
+            provider: codex,
+            cliPath: "x",
+            authEnv: { CODEX_HOME: "C:/auth" },
+            setAuthUrl: vi.fn(),
+            log: vi.fn(),
+            onAccountRegistered,
+        });
+        await vi.advanceTimersByTimeAsync(10_000);
+        await promise;
+
+        expect(onAccountRegistered).toHaveBeenCalledWith(MINTED.accountId, MINTED.dir);
+    });
 });
