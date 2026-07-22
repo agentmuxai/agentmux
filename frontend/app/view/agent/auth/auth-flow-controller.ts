@@ -168,6 +168,15 @@ export class AuthFlowController {
      *  swapped to a different bundle and submitted again. */
     private actionToken = 0;
     private externalDispatch: ((cmd: AuthCommand) => void) | null;
+    /** Set only by `cancel()` — an explicit user Cancel click, not any
+     *  other reason the state might leave `waiting` (reagent P2 on
+     *  #2262: a caller polling via `state().kind !== "waiting"` as its
+     *  own cancellation signal can't distinguish "user cancelled" from
+     *  "state moved on for some other reason", which would misreport a
+     *  non-cancel exit as a plain timeout). Reset at the start of every
+     *  fresh `connect()` so a stale cancellation from a PRIOR attempt
+     *  never bleeds into a new one. */
+    private userCancelled = false;
 
     constructor(opts: AuthFlowOptions = {}) {
         this.rpc = opts.rpc ?? defaultAuthRpc;
@@ -259,6 +268,7 @@ export class AuthFlowController {
         // connect() calls would race; the older one must not dispatch.
         this.actionToken += 1;
         const myToken = this.actionToken;
+        this.userCancelled = false;
         this.dispatch({ type: "ConnectClicked" });
         try {
             const { sessionId, authUrl } = await this.rpc.start({
@@ -341,6 +351,7 @@ export class AuthFlowController {
             return;
         }
         this.actionToken += 1;
+        this.userCancelled = true;
         this.stopPolling();
         this.dispatch({ type: "CancelClicked" });
         const sessionId = s.sessionId;
@@ -352,6 +363,69 @@ export class AuthFlowController {
             // of the live-session kinds; a stale backend session
             // times out on its own.
         }
+    }
+
+    /** True only after an explicit `cancel()` call for the CURRENT
+     *  connect attempt — see `userCancelled`'s own doc comment. Callers
+     *  driving their own completion poll (e.g. `runProviderLogin`'s
+     *  `isCancelled`) should use this instead of inferring cancellation
+     *  from `state().kind !== "waiting"`. */
+    wasCancelled(): boolean {
+        return this.userCancelled;
+    }
+
+    /** Set only while a `requiresLoginTty` provider's login (routed through
+     *  `runProviderLogin` in `PreLaunchAuthPanel.tsx`, bypassing `connect()`
+     *  entirely) is in flight. reagent P1 on #2262: the Reconnect arm for a
+     *  stale (`needs_reauth`/`expired`) account leaves the reducer in
+     *  `ready` the whole time — `connect()`'s own guard only accepts
+     *  `ConnectClicked` from `unauthenticated`/`expired`/`failed`, so
+     *  dispatching it from `ready` is silently dropped and `state().kind`
+     *  never changes to `waiting`. That means the state machine has no way
+     *  to represent "already in flight" for this specific origin state, so
+     *  a second click while the first login is still running looked
+     *  identical to the first click and spawned a second, concurrent
+     *  terminal-login process against the same account dir. This flag is
+     *  the explicit, state-machine-independent guard that gap needs. */
+    private ttyLoginInFlight = false;
+
+    /** Returns `false` (and leaves the flag untouched) if a tty-login is
+     *  already in flight — the caller should treat that as "ignore this
+     *  click," not retry or queue it. Returns `true` (and sets the flag) to
+     *  claim the slot; the caller MUST call `endTtyLogin()` when done,
+     *  success or failure, typically from a `finally` block. */
+    beginTtyLogin(): boolean {
+        if (this.ttyLoginInFlight) return false;
+        this.ttyLoginInFlight = true;
+        return true;
+    }
+
+    endTtyLogin(): void {
+        this.ttyLoginInFlight = false;
+    }
+
+    /** Snapshot the current action generation — capture this before
+     *  starting work whose completion should be ignored if the user moves
+     *  on (changes selection, cancels, disposes) before it resolves. Same
+     *  mechanism `connect()`/`submitCallback()` already use internally
+     *  (`actionToken`), exposed for callers outside the class that drive
+     *  their own async flow around the controller — specifically
+     *  `PreLaunchAuthPanel.tsx`'s `requiresLoginTty` branch (reagent P1 on
+     *  #2262): `runProviderLogin` there isn't gated through `connect()`'s
+     *  own actionToken check at all, so a `Selected` dispatch mid-flight
+     *  (the account/provider dropdown isn't disabled during a tty login)
+     *  used to let the ABANDONED login's `Seeded`/`ConnectFailed` outcome
+     *  land on top of whatever the user selected next. */
+    currentActionToken(): number {
+        return this.actionToken;
+    }
+
+    /** True if `token` (from an earlier `currentActionToken()`) no longer
+     *  matches — i.e. `selected()`/`cancel()`/`dispose()` ran since it was
+     *  captured, so whatever produced this result is stale and its outcome
+     *  must not be dispatched. */
+    isStaleAction(token: number): boolean {
+        return token !== this.actionToken;
     }
 
     async submitCallback(callbackUrl: string): Promise<void> {
