@@ -417,13 +417,17 @@ async function startConnect(
             setAuthUrl: (url) =>
                 controller.dispatch({ type: "SessionStarted", sessionId: "provider-login", authUrl: url ?? undefined }),
             log: (_cat, msg) => console.log(`[auth-diag] ${msg}`),
-            // The user's Cancel click dispatches CancelClicked, which moves
-            // state out of `waiting` — that's the signal tier 3's poll loop
-            // watches to stop waiting early. This doesn't kill the terminal
-            // process itself (a known, separately-tracked gap — see
+            // The user's Cancel click dispatches CancelClicked (moving state
+            // out of `waiting`) AND sets controller.wasCancelled() — tier 3's
+            // poll loop watches the latter specifically (reagent P2: state
+            // could leave `waiting` for a reason other than a user cancel,
+            // which `kind !== "waiting"` alone can't distinguish, misreporting
+            // a non-cancel exit as "wasn't completed within 5 minutes"). This
+            // doesn't kill the terminal process itself (a known,
+            // separately-tracked gap — see
             // PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md §7 Phase 4),
             // only the frontend's wait for it.
-            isCancelled: () => controller.state().kind !== "waiting",
+            isCancelled: () => controller.wasCancelled(),
         });
         switch (outcome) {
             case "seeded":

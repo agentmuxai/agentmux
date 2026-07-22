@@ -155,6 +155,45 @@ describe("AuthFlowController", () => {
         });
     });
 
+    it("wasCancelled() is true only after an explicit cancel() — not for any other exit from `waiting` (reagent P2 on #2262)", async () => {
+        await createRoot(async (dispose) => {
+            const timers = fakeTimers();
+            const ctrl = new AuthFlowController({
+                rpc: fakeRpc({
+                    start: async () => ({ sessionId: "s1" }),
+                    cancel: async () => {},
+                }),
+                timers,
+            });
+            ctrl.selected("claude", "", "needs-account");
+            expect(ctrl.wasCancelled()).toBe(false);
+
+            await ctrl.connect({
+                cliPath: "/x",
+                authLoginArgs: [],
+                authCheckArgs: [],
+            });
+            expect(ctrl.state().kind).toBe("waiting");
+            expect(ctrl.wasCancelled()).toBe(false);
+
+            // Leaving `waiting` for a reason OTHER than a user cancel (e.g.
+            // switching provider mid-flow) must NOT read as cancelled.
+            ctrl.selected("openai", "", "needs-account");
+            expect(ctrl.wasCancelled()).toBe(false);
+
+            // A fresh connect + a real cancel() DOES flip it.
+            await ctrl.connect({
+                cliPath: "/x",
+                authLoginArgs: [],
+                authCheckArgs: [],
+            });
+            await ctrl.cancel();
+            expect(ctrl.wasCancelled()).toBe(true);
+
+            dispose();
+        });
+    });
+
     it("selected() during waiting cancels the backend session", async () => {
         // Reagent + Codex P2 on #850 round 6: switching selection
         // mid-OAuth must fire auth.cancel for the live sessionId so

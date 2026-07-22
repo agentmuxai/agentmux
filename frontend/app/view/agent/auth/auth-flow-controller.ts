@@ -168,6 +168,15 @@ export class AuthFlowController {
      *  swapped to a different bundle and submitted again. */
     private actionToken = 0;
     private externalDispatch: ((cmd: AuthCommand) => void) | null;
+    /** Set only by `cancel()` — an explicit user Cancel click, not any
+     *  other reason the state might leave `waiting` (reagent P2 on
+     *  #2262: a caller polling via `state().kind !== "waiting"` as its
+     *  own cancellation signal can't distinguish "user cancelled" from
+     *  "state moved on for some other reason", which would misreport a
+     *  non-cancel exit as a plain timeout). Reset at the start of every
+     *  fresh `connect()` so a stale cancellation from a PRIOR attempt
+     *  never bleeds into a new one. */
+    private userCancelled = false;
 
     constructor(opts: AuthFlowOptions = {}) {
         this.rpc = opts.rpc ?? defaultAuthRpc;
@@ -259,6 +268,7 @@ export class AuthFlowController {
         // connect() calls would race; the older one must not dispatch.
         this.actionToken += 1;
         const myToken = this.actionToken;
+        this.userCancelled = false;
         this.dispatch({ type: "ConnectClicked" });
         try {
             const { sessionId, authUrl } = await this.rpc.start({
@@ -341,6 +351,7 @@ export class AuthFlowController {
             return;
         }
         this.actionToken += 1;
+        this.userCancelled = true;
         this.stopPolling();
         this.dispatch({ type: "CancelClicked" });
         const sessionId = s.sessionId;
@@ -352,6 +363,15 @@ export class AuthFlowController {
             // of the live-session kinds; a stale backend session
             // times out on its own.
         }
+    }
+
+    /** True only after an explicit `cancel()` call for the CURRENT
+     *  connect attempt — see `userCancelled`'s own doc comment. Callers
+     *  driving their own completion poll (e.g. `runProviderLogin`'s
+     *  `isCancelled`) should use this instead of inferring cancellation
+     *  from `state().kind !== "waiting"`. */
+    wasCancelled(): boolean {
+        return this.userCancelled;
     }
 
     async submitCallback(callbackUrl: string): Promise<void> {
