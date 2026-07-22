@@ -1521,10 +1521,13 @@ mod tests {
             slug: String::new(),
             name: "T".to_string(),
             icon: "✦".to_string(),
-            // Not oauth-class (§4.3) — the layer-3 gate only applies to
-            // claude/codex/openclaw definitions, so a non-oauth def here
-            // keeps this test focused on the api-key round trip below
-            // without a claude account fixture it doesn't otherwise need.
+            // Not oauth-class — the layer-3 gate only applies to providers
+            // `provider_class` classifies as OAuth-class (claude / codex /
+            // openclaw / gemini / copilot as of
+            // REPORT_AUTH_ARCHITECTURE_STATE_AND_RETHINK_2026_07_21.md
+            // §2.5/§6), so a non-oauth def here keeps this test focused on
+            // the api-key round trip below without a claude account fixture
+            // it doesn't otherwise need.
             provider: "kimi".to_string(),
             description: String::new(),
             working_directory: String::new(),
