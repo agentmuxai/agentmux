@@ -90,15 +90,23 @@ export interface RunProviderLoginParams extends ForceLoginParams {
     /** Reconnect (not fresh-connect) into this account id, if set — threaded
      *  through to tier 2/3's account-dir minting so the SAME account's
      *  isolated dir is reused/refreshed instead of a new one being minted.
-     *  Omit for a genuinely fresh connect. */
+     *  Omit for a genuinely fresh connect. Callers that already know this
+     *  agent has a bound account for this provider (e.g. a retry after a
+     *  failed login) should always pass it — otherwise every retry mints
+     *  and orphans a brand-new account instead of refreshing the one
+     *  already in use. */
     existingAccountId?: string;
     /** Fired as soon as tier 2 or 3 registers a real IdentityAccount row —
      *  before `linkTarget`'s own linking (if any). Callers that need to know
-     *  the resulting account id for their own purposes (e.g. the New Agent
-     *  modal selecting the newly-created account in its dropdown) should use
-     *  this instead of threading a new return shape through `runProviderLogin`
-     *  — `linkTarget`-driven pane callers don't need it and shouldn't have to
-     *  care that it exists. */
+     *  the resulting account id/dir for their own purposes (e.g. rebuilding
+     *  a local `authEnv` copy to recheck auth status against the NEW
+     *  isolated dir, since `finalizeAccount` only updates the persisted
+     *  block meta — a caller's own in-memory `authEnv` variable is never
+     *  refreshed by this function; or the New Agent modal selecting the
+     *  newly-created account in its dropdown) should use this instead of
+     *  threading a new return shape through `runProviderLogin` —
+     *  `linkTarget`-driven pane callers that don't need the value don't
+     *  have to care it exists. */
     onAccountRegistered?: (accountId: string, dir: string) => void;
     /** Skip tier 1 (headless URL-capture) entirely and go straight to tier 2.
      *  For providers where tier 1 is a documented, unconditional dead end —
