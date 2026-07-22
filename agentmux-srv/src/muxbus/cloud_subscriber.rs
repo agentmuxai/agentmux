@@ -245,12 +245,21 @@ async fn run_loop(
         //   - access_token present AND still valid (use it now), OR
         //   - access_token expired but refresh_token present (can refresh).
         // An expired token with no refresh_token is a permanent failure → park like no-creds.
-        let has_stored_creds = wstore
-            .muxbus_load()
-            .ok()
-            .flatten()
-            .map(|c| !c.access_token.is_empty() && (c.is_valid() || !c.refresh_token.is_empty()))
-            .unwrap_or(false);
+        //
+        // A real load ERROR (keychain locked/unavailable, distinct from
+        // muxbus_load's Ok(None) "genuinely nothing stored" — see that
+        // function's own reagent-fixed error handling) must NOT collapse to
+        // has_stored_creds=false: that would park indefinitely waiting for a
+        // muxbus.login the user was never actually missing, instead of
+        // backing off and retrying once the transient failure clears.
+        let has_stored_creds = match wstore.muxbus_load() {
+            Ok(Some(c)) => !c.access_token.is_empty() && (c.is_valid() || !c.refresh_token.is_empty()),
+            Ok(None) => false,
+            Err(e) => {
+                tracing::warn!(error = %e, "cloud_subscriber: muxbus_load failed — assuming credentials exist and retrying with backoff");
+                true
+            }
+        };
         let token = match load_valid_token(&wstore, &scheduler).await {
             Some(t) => t,
             None if !has_stored_creds => {
