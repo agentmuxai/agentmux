@@ -121,8 +121,15 @@ impl RefreshScheduler {
 
     pub async fn unregister(&self, credential_id: &str) {
         self.closures.lock().await.remove(credential_id);
-        let mut states = self.states.lock().unwrap();
-        state::update(&mut states, Command::Unregister { id: credential_id.to_string() });
+        let events = {
+            let mut states = self.states.lock().unwrap();
+            state::update(&mut states, Command::Unregister { id: credential_id.to_string() })
+        };
+        self.trace(&events);
+        // A caller elsewhere may be parked on notified().await after seeing
+        // AlreadyInFlight for this id; nothing else will ever wake it once
+        // the entry is gone (reagent re-review on #2275).
+        self.wake(credential_id);
     }
 
     /// The credential's current coordination state, if registered —
@@ -168,7 +175,12 @@ impl RefreshScheduler {
                 [Event::RunFreshnessCheck { .. }] => {
                     let Some(closures) = self.closures.lock().await.get(&id).cloned() else {
                         // Unregistered concurrently between the dispatch
-                        // above and this lookup.
+                        // above and this lookup. Wake any other caller
+                        // parked on AlreadyInFlight for this id — this path
+                        // owns the only Refreshing state that existed for
+                        // it, so nothing else will ever notify them
+                        // (reagent re-review on #2275).
+                        self.wake(&id);
                         return Err(format!("no credential registered as '{id}'"));
                     };
                     let is_fresh = (closures.is_fresh)().await;
@@ -507,5 +519,61 @@ mod tests {
             .expect("second (waiting) caller must not be orphaned by a concurrent re-register")
             .unwrap();
         assert!(second_result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn unregistering_a_credential_mid_refresh_wakes_a_waiting_second_caller() {
+        // reagent re-review on #2275: unregister() dispatched
+        // Command::Unregister without ever calling wake(), so a second
+        // caller already parked on AlreadyInFlight's notified().await for
+        // this id would hang forever once the entry was gone — nothing else
+        // was ever going to notify it.
+        let scheduler = Arc::new(RefreshScheduler::new());
+        let gate = Arc::new(tokio::sync::Notify::new());
+        let gate_wait = gate.clone();
+        scheduler
+            .register(
+                "test:cred",
+                || Box::pin(async { false }),
+                move || {
+                    let gate_wait = gate_wait.clone();
+                    Box::pin(async move {
+                        gate_wait.notified().await;
+                        Ok(())
+                    })
+                },
+            )
+            .await;
+
+        let s1 = scheduler.clone();
+        let first = tokio::spawn(async move { s1.ensure_fresh("test:cred").await });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(
+            scheduler.state("test:cred"),
+            Some(CredentialState::Refreshing { prior_failures: 0 })
+        );
+
+        let s2 = scheduler.clone();
+        let second = tokio::spawn(async move { s2.ensure_fresh("test:cred").await });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(!second.is_finished(), "second caller must be waiting, not returned yet");
+
+        // Unregister while BOTH the first call is gated inside `refresh` AND
+        // the second call is waiting on AlreadyInFlight.
+        scheduler.unregister("test:cred").await;
+
+        let second_result = tokio::time::timeout(Duration::from_secs(2), second)
+            .await
+            .expect("second (waiting) caller must not hang after a concurrent unregister")
+            .unwrap();
+        assert!(
+            second_result.is_err(),
+            "credential is gone — the woken caller should see it as unregistered"
+        );
+
+        // Release the gate so the orphaned first call's own refresh
+        // resolves and its spawned task doesn't leak past the test.
+        gate.notify_waiters();
+        let _ = tokio::time::timeout(Duration::from_secs(2), first).await;
     }
 }
