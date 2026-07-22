@@ -204,14 +204,14 @@ async fn run_loop(
         scheduler
             .register(
                 crate::muxbus::CREDENTIAL_ID,
-                move || {
-                    wstore_fresh
-                        .muxbus_load()
-                        .ok()
-                        .flatten()
-                        .map(|c| !c.access_token.is_empty() && c.is_valid() && !c.nearly_expired())
-                        .unwrap_or(false)
-                },
+                // muxbus_is_fresh, not muxbus_load — reagent P2 on #2260:
+                // register()'s own contract requires is_fresh to be cheap
+                // and side-effect-free (called under the per-id lock on
+                // every ensure_fresh/sweep tick), but muxbus_load's
+                // lazy-migration branch can perform a keychain write + SQL
+                // update for a legacy row. muxbus_is_fresh shares the same
+                // read logic with that branch disabled.
+                move || wstore_fresh.muxbus_is_fresh(),
                 move || {
                     let wstore = wstore_refresh.clone();
                     let http = http_refresh.clone();
