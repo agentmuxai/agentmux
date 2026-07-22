@@ -21,9 +21,27 @@
 export interface ForkDefinition {
     id: string;
     name: string;
-    /** Forked-from definition id; empty/undefined for a root. */
+    /**
+     * Forked-from definition id; empty/undefined for a root.
+     *
+     * NOTE: the backend also writes this field when a definition is
+     * instantiated from a catalog template (`agentdefcreatefromtemplate`
+     * sets it to the template's id — `db_agents.parent_template_id`,
+     * wire-mapped to `parent_id` for back-compat). That's template
+     * *provenance*, not a conversation fork — two unrelated agents cloned
+     * from the same template must NOT be treated as forks of each other.
+     * `hasParent` below distinguishes the two using `branch_label` (see
+     * that field's doc comment), not this one.
+     */
     parent_id?: string;
-    /** Free-form branch label (e.g. "pr-422-review"); empty for a root. */
+    /**
+     * Free-form branch label; empty for a root. Also the discriminator for
+     * `parent_id`'s meaning: `ForkAgentDefinitionCommand` always sets this
+     * (user-provided or an auto-generated "Name #N"), while
+     * `agentdefcreatefromtemplate` always leaves it empty. So a non-empty
+     * `branch_label` means `parent_id` is a real fork link; an empty one
+     * means `parent_id` (if set at all) is template provenance to ignore.
+     */
     branch_label?: string;
     /** Epoch ms — orders siblings oldest-first under the root. */
     created_at: number;
@@ -52,10 +70,24 @@ function titleOf(d: ForkDefinition): string {
     return label && label.length > 0 ? label : d.name;
 }
 
-/** Is `parentId` a usable link to a definition that exists in the set? */
+/**
+ * Is `parent_id` a usable link to a definition that exists in the set?
+ *
+ * Gates on `d`'s OWN `branch_label`, not the parent's shape — see
+ * `ForkDefinition.branch_label`'s doc comment for why that's the correct
+ * discriminator between a real fork link and template-clone provenance.
+ * Gating on the parent's `is_seeded` instead would either wrongly treat
+ * every clone of the same template as a fork of the others (`is_seeded`
+ * unchecked), or wrongly drop the lineage link for a fork whose source
+ * happens to be a template row (`is_seeded` checked) — `forkagentdefinition`
+ * doesn't reject a template as `source_id`, it just isn't reachable from
+ * today's UI.
+ */
 function hasParent(d: ForkDefinition, byId: Map<string, ForkDefinition>): boolean {
     const p = d.parent_id;
-    return !!p && p.length > 0 && byId.has(p);
+    if (!p || p.length === 0) return false;
+    if (!d.branch_label || d.branch_label.trim().length === 0) return false;
+    return byId.has(p);
 }
 
 /**
