@@ -494,7 +494,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     // selected account can't supply credentials for the agent's
     // provider. That's true when:
     //
-    // - No account selected — ambient creds, OAuth flow runs once.
+    // - No account selected at all.
     // - A selected account for a different provider.
     //
     // Bypasses:
@@ -505,13 +505,21 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     // Hard auth-blockers: launch CANNOT proceed without the user
     // completing OAuth. Drives both the panel mount AND the launch
     // gate.
+    //
+    // 2026-07-20: reverted a same-day "no account = ambient creds is fine"
+    // relaxation. `identity/resolver.rs`'s layer-3 spawn gate was ALREADY
+    // hard-blocking an oauth-class agent with no bound account by default
+    // (`use_ambient_login=0`) — that relaxation let Launch enable and then
+    // had the agent fail its first real turn with a raw backend error,
+    // which is worse than being blocked up front with a clear reason. The
+    // gate's ambient escape hatch is now removed entirely (single point,
+    // not global — PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md §7),
+    // so "no account selected" must block here again, for every provider,
+    // with no exception.
     const authBlocksLaunch = () =>
         !isContinue()
         && provider()?.authType === "oauth"
-        && (
-            accountId() === ""
-            || !accountSupplies()
-        );
+        && (accountId() === "" || !accountSupplies());
     // Soft nudges: show the Connect CTA (with status-aware wording)
     // when the account is selected but its status is `needs_reauth` /
     // `expired`. Per spec §4.4 this is a "wording-only nudge" — does

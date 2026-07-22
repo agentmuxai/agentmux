@@ -39,7 +39,7 @@ import { WpsEvent } from "@/app/store/wps-events";
 import * as WOS from "@/app/store/wos";
 import { BlockService } from "@/app/store/services";
 import { getApi, staticTabId } from "@/app/store/global";
-import { openOAuthBrowserPane } from "./open-oauth-pane";
+import { persistAndLinkAccount, runProviderLogin } from "./run-provider-login";
 import type { ProviderDefinition } from "../providers";
 
 import type { LogFn } from "../types";
@@ -197,85 +197,162 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
 
     if (needsLogin) {
         log("auth", "not authenticated — starting login flow...");
+        setLoginWaiting(true);
         try {
-            // Run from the CEF host (GUI process) so the browser opens correctly on Windows.
-            // Returns immediately after spawning — browser opens, frontend polls for completion.
-            //
-            // The host API may return an OAuth URL string captured from the
-            // CLI's stdout (Claude Code does this reliably; other providers
-            // may not). When available, push it into setAuthUrl so the
-            // auth-url box renders above the composer with a Copy button —
-            // the user can paste the URL into their browser manually if the
-            // auto-open didn't fire or got blocked. See
-            // SPEC_AGENT_PANE_FOLLOWUPS item #3.
-            const loginUrl = await getApi().runCliLogin(
-                cliResult.cli_path,
-                provider.authLoginCommand,
-                authEnv ?? {},
-                provider.requiresLoginTty ?? false,
-            );
-            if (loginUrl) {
-                setAuthUrl(loginUrl);
-                log("auth", "opening browser...");
-                // Open the OAuth URL in the system browser — it already has the
-                // user's session/cookies, so login there is more likely to
-                // auto-complete; falls back to an in-app browser pane if the
-                // system browser can't be opened. The auth-url box above the
-                // composer is the URL backup either way.
-                const opened = await openOAuthBrowserPane(loginUrl);
-                if (opened === "pane") {
-                    log("auth", "opened login in an in-app browser pane — complete login there");
-                } else if (opened === "external") {
-                    log("auth", "opened login in your system browser — complete login there");
-                } else {
-                    log("auth", "could not open a browser; copy the URL from the box above and open it manually", "warn");
+            // Shared with `/login` and the "Login Again" failure-banner action
+            // (retro-headless-login-browser-open-2026-07-20 / retro-login-
+            // three-code-paths-2026-07-20) — this used to be a hand-rolled
+            // `runCliLogin` call with no fallback when the CLI produced no
+            // scrapeable URL, which is every time for Claude Code v2.1.x. That
+            // left this specific call site — the one "Retry Login" actually
+            // triggers — stuck polling CheckCliAuth against a dir nothing was
+            // writing to, for the full 5-minute deadline, every single click.
+            // linkTarget lets a tier-2/3 success register a real Armory
+            // account bound to THIS agent instead of just seeding a file
+            // nothing tracks (PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md
+            // §7 — required now that the resolver's spawn gate has no
+            // ambient exception).
+            const agentDefinitionId = blockData?.meta?.agentId as string | undefined;
+
+            // Reuse the account already bound to this agent for this
+            // provider, if any — reagent P1: without this, every retry
+            // through this flow minted a brand-new account+dir instead of
+            // refreshing the one already in use, orphaning an unlinked
+            // IdentityAccount row/dir on every failed "Retry Login" click.
+            let existingAccountId: string | undefined;
+            if (agentDefinitionId) {
+                try {
+                    const links = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, {
+                        agent_id: agentDefinitionId,
+                    });
+                    existingAccountId = links.find((l) => l.provider === provider.id)?.account_id;
+                } catch {
+                    // Best-effort — a fresh account still gets minted below if this lookup fails.
                 }
-            } else {
-                log("auth", "attempting to open browser for login...");
-                log("auth", "if no browser opened, run the login command manually", "warn");
             }
 
-            // Poll until authenticated, cancelled, or timed out (5 minutes)
-            log("auth", "waiting for login to complete...");
-            setLoginWaiting(true);
-            const deadline = Date.now() + 5 * 60 * 1000;
+            // Tier 2/3 mint (or reuse) an isolated account dir that's
+            // DIFFERENT from the pre-login `authEnv` closure above — this
+            // local copy is what the post-login recheck below actually
+            // queries, so it must be refreshed. reagent P0: without this,
+            // the "seeded"/"terminal-success" recheck queried the OLD
+            // directory (nothing had ever been written there) and reported
+            // authenticated: false even though the login just succeeded,
+            // defeating the entire "Retry Login" flow this file exists for.
+            let recheckAuthEnv = authEnv ?? {};
+            // Captured for the "opened" case specifically — tier 1 mints
+            // and reports the account but does NOT persist/link it (it
+            // returns before confirming completion); once THIS function's
+            // own poll below confirms authenticated: true, it must call
+            // persistAndLinkAccount itself using these. reagent P0 on
+            // #2263: without this, a tier-1 login that succeeds for any
+            // provider whose CLI actually prints a URL (not
+            // requiresLoginTty — e.g. gemini/copilot) never gets a real
+            // IdentityAccount, and the resolver's spawn gate blocks the
+            // agent on its very next spawn regardless of what this poll
+            // reports now.
+            let openedAccountId: string | undefined;
+            let openedAccountDir: string | undefined;
+            const outcome = await runProviderLogin({
+                provider,
+                cliPath: cliResult.cli_path,
+                authEnv: authEnv ?? {},
+                setAuthUrl,
+                log,
+                isCancelled,
+                linkTarget: agentDefinitionId ? { blockId, agentDefinitionId } : undefined,
+                existingAccountId,
+                onAccountRegistered: (accountId, dir) => {
+                    openedAccountId = accountId;
+                    openedAccountDir = dir;
+                    if (provider.authConfigDirEnvVar) {
+                        recheckAuthEnv = { ...(authEnv ?? {}), [provider.authConfigDirEnvVar]: dir };
+                    }
+                },
+            });
+
             let authenticated = false;
-            while (!isCancelled() && Date.now() < deadline) {
-                await new Promise<void>((r) => setTimeout(r, 2000));
-                if (isCancelled()) break;
+            let authedEmail: string | null = null;
+
+            if (outcome === "opened") {
+                // A real OAuth URL was captured and opened — poll until the
+                // user finishes there, cancels, or 5 minutes elapse.
+                log("auth", "waiting for login to complete...");
+                const deadline = Date.now() + 5 * 60 * 1000;
+                while (!isCancelled() && Date.now() < deadline && !authenticated) {
+                    await new Promise<void>((r) => setTimeout(r, 2000));
+                    if (isCancelled()) break;
+                    try {
+                        const recheck = await RpcApi.CheckCliAuthCommand(TabRpcClient, {
+                            cli_path: cliResult.cli_path,
+                            auth_check_args: provider.authCheckCommand,
+                            auth_env: recheckAuthEnv,
+                        }, { timeout: 10000 });
+                        if (recheck.authenticated) {
+                            authenticated = true;
+                            authedEmail = recheck.email ?? null;
+                        }
+                    } catch {
+                        // keep polling on transient RPC errors
+                    }
+                }
+                // Tier 1 minted the account but deliberately didn't persist
+                // it (see run-provider-login.ts's persistAndLinkAccount doc
+                // comment) — now that THIS poll has confirmed the login
+                // actually completed, persist and link it for real.
+                if (authenticated && openedAccountId && openedAccountDir) {
+                    await persistAndLinkAccount(
+                        {
+                            provider,
+                            cliPath: cliResult.cli_path,
+                            authEnv: authEnv ?? {},
+                            setAuthUrl,
+                            log,
+                            linkTarget: agentDefinitionId ? { blockId, agentDefinitionId } : undefined,
+                        },
+                        openedAccountId,
+                        openedAccountDir,
+                    );
+                }
+            } else if (outcome === "seeded" || outcome === "terminal-success") {
+                // A credential already landed on disk (copied from a valid
+                // global login, or completed in the terminal-fallback tier,
+                // which already polled internally) — one-shot confirm instead
+                // of polling again.
                 try {
-                    const recheckResult = await RpcApi.CheckCliAuthCommand(TabRpcClient, {
+                    const recheck = await RpcApi.CheckCliAuthCommand(TabRpcClient, {
                         cli_path: cliResult.cli_path,
                         auth_check_args: provider.authCheckCommand,
-                        auth_env: authEnv,
+                        auth_env: recheckAuthEnv,
                     }, { timeout: 10000 });
-                    if (recheckResult.authenticated) {
-                        const emailPart = recheckResult.email ? ` as ${recheckResult.email}` : "";
-                        log("auth", `authenticated${emailPart}`);
-                        opts.onLoginSuccess?.(recheckResult.email ?? null);
-                        authenticated = true;
-                        break;
-                    }
+                    authenticated = recheck.authenticated;
+                    authedEmail = recheck.email ?? null;
                 } catch {
-                    // keep polling on transient RPC errors
+                    // The credential is on disk even if this recheck RPC
+                    // itself failed transiently — don't block success on it.
+                    authenticated = true;
                 }
             }
-            setLoginWaiting(false);
+            // "terminal-timeout" / "terminal-unavailable" leave authenticated
+            // false and fall through to the AMX-AUTH-002 error below.
 
+            setLoginWaiting(false);
             // Reap the login CLI now the attempt has concluded (success,
             // timeout, or cancel). On manual-paste success the child self-exits;
             // if creds appeared without a paste it would otherwise linger at the
             // prompt. cancelCliLogin is idempotent and host-side.
             getApi().cancelCliLogin().catch(() => {});
-
-            // Always clear auth URL after the login attempt
             setAuthUrl(null);
 
             if (isCancelled()) {
                 return "auth_failed";
             }
 
-            if (!authenticated) {
+            if (authenticated) {
+                const emailPart = authedEmail ? ` as ${authedEmail}` : "";
+                log("auth", `authenticated${emailPart}`);
+                opts.onLoginSuccess?.(authedEmail);
+            } else {
                 // Synthesize an AMX-AUTH-002 wire payload so the log
                 // entry renders with the catalog's friendly title +
                 // retry hint, matching the typed-error pattern used

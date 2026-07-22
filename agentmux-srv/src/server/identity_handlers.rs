@@ -37,6 +37,15 @@ pub const COMMAND_AUTH_POLL: &str = "auth.poll";
 pub const COMMAND_AUTH_SUBMIT_CALLBACK: &str = "auth.submitcallback";
 pub const COMMAND_AUTH_CANCEL: &str = "auth.cancel";
 pub const COMMAND_AUTH_SUBMIT_API_KEY: &str = "auth.submitapikey";
+/// Mints (or reuses) a per-account isolated config dir without spawning any
+/// CLI — a standalone entry point onto `compute_and_ensure_account_dir` for
+/// callers that seed a credential file directly (`seed_provider_auth_from_global`)
+/// instead of driving a fresh OAuth handshake through `auth.start`. See
+/// `docs/specs/PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md` §7 —
+/// "single point, not global": every credential-bearing dir a running agent
+/// reads from must belong to a real `IdentityAccount` row, never the shared
+/// default dir.
+pub const COMMAND_ENSURE_ACCOUNT_DIR: &str = "identity.ensureaccountdir";
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -131,10 +140,32 @@ struct AckResp {
     error: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EnsureAccountDirReq {
+    provider_id: String,
+    /// Non-empty to resolve an already-minted account's own dir
+    /// (reconnect-in-place); empty mints a fresh account id.
+    #[serde(default)]
+    existing_account_id: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EnsureAccountDirResp {
+    account_id: String,
+    /// `None` when the provider isn't oauth-class or the dir couldn't be
+    /// resolved/created — same soft-failure contract as `auth.start`'s
+    /// internal use of `compute_and_ensure_account_dir`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dir: Option<String>,
+}
+
 pub fn register_identity_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let mgr = state.auth_session_manager.clone();
     let wstore = state.id_store.clone();
     let broker = state.broker.clone();
+    let wstore_for_ensure_dir = wstore.clone();
     engine.register_handler(
         COMMAND_AUTH_START,
         Box::new(move |data, _ctx| {
@@ -171,6 +202,7 @@ pub fn register_identity_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) 
                 let mut auth_env = req.auth_env;
                 let (account_id, bundle_dir) = if req.direct_account {
                     let (account_id, dir) = compute_and_ensure_account_dir(
+                        &wstore,
                         &req.existing_account_id,
                         &req.provider_id,
                         &mut auth_env,
@@ -293,6 +325,26 @@ pub fn register_identity_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) 
                     "auth.submitapikey: bundle persistence lands in PR C"
                         .to_string(),
                 )
+            })
+        }),
+    );
+
+    engine.register_handler(
+        COMMAND_ENSURE_ACCOUNT_DIR,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore_for_ensure_dir.clone();
+            Box::pin(async move {
+                let req: EnsureAccountDirReq = serde_json::from_value(data)
+                    .map_err(|e| format!("identity.ensureaccountdir: {e}"))?;
+                let mut auth_env = std::collections::HashMap::new();
+                let (account_id, dir) = compute_and_ensure_account_dir(
+                    &wstore,
+                    &req.existing_account_id,
+                    &req.provider_id,
+                    &mut auth_env,
+                );
+                let resp = EnsureAccountDirResp { account_id, dir };
+                Ok(Some(serde_json::to_value(&resp).unwrap_or_default()))
             })
         }),
     );
@@ -1094,12 +1146,22 @@ fn compute_and_ensure_bundle_dir(
 /// (Reconnect — refresh tokens in place, same isolation dir, same
 /// account row updated in place).
 ///
+/// Every fresh mint (`existing_account_id` empty) is swept for BEFORE it,
+/// giving prior abandoned/failed attempts a chance to be cleaned up
+/// (reagent finding on #2260 — see `sweep_orphaned_account_dirs`'s own
+/// doc comment). 30 minutes comfortably clears every frontend poll
+/// timeout in this flow (5 minutes, as of this writing) plus room for a
+/// slow user plus one retry, so an in-progress login's dir is never
+/// swept out from under it.
+const ORPHAN_SWEEP_MIN_AGE_SECS: u64 = 30 * 60;
+
 /// Returns `(account_id, dir)` — `account_id` is always populated (even
 /// on a dir-resolution failure, so the caller can still log/track it);
 /// `dir` is `None` on the same gate/registry/fs failures
 /// `compute_and_ensure_bundle_dir` treats as soft failures — never
 /// abort `auth.start` over a config-dir issue.
 fn compute_and_ensure_account_dir(
+    store: &Store,
     existing_account_id: &str,
     provider_id: &str,
     auth_env: &mut std::collections::HashMap<String, String>,
@@ -1143,6 +1205,22 @@ fn compute_and_ensure_account_dir(
             return (account_id, None);
         }
     };
+    if existing_account_id.is_empty() {
+        let removed = crate::identity::cleanup::sweep_orphaned_account_dirs(
+            store,
+            &paths.identities_dir(),
+            ORPHAN_SWEEP_MIN_AGE_SECS,
+        );
+        if !removed.is_empty() {
+            tracing::info!(
+                target: "identity",
+                provider_id,
+                account_id,
+                swept = removed.len(),
+                "auth.start (direct-account): swept orphaned account dirs before minting a fresh one"
+            );
+        }
+    }
     // identity_dir is already generic (not bundle-specific) — same
     // unsafe-path-segment rejection applies to account_id here.
     let account_root = match paths.identity_dir(&account_id) {
@@ -1483,8 +1561,9 @@ mod tests {
             std::env::set_var(k, v);
         }
 
+        let wstore = Store::open_in_memory().unwrap();
         let mut env = std::collections::HashMap::new();
-        let (account_id, dir) = compute_and_ensure_account_dir("", "claude", &mut env);
+        let (account_id, dir) = compute_and_ensure_account_dir(&wstore, "", "claude", &mut env);
         assert!(!account_id.is_empty(), "must mint a fresh id when none supplied");
         let dir = dir.expect("oauth-class provider must yield a dir");
         let expected = paths.identity_dir(&account_id).unwrap().join("claude");
@@ -1513,8 +1592,9 @@ mod tests {
             std::env::set_var(k, v);
         }
 
+        let wstore = Store::open_in_memory().unwrap();
         let mut env = std::collections::HashMap::new();
-        let (account_id, _) = compute_and_ensure_account_dir("acc-reconnect", "claude", &mut env);
+        let (account_id, _) = compute_and_ensure_account_dir(&wstore, "acc-reconnect", "claude", &mut env);
         assert_eq!(account_id, "acc-reconnect", "reconnect must reuse the supplied id, not mint a new one");
 
         std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
@@ -1529,8 +1609,9 @@ mod tests {
         // but the account id is still returned (unlike bundle mode,
         // there's no "skip entirely" case here — the account always
         // gets minted/reused, only the isolation dir is conditional).
+        let wstore = Store::open_in_memory().unwrap();
         let mut env = std::collections::HashMap::new();
-        let (account_id, dir) = compute_and_ensure_account_dir("", "kimi", &mut env);
+        let (account_id, dir) = compute_and_ensure_account_dir(&wstore, "", "kimi", &mut env);
         assert!(!account_id.is_empty());
         assert!(dir.is_none(), "api-key provider class must skip the OAuth dir path");
         assert!(env.get("KIMI_SHARE_DIR").is_none());
