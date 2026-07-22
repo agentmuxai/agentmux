@@ -30,15 +30,21 @@ export interface ForkDefinition {
      * wire-mapped to `parent_id` for back-compat). That's template
      * *provenance*, not a conversation fork — two unrelated agents cloned
      * from the same template must NOT be treated as forks of each other.
-     * `hasParent` below excludes template parents for exactly this reason.
+     * `hasParent` below distinguishes the two using `branch_label` (see
+     * that field's doc comment), not this one.
      */
     parent_id?: string;
-    /** Free-form branch label (e.g. "pr-422-review"); empty for a root. */
+    /**
+     * Free-form branch label; empty for a root. Also the discriminator for
+     * `parent_id`'s meaning: `ForkAgentDefinitionCommand` always sets this
+     * (user-provided or an auto-generated "Name #N"), while
+     * `agentdefcreatefromtemplate` always leaves it empty. So a non-empty
+     * `branch_label` means `parent_id` is a real fork link; an empty one
+     * means `parent_id` (if set at all) is template provenance to ignore.
+     */
     branch_label?: string;
     /** Epoch ms — orders siblings oldest-first under the root. */
     created_at: number;
-    /** 1 for a seeded catalog template, 0 for a user-owned agent. */
-    is_seeded?: number;
 }
 
 /** One row in the fork bar. */
@@ -67,22 +73,21 @@ function titleOf(d: ForkDefinition): string {
 /**
  * Is `parent_id` a usable link to a definition that exists in the set?
  *
- * Excludes template parents: `parent_id` doubles as "cloned from this
- * template" provenance (see the `ForkDefinition.parent_id` doc comment),
- * which is not a fork lineage. Without this check, every definition ever
- * created from the same template would walk up to that template as a
- * shared lineage root and appear as forks of each other — even when they
- * have no fork relationship at all.
- *
- * Requires `is_seeded === 0` (not just `!== 1`) so a parent with an
- * unpopulated `is_seeded` — e.g. a legacy row predating the column — is
- * excluded too, rather than defaulting to "trusted as a real fork parent."
+ * Gates on `d`'s OWN `branch_label`, not the parent's shape — see
+ * `ForkDefinition.branch_label`'s doc comment for why that's the correct
+ * discriminator between a real fork link and template-clone provenance.
+ * Gating on the parent's `is_seeded` instead would either wrongly treat
+ * every clone of the same template as a fork of the others (`is_seeded`
+ * unchecked), or wrongly drop the lineage link for a fork whose source
+ * happens to be a template row (`is_seeded` checked) — `forkagentdefinition`
+ * doesn't reject a template as `source_id`, it just isn't reachable from
+ * today's UI.
  */
 function hasParent(d: ForkDefinition, byId: Map<string, ForkDefinition>): boolean {
     const p = d.parent_id;
     if (!p || p.length === 0) return false;
-    const parent = byId.get(p);
-    return !!parent && parent.is_seeded === 0;
+    if (!d.branch_label || d.branch_label.trim().length === 0) return false;
+    return byId.has(p);
 }
 
 /**
