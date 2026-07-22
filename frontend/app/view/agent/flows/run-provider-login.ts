@@ -107,8 +107,11 @@ export interface RunProviderLoginParams extends ForceLoginParams {
      *  avoids a pointless ~15s wait for an attempt that cannot succeed, and
      *  (for callers that need a completion signal, which tier 1 alone doesn't
      *  provide) keeps the "opened, now what?" case structurally unreachable
-     *  rather than something every caller has to defend against. Default
-     *  false — existing callers are unaffected. */
+     *  rather than something every caller has to defend against. Also the
+     *  right default for a caller whose UI already explicitly says "login
+     *  via terminal" (the user has already opted into a real console, no
+     *  point trying headless first). Default false — existing callers are
+     *  unaffected. */
     skipTier1?: boolean;
 }
 
