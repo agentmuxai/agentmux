@@ -28,8 +28,9 @@
  *      OAuth flow opens the browser itself from inside the CLI process, and
  *      a piped/PTY spawn has no attached console for that call to succeed
  *      from — see retro-headless-login-browser-open-2026-07-20 §1.
- *   2. `registerSeededAccount` — if no URL was captured, check whether the
- *      user already has a VALID login in their global `~/.claude` (common:
+ *   2. `seedGlobalLogin` + `persistSeededAccount` — if no URL was captured,
+ *      check whether the user already has a VALID login in their global
+ *      `~/.claude` (common:
  *      the CLI installed outside AgentMux, or a prior AgentMux session). If
  *      so, mint a real per-account isolated dir, copy the credential into
  *      it, and persist an IdentityAccount row — not just a file in the
@@ -61,8 +62,8 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import * as WOS from "@/app/store/wos";
 import { forceProviderLogin, type ForceLoginParams } from "./force-login";
-import { pollForGlobalLoginSeed } from "./seed-global-login";
-import { ensureAccountDir, persistSeededAccount, registerSeededAccount } from "./register-seeded-account";
+import { pollForGlobalLoginSeed, seedGlobalLogin } from "./seed-global-login";
+import { ensureAccountDir, persistSeededAccount } from "./register-seeded-account";
 
 export interface RunProviderLoginParams extends ForceLoginParams {
     provider: ForceLoginParams["provider"] & { id: string; authConfigDirEnvVar: string };
@@ -145,23 +146,36 @@ export async function runProviderLogin(p: RunProviderLoginParams): Promise<Provi
         if (tier1 === "opened") return "opened";
     }
 
-    if (p.provider.id === "claude") {
+    // Tier 1's login CLI child (piped/PTY, spawned by forceProviderLogin's
+    // getApi().runCliLogin) is left running/abandoned when it doesn't
+    // produce a URL within its own timeout — cancel it before tier 2/3
+    // potentially spawn a second, concurrent login CLI process against the
+    // same config dir. cancelCliLogin is idempotent and host-side (safe to
+    // call even if nothing is running — see useAgentControllerStatus.ts's
+    // and launch-flow.ts's existing best-effort uses of the same call).
+    await getApi().cancelCliLogin().catch(() => {});
+
+    // Mint the account dir ONCE, up front (Claude only; other providers
+    // have no seed-from-global detection path at all) so tier 2 and tier 3
+    // share the SAME account instead of each minting its own — minting
+    // twice left an orphaned, unpersisted account dir behind on disk
+    // whenever tier 2's seed step failed partway through (ensureAccountDir
+    // succeeded, seedGlobalLogin didn't). existingAccountId threads through
+    // so a Reconnect (not a fresh Connect) refreshes the SAME account's dir.
+    const minted = p.provider.id === "claude" ? await ensureAccountDir(p.provider.id, p.log, p.existingAccountId) : null;
+
+    if (minted && p.provider.id === "claude") {
         p.log("auth", "no login URL captured — checking for an existing global Claude login…");
-        const reg = await registerSeededAccount(p.provider.id, p.log, p.existingAccountId);
-        if (reg.ok && reg.accountId && reg.dir) {
-            p.onAccountRegistered?.(reg.accountId, reg.dir);
-            await finalizeAccount(p, reg.accountId, reg.dir);
-            return "seeded";
+        if (await seedGlobalLogin(p.provider.id, p.log, minted.dir)) {
+            if (await persistSeededAccount(p.provider.id, minted.accountId, minted.dir, p.log)) {
+                p.onAccountRegistered?.(minted.accountId, minted.dir);
+                await finalizeAccount(p, minted.accountId, minted.dir);
+                return "seeded";
+            }
         }
     }
 
     p.log("auth", "opening a terminal window for a fresh login…");
-
-    // Tier 3 needs a real, persistable account dir too — mint it up front
-    // (Claude only; other providers have no seed-from-global detection path
-    // at all, so they fall back to whatever dir was already resolved, same
-    // as before this account-registration change).
-    const minted = p.provider.id === "claude" ? await ensureAccountDir(p.provider.id, p.log, p.existingAccountId) : null;
     const configDir = minted?.dir ?? p.authEnv[p.provider.authConfigDirEnvVar];
 
     const terminalEnv: Record<string, string> = { ...p.authEnv };
