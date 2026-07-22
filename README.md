@@ -53,7 +53,7 @@ Cross-platform (Windows, macOS, Linux). 100% Rust backend (Tokio + Axum). CEF ho
 - **Interagent comms** — `SendMessage` routes one agent's output into another agent's input, so you can build hand-offs and reactive pipelines.
 - **Swarm** — A live two-level agent/subagent tree. Watch delegation chains and every subagent's activity in one view.
 - **Identity bundles** — Named credential sets (GitHub PAT, AWS profile, Anthropic key, etc.), keychain-backed, assigned per agent at launch. Survive renames; swappable without restart.
-- **Reusable presets** — Capture an agent's provider, model, instructions, MCP servers, skills, and environment once and relaunch it as that agent. (Backend: `db_bundles`; surfaced as Presets in the UI.)
+- **Bundles** — Capture an agent's instructions and context files once and reuse them across agents (renamed from "presets"). Backend: `db_bundles`; managed from the Armory tab (hamburger → Armory → Bundles).
 - **Native memory** — Agents read and write their own memory files (`agent:memory:*`). Deeper cross-session memory is actively in development.
 - **One-shot CLIs, AgentMux owns state** — Most provider CLIs are invoked per turn (Subprocess/ACP controllers); Claude Code runs as a persistent stream. Either way AgentMux holds the durable session state, so a 150–350MB Rust core stays flat over long sessions (no GC pauses, no heap growth).
 - **Reducer stack** — A multi-layer reducer architecture (launcher / host / sidecar / frontend) with structured event logs, so "what mutated this state?" has one place to look.
@@ -136,9 +136,8 @@ Every widget is pinned by default — the widget bar shows the full set directly
 
 | Surface | How to reach it |
 |---|---|
-| **Identity** | Tab inside an Agent pane (cog → settings → Identity). Manage the credential bundle assigned to this instance. |
-| **Memory** | Tab inside an Agent pane (cog → settings → Memory). Manage the personality / capability bundle (provider, model, instructions, MCP, skills). Replaces the old Forge concept. |
-| **Settings** | Hamburger menu (≡) in the top tab bar → Settings. Opens `settings.json` in your default editor. |
+| **Agent setup** | Vault icon in an Agent pane's header → Accounts / Memories / MCP Servers / Skills / Startup tabs. Accounts assigns the credential bundle for this instance; Memories browses native memory; MCP Servers and Skills bind agent-private or global entries; Startup selects an Armory Bundle as Session Context's startup instructions. Replaces the old Forge concept. |
+| **Settings** | Hamburger menu (≡) in the top tab bar → Settings. Opens the Settings pane (Appearance, Window & Panes, Terminal, Sounds, Network, Advanced); a footer button opens the raw `settings.json` in your default editor as an escape hatch. |
 | **DevTools** | Hamburger menu (≡) in the top tab bar → DevTools. Toggles Chromium DevTools (no longer a widget). |
 
 ## Agents
