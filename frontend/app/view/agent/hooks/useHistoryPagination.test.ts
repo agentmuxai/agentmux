@@ -275,4 +275,62 @@ describe("useHistoryPagination — cross-block continuation restore (#1397)", ()
         expect(RpcApi.BlockfileLineCountCommand).toHaveBeenCalled();
         expect(model.docEvents.find((e) => e.type === "HistoryRestored")).toBeFalsy();
     });
+
+    it("still widens a stale highWaterMark for an agent-anchored (sourceBlockId=\"\") v2 snapshot reopened on the SAME block (reagent P1 regression)", async () => {
+        // Regression guard: an earlier version of the #1397 fix computed
+        // `needsHwmWidening` as `!sourceMatchesThisBlock`, which treats
+        // sourceBlockId==="" (agent-anchored) as "matches this block" and
+        // skipped the live line-count widening probe entirely for that
+        // case — silently reintroducing a stale-highWaterMark cap on the
+        // pre-existing, common same-block-reopen-after-agent-anchored-write
+        // path this hook already handled correctly before #1397.
+        const snapshot = {
+            schemaVersion: 2,
+            savedAt: "2026-07-22T00:00:00Z",
+            highWaterMark: 5, // stale — real global-zone total is larger
+            sourceBlockId: "", // agent-anchored, not tied to one block
+            documentState: {},
+        };
+        vi.mocked(RpcApi.AgentSessionReadCommand).mockResolvedValue({
+            content: JSON.stringify(snapshot),
+            modts: Date.now() - 3_600_000,
+        });
+        vi.mocked(RpcApi.BlockfileLineCountCommand).mockResolvedValue({ count: 500 });
+        vi.mocked(RpcApi.BlockfileReadRangeCommand).mockResolvedValue({
+            lines: ['{"type":"user","message":{"content":[{"type":"text","text":"hi"}]}}'],
+            total: 500,
+        });
+
+        const model = makeMockModel();
+        createRoot((d) => {
+            dispose = d;
+            useHistoryPagination({
+                blockId: "blk-1", // SAME block the snapshot's read is scoped to
+                model,
+                outputFormat: () => "claude-stream-json",
+                definitionId: "def-claude",
+                log: () => {},
+            });
+        });
+
+        await flushMicrotasks();
+        await flushMicrotasks();
+        await flushMicrotasks();
+
+        // The widening probe must still fire — the stale hwm=5 must NOT be
+        // trusted as-is when the snapshot is agent-anchored, even though
+        // this pane's own blockId matches where the read is scoped.
+        expect(RpcApi.BlockfileLineCountCommand).toHaveBeenCalledWith(
+            {},
+            { block_id: "blk-1", filename: "output" },
+            { timeout: 5000 },
+        );
+        // The widened count (500), not the stale stored hwm (5), must drive
+        // the range read's limit.
+        expect(RpcApi.BlockfileReadRangeCommand).toHaveBeenCalledWith(
+            {},
+            expect.objectContaining({ block_id: "blk-1", filename: "output", limit: 500 }),
+            { timeout: 30_000 },
+        );
+    });
 });
