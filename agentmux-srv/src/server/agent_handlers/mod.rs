@@ -314,6 +314,7 @@ mod recent_sessions_tests {
         let process_tracker = Arc::new(
             crate::backend::process_tracker::registry::AgentProcessRegistry::new(Some(broker.clone())),
         );
+        let process_broker = Arc::new(crate::broker::ProcessBroker::new(Some(broker.clone())));
         let state = AppState {
             auth_key: "test".to_string(),
             version: "test".to_string(),
@@ -343,6 +344,7 @@ mod recent_sessions_tests {
             )),
             lsp_supervisor: Arc::new(crate::backend::lsp::LspSupervisor::new(event_bus.clone())),
             process_tracker,
+            process_broker,
             srv_state: Arc::new(tokio::sync::Mutex::new(crate::state::State::default())),
             srv_events_tx: tokio::sync::broadcast::channel::<agentmux_common::ipc::Event>(64).0,
             saga_id_alloc: Arc::new(std::sync::atomic::AtomicU64::new(0)),
@@ -626,6 +628,7 @@ mod recent_sessions_tests {
         let process_tracker = Arc::new(
             crate::backend::process_tracker::registry::AgentProcessRegistry::new(Some(broker.clone())),
         );
+        let process_broker = Arc::new(crate::broker::ProcessBroker::new(Some(broker.clone())));
         let state = AppState {
             auth_key: "test".to_string(),
             version: "test".to_string(),
@@ -655,6 +658,7 @@ mod recent_sessions_tests {
             )),
             lsp_supervisor: Arc::new(crate::backend::lsp::LspSupervisor::new(event_bus.clone())),
             process_tracker,
+            process_broker,
             srv_state: Arc::new(tokio::sync::Mutex::new(crate::state::State::default())),
             srv_events_tx: tokio::sync::broadcast::channel::<agentmux_common::ipc::Event>(64).0,
             saga_id_alloc: Arc::new(std::sync::atomic::AtomicU64::new(0)),

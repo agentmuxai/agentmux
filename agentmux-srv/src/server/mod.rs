@@ -99,6 +99,11 @@ pub struct AppState {
     /// provides kill-tree on pane close / host exit.
     /// See `backend::process_tracker` + `agentmux-ai/AGENT_SPAWNED_PROCESSES_SPEC.md`.
     pub process_tracker: Arc<crate::backend::process_tracker::registry::AgentProcessRegistry>,
+    /// Process Broker (Phase A) — unified `ProcessStatus` per block, read
+    /// through instead of composing `blockcontroller`/`process_tracker`
+    /// directly at each call site. See `crate::broker::process` and
+    /// `docs/specs/REPORT_PROCESS_ARCHITECTURE_STATE_AND_RETHINK_2026_07_22.md`.
+    pub process_broker: Arc<crate::broker::ProcessBroker>,
     /// Live controller for mDNS-based LAN/host peer discovery. The controller
     /// owns a swappable daemon slot so the `network:lan_discovery` setting can
     /// be toggled at runtime without restarting the process.

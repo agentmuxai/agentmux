@@ -47,17 +47,29 @@ fn register_agent_process_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
 }
 
 fn register_agent_tracked_blocks(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let process_tracker = state.process_tracker.clone();
+    let process_broker = state.process_broker.clone();
     engine.register_handler(
         COMMAND_AGENT_TRACKED_BLOCKS,
         Box::new(move |_data, _ctx| {
-            let process_tracker = process_tracker.clone();
+            let process_broker = process_broker.clone();
             Box::pin(async move {
-                let process_ids = process_tracker.list_all_blocks();
-                let reactive_ids = crate::backend::reactive::get_global_handler().list_active_blocks();
-                let mut seen = std::collections::HashSet::new();
-                let block_ids: Vec<String> = process_ids.into_iter().chain(reactive_ids)
-                    .filter(|id| seen.insert(id.clone()))
+                // Was: `process_tracker.list_all_blocks()` unioned with
+                // `reactive::get_global_handler().list_active_blocks()` — two
+                // structurally different, independently-populated registries
+                // concatenated with no reconciliation (a provider-chain
+                // anti-pattern — see
+                // docs/specs/REPORT_PROCESS_ARCHITECTURE_STATE_AND_RETHINK_2026_07_22.md
+                // §1/§3.0.2). `ProcessBroker::list_agent_panes()` sources
+                // discovery from `blockcontroller::get_all_controllers()`
+                // instead (authoritative for every controller type, closing
+                // the coverage gap the old `process_tracker`-only half had
+                // for `shell`/`acp` blocks) filtered down to agent panes —
+                // `list()` alone would also include plain terminals, which
+                // this RPC's contract has never included (reagent/codex P1).
+                let block_ids: Vec<String> = process_broker
+                    .list_agent_panes()
+                    .into_iter()
+                    .map(|status| status.block_id)
                     .collect();
                 Ok(Some(serde_json::to_value(&AgentTrackedBlocksResult {
                     block_ids,

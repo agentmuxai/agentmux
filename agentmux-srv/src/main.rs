@@ -1032,6 +1032,11 @@ async fn main() {
     backend::process_tracker::registry::set_global(process_tracker.clone());
     backend::process_tracker::registry::spawn_poller(process_tracker.clone());
 
+    // Process Broker (Phase A) — unified read path over blockcontroller +
+    // process_tracker. See docs/specs/REPORT_PROCESS_ARCHITECTURE_STATE_AND_RETHINK_2026_07_22.md.
+    let process_broker = std::sync::Arc::new(crate::broker::ProcessBroker::new(Some(broker.clone())));
+    crate::broker::process::set_global(process_broker.clone());
+
     // Phase E.2 / E.2c.2 — srv reducer plumbing, hoisted out of the
     // (conditional) pipe-IPC bind block so HTTP/WS RPC handlers in
     // dispatch_service can route through the reducer. State, event
@@ -1134,6 +1139,7 @@ async fn main() {
         local_web_url: local_web_url.clone(),
         http_client: reqwest::Client::new(),
         process_tracker,
+        process_broker,
         // Phase E.2c.2 — reducer state + event bus exposed to HTTP/WS
         // dispatch handlers. Workspace handlers route through the
         // reducer and publish events to `srv_events_tx`; the persist
