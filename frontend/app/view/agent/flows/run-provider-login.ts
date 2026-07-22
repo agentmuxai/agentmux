@@ -28,26 +28,35 @@
  *      OAuth flow opens the browser itself from inside the CLI process, and
  *      a piped/PTY spawn has no attached console for that call to succeed
  *      from — see retro-headless-login-browser-open-2026-07-20 §1.
- *   2. `registerSeededAccount` — if no URL was captured, check whether the
- *      user already has a VALID login in their global `~/.claude` (common:
- *      the CLI installed outside AgentMux, or a prior AgentMux session). If
- *      so, mint a real per-account isolated dir, copy the credential into
- *      it, and persist an IdentityAccount row — not just a file in the
- *      shared default dir (PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md
- *      §7, "single point, not global": `identity/resolver.rs`'s spawn gate
- *      now requires a real bound account, no ambient exception). No
- *      browser, no user action, completes in well under a second.
- *      Claude-only (the host command rejects other providers —
- *      `providers.rs`'s `seed_provider_auth_from_global`), so this tier is
- *      skipped for everything else.
- *   3. `openLoginTerminal` — last resort: mint the same kind of per-account
- *      dir, spawn the login command in a REAL visible console window (which
- *      gives the CLI's own browser-open call something to attach to) with
- *      that dir's env var stripped so the login lands in the user's GLOBAL
- *      `~/.claude`, then poll for it to land — same "single point" account
- *      persisted on success. Needs the user to actually finish the OAuth
- *      flow in their browser, so this tier polls for up to 5 minutes
- *      instead of returning immediately.
+ *   2. `seedGlobalLogin` + `persistSeededAccount` — Claude only: check
+ *      whether the user already has a VALID login in their global
+ *      `~/.claude` (common: the CLI installed outside AgentMux, or a prior
+ *      AgentMux session). If so, mint a real per-account isolated dir, copy
+ *      the credential into it, and persist an IdentityAccount row — not
+ *      just a file in the shared default dir
+ *      (PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md §7, "single
+ *      point, not global": `identity/resolver.rs`'s spawn gate now requires
+ *      a real bound account, no ambient exception). No browser, no user
+ *      action, completes in well under a second. Skipped for every other
+ *      provider — the host command rejects them (`providers.rs`'s
+ *      `seed_provider_auth_from_global`), and unlike tier 3 there's no
+ *      substitute strategy for tier 2 specifically; they just fall through.
+ *   3. `openLoginTerminal` — last resort, same real per-account dir minted
+ *      up front for EVERY oauth-class provider (not just Claude). Two
+ *      different completion strategies depending on the provider, since
+ *      only Claude has a seed-from-global capability to fall back on:
+ *        - **Claude**: the dir's env var is stripped so the login lands in
+ *          the user's GLOBAL `~/.claude` instead, then polled via
+ *          `pollForGlobalLoginSeed` until it copies into the isolated dir.
+ *        - **Every other oauth-class provider** (codex, openclaw, gemini,
+ *          copilot): the env var is left pointed AT the isolated dir, so
+ *          the login writes there directly, then polled via
+ *          `pollForCliAuthReady` (asks the CLI's own auth-check command
+ *          whether it's authenticated in that dir) since there's no
+ *          global-login file to watch for. Persisted on success either way
+ *          — same "single point" account. Needs the user to actually
+ *          finish the OAuth flow in their browser, so this tier polls for
+ *          up to 5 minutes instead of returning immediately.
  *
  * Before this existed, tier 1 failing meant `/login` and "Login Again" both
  * dead-ended on an error message telling the user to go click a *different*
@@ -65,7 +74,11 @@ import { pollForGlobalLoginSeed, seedGlobalLogin } from "./seed-global-login";
 import { ensureAccountDir, persistSeededAccount } from "./register-seeded-account";
 
 export interface RunProviderLoginParams extends ForceLoginParams {
-    provider: ForceLoginParams["provider"] & { id: string; authConfigDirEnvVar: string };
+    provider: ForceLoginParams["provider"] & {
+        id: string;
+        authConfigDirEnvVar: string;
+        authCheckCommand: string[];
+    };
     /** Polled during the tier-3 wait; return true to abort early (e.g. the user hit Cancel). */
     isCancelled?: () => boolean;
     /** When set, a newly-registered account (tier 2 or 3) is linked to this
@@ -116,6 +129,43 @@ async function finalizeAccount(
     }
 }
 
+/** Poll `CheckCliAuthCommand` against a login that was told to write
+ *  DIRECTLY into `authEnv`'s isolated dir, until it reports authenticated,
+ *  the deadline passes, or `isCancelled` reports true. The provider-agnostic
+ *  sibling of `pollForGlobalLoginSeed` (seed-global-login.ts) — used for
+ *  every oauth-class provider OTHER than Claude, which has no seed-from-
+ *  global capability at all (`seed_provider_auth_from_global` hard-rejects
+ *  every provider but claude — providers.rs) and so must detect completion
+ *  by asking the CLI itself whether it's authenticated in the dir the login
+ *  was pointed at directly, rather than by watching a global dir get copied. */
+async function pollForCliAuthReady(
+    cliPath: string,
+    authCheckArgs: string[],
+    authEnv: Record<string, string>,
+    isCancelled: () => boolean,
+    opts: { pollMs?: number; timeoutMs?: number } = {},
+): Promise<boolean> {
+    const pollMs = opts.pollMs ?? 5_000;
+    const timeoutMs = opts.timeoutMs ?? 5 * 60 * 1_000;
+    const deadline = performance.now() + timeoutMs;
+    while (performance.now() < deadline) {
+        if (isCancelled()) return false;
+        await new Promise<void>((r) => setTimeout(r, pollMs));
+        if (isCancelled()) return false;
+        try {
+            const result = await RpcApi.CheckCliAuthCommand(
+                TabRpcClient,
+                { cli_path: cliPath, auth_check_args: authCheckArgs, auth_env: authEnv },
+                { timeout: 10000 },
+            );
+            if (result.authenticated) return true;
+        } catch {
+            // keep polling on transient RPC errors
+        }
+    }
+    return false;
+}
+
 export async function runProviderLogin(p: RunProviderLoginParams): Promise<ProviderLoginOutcome> {
     const tier1 = await forceProviderLogin(p);
     if (tier1 === "opened") return "opened";
@@ -129,14 +179,24 @@ export async function runProviderLogin(p: RunProviderLoginParams): Promise<Provi
     // and launch-flow.ts's existing best-effort uses of the same call).
     await getApi().cancelCliLogin().catch(() => {});
 
-    // Mint the account dir ONCE, up front (Claude only; other providers
-    // have no seed-from-global detection path at all) so tier 2 and tier 3
-    // share the SAME account instead of each minting its own — minting
-    // twice left an orphaned, unpersisted account dir behind on disk
-    // whenever tier 2's seed step failed partway through (ensureAccountDir
-    // succeeded, seedGlobalLogin didn't).
-    const minted = p.provider.id === "claude" ? await ensureAccountDir(p.provider.id, p.log) : null;
+    // Mint the account dir ONCE, up front, for EVERY oauth-class provider —
+    // not just Claude. Account minting itself (ensureAccountDir /
+    // persistSeededAccount) has always been provider-agnostic; the backend
+    // RPC it calls (identity.ensureaccountdir) already gates on the real
+    // oauth-class check (resolver::provider_class), so a non-oauth-class id
+    // reaching this function just gets `null` back here, same as before.
+    // A prior version of this code additionally gated the CALL on
+    // `provider.id === "claude"` — reagent P0: that meant a successful
+    // tier-3 terminal login for codex/openclaw never minted or persisted a
+    // real IdentityAccount at all, so the agent reported "Login successful"
+    // but stayed permanently blocked by the resolver's unconditional
+    // oauth-class spawn gate on its very next spawn.
+    const minted = await ensureAccountDir(p.provider.id, p.log);
 
+    // Claude-only: seed-from-global. seed_provider_auth_from_global
+    // hard-rejects every other provider server-side, so this tier is
+    // structurally Claude-specific — not a coverage gap for the others,
+    // just a different tier-3 completion strategy for them, below.
     if (minted && p.provider.id === "claude") {
         p.log("auth", "no login URL captured — checking for an existing global Claude login…");
         if (await seedGlobalLogin(p.provider.id, p.log, minted.dir)) {
@@ -148,10 +208,23 @@ export async function runProviderLogin(p: RunProviderLoginParams): Promise<Provi
     }
 
     p.log("auth", "opening a terminal window for a fresh login…");
-    const configDir = minted?.dir ?? p.authEnv[p.provider.authConfigDirEnvVar];
 
     const terminalEnv: Record<string, string> = { ...p.authEnv };
-    delete terminalEnv[p.provider.authConfigDirEnvVar];
+    const isClaude = p.provider.id === "claude";
+    if (isClaude) {
+        // Claude: strip the isolated dir's env var so the login lands in
+        // the user's GLOBAL ~/.claude instead — seed_provider_auth_from_
+        // global then copies it into the isolated dir once it lands there
+        // (poll below). This is the ONLY provider with that copy-back path.
+        delete terminalEnv[p.provider.authConfigDirEnvVar];
+    } else if (minted) {
+        // Every other oauth-class provider has no seed-from-global
+        // capability to fall back on — instead, let the login write
+        // DIRECTLY into the isolated dir by keeping the env var pointed at
+        // it, and detect completion by asking the CLI itself (below).
+        terminalEnv[p.provider.authConfigDirEnvVar] = minted.dir;
+    }
+
     try {
         await getApi().openLoginTerminal(p.cliPath, p.provider.authLoginCommand, terminalEnv);
     } catch (err: any) {
@@ -161,8 +234,19 @@ export async function runProviderLogin(p: RunProviderLoginParams): Promise<Provi
     p.log("auth", "a terminal window opened — complete the login there");
 
     const isCancelled = p.isCancelled ?? (() => false);
-    const seeded = await pollForGlobalLoginSeed(p.provider.id, configDir, isCancelled);
-    if (!seeded) return "terminal-timeout";
+    if (isClaude) {
+        const configDir = minted?.dir ?? p.authEnv[p.provider.authConfigDirEnvVar];
+        const seeded = await pollForGlobalLoginSeed(p.provider.id, configDir, isCancelled);
+        if (!seeded) return "terminal-timeout";
+    } else if (minted) {
+        const ready = await pollForCliAuthReady(p.cliPath, p.provider.authCheckCommand, terminalEnv, isCancelled);
+        if (!ready) return "terminal-timeout";
+    } else {
+        // Not oauth-class (or the dir mint itself failed) — nothing to poll
+        // for and nothing to persist; the terminal opened, but there's no
+        // way to detect or register a completed login for this call.
+        return "terminal-timeout";
+    }
 
     if (minted) {
         if (await persistSeededAccount(p.provider.id, minted.accountId, minted.dir, p.log)) {
