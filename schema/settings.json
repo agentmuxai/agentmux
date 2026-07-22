@@ -191,12 +191,12 @@
         },
         "voice:engine": {
           "type": "string",
-          "enum": ["whisper", "whisper-local", "webspeech"],
-          "description": "Speech-to-text engine. 'whisper' (default, absent means whisper) captures audio and sends it to the server-side Whisper backend (Groq-hosted); 'whisper-local' uses a local whisper.cpp binary; 'webspeech' uses the browser API (dev / real-Chromium only, not viable in packaged CEF builds). See docs/specs/SPEC_VOICE_STT_ENGINE_2026_06_20.md."
+          "enum": ["groq", "whisper-local", "webspeech"],
+          "description": "Speech-to-text engine. 'groq' (default, absent means groq — agentmux-srv/src/server/voice.rs's resolve_engine) sends captured audio to the hosted Groq Whisper backend; 'whisper-local' uses a local whisper.cpp binary; 'webspeech' uses the browser API (frontend-only opt-in, dev / real-Chromium only, not viable in packaged CEF builds — never reaches the backend). See docs/specs/SPEC_VOICE_STT_ENGINE_2026_06_20.md."
         },
         "voice:groqApiKey": {
           "type": "string",
-          "description": "Groq API key for the hosted Whisper backend (voice:engine = 'whisper'). Read server-side only, never sent to the renderer. The AGENTMUX_GROQ_API_KEY env var takes precedence."
+          "description": "Groq API key for the hosted Whisper backend (voice:engine = 'groq', the default). Read server-side only, never sent to the renderer. The AGENTMUX_GROQ_API_KEY env var takes precedence."
         },
         "voice:whisperCliPath": {
           "type": "string",

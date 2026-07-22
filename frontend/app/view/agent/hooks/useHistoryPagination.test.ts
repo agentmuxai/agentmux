@@ -207,9 +207,10 @@ describe("useHistoryPagination — cross-block continuation restore (#1397)", ()
         });
 
         const model = makeMockModel();
+        let hook!: ReturnType<typeof useHistoryPagination>;
         createRoot((d) => {
             dispose = d;
-            useHistoryPagination({
+            hook = useHistoryPagination({
                 blockId: "blk-NEW",
                 model,
                 outputFormat: () => "claude-stream-json",
@@ -221,6 +222,12 @@ describe("useHistoryPagination — cross-block continuation restore (#1397)", ()
         await flushMicrotasks();
         await flushMicrotasks();
         await flushMicrotasks();
+
+        // A successful cross-block restore must NOT permanently suppress
+        // future snapshot writes from this pane (reagent P1) — its live
+        // state now correctly reflects the full history via the global
+        // zone, so it's safe (and expected) to keep persisting from here.
+        expect(hook.snapshotIsForeignBlock()).toBe(false);
 
         // Fast path taken: line-count widening + range read scoped to THIS
         // (new) block, not a fall-through to legacy NDJSON replay.

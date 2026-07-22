@@ -100,12 +100,19 @@ export interface UseHistoryPagination {
     loadOlder: () => Promise<void>;
     /**
      * True when this pane mounted against a v2 snapshot whose `sourceBlockId`
-     * names a DIFFERENT block (cross-block "structural continuation" — a second
-     * pane for an agent already shown elsewhere). Such a pane is a transient
-     * viewer: it must NOT overwrite the agent-anchored snapshot, or it would
-     * repoint it at its own (near-empty) block and make the original block's
-     * conversation unrestorable. The caller gates `writeSnapshotNow` on this.
-     * Cross-block continuation restore itself is deferred (see spec §15, #1397).
+     * names a DIFFERENT block, AND no `definitionId` was available to resolve
+     * the cross-block fast path (legacy/picker callers only — see
+     * useHistoryPagination.ts's `v2SameBlock`/`isForeignBlock`). Such a pane
+     * fell through to NDJSON replay on its own empty block and has no real
+     * continuity: it must NOT overwrite the agent-anchored snapshot, or it
+     * would repoint it at its own (near-empty) block and make the original
+     * block's conversation unrestorable. The caller gates `writeSnapshotNow`
+     * on this.
+     *
+     * NOT set for a definitionId-bearing cross-block continuation that
+     * successfully restores via the fast path (#1397) — that pane's live
+     * state correctly reflects the full history via the global output zone,
+     * exactly like a same-block reopen, so its writes are safe and expected.
      */
     snapshotIsForeignBlock: Accessor<boolean>;
 }
@@ -267,13 +274,20 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                     // case still falls through to NDJSON replay below. Closes #1397.
                     const v2SameBlock = hasUsableHwm && (sourceMatchesThisBlock || !!opts.definitionId);
                     if (v2SameBlock) {
+                        // NOT calling setSnapshotIsForeignBlock(true) here, even when
+                        // !sourceMatchesThisBlock: that flag means "this pane has no real
+                        // continuity, never let it write" — true for the legacy fallback
+                        // below (no definitionId, falls through to NDJSON on an empty
+                        // block), but no longer true here. This branch just successfully
+                        // restored the FULL cross-block history via the global zone
+                        // (isForeignBlock's widening step below) and applied the
+                        // snapshot's documentState overlay (below), so this pane's live
+                        // state now correctly reflects the ongoing conversation — exactly
+                        // like a same-block reopen. Permanently suppressing writes here
+                        // was reagent's P1 finding on this PR: it silently stopped
+                        // persisting collapsed/pinned nodes, scroll position, and filter
+                        // for every successful cross-block continuation.
                         const isForeignBlock = !sourceMatchesThisBlock;
-                        if (isForeignBlock) {
-                            // This pane didn't write the snapshot's documentState overlay —
-                            // suppress this pane from later clobbering it (see
-                            // setSnapshotIsForeignBlock's own declaration for why).
-                            setSnapshotIsForeignBlock(true);
-                        }
                         // When the snapshot isn't sourced from THIS block (agent-anchored, or
                         // a genuine cross-block continuation), the stored highWaterMark was
                         // written by a *different* block's local line count and can be far
