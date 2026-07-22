@@ -254,6 +254,24 @@ export function useAgentControllerStatus(
         }
     };
 
+    /** Look up the account already bound to THIS agent for `providerId`, if
+     *  any — pass as `runProviderLogin`'s `existingAccountId` so a recovery
+     *  action reuses/refreshes the same account instead of minting and
+     *  orphaning a new one on every retry (the same class of gap reagent
+     *  caught in launch-flow.ts's Phase 2 — this hook's `relogin`/
+     *  `loginViaTerminal` had it too, just never flagged directly since
+     *  neither reported "auth_failed" the same visible way Phase 2 did). */
+    const existingAccountIdFor = async (providerId: string): Promise<string | undefined> => {
+        const agentDefinitionId = getBlockMetaKeyAtom(opts.blockId, "agentId")() as string | undefined;
+        if (!agentDefinitionId) return undefined;
+        try {
+            const links = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, { agent_id: agentDefinitionId });
+            return links.find((l) => l.provider === providerId)?.account_id;
+        } catch {
+            return undefined;
+        }
+    };
+
     /** Auth env for recovery actions: block meta `cmd:env` when present, else rebuilt. */
     const recoveryAuthEnv = async (prov: ProviderDefinition): Promise<Record<string, string>> => {
         const envMeta = getBlockMetaKeyAtom(opts.blockId, "cmd:env")();
@@ -316,6 +334,7 @@ export function useAgentControllerStatus(
                 linkTarget: agentDefinitionId
                     ? { blockId: opts.blockId, agentDefinitionId }
                     : undefined,
+                existingAccountId: await existingAccountIdFor(prov.id),
             });
             switch (outcome) {
                 case "opened":
@@ -378,7 +397,7 @@ export function useAgentControllerStatus(
             // §7), so a bare file-copy into the old shared/resolved dir
             // would leave this agent blocked on its next turn regardless of
             // how valid the credential file itself is.
-            const reg = await registerSeededAccount(prov.id, opts.log);
+            const reg = await registerSeededAccount(prov.id, opts.log, await existingAccountIdFor(prov.id));
             if (reg.ok && reg.accountId && reg.dir) {
                 const agentDefinitionId = getBlockMetaKeyAtom(opts.blockId, "agentId")() as string | undefined;
                 if (agentDefinitionId) {
@@ -481,6 +500,7 @@ export function useAgentControllerStatus(
                 linkTarget: agentDefinitionId
                     ? { blockId: opts.blockId, agentDefinitionId }
                     : undefined,
+                existingAccountId: await existingAccountIdFor(prov.id),
             });
             switch (outcome) {
                 case "opened":
