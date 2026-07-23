@@ -6,7 +6,10 @@
  * opened by the single "Agent setup" (vault) icon in the agent pane
  * header. Consolidates the former two icons (identity + native memory)
  * into one modal with tabs:
- *   - Accounts    — the former Identity panel (AgentIdentityModalPanel).
+ *   - Accounts    — read-only linked-accounts view (AgentIdentityLinksPanel).
+ *                   New bindings are created from the agent-launch flow;
+ *                   see that component's own doc comment for why this tab
+ *                   is not a create/edit surface.
  *   - Memory      — the native-memory browser (AgentNativeMemoryModal).
  *   - MCP Servers — the standalone MCP Server primitive (AgentMcpModal).
  *   - Skills      — the standalone Skill primitive (AgentSkillsModal).
@@ -22,7 +25,7 @@
  */
 
 import { createSignal, For, Show, type JSX } from "solid-js";
-import { AgentIdentityModalPanel } from "./AgentIdentityModal";
+import { AgentIdentityLinksPanel } from "@/app/view/identity/agent-identity-links-panel";
 import { AgentMcpModal } from "./AgentMcpModal";
 import { AgentNativeMemoryModal } from "./AgentNativeMemoryModal";
 import { AgentSkillsModal } from "./AgentSkillsModal";
@@ -32,13 +35,9 @@ import "./AgentSetupModal.scss";
 type SetupTabId = "accounts" | "memory" | "mcp" | "skills" | "startup";
 
 interface AgentSetupModalProps {
-    /** Agent definition for the Accounts tab. Null for quick-launch panes
-     *  with no loadable definition — the Accounts tab shows an empty state. */
-    agent: AgentDefinition | null;
     agentId: string;
     agentName: string;
     workingDirectory: string;
-    blockId: string;
     initialTab?: SetupTabId;
     onClose: () => void;
 }
@@ -93,23 +92,7 @@ export const AgentSetupModal = (props: AgentSetupModalProps): JSX.Element => {
 
             <div class="agent-setup-modal-panel">
                 <Show when={activeTab() === "accounts"}>
-                    <Show
-                        when={props.agent}
-                        fallback={
-                            <div class="agent-setup-modal-empty">
-                                Account assignment is unavailable for this pane — it isn't
-                                backed by a saved agent definition.
-                            </div>
-                        }
-                    >
-                        {(agent) => (
-                            <AgentIdentityModalPanel
-                                agent={agent()}
-                                blockId={props.blockId}
-                                onClose={props.onClose}
-                            />
-                        )}
-                    </Show>
+                    <AgentIdentityLinksPanel agentId={props.agentId} />
                 </Show>
 
                 <Show when={activeTab() === "memory"}>
