@@ -396,9 +396,9 @@ async fn route_command(
         "seed_provider_auth_from_global" => {
             commands::providers::seed_provider_auth_from_global(state, args)
         }
-        "run_cli_login" => commands::platform::run_cli_login(state.clone(), args).await,
-        "cancel_cli_login" => commands::platform::cancel_cli_login(state),
-        "open_login_terminal" => commands::platform::open_login_terminal(args),
+        "run_cli_login" => commands::cli_login::run_cli_login(state.clone(), args).await,
+        "cancel_cli_login" => commands::cli_login::cancel_cli_login(state),
+        "open_login_terminal" => commands::cli_login::open_login_terminal(args),
         "ensure_settings_file" => commands::platform::ensure_settings_file(state),
         "open_in_editor" => commands::platform::open_in_editor(args),
         "copy_file_to_dir" => commands::providers::copy_file_to_dir(args),

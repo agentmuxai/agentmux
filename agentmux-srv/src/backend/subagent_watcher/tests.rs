@@ -1,0 +1,1312 @@
+// Copyright 2025-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+//! Tests for the whole `subagent_watcher` module tree. Kept as one file
+//! (rather than split per-submodule) because most tests share fixture
+//! helpers (`fixture_watcher`, `fixture_state`, `p`, `StubController`) that
+//! cut across the lifecycle/query/scan/jsonl seams, and several tests
+//! (e.g. the `reconcile_stale_subagents`/`scan_session_subagents`
+//! end-to-end cases) deliberately exercise more than one of those layers at
+//! once.
+
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
+
+use super::parse::*;
+use super::types::*;
+use super::*;
+
+fn fixture_watcher() -> SubagentWatcher {
+    let wstore = Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
+    SubagentWatcher::new(Arc::new(EventBus::new()), wstore)
+}
+
+/// Write a minimal terminated subagent JSONL file with an explicit mtime
+/// (`UNIX_EPOCH + offset_secs`), so backfill-ordering tests don't depend
+/// on real wall-clock write speed / filesystem timestamp resolution.
+fn write_agent_file_with_mtime(path: &Path, offset_secs: u64) {
+    use std::io::Write;
+    let mut f = std::fs::File::create(path).unwrap();
+    f.write_all(b"{\"type\":\"result\",\"result\":\"done\"}\n").unwrap();
+    f.set_modified(std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(offset_secs))
+        .unwrap();
+}
+
+fn fixture_state(parent_agent: &str, agent_id: &str, session_id: &str) -> SubagentState {
+    SubagentState {
+        info: SubAgent {
+            agent_id: agent_id.to_string(),
+            slug: String::new(),
+            jsonl_path: String::new(),
+            parent_agent: parent_agent.to_string(),
+            parent_block_id: String::new(),
+            session_id: session_id.to_string(),
+            spawned_at: 0,
+            last_event_at: 0,
+            status: SubAgentStatus::Active,
+            event_count: 0,
+            model: None,
+            dispatch_id: solo_dispatch_id(agent_id),
+            display_name: None,
+            spawned_from_agent_id: None,
+        },
+        file_offset: 0,
+        events: Vec::new(),
+    }
+}
+
+#[test]
+fn unwatch_agent_prunes_only_matching_parent_subagents() {
+    let watcher = fixture_watcher();
+    {
+        let mut sessions = watcher.sessions.lock().unwrap();
+        // Two sessions; session "s1" has subagents from two different
+        // parents, session "s2" has a subagent from a third parent.
+        let mut s1 = SessionWatch { subagents: HashMap::new() };
+        s1.subagents.insert("sub-a".to_string(), fixture_state("parent-1", "sub-a", "s1"));
+        s1.subagents.insert("sub-b".to_string(), fixture_state("parent-2", "sub-b", "s1"));
+        sessions.insert("s1".to_string(), s1);
+
+        let mut s2 = SessionWatch { subagents: HashMap::new() };
+        s2.subagents.insert("sub-c".to_string(), fixture_state("parent-1", "sub-c", "s2"));
+        sessions.insert("s2".to_string(), s2);
+    }
+
+    watcher.unwatch_agent("parent-1");
+
+    let sessions = watcher.sessions.lock().unwrap();
+    // s1: parent-1's subagent gone, parent-2's remains.
+    let s1 = sessions.get("s1").expect("s1 still has parent-2's subagent, should not be dropped");
+    assert!(!s1.subagents.contains_key("sub-a"));
+    assert!(s1.subagents.contains_key("sub-b"));
+    // s2: its only subagent belonged to parent-1, so the whole session
+    // entry is pruned (not left behind as an empty HashMap).
+    assert!(!sessions.contains_key("s2"), "session left with zero subagents must be removed, not left empty");
+}
+
+#[test]
+fn get_info_finds_a_subagent_by_id_without_scanning_the_full_list() {
+    let watcher = fixture_watcher();
+    {
+        let mut sessions = watcher.sessions.lock().unwrap();
+        let mut s1 = SessionWatch { subagents: HashMap::new() };
+        s1.subagents.insert("sub-a".to_string(), fixture_state("parent-1", "sub-a", "s1"));
+        s1.subagents.insert("sub-b".to_string(), fixture_state("parent-1", "sub-b", "s1"));
+        sessions.insert("s1".to_string(), s1);
+    }
+
+    let found = watcher.get_info("sub-b").expect("sub-b should be found");
+    assert_eq!(found.agent_id, "sub-b");
+    assert_eq!(found.parent_agent, "parent-1");
+
+    assert!(watcher.get_info("never-spawned").is_none());
+}
+
+#[test]
+fn set_display_name_updates_info_and_reports_found() {
+    let watcher = fixture_watcher();
+    {
+        let mut sessions = watcher.sessions.lock().unwrap();
+        let mut s1 = SessionWatch { subagents: HashMap::new() };
+        s1.subagents.insert("sub-a".to_string(), fixture_state("parent-1", "sub-a", "s1"));
+        sessions.insert("s1".to_string(), s1);
+    }
+
+    assert!(watcher.set_display_name("sub-a", "Refactor shell module"));
+    let info = watcher.get_info("sub-a").expect("sub-a should be found");
+    assert_eq!(info.display_name.as_deref(), Some("Refactor shell module"));
+}
+
+#[test]
+fn set_display_name_on_unknown_agent_is_noop_and_reports_not_found() {
+    let watcher = fixture_watcher();
+    assert!(!watcher.set_display_name("never-spawned", "Some name"));
+}
+
+#[test]
+fn read_task_prompt_extracts_plain_string_content_from_first_line() {
+    // Pre-existing bug fixed in passing: this and its two sibling tests
+    // below all shared one directory keyed on std::process::id() (constant
+    // for the whole test binary, not per-test) — under parallel test
+    // execution, one test's std::fs::remove_dir_all teardown could race
+    // another's still-in-progress create_dir_all/write/read, producing
+    // flaky failures unrelated to what each test actually exercises.
+    // now_millis() (already used elsewhere in this file for the same
+    // per-test-uniqueness purpose) gives each test its own directory.
+    let dir = std::env::temp_dir().join(format!("amx-test-{}", now_millis()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let jsonl_path = dir.join("agent-prompt-string.jsonl");
+    std::fs::write(
+        &jsonl_path,
+        "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"Analyze the shell module\"}}\n\
+         {\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n",
+    )
+    .unwrap();
+
+    let prompt = read_task_prompt(jsonl_path.to_str().unwrap());
+    assert_eq!(prompt.as_deref(), Some("Analyze the shell module"));
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn read_task_prompt_extracts_joined_text_blocks_from_content_array() {
+    let dir = std::env::temp_dir().join(format!("amx-test-{}", now_millis()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let jsonl_path = dir.join("agent-prompt-array.jsonl");
+    std::fs::write(
+        &jsonl_path,
+        "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Part one\"},{\"type\":\"text\",\"text\":\"Part two\"}]}}\n",
+    )
+    .unwrap();
+
+    let prompt = read_task_prompt(jsonl_path.to_str().unwrap());
+    assert_eq!(prompt.as_deref(), Some("Part one\nPart two"));
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn read_task_prompt_returns_none_when_first_line_is_not_a_user_record() {
+    let dir = std::env::temp_dir().join(format!("amx-test-{}", now_millis()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let jsonl_path = dir.join("agent-prompt-none.jsonl");
+    std::fs::write(
+        &jsonl_path,
+        "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n",
+    )
+    .unwrap();
+
+    assert!(read_task_prompt(jsonl_path.to_str().unwrap()).is_none());
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn unwatch_agent_on_unknown_agent_is_noop() {
+    let watcher = fixture_watcher();
+    {
+        let mut sessions = watcher.sessions.lock().unwrap();
+        let mut s1 = SessionWatch { subagents: HashMap::new() };
+        s1.subagents.insert("sub-a".to_string(), fixture_state("parent-1", "sub-a", "s1"));
+        sessions.insert("s1".to_string(), s1);
+    }
+
+    watcher.unwatch_agent("never-watched");
+
+    let sessions = watcher.sessions.lock().unwrap();
+    assert!(sessions.get("s1").unwrap().subagents.contains_key("sub-a"));
+}
+
+fn fixture_state_for_block(parent_block_id: &str, agent_id: &str, session_id: &str) -> SubagentState {
+    let mut state = fixture_state("some-agent", agent_id, session_id);
+    state.info.parent_block_id = parent_block_id.to_string();
+    state
+}
+
+fn fixture_dispatch_state(dispatch_id: &str, parent_block_id: &str) -> DispatchState {
+    DispatchState {
+        info: AgentDispatch {
+            dispatch_id: dispatch_id.to_string(),
+            kind: DispatchKind::Workflow,
+            parent_agent: "some-agent".to_string(),
+            parent_block_id: parent_block_id.to_string(),
+            session_id: "s1".to_string(),
+            member_count: 1,
+            members_done: 0,
+            status: DispatchStatus::Running,
+            last_event_at: 0,
+            dispatch_name: None,
+        },
+        journal_offset: 0,
+        journal_started: 0,
+        journal_results: 0,
+        member_files: 0,
+        members_completed: 0,
+    }
+}
+
+#[test]
+fn prune_block_prunes_only_matching_parent_block_subagents() {
+    let watcher = fixture_watcher();
+    {
+        let mut sessions = watcher.sessions.lock().unwrap();
+        let mut s1 = SessionWatch { subagents: HashMap::new() };
+        s1.subagents.insert("sub-a".to_string(), fixture_state_for_block("block-1", "sub-a", "s1"));
+        s1.subagents.insert("sub-b".to_string(), fixture_state_for_block("block-2", "sub-b", "s1"));
+        sessions.insert("s1".to_string(), s1);
+
+        let mut s2 = SessionWatch { subagents: HashMap::new() };
+        s2.subagents.insert("sub-c".to_string(), fixture_state_for_block("block-1", "sub-c", "s2"));
+        sessions.insert("s2".to_string(), s2);
+    }
+
+    let pruned = watcher.prune_block("block-1");
+    assert!(pruned);
+
+    let sessions = watcher.sessions.lock().unwrap();
+    let s1 = sessions.get("s1").expect("s1 still has block-2's subagent, should not be dropped");
+    assert!(!s1.subagents.contains_key("sub-a"));
+    assert!(s1.subagents.contains_key("sub-b"));
+    assert!(!sessions.contains_key("s2"), "session left with zero subagents must be removed, not left empty");
+}
+
+#[test]
+fn prune_block_prunes_matching_dispatches_and_leaves_others() {
+    let watcher = fixture_watcher();
+    {
+        let mut dispatches = watcher.dispatches.lock().unwrap();
+        dispatches.insert("wf_1".to_string(), fixture_dispatch_state("wf_1", "block-1"));
+        dispatches.insert("wf_2".to_string(), fixture_dispatch_state("wf_2", "block-2"));
+    }
+
+    let pruned = watcher.prune_block("block-1");
+    assert!(pruned);
+
+    let dispatches = watcher.dispatches.lock().unwrap();
+    assert!(!dispatches.contains_key("wf_1"));
+    assert!(dispatches.contains_key("wf_2"));
+}
+
+#[test]
+fn prune_block_prunes_matching_pending_activity_and_leaves_others() {
+    let watcher = fixture_watcher();
+    {
+        let mut pending = watcher.pending_activity.lock().unwrap();
+        pending.insert("wf_1".to_string(), PendingDispatchActivity::new("some-agent", "block-1", "s1"));
+        pending.insert("wf_2".to_string(), PendingDispatchActivity::new("some-agent", "block-2", "s1"));
+    }
+
+    let pruned = watcher.prune_block("block-1");
+    assert!(pruned);
+
+    let pending = watcher.pending_activity.lock().unwrap();
+    assert!(!pending.contains_key("wf_1"));
+    assert!(pending.contains_key("wf_2"));
+}
+
+#[test]
+fn prune_block_on_unknown_block_is_noop_and_returns_false() {
+    let watcher = fixture_watcher();
+    {
+        let mut sessions = watcher.sessions.lock().unwrap();
+        let mut s1 = SessionWatch { subagents: HashMap::new() };
+        s1.subagents.insert("sub-a".to_string(), fixture_state_for_block("block-1", "sub-a", "s1"));
+        sessions.insert("s1".to_string(), s1);
+    }
+
+    let pruned = watcher.prune_block("never-tracked");
+    assert!(!pruned);
+
+    let sessions = watcher.sessions.lock().unwrap();
+    assert!(sessions.get("s1").unwrap().subagents.contains_key("sub-a"));
+}
+
+#[test]
+fn unwatch_agent_also_prunes_matching_dispatches_and_pending_activity() {
+    let watcher = fixture_watcher();
+    {
+        let mut dispatches = watcher.dispatches.lock().unwrap();
+        let mut d1 = fixture_dispatch_state("wf_1", "block-1");
+        d1.info.parent_agent = "parent-1".to_string();
+        dispatches.insert("wf_1".to_string(), d1);
+        let mut d2 = fixture_dispatch_state("wf_2", "block-2");
+        d2.info.parent_agent = "parent-2".to_string();
+        dispatches.insert("wf_2".to_string(), d2);
+    }
+    {
+        let mut pending = watcher.pending_activity.lock().unwrap();
+        pending.insert("wf_1".to_string(), PendingDispatchActivity::new("parent-1", "block-1", "s1"));
+        pending.insert("wf_2".to_string(), PendingDispatchActivity::new("parent-2", "block-2", "s1"));
+    }
+
+    watcher.unwatch_agent("parent-1");
+
+    let dispatches = watcher.dispatches.lock().unwrap();
+    assert!(!dispatches.contains_key("wf_1"));
+    assert!(dispatches.contains_key("wf_2"));
+
+    let pending = watcher.pending_activity.lock().unwrap();
+    assert!(!pending.contains_key("wf_1"));
+    assert!(pending.contains_key("wf_2"));
+}
+
+#[test]
+fn subagent_events_are_capped_at_max() {
+    let mut state = fixture_state("parent-1", "sub-a", "s1");
+    // Simulate what process_jsonl_change's push+trim loop does, without
+    // going through real JSONL files.
+    for i in 0..(MAX_SUBAGENT_EVENTS + 100) {
+        state.info.event_count += 1;
+        state.events.push(SubagentEvent {
+            agent_id: "sub-a".to_string(),
+            event_type: SubagentEventType::Text { content: i.to_string() },
+            timestamp: i as u64,
+        });
+    }
+    if state.events.len() > MAX_SUBAGENT_EVENTS {
+        let excess = state.events.len() - MAX_SUBAGENT_EVENTS;
+        state.events.drain(..excess);
+    }
+
+    assert_eq!(state.events.len(), MAX_SUBAGENT_EVENTS);
+    // event_count kept the true cumulative total despite truncation.
+    assert_eq!(state.info.event_count, MAX_SUBAGENT_EVENTS + 100);
+    // Oldest events were dropped — the retained window is the newest ones.
+    let SubagentEventType::Text { content } = &state.events[0].event_type else {
+        panic!("expected Text event");
+    };
+    assert_eq!(content, "100"); // first 100 (0..100) were trimmed away
+}
+
+#[test]
+fn parse_event_type_result_line_with_content() {
+    let value: serde_json::Value =
+        serde_json::from_str(r#"{"type":"result","result":"final answer"}"#).unwrap();
+    let parsed = parse_event_type(&value);
+    assert!(matches!(
+        parsed,
+        Some(SubagentEventType::Result { content }) if content == "final answer"
+    ));
+}
+
+#[test]
+fn parse_event_type_result_line_without_content_falls_back() {
+    // Real Claude Code result events always populate `result`/`content`;
+    // this fallback only exists for malformed/unexpected lines.
+    let value: serde_json::Value = serde_json::from_str(r#"{"type":"result"}"#).unwrap();
+    let parsed = parse_event_type(&value);
+    assert!(matches!(
+        parsed,
+        Some(SubagentEventType::Result { content }) if content == "Subagent completed"
+    ));
+}
+
+#[test]
+fn process_jsonl_change_marks_completed_on_result_event() {
+    let dir = std::env::temp_dir().join(format!("amx-subagent-test-{}", now_millis()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let jsonl_path = dir.join("agent-sub-a.jsonl");
+    std::fs::write(
+        &jsonl_path,
+        concat!(
+            "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n",
+            "{\"type\":\"result\",\"result\":\"final answer\"}\n",
+        ),
+    )
+    .unwrap();
+
+    let watcher = fixture_watcher();
+    watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, true);
+
+    {
+        let sessions = watcher.sessions.lock().unwrap();
+        let session = sessions.values().next().expect("session recorded");
+        let state = session.subagents.get("sub-a").expect("subagent recorded");
+        assert_eq!(state.info.status, SubAgentStatus::Completed);
+        assert!(matches!(
+            state.events.last().unwrap().event_type,
+            SubagentEventType::Result { .. }
+        ));
+    }
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn process_jsonl_change_stays_active_without_result_event() {
+    let dir = std::env::temp_dir().join(format!("amx-subagent-test-active-{}", now_millis()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let jsonl_path = dir.join("agent-sub-b.jsonl");
+    std::fs::write(
+        &jsonl_path,
+        "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"still working\"}]}}\n",
+    )
+    .unwrap();
+
+    let watcher = fixture_watcher();
+    watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, true);
+
+    {
+        let sessions = watcher.sessions.lock().unwrap();
+        let session = sessions.values().next().expect("session recorded");
+        let state = session.subagents.get("sub-b").expect("subagent recorded");
+        assert_eq!(state.info.status, SubAgentStatus::Active);
+    }
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+// ── AgentDispatch (SPEC_AGENT_DISPATCH_SUBAGENT_HIERARCHY_2026_07_17) ──
+
+#[test]
+fn process_jsonl_change_parses_spawned_from_agent_id_from_parent_uuid() {
+    // Empirically null in every real transcript checked (SPEC §9.2), but
+    // the field is captured defensively — verify it round-trips when
+    // present so a future real occurrence isn't silently dropped.
+    let dir = std::env::temp_dir().join(format!("amx-subagent-parentuuid-{}", now_millis()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let jsonl_path = dir.join("agent-child-a.jsonl");
+    std::fs::write(
+        &jsonl_path,
+        "{\"parentUuid\":\"parent-turn-uuid-123\",\"agentId\":\"child-a\",\"type\":\"user\"}\n",
+    )
+    .unwrap();
+
+    let watcher = fixture_watcher();
+    watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, true);
+
+    let sessions = watcher.sessions.lock().unwrap();
+    let session = sessions.values().next().expect("session recorded");
+    let state = session.subagents.get("child-a").expect("subagent recorded");
+    assert_eq!(
+        state.info.spawned_from_agent_id.as_deref(),
+        Some("parent-turn-uuid-123")
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn process_jsonl_change_leaves_spawned_from_agent_id_none_when_parent_uuid_is_null() {
+    let dir = std::env::temp_dir().join(format!("amx-subagent-parentuuid-null-{}", now_millis()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let jsonl_path = dir.join("agent-child-b.jsonl");
+    std::fs::write(
+        &jsonl_path,
+        "{\"parentUuid\":null,\"agentId\":\"child-b\",\"type\":\"user\"}\n",
+    )
+    .unwrap();
+
+    let watcher = fixture_watcher();
+    watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, true);
+
+    let sessions = watcher.sessions.lock().unwrap();
+    let session = sessions.values().next().expect("session recorded");
+    let state = session.subagents.get("child-b").expect("subagent recorded");
+    assert_eq!(state.info.spawned_from_agent_id, None);
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn list_dispatches_synthesizes_a_solo_dispatch_for_a_loose_subagent() {
+    let dir = std::env::temp_dir().join(format!("amx-solo-dispatch-{}", now_millis()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let jsonl_path = dir.join("agent-solo-a.jsonl");
+    std::fs::write(
+        &jsonl_path,
+        "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n",
+    )
+    .unwrap();
+
+    let watcher = fixture_watcher();
+    watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, true);
+
+    let dispatches = watcher.list_dispatches();
+    assert_eq!(dispatches.len(), 1, "one solo dispatch, synthesized on demand");
+    let d = &dispatches[0];
+    assert_eq!(d.dispatch_id, "solo:solo-a");
+    assert_eq!(d.kind, DispatchKind::Solo);
+    assert_eq!(d.member_count, 1);
+    assert_eq!(d.members_done, 0, "still active, not yet completed");
+    assert_eq!(d.status, DispatchStatus::Running);
+
+    // The same dispatch_id is stamped on the member itself.
+    let active = watcher.list_active();
+    assert_eq!(active.len(), 1);
+    assert_eq!(active[0].dispatch_id, "solo:solo-a");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn list_dispatches_marks_solo_dispatch_done_once_its_member_completes() {
+    let dir = std::env::temp_dir().join(format!("amx-solo-dispatch-done-{}", now_millis()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let jsonl_path = dir.join("agent-solo-b.jsonl");
+    std::fs::write(&jsonl_path, "{\"type\":\"result\",\"result\":\"done\"}\n").unwrap();
+
+    let watcher = fixture_watcher();
+    watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, true);
+
+    let dispatches = watcher.list_dispatches();
+    assert_eq!(dispatches.len(), 1);
+    assert_eq!(dispatches[0].members_done, 1);
+    assert_eq!(dispatches[0].status, DispatchStatus::Completed);
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn list_dispatches_includes_a_tracked_workflow_dispatch_from_its_journal() {
+    let dir = std::env::temp_dir().join(format!("amx-workflow-dispatch-{}", now_millis()));
+    let run_dir = dir.join("subagents").join("workflows").join("wf_xyz789");
+    std::fs::create_dir_all(&run_dir).unwrap();
+    let journal_path = run_dir.join("journal.jsonl");
+    std::fs::write(
+        &journal_path,
+        concat!(
+            "{\"type\":\"started\",\"agent_id\":\"m1\"}\n",
+            "{\"type\":\"started\",\"agent_id\":\"m2\"}\n",
+        ),
+    )
+    .unwrap();
+
+    let watcher = fixture_watcher();
+    watcher.process_journal_change("parent-1", "block-1", &journal_path);
+
+    let dispatches = watcher.list_dispatches();
+    assert_eq!(dispatches.len(), 1);
+    let d = &dispatches[0];
+    assert_eq!(d.dispatch_id, "wf_xyz789");
+    assert_eq!(d.kind, DispatchKind::Workflow);
+    assert_eq!(d.member_count, 2);
+    assert_eq!(d.members_done, 0);
+    assert_eq!(d.status, DispatchStatus::Running);
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn workflow_member_activity_is_buffered_not_broadcast_immediately() {
+    // SPEC §7: a Workflow-kind member's new events are coalesced into
+    // pending_activity, not broadcast per-member — the direct fix for
+    // the crash-storm mechanism in
+    // docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md.
+    let dir = std::env::temp_dir().join(format!("amx-coalesce-{}", now_millis()));
+    let run_dir = dir.join("subagents").join("workflows").join("wf_coalesce1");
+    std::fs::create_dir_all(&run_dir).unwrap();
+    let jsonl_path = run_dir.join("agent-member-a.jsonl");
+    std::fs::write(
+        &jsonl_path,
+        "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"working\"}]}}\n",
+    )
+    .unwrap();
+
+    let watcher = fixture_watcher();
+    watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, true);
+
+    {
+        let pending = watcher.pending_activity.lock().unwrap();
+        let buffered = pending.get("wf_coalesce1").expect("activity buffered for this dispatch");
+        assert_eq!(buffered.members.len(), 1);
+        assert_eq!(buffered.members[0].0, "member-a");
+    }
+
+    // Flushing drains the buffer.
+    watcher.flush_pending_dispatch_activity();
+    {
+        let pending = watcher.pending_activity.lock().unwrap();
+        assert!(pending.is_empty(), "flush must drain every dispatch's buffer");
+    }
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Issue: SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 Phase A —
+/// a Workflow dispatch's `dispatch_id` is shared by every member, so
+/// `naming_triggered` must claim it exactly once, on the first member's
+/// live `is_new`, not once per member. `fixture_watcher()` has no
+/// `self_ref` (built via bare `new()`), so `trigger_eager_naming` itself
+/// no-ops after the gate — this test only exercises the synchronous
+/// gating logic in `process_jsonl_change`, not the async Haiku call.
+#[test]
+fn process_jsonl_change_claims_naming_triggered_once_per_workflow_not_once_per_member() {
+    let dir = std::env::temp_dir().join(format!("amx-naming-wf-{}", now_millis()));
+    let run_dir = dir.join("subagents").join("workflows").join("wf_naming1");
+    std::fs::create_dir_all(&run_dir).unwrap();
+
+    let watcher = fixture_watcher();
+    assert!(!watcher.naming_triggered_contains("wf_naming1"));
+
+    for member in ["member-a", "member-b"] {
+        let jsonl_path = run_dir.join(format!("agent-{member}.jsonl"));
+        std::fs::write(
+            &jsonl_path,
+            "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n",
+        )
+        .unwrap();
+        watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, true);
+    }
+
+    // Claimed after the FIRST member's live is_new — this is the
+    // dedup key that keeps the eventual Haiku call to exactly one per
+    // dispatch regardless of member count.
+    assert!(watcher.naming_triggered_contains("wf_naming1"));
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Issue: SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 Phase A —
+/// the non-negotiable backfill guard: `live=false` (the exact value
+/// `scan_subagents_dir`'s cold-backfill replay passes) must never claim
+/// `naming_triggered`, even though `is_new` is still true for a file the
+/// in-memory `sessions` map has never seen before (which is the whole
+/// backfill mechanism). Without this, every srv restart / pane reopen
+/// against a long-lived session would re-fire a Haiku call for every
+/// dispatch replayed from history — the exact incident class in
+/// docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md, just for
+/// Haiku spend instead of WS broadcast volume.
+#[test]
+fn process_jsonl_change_never_claims_naming_triggered_during_backfill_replay() {
+    let dir = std::env::temp_dir().join(format!("amx-naming-backfill-{}", now_millis()));
+    let subagents_dir = dir.join("subagents");
+    std::fs::create_dir_all(&subagents_dir).unwrap();
+    let jsonl_path = subagents_dir.join("agent-replayed.jsonl");
+    std::fs::write(
+        &jsonl_path,
+        "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n",
+    )
+    .unwrap();
+
+    let watcher = fixture_watcher();
+    watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, false);
+
+    assert!(
+        !watcher.naming_triggered_contains("solo:replayed"),
+        "backfill replay (live=false) must never claim naming_triggered"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+fn p(s: &str) -> PathBuf {
+    PathBuf::from(s.replace('/', std::path::MAIN_SEPARATOR_STR))
+}
+
+#[test]
+fn workflow_id_from_nested_member_path() {
+    let path = p("projects/ws/sess-1/subagents/workflows/wf_abc123/agent-a1.jsonl");
+    assert_eq!(parse_workflow_id(&path), Some("wf_abc123".to_string()));
+}
+
+#[test]
+fn workflow_id_from_journal_path() {
+    let path = p("projects/ws/sess-1/subagents/workflows/wf_abc123/journal.jsonl");
+    assert_eq!(parse_workflow_id(&path), Some("wf_abc123".to_string()));
+}
+
+#[test]
+fn workflow_id_none_for_direct_subagent() {
+    let path = p("projects/ws/subagents/agent-a1.jsonl");
+    assert_eq!(parse_workflow_id(&path), None);
+}
+
+#[test]
+fn workflow_id_none_for_stray_file_in_workflows_dir() {
+    let path = p("projects/ws/subagents/workflows/agent-a1.jsonl");
+    assert_eq!(parse_workflow_id(&path), None);
+}
+
+#[test]
+fn session_id_flat_layout() {
+    let path = p("projects/proj-enc/subagents/agent-a1.jsonl");
+    assert_eq!(derive_session_id(&path), "proj-enc");
+}
+
+#[test]
+fn nearest_existing_ancestor_finds_first_existing_parent() {
+    // Must live under the home dir — nearest_existing_ancestor's floor
+    // (see its doc comment) would otherwise reject the whole path before
+    // ever reaching `dir`. std::env::temp_dir() is NOT reliably under
+    // home (e.g. plain /tmp on Linux CI runners), so build the temp path
+    // from home_dir() directly.
+    let home = dirs::home_dir().expect("test requires a resolvable home dir");
+    let dir = home.join(format!("amx-ancestor-test-{}", now_millis()));
+    std::fs::create_dir_all(&dir).unwrap();
+
+    // dir exists; dir/a/b/c does not.
+    let missing = dir.join("a").join("b").join("c");
+    assert_eq!(nearest_existing_ancestor(&missing), Some(dir.clone()));
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn nearest_existing_ancestor_returns_none_for_a_root_that_does_not_exist() {
+    // A path with no ancestors at all (bare filename) has nothing to
+    // walk up to — real callers always pass an absolute config dir, but
+    // the function must not panic on this input.
+    assert_eq!(nearest_existing_ancestor(Path::new("bare-name")), None);
+}
+
+/// Regression test for reagent's finding on PR #2008: without a floor,
+/// a path whose entire ancestor chain up to and including the home
+/// directory is missing would walk PAST home — risking a
+/// `notify::Watcher::watch` recursive walk of an enormous, unrelated
+/// tree. Must return None instead once the walk would have to cross the
+/// home directory boundary.
+#[test]
+fn nearest_existing_ancestor_never_walks_above_the_home_directory() {
+    let home = dirs::home_dir().expect("test requires a resolvable home dir");
+    // Every ancestor from `missing` up through (and including) `home`
+    // is guaranteed nonexistent (home itself always exists — it's the
+    // real user's home dir — so nest deep enough that none of the
+    // intermediate synthetic segments exist either).
+    let missing = home
+        .join("amx-never-created-1")
+        .join("amx-never-created-2")
+        .join("amx-never-created-3");
+    // `home` itself exists, so the walk finds it — proving the floor is
+    // inclusive of home, not exclusive.
+    assert_eq!(nearest_existing_ancestor(&missing), Some(home));
+}
+
+/// Regression test for the observed bug: an agent without an explicit
+/// per-identity bundle override launches under the shared default auth
+/// dir (`~/.agentmux/shared/providers/claude/`), not
+/// `derive_claude_config_dir`'s `~/.config/claude-<agent_id>` guess.
+/// `resolve_claude_config_dir` must prefer the block's real `cmd:env`
+/// over that guess whenever it's actually set.
+#[test]
+fn resolve_claude_config_dir_prefers_cmd_env_over_the_legacy_guess() {
+    let mut meta = crate::backend::obj::MetaMapType::new();
+    meta.insert(
+        "cmd:env".to_string(),
+        serde_json::json!({ "CLAUDE_CONFIG_DIR": "/agentmux/shared/providers/claude" }),
+    );
+
+    let resolved = resolve_claude_config_dir(&meta, "some-agent").unwrap();
+    assert_eq!(resolved, PathBuf::from("/agentmux/shared/providers/claude"));
+}
+
+#[test]
+fn resolve_claude_config_dir_falls_back_to_the_legacy_guess_when_cmd_env_is_absent() {
+    let meta = crate::backend::obj::MetaMapType::new();
+    let resolved = resolve_claude_config_dir(&meta, "SomeAgent").unwrap();
+    assert_eq!(resolved, derive_claude_config_dir("SomeAgent").unwrap());
+}
+
+#[test]
+fn resolve_claude_config_dir_falls_back_when_cmd_env_lacks_the_key() {
+    let mut meta = crate::backend::obj::MetaMapType::new();
+    // cmd:env is present but doesn't carry CLAUDE_CONFIG_DIR (e.g. a
+    // non-Claude provider, or a race before the key is written).
+    meta.insert("cmd:env".to_string(), serde_json::json!({ "OTHER_VAR": "x" }));
+
+    let resolved = resolve_claude_config_dir(&meta, "SomeAgent").unwrap();
+    assert_eq!(resolved, derive_claude_config_dir("SomeAgent").unwrap());
+}
+
+#[tokio::test]
+async fn watch_agent_falls_back_to_nearest_existing_ancestor_when_config_dir_is_missing() {
+    // Regression test for the observed bug: watch_agent() is called from
+    // the reactive-register handshake, which fires well before the CLI
+    // process has created CLAUDE_CONFIG_DIR on disk. Watching a
+    // nonexistent path used to fail outright with no retry, permanently
+    // disabling subagent tracking for that agent's whole session.
+    // Must live under the home dir — nearest_existing_ancestor's floor
+    // would otherwise reject this path outright on platforms where
+    // std::env::temp_dir() isn't under home (e.g. plain /tmp on Linux
+    // CI runners).
+    let home = dirs::home_dir().expect("test requires a resolvable home dir");
+    let root = home.join(format!("amx-watch-fallback-test-{}", now_millis()));
+    std::fs::create_dir_all(&root).unwrap(); // ancestor exists...
+    let config_dir = root.join("claude-testagent"); // ...but this does not.
+    assert!(!config_dir.exists());
+
+    let watcher = Arc::new(fixture_watcher());
+    watcher.watch_agent("test-agent", "block-1", config_dir.clone());
+
+    // watch_agent must have succeeded (registered itself) instead of
+    // bailing out — the old behavior returned early on the failed
+    // notify::watch() call, before ever reaching this point.
+    assert_eq!(watcher.watched_agents.lock().unwrap().len(), 1);
+
+    std::fs::remove_dir_all(&root).ok();
+}
+
+/// Regression test for the observed flood: reopening a pane for an
+/// agent identity that has spawned subagents across many past sessions
+/// (in this project) must only backfill the ONE session being resumed,
+/// not every session the identity has ever run.
+#[test]
+fn scan_session_subagents_only_backfills_the_named_session() {
+    let config_dir = std::env::temp_dir()
+        .join(format!("amx-scan-session-test-{}", now_millis()));
+    let target_session = "target-session-uuid";
+    let other_session = "other-session-uuid";
+
+    let target_dir = config_dir
+        .join("projects")
+        .join("ws-enc")
+        .join(target_session)
+        .join("subagents");
+    let other_dir = config_dir
+        .join("projects")
+        .join("ws-enc")
+        .join(other_session)
+        .join("subagents");
+    std::fs::create_dir_all(&target_dir).unwrap();
+    std::fs::create_dir_all(&other_dir).unwrap();
+
+    std::fs::write(
+        target_dir.join("agent-wanted.jsonl"),
+        "{\"type\":\"result\",\"result\":\"done\"}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        other_dir.join("agent-unwanted.jsonl"),
+        "{\"type\":\"result\",\"result\":\"done\"}\n",
+    )
+    .unwrap();
+
+    let watcher = fixture_watcher();
+    watcher.scan_session_subagents("parent-1", "block-1", &config_dir, target_session);
+
+    let active = watcher.list_active();
+    assert_eq!(active.len(), 1, "only the target session's subagent should be backfilled");
+    assert_eq!(active[0].agent_id, "wanted");
+    assert_eq!(active[0].session_id, target_session);
+
+    std::fs::remove_dir_all(&config_dir).ok();
+}
+
+#[test]
+fn scan_session_subagents_is_a_noop_for_an_unknown_session_id() {
+    let config_dir = std::env::temp_dir()
+        .join(format!("amx-scan-session-unknown-test-{}", now_millis()));
+    let existing_dir = config_dir
+        .join("projects")
+        .join("ws-enc")
+        .join("some-other-session")
+        .join("subagents");
+    std::fs::create_dir_all(&existing_dir).unwrap();
+    std::fs::write(
+        existing_dir.join("agent-a.jsonl"),
+        "{\"type\":\"result\",\"result\":\"done\"}\n",
+    )
+    .unwrap();
+
+    let watcher = fixture_watcher();
+    watcher.scan_session_subagents("parent-1", "block-1", &config_dir, "never-existed");
+
+    assert!(watcher.list_active().is_empty(), "unknown session id must not fall back to scanning everything");
+
+    std::fs::remove_dir_all(&config_dir).ok();
+}
+
+// ── scan_subagents_dir backfill cap (docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md) ──
+//
+// A long-lived pane's subagents/ directory accumulates forever; without a
+// cap, every cold backfill (pane reopen, srv restart) replays the WHOLE
+// history — a live incident hit 1,000+ replayed files across three
+// back-to-back srv crash-restarts in under 10 seconds. These tests lock
+// in the fix: the cap applies regardless of corpus size, and it always
+// keeps the most RECENT files, not an arbitrary subset.
+
+#[test]
+fn scan_subagents_dir_caps_cold_backfill_to_the_most_recent_files() {
+    let config_dir = std::env::temp_dir()
+        .join(format!("amx-scan-backfill-cap-test-{}", now_millis()));
+    let session_id = "backfill-cap-session";
+    let subagents_dir = config_dir
+        .join("projects")
+        .join("ws-enc")
+        .join(session_id)
+        .join("subagents");
+    std::fs::create_dir_all(&subagents_dir).unwrap();
+
+    // One more file than the cap, mtimes strictly increasing by index —
+    // "newest BACKFILL_MAX_FILES" is unambiguous regardless of directory
+    // enumeration order.
+    let total = BACKFILL_MAX_FILES + 1;
+    for i in 0..total {
+        let path = subagents_dir.join(format!("agent-id{i:04}.jsonl"));
+        write_agent_file_with_mtime(&path, i as u64);
+    }
+
+    let watcher = fixture_watcher();
+    watcher.scan_session_subagents("parent-1", "block-1", &config_dir, session_id);
+
+    let active = watcher.list_active();
+    assert_eq!(
+        active.len(),
+        BACKFILL_MAX_FILES,
+        "cold backfill must not replay more than the cap regardless of corpus size"
+    );
+    assert!(
+        !active.iter().any(|a| a.agent_id == "id0000"),
+        "the single oldest file must be the one dropped"
+    );
+    assert!(
+        active
+            .iter()
+            .any(|a| a.agent_id == format!("id{:04}", total - 1)),
+        "the newest file must always survive the cap"
+    );
+
+    std::fs::remove_dir_all(&config_dir).ok();
+}
+
+#[test]
+fn scan_subagents_dir_processes_workflow_journal_even_beyond_the_member_cap() {
+    let config_dir = std::env::temp_dir()
+        .join(format!("amx-scan-backfill-journal-test-{}", now_millis()));
+    let session_id = "backfill-journal-session";
+    let run_dir = config_dir
+        .join("projects")
+        .join("ws-enc")
+        .join(session_id)
+        .join("subagents")
+        .join("workflows")
+        .join("wf_test-run");
+    std::fs::create_dir_all(&run_dir).unwrap();
+
+    // More member files than the cap — the cap must still apply here...
+    let total = BACKFILL_MAX_FILES + 5;
+    for i in 0..total {
+        let path = run_dir.join(format!("agent-id{i:04}.jsonl"));
+        write_agent_file_with_mtime(&path, i as u64);
+    }
+    // ...but the run's journal (one small file, not one per member) is
+    // always processed regardless — it drives `workflow:updated`/run
+    // status, which must stay accurate even when membership is capped.
+    std::fs::write(
+        run_dir.join("journal.jsonl"),
+        "{\"type\":\"started\",\"agent_id\":\"id0000\"}\n",
+    )
+    .unwrap();
+
+    let watcher = fixture_watcher();
+    watcher.scan_session_subagents("parent-1", "block-1", &config_dir, session_id);
+
+    assert_eq!(
+        watcher.list_active().len(),
+        BACKFILL_MAX_FILES,
+        "member files are still capped inside a workflow run"
+    );
+    let dispatches = watcher.list_dispatches();
+    assert_eq!(dispatches.len(), 1, "the run's journal must still be processed");
+    assert_eq!(dispatches[0].dispatch_id, "wf_test-run");
+
+    std::fs::remove_dir_all(&config_dir).ok();
+}
+
+// ── reconcile_stale_subagents ─────────────────────────────────────────
+//
+// A stub `Controller` so these tests can control what
+// `get_block_controller_status` reports without spinning up a real
+// subprocess. `CONTROLLER_REGISTRY` is process-global (shared across
+// every test in this binary) — each test below registers its stub
+// under a unique, per-test block id (never a literal shared with any
+// other test) so parallel test execution can't cross-contaminate.
+
+struct StubController {
+    block_id: String,
+    turn_active: bool,
+}
+
+impl crate::backend::blockcontroller::Controller for StubController {
+    fn start(&self, _: crate::backend::obj::MetaMapType, _: Option<serde_json::Value>, _: bool) -> Result<(), String> {
+        Ok(())
+    }
+    fn stop(&self, _: bool, _: &str) -> Result<(), String> {
+        Ok(())
+    }
+    fn get_runtime_status(&self) -> crate::backend::blockcontroller::BlockControllerRuntimeStatus {
+        crate::backend::blockcontroller::BlockControllerRuntimeStatus {
+            blockid: self.block_id.clone(),
+            turn_active: self.turn_active,
+            ..Default::default()
+        }
+    }
+    fn send_input(&self, _: crate::backend::blockcontroller::BlockInputUnion, _: Option<u64>) -> Result<(), String> {
+        Ok(())
+    }
+    fn controller_type(&self) -> &str {
+        "stub"
+    }
+    fn block_id(&self) -> &str {
+        &self.block_id
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+fn register_stub_controller(block_id: &str, turn_active: bool) {
+    crate::backend::blockcontroller::register_controller(
+        block_id,
+        Arc::new(StubController { block_id: block_id.to_string(), turn_active }),
+    );
+}
+
+#[test]
+fn reconcile_stale_subagents_downgrades_active_to_abandoned_when_parent_turn_is_confirmed_idle() {
+    let block_id = format!("recon-idle-{}", now_millis());
+    register_stub_controller(&block_id, false);
+
+    let watcher = fixture_watcher();
+    {
+        let mut sessions = watcher.sessions.lock().unwrap();
+        let mut s1 = SessionWatch { subagents: HashMap::new() };
+        let mut state = fixture_state("parent-1", "sub-a", "s1");
+        state.info.parent_block_id = block_id.clone();
+        s1.subagents.insert("sub-a".to_string(), state);
+        sessions.insert("s1".to_string(), s1);
+    }
+
+    watcher.reconcile_stale_subagents(&block_id, "s1");
+
+    let info = watcher.get_info("sub-a").expect("sub-a should still exist");
+    assert_eq!(info.status, SubAgentStatus::Abandoned);
+}
+
+#[test]
+fn reconcile_stale_subagents_leaves_active_alone_when_parent_turn_is_active() {
+    let block_id = format!("recon-active-{}", now_millis());
+    register_stub_controller(&block_id, true);
+
+    let watcher = fixture_watcher();
+    {
+        let mut sessions = watcher.sessions.lock().unwrap();
+        let mut s1 = SessionWatch { subagents: HashMap::new() };
+        let mut state = fixture_state("parent-1", "sub-a", "s1");
+        state.info.parent_block_id = block_id.clone();
+        s1.subagents.insert("sub-a".to_string(), state);
+        sessions.insert("s1".to_string(), s1);
+    }
+
+    watcher.reconcile_stale_subagents(&block_id, "s1");
+
+    let info = watcher.get_info("sub-a").expect("sub-a should still exist");
+    assert_eq!(info.status, SubAgentStatus::Active, "a genuinely active parent turn must never be reconciled away");
+}
+
+#[test]
+fn reconcile_stale_subagents_leaves_active_alone_when_no_controller_is_registered() {
+    // No register_stub_controller call — block id is guaranteed unique
+    // (per-test suffix) so get_block_controller_status returns None.
+    // unwrap_or(true) means "uncertain" defaults to "assume active,
+    // don't touch it" — the same conservative bias as ReconcileTurnActive.
+    let block_id = format!("recon-unregistered-{}", now_millis());
+
+    let watcher = fixture_watcher();
+    {
+        let mut sessions = watcher.sessions.lock().unwrap();
+        let mut s1 = SessionWatch { subagents: HashMap::new() };
+        let mut state = fixture_state("parent-1", "sub-a", "s1");
+        state.info.parent_block_id = block_id.clone();
+        s1.subagents.insert("sub-a".to_string(), state);
+        sessions.insert("s1".to_string(), s1);
+    }
+
+    watcher.reconcile_stale_subagents(&block_id, "s1");
+
+    let info = watcher.get_info("sub-a").expect("sub-a should still exist");
+    assert_eq!(info.status, SubAgentStatus::Active);
+}
+
+#[test]
+fn reconcile_stale_subagents_never_downgrades_an_already_completed_subagent() {
+    let block_id = format!("recon-completed-{}", now_millis());
+    register_stub_controller(&block_id, false);
+
+    let watcher = fixture_watcher();
+    {
+        let mut sessions = watcher.sessions.lock().unwrap();
+        let mut s1 = SessionWatch { subagents: HashMap::new() };
+        let mut state = fixture_state("parent-1", "sub-a", "s1");
+        state.info.parent_block_id = block_id.clone();
+        state.info.status = SubAgentStatus::Completed;
+        s1.subagents.insert("sub-a".to_string(), state);
+        sessions.insert("s1".to_string(), s1);
+    }
+
+    watcher.reconcile_stale_subagents(&block_id, "s1");
+
+    let info = watcher.get_info("sub-a").expect("sub-a should still exist");
+    assert_eq!(info.status, SubAgentStatus::Completed, "a subagent that genuinely finished must stay Completed, not be downgraded");
+}
+
+#[test]
+fn reconcile_stale_subagents_never_touches_a_sibling_blocks_subagent_in_the_same_session() {
+    // Two blocks can both have subagents recorded under the same
+    // session_id (the watcher dedupes purely by agent_id — see
+    // watch_agent's doc comment). reconcile_stale_subagents only has a
+    // confirmed-idle read for the ONE block it was called with; a
+    // sibling block sharing that session_id could still be genuinely
+    // active, so its subagent must be left alone. Reagent P1 on #2131.
+    let idle_block = format!("recon-sibling-idle-{}", now_millis());
+    let active_block = format!("recon-sibling-active-{}", now_millis());
+    register_stub_controller(&idle_block, false);
+    register_stub_controller(&active_block, true);
+
+    let watcher = fixture_watcher();
+    {
+        let mut sessions = watcher.sessions.lock().unwrap();
+        let mut s1 = SessionWatch { subagents: HashMap::new() };
+        let mut owned = fixture_state("parent-1", "sub-owned", "s1");
+        owned.info.parent_block_id = idle_block.clone();
+        let mut sibling = fixture_state("parent-2", "sub-sibling", "s1");
+        sibling.info.parent_block_id = active_block.clone();
+        s1.subagents.insert("sub-owned".to_string(), owned);
+        s1.subagents.insert("sub-sibling".to_string(), sibling);
+        sessions.insert("s1".to_string(), s1);
+    }
+
+    watcher.reconcile_stale_subagents(&idle_block, "s1");
+
+    let owned_info = watcher.get_info("sub-owned").expect("sub-owned should still exist");
+    assert_eq!(owned_info.status, SubAgentStatus::Abandoned, "this block's own subagent should still be reconciled");
+    let sibling_info = watcher.get_info("sub-sibling").expect("sub-sibling should still exist");
+    assert_eq!(sibling_info.status, SubAgentStatus::Active, "a sibling block's subagent must never be reconciled by an unrelated block's idle read");
+}
+
+/// SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20 §7 Open
+/// Question 1: does live reconciliation racing a subagent's own
+/// (not-yet-read) `Result` line permanently strand it at `Abandoned`?
+/// No — `process_jsonl_change`'s completion check overwrites `status`
+/// unconditionally on seeing `Result`, regardless of what it was before,
+/// so a late-arriving completion always wins.
+#[test]
+fn reconcile_stale_subagents_then_late_result_line_ends_completed_not_stuck_abandoned() {
+    let block_id = format!("recon-late-result-{}", now_millis());
+    register_stub_controller(&block_id, false);
+
+    let dir = std::env::temp_dir().join(format!("amx-recon-late-result-{}", now_millis()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let jsonl_path = dir.join("agent-sub-a.jsonl");
+    // Turn ends before the subagent's own Result line has been written —
+    // only an assistant message is on disk so far.
+    std::fs::write(
+        &jsonl_path,
+        "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"working\"}]}}\n",
+    )
+    .unwrap();
+
+    let watcher = fixture_watcher();
+    watcher.process_jsonl_change("parent-1", &block_id, &jsonl_path, true);
+    let info = watcher.get_info("sub-a").expect("sub-a should be tracked");
+    assert_eq!(info.status, SubAgentStatus::Active);
+
+    // `derive_session_id` returns "unknown" for a flat (non-`subagents/`-
+    // nested) test path — matches this file's other flat-layout tests.
+    watcher.reconcile_stale_subagents(&block_id, "unknown");
+    let info = watcher.get_info("sub-a").expect("sub-a should still exist");
+    assert_eq!(info.status, SubAgentStatus::Abandoned);
+
+    // The Result line lands moments later (fs-watcher debounce, or the
+    // subagent process finishing its write just after the parent's own
+    // turn-end fired) — appended, not rewritten, so file_offset tracking
+    // from the first process_jsonl_change call stays valid.
+    {
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new().append(true).open(&jsonl_path).unwrap();
+        f.write_all(b"{\"type\":\"result\",\"result\":\"done\"}\n").unwrap();
+    }
+    watcher.process_jsonl_change("parent-1", &block_id, &jsonl_path, true);
+
+    let info = watcher.get_info("sub-a").expect("sub-a should still exist");
+    assert_eq!(info.status, SubAgentStatus::Completed, "a late-arriving Result line must win over an earlier Abandoned reconciliation, not be stuck behind it");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// End-to-end: a subagent JSONL with no terminal `result` line, backfilled
+/// via a real `scan_session_subagents` call while the parent's turn is
+/// confirmed idle, comes out `Abandoned` — not `Active` forever. This is
+/// the exact user-reported symptom (SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md).
+#[test]
+fn scan_session_subagents_reconciles_an_unterminated_file_to_abandoned_when_parent_turn_is_idle() {
+    let block_id = format!("recon-scan-{}", now_millis());
+    register_stub_controller(&block_id, false);
+
+    let config_dir = std::env::temp_dir()
+        .join(format!("amx-scan-reconcile-test-{}", now_millis()));
+    let session_id = "target-session-uuid";
+    let target_dir = config_dir
+        .join("projects")
+        .join("ws-enc")
+        .join(session_id)
+        .join("subagents");
+    std::fs::create_dir_all(&target_dir).unwrap();
+    // No "type":"result" line — this subagent never got a terminal event,
+    // simulating a crash/kill/interrupted-by-restart.
+    std::fs::write(
+        target_dir.join("agent-crashed.jsonl"),
+        "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"working...\"}]}}\n",
+    )
+    .unwrap();
+
+    let watcher = fixture_watcher();
+    watcher.scan_session_subagents("parent-1", &block_id, &config_dir, session_id);
+
+    let active = watcher.list_active();
+    assert_eq!(active.len(), 1);
+    assert_eq!(active[0].agent_id, "crashed");
+    assert_eq!(active[0].status, SubAgentStatus::Abandoned);
+
+    std::fs::remove_dir_all(&config_dir).ok();
+}
+
+#[test]
+fn session_id_nested_workflow_layout() {
+    let path = p("projects/ws/sess-uuid/subagents/workflows/wf_x/agent-a1.jsonl");
+    assert_eq!(derive_session_id(&path), "sess-uuid");
+}
+
+#[test]
+fn journal_counts_incremental() {
+    let dir = std::env::temp_dir().join(format!("amx-journal-test-{}", now_millis()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let journal = dir.join("journal.jsonl");
+
+    std::fs::write(
+        &journal,
+        "{\"type\":\"started\",\"agentId\":\"a1\"}\n{\"type\":\"result\",\"agentId\":\"a1\",\"result\":{}}\n",
+    )
+    .unwrap();
+    let (started, results, offset) = read_journal_counts(&journal, 0).unwrap();
+    assert_eq!((started, results), (1, 1));
+
+    // Append two more records; re-read from the saved offset.
+    let mut existing = std::fs::read(&journal).unwrap();
+    existing.extend_from_slice(
+        b"{\"type\":\"started\",\"agentId\":\"a2\"}\n{\"type\":\"started\",\"agentId\":\"a3\"}\n",
+    );
+    std::fs::write(&journal, existing).unwrap();
+    let (started2, results2, _) = read_journal_counts(&journal, offset).unwrap();
+    assert_eq!((started2, results2), (2, 0));
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Regression test for a race where the journal writer has flushed a
+/// record's bytes but not yet its trailing `\n` (mid-`write!` on a
+/// concurrently-appended file). The unterminated line must be neither
+/// counted nor consumed — `new_offset` should sit exactly at its start —
+/// so the next read picks it up whole once the newline lands, instead of
+/// silently losing the record.
+#[test]
+fn journal_counts_skips_unterminated_trailing_line() {
+    let dir = std::env::temp_dir().join(format!("amx-journal-test-partial-{}", now_millis()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let journal = dir.join("journal.jsonl");
+
+    // One complete record, then a partial record with no trailing newline.
+    let first_line = "{\"type\":\"started\",\"agentId\":\"a1\"}\n";
+    let partial_line = "{\"type\":\"started\",\"agentId\":\"a2";
+    std::fs::write(&journal, format!("{first_line}{partial_line}")).unwrap();
+
+    let (started, results, offset) = read_journal_counts(&journal, 0).unwrap();
+    assert_eq!((started, results), (1, 0), "partial trailing line must not be counted");
+    assert_eq!(
+        offset, first_line.len() as u64,
+        "offset must stop at the start of the partial line, not past it"
+    );
+
+    // The writer finishes the line; a re-read from the same offset must
+    // now see the complete record rather than a truncated/corrupted one.
+    let mut existing = std::fs::read(&journal).unwrap();
+    existing.extend_from_slice(b"\"}\n");
+    std::fs::write(&journal, existing).unwrap();
+    let (started2, results2, _) = read_journal_counts(&journal, offset).unwrap();
+    assert_eq!((started2, results2), (1, 0), "completed line must be picked up whole, not dropped");
+
+    std::fs::remove_dir_all(&dir).ok();
+}

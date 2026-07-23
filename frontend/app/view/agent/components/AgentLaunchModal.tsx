@@ -13,7 +13,7 @@
  * panel only. See docs/specs/launch-modal-rearchitecture-2026-05-01.md.
  */
 
-import { createEffect, createMemo, createResource, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 
 import { Button } from "@/element/button";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -21,14 +21,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { isAvailable, watchCapability } from "@/app/store/toolchain-capabilities";
 
 import { waveEventSubscribe } from "@/app/store/wps";
-import {
-    createLaunchFlowStore,
-    accountsForProvider,
-    accountSuppliesProvider,
-    continueLocksIdentity as flowContinueLocksIdentity,
-    continueLocksMemory as flowContinueLocksMemory,
-    realMemories,
-} from "@/app/store/launch-flow-state";
+import { createLaunchFlowStore, accountsForProvider, realMemories } from "@/app/store/launch-flow-state";
 
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
 import { defaultAgentName } from "../defaults/default-agent-name";
@@ -37,6 +30,8 @@ import { getProvider } from "../providers";
 import { PreLaunchAuthPanel } from "./PreLaunchAuthPanel";
 import { AuthFlowController } from "../auth";
 import { refreshAccountCache } from "@/app/view/identity/identity-model";
+import { useContinueOrNewMode } from "../hooks/useContinueOrNewMode";
+import { useLaunchAuthGate } from "../hooks/useLaunchAuthGate";
 
 export interface LaunchOverrides {
     /** Instance name — written into AGENTMUX_AGENT_ID and used to
@@ -275,127 +270,43 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     const handleAddAccount = () => props.onRequestAddAccount?.(snapshot());
     const handleNewMemory = () => props.onRequestNewMemory?.(snapshot());
 
-    // v8 — "Continue agent" dropdown. Filters to instances of the
-    // CURRENT definition (server-side; a global cap would let older
-    // rows of this definition fall off when users have many agents
-    // across definitions). Empty list = no past launches for this
-    // definition, dropdown hides itself.
-    const [namedAgents] = createResource<NamedAgentRow[]>(async () => {
-        try {
-            return await RpcApi.ListNamedAgentsCommand(TabRpcClient, {
-                limit: 200,
-                definition_id: props.agent.id,
-            });
-        } catch {
-            return [];
-        }
-    });
-
-    /** "" = "— New agent —" (default). Non-empty = continuing that
-     *  past instance; name + identity + memory are pre-filled and
-     *  locked. Mirrors the store's `form.continueOfId` (which uses
-     *  `null` instead of "" — the dropdown uses "" as its UI sentinel
-     *  for the placeholder option). */
-    const continueOfId = () => flow.state.form.continueOfId ?? "";
-
-    const continuedRow = createMemo(() => {
-        const id = continueOfId();
-        if (!id) return null;
-        return (namedAgents() ?? []).find((r) => r.instance_id === id) ?? null;
-    });
-    // Continuation status is read from the reducer's `form.continueOfId`
-    // (the source of truth) rather than from `continuedRow()` — the
-    // latter depends on `namedAgents()` having loaded, so on round-trip
-    // re-open isContinue() would transiently be false until that
-    // resource lands, flipping the auth gate on for a tick. Reading the
-    // form directly keeps the answer stable from the moment Opened
-    // dispatches with a restored continueOfId.
-    const isContinue = () => flow.state.form.continueOfId !== null;
-    // Per-bundle continuation locks come from the slice's selectors.
-    // Local memos read flow.state.form so they invalidate when the
-    // selection or carry-over identity changes.
-    const continueLocksIdentity = createMemo(() =>
-        flowContinueLocksIdentity(flow.state),
-    );
-    const continueLocksMemory = createMemo(() =>
-        flowContinueLocksMemory(flow.state),
-    );
-
-    const handleContinueSelect = (rawId: string) => {
-        const id = rawId === "" ? null : rawId;
-        const row =
-            id === null
-                ? null
-                : (namedAgents() ?? []).find((r) => r.instance_id === id) ?? null;
-        // Legacy rows may carry "" or "blank" identity_id/memory_id
-        // from before the blank-removal, or (pre-issue-#1624-PR-C rows)
-        // a bundle id that no longer resolves to an account. Treat all
-        // three as "no carry-over" so the user must pick a real account
-        // for the continuation — see the plan's migration note; an
-        // unresolvable carried id already falls back to "re-pick" here
-        // rather than needing a backend resolution step.
-        const carry = row
-            ? {
-                  name: row.instance_name,
-                  accountId:
-                      row.identity_id && row.identity_id !== "blank"
-                          ? row.identity_id
-                          : "",
-                  memoryId:
-                      row.memory_id && row.memory_id !== "blank"
-                          ? row.memory_id
-                          : "",
-              }
-            : undefined;
-        flow.dispatch({ type: "ContinueOfChanged", continueOfId: id, carry });
-    };
-
     // ── Feature A — Continue / New view mode ──────────────────────────
-    // SPEC_AGENT_LAUNCH_AND_MODAL_DISMISSAL §A. When this definition has
-    // past instances, default to Continue (most-recent preselected) so
-    // re-opening a configured agent is one step, not a dropdown hunt.
-    const mostRecentInstance = (): NamedAgentRow | null => {
-        const rows = namedAgents() ?? [];
-        if (rows.length === 0) return null;
-        return [...rows].sort((a, b) => (b.started_at ?? 0) - (a.started_at ?? 0))[0];
-    };
-    // Initial viewMode honors a restored continuation: if the snapshot
-    // captured a `continueOfId`, the user was in Continue mode when
-    // they left for the `+ New bundle` flow — restore them there. The
-    // previous "+New buttons disabled while continuing → always restore
-    // as New" assumption was false for ambient-creds continuations
-    // (continueLocksIdentity is false when the carried identity is
-    // empty, so the +New button stays enabled even in Continue mode).
-    const [viewMode, setViewMode] = createSignal<"continue" | "new">(
-        props.initialFormState?.continueOfId != null ? "continue" : "new",
-    );
-    // viewModeDecided suppresses the auto-decide effect when we're
-    // restoring from a snapshot — the snapshot's continueOfId decides
-    // it, not the most-recent-instance heuristic.
-    let viewModeDecided = props.initialFormState != null;
-    createEffect(() => {
-        const rows = namedAgents();
-        if (rows === undefined || viewModeDecided) return;
-        viewModeDecided = true;
-        const recent = mostRecentInstance();
-        if (recent) {
-            setViewMode("continue");
-            handleContinueSelect(recent.instance_id);
-        }
+    // SPEC_AGENT_LAUNCH_AND_MODAL_DISMISSAL §A. Extracted to
+    // useContinueOrNewMode (modularization pass, 2026-07-23) — owns the
+    // "Continue an existing agent" dropdown, the New/Continue toggle,
+    // and everything that decides which past instance (if any) this
+    // launch continues. `flow` is passed by reference so the hook's
+    // reads/dispatches stay tracked against the live store.
+    const {
+        namedAgents,
+        continueOfId,
+        continuedRow,
+        isContinue,
+        continueLocksIdentity,
+        continueLocksMemory,
+        handleContinueSelect,
+        viewMode,
+        enterNewMode,
+        enterContinueMode,
+    } = useContinueOrNewMode({
+        flow,
+        agentId: props.agent.id,
+        hasInitialFormState: props.initialFormState != null,
+        initialContinueOfId: props.initialFormState?.continueOfId,
     });
 
     // Default agent name (#780) — pre-fill so the user can click Launch
     // immediately instead of needing to type something first. Runs once,
-    // after the effect above has settled viewMode for this open (Continue
-    // mode already prefills the name from the continued row via
-    // handleContinueSelect's carry-over, so this only applies in New
-    // mode). Checking `name() === ""` at fire time — rather than a
-    // separate isDirty flag — is enough to respect both a user who typed
-    // before this resolved and a round-tripped `initialFormState.name` :
-    // provider is fixed for this component's whole lifetime (one
-    // AgentDefinition per modal instance), so there's no "recompute on
-    // provider change" case to handle here, unlike the original spec's
-    // multi-provider-picker assumption.
+    // after useContinueOrNewMode's own effect has settled viewMode for
+    // this open (Continue mode already prefills the name from the
+    // continued row via handleContinueSelect's carry-over, so this only
+    // applies in New mode). Checking `name() === ""` at fire time —
+    // rather than a separate isDirty flag — is enough to respect both a
+    // user who typed before this resolved and a round-tripped
+    // `initialFormState.name`: provider is fixed for this component's
+    // whole lifetime (one AgentDefinition per modal instance), so
+    // there's no "recompute on provider change" case to handle here,
+    // unlike the original spec's multi-provider-picker assumption.
     let defaultNameApplied = false;
     createEffect(() => {
         const rows = namedAgents();
@@ -405,17 +316,6 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         const existing = new Set(rows.map((r) => r.instance_name));
         setName(defaultAgentName(displayName(), existing));
     });
-
-    const enterNewMode = () => {
-        setViewMode("new");
-        handleContinueSelect(""); // clears continueOfId; unlocks identity/memory
-    };
-    const enterContinueMode = () => {
-        setViewMode("continue");
-        if (continueOfId()) return;
-        const recent = mostRecentInstance();
-        if (recent) handleContinueSelect(recent.instance_id);
-    };
 
     const formatRelative = (ms: number): string => {
         if (!ms) return "";
@@ -469,7 +369,6 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         externalDispatch: (cmd) => flow.dispatch({ type: "Auth", cmd }),
     });
     onCleanup(() => authController.dispose());
-    const authStateKind = () => flow.state.auth.kind;
     const onAccountCreated = (accId: string) => {
         // The new account was just persisted backend-side (OAuth or
         // API-key). Switch the dropdown to it AND refresh the account
@@ -483,85 +382,19 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         void loadAccountsIntoForm();
     };
 
-    // True when the selected account actually supplies credentials for
-    // the agent's provider. Replaces `bundleHasMatchingBinding` — with
-    // a direct account selection instead of a bundle-of-bindings, this
-    // is a plain lookup against the already-loaded account list (issue
-    // #1624 PR-C Part B).
-    const accountSupplies = createMemo(() =>
-        accountSuppliesProvider(flow.state, provider()?.id ?? ""),
-    );
-
-    // The selected account's own `status` field. Replaces
-    // `bundleBindingStatus` — no bundle→binding→account join needed
-    // anymore, `flow.state.accounts.list` is already reactive (updated
-    // by `loadAccountsIntoForm` on the `identityaccounts:changed`
-    // subscription above), so no separate cache-tick signal is needed
-    // either.
-    const selectedAccountStatus = createMemo<string | null>(() => {
-        const id = accountId();
-        if (!id) return null;
-        return flow.state.accounts.list.find((a) => a.id === id)?.status ?? null;
-    });
-
-    // True when the selected account is in an oauth-class state that
-    // benefits from a Reconnect nudge — strictly a wording trigger, not
-    // a launch-blocker (spec §4.4: "wording-only nudge"). The Launch
-    // button stays enabled because the account still counts; the CLI
-    // will refresh on its first call.
-    const accountNeedsReconnectNudge = createMemo(() => {
-        const s = selectedAccountStatus();
-        return s === "needs_reauth" || s === "expired";
-    });
-
-    // Auth gate applies to fresh launches of OAuth providers when the
-    // selected account can't supply credentials for the agent's
-    // provider. That's true when:
-    //
-    // - No account selected at all.
-    // - A selected account for a different provider.
-    //
-    // Bypasses:
-    // - `isContinue` — prior launch already produced creds.
-    // - API-key providers (kimi/pi) — their existing `launch-flow.ts`
-    //   Phase 2 prompts for the key in-line. Reagent + codex P1 on #847.
-    //
-    // Hard auth-blockers: launch CANNOT proceed without the user
-    // completing OAuth. Drives both the panel mount AND the launch
-    // gate.
-    //
-    // 2026-07-20: reverted a same-day "no account = ambient creds is fine"
-    // relaxation. `identity/resolver.rs`'s layer-3 spawn gate was ALREADY
-    // hard-blocking an oauth-class agent with no bound account by default
-    // (`use_ambient_login=0`) — that relaxation let Launch enable and then
-    // had the agent fail its first real turn with a raw backend error,
-    // which is worse than being blocked up front with a clear reason. The
-    // gate's ambient escape hatch is now removed entirely (single point,
-    // not global — PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md §7),
-    // so "no account selected" must block here again, for every provider,
-    // with no exception.
-    const authBlocksLaunch = () =>
-        !isContinue()
-        && provider()?.authType === "oauth"
-        && (accountId() === "" || !accountSupplies());
-    // Soft nudges: show the Connect CTA (with status-aware wording)
-    // when the account is selected but its status is `needs_reauth` /
-    // `expired`. Per spec §4.4 this is a "wording-only nudge" — does
-    // NOT block Launch. The CLI's own refresh path handles the rest on
-    // first call; the nudge just gives the user a one-click path to
-    // refresh proactively.
-    const authNeedsReconnectWording = () =>
-        !isContinue()
-        && provider()?.authType === "oauth"
-        && accountSupplies()
-        && accountNeedsReconnectNudge();
-    // Mount the panel for EITHER reason (hard block or soft nudge).
-    const authRequired = () => authBlocksLaunch() || authNeedsReconnectWording();
-    // Launch-readiness gate. Note this only consults `authBlocksLaunch`
-    // — the wording-only path doesn't gate. The panel may still show a
-    // `ConnectCta` in the nudge case, but `authReady` returns true and
-    // Launch is clickable.
-    const authReady = () => !authBlocksLaunch() || authStateKind() === "ready";
+    // Auth-gating logic (spec: SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md).
+    // Extracted to useLaunchAuthGate (modularization pass, 2026-07-23) —
+    // `flow` is passed by reference so its reads stay tracked against
+    // the live store; `provider`/`isContinue` are threaded through as
+    // accessors since the hook has no other way to derive them.
+    const {
+        authBlocksLaunch,
+        authNeedsReconnectWording,
+        authRequired,
+        authReady,
+        accountSupplies,
+        selectedAccountStatus,
+    } = useLaunchAuthGate({ flow, provider, isContinue });
     const canSubmit = () =>
         !submitting()
         && slugifyInstanceName(name()).length > 0

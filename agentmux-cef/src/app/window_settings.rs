@@ -1,0 +1,129 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Window-level settings plumbing: the Linux `WindowDelegate` FFI override
+// that sets the Wayland app_id / X11 WM_CLASS, the selected-ozone-platform
+// publication point, and the `window:transparent` settings.json reader used
+// to gate transparent-compositing command-line flags before CefInitialize.
+// Split out of `app.rs` (now `app/mod.rs`).
+
+/// Override the `get_linux_window_properties` function pointer on a
+/// `WindowDelegate` to write the AgentMux app_id directly to the C struct,
+/// bypassing the buggy `CefString` → `cef_string_utf16_t` conversion in the
+/// cef 146.7.0 wrapper (`Clear` variant gets dropped during writeback).
+///
+/// Without this, CEF emits `xdg_toplevel.set_app_id("")` and GNOME / KWin /
+/// sway can't match the window to `agentmux.desktop`, so the AgentMux icon
+/// never appears in the taskbar/dock/launcher.
+///
+/// Must be called once on every `WindowDelegate` we create (top-level, popup,
+/// new sub-window) before passing it to `window_create_top_level`.
+#[cfg(target_os = "linux")]
+pub fn install_linux_window_properties_override(delegate: &cef::WindowDelegate) {
+    use cef::ImplWindowDelegate;
+    // Disambiguate: WindowDelegate implements get_raw on three traits
+    // (ImplViewDelegate / ImplPanelDelegate / ImplWindowDelegate). We need
+    // the WindowDelegate one to get the right struct type for casting.
+    let raw: *mut cef::sys::_cef_window_delegate_t =
+        <cef::WindowDelegate as ImplWindowDelegate>::get_raw(delegate);
+    unsafe {
+        (*raw).get_linux_window_properties = Some(write_linux_window_properties);
+    }
+}
+
+/// Custom extern "C" shim invoked by libcef to populate
+/// `_cef_linux_window_properties_t`. Writes "agentmux" to wayland_app_id
+/// and the X11 wm_class fields via cef-dll-sys utf8→utf16 setters,
+/// then returns 1 so libcef uses the values.
+#[cfg(target_os = "linux")]
+extern "C" fn write_linux_window_properties(
+    _self_: *mut cef::sys::_cef_window_delegate_t,
+    _window: *mut cef::sys::_cef_window_t,
+    properties: *mut cef::sys::_cef_linux_window_properties_t,
+) -> std::os::raw::c_int {
+    if properties.is_null() {
+        return 0;
+    }
+    const APP_ID: &[u8] = b"agentmux";
+    unsafe {
+        let props = &mut *properties;
+        // The C struct's strings start zeroed (libcef constructs a default
+        // CefLinuxWindowProperties). cef_string_utf8_to_utf16 allocates a
+        // new utf-16 buffer and assigns it to the dest cef_string_utf16_t;
+        // ownership transfers to libcef which calls dtor when done.
+        cef::sys::cef_string_utf8_to_utf16(
+            APP_ID.as_ptr().cast(), APP_ID.len(), &mut props.wayland_app_id,
+        );
+        cef::sys::cef_string_utf8_to_utf16(
+            APP_ID.as_ptr().cast(), APP_ID.len(), &mut props.wm_class_class,
+        );
+        cef::sys::cef_string_utf8_to_utf16(
+            APP_ID.as_ptr().cast(), APP_ID.len(), &mut props.wm_class_name,
+        );
+    }
+    1
+}
+
+/// The ozone platform this process appended to the command line (Linux).
+/// Unset when nothing was appended (pure X11 session → Chromium's X11
+/// default). Read by `ui_tasks::SetWindowAlphaTask` to decide whether
+/// `window_handle()` is an X11 XID that `_NET_WM_WINDOW_OPACITY` can target.
+#[cfg(target_os = "linux")]
+pub static SELECTED_OZONE_PLATFORM: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Read `window:transparent` from the user's settings.json before CefInitialize.
+/// Gates the transparent-compositing command-line flags so non-transparent
+/// windows don't pay the LCD-text and opacity-flash penalties. Returns false
+/// if the file is absent or the key is missing (default = opaque).
+pub(crate) fn read_window_transparent_setting() -> bool {
+    // Candidate locations for the LIVE settings.json, in priority order —
+    // mirrors srv's `config_watcher_fs::resolve_settings_dir()` (the file the
+    // settings UI actually edits), then legacy/per-instance fallbacks:
+    //   1. $AGENTMUX_SETTINGS_DIR/settings.json (explicit override)
+    //   2. $AGENTMUX_CONFIG_HOME/../../settings.json (channels-root shared
+    //      file — the modern location, e.g. ~/.agentmux/channels/settings.json)
+    //   3. $AGENTMUX_CONFIG_DIR/settings.json (per-instance config dir)
+    //   4. ~/.agentmux/channels/settings.json
+    //   5. ~/.agentmux/settings.json (legacy)
+    // First file that exists wins. The old code checked ONLY (3), which is
+    // empty in every real deployment — so `window:transparent` silently read
+    // `false` for everyone on Linux/macOS.
+    fn candidates() -> Vec<std::path::PathBuf> {
+        let mut out = Vec::new();
+        if let Some(d) = std::env::var_os("AGENTMUX_SETTINGS_DIR").filter(|s| !s.is_empty()) {
+            out.push(std::path::PathBuf::from(d).join("settings.json"));
+        }
+        if let Some(d) = std::env::var_os("AGENTMUX_CONFIG_HOME").filter(|s| !s.is_empty()) {
+            let p = std::path::PathBuf::from(d);
+            if let Some(root) = p.parent().and_then(|p| p.parent()) {
+                out.push(root.join("settings.json"));
+            }
+        }
+        if let Some(d) = std::env::var_os("AGENTMUX_CONFIG_DIR").filter(|s| !s.is_empty()) {
+            out.push(std::path::PathBuf::from(d).join("settings.json"));
+        } else if let Some(p) = agentmux_common::DataPaths::from_env().map(|p| p.config_dir) {
+            out.push(p.join("settings.json"));
+        }
+        if let Some(home) = dirs::home_dir() {
+            out.push(home.join(".agentmux").join("channels").join("settings.json"));
+            out.push(home.join(".agentmux").join("settings.json"));
+        }
+        out
+    }
+    for path in candidates() {
+        if !path.exists() {
+            continue;
+        }
+        // settings.json is JSONC (comments + trailing commas) — a strict
+        // serde_json parse fails on the shipped template. Use the same
+        // lenient reader the settings command path uses.
+        let map = crate::commands::platform::read_settings_jsonc(&path);
+        if let Some(v) = map.get("window:transparent").and_then(|v| v.as_bool()) {
+            tracing::info!("window:transparent={} (from {})", v, path.display());
+            return v;
+        }
+        // File exists but has no (uncommented) key → default false, but keep
+        // scanning lower-priority locations in case an older file has it.
+    }
+    false
+}

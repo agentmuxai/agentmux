@@ -1,429 +1,34 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { focusManager } from "@/app/store/focusManager";
 import { getVoiceSession } from "@/app/hook/useVoiceInput";
 import {
     atoms,
-    createBlock,
-    createBlockSplitHorizontally,
-    createBlockSplitVertically,
     createTab,
     getAllBlockComponentModels,
     getApi,
     getBlockComponentModel,
     getFocusedBlockId,
-    getSettingsKeyAtom,
-    refocusNode,
     replaceBlock,
-    setActiveTab,
-    setControlShiftDelayAtom,
     setIsTermMultiInput,
-    WOS,
 } from "@/app/store/global";
-import { WorkspaceService } from "@/app/store/services";
-import { RpcApi } from "@/app/store/rpc-api";
-import { TabRpcClient } from "@/app/store/rpc-util";
 import { zoomIn, zoomOut, zoomReset } from "@/app/store/zoom.platform";
-import { deleteLayoutModelForTab, getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
-import * as keyutil from "@/util/keyutil";
-import { CHORD_TIMEOUT } from "@/util/sharedconst";
-import { fireAndForget } from "@/util/util";
-import { createSignal } from "solid-js";
+import { getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
 import { modalsModel, openModal } from "./modalmodel";
 import { CommandPaletteModal } from "@/app/modals/command-palette";
-import { triggerTabCloseRequest } from "@/app/tab/tab-close-request";
-
-// Debug logging function - writes to file
-const DEBUG_LOG_PATH = "C:/Systems/agentmux-debug.log";
-
-function stringToBase64(str: string): string {
-    const bytes = new TextEncoder().encode(str);
-    let binary = "";
-    for (let i = 0; i < bytes.length; i++) {
-        binary += String.fromCharCode(bytes[i]);
-    }
-    return btoa(binary);
-}
-
-function debugLog(message: string, data?: unknown): void {
-    const timestamp = new Date().toISOString();
-    const logLine = `[${timestamp}] [KEYMODEL] ${message}${data !== undefined ? ": " + JSON.stringify(data) : ""}\n`;
-    fireAndForget(async () => {
-        try {
-            await RpcApi.FileAppendCommand(TabRpcClient, {
-                info: { path: DEBUG_LOG_PATH },
-                data64: stringToBase64(logLine),
-            });
-        } catch (e) {
-            console.error("Failed to write debug log:", e);
-        }
-    });
-}
-
-type KeyHandler = (event: WaveKeyboardEvent) => boolean;
-
-const [simpleControlShift, setSimpleControlShift] = createSignal(false);
-const globalKeyMap = new Map<string, (waveEvent: WaveKeyboardEvent) => boolean>();
-const globalChordMap = new Map<string, Map<string, KeyHandler>>();
-let globalKeybindingsDisabled = false;
-
-// track current chord state and timeout (for resetting)
-let activeChord: string | null = null;
-let chordTimeout: NodeJS.Timeout = null;
-
-function resetChord() {
-    activeChord = null;
-    if (chordTimeout) {
-        clearTimeout(chordTimeout);
-        chordTimeout = null;
-    }
-}
-
-function setActiveChord(activeChordArg: string) {
-    getApi().setKeyboardChordMode();
-    if (chordTimeout) {
-        clearTimeout(chordTimeout);
-    }
-    activeChord = activeChordArg;
-    chordTimeout = setTimeout(() => resetChord(), CHORD_TIMEOUT);
-}
-
-export function keyboardMouseDownHandler(e: MouseEvent) {
-    if (!e.ctrlKey || !e.shiftKey) {
-        unsetControlShift();
-    }
-}
-
-function getFocusedBlockInStaticTab() {
-    const layoutModel = getLayoutModelForStaticTab();
-    const focusedNode = layoutModel.focusedNode?.();
-    return focusedNode?.data?.blockId;
-}
-
-function getSimpleControlShiftAtom() {
-    return simpleControlShift;
-}
-
-function setControlShift() {
-    setSimpleControlShift(true);
-    setTimeout(() => {
-        if (simpleControlShift()) {
-            setControlShiftDelayAtom(true);
-        }
-    }, 400);
-}
-
-function unsetControlShift() {
-    setSimpleControlShift(false);
-    setControlShiftDelayAtom(false);
-}
-
-function disableGlobalKeybindings() {
-    globalKeybindingsDisabled = true;
-}
-
-function enableGlobalKeybindings() {
-    globalKeybindingsDisabled = false;
-}
-
-function shouldDispatchToBlock(e: WaveKeyboardEvent): boolean {
-    if (atoms.modalOpen()) {
-        return false;
-    }
-    const activeElem = document.activeElement;
-    if (activeElem != null && activeElem instanceof HTMLElement) {
-        if (activeElem.tagName == "INPUT" || activeElem.tagName == "TEXTAREA" || activeElem.contentEditable == "true") {
-            if (activeElem.classList.contains("dummy-focus") || activeElem.classList.contains("dummy")) {
-                return true;
-            }
-            if (keyutil.isInputEvent(e)) {
-                return false;
-            }
-            return true;
-        }
-    }
-    return true;
-}
-
-function getStaticTabBlockCount(): number {
-    const tabId = atoms.activeTabId();
-    const tabORef = WOS.makeORef("tab", tabId);
-    const tabAtom = WOS.getWaveObjectAtom<Tab>(tabORef);
-    const tabData = tabAtom();
-    return tabData?.blockids?.length ?? 0;
-}
-
-function simpleCloseStaticTab() {
-    debugLog("simpleCloseStaticTab called");
-    // Route through TabBar's requestClose so the close-confirmation modal
-    // (and the tab:skipcloseconfirm setting) is honoured on keyboard close
-    // the same way it is on the X-button path. The last-tab guard and the
-    // WorkspaceService.CloseTab + deleteLayoutModelForTab calls all live
-    // inside handleClose, which requestClose delegates to. (reagent P2 #1636.)
-    triggerTabCloseRequest();
-}
-
-function uxCloseBlock(blockId: string) {
-    const layoutModel = getLayoutModelForStaticTab();
-    const node = layoutModel.getNodeByBlockId(blockId);
-    if (node) {
-        fireAndForget(() => layoutModel.closeNode(node.id));
-    }
-}
-
-function genericClose() {
-    debugLog("genericClose called");
-    const blockCount = getStaticTabBlockCount();
-    debugLog("genericClose blockCount", blockCount);
-    if (blockCount === 0) {
-        debugLog("genericClose calling simpleCloseStaticTab because blockCount is 0");
-        simpleCloseStaticTab();
-        return;
-    }
-    debugLog("genericClose calling closeFocusedNode");
-    const layoutModel = getLayoutModelForStaticTab();
-    fireAndForget(layoutModel.closeFocusedNode.bind(layoutModel));
-}
-
-function switchBlockByBlockNum(index: number) {
-    const layoutModel = getLayoutModelForStaticTab();
-    if (!layoutModel) {
-        return;
-    }
-    layoutModel.switchNodeFocusByBlockNum(index);
-    setTimeout(() => {
-        globalRefocus();
-    }, 10);
-}
-
-function cyclePaneFocus(direction: "forward" | "backward") {
-    const layoutModel = getLayoutModelForStaticTab();
-    const spiralOrder = layoutModel.spiralLeafOrder?.() ?? [];
-    if (spiralOrder.length <= 1) return;
-
-    const focusedNode = layoutModel.focusedNode?.();
-    const currentIndex = spiralOrder.findIndex((entry) => entry.nodeid === focusedNode?.id);
-
-    let nextIndex: number;
-    if (direction === "forward") {
-        nextIndex = (currentIndex + 1) % spiralOrder.length;
-    } else {
-        nextIndex = (currentIndex - 1 + spiralOrder.length) % spiralOrder.length;
-    }
-
-    const nextEntry = spiralOrder[nextIndex];
-    layoutModel.focusNode(nextEntry.nodeid);
-    setTimeout(() => globalRefocus(), 10);
-}
-
-function switchBlockInDirection(direction: NavigateDirection) {
-    const layoutModel = getLayoutModelForStaticTab();
-    layoutModel.switchNodeFocusInDirection(direction);
-    setTimeout(() => {
-        globalRefocus();
-    }, 10);
-}
-
-function getAllTabs(ws: Workspace): string[] {
-    return [...(ws.pinnedtabids ?? []), ...(ws.tabids ?? [])];
-}
-
-function switchTabAbs(index: number) {
-    console.log("switchTabAbs", index);
-    const ws = atoms.workspace();
-    const newTabIdx = index - 1;
-    const tabids = getAllTabs(ws);
-    if (newTabIdx < 0 || newTabIdx >= tabids.length) {
-        return;
-    }
-    const newActiveTabId = tabids[newTabIdx];
-    setActiveTab(newActiveTabId);
-}
-
-function switchTab(offset: number) {
-    console.log("switchTab", offset);
-    const ws = atoms.workspace();
-    const curTabId = atoms.activeTabId();
-    let tabIdx = -1;
-    const tabids = getAllTabs(ws);
-    for (let i = 0; i < tabids.length; i++) {
-        if (tabids[i] == curTabId) {
-            tabIdx = i;
-            break;
-        }
-    }
-    if (tabIdx == -1) {
-        return;
-    }
-    const newTabIdx = (tabIdx + offset + tabids.length) % tabids.length;
-    const newActiveTabId = tabids[newTabIdx];
-    setActiveTab(newActiveTabId);
-}
-
-function handleCmdI() {
-    globalRefocus();
-}
-
-function globalRefocusWithTimeout(timeoutVal: number) {
-    setTimeout(() => {
-        globalRefocus();
-    }, timeoutVal);
-}
-
-function globalRefocus() {
-    const layoutModel = getLayoutModelForStaticTab();
-    const focusedNode = layoutModel.focusedNode?.();
-    if (focusedNode == null) {
-        // focus a node
-        layoutModel.focusFirstNode();
-        return;
-    }
-    const blockId = focusedNode?.data?.blockId;
-    if (blockId == null) {
-        return;
-    }
-    refocusNode(blockId);
-}
-
-function getDefaultNewBlockDef(): BlockDef {
-    const adnbAtom = getSettingsKeyAtom("app:defaultnewblock");
-    const adnb = adnbAtom() ?? "term";
-    if (adnb == "launcher") {
-        return {
-            meta: {
-                view: "launcher",
-            },
-        };
-    }
-    // "term", blank, anything else, fall back to terminal
-    const termBlockDef: BlockDef = {
-        meta: {
-            view: "term",
-            controller: "shell",
-        },
-    };
-    const layoutModel = getLayoutModelForStaticTab();
-    const focusedNode = layoutModel.focusedNode?.();
-    if (focusedNode != null) {
-        const blockAtom = WOS.getWaveObjectAtom<Block>(WOS.makeORef("block", focusedNode.data?.blockId));
-        const blockData = blockAtom();
-        if (blockData?.meta?.view == "term") {
-            if (blockData?.meta?.["cmd:cwd"] != null) {
-                termBlockDef.meta["cmd:cwd"] = blockData.meta["cmd:cwd"];
-            }
-        }
-        if (blockData?.meta?.connection != null) {
-            termBlockDef.meta.connection = blockData.meta.connection;
-        }
-    }
-    return termBlockDef;
-}
-
-async function handleCmdN() {
-    const blockDef = getDefaultNewBlockDef();
-    await createBlock(blockDef);
-}
-
-async function handleSplitHorizontal(position: "before" | "after") {
-    const layoutModel = getLayoutModelForStaticTab();
-    const focusedNode = layoutModel.focusedNode?.();
-    if (focusedNode == null) {
-        return;
-    }
-    const blockDef = getDefaultNewBlockDef();
-    await createBlockSplitHorizontally(blockDef, focusedNode.data.blockId, position);
-}
-
-async function handleSplitVertical(position: "before" | "after") {
-    const layoutModel = getLayoutModelForStaticTab();
-    const focusedNode = layoutModel.focusedNode?.();
-    if (focusedNode == null) {
-        return;
-    }
-    const blockDef = getDefaultNewBlockDef();
-    await createBlockSplitVertically(blockDef, focusedNode.data.blockId, position);
-}
-
-let lastHandledEvent: KeyboardEvent | null = null;
-
-// returns [keymatch, T]
-function checkKeyMap<T>(waveEvent: WaveKeyboardEvent, keyMap: Map<string, T>): [string, T] {
-    for (const key of keyMap.keys()) {
-        if (keyutil.checkKeyPressed(waveEvent, key)) {
-            const val = keyMap.get(key);
-            return [key, val];
-        }
-    }
-    return [null, null];
-}
-
-function appHandleKeyDown(waveEvent: WaveKeyboardEvent): boolean {
-    if (globalKeybindingsDisabled) {
-        return false;
-    }
-    const nativeEvent = (waveEvent as any).nativeEvent;
-    if (lastHandledEvent != null && nativeEvent != null && lastHandledEvent === nativeEvent) {
-        console.log("lastHandledEvent return false");
-        return false;
-    }
-    lastHandledEvent = nativeEvent;
-    if (activeChord) {
-        console.log("handle activeChord", activeChord);
-        // If we're in chord mode, look for the second key.
-        const chordBindings = globalChordMap.get(activeChord);
-        const [, handler] = checkKeyMap(waveEvent, chordBindings);
-        if (handler) {
-            resetChord();
-            return handler(waveEvent);
-        } else {
-            // invalid chord; reset state and consume key
-            resetChord();
-            return true;
-        }
-    }
-    const [chordKeyMatch] = checkKeyMap(waveEvent, globalChordMap);
-    if (chordKeyMatch) {
-        setActiveChord(chordKeyMatch);
-        return true;
-    }
-
-    const [, globalHandler] = checkKeyMap(waveEvent, globalKeyMap);
-    if (globalHandler) {
-        const handled = globalHandler(waveEvent);
-        if (handled) {
-            return true;
-        }
-    }
-    const layoutModel = getLayoutModelForStaticTab();
-    const focusedNode = layoutModel.focusedNode?.();
-    const blockId = focusedNode?.data?.blockId;
-    if (blockId != null && shouldDispatchToBlock(waveEvent)) {
-        const bcm = getBlockComponentModel(blockId);
-        const viewModel = bcm?.viewModel;
-        if (viewModel?.keyDownHandler) {
-            const handledByBlock = viewModel.keyDownHandler(waveEvent);
-            if (handledByBlock) {
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
-function registerControlShiftStateUpdateHandler() {
-    getApi().onControlShiftStateUpdate((state: boolean) => {
-        if (state) {
-            setControlShift();
-        } else {
-            unsetControlShift();
-        }
-    });
-}
-
-function tryReinjectKey(event: WaveKeyboardEvent): boolean {
-    return appHandleKeyDown(event);
-}
+import { handleCmdN, handleSplitHorizontal, handleSplitVertical } from "./keymodel-blockcreate";
+import { type KeyHandler, globalChordMap, globalKeyMap } from "./keymodel-dispatch";
+import {
+    cyclePaneFocus,
+    genericClose,
+    getFocusedBlockInStaticTab,
+    handleCmdI,
+    simpleCloseStaticTab,
+    switchBlockByBlockNum,
+    switchBlockInDirection,
+    switchTab,
+    switchTabAbs,
+} from "./keymodel-nav";
 
 function countTermBlocks(): number {
     const allBCMs = getAllBlockComponentModels();
@@ -692,16 +297,17 @@ function getAllGlobalKeyBindings(): string[] {
     return allKeys;
 }
 
+export { registerGlobalKeys };
+
 export {
     appHandleKeyDown,
     disableGlobalKeybindings,
     enableGlobalKeybindings,
     getSimpleControlShiftAtom,
-    globalRefocus,
-    globalRefocusWithTimeout,
+    keyboardMouseDownHandler,
     registerControlShiftStateUpdateHandler,
-    registerGlobalKeys,
     tryReinjectKey,
     unsetControlShift,
-    uxCloseBlock,
-};
+} from "./keymodel-dispatch";
+
+export { globalRefocus, globalRefocusWithTimeout, uxCloseBlock } from "./keymodel-nav";

@@ -5,6 +5,20 @@
 // Creates a browser window loading the frontend URL on context initialization.
 //
 // Phase 2: Stores AppState and injects IPC port into the page after load.
+//
+// This module holds the irreducible CEF FFI boilerplate: the
+// `wrap_window_delegate!`/`wrap_browser_view_delegate!`/`wrap_app!`/
+// `wrap_browser_process_handler!` macro blocks plus the small amount of
+// macOS FFI (`ensure_macos_native_window_buttons`) they call directly.
+// Pure/stateless helpers that those macro bodies call but that don't
+// depend back on them live in sibling modules and are re-exported here
+// so every existing `crate::app::*` call site (in and out of this
+// module) keeps working unchanged:
+//   - `gpu`             — Linux GPU-tier probing for ANGLE selection.
+//   - `monitor`          — monitor work-area / DPI / centered-rect math.
+//   - `window_settings`  — Linux window-properties FFI override,
+//                           `SELECTED_OZONE_PLATFORM`, and the
+//                           `window:transparent` settings.json reader.
 
 use cef::*;
 use std::cell::RefCell;
@@ -12,6 +26,20 @@ use std::sync::Arc;
 
 use crate::client::*;
 use crate::state::AppState;
+
+mod gpu;
+mod monitor;
+mod window_settings;
+
+#[cfg(target_os = "linux")]
+pub(crate) use gpu::{detect_gpu_tier, GpuTier};
+pub(crate) use monitor::get_monitor_centered_70pct;
+pub use monitor::get_monitor_work_area;
+#[cfg(target_os = "windows")]
+pub use monitor::{dpi_scale_at, get_monitor_work_area_physical};
+#[cfg(target_os = "linux")]
+pub use window_settings::{install_linux_window_properties_override, SELECTED_OZONE_PLATFORM};
+pub(crate) use window_settings::read_window_transparent_setting;
 
 // ---------------------------------------------------------------------------
 // Window & BrowserView delegates (CEF Views framework)
@@ -287,277 +315,6 @@ wrap_window_delegate! {
     }
 }
 
-/// Override the `get_linux_window_properties` function pointer on a
-/// `WindowDelegate` to write the AgentMux app_id directly to the C struct,
-/// bypassing the buggy `CefString` → `cef_string_utf16_t` conversion in the
-/// cef 146.7.0 wrapper (`Clear` variant gets dropped during writeback).
-///
-/// Without this, CEF emits `xdg_toplevel.set_app_id("")` and GNOME / KWin /
-/// sway can't match the window to `agentmux.desktop`, so the AgentMux icon
-/// never appears in the taskbar/dock/launcher.
-///
-/// Must be called once on every `WindowDelegate` we create (top-level, popup,
-/// new sub-window) before passing it to `window_create_top_level`.
-#[cfg(target_os = "linux")]
-pub fn install_linux_window_properties_override(delegate: &cef::WindowDelegate) {
-    use cef::ImplWindowDelegate;
-    // Disambiguate: WindowDelegate implements get_raw on three traits
-    // (ImplViewDelegate / ImplPanelDelegate / ImplWindowDelegate). We need
-    // the WindowDelegate one to get the right struct type for casting.
-    let raw: *mut cef::sys::_cef_window_delegate_t =
-        <cef::WindowDelegate as ImplWindowDelegate>::get_raw(delegate);
-    unsafe {
-        (*raw).get_linux_window_properties = Some(write_linux_window_properties);
-    }
-}
-
-/// Custom extern "C" shim invoked by libcef to populate
-/// `_cef_linux_window_properties_t`. Writes "agentmux" to wayland_app_id
-/// and the X11 wm_class fields via cef-dll-sys utf8→utf16 setters,
-/// then returns 1 so libcef uses the values.
-#[cfg(target_os = "linux")]
-extern "C" fn write_linux_window_properties(
-    _self_: *mut cef::sys::_cef_window_delegate_t,
-    _window: *mut cef::sys::_cef_window_t,
-    properties: *mut cef::sys::_cef_linux_window_properties_t,
-) -> std::os::raw::c_int {
-    if properties.is_null() {
-        return 0;
-    }
-    const APP_ID: &[u8] = b"agentmux";
-    unsafe {
-        let props = &mut *properties;
-        // The C struct's strings start zeroed (libcef constructs a default
-        // CefLinuxWindowProperties). cef_string_utf8_to_utf16 allocates a
-        // new utf-16 buffer and assigns it to the dest cef_string_utf16_t;
-        // ownership transfers to libcef which calls dtor when done.
-        cef::sys::cef_string_utf8_to_utf16(
-            APP_ID.as_ptr().cast(), APP_ID.len(), &mut props.wayland_app_id,
-        );
-        cef::sys::cef_string_utf8_to_utf16(
-            APP_ID.as_ptr().cast(), APP_ID.len(), &mut props.wm_class_class,
-        );
-        cef::sys::cef_string_utf8_to_utf16(
-            APP_ID.as_ptr().cast(), APP_ID.len(), &mut props.wm_class_name,
-        );
-    }
-    1
-}
-
-/// GPU capability tier, measured once at startup to drive ANGLE backend
-/// selection. Precedence: hardware Vulkan → hardware GL → software (SwiftShader).
-/// ANGLE is only retargeted, never bypassed. See the GPU block in
-/// `on_before_command_line_processing` and
-/// docs/specs/SPEC_LINUX_GPU_BACKEND_PRECEDENCE_2026_06_13.md.
-#[cfg(target_os = "linux")]
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum GpuTier {
-    /// A hardware Vulkan device is present — leave Chromium's default (Vulkan).
-    HwVulkan,
-    /// No hardware Vulkan but a DRM render node exists — route ANGLE to GL and
-    /// override the GPU blocklist (the VMware/SVGA3D case).
-    HwGl,
-    /// Neither — leave Chromium's default (software SwiftShader).
-    Software,
-}
-
-#[cfg(target_os = "linux")]
-impl GpuTier {
-    fn as_str(self) -> &'static str {
-        match self {
-            GpuTier::HwVulkan => "hw-vulkan",
-            GpuTier::HwGl => "hw-gl",
-            GpuTier::Software => "software",
-        }
-    }
-    fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "hw-vulkan" => Some(GpuTier::HwVulkan),
-            "hw-gl" => Some(GpuTier::HwGl),
-            "software" => Some(GpuTier::Software),
-            _ => None,
-        }
-    }
-}
-
-/// Resolve the GPU tier once. `on_before_command_line_processing` runs per
-/// process; the browser process (which starts first, before any child is
-/// spawned) finds `AGENTMUX_GPU_TIER` unset, probes the hardware, and publishes
-/// the result. Child processes (gpu/renderer/utility) inherit that env var and
-/// read it back — so the `VkInstance` probe runs exactly once, in the browser.
-#[cfg(target_os = "linux")]
-fn detect_gpu_tier() -> GpuTier {
-    if let Ok(v) = std::env::var("AGENTMUX_GPU_TIER") {
-        if let Some(t) = GpuTier::from_str(&v) {
-            return t;
-        }
-    }
-    let tier = if has_hardware_vulkan() {
-        GpuTier::HwVulkan
-    } else if has_drm_render_node() {
-        GpuTier::HwGl
-    } else {
-        GpuTier::Software
-    };
-    // Publish for child processes (inherited through the environment on spawn).
-    std::env::set_var("AGENTMUX_GPU_TIER", tier.as_str());
-    tracing::info!(tier = tier.as_str(), "resolved GPU tier for ANGLE selection");
-    tier
-}
-
-/// True if a *hardware* Vulkan device is present. Enumerates Vulkan physical
-/// devices and accepts any whose `device_type` is not `CPU` — llvmpipe/lavapipe/
-/// SwiftShader all report `CPU`. Fully defensive: any load/create/enumerate
-/// failure ⇒ false (we then fall through to the GL check).
-#[cfg(target_os = "linux")]
-fn has_hardware_vulkan() -> bool {
-    use ash::vk;
-    let entry = match unsafe { ash::Entry::load() } {
-        Ok(e) => e,
-        Err(_) => return false,
-    };
-    let app_info = vk::ApplicationInfo::default().api_version(vk::API_VERSION_1_0);
-    let create_info = vk::InstanceCreateInfo::default().application_info(&app_info);
-    let instance = match unsafe { entry.create_instance(&create_info, None) } {
-        Ok(i) => i,
-        Err(_) => return false,
-    };
-    let has_hw = unsafe { instance.enumerate_physical_devices() }
-        .map(|devices| {
-            devices.iter().any(|&d| {
-                unsafe { instance.get_physical_device_properties(d) }.device_type
-                    != vk::PhysicalDeviceType::CPU
-            })
-        })
-        .unwrap_or(false);
-    unsafe { instance.destroy_instance(None) };
-    has_hw
-}
-
-/// True if a DRM render node (`/dev/dri/renderD*`) exists — a kernel GPU with a
-/// render node, i.e. a real hardware GL path (vmwgfx on VMware, i915/amdgpu/
-/// nvidia on bare metal). Heuristic; the spec's §7 upgrade path tightens this to
-/// a `GL_RENDERER` software-marker check.
-#[cfg(target_os = "linux")]
-fn has_drm_render_node() -> bool {
-    std::fs::read_dir("/dev/dri")
-        .map(|rd| {
-            rd.flatten()
-                .any(|e| e.file_name().to_string_lossy().starts_with("renderD"))
-        })
-        .unwrap_or(false)
-}
-
-/// Compute a centered 70% rect for the monitor the window is currently on.
-/// Returns (x, y, width, height) or None if the monitor can't be determined.
-fn get_monitor_centered_70pct(window: &Window) -> Option<(i32, i32, i32, i32)> {
-    let bounds = window.bounds();
-    let (work_x, work_y, work_w, work_h) = get_monitor_work_area(bounds.x, bounds.y)?;
-    let w = (work_w as f64 * 0.70) as i32;
-    let h = (work_h as f64 * 0.70) as i32;
-    let x = work_x + (work_w - w) / 2;
-    let y = work_y + (work_h - h) / 2;
-    Some((x, y, w, h))
-}
-
-/// Get the work area (excluding taskbar/dock) of the monitor containing (px, py).
-/// Returns (x, y, width, height) of the work area.
-#[cfg(target_os = "windows")]
-pub fn get_monitor_work_area(px: i32, py: i32) -> Option<(i32, i32, i32, i32)> {
-    use windows_sys::Win32::Graphics::Gdi::{
-        MonitorFromPoint, GetMonitorInfoW, MONITORINFO, MONITOR_DEFAULTTOPRIMARY,
-    };
-    use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
-    unsafe {
-        let point = windows_sys::Win32::Foundation::POINT { x: px, y: py };
-        let hmonitor = MonitorFromPoint(point, MONITOR_DEFAULTTOPRIMARY);
-        if hmonitor.is_null() {
-            return None;
-        }
-        let mut info: MONITORINFO = std::mem::zeroed();
-        info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
-        if GetMonitorInfoW(hmonitor, &mut info) == 0 {
-            return None;
-        }
-        // Convert physical pixels → DIP (logical) pixels.
-        // CEF Views set_bounds() expects DIP; GetMonitorInfoW returns physical pixels.
-        // On Windows 10 @ 100%: dpi_x == 96 → scale == 1.0 (no change).
-        // On Windows 11 @ 125%: dpi_x == 120 → divide physical coords by 1.25.
-        let mut dpi_x: u32 = 96;
-        let mut dpi_y: u32 = 96;
-        let _ = GetDpiForMonitor(hmonitor, MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y);
-        let scale = dpi_x as f64 / 96.0;
-        let rc = info.rcWork;
-        Some((
-            (rc.left as f64 / scale).round() as i32,
-            (rc.top as f64 / scale).round() as i32,
-            ((rc.right - rc.left) as f64 / scale).round() as i32,
-            ((rc.bottom - rc.top) as f64 / scale).round() as i32,
-        ))
-    }
-}
-
-/// Like [`get_monitor_work_area`] but returns the work area in **physical**
-/// pixels (no DIP division). Win32 `SetWindowPos`/`GetWindowRect` operate in
-/// physical pixels, so clamping a physical-pixel window rect must use physical
-/// work-area bounds — using the DIP variant over-constrains placement on HiDPI
-/// (reagent P1 on PR #1652). Returns `(left, top, width, height)`.
-#[cfg(target_os = "windows")]
-pub fn get_monitor_work_area_physical(px: i32, py: i32) -> Option<(i32, i32, i32, i32)> {
-    use windows_sys::Win32::Graphics::Gdi::{
-        GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTOPRIMARY,
-    };
-    unsafe {
-        let point = windows_sys::Win32::Foundation::POINT { x: px, y: py };
-        let hmonitor = MonitorFromPoint(point, MONITOR_DEFAULTTOPRIMARY);
-        if hmonitor.is_null() {
-            return None;
-        }
-        let mut info: MONITORINFO = std::mem::zeroed();
-        info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
-        if GetMonitorInfoW(hmonitor, &mut info) == 0 {
-            return None;
-        }
-        let rc = info.rcWork;
-        Some((rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top))
-    }
-}
-
-/// Effective DPI scale (1.0 == 96 DPI == 100%) of the monitor under `(px, py)`
-/// in physical px. Used to convert physical-pixel rects to DIP for CEF Views
-/// `set_bounds` (which works in DIP). Returns 1.0 if the monitor can't be found.
-#[cfg(target_os = "windows")]
-pub fn dpi_scale_at(px: i32, py: i32) -> f32 {
-    use windows_sys::Win32::Graphics::Gdi::{MonitorFromPoint, MONITOR_DEFAULTTOPRIMARY};
-    use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
-    unsafe {
-        let pt = windows_sys::Win32::Foundation::POINT { x: px, y: py };
-        let mon = MonitorFromPoint(pt, MONITOR_DEFAULTTOPRIMARY);
-        if mon.is_null() {
-            return 1.0;
-        }
-        let (mut dx, mut dy) = (96u32, 96u32);
-        let _ = GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &mut dx, &mut dy);
-        (dx as f32 / 96.0).max(0.1)
-    }
-}
-
-#[cfg(target_os = "macos")]
-pub fn get_monitor_work_area(_px: i32, _py: i32) -> Option<(i32, i32, i32, i32)> {
-    // TODO: Use NSScreen.main.visibleFrame for proper work area (minus Dock/menu bar).
-    // CGMainDisplayID only returns the primary display — doesn't support multi-monitor
-    // and hardcoding menu bar height is fragile. Fall back to 1200x800 default.
-    None
-}
-
-#[cfg(target_os = "linux")]
-pub fn get_monitor_work_area(_px: i32, _py: i32) -> Option<(i32, i32, i32, i32)> {
-    // X11: XDisplayWidth/XDisplayHeight on the default screen.
-    // This is the full screen, not work area (no taskbar subtraction).
-    // TODO: use _NET_WORKAREA from the root window for proper work area.
-    None // Falls back to 1200x800 default
-}
-
 wrap_browser_view_delegate! {
     pub struct AgentMuxBrowserViewDelegate {
         runtime_style: RuntimeStyle,
@@ -655,70 +412,6 @@ unsafe fn ensure_macos_native_window_buttons(nsview: *mut std::ffi::c_void) {
 // ---------------------------------------------------------------------------
 // CefApp + BrowserProcessHandler
 // ---------------------------------------------------------------------------
-
-/// The ozone platform this process appended to the command line (Linux).
-/// Unset when nothing was appended (pure X11 session → Chromium's X11
-/// default). Read by `ui_tasks::SetWindowAlphaTask` to decide whether
-/// `window_handle()` is an X11 XID that `_NET_WM_WINDOW_OPACITY` can target.
-#[cfg(target_os = "linux")]
-pub static SELECTED_OZONE_PLATFORM: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-
-/// Read `window:transparent` from the user's settings.json before CefInitialize.
-/// Gates the transparent-compositing command-line flags so non-transparent
-/// windows don't pay the LCD-text and opacity-flash penalties. Returns false
-/// if the file is absent or the key is missing (default = opaque).
-fn read_window_transparent_setting() -> bool {
-    // Candidate locations for the LIVE settings.json, in priority order —
-    // mirrors srv's `config_watcher_fs::resolve_settings_dir()` (the file the
-    // settings UI actually edits), then legacy/per-instance fallbacks:
-    //   1. $AGENTMUX_SETTINGS_DIR/settings.json (explicit override)
-    //   2. $AGENTMUX_CONFIG_HOME/../../settings.json (channels-root shared
-    //      file — the modern location, e.g. ~/.agentmux/channels/settings.json)
-    //   3. $AGENTMUX_CONFIG_DIR/settings.json (per-instance config dir)
-    //   4. ~/.agentmux/channels/settings.json
-    //   5. ~/.agentmux/settings.json (legacy)
-    // First file that exists wins. The old code checked ONLY (3), which is
-    // empty in every real deployment — so `window:transparent` silently read
-    // `false` for everyone on Linux/macOS.
-    fn candidates() -> Vec<std::path::PathBuf> {
-        let mut out = Vec::new();
-        if let Some(d) = std::env::var_os("AGENTMUX_SETTINGS_DIR").filter(|s| !s.is_empty()) {
-            out.push(std::path::PathBuf::from(d).join("settings.json"));
-        }
-        if let Some(d) = std::env::var_os("AGENTMUX_CONFIG_HOME").filter(|s| !s.is_empty()) {
-            let p = std::path::PathBuf::from(d);
-            if let Some(root) = p.parent().and_then(|p| p.parent()) {
-                out.push(root.join("settings.json"));
-            }
-        }
-        if let Some(d) = std::env::var_os("AGENTMUX_CONFIG_DIR").filter(|s| !s.is_empty()) {
-            out.push(std::path::PathBuf::from(d).join("settings.json"));
-        } else if let Some(p) = agentmux_common::DataPaths::from_env().map(|p| p.config_dir) {
-            out.push(p.join("settings.json"));
-        }
-        if let Some(home) = dirs::home_dir() {
-            out.push(home.join(".agentmux").join("channels").join("settings.json"));
-            out.push(home.join(".agentmux").join("settings.json"));
-        }
-        out
-    }
-    for path in candidates() {
-        if !path.exists() {
-            continue;
-        }
-        // settings.json is JSONC (comments + trailing commas) — a strict
-        // serde_json parse fails on the shipped template. Use the same
-        // lenient reader the settings command path uses.
-        let map = crate::commands::platform::read_settings_jsonc(&path);
-        if let Some(v) = map.get("window:transparent").and_then(|v| v.as_bool()) {
-            tracing::info!("window:transparent={} (from {})", v, path.display());
-            return v;
-        }
-        // File exists but has no (uncommented) key → default false, but keep
-        // scanning lower-priority locations in case an older file has it.
-    }
-    false
-}
 
 wrap_app! {
     pub struct AgentMuxApp {
