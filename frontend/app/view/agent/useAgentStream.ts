@@ -5,29 +5,51 @@
  * useAgentStream — SolidJS hook that subscribes to a block's subprocess output,
  * pipes it through the provider translator + stream parser, and feeds
  * the resulting DocumentNodes into SolidJS signals.
+ *
+ * This hook bundles several producers that all write into the same agent
+ * document: the core NDJSON transform pipeline below (byte decode → line
+ * buffering → JSON parse → token extraction → translate → parse → node),
+ * tool-chunk streaming (`hooks/useToolChunkStream.ts`), persistent-shell
+ * streaming (`hooks/useShellNodeStream.ts`), turn-lifecycle finalization
+ * and watchdogs (`hooks/useTurnLifecycle.ts`), and pending-message
+ * acceptance (`hooks/usePendingMessageAcceptance.ts`).
+ *
+ * IMPORTANT — crash history: `tool_chunk` WPS events used to call
+ * dispatchDoc(ToolChunkAppend) directly, one immediate signal write per
+ * chunk. During active tool streaming that meant many independent signal
+ * writes, each triggering its own Solid reactive flush. When a chunk write
+ * raced with a concurrent RAF-scheduled document flush (both live in the
+ * same browser task), two separate runUpdates frames could interleave,
+ * leaving the <Index> reconciler holding a stale `current` array →
+ * replaceChild NotFoundError. (Retro: RETRO_REPLACECHILD_CRASH_2026-06-06.md;
+ * see also SPEC_REPLACECHILD_CRASH_FULL_ANALYSIS_AND_FIX_2026-06-06.md §3.1.)
+ *
+ * The fix — and the reason this file is split the way it is — is
+ * `stream-flush-queue.ts`'s `StreamFlushQueue`: ONE shared
+ * `requestAnimationFrame` call site and ONE shared `batch()` call site for
+ * every producer below. EVERY producer (this file's own NDJSON loop, the
+ * tool-chunk hook, the shell hook, and turn-lifecycle's "Interrupted by
+ * user" row) pushes into that SAME queue instance instead of scheduling
+ * its own flush or calling its own `batch()`. If you are adding a new
+ * event-source producer, give it a `pushXxx` method on `StreamFlushQueue`
+ * — do NOT give it its own RAF or `batch()` call.
  */
 
-import { getFileSubject, waveEventSubscribe } from "@/app/store/wps";
-import { WpsEvent } from "@/app/store/wps-events";
-import * as WOS from "@/app/store/wos";
+import { getFileSubject } from "@/app/store/wps";
 import { base64ToArray } from "@/util/util";
-import { trail } from "@/log/render-trail";
-import { batch, createEffect, onCleanup, onMount } from "solid-js";
+import { onCleanup, onMount } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
 import type { PendingMessage, SignalPair } from "./state";
-import { ClaudeCodeStreamParser, STARTUP_HEADING_RE } from "./stream-parser";
-import type { ContextCompactedNode, DocumentNode, SessionStats, ShellNode, ToolLogChunk, UserMessageNode } from "./types";
-import { recordTurn } from "@/store/token-usage";
+import { ClaudeCodeStreamParser } from "./stream-parser";
+import type { ContextCompactedNode, DocumentNode } from "./types";
 import type { TurnPhase } from "@/app/store/agent-pane-state/types";
-import {
-    dispatch as dispatchDoc,
-    getNodeIdSet,
-} from "@/app/store/agent-document-store";
-import {
-    dispatch as dispatchPane,
-    snapshot as paneSnapshot,
-} from "@/app/store/agent-pane-state-store";
-import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
+import { getNodeIdSet } from "@/app/store/agent-document-store";
+import type { AgentPaneModel } from "@/app/store/agent-pane-model";
+import { createStreamFlushQueue } from "./stream-flush-queue";
+import { useToolChunkStream } from "./hooks/useToolChunkStream";
+import { useShellNodeStream } from "./hooks/useShellNodeStream";
+import { useTurnLifecycle } from "./hooks/useTurnLifecycle";
+import { usePendingMessageAcceptance } from "./hooks/usePendingMessageAcceptance";
 
 const OutputFileName = "output";
 
@@ -58,14 +80,6 @@ function extractToolArg(tool: string, params: Record<string, unknown> | undefine
             return undefined;
     }
 }
-
-/**
- * Watchdog tick rate. Every 5s the hook dispatches a StreamWatchdogTick
- * to the pane-state reducer; the reducer compares against
- * `STUCK_THRESHOLD_MS` (45s) and emits a `stream-stuck` event when the
- * subscribed stream has been silent that long. Issue #728 gap 3.
- */
-const WATCHDOG_INTERVAL_MS = 5_000;
 
 interface UseAgentStreamOpts {
     blockId: string;
@@ -129,20 +143,12 @@ export function useAgentStream({
     provider,
     agentName,
 }: UseAgentStreamOpts): void {
-    // Read-side accessors only — all writes route through dispatchPane.
-    // Maintaining this contract is how the agent pane stays 100%
-    // reducer-routed and why `recordDispatch` is a sufficient tap for
-    // session-replay fixtures. See docs/analysis/AGENT_PANE_REDUCER_
-    // AUDIT_2026_05_12.md.
-    //
-    // PR G: turnTokens is fetched directly from the reducer snapshot
-    // at finalize time (paneSnapshot) instead of being threaded through
-    // a dedicated accessor — fewer props, same content. Similarly, the
-    // user-initiated-stop check reads `turnPhase.kind === "Interrupting"`
-    // from the turnPhaseAtom that the agent-view registered.
-    const [getTurnPhase] = turnPhaseAtom;
-
-    // Mutable state that doesn't trigger re-renders
+    // Mutable state that doesn't trigger re-renders. Kept here (not
+    // extracted) because it's tightly coupled to the NDJSON parse loop
+    // below: lineBuffer/translator/parser accumulate per-byte parse state
+    // across fileSubject callbacks, and nodeIdSet is this hook's in-batch
+    // dedup cache that the extracted producer hooks also need to consult
+    // via the hasNodeId/addNodeId closures passed to them.
     let lineBuffer = "";
     let translator = createTranslator(outputFormat);
     let parser = new ClaudeCodeStreamParser();
@@ -150,256 +156,20 @@ export function useAgentStream({
     // nodeIdSet remains for fast in-batch dedup (the reducer also dedups,
     // but checking here avoids enqueuing already-seen nodes into pendingNew).
     let nodeIdSet = new Set<string>();
+    const hasNodeId = (id: string) => nodeIdSet.has(id);
+    const addNodeId = (id: string) => { nodeIdSet.add(id); };
 
-    // Batching: accumulate parsed nodes between RAF flushes
-    let pendingNew: DocumentNode[] = [];
-    let pendingUpdates: DocumentNode[] = [];
-    let flushRafId: number | null = null;
+    // The single shared RAF-batching queue every producer in this hook
+    // pushes into — see this file's top doc comment and
+    // stream-flush-queue.ts's module doc for why there must be exactly one.
+    const queue = createStreamFlushQueue(model);
 
-    // Tool-chunk accumulator. `tool_chunk` WPS events previously called
-    // dispatchDoc(ToolChunkAppend) directly — one immediate signal write per
-    // chunk. During active tool streaming that means many independent signal
-    // writes, each triggering its own Solid reactive flush. When a chunk write
-    // races with a concurrent RAF StreamFlush (both live in the same browser
-    // task), two separate runUpdates frames can interleave, leaving the <Index>
-    // reconciler holding a stale `current` array → replaceChild NotFoundError.
-    // Fix: accumulate chunks here and flush them inside the same batch() as
-    // StreamFlush, so all documentAtom writes from streaming originate from one
-    // code path and one reactive frame. (Retro: RETRO_REPLACECHILD_CRASH_2026-06-06.md)
-    type PendingChunk = { toolId: string; chunk: ToolLogChunk };
-    let pendingChunks: PendingChunk[] = [];
-
-    // Shell-node accumulators. Mirrors the tool_chunk pattern — batched inside
-    // the same RAF flush so ShellNodeCreate exists before ShellChunkAppend
-    // tries to append to it. (SPEC_PERSISTENT_SHELL_NODE_2026_06_11.md §5.6)
-    type PendingShellCreate = { node: ShellNode };
-    type PendingShellChunk = { shellId: string; chunk: ToolLogChunk };
-    type PendingShellExit = { shellId: string; status: ShellNode["status"]; exitCode: number; exitedAt: number };
-    let pendingShellCreates: PendingShellCreate[] = [];
-    let pendingShellChunks: PendingShellChunk[] = [];
-    let pendingShellExits: PendingShellExit[] = [];
-
-    // Single per-block WPS subscription for `tool_chunk` events.
-    // `agentmux-bashwrap exec` publishes every stdout/stderr line to a
-    // fixed event name with `scopes: ["block:<id>"]` and the tool_use_id
-    // in the payload. The broker persists ~1024 events per scope, so
-    // the subscription installed on mount picks up any chunks that
-    // landed before Claude's stream-json caught up enough for the
-    // frontend to learn the tool_use_id — closes the late-subscribe
-    // race that the previous per-tool subscription model could not.
-    // See `docs/specs/SPEC_STREAMING_BASH_RUNNER_2026_05_11.md` §6.
-    const blockChunkUnsub = waveEventSubscribe({
-        eventType: "tool_chunk",
-        scope: `block:${blockId}`,
-        handler: (event: any) => {
-            const data = event?.data;
-            if (!data || typeof data !== "object") return;
-            const toolId = typeof data.tool_id === "string" ? data.tool_id : "";
-            if (!toolId) return;
-            if (data.op === "terminal") {
-                pendingChunks.push({
-                    toolId,
-                    chunk: {
-                        kind: "system",
-                        content: `[exited ${data.exit_code ?? "?"}]`,
-                        timestamp: data.timestamp ?? Date.now(),
-                    },
-                });
-                scheduleFlush();
-                return;
-            }
-            if (data.op !== "chunk") return;
-            pendingChunks.push({
-                toolId,
-                chunk: {
-                    kind: data.kind ?? "stdout",
-                    content: data.content ?? "",
-                    timestamp: data.timestamp ?? Date.now(),
-                },
-            });
-            scheduleFlush();
-        },
-    });
-
-    // Own the tool_chunk subscription at body scope so it is torn down even if
-    // onMount early-returns (e.g. enabled:false). Its only other teardown lives
-    // inside onMount's onCleanup, which is skipped on early-return — so without
-    // this the global handler would leak one per mount.
-    onCleanup(() => { try { blockChunkUnsub(); } catch { /* ignore */ } });
-
-    // shell_chunk handler — used by the per-shell subscriptions. The payload
-    // always carries `shell_id`, so one handler routes correctly. Chunks are
-    // delivered via a SINGLE scope (`shell:<id>`); there is no longer a separate
-    // block-scope live path, so the same chunk can never arrive twice (the
-    // doubled-output bug this fix removes — see shell_node.rs for the full
-    // rationale).
-    const handleShellChunk = (event: any) => {
-        const d = event?.data;
-        if (!d || typeof d !== "object") return;
-        const shellId = typeof d.shell_id === "string" ? d.shell_id : "";
-        if (!shellId) return;
-        if (d.op === "exit") {
-            const exitCode = typeof d.exit_code === "number" ? d.exit_code : -1;
-            // `stopped` = the exit was caused by ShellStop (tree-killed), so show
-            // the grey "stopped" status rather than a red exited-err for the
-            // non-zero code the kill produces.
-            const status: ShellNode["status"] = d.stopped === true
-                ? "stopped"
-                : exitCode === 0 ? "exited-ok" : "exited-err";
-            pendingShellExits.push({ shellId, status, exitCode, exitedAt: d.timestamp ?? Date.now() });
-            scheduleFlush();
-            return;
-        }
-        if (d.op !== "chunk") return;
-        pendingShellChunks.push({
-            shellId,
-            chunk: {
-                kind: d.kind ?? "stdout",
-                content: d.content ?? "",
-                timestamp: d.timestamp ?? Date.now(),
-            },
-        });
-        scheduleFlush();
-    };
-
-    // Per-shell shell_chunk subscriptions. The backend publishes each shell's
-    // chunk/exit events under a SINGLE scope: `shell:<shellId>` (a dedicated
-    // persist:1024 ring — see shell_node.rs). This is the ONLY delivery path for
-    // chunks; we subscribe to it when we learn of the shell (via the persist:64
-    // block-scoped shell_node_create that replays on remount). Because the broker
-    // persists the ring regardless of subscribers, any output produced before
-    // this subscription establishes (the common spawn-beats-resub race) is
-    // retained in the ring and replayed exactly once on subscribe — so dropping
-    // the old block-scope live subscription cannot lose the first chunks. Each
-    // shell having its own ring also means a chatty sibling can't evict another
-    // shell's exit event. Tracked here so all per-shell subs tear down on
-    // unmount. (SPEC_PERSISTENT_SHELL_NODE — P2 per-shell ring buffer fix.)
-    const perShellUnsubs = new Map<string, () => void>();
-    const subscribeShellScope = (shellId: string) => {
-        if (perShellUnsubs.has(shellId)) return;
-        const unsub = waveEventSubscribe({
-            eventType: WpsEvent.ShellChunk,
-            scope: `shell:${shellId}`,
-            handler: handleShellChunk,
-        });
-        perShellUnsubs.set(shellId, unsub);
-    };
-    onCleanup(() => {
-        for (const unsub of perShellUnsubs.values()) {
-            try { unsub(); } catch { /* ignore */ }
-        }
-        perShellUnsubs.clear();
-    });
-
-    // shell_node_create: backend published immediately when Shell tool is called.
-    // We build the full ShellNode and queue it for the next RAF flush. We also
-    // subscribe to this shell's per-shell `shell_chunk` ring so its chunks/exit
-    // replay on remount even if a sibling shell evicted them from the block ring.
-    const shellNodeCreateUnsub = waveEventSubscribe({
-        eventType: WpsEvent.ShellNodeCreate,
-        scope: `block:${blockId}`,
-        handler: (event: any) => {
-            const d = event?.data;
-            if (!d || typeof d !== "object") return;
-            const shellId = typeof d.shell_id === "string" ? d.shell_id : "";
-            if (!shellId) return;
-            const node: ShellNode = {
-                type: "shell",
-                id: shellId,
-                cmd: d.cmd ?? "",
-                title: d.title ?? d.cmd ?? "",
-                cwd: typeof d.cwd === "string" ? d.cwd : undefined,
-                status: "running",
-                spawnedAt: d.timestamp ?? Date.now(),
-                log: { chunks: [], open: true },
-            };
-            pendingShellCreates.push({ node });
-            subscribeShellScope(shellId);
-            scheduleFlush();
-        },
-    });
-    onCleanup(() => { try { shellNodeCreateUnsub(); } catch { /* ignore */ } });
-
-    // NOTE: there is intentionally NO block-scope `shell_chunk` subscription.
-    // Chunks/exit are delivered solely via the per-shell `shell:<id>` scope
-    // (subscribed in subscribeShellScope above). Publishing to both scopes used
-    // to double-deliver early output — once live via block, once in the replay
-    // burst via shell — which the reducer's last-chunk-only isDuplicate could not
-    // collapse. See shell_node.rs shell_scopes() for the full rationale.
-
-    function flushPendingNodes() {
-        flushRafId = null;
-        if (pendingNew.length === 0 && pendingUpdates.length === 0 && pendingChunks.length === 0
-            && pendingShellCreates.length === 0 && pendingShellChunks.length === 0 && pendingShellExits.length === 0) return;
-
-        const batchNew = pendingNew;
-        const batchUpdates = pendingUpdates;
-        const batchChunks = pendingChunks;
-        const batchShellCreates = pendingShellCreates;
-        const batchShellChunks = pendingShellChunks;
-        const batchShellExits = pendingShellExits;
-        pendingNew = [];
-        pendingUpdates = [];
-        pendingChunks = [];
-        pendingShellCreates = [];
-        pendingShellChunks = [];
-        pendingShellExits = [];
-
-        // Wrap both store writes in a single Solid batch so all reactive
-        // effects (partition memo → <Index> reconciler, DocumentRow
-        // re-renders, pane-state observers) settle together in one
-        // synchronous pass. Without batch(), the two sequential writes
-        // can interleave reactive re-renders: the first write triggers
-        // the <Index> outer reconciler, which starts inserting new DOM
-        // rows; the second write (or a concurrent DocumentRow update
-        // triggered by the first) then mutates the same DOM subtree
-        // mid-reconcile, causing reconcileArrays to call replaceChild on
-        // a node that was just moved — the confirmed crash root cause
-        // (render_trail 2026-06-05: replaceChild / reconcileArrays /
-        // insertExpression in solid-js/web).
-        batch(() => {
-            // Document mutation first — the reducer owns dedup, in-place
-            // updates, and the markdown-content merge. StreamFlush must run
-            // BEFORE ToolChunkAppend so that any ToolNode created by this
-            // flush exists before we try to append chunks to it. Chunks that
-            // arrive before their ToolNode is created (the WPS late-subscribe
-            // case) are dropped by the reducer's findToolIndex guard; ordering
-            // StreamFlush first is the narrowest window possible.
-            model.dispatchDoc({
-                type: "StreamFlush",
-                newNodes: batchNew,
-                updatedNodes: batchUpdates,
-            });
-            // Tool-chunk appends after StreamFlush has committed the ToolNode.
-            for (const { toolId, chunk } of batchChunks) {
-                model.dispatchDoc({ type: "ToolChunkAppend", toolId, chunk });
-            }
-            // Shell: create nodes first, then chunks, then exits —
-            // same ordering guarantee as the tool_chunk/StreamFlush pair.
-            for (const { node } of batchShellCreates) {
-                model.dispatchDoc({ type: "ShellNodeCreate", node });
-            }
-            for (const { shellId, chunk } of batchShellChunks) {
-                model.dispatchDoc({ type: "ShellChunkAppend", shellId, chunk });
-            }
-            for (const { shellId, status, exitCode, exitedAt } of batchShellExits) {
-                model.dispatchDoc({ type: "ShellStatusUpdate", shellId, status, exitCode, exitedAt });
-            }
-            // Lifecycle counter bump — agent-pane-state owns streaming
-            // metadata (active flag + bufferSize + lastEventTime).
-            model.dispatchPane({
-                type: "StreamFlushObserved",
-                addedCount: batchNew.length,
-                at: Date.now(),
-            });
-        });
-    }
-
-    function scheduleFlush() {
-        if (flushRafId == null) {
-            flushRafId = requestAnimationFrame(flushPendingNodes);
-        }
-    }
+    // Tool-chunk and persistent-shell streaming subscriptions, installed at
+    // body scope (not inside onMount) so they tear down even if onMount
+    // below early-returns (e.g. enabled:false). Both push into `queue`
+    // rather than scheduling their own flush.
+    useToolChunkStream({ blockId, queue });
+    useShellNodeStream({ blockId, queue });
 
     onMount(() => {
         if (!enabled || !blockId) return;
@@ -410,252 +180,32 @@ export function useAgentStream({
         parser = new ClaudeCodeStreamParser();
         if (agentName) parser.setAgentId(agentName);
         nodeIdSet = new Set();
-        pendingNew = [];
-        pendingUpdates = [];
+        queue.resetNodeQueues();
 
-        /**
-         * Shared finalization for "the turn is over." Called by both the
-         * real `session_end` event from the CLI's result line AND the
-         * fallback timer armed when the user presses Esc (killing the
-         * subprocess prevents it from emitting its own result event).
-         *
-         * If `turnPhase.kind === "Interrupting"` when this runs, the
-         * ending was user-initiated — append a visible "⏹ Interrupted
-         * by user" row to the document so the user has durable
-         * confirmation that the stop landed.
-         */
-        const finalizeTurn = (stats: SessionStats | null) => {
-            parser.flushPending();
-            // Snapshot live turn tokens into SessionStats before nulling
-            // the live signal. The Worked footer reads from sessionStats
-            // (since turnTokens is cleared on session_end); without this
-            // merge the headline tokens-in-Worked feature shows nothing.
-            // Per PR #549 reagent/codex P1.
-            //
-            // PR G: turn-tokens are read from the reducer snapshot
-            // instead of a dedicated signal accessor — same source of
-            // truth, fewer props threaded into the hook.
-            // Prefer the result event's turn-total usage. The live
-            // turnTokens hold only the last message_start/message_delta
-            // (TokensIn/TokensOut overwrite, not accumulate), so they
-            // undercount multi-call turns; fall back to them only when
-            // session_end carries no usage (e.g. providers without a
-            // token-bearing result line).
-            const liveTokens = paneSnapshot(blockId)?.turnTokens ?? null;
-            const statsTokens =
-                stats && (stats.input_tokens != null || stats.output_tokens != null)
-                    ? { input: stats.input_tokens ?? 0, output: stats.output_tokens ?? 0 }
-                    : null;
-            const tokens = statsTokens ?? liveTokens;
-            // Aggregate the completed turn's tokens into the global
-            // session-local token-usage store so the status bar's
-            // indicator + breakdown popover stay up to date. Guarded
-            // against double-counting by recordTurn's own no-op-on-zero
-            // check — see SPEC_STATUSBAR_TOKEN_USAGE_2026_04_24.md §5.1.
-            if (provider && tokens) {
-                recordTurn(provider, tokens);
-            }
-            // Detect user-initiated stop via the reducer's turn phase.
-            // PR G: replaces the legacy `stoppingAtom` getter — the
-            // predicate is exactly `turnPhase.kind === "Interrupting"`
-            // since RequestStop is the only command that enters
-            // Interrupting and TurnEnd is the next transition out.
-            // The reducer's TurnEnd handler does the cross-atom cleanup
-            // in one shot: merges live tokens into stats, clears
-            // tool/tokens, and transitions the phase to Done.
-            const wasStopping = getTurnPhase().kind === "Interrupting";
-            model.dispatchPane({ type: "TurnEnd", stats });
-            if (wasStopping) {
-                const interruptedNode: DocumentNode = {
-                    type: "markdown",
-                    id: `interrupted-${Date.now()}`,
-                    content: "⏹ _Interrupted by user_",
-                    timestamp: Date.now(),
-                };
-                if (!nodeIdSet.has(interruptedNode.id)) {
-                    nodeIdSet.add(interruptedNode.id);
-                    pendingNew.push(interruptedNode);
-                    scheduleFlush();
-                }
-            }
-        };
-
-        // Process-exit grace-period: when the backend subprocess exits
-        // (`ControllerStatus: done`), give 1.5 s for any buffered
-        // `session_end` to drain through the IPC. If the phase is still
-        // working after that window, the process crashed without emitting
-        // `session_end` — force StreamUnsubscribe so "Working…" clears
-        // and the Disconnected state surfaces the AgentFailure banner.
-        //
-        // Clean exit: `session_end` → `finalizeTurn` → `TurnEnd` puts the
-        // phase in Done before the timer fires → no-op.
-        // Persistent mode: the process never exits between turns, so
-        // `ControllerStatus: done` only fires on crash or session teardown.
-        // Auto-retry: `ControllerStatus: running` cancels any pending timer.
-        let procExitGraceTimer: number | null = null;
-        const procExitUnsub = waveEventSubscribe({
-            eventType: WpsEvent.ControllerStatus,
-            scope: WOS.makeORef("block", blockId),
-            handler: (event) => {
-                const status = (event as any)?.data?.shellprocstatus;
-                if (status === "running") {
-                    if (procExitGraceTimer != null) {
-                        clearTimeout(procExitGraceTimer);
-                        procExitGraceTimer = null;
-                    }
-                    return;
-                }
-                if (status !== "done") return;
-                if (procExitGraceTimer != null) return; // already armed
-                procExitGraceTimer = window.setTimeout(() => {
-                    procExitGraceTimer = null;
-                    const phase = paneSnapshot(blockId)?.turnPhase?.kind;
-                    if (phase === "Streaming" || phase === "Submitting") {
-                        const at = Date.now();
-                        // StreamUnsubscribe transitions Streaming → Disconnected,
-                        // clearing "Working...", but also nulls lastEventMs in the
-                        // reducer — which would gate TurnStart and StreamFlushObserved
-                        // for any recovery turn (failure-banner Retry or auto-retry).
-                        // Immediately re-dispatch StreamSubscribe to restore lastEventMs
-                        // while keeping the file subscription live. Net phase: Idle
-                        // (Disconnected → Idle via StreamSubscribe). The AgentFailure
-                        // banner drives the crash UX independently of turn phase.
-                        model.dispatchPane({ type: "StreamUnsubscribe", at });
-                        model.dispatchPane({ type: "StreamSubscribe", at });
-                    }
-                }, 1500);
-            },
-        });
-        onCleanup(() => {
-            procExitUnsub();
-            if (procExitGraceTimer != null) {
-                clearTimeout(procExitGraceTimer);
-                procExitGraceTimer = null;
-            }
+        // Turn-lifecycle finalization (session_end / Esc-fallback / crash
+        // grace timer) and the stuck-stream watchdog. `finalizeTurn` is
+        // called below on the real `session_end` StreamEvent.
+        const { finalizeTurn } = useTurnLifecycle({
+            blockId,
+            model,
+            turnPhaseAtom,
+            provider,
+            queue,
+            flushParserPending: () => parser.flushPending(),
+            hasNodeId,
+            addNodeId,
         });
 
-        // Cancel the crash-recovery timer when a new turn is submitted.
-        // Gated on Submitting only — NOT Streaming — because StreamFlushObserved
-        // replaces the Streaming phase object with a fresh reference even for the
-        // dying turn's buffered output, which would spuriously cancel the timer
-        // before it can fire. Submitting is only entered via TurnStart (a real
-        // new turn), so it is safe to cancel here.
-        createEffect(() => {
-            const kind = getTurnPhase().kind;
-            if (kind === "Submitting" && procExitGraceTimer != null) {
-                clearTimeout(procExitGraceTimer);
-                procExitGraceTimer = null;
-            }
+        // Promotes accepted pending messages into user_message document
+        // nodes. No-ops internally if pendingMessagesAtom wasn't provided.
+        usePendingMessageAcceptance({
+            blockId,
+            model,
+            pendingMessagesAtom,
+            queue,
+            hasNodeId,
+            addNodeId,
         });
-
-        // Fallback timer: if the user presses Esc and the CLI doesn't
-        // emit `session_end` within 1.5s (normal for a killed subprocess
-        // — TerminateProcess skips any final output), run the same
-        // finalization locally so the UI doesn't hang on "Stopping…".
-        //
-        // PR G: previously gated on `getStopping()` (legacy boolean);
-        // now gated on `turnPhase.kind === "Interrupting"`. Same edge
-        // semantics — the reducer transitions into Interrupting on
-        // RequestStop and out on TurnEnd / disconnect.
-        let stopFallbackTimer: number | null = null;
-        createEffect(() => {
-            const stopping = getTurnPhase().kind === "Interrupting";
-            if (stopFallbackTimer != null) {
-                clearTimeout(stopFallbackTimer);
-                stopFallbackTimer = null;
-            }
-            if (stopping) {
-                stopFallbackTimer = window.setTimeout(() => {
-                    stopFallbackTimer = null;
-                    if (getTurnPhase().kind === "Interrupting") {
-                        finalizeTurn(null);
-                    }
-                }, 1500);
-            }
-        });
-        onCleanup(() => {
-            if (stopFallbackTimer != null) {
-                clearTimeout(stopFallbackTimer);
-                stopFallbackTimer = null;
-            }
-        });
-
-        // Subscribe to `agent-message-accepted`: when the backend picks
-        // up a queued message, promote the matching entry out of the
-        // pending zone into a real `user_message` document node. That
-        // color shift (amber → accent blue) is the user's visible
-        // "accepted" signal — the spec's core requirement.
-        if (pendingMessagesAtom) {
-            const [getPending] = pendingMessagesAtom;
-            const acceptedUnsub = waveEventSubscribe({
-                eventType: WpsEvent.AgentMessageAccepted,
-                scope: WOS.makeORef("block", blockId),
-                handler: (event) => {
-                    const data = (event as any)?.data;
-                    if (!data) return;
-                    const messageId: string | undefined = data.message_id;
-                    if (!messageId) return;
-                    const pending = getPending().find((m) => m.id === messageId);
-                    if (!pending) {
-                        // Accepted event for an id we don't know about.
-                        // Can legitimately happen if the entry was already
-                        // promoted or the pane was re-mounted mid-queue.
-                        return;
-                    }
-                    // Reducer removes the entry + emits pending-accepted.
-                    model.dispatchPane({
-                        type: "PendingMessageAccepted",
-                        id: messageId,
-                    });
-                    // Queue-drain case: the prior turn ended (phase Done/Idle/
-                    // Disconnected) and the backend is now picking up the next
-                    // queued message. Re-enter Submitting so the working
-                    // animation re-activates.
-                    //
-                    // For idle sends (phase Submitting/Streaming/Interrupting),
-                    // TurnStart was already dispatched in handleSendMessage —
-                    // a second fire here regresses Streaming → Submitting and
-                    // re-arms the 30 s submit timeout unnecessarily.
-                    // See docs/analysis/ANALYSIS_IDLE_SEND_RACE_2026_06_11.md.
-                    const currentPhase = paneSnapshot(blockId)?.turnPhase;
-                    const needsTurnStart =
-                        currentPhase?.kind === "Done" ||
-                        currentPhase?.kind === "Idle" ||
-                        currentPhase?.kind === "Disconnected" ||
-                        currentPhase == null;
-                    if (needsTurnStart) {
-                        trail("agent:dispatch:TurnStart", { messageId });
-                        model.dispatchPane({ type: "TurnStart", at: Date.now() });
-                        trail("agent:dispatch:TurnStart:done", { messageId });
-                    }
-                    // Append as a normal user_message so it joins the
-                    // conversation stream. Keeps the same id so the new
-                    // node ties back to the pending entry 1:1.
-                    // The optimistic-acceptance path goes through the
-                    // same `handleSendMessage` pipeline as the startup
-                    // injection (see agent-view.tsx `onReadyFn`). Apply
-                    // the same heuristic here as in the stream-parser
-                    // so the startup payload is flagged on first
-                    // render — otherwise UserMessageBlock would render
-                    // it as a regular user message (the full Markdown
-                    // wall, not the collapsed summary).
-                    // Codex P1 round 2 on PR #1020.
-                    const node: UserMessageNode = {
-                        type: "user_message",
-                        id: pending.id,
-                        message: pending.text,
-                        timestamp: Date.now(),
-                        isStartup: STARTUP_HEADING_RE.test(pending.text),
-                    };
-                    if (!nodeIdSet.has(node.id)) {
-                        nodeIdSet.add(node.id);
-                        pendingNew.push(node);
-                        scheduleFlush();
-                    }
-                },
-            });
-            onCleanup(() => acceptedUnsub());
-        }
 
         // Seed the in-batch dedup cache from the reducer-maintained
         // index. Issue #728 gap 4 — replaces the per-mount scan of
@@ -691,18 +241,6 @@ export function useAgentStream({
         model.dispatchPane({ type: "StreamSubscribe", at: subscribedAt });
         model.dispatchDoc({ type: "SessionStart", at: subscribedAt });
 
-        // Stuck-stream watchdog (issue #728 gap 3). The reducer evaluates
-        // each tick against `lastEventMs` and emits a `stream-stuck`
-        // event when the gap exceeds `STUCK_THRESHOLD_MS`. The interval
-        // cleans up via the same effect cleanup as the subscription.
-        const watchdogId = setInterval(() => {
-            model.dispatchPane({
-                type: "StreamWatchdogTick",
-                nowMs: Date.now(),
-            });
-        }, WATCHDOG_INTERVAL_MS);
-        onCleanup(() => clearInterval(watchdogId));
-
         const fileSubject = getFileSubject(blockId, OutputFileName);
 
         console.debug(`[useAgentStream] subscribed blockId=${blockId} format=${outputFormat}`);
@@ -719,13 +257,7 @@ export function useAgentStream({
                 });
                 const honored = events.some((e) => e.type === "truncate-applied");
                 if (!honored) return;
-                if (flushRafId != null) { cancelAnimationFrame(flushRafId); flushRafId = null; }
-                pendingNew = [];
-                pendingUpdates = [];
-                pendingChunks = [];
-                pendingShellCreates = [];
-                pendingShellChunks = [];
-                pendingShellExits = [];
+                queue.resetAll();
                 lineBuffer = "";
                 translator.reset();
                 parser.reset();
@@ -783,13 +315,13 @@ export function useAgentStream({
                         text.includes("[WARN]") && text.length < 200) {
                         continue;
                     }
-                    pendingNew.push({
+                    queue.pushNewNode({
                         id: `stderr-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
                         type: "markdown",
                         content: `**stderr:** ${text}`,
                         timestamp: Date.now(),
                     });
-                    scheduleFlush();
+                    queue.scheduleFlush();
                     continue;
                 }
 
@@ -826,10 +358,10 @@ export function useAgentStream({
                                         tokensAfter: ev.tokensAfter,
                                         timestamp: Date.now(),
                                     };
-                                    if (!nodeIdSet.has(compactNode.id)) {
-                                        nodeIdSet.add(compactNode.id);
-                                        pendingNew.push(compactNode);
-                                        scheduleFlush();
+                                    if (!hasNodeId(compactNode.id)) {
+                                        addNodeId(compactNode.id);
+                                        queue.pushNewNode(compactNode);
+                                        queue.scheduleFlush();
                                     }
                                 }
                             }
@@ -894,8 +426,8 @@ export function useAgentStream({
                         // node → pendingNew path; the reducer mutates
                         // one ToolNode in place.
                         const { toolId, chunk } = parser.parseToolChunkEvent(event);
-                        pendingChunks.push({ toolId, chunk });
-                        scheduleFlush();
+                        queue.pushToolChunk(toolId, chunk);
+                        queue.scheduleFlush();
                         continue;
                     }
                     const node = parser.parseLine(JSON.stringify(event));
@@ -908,27 +440,27 @@ export function useAgentStream({
                         (node as any).timestamp = Date.now();
                     }
 
-                    if (nodeIdSet.has(node.id)) {
-                        pendingUpdates.push(node);
+                    if (hasNodeId(node.id)) {
+                        queue.pushUpdatedNode(node);
                     } else {
-                        nodeIdSet.add(node.id);
-                        pendingNew.push(node);
+                        addNodeId(node.id);
+                        queue.pushNewNode(node);
                     }
                 }
             }
 
             // Schedule a single flush per animation frame
-            if (pendingNew.length > 0 || pendingUpdates.length > 0) {
-                scheduleFlush();
+            if (queue.hasPendingNewOrUpdated()) {
+                queue.scheduleFlush();
             }
         });
 
         onCleanup(() => {
-            if (flushRafId != null) { cancelAnimationFrame(flushRafId); flushRafId = null; }
+            queue.cancelScheduledFlush();
             subscription.unsubscribe();
             // (the tool_chunk subscription is torn down by its own body-scope
-            // onCleanup registered where blockChunkUnsub is created — so it is
-            // cleaned up even when this onMount early-returns.)
+            // onCleanup registered where useToolChunkStream is called — so it
+            // is cleaned up even when this onMount early-returns.)
             // StreamUnsubscribe transitions a working turn into the
             // Disconnected phase (so a crash or exit without
             // session_end doesn't leave "Working…" stuck).
