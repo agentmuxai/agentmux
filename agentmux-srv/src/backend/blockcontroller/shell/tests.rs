@@ -114,6 +114,7 @@ use std::sync::Arc;
             None,
             None,
             None,
+            None,
         );
         assert_eq!(ctrl.controller_type(), "shell");
         assert_eq!(ctrl.block_id(), "block-1");
@@ -130,6 +131,7 @@ use std::sync::Arc;
             "shell".to_string(),
             "tab-1".to_string(),
             "block-1".to_string(),
+            None,
             None,
             None,
             None,
@@ -162,6 +164,7 @@ use std::sync::Arc;
             None,
             None,
             None,
+            None,
         );
 
         let mut meta = make_shell_meta();
@@ -184,6 +187,7 @@ use std::sync::Arc;
             "shell".to_string(),
             "tab-1".to_string(),
             "block-1".to_string(),
+            None,
             None,
             None,
             None,
@@ -217,6 +221,7 @@ use std::sync::Arc;
             None,
             None,
             None,
+            None,
         );
 
         // Set a custom factory that returns a mock with exit code 42
@@ -239,6 +244,7 @@ use std::sync::Arc;
             "shell".to_string(),
             "tab-1".to_string(),
             "block-1".to_string(),
+            None,
             None,
             None,
             None,
@@ -267,6 +273,7 @@ use std::sync::Arc;
             None,
             None,
             None,
+            None,
         );
 
         let result = ctrl.send_input(BlockInputUnion::data(b"hello".to_vec()), None);
@@ -280,6 +287,7 @@ use std::sync::Arc;
             "shell".to_string(),
             "tab-1".to_string(),
             "block-1".to_string(),
+            None,
             None,
             None,
             None,
@@ -300,11 +308,35 @@ use std::sync::Arc;
     }
 
     #[test]
+    fn test_shell_controller_stores_filestore_for_write_through() {
+        // SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md §2.1 — confirms
+        // the constructor wiring itself (the actual PTY read loop's use of
+        // `filestore_read.as_ref()` is inside a real-PTY code path, `set_
+        // conn_factory`'s mock path is a separate, simpler branch that
+        // doesn't reach it — `handle_append_block_file`'s own Some-filestore
+        // behavior is already covered by `test_handle_append_block_file_
+        // writes_to_filestore` above).
+        let fs = Arc::new(FileStore::open_in_memory().expect("filestore"));
+        let ctrl = ShellController::new(
+            "shell".to_string(),
+            "tab-1".to_string(),
+            "block-1".to_string(),
+            None,
+            None,
+            None,
+            Some(fs.clone()),
+        );
+        assert!(ctrl.filestore.is_some());
+        assert!(Arc::ptr_eq(ctrl.filestore.as_ref().unwrap(), &fs));
+    }
+
+    #[test]
     fn test_controller_trait_as_arc() {
         let ctrl: Arc<dyn Controller> = Arc::new(ShellController::new(
             "shell".to_string(),
             "tab-1".to_string(),
             "block-1".to_string(),
+            None,
             None,
             None,
             None,
@@ -474,6 +506,7 @@ use std::sync::Arc;
             "shell".to_string(),
             "tab-1".to_string(),
             "test-register-block".to_string(),
+            None,
             None,
             None,
             None,

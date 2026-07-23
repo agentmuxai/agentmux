@@ -21,6 +21,7 @@ use super::super::{
 use crate::backend::eventbus::EventBus;
 use crate::backend::obj::{self, MetaMapType};
 use crate::backend::shellexec::ConnInterface;
+use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::store::Store;
 use crate::backend::wps;
 
@@ -95,6 +96,12 @@ pub struct ShellController {
     pub(super) event_bus: Option<Arc<EventBus>>,
     /// Wave object store — used to seed cmd:cwd on shell spawn.
     pub(super) wstore: Option<Arc<Store>>,
+    /// FileStore write-through target for PTY output persistence
+    /// (SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md §2.1) — lets
+    /// `handle_append_block_file`'s "term" writes survive a reconnect,
+    /// mirroring `PersistentController`/`SubprocessController`'s existing
+    /// filestore wiring.
+    pub(super) filestore: Option<Arc<FileStore>>,
 }
 
 impl ShellController {
@@ -106,6 +113,7 @@ impl ShellController {
         broker: Option<Arc<wps::Broker>>,
         event_bus: Option<Arc<EventBus>>,
         wstore: Option<Arc<Store>>,
+        filestore: Option<Arc<FileStore>>,
     ) -> Self {
         Self {
             controller_type,
@@ -130,6 +138,7 @@ impl ShellController {
             broker,
             event_bus,
             wstore,
+            filestore,
         }
     }
 

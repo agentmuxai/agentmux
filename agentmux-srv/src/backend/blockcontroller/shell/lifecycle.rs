@@ -593,6 +593,7 @@ impl Controller for ShellController {
         let block_id_read = self.block_id.clone();
         let broker_read = self.broker.clone();
         let inner_read = self.inner.clone();
+        let filestore_read = self.filestore.clone();
         let is_agent_read = is_agent;
         tokio::task::spawn_blocking(move || {
             let mut reader = reader;
@@ -662,7 +663,13 @@ impl Controller for ShellController {
                                 &block_id_read,
                                 "term",
                                 chunk,
-                                None, // PTY output is raw terminal data; no FileStore write-through
+                                // Write-through so scrollback survives a reconnect
+                                // (SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md
+                                // §2.1) — was `None` (raw PTY bytes discarded after
+                                // the live broadcast), which meant every `view:"term"`
+                                // pane (standalone Terminal panes and the agent-shell
+                                // drawer alike) lost all output on remount.
+                                filestore_read.as_ref(),
                                 None, // not an agent output stream; no global mirror
                             );
 
