@@ -1,12 +1,22 @@
 # AgentMux Executable Return Codes
 
+## agentmux.exe / agentmux-launcher (Windows entry point)
+
+On Windows, the executable users actually launch is `agentmux.exe` — `scripts/package-portable.sh` builds it by copying `agentmux-launcher.exe`, and `packaging/windows/agentmux.iss` installs it under that name. The launcher owns `agentmux-srv`'s lifecycle directly and spawns `agentmux-cef` itself (see the Architecture section of `CLAUDE.md`).
+
+| Exit Code | Description |
+|-----------|-------------|
+| **0** | Clean exit — the launcher supervisor finished normally (host exited, or a `--diag` subcommand succeeded) |
+| **1** | Fatal startup/supervision error — causes include: the supervisor thread panicking, the runtime being misconfigured (host binary resolves to the launcher itself), the CEF host binary not found in `runtime/`, or a `--diag sagas` failure |
+| **2** | `--diag` CLI usage error (missing or unknown topic; known topics: `wrr`, `srv`, `sagas`) |
+
 ## agentmux-cef (Desktop Host)
 
 | Exit Code | Description |
 |-----------|-------------|
 | **0** | Clean exit — application closed normally (e.g., user quit via tray icon or window close) |
 
-On Windows, `agentmux-launcher` is what actually launches `agentmux-cef` (and, in turn, owns `agentmux-srv`'s lifecycle) — see the Architecture section of `CLAUDE.md`. `agentmux-cef` is not spawned directly by the user on that platform.
+`agentmux-cef` is not spawned directly by the user on Windows — `agentmux-launcher` launches it, per the table above. On macOS/Linux, `agentmux-cef` is invoked via the launcher too (see `CLAUDE.md`'s Architecture section) rather than run standalone.
 
 ## agentmux-srv (Backend Server)
 
