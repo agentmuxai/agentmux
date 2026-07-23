@@ -51,14 +51,15 @@ struct RegisteredClosures {
     refresh: Box<dyn Fn() -> BoxFuture<'static, Result<(), RefreshErrorKind>> + Send + Sync>,
 }
 
-// Bundled behind ONE mutex (not two) so a `states`/`generations` pair is
-// always read and written atomically — the reducer needs both together to
-// tell a stale, superseded-registration completion apart from a current one
-// (see `state::Event::RunFreshnessCheck`'s doc comment).
+// Bundled behind ONE mutex (not three) so `states`/`generations`/
+// `next_generation` are always read and written atomically — the reducer
+// needs all three together to tell a stale, superseded-registration
+// completion apart from a current one (see `state::update`'s doc comment).
 #[derive(Default)]
 struct ReducerTables {
     states: HashMap<String, CredentialState>,
     generations: HashMap<String, u64>,
+    next_generation: u64,
 }
 
 pub struct RefreshScheduler {
@@ -120,8 +121,8 @@ impl RefreshScheduler {
         }
         {
             let mut tables = self.tables.lock().unwrap();
-            let ReducerTables { states, generations } = &mut *tables;
-            state::update(states, generations, Command::Register { id: id.clone() });
+            let ReducerTables { states, generations, next_generation } = &mut *tables;
+            state::update(states, generations, next_generation, Command::Register { id: id.clone() });
         }
         self.notifiers
             .lock()
@@ -134,10 +135,11 @@ impl RefreshScheduler {
         self.closures.lock().await.remove(credential_id);
         let events = {
             let mut tables = self.tables.lock().unwrap();
-            let ReducerTables { states, generations } = &mut *tables;
+            let ReducerTables { states, generations, next_generation } = &mut *tables;
             state::update(
                 states,
                 generations,
+                next_generation,
                 Command::Unregister { id: credential_id.to_string() },
             )
         };
@@ -178,8 +180,8 @@ impl RefreshScheduler {
 
             let events = {
                 let mut tables = self.tables.lock().unwrap();
-                let ReducerTables { states, generations } = &mut *tables;
-                state::update(states, generations, Command::CheckRequested { id: id.clone() })
+                let ReducerTables { states, generations, next_generation } = &mut *tables;
+                state::update(states, generations, next_generation, Command::CheckRequested { id: id.clone() })
             };
             match events.as_slice() {
                 [Event::Unregistered { .. }] => {
@@ -204,10 +206,11 @@ impl RefreshScheduler {
                     let is_fresh = (closures.is_fresh)().await;
                     let events = {
                         let mut tables = self.tables.lock().unwrap();
-                        let ReducerTables { states, generations } = &mut *tables;
+                        let ReducerTables { states, generations, next_generation } = &mut *tables;
                         state::update(
                             states,
                             generations,
+                            next_generation,
                             Command::FreshnessChecked { id: id.clone(), is_fresh, generation },
                         )
                     };
@@ -240,8 +243,8 @@ impl RefreshScheduler {
                     };
                     let events = {
                         let mut tables = self.tables.lock().unwrap();
-                        let ReducerTables { states, generations } = &mut *tables;
-                        state::update(states, generations, cmd)
+                        let ReducerTables { states, generations, next_generation } = &mut *tables;
+                        state::update(states, generations, next_generation, cmd)
                     };
                     self.trace(&events);
                     self.wake(&id);

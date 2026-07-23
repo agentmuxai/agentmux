@@ -143,13 +143,21 @@ fn now_unix() -> u64 {
 }
 
 /// `states` is the orchestrator's whole coordination table; `generations`
-/// tracks each id's registration epoch (bumped on every `Register`) so a
-/// completion from a superseded registration can be told apart from a
-/// current one — see `Event::RunFreshnessCheck`'s doc comment. One reducer
+/// tracks each id's CURRENT registration epoch so a completion from a
+/// superseded registration can be told apart from a current one (see
+/// `Event::RunFreshnessCheck`'s doc comment); `next_generation` is a single
+/// counter shared across ALL ids, strictly increasing, never reused —
+/// deliberately NOT a per-id counter restarted at 0 on each `Register`,
+/// because an unregister-then-re-register sequence would then hand the new
+/// registration the SAME generation number the old one had, and a stale
+/// completion from the old registration (still in flight when the
+/// unregister/re-register raced in) would wrongly pass the staleness check
+/// instead of being discarded (reagent re-review on #2275). One reducer
 /// call per dispatched command, sub-millisecond, never awaits.
 pub fn update(
     states: &mut HashMap<String, CredentialState>,
     generations: &mut HashMap<String, u64>,
+    next_generation: &mut u64,
     cmd: Command,
 ) -> Vec<Event> {
     match cmd {
@@ -159,14 +167,18 @@ pub fn update(
             // not by an external lock a caller could be left blocked on
             // (the pre-refactor design's latent race). A caller currently
             // waiting via AlreadyInFlight re-dispatches CheckRequested once
-            // woken and just sees the fresh entry's is_fresh() result. The
-            // generation bump is what lets a stale in-flight completion from
-            // the OLD registration be told apart from this new one.
-            *generations.entry(id.clone()).or_insert(0) += 1;
+            // woken and just sees the fresh entry's is_fresh() result.
+            let generation = *next_generation;
+            *next_generation += 1;
+            generations.insert(id.clone(), generation);
             states.insert(id, CredentialState::Fresh);
             Vec::new()
         }
         Command::Unregister { id } => {
+            // Removing the entry here is just memory hygiene, not a
+            // correctness requirement — next_generation never reuses a
+            // number, so a future re-registration can't collide with a
+            // stale completion's captured generation either way.
             generations.remove(&id);
             states.remove(&id);
             vec![Event::Unregistered { id }]
@@ -274,16 +286,24 @@ pub fn update(
 mod tests {
     use super::*;
 
-    /// Bundles `states` + `generations` so tests can dispatch commands
-    /// without threading two maps through every call site by hand.
+    /// Bundles `states` + `generations` + `next_generation` so tests can
+    /// dispatch commands without threading three pieces of state through
+    /// every call site by hand.
+    #[derive(Default)]
     struct Harness {
         states: HashMap<String, CredentialState>,
         generations: HashMap<String, u64>,
+        next_generation: u64,
     }
 
     impl Harness {
         fn dispatch(&mut self, cmd: Command) -> Vec<Event> {
-            update(&mut self.states, &mut self.generations, cmd)
+            update(
+                &mut self.states,
+                &mut self.generations,
+                &mut self.next_generation,
+                cmd,
+            )
         }
 
         fn get(&self, id: &str) -> Option<&CredentialState> {
@@ -300,10 +320,7 @@ mod tests {
     }
 
     fn registered() -> Harness {
-        let mut h = Harness {
-            states: HashMap::new(),
-            generations: HashMap::new(),
-        };
+        let mut h = Harness::default();
         h.dispatch(Command::Register { id: "cred".into() });
         h
     }
@@ -529,10 +546,7 @@ mod tests {
 
     #[test]
     fn check_requested_on_an_unregistered_id_reports_unregistered() {
-        let mut m = Harness {
-            states: HashMap::new(),
-            generations: HashMap::new(),
-        };
+        let mut m = Harness::default();
         let events = m.dispatch(Command::CheckRequested { id: "nope".into() });
         assert_eq!(events, vec![Event::Unregistered { id: "nope".into() }]);
     }
@@ -588,35 +602,30 @@ mod tests {
             (m, gen)
         }
 
-        // A fresh registration's generation is always 1 (Register starts
-        // the counter at 0 and increments once) — hardcoded below just to
-        // build the Command literals; the real value is still read back via
-        // mid_check_then_unregistered()'s own gen for the actual dispatch.
-        let stale_completions = [
-            Command::FreshnessChecked {
+        let stale_completion_builders: [fn(u64) -> Command; 4] = [
+            |gen| Command::FreshnessChecked {
                 id: "cred".into(),
                 is_fresh: true,
-                generation: 1,
+                generation: gen,
             },
-            Command::FreshnessChecked {
+            |gen| Command::FreshnessChecked {
                 id: "cred".into(),
                 is_fresh: false,
-                generation: 1,
+                generation: gen,
             },
-            Command::RefreshSucceeded {
+            |gen| Command::RefreshSucceeded {
                 id: "cred".into(),
-                generation: 1,
+                generation: gen,
             },
-            Command::RefreshFailed {
+            |gen| Command::RefreshFailed {
                 id: "cred".into(),
                 error: RefreshErrorKind::Transient("late".into()),
-                generation: 1,
+                generation: gen,
             },
         ];
-        for stale_completion in stale_completions {
+        for build_stale_completion in stale_completion_builders {
             let (mut m, gen) = mid_check_then_unregistered();
-            assert_eq!(gen, 1, "sanity: a fresh registration's generation is 1");
-            let events = m.dispatch(stale_completion);
+            let events = m.dispatch(build_stale_completion(gen));
             assert_eq!(events, Vec::new());
             assert!(
                 !m.contains_key("cred"),
@@ -655,6 +664,42 @@ mod tests {
             m.get("cred"),
             Some(&CredentialState::Fresh),
             "a stale completion from a superseded registration must not mask the new one"
+        );
+    }
+
+    #[test]
+    fn a_stale_completion_survives_an_unregister_then_re_register_of_the_same_id() {
+        // reagent re-review on #2275, second round: a PER-ID counter that
+        // restarts at 0 on each Register would hand an unregister-then-
+        // re-register sequence the SAME generation number the original
+        // registration had, so a stale completion from before the
+        // unregister would wrongly pass the staleness check after the
+        // re-register instead of being discarded. next_generation is a
+        // single counter shared across every id specifically so this can't
+        // happen — assert the two registrations never collide even across
+        // an intervening unregister.
+        let mut m = registered();
+        let old_gen = m.generation_of("cred");
+        m.dispatch(Command::CheckRequested { id: "cred".into() });
+
+        m.dispatch(Command::Unregister { id: "cred".into() });
+        m.dispatch(Command::Register { id: "cred".into() });
+        let new_gen = m.generation_of("cred");
+        assert_ne!(
+            old_gen, new_gen,
+            "unregister-then-register must never reissue a prior generation number"
+        );
+
+        let events = m.dispatch(Command::RefreshFailed {
+            id: "cred".into(),
+            error: RefreshErrorKind::PermanentAuthFailure("stale invalid_grant".into()),
+            generation: old_gen,
+        });
+        assert_eq!(events, Vec::new());
+        assert_eq!(
+            m.get("cred"),
+            Some(&CredentialState::Fresh),
+            "a stale completion from before the unregister must not mask the re-registered credential"
         );
     }
 }
