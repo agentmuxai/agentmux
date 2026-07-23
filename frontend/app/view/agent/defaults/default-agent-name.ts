@@ -26,9 +26,12 @@ export function cleanProviderLabel(displayName: string): string {
 }
 
 /**
- * `<Provider> Agent`, suffixed with the lowest unused `2`, `3`, ... on
- * collision against `existingNames`. Gaps aren't filled — deleting
- * `Claude Agent 3` doesn't make a later `Claude Agent 3` reappear.
+ * `<Provider> Agent`, suffixed with the lowest unused `2`, `3`, ... against
+ * `existingNames` at call time. `existingNames` is a live snapshot (the
+ * caller's currently-launched instances), not persisted counter state, so a
+ * freed name IS reused: if `Claude Agent 3` is later deleted, the next call
+ * finds `3` unused again and returns `Claude Agent 3` — reagent P2 on #780,
+ * correcting an earlier version of this comment that claimed the opposite.
  */
 export function defaultAgentName(providerDisplayName: string, existingNames: Set<string>): string {
     const base = `${cleanProviderLabel(providerDisplayName)} Agent`;
