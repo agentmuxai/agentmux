@@ -605,6 +605,85 @@ use std::sync::Arc;
         assert_eq!(stat_after.size, (line1.len() + line2.len() + b"line three\n".len()) as i64);
     }
 
+    /// Minimal WpsClient that records every event delivered to it, so tests
+    /// can assert on the broadcast payload (not just the FileStore side effect).
+    struct RecordingClient {
+        events: std::sync::Mutex<Vec<wps::WaveEvent>>,
+    }
+
+    impl RecordingClient {
+        fn new() -> Self {
+            Self { events: std::sync::Mutex::new(Vec::new()) }
+        }
+    }
+
+    impl wps::WpsClient for Arc<RecordingClient> {
+        fn send_event(&self, _route_id: &str, event: wps::WaveEvent) {
+            self.events.lock().unwrap().push(event);
+        }
+    }
+
+    #[test]
+    fn test_handle_append_block_file_broadcasts_start_offset() {
+        use crate::backend::storage::filestore::FileStore;
+
+        let broker = wps::Broker::new();
+        let client = Arc::new(RecordingClient::new());
+        broker.set_client(Box::new(Arc::clone(&client)));
+        broker.subscribe(
+            "test-route-offset",
+            wps::SubscriptionRequest {
+                event: wps::EVENT_BLOCK_FILE.to_string(),
+                scopes: vec!["block:offset-block".to_string()],
+                allscopes: false,
+            },
+        );
+
+        let fs = Arc::new(FileStore::open_in_memory().expect("open in-memory filestore"));
+        let block_id = "offset-block";
+        let filename = "term";
+
+        // First append — file doesn't exist yet, so the chunk starts at offset 0.
+        handle_append_block_file(&broker, block_id, filename, b"hello ", Some(&fs), None);
+        // Second append — file now has 6 bytes, so this chunk starts at offset 6.
+        handle_append_block_file(&broker, block_id, filename, b"world\n", Some(&fs), None);
+
+        let events = client.events.lock().unwrap();
+        assert_eq!(events.len(), 2);
+        let offsets: Vec<Option<u64>> = events
+            .iter()
+            .map(|e| {
+                let data: wps::WSFileEventData =
+                    serde_json::from_value(e.data.clone().unwrap()).unwrap();
+                data.offset
+            })
+            .collect();
+        assert_eq!(offsets, vec![Some(0), Some(6)]);
+    }
+
+    #[test]
+    fn test_handle_append_block_file_omits_offset_without_filestore() {
+        let broker = wps::Broker::new();
+        let client = Arc::new(RecordingClient::new());
+        broker.set_client(Box::new(Arc::clone(&client)));
+        broker.subscribe(
+            "test-route-no-fs",
+            wps::SubscriptionRequest {
+                event: wps::EVENT_BLOCK_FILE.to_string(),
+                scopes: vec!["block:no-fs-block".to_string()],
+                allscopes: false,
+            },
+        );
+
+        handle_append_block_file(&broker, "no-fs-block", "term", b"hi", None, None);
+
+        let events = client.events.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        let data: wps::WSFileEventData =
+            serde_json::from_value(events[0].data.clone().unwrap()).unwrap();
+        assert_eq!(data.offset, None);
+    }
+
     // ────────────────────────────────────────────────────────────────
     // Cross-channel global transcript mirror
     // ────────────────────────────────────────────────────────────────
