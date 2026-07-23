@@ -3,8 +3,9 @@
 
 /**
  * ResizableDetailsDrawer — drag-to-height wrapper for the composer details
- * region's content (AgentShellSubblock — activity-log lines write directly
- * into its terminal rather than a separate panel). The drag handle
+ * region's content (AgentShellSubblock — bang-command/slash-command
+ * ("system"-tagged) activity-log lines write directly into its terminal
+ * rather than a separate panel). The drag handle
  * sits on the drawer's top edge (the drawer itself is docked above the
  * composer, so dragging the top edge up grows it). Height is persisted on
  * the agent block's meta (`term:shellheight`) so it's remembered per pane

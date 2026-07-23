@@ -474,19 +474,25 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     }
 
     // Activity log — collects per-session diagnostic entries from launch
-    // flow, subprocess lifecycle, slash commands, errors, etc. No longer
-    // rendered as its own panel — written directly into the shell terminal
-    // instead (AgentShellSubblock's `onTermReady`), so the shell is the only
-    // place this surfaces. `logLines` stays as a backlog so a line logged
-    // while the drawer is closed still gets shown once it reopens.
-    // `logFlushedCount` tracks how many of `logLines()` have already been
-    // written into *some* terminal instance (live or replayed) — every
-    // write, whether live or catch-up, advances it. Without this, each
-    // drawer close/reopen replayed the *entire* backlog again on top of
-    // whatever real PTY content the terminal (now durably) restored
-    // (SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md), burying it under
-    // an ever-repeating copy of the same log lines — confirmed live via CDP.
-    // `log` is passed down to every hook whose signature takes a `LogFn`.
+    // flow, subprocess lifecycle, slash commands, errors, etc. `log` is
+    // passed down to every hook whose signature takes a `LogFn`, but only
+    // "system"-tagged entries (bang-command output, `useAgentCommands.ts`'s
+    // `dispatchBangCommand`; slash-command results, `commands/dispatch.ts`)
+    // are genuinely user-initiated console-style interactions written into
+    // the shell terminal (AgentShellSubblock's `onTermReady`) — everything
+    // else (launch-flow status, auth prompts, CLI resolution, etc.) is
+    // passive app-internal noise the shell should stay clean of. First cut
+    // redirected every tag, which made the shell open with a wall of
+    // "[cli] checking for claude...", "[auth] ..." etc. sitting above the
+    // real prompt — reported live after removing the separate log panel.
+    // `logLines` stays as a backlog (system-tagged entries only) so a bang
+    // command's output logged while the drawer is closed still shows once
+    // it reopens. `logFlushedCount` tracks how many of `logLines()` have
+    // already been written into *some* terminal instance (live or
+    // replayed) — every write, whether live or catch-up, advances it.
+    // Without this, each drawer close/reopen replayed the entire backlog
+    // again on top of whatever real PTY content the terminal (now durably)
+    // restored (SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md).
     const { lines: logLines, append: appendLog } = useActivityLog();
     const [termWrite, setTermWrite] = createSignal<((text: string) => void) | null>(null);
     let logFlushedCount = 0;
@@ -499,6 +505,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     };
 
     const log = (tag: string, text: string, level?: "info" | "error" | "warn") => {
+        if (tag !== "system") return;
         appendLog(tag, text, level);
         const write = termWrite();
         if (write) {
