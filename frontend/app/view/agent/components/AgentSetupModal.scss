@@ -128,9 +128,8 @@
     // Neutralize the embedded panels' standalone-modal sizing so each tab fills
     // the shared panel area at one consistent size — no horizontal overflow past
     // the 780px frame, and no height jump when switching tabs (the Memory panel
-    // otherwise forces its own 780×520; the Accounts body is auto-height).
-    .agent-memory-modal,
-    .agent-identity-modal-body {
+    // otherwise forces its own 780×520).
+    .agent-memory-modal {
         width: 100%;
         height: 100%;
         max-width: none;
@@ -138,11 +137,4 @@
         min-width: 0;
         box-sizing: border-box;
     }
-}
-
-.agent-setup-modal-empty {
-    padding: var(--space-6) var(--space-5);
-    font-size: var(--text-sm);
-    color: var(--secondary-text-color);
-    line-height: 1.5;
 }

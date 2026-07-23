@@ -284,11 +284,9 @@ export function renderRequest(
                 label: requestLabel(req),
                 panel: (
                     <AgentSetupModal
-                        agent={req.agent}
                         agentId={req.agentId}
                         agentName={req.agentName}
                         workingDirectory={req.workingDirectory}
-                        blockId={req.blockId}
                         initialTab={req.initialTab}
                         onClose={api.close}
                     />
