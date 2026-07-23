@@ -31,6 +31,7 @@ import {
 } from "@/app/store/launch-flow-state";
 
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
+import { defaultAgentName } from "../defaults/default-agent-name";
 import { buildInstanceSlug, slugifyInstanceName } from "../defaults/instance-slug";
 import { getProvider } from "../providers";
 import { PreLaunchAuthPanel } from "./PreLaunchAuthPanel";
@@ -382,6 +383,29 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
             handleContinueSelect(recent.instance_id);
         }
     });
+
+    // Default agent name (#780) — pre-fill so the user can click Launch
+    // immediately instead of needing to type something first. Runs once,
+    // after the effect above has settled viewMode for this open (Continue
+    // mode already prefills the name from the continued row via
+    // handleContinueSelect's carry-over, so this only applies in New
+    // mode). Checking `name() === ""` at fire time — rather than a
+    // separate isDirty flag — is enough to respect both a user who typed
+    // before this resolved and a round-tripped `initialFormState.name` :
+    // provider is fixed for this component's whole lifetime (one
+    // AgentDefinition per modal instance), so there's no "recompute on
+    // provider change" case to handle here, unlike the original spec's
+    // multi-provider-picker assumption.
+    let defaultNameApplied = false;
+    createEffect(() => {
+        const rows = namedAgents();
+        if (rows === undefined || defaultNameApplied || viewMode() !== "new") return;
+        defaultNameApplied = true;
+        if (name() !== "") return;
+        const existing = new Set(rows.map((r) => r.instance_name));
+        setName(defaultAgentName(displayName(), existing));
+    });
+
     const enterNewMode = () => {
         setViewMode("new");
         handleContinueSelect(""); // clears continueOfId; unlocks identity/memory

@@ -1206,6 +1206,10 @@ declare global {
         "frame:title"?: string;
         "frame:icon"?: string;
         "frame:text"?: string;
+        // Tab accent color (frontend/app/tab/tab.tsx, tabbar.tsx). Was missing
+        // here despite being a real, actively-set meta key — #859.
+        "tab:color"?: string | null;
+        "tab:color-initialized"?: boolean;
         "cmd:*"?: boolean;
         cmd?: string;
         "cmd:interactive"?: boolean;
@@ -1424,7 +1428,6 @@ declare global {
         "term:*"?: boolean;
         "term:fontsize"?: number;
         "term:fontfamily"?: string;
-        "term:zoom"?: number;
         "term:theme"?: string;
         "term:disablewebgl"?: boolean;
         "term:localshellpath"?: string;
@@ -1441,7 +1444,7 @@ declare global {
         "blockheader:showblockids"?: boolean;
         "preview:showhiddenfiles"?: boolean;
         "tab:preset"?: string;
-        "tab:color"?: string | null;
+        "tab:skipcloseconfirm"?: boolean;
         "widget:*"?: boolean;
         "widget:showhelp"?: boolean;
         "widget:icononly"?: boolean;
@@ -1470,6 +1473,8 @@ declare global {
         "telemetry:interval"?: number;
         "telemetry:numpoints"?: number;
         "conn:*"?: boolean;
+        "conn:askbeforewshinstall"?: boolean;
+        "conn:wshenabled"?: boolean;
         "network:lan_discovery"?: boolean;
         "voice:enabled"?: boolean;
         "voice:engine"?: string;
@@ -1491,9 +1496,7 @@ declare global {
         "notify:tooltones:enabled"?: boolean;
         "notify:tooltones:volume"?: number;
         "notify:tooltones:scope"?: "all" | "focused";
-        "dnd:*"?: boolean;
         "dnd:enabled"?: boolean;
-        "dnd:maxfilesizemb"?: number;
         "dnd:concurrency"?: number;
         "dnd:agentinserttoken"?: boolean;
     };
