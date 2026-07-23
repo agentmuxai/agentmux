@@ -230,12 +230,40 @@ pub async fn run_pkce_login(
     })
 }
 
+/// Typed so callers (the credential broker's registered `refresh` closure)
+/// can distinguish "worth retrying" from "this refresh_token is dead, only
+/// a fresh login fixes it" without string-sniffing an error message.
+/// `Rejected` specifically means the token endpoint responded but rejected
+/// the request (Cognito's `invalid_grant`-class 4xx for a revoked/expired
+/// refresh_token) — the credential itself is the problem. `Network`/
+/// `ParseFailed` mean the ATTEMPT failed, not the credential.
+#[derive(Debug)]
+pub enum RefreshTokenError {
+    NoRefreshToken,
+    Network(String),
+    Rejected { status: u16, body: String },
+    ParseFailed(String),
+}
+
+impl std::fmt::Display for RefreshTokenError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RefreshTokenError::NoRefreshToken => write!(f, "no refresh token stored"),
+            RefreshTokenError::Network(e) => write!(f, "refresh request failed: {e}"),
+            RefreshTokenError::Rejected { status, body } => {
+                write!(f, "token refresh failed ({status}): {body}")
+            }
+            RefreshTokenError::ParseFailed(e) => write!(f, "refresh response parse failed: {e}"),
+        }
+    }
+}
+
 pub async fn refresh_token(
     creds: &MuxBusCredentials,
     http_client: &reqwest::Client,
-) -> Result<MuxBusCredentials, String> {
+) -> Result<MuxBusCredentials, RefreshTokenError> {
     if creds.refresh_token.is_empty() {
-        return Err("no refresh token stored".to_string());
+        return Err(RefreshTokenError::NoRefreshToken);
     }
     let token_url = format!("{}/oauth2/token", creds.cognito_domain);
     let params = [
@@ -248,15 +276,16 @@ pub async fn refresh_token(
         .form(&params)
         .send()
         .await
-        .map_err(|e| format!("refresh request failed: {e}"))?;
+        .map_err(|e| RefreshTokenError::Network(e.to_string()))?;
     if !resp.status().is_success() {
+        let status = resp.status().as_u16();
         let body = resp.text().await.unwrap_or_default();
-        return Err(format!("token refresh failed: {body}"));
+        return Err(RefreshTokenError::Rejected { status, body });
     }
     let json: serde_json::Value = resp
         .json()
         .await
-        .map_err(|e| format!("refresh response parse failed: {e}"))?;
+        .map_err(|e| RefreshTokenError::ParseFailed(e.to_string()))?;
 
     let access_token = json["access_token"].as_str().unwrap_or("").to_string();
     let expires_in = json["expires_in"].as_i64().unwrap_or(3600);

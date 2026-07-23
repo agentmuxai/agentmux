@@ -28,9 +28,11 @@
 
 pub mod process;
 pub mod scheduler;
+pub mod state;
 
 pub use process::ProcessBroker;
 pub use scheduler::RefreshScheduler;
+pub use state::{CredentialState, RefreshErrorKind};
 
 use std::sync::{Arc, OnceLock};
 

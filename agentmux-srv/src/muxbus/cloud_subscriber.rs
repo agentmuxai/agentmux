@@ -34,6 +34,7 @@ use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::Message};
 use crate::backend::reactive::handler::get_global_handler;
 use crate::backend::reactive::types::InjectionRequest;
 use crate::backend::storage::store::Store;
+use crate::broker::RefreshErrorKind;
 
 // Dedicated custom domain on the API Gateway WebSocket API (apigatewayv2
 // DomainName + ApiMapping), not a path under muxbus.agentmux.ai's CloudFront
@@ -237,23 +238,36 @@ async fn run_loop(
                         let load_store = wstore.clone();
                         let current = tokio::task::spawn_blocking(move || load_store.muxbus_load())
                             .await
-                            .map_err(|e| format!("muxbus_load task: {e}"))?
-                            .map_err(|e| e.to_string())?
-                            .ok_or_else(|| "no muxbus credentials stored".to_string())?;
+                            .map_err(|e| RefreshErrorKind::Transient(format!("muxbus_load task: {e}")))?
+                            .map_err(|e| RefreshErrorKind::Transient(e.to_string()))?
+                            // Nothing stored at all — not a transient storage
+                            // blip, there's genuinely no credential to refresh;
+                            // only a fresh login produces one.
+                            .ok_or_else(|| {
+                                RefreshErrorKind::PermanentAuthFailure(
+                                    "no muxbus credentials stored".to_string(),
+                                )
+                            })?;
                         if current.refresh_token.is_empty() {
-                            return Err("no refresh_token stored".to_string());
+                            // Same reasoning: no refresh_token will ever
+                            // appear on its own — only re-login fixes it.
+                            return Err(RefreshErrorKind::PermanentAuthFailure(
+                                "no refresh_token stored".to_string(),
+                            ));
                         }
                         // Preserve-on-failure: `refresh_token` returning Err
                         // here means `muxbus_save` is simply never called —
                         // the last-known-good credential in the store is
                         // left untouched rather than overwritten with a
                         // failed/partial result.
-                        let refreshed = crate::muxbus::pkce::refresh_token(&current, &http).await?;
+                        let refreshed = crate::muxbus::pkce::refresh_token(&current, &http)
+                            .await
+                            .map_err(classify_refresh_token_error)?;
                         let save_store = wstore.clone();
                         tokio::task::spawn_blocking(move || save_store.muxbus_save(&refreshed))
                             .await
-                            .map_err(|e| format!("muxbus_save task: {e}"))?
-                            .map_err(|e| e.to_string())
+                            .map_err(|e| RefreshErrorKind::Transient(format!("muxbus_save task: {e}")))?
+                            .map_err(|e| RefreshErrorKind::Transient(e.to_string()))
                     })
                 },
             )
@@ -755,10 +769,99 @@ async fn load_valid_token(
     }
 }
 
+/// Classify a `pkce::refresh_token` failure for the broker's
+/// `RefreshErrorKind` — `NoRefreshToken`/`Rejected` in the 4xx range mean
+/// the credential itself is the problem (only a fresh `muxbus.login` fixes
+/// it) *except* 408/429, which mean the request itself was throttled or
+/// timed out, not that the refresh_token was rejected — treating those as
+/// permanent would strand the credential in `NeedsReauth` past a temporary
+/// rate limit (reagent P2 on #2275). Everything else (network blips, 5xx,
+/// response parse failures) is worth retrying on the next sweep tick.
+fn classify_refresh_token_error(e: crate::muxbus::pkce::RefreshTokenError) -> RefreshErrorKind {
+    use crate::muxbus::pkce::RefreshTokenError;
+    match &e {
+        RefreshTokenError::NoRefreshToken => RefreshErrorKind::PermanentAuthFailure(e.to_string()),
+        RefreshTokenError::Rejected { status, .. }
+            if (400..500).contains(status) && !matches!(status, 408 | 429) =>
+        {
+            RefreshErrorKind::PermanentAuthFailure(e.to_string())
+        }
+        RefreshTokenError::Rejected { .. }
+        | RefreshTokenError::Network(_)
+        | RefreshTokenError::ParseFailed(_) => RefreshErrorKind::Transient(e.to_string()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::classify_refresh_token_error;
+    use crate::broker::RefreshErrorKind;
+    use crate::muxbus::pkce::RefreshTokenError;
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
     use tokio_tungstenite::tungstenite::ClientRequestBuilder;
+
+    #[test]
+    fn no_refresh_token_is_permanent() {
+        assert!(matches!(
+            classify_refresh_token_error(RefreshTokenError::NoRefreshToken),
+            RefreshErrorKind::PermanentAuthFailure(_)
+        ));
+    }
+
+    #[test]
+    fn a_4xx_rejection_is_permanent() {
+        assert!(matches!(
+            classify_refresh_token_error(RefreshTokenError::Rejected {
+                status: 400,
+                body: "invalid_grant".into(),
+            }),
+            RefreshErrorKind::PermanentAuthFailure(_)
+        ));
+    }
+
+    #[test]
+    fn a_5xx_rejection_is_transient() {
+        assert!(matches!(
+            classify_refresh_token_error(RefreshTokenError::Rejected {
+                status: 503,
+                body: "unavailable".into(),
+            }),
+            RefreshErrorKind::Transient(_)
+        ));
+    }
+
+    #[test]
+    fn rate_limit_and_timeout_rejections_are_transient_not_permanent() {
+        // A 429/408 means the request was throttled/timed out, not that the
+        // refresh_token itself was rejected — must not strand the
+        // credential in NeedsReauth past a temporary rate limit.
+        assert!(matches!(
+            classify_refresh_token_error(RefreshTokenError::Rejected {
+                status: 429,
+                body: "rate limited".into(),
+            }),
+            RefreshErrorKind::Transient(_)
+        ));
+        assert!(matches!(
+            classify_refresh_token_error(RefreshTokenError::Rejected {
+                status: 408,
+                body: "request timeout".into(),
+            }),
+            RefreshErrorKind::Transient(_)
+        ));
+    }
+
+    #[test]
+    fn network_and_parse_errors_are_transient() {
+        assert!(matches!(
+            classify_refresh_token_error(RefreshTokenError::Network("timeout".into())),
+            RefreshErrorKind::Transient(_)
+        ));
+        assert!(matches!(
+            classify_refresh_token_error(RefreshTokenError::ParseFailed("bad json".into())),
+            RefreshErrorKind::Transient(_)
+        ));
+    }
 
     /// Regression for issue #2091: every connection attempt failed the
     /// WebSocket handshake with "Missing, duplicated or incorrect header
