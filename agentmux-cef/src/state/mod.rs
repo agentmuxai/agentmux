@@ -180,8 +180,8 @@ pub struct AppState {
     /// interactive TTY for their auth subcommand and we spawn them via
     /// `portable_pty` instead of `tokio::process::Command`. Written to
     /// by `set_provider_auth` to deliver an OAuth device code or
-    /// pasted token. See `commands::platform::CliLoginStdin`.
-    pub cli_login_stdin: Mutex<Option<crate::commands::platform::CliLoginStdin>>,
+    /// pasted token. See `commands::cli_login::CliLoginStdin`.
+    pub cli_login_stdin: Mutex<Option<crate::commands::cli_login::CliLoginStdin>>,
 
     /// Monotonic login-attempt counter. `run_cli_login` bumps it on every
     /// attempt. A login's reaper task captures the value at spawn and only

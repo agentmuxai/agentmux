@@ -5,12 +5,14 @@
 // Each module corresponds to a category of commands ported from src-tauri/src/commands/.
 
 pub mod platform;
+pub mod cli_login;
 pub mod window;
 pub mod backend;
 pub mod providers;
 pub mod drag;
 pub mod tear_off_hook;
 pub mod window_pool;
+pub mod pane_pool;
 pub mod clipboard;
 pub mod stubs;
 pub mod palette;

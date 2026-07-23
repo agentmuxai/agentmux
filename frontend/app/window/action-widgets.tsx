@@ -10,96 +10,34 @@
  * Settings keys:
  *   widget:pinned   — ordered short-name array (e.g. ["agent","terminal","sysinfo"])
  *   widget:icononly — icons only, no labels
+ *
+ * Split (see also):
+ *   action-widgets-config.ts    — pure/RPC config helpers (pinned/more derivation, pin/unpin)
+ *   more-dropdown.tsx           — the "More" overflow dropdown
+ *   use-widget-bar-responsive.ts — responsive 3-tier collapse hook
+ *   use-widget-drag-reorder.ts  — drag-to-reorder state machine
  */
 
 import { Tooltip } from "@/app/element/tooltip";
 import { PopoverMenu, type PopoverMenuItem } from "@/app/element/popover-menu";
 import { ContextMenuModel } from "@/app/store/contextmenu";
-import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { atoms, createBlock, getApi } from "@/store/global";
+import { atoms, getApi } from "@/store/global";
 import { fireAndForget, isBlank, makeIconClass } from "@/util/util";
-import { usePaneOverlay } from "@/app/platform/pane-overlay";
-import {
-    assertMenuInPaintableArea,
-    computeMenuPosition,
-} from "@/app/util/menu-position";
-import { autoUpdate } from "@floating-ui/dom";
-import { createEffect, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
+import {
+    getMoreWidgets,
+    getPinnedKeys,
+    getPinnedWidgets,
+    handleWidgetSelect,
+    pinWidget,
+    unpinWidget,
+} from "./action-widgets-config";
+import { MoreDropdown } from "./more-dropdown";
+import { useWidgetBarResponsive } from "./use-widget-bar-responsive";
+import { useWidgetDragReorder } from "./use-widget-drag-reorder";
 import "./action-widgets.scss";
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-/**
- * Return the effective pinned short-names (no "defwidget@" prefix), in order.
- *
- * Priority:
- *  1. widget:pinned is set → authoritative
- *  2. Not set → derive from display:pinned in widget config
- */
-function getPinnedKeys(
-    settings: Record<string, any>,
-    wmap: Record<string, WidgetConfigType>
-): string[] {
-    const pinned: string[] | undefined = settings["widget:pinned"];
-    if (pinned !== undefined) {
-        return pinned.filter((shortName) => wmap[`defwidget@${shortName}`] != null);
-    }
-    return Object.entries(wmap)
-        .filter(([, w]) => w["display:pinned"])
-        .sort(([, a], [, b]) => (a["display:order"] ?? 0) - (b["display:order"] ?? 0))
-        .map(([key]) => key.replace("defwidget@", ""));
-}
-
-function getPinnedWidgets(
-    settings: Record<string, any>,
-    wmap: Record<string, WidgetConfigType>
-): { key: string; widget: WidgetConfigType }[] {
-    if (!wmap) return [];
-    return getPinnedKeys(settings, wmap)
-        .map((shortName) => {
-            const key = `defwidget@${shortName}`;
-            return { key, widget: wmap[key] };
-        })
-        .filter((e) => e.widget != null);
-}
-
-function getMoreWidgets(
-    settings: Record<string, any>,
-    wmap: Record<string, WidgetConfigType>
-): { key: string; widget: WidgetConfigType }[] {
-    if (!wmap) return [];
-    const pinnedSet = new Set(getPinnedKeys(settings, wmap));
-    return Object.entries(wmap)
-        .filter(([key]) => !pinnedSet.has(key.replace("defwidget@", "")))
-        .sort(([, a], [, b]) => (a["display:order"] ?? 0) - (b["display:order"] ?? 0))
-        .map(([key, widget]) => ({ key, widget }));
-}
-
-// ── Widget actions ────────────────────────────────────────────────────────────
-
-async function handleWidgetSelect(widget: WidgetConfigType) {
-    createBlock(widget.blockdef, widget.magnified);
-}
-
-function pinWidget(shortName: string, settings: Record<string, any>, wmap: Record<string, WidgetConfigType>) {
-    fireAndForget(async () => {
-        const current = getPinnedKeys(settings, wmap);
-        if (current.includes(shortName)) return;
-        await RpcApi.SetConfigCommand(TabRpcClient, { "widget:pinned": [...current, shortName] } as any);
-    });
-}
-
-function unpinWidget(shortName: string, settings: Record<string, any>, wmap: Record<string, WidgetConfigType>) {
-    fireAndForget(async () => {
-        const current = getPinnedKeys(settings, wmap);
-        await RpcApi.SetConfigCommand(TabRpcClient, {
-            "widget:pinned": current.filter((k) => k !== shortName),
-        } as any);
-    });
-}
-
 
 // ── ActionWidget ──────────────────────────────────────────────────────────────
 
@@ -133,116 +71,7 @@ const ActionWidget = (props: {
 
 ActionWidget.displayName = "ActionWidget";
 
-// ── More dropdown ─────────────────────────────────────────────────────────────
-
-const MoreDropdown = ({
-    widgets,
-    onClose,
-    onItemContextMenu,
-    anchor,
-    settings,
-    wmap,
-    ref,
-}: {
-    widgets: () => { key: string; widget: WidgetConfigType }[];
-    onClose: () => void;
-    onItemContextMenu: (pos: { x: number; y: number }, key: string) => void;
-    anchor: () => HTMLElement | null;
-    settings: () => Record<string, any>;
-    wmap: () => Record<string, WidgetConfigType>;
-    ref?: (el: HTMLDivElement) => void;
-}): JSX.Element => {
-    let overlayEl: HTMLDivElement | undefined;
-    // Cut a transparent hole through any browser pane HWND behind this
-    // dropdown so DOM renders above the pane in this rect.
-    // See `frontend/app/platform/pane-overlay.ts`.
-    usePaneOverlay(() => overlayEl);
-
-    // Positioning routes through the shared primitive (Phase 3): anchored to
-    // the More button, preferred placement bottom-end (right-aligned, as
-    // before). flip/shift/size + the paintable-area boundary replace the old
-    // hand-rolled `window.innerWidth - rect.right` clamp.
-    const [floatingStyle, setFloatingStyle] = createSignal<JSX.CSSProperties>({
-        position: "fixed",
-        left: "0px",
-        top: "0px",
-    });
-    let cleanupAutoUpdate: (() => void) | null = null;
-
-    const registerFloating = (el: HTMLDivElement) => {
-        overlayEl = el;
-        ref?.(el);
-        requestAnimationFrame(() => {
-            const anchorEl = anchor();
-            if (!(anchorEl instanceof Element) || !(el instanceof Element)) return;
-            const update = async () => {
-                const a = anchor();
-                if (!a) return;
-                // avoidNativePanes:false — this dropdown renders with
-                // `data-pane-overlay` (+ usePaneOverlay), which clips a hole
-                // through any native browser/webview pane behind it so the DOM
-                // draws on top. So it should open in place under the More button,
-                // not get pushed to the window edge into the largest pane-free
-                // rect. Matches FlyoutMenu / showJsContextMenu.
-                const pos = await computeMenuPosition(
-                    { anchor: a, placement: "bottom-end", gutter: 4, avoidNativePanes: false },
-                    el,
-                );
-                setFloatingStyle(pos.style);
-            };
-            cleanupAutoUpdate?.();
-            cleanupAutoUpdate = autoUpdate(anchorEl, el, update);
-            // Dev-only paintable-area guard (spec §6.1).
-            assertMenuInPaintableArea(el, "more-dropdown");
-        });
-    };
-
-    onCleanup(() => cleanupAutoUpdate?.());
-
-    const handleItemClick = (widget: WidgetConfigType) => {
-        handleWidgetSelect(widget);
-        onClose();
-    };
-
-    const handleItemContextMenu = (e: MouseEvent, key: string) => {
-        e.preventDefault();
-        e.stopPropagation();
-        // Delegate to ActionWidgets — the item popover is rendered there so it
-        // can stay open independently of this dropdown. onClose() is NOT called
-        // here; the More dropdown remains visible while the item menu is open.
-        onItemContextMenu({ x: e.clientX, y: e.clientY }, key);
-    };
-
-    return (
-        <div
-            ref={registerFloating}
-            class="action-widget-more-dropdown"
-            style={floatingStyle()}
-            data-pane-overlay
-        >
-            <For each={widgets()}>
-                {({ key, widget }) => (
-                    <div
-                        class="action-widget-more-item"
-                        onClick={() => handleItemClick(widget)}
-                        onContextMenu={(e) => handleItemContextMenu(e, key)}
-                    >
-                        <span class="action-widget-more-item-icon widget-icon">
-                            <i class={makeIconClass(widget.icon, true, { defaultIcon: "browser" })}></i>
-                        </span>
-                        <span class="action-widget-more-item-label">{widget.label}</span>
-                    </div>
-                )}
-            </For>
-        </div>
-    );
-};
-
-MoreDropdown.displayName = "MoreDropdown";
-
 // ── Main ActionWidgets ────────────────────────────────────────────────────────
-
-const DRAG_THRESHOLD = 5;
 
 const ActionWidgets = (): JSX.Element => {
     const fullConfig = atoms.fullConfigAtom;
@@ -252,53 +81,42 @@ const ActionWidgets = (): JSX.Element => {
     const pinnedWidgets = () => getPinnedWidgets(settings(), wmap());
     const moreWidgets = () => getMoreWidgets(settings(), wmap());
 
-    // ── Responsive labels — 3-tier collapse ──────────────────────────────────
-    //
-    // SPEC: SPEC_TOPBAR_PROGRESSIVE_COLLAPSE_2026_06_05.md
-    //
-    // Tier 1 (wide):    labels + "more" text visible
-    // Tier 2 (medium):  icon-only — labels hidden, all icons stay on bar
-    // Tier 3 (narrow):  overflow — icons + "…more" button for hidden widgets
-    //
-    // Each uses its own hidden measurement mirror so the decision is never
-    // based on the already-collapsed visible bar (no oscillation).
-    const [tooNarrow,  setTooNarrow]  = createSignal(false); // tier 1→2: drop labels
-    const [clipCount,  setClipCount]  = createSignal(0);     // pinned icons pushed to overflow in tier 3
+    let containerRef!: HTMLDivElement;
+    let moreButtonRef!: HTMLDivElement;
+    let moreDropdownRef: HTMLDivElement | undefined;
 
-    // Tier 1 only: show widget labels and the More button's "more" text.
-    const showWidgetLabels = () => !tooNarrow() && !iconOnly();
+    // ── Responsive labels — 3-tier collapse ────────────────────────────────
+    const {
+        showWidgetLabels,
+        visiblePinnedWidgets,
+        clippedPinnedWidgets,
+        clipCount,
+        setMirrorRef,
+        setIconMirrorRef,
+        setIconMirrorMoreRef,
+    } = useWidgetBarResponsive({
+        containerRef: () => containerRef,
+        moreButtonRef: () => moreButtonRef,
+        pinnedWidgets,
+        moreWidgets,
+        iconOnly,
+    });
 
-    // Tier 3: split pinned widgets into those that fit on the bar vs. those that overflow.
-    const visiblePinnedWidgets = () => {
-        const all = pinnedWidgets();
-        const clip = clipCount();
-        return clip > 0 ? all.slice(0, Math.max(0, all.length - clip)) : all;
-    };
-    const clippedPinnedWidgets = () => {
-        const all = pinnedWidgets();
-        const clip = clipCount();
-        return clip > 0 ? all.slice(Math.max(0, all.length - clip)) : [];
-    };
-
-    let mirrorRef:         HTMLDivElement | undefined;
-    let iconMirrorRef:     HTMLDivElement | undefined;
-    let iconMirrorMoreRef: HTMLDivElement | undefined;
-
-    // Minimum tab strip reserved before widget labels are dropped (tier 1→2).
-    const MIN_TAB_WIDTH = 120;
-    // Per-tab comfortable width — labels collapse when each tab would fall
-    // below this. Deliberately above --ws-tab-min (60 px) so labels drop
-    // first, then tabs continue shrinking.
-    const TAB_COLLAPSE_RESERVE_PX = 100;
-    // Tighter reserves used for the tier 2→3 threshold (icon-only bar is
-    // narrower, so tabs can afford to be a bit squeezed before overflow).
-    const MIN_TAB_WIDTH_ICON_ONLY      = 80;
-    const TAB_COLLAPSE_RESERVE_ICON_PX = 70;
+    // ── Drag-to-reorder (pinned only, saves to widget:pinned) ──────────────
+    const {
+        draggingKey,
+        dropIndex,
+        handlePointerDown,
+        handlePointerMove,
+        handlePointerUp,
+        handlePointerCancel,
+    } = useWidgetDragReorder({
+        containerRef: () => containerRef,
+        pinnedWidgets,
+    });
 
     // More dropdown state
     const [moreOpen, setMoreOpen] = createSignal(false);
-    let moreButtonRef!: HTMLDivElement;
-    let moreDropdownRef: HTMLDivElement | undefined;
 
     const openMore = (_e: MouseEvent) => {
         setMoreOpen(!moreOpen());
@@ -366,148 +184,6 @@ const ActionWidgets = (): JSX.Element => {
         onCleanup(() => document.removeEventListener("mousedown", handler, true));
     });
 
-    // ── Drag-to-reorder (pinned only, saves to widget:pinned) ─────────────────
-    //
-    // State machine: idle → pending (left-button down) → dragging (threshold exceeded)
-    // A single DragState signal replaces the previous ref/signal duplication.
-
-    type DragState =
-        | { phase: "idle" }
-        | { phase: "pending"; key: string; startX: number; startY: number; pointerId: number }
-        | { phase: "dragging"; key: string; dropIndex: number };
-
-    const DRAG_IDLE: DragState = { phase: "idle" };
-    const [dragState, setDragState] = createSignal<DragState>(DRAG_IDLE);
-
-    const draggingKey = () => { const s = dragState(); return s.phase === "dragging" ? s.key      : null; };
-    const dropIndex   = () => { const s = dragState(); return s.phase === "dragging" ? s.dropIndex : null; };
-
-    let containerRef!: HTMLDivElement;
-
-    // Cancel drag if the OS interrupts the gesture or the window loses visibility
-    // (e.g. Alt+Tab with a button held). pointerup during a normal drop is handled
-    // by the element's handlePointerUp — no global pointerup listener needed because
-    // setPointerCapture redirects it to the element once dragging begins.
-    createEffect(() => {
-        if (dragState().phase === "idle") return;
-        const cancel = () => setDragState(DRAG_IDLE);
-        window.addEventListener("pointercancel",    cancel, { capture: true });
-        window.addEventListener("visibilitychange", cancel);
-        onCleanup(() => {
-            window.removeEventListener("pointercancel",    cancel, { capture: true });
-            window.removeEventListener("visibilitychange", cancel);
-        });
-    });
-
-    onMount(() => {
-        const header = containerRef?.closest(".window-header") as HTMLElement | null;
-        if (!header || !mirrorRef || !iconMirrorRef) return;
-        const buttons = containerRef?.parentElement?.querySelector(
-            ".window-action-buttons"
-        ) as HTMLElement | null;
-        const tabScroll = header.querySelector(".tab-bar-scroll") as HTMLElement | null;
-        const measure = () => {
-            const labeledW  = mirrorRef?.offsetWidth ?? 0;
-            const iconOnlyW = iconMirrorRef?.offsetWidth ?? 0;
-            const headerW   = header.clientWidth;
-            if (labeledW === 0 || headerW === 0) return;
-            const buttonsW = buttons?.offsetWidth ?? 0;
-            const tabCount = tabScroll?.querySelectorAll(".tab").length ?? 0;
-            const tabsNeeded = Math.max(MIN_TAB_WIDTH, tabCount * TAB_COLLAPSE_RESERVE_PX);
-            setTooNarrow(labeledW + buttonsW + tabsNeeded > headerW);
-            const tabsNeededIconOnly = Math.max(MIN_TAB_WIDTH_ICON_ONLY, tabCount * TAB_COLLAPSE_RESERVE_ICON_PX);
-            const isTooIconOnly = iconOnlyW + buttonsW + tabsNeededIconOnly > headerW;
-            if (isTooIconOnly) {
-                const pinnedCount = pinnedWidgets().length;
-                if (pinnedCount > 0) {
-                    // Always-mounted More button probe gives reliable moreBtnW even
-                    // before the live More button mounts on first tier-3 entry.
-                    const mirrorMoreW = iconMirrorMoreRef?.offsetWidth ?? 0;
-                    const moreBtnW = moreButtonRef?.offsetWidth || mirrorMoreW;
-                    // Mirror 2 includes the More button only when unpinned widgets exist;
-                    // strip it from iconOnlyW in that case to get pure per-icon width.
-                    const iconsOnlyW = moreWidgets().length > 0
-                        ? Math.max(0, iconOnlyW - mirrorMoreW)
-                        : iconOnlyW;
-                    const perIconW = iconsOnlyW / pinnedCount;
-                    const availableForIcons = Math.max(0, headerW - buttonsW - tabsNeededIconOnly - moreBtnW);
-                    const fitsCount = Math.max(0, Math.floor(availableForIcons / Math.max(1, perIconW)));
-                    setClipCount(Math.max(0, pinnedCount - fitsCount));
-                } else {
-                    setClipCount(0);
-                }
-            } else {
-                setClipCount(0);
-            }
-        };
-        const ro = new ResizeObserver(measure);
-        ro.observe(header);
-        ro.observe(mirrorRef);
-        ro.observe(iconMirrorRef);
-        if (iconMirrorMoreRef) ro.observe(iconMirrorMoreRef);
-        const mo = tabScroll ? new MutationObserver(measure) : null;
-        if (mo && tabScroll) mo.observe(tabScroll, { childList: true });
-        measure();
-        onCleanup(() => {
-            ro.disconnect();
-            mo?.disconnect();
-        });
-    });
-
-    const handlePointerDown = (key: string, e: PointerEvent) => {
-        if (e.button !== 0) return;
-        setDragState({ phase: "pending", key, startX: e.clientX, startY: e.clientY, pointerId: e.pointerId });
-    };
-
-    const handlePointerMove = (e: PointerEvent) => {
-        const state = dragState();
-        if (state.phase === "idle") return;
-        if (state.phase === "pending") {
-            const dx = e.clientX - state.startX;
-            const dy = e.clientY - state.startY;
-            if (Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
-            (e.currentTarget as HTMLElement).setPointerCapture(state.pointerId);
-        }
-        e.preventDefault();
-        if (!containerRef) return;
-        const slots = Array.from(containerRef.querySelectorAll<HTMLElement>("[data-widget-slot]"));
-        let newIndex = slots.length;
-        for (let i = 0; i < slots.length; i++) {
-            const rect = slots[i].getBoundingClientRect();
-            if (e.clientX <= rect.right) {
-                newIndex = e.clientX <= rect.left + rect.width / 2 ? i : i + 1;
-                break;
-            }
-        }
-        if (state.phase === "pending") {
-            setDragState({ phase: "dragging", key: state.key, dropIndex: newIndex });
-        } else if (state.dropIndex !== newIndex) {
-            setDragState({ ...state, dropIndex: newIndex });
-        }
-    };
-
-    const handlePointerUp = (_e: PointerEvent) => {
-        const state = dragState();
-        setDragState(DRAG_IDLE);
-        if (state.phase !== "dragging") return;
-        const current = pinnedWidgets();
-        const shortNames = current.map(({ key }) => key.replace("defwidget@", ""));
-        const dragShort = state.key.replace("defwidget@", "");
-        const fromIdx = shortNames.indexOf(dragShort);
-        if (fromIdx === -1) return;
-        const next = [...shortNames];
-        next.splice(fromIdx, 1);
-        const adjustedDrop = fromIdx < state.dropIndex ? state.dropIndex - 1 : state.dropIndex;
-        next.splice(adjustedDrop, 0, dragShort);
-        if (next.join(",") !== shortNames.join(",")) {
-            fireAndForget(async () => {
-                await RpcApi.SetConfigCommand(TabRpcClient, { "widget:pinned": next } as any);
-            });
-        }
-    };
-
-    const handlePointerCancel = () => setDragState(DRAG_IDLE);
-
     // ── Context menu active state (keeps hover highlight while menu is open) ──
     const [contextMenuActiveKey, setContextMenuActiveKey] = createSignal<string | null>(null);
     let contextMenuCleanup: (() => void) | null = null;
@@ -539,7 +215,7 @@ const ActionWidgets = (): JSX.Element => {
     const handlePinnedContextMenu = (e: MouseEvent, key: string) => {
         e.preventDefault();
         e.stopPropagation();
-        setDragState(DRAG_IDLE);
+        handlePointerCancel();
         armContextMenuDismiss(key);
         const shortName = key.replace("defwidget@", "");
         ContextMenuModel.showContextMenu(
@@ -612,7 +288,7 @@ const ActionWidgets = (): JSX.Element => {
             </div>
 
             {/* Mirror 1: always-labeled — measures tier 1→2 threshold. */}
-            <div ref={mirrorRef} class="action-widgets action-widgets--measure" aria-hidden="true">
+            <div ref={setMirrorRef} class="action-widgets action-widgets--measure" aria-hidden="true">
                 <For each={pinnedWidgets()}>
                     {({ widget }) => (
                         <div class="action-widget-slot">
@@ -632,7 +308,7 @@ const ActionWidgets = (): JSX.Element => {
             {/* Mirror 2: icon-only — measures tier 2→3 threshold.
                 Includes the More button when unpinned widgets exist because
                 the tier-2 bar still shows it, so its width counts. */}
-            <div ref={iconMirrorRef} class="action-widgets action-widgets--measure" aria-hidden="true">
+            <div ref={setIconMirrorRef} class="action-widgets action-widgets--measure" aria-hidden="true">
                 <For each={pinnedWidgets()}>
                     {({ widget }) => (
                         <div class="action-widget-slot">
@@ -651,7 +327,7 @@ const ActionWidgets = (): JSX.Element => {
             {/* More button width probe — always mounted so moreBtnW is available
                 before the live More button mounts on first tier-3 entry. */}
             <div class="action-widgets action-widgets--measure" aria-hidden="true">
-                <div ref={(el) => (iconMirrorMoreRef = el)} class="action-widget-more-btn">
+                <div ref={setIconMirrorMoreRef} class="action-widget-more-btn">
                     <i class="fa-solid fa-ellipsis" />
                     <i class="fa-solid fa-chevron-down action-widget-more-chevron" />
                 </div>

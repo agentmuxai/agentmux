@@ -15,7 +15,7 @@
  */
 
 import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
-import { AccountForm } from "@/app/view/identity/identity-view";
+import { AccountForm } from "@/app/view/identity/identity-account-form";
 import { ProviderLogo } from "@/element/ProviderLogo";
 import {
     type AccountProvider,
