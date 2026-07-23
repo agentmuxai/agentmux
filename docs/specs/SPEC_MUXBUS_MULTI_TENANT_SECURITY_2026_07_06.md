@@ -1,7 +1,15 @@
 # Plan: MuxBus multi-tenant security — current state and path to production isolation
 
-**Status:** Draft — audit complete (client + server code read directly, no
-implementation started).
+**Status:** Draft — audit complete. **Update 2026-07-23: Phase 1 below has
+since landed** (agentmux-cloud commit `40a2fc4`, #25, merged 2026-07-07, the
+day after this doc was written) — per-agent Cognito client provisioning and
+a server-side `checkAgentBinding()` check exist on all five reactive routes
+in `agentmux-cloud`'s `muxbus/server/src/index.ts`. It currently runs
+**log-only**: mismatches are logged, not rejected, pending the
+`ENFORCE_AGENT_BINDING` flag (unset in every deployed environment). See
+`agentmux-cloud`'s `muxbus/PLAN_PER_AGENT_CREDENTIAL_BINDING_2026_07_06.md`
+for the implementation's own status tracking. Phases 2-5 below remain
+unstarted.
 **Author:** Agent3
 **Date:** 2026-07-06
 **Related:** agentmuxai/agentmux-cloud#2 (open, proposes the core fix),
@@ -124,9 +132,11 @@ underlying spoofing/interception at the transport layer described above.
   about local Tier 2/3 delivery misses, not cross-account authorization.
 - **`agentmux-docs` `security/trust-model.md`** — already states outright
   that "AgentMux is not designed for hostile multi-tenant deployments." This
-  audit doesn't contradict that disclosure; it confirms "multi-user isolated
-  and secure channels" is genuine, currently-unstarted work, not a small
-  patch on top of an existing partial implementation.
+  audit doesn't contradict that disclosure; at the time of writing it
+  confirmed "multi-user isolated and secure channels" was genuine,
+  unstarted work — Phase 1 below has since shipped log-only (see the status
+  update above), closing the *identity-binding* half of the gap in code
+  while leaving it unenforced.
 
 ## Path to production: multi-user isolated channels
 
