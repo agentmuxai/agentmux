@@ -332,6 +332,17 @@ export const AgentApi = {
         return client.rpcCall("forkagentdefinitionsuggest", data, opts);
     },
 
+    // Renames a fork tab's displayed title — writes branch_label when the
+    // definition already has one (a fork), else name (a lineage root). See
+    // SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md §4.
+    RenameAgentDefinitionTitleCommand(
+        client: RpcClient,
+        data: { id: string; title: string },
+        opts?: RpcOpts,
+    ): Promise<AgentDefinition> {
+        return client.rpcCall("renameagentdefinitiontitle", data, opts);
+    },
+
     SubprocessSpawnCommand(client: RpcClient, data: CommandSubprocessSpawnData, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("subprocessspawn", data, opts);
     },

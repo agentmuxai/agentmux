@@ -635,3 +635,11 @@ pub struct CommandForkAgentDefinitionSuggestData {
 pub struct ForkAgentDefinitionSuggestResult {
     pub suggested_label: String,
 }
+
+/// SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md §4 — renames
+/// whichever field a fork tab's title actually resolves from.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandRenameAgentDefinitionTitleData {
+    pub id: String,
+    pub title: String,
+}

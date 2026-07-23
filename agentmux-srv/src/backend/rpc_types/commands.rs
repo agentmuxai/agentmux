@@ -209,6 +209,12 @@ pub const COMMAND_FORK_AGENT_DEFINITION: &str = "forkagentdefinition";
 /// Returns the suggested branch label for a fork without mutating anything.
 /// Called when the user clicks "Open new session" to pre-fill the name input.
 pub const COMMAND_FORK_AGENT_DEFINITION_SUGGEST: &str = "forkagentdefinitionsuggest";
+/// Renames a fork/agent tab's displayed title — SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md §4.
+/// Writes `branch_label` when the definition already has one set (a fork),
+/// else `name` (a lineage root) — whichever field `fork-set.ts`'s `titleOf()`
+/// actually displays. Deliberately separate from `updateagent`, which keeps
+/// `branch_label` immutable for every other caller.
+pub const COMMAND_RENAME_AGENT_DEFINITION_TITLE: &str = "renameagentdefinitiontitle";
 
 /// Two-tier picker (Phase 1 — SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md).
 /// Clone a seeded template into a new user-owned agent definition with
