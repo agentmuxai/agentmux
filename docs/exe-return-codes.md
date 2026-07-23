@@ -6,9 +6,9 @@ On Windows, the executable users actually launch is `agentmux.exe` — `scripts/
 
 | Exit Code | Description |
 |-----------|-------------|
-| **0** | Clean exit — the launcher supervisor finished normally (host exited, or a `--diag` subcommand succeeded) |
+| **0** | Clean exit — the launcher supervisor finished normally (host exited, a `--diag` subcommand succeeded, or on macOS/Linux, `second_instance.rs` detected a running peer and exited cleanly as the second instance) |
 | **1** | Fatal startup/supervision error — causes include: the supervisor thread panicking, the runtime being misconfigured (host binary resolves to the launcher itself), the CEF host binary not found in `runtime/`, or a `--diag sagas` failure |
-| **2** | `--diag` CLI usage error (missing or unknown topic; known topics: `wrr`, `srv`, `sagas`) |
+| **2** | Fatal setup error unrelated to `--diag`: on Windows, a `--diag` CLI usage error (missing or unknown topic; known topics: `wrr`, `srv`, `sagas`); on macOS/Linux, `second_instance.rs::bind_socket_with_recovery` failing to bind/recover the IPC socket (initial bind failure, lockfile open failure, `flock` failure, post-lock or post-recovery rebind failure) |
 
 ## agentmux-cef (Desktop Host)
 
