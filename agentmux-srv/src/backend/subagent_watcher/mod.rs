@@ -200,11 +200,17 @@ impl SubagentWatcher {
             );
         }
 
-        // Check if already watching this agent
+        // Check if already watching this agent. A second block registering
+        // the same agent_id adds itself as a dependent of the existing
+        // shared watcher (see WatchedAgent::parent_block_ids) instead of
+        // being silently dropped — otherwise `unwatch_block` (below) had no
+        // way to tell that a still-open second block also depended on this
+        // watcher when the first one closed.
         {
-            let watched = self.watched_agents.lock().unwrap();
-            if watched.iter().any(|w| w.agent_id == agent_id) {
-                tracing::debug!(agent = %agent_id, "already watching this agent");
+            let mut watched = self.watched_agents.lock().unwrap();
+            if let Some(existing) = watched.iter_mut().find(|w| w.agent_id == agent_id) {
+                existing.parent_block_ids.insert(parent_block_id.to_string());
+                tracing::debug!(agent = %agent_id, parent_block_id = %parent_block_id, "already watching this agent");
                 return;
             }
         }
@@ -321,7 +327,7 @@ impl SubagentWatcher {
             let mut watched = self.watched_agents.lock().unwrap();
             watched.push(WatchedAgent {
                 agent_id: agent_id.to_string(),
-                parent_block_id: parent_block_id.to_string(),
+                parent_block_ids: std::iter::once(parent_block_id.to_string()).collect(),
                 config_dir: config_dir.clone(),
                 _watcher: watcher,
             });
@@ -381,8 +387,17 @@ impl SubagentWatcher {
                     // that path, each misattributing it to their own
                     // parent_block_id. See
                     // docs/retro/retro-subagent-watcher-shared-dir-fanout-and-leak-2026-07-23.md.
+                    //
+                    // Skipped entirely when parent_block_id is empty — the
+                    // legacy/manual `subagent.WatchAgent` RPC entry point
+                    // (server/service/misc.rs) deliberately passes "" for
+                    // callers with no pane to scope to; there's no block to
+                    // own the session against, so the check would otherwise
+                    // reject every event from that path unconditionally.
                     let session_id = derive_session_id(&changed_path);
-                    if !self_clone.session_belongs_to_block(&parent_block_id, &session_id) {
+                    if !parent_block_id.is_empty()
+                        && !self_clone.session_belongs_to_block(&parent_block_id, &session_id)
+                    {
                         tracing::debug!(
                             agent = %parent_agent,
                             parent_block_id = %parent_block_id,
@@ -585,21 +600,31 @@ impl SubagentWatcher {
         pruned
     }
 
-    /// Stop watching a block's filesystem watcher (drop its `notify`
-    /// subscription, closing the debounce channel so the associated
-    /// processing task self-terminates on its next `rx.recv()`). Block-
-    /// scoped, not agent-name-scoped — mirrors `unwatch_agent`'s teardown
-    /// mechanism, keyed by `parent_block_id` instead of `agent_id` so an
-    /// agent identity reused across multiple blocks over time only loses
-    /// the ONE watcher tied to the block that actually closed, never a
-    /// different still-open block sharing its name. Idempotent — a no-op if
-    /// no watcher is registered for this block.
+    /// Remove `block_id` as a dependent of its watcher, tearing down the
+    /// underlying `notify` subscription (closing the debounce channel so the
+    /// associated processing task self-terminates on its next `rx.recv()`)
+    /// only once NO block depends on it anymore. Block-scoped, not
+    /// agent-name-scoped — mirrors `unwatch_agent`'s teardown mechanism, but
+    /// keyed by `parent_block_id`.
+    ///
+    /// `watch_agent` dedupes by `agent_id`: a second block registering an
+    /// already-watched agent_id adds itself to that entry's
+    /// `parent_block_ids` instead of getting its own watcher. Tearing down
+    /// the whole entry the moment ANY one dependent block closes would kill
+    /// live tracking for every other still-open block sharing that agent
+    /// identity — removing just this block_id from the set (and only
+    /// dropping the entry once the set is empty) keeps the watcher alive for
+    /// as long as any block still needs it. Idempotent — a no-op if
+    /// `block_id` isn't a dependent of any watcher.
     fn unwatch_block(&self, block_id: &str) {
         let mut watched = self.watched_agents.lock().unwrap();
+        for w in watched.iter_mut() {
+            w.parent_block_ids.remove(block_id);
+        }
         let before = watched.len();
-        watched.retain(|w| w.parent_block_id != block_id);
+        watched.retain(|w| !w.parent_block_ids.is_empty());
         if watched.len() != before {
-            tracing::info!(block_id = %block_id, "stopped watching subagent dir for deleted block");
+            tracing::info!(block_id = %block_id, "stopped watching subagent dir: last dependent block closed");
         }
     }
 

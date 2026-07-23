@@ -7,7 +7,7 @@
 //! tracking counterparts, and the `PendingDispatchActivity` coalescing
 //! buffer filled and flushed by `subagent_watcher::jsonl`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use notify::RecommendedWatcher;
@@ -200,7 +200,13 @@ pub(super) struct DispatchState {
 #[allow(dead_code)]
 pub(super) struct WatchedAgent {
     pub(super) agent_id: String,
-    pub(super) parent_block_id: String,
+    /// Every block currently depending on this shared watcher. `watch_agent`
+    /// dedupes by `agent_id` — a second block registering the same agent_id
+    /// gets no watcher of its own, it just adds itself here. `unwatch_block`
+    /// only tears down the underlying `notify` watcher once this set is
+    /// empty, so closing one of several blocks sharing an agent identity
+    /// never kills live tracking for the others still depending on it.
+    pub(super) parent_block_ids: HashSet<String>,
     pub(super) config_dir: PathBuf,
     pub(super) _watcher: RecommendedWatcher,
 }

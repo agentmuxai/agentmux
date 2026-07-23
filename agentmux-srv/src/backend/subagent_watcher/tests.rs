@@ -874,8 +874,48 @@ async fn prune_block_also_tears_down_that_blocks_filesystem_watcher() {
 
     let watched = watcher.watched_agents.lock().unwrap();
     assert_eq!(watched.len(), 1, "prune_block must tear down the closed block's own watcher");
-    assert_eq!(watched[0].parent_block_id, "block-2", "a different, still-open block's watcher must be untouched");
+    assert!(
+        watched[0].parent_block_ids.contains("block-2"),
+        "a different, still-open block's watcher must be untouched"
+    );
     drop(watched);
+
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[tokio::test]
+async fn prune_block_does_not_kill_a_watcher_still_depended_on_by_another_block() {
+    // Regression test for reagent's P1 on the first version of this fix:
+    // watch_agent dedupes by agent_id, so two blocks registering the SAME
+    // agent_id share one WatchedAgent entry. Pruning the first-registered
+    // block must not silently kill live tracking for the second, still-open
+    // block sharing that agent identity — only pruning BOTH should tear
+    // down the underlying watcher.
+    let home = dirs::home_dir().expect("test requires a resolvable home dir");
+    let root = home.join(format!("amx-prune-shared-agent-test-{}", now_millis()));
+    std::fs::create_dir_all(&root).unwrap();
+    let config_dir = root.join("claude-shared-agent");
+
+    let watcher = Arc::new(fixture_watcher());
+    watcher.watch_agent("shared-agent", "block-1", config_dir.clone());
+    watcher.watch_agent("shared-agent", "block-2", config_dir.clone());
+    // Same agent_id dedupes to one entry, now depended on by both blocks.
+    assert_eq!(watcher.watched_agents.lock().unwrap().len(), 1);
+
+    watcher.prune_block("block-1");
+    {
+        let watched = watcher.watched_agents.lock().unwrap();
+        assert_eq!(watched.len(), 1, "watcher must survive: block-2 still depends on it");
+        assert!(!watched[0].parent_block_ids.contains("block-1"));
+        assert!(watched[0].parent_block_ids.contains("block-2"));
+    }
+
+    watcher.prune_block("block-2");
+    assert_eq!(
+        watcher.watched_agents.lock().unwrap().len(),
+        0,
+        "once the last dependent block is pruned, the watcher must be torn down"
+    );
 
     std::fs::remove_dir_all(&root).ok();
 }
@@ -947,6 +987,37 @@ async fn live_fs_event_is_not_misattributed_to_a_block_that_does_not_own_the_ses
         active[0].parent_block_id, "block-owner",
         "must be attributed to the block that actually owns the session, never the other block sharing its watched directory"
     );
+
+    std::fs::remove_dir_all(&config_dir).ok();
+}
+
+#[tokio::test]
+async fn live_fs_event_with_empty_block_id_bypasses_the_ownership_check() {
+    // Regression test for reagent's P1 on the first version of this fix:
+    // the legacy/manual `subagent.WatchAgent` RPC entry point
+    // (server/service/misc.rs) deliberately passes block_id="" for callers
+    // with no pane to scope events to. No block has oid "", so the new
+    // session-ownership gate must not apply to it — otherwise every live
+    // event from that path is silently dropped.
+    let home = dirs::home_dir().expect("test requires a resolvable home dir");
+    let config_dir = home.join(format!("amx-empty-block-id-test-{}", now_millis()));
+    let subagents_dir = config_dir.join("projects").join("ws-enc").join("some-session").join("subagents");
+    std::fs::create_dir_all(&subagents_dir).unwrap();
+
+    let watcher = Arc::new(fixture_watcher());
+    watcher.watch_agent("manual-agent", "", config_dir.clone());
+
+    std::fs::write(
+        subagents_dir.join("agent-x.jsonl"),
+        "{\"type\":\"result\",\"result\":\"done\"}\n",
+    )
+    .unwrap();
+
+    tokio::time::sleep(Duration::from_millis(800)).await;
+
+    let active = watcher.list_active();
+    assert_eq!(active.len(), 1, "an empty block_id must not cause every live event to be dropped");
+    assert_eq!(active[0].parent_block_id, "");
 
     std::fs::remove_dir_all(&config_dir).ok();
 }
