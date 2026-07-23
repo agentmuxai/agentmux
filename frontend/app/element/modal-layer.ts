@@ -303,17 +303,12 @@ export interface AgentMemoryRequest {
  */
 export interface AgentSetupRequest {
     kind: "agent-setup";
-    /** Agent definition to show/edit accounts for (Accounts tab). May be
-     *  null for quick-launch panes with no loadable definition — the
-     *  Accounts tab renders its own empty state in that case. */
-    agent: AgentDefinition | null;
-    /** Provider/definition id — used by the Memory tab. */
+    /** Provider/definition id — used by the Accounts tab (read-only linked-
+     *  accounts view, keyed on agentId alone) and the Memory tab. */
     agentId: string;
     agentName: string;
     /** Agent's working directory — used to compute the memory folder path. */
     workingDirectory: string;
-    /** Block id of the pane — used to construct the IdentityViewModel. */
-    blockId: string;
     /** Which tab to open on. Defaults to "accounts". */
     initialTab?: "accounts" | "memory";
 }
