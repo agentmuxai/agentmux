@@ -2391,6 +2391,57 @@
         );
     }
 
+    // Reagent P0 on PR #2282: `agent_def_update`'s legacy `db_agent_definitions`
+    // UPDATE never touches `branch_label` — but the dual-write upsert into
+    // `db_agents` (the table `agent_def_list` actually reads) does, via its
+    // `branch_label = excluded.branch_label` ON CONFLICT clause. Verifies the
+    // end-to-end round-trip `renameagentdefinitiontitle` depends on: a
+    // `branch_label` change made through `agent_def_update` is both persisted
+    // in `db_agents` and visible through `agent_def_list`.
+    #[test]
+    fn dual_write_agent_def_update_persists_branch_label_change() {
+        let store = make_store();
+        let mut def = AgentDefinition {
+            id: "fork-rename-test".to_string(),
+            slug: String::new(),
+            name: "Fork Name".to_string(),
+            icon: "✦".to_string(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: "bash".to_string(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 1000,
+            agent_type: "standalone".to_string(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: "some-parent".to_string(),
+            branch_label: "Old Branch".to_string(),
+            updated_at: 1000,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+        };
+        store.agent_def_insert(&mut def).unwrap();
+        def.branch_label = "New Branch".to_string();
+        assert!(store.agent_def_update(&mut def).unwrap());
+        assert_eq!(
+            read_agent_field(&store, "fork-rename-test", "branch_label"),
+            Some("New Branch".to_string()),
+            "branch_label should persist into db_agents after agent_def_update"
+        );
+        let listed = store.agent_def_list().unwrap();
+        let row = listed.iter().find(|a| a.id == "fork-rename-test").unwrap();
+        assert_eq!(row.branch_label, "New Branch", "agent_def_list should reflect the new branch_label");
+    }
+
     #[test]
     fn dual_write_agent_def_delete_removes_db_agents_row() {
         let store = make_store();

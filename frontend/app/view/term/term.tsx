@@ -19,6 +19,7 @@ import { TermWrap } from "./termwrap";
 import "./xterm.css";
 import { DragOverlay } from "@/app/element/dragoverlay";
 import { PaneTabStrip } from "@/app/element/PaneTabStrip";
+import { PaneTabRenameInput } from "@/app/element/PaneTabRenameInput";
 import { detectHost, invokeCommand } from "@/app/platform/ipc";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -85,11 +86,18 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
     // cross-pane derivation needed.
     const layoutModel = getLayoutModelForStaticTab();
     interface TermTab { blockId: string; label: string }
+    // Rename overrides, keyed by blockId — set synchronously by
+    // handleTermTabRename below so a just-renamed tab (including a dormant,
+    // non-active one whose block meta isn't reactively tracked here) reflects
+    // its new label immediately, without waiting on a cross-pane event.
+    // SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md §3.3.
+    const [titleOverrides, setTitleOverrides] = createSignal<Record<string, string>>({});
     const termTabs = createMemo<TermTab[]>(() => {
         // Reactive dependency: re-derive whenever ANY layout mutation
         // happens (matches the pattern getNodeModel's own isFocused/
         // isMagnified memos already use in layoutNodeModels.ts).
         layoutModel.localTreeStateAtom();
+        const overrides = titleOverrides();
         const node = layoutModel.getNodeByBlockId(blockId);
         // No stack yet (the common default case — a single, never-forked
         // terminal) → synthesize this pane's own one-tab list rather than
@@ -98,14 +106,21 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
         // confusing; every other pane type's strip always shows at least
         // its own active entry (see agent-view.tsx's switchableForks).
         const stack = node?.data?.blockStack?.length ? node.data.blockStack : [blockId];
-        // Position-based labels ("Terminal 1", "Terminal 2", …) — matches
-        // common terminal-app convention for an unnamed session. A dormant
-        // (non-active) tab's own block isn't mounted (no live TermViewModel
-        // to read a richer title from — see layoutStack.ts's header comment
-        // on why switching is a remount, not a reactive update), so a
-        // cwd-derived or user-renamable label is a follow-up, not something
-        // cheaply available here yet.
-        return stack.map((id, i) => ({ blockId: id, label: `Terminal ${i + 1}` }));
+        // Position-based labels ("Terminal 1", "Terminal 2", …) as the
+        // fallback for an unnamed session — matches common terminal-app
+        // convention. A user-set title (double-click to rename, persisted on
+        // the tab's own block as meta["pane-title"] — the same field
+        // titlebar.tsx's pane title editor uses) wins when present, read via
+        // a non-reactive lookup since a dormant tab's block isn't mounted
+        // (no live TermViewModel — see layoutStack.ts's header comment on
+        // why switching is a remount, not a reactive update); `overrides`
+        // above is what makes a just-performed rename show up immediately.
+        return stack.map((id, i) => {
+            const persistedTitle = WOS.getObjectValue<Block>(WOS.makeORef("block", id))?.meta?.["pane-title"] as
+                | string
+                | undefined;
+            return { blockId: id, label: overrides[id] ?? persistedTitle ?? `Terminal ${i + 1}` };
+        });
     });
     const activeBlockId = createMemo(() => {
         layoutModel.localTreeStateAtom();
@@ -156,6 +171,19 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
                 expiration: Date.now() + 8000,
             });
         }
+    };
+
+    // Double-click-to-rename — SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md §3.3.
+    const [renamingBlockId, setRenamingBlockId] = createSignal<string | null>(null);
+    const handleTermTabRenameConfirm = (targetBlockId: string, title: string) => {
+        setRenamingBlockId(null);
+        setTitleOverrides((prev) => ({ ...prev, [targetBlockId]: title }));
+        fireAndForget(() =>
+            RpcApi.SetMetaCommand(TabRpcClient, {
+                oref: WOS.makeORef("block", targetBlockId),
+                meta: { "pane-title": title } as any,
+            }),
+        );
     };
 
     const termSettingsAtom = getSettingsPrefixAtom("term");
@@ -497,6 +525,18 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
                 getLabel={(t) => t.label}
                 onActivate={handleTermTabSwitch}
                 onClose={handleTermTabClose}
+                onTabDoubleClick={(t) => setRenamingBlockId(t.blockId)}
+                renderLabel={(t) =>
+                    renamingBlockId() === t.blockId ? (
+                        <PaneTabRenameInput
+                            initialValue={t.label}
+                            onConfirm={(title) => handleTermTabRenameConfirm(t.blockId, title)}
+                            onCancel={() => setRenamingBlockId(null)}
+                        />
+                    ) : (
+                        <span class="pane-tab-label">{t.label}</span>
+                    )
+                }
                 onAdd={() => void handleTermTabAdd()}
                 addTitle="New terminal tab"
             />

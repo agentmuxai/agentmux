@@ -19,6 +19,8 @@ use crate::backend::rpc_types::{
     COMMAND_FORK_AGENT_DEFINITION_SUGGEST,
     CommandForkAgentDefinitionSuggestData, ForkAgentDefinitionSuggestResult,
     CommandForkAgentDefinitionData,
+    COMMAND_RENAME_AGENT_DEFINITION_TITLE,
+    CommandRenameAgentDefinitionTitleData,
 };
 use crate::backend::storage::{AgentDefinition, AgentContent, AgentSkill};
 
@@ -431,6 +433,66 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
                 let result = ForkAgentDefinitionSuggestResult { suggested_label };
                 Ok(Some(serde_json::to_value(&result).unwrap_or_default()))
+            })
+        }),
+    );
+
+    // ---- Rename a fork/agent tab's displayed title ----
+    //
+    // Deliberately separate from `updateagent`, which preserves
+    // `branch_label` unconditionally (core.rs: "parent_id + branch_label
+    // describe provenance and are immutable post-insert"). That contract
+    // stays true for every OTHER caller of `updateagent` — this handler is
+    // the one narrow, explicit path that's allowed to change it, and only
+    // the field `fork-set.ts`'s `titleOf()` actually displays: `branch_label`
+    // when the row already has one (a fork), else `name` (a lineage root).
+    // See SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md §4.
+    let wstore_rn = state.wstore.clone();
+    let broker_rn = state.broker.clone();
+    engine.register_handler(
+        COMMAND_RENAME_AGENT_DEFINITION_TITLE,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore_rn.clone();
+            let broker = broker_rn.clone();
+            Box::pin(async move {
+                let cmd: CommandRenameAgentDefinitionTitleData = serde_json::from_value(data)
+                    .map_err(|e| format!("renameagentdefinitiontitle: {e}"))?;
+                let title = cmd.title.trim();
+                if title.is_empty() {
+                    return Err("renameagentdefinitiontitle: title must not be empty".to_string());
+                }
+
+                let all = wstore
+                    .agent_def_list()
+                    .map_err(|e| format!("renameagentdefinitiontitle: {e}"))?;
+                let old = all
+                    .iter()
+                    .find(|a| a.id == cmd.id)
+                    .ok_or_else(|| format!("renameagentdefinitiontitle: agent {} not found", cmd.id))?;
+
+                let mut updated = old.clone();
+                if !updated.branch_label.is_empty() {
+                    updated.branch_label = title.to_string();
+                } else {
+                    updated.name = title.to_string();
+                }
+
+                let found = wstore
+                    .agent_def_update(&mut updated)
+                    .map_err(|e| format!("renameagentdefinitiontitle: {e}"))?;
+                if !found {
+                    return Err(format!("renameagentdefinitiontitle: agent {} not found", cmd.id));
+                }
+
+                broker.publish(crate::backend::wps::WaveEvent {
+                    event: "agents:changed".to_string(),
+                    scopes: vec![],
+                    sender: String::new(),
+                    persist: 0,
+                    data: None,
+                });
+
+                Ok(Some(serde_json::to_value(&updated).unwrap_or_default()))
             })
         }),
     );

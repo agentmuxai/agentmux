@@ -746,10 +746,19 @@ impl Store {
         Ok(rows > 0)
     }
 
-    /// Update an existing agent definition (all fields except id, created_at, is_seeded).
-    /// `parent_id` and `branch_label` are NOT updatable post-insert — they
-    /// describe the agent's provenance; renaming or re-branching is done by
-    /// creating a new fork, not mutating the original.
+    /// Update an existing agent definition (all fields except id, created_at, is_seeded, `parent_id`).
+    /// `parent_id` is NOT updatable post-insert — it describes the agent's
+    /// lineage; re-parenting is done by creating a new fork, not mutating the
+    /// original.
+    ///
+    /// `branch_label` IS written here (unlike `parent_id`) — this storage-
+    /// layer function persists whatever is on `agent`. Immutability for most
+    /// callers is enforced one layer up, at the RPC handler: `updateagent`
+    /// always passes back `old.branch_label.clone()` unchanged, so it's a
+    /// no-op for that caller. `renameagentdefinitiontitle` is the one
+    /// deliberate exception that supplies a real change — see
+    /// `agentmux-srv/src/server/agent_handlers/template.rs` and
+    /// docs/specs/SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md §4.
     ///
     /// Self-stamps `updated_at` with the current time and writes it back into
     /// `agent.updated_at`, so the caller's struct (e.g. an RPC response body)
@@ -767,7 +776,7 @@ impl Store {
                  restart_on_crash=?9, idle_timeout_minutes=?10,
                  agent_type=?11, environment=?12, agent_bus_id=?13, accounts=?14, updated_at=?15,
                  container_image=?17, container_volumes=?18, container_name=?19,
-                 use_ambient_login=?20
+                 use_ambient_login=?20, branch_label=?21
                  WHERE id=?16",
                 params![
                     agent.name,
@@ -790,6 +799,7 @@ impl Store {
                     agent.container_volumes,
                     agent.container_name,
                     agent.use_ambient_login,
+                    agent.branch_label,
                 ],
             )?
         };
