@@ -336,14 +336,13 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             const agent = currentAgent() ?? null;
             modalLayer.open({
                 kind: "agent-setup",
-                agent,
                 agentId,
                 agentName: agentName(),
                 workingDirectory,
-                blockId: model.blockId,
                 // No loadable definition (quick-launch pane) → default to
-                // the Memory tab, which needs no AgentDefinition; the
-                // Accounts tab still renders its own empty state.
+                // the Memory tab; the Accounts tab works from agentId alone
+                // but the Memory tab is the more useful default for a pane
+                // with no saved definition yet.
                 initialTab: agent ? "accounts" : "memory",
             });
         };
