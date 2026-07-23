@@ -19,7 +19,7 @@ import { createEffect, createMemo, createSignal, onCleanup, onMount, type Access
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { sendWSCommand } from "@/app/store/ws";
-import { WOS } from "@/app/store/global";
+import { WOS, staticTabId } from "@/app/store/global";
 import { stringToBase64 } from "@/util/util";
 import { TermWrap } from "@/app/view/term/termwrap";
 
@@ -110,6 +110,32 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
         void (async () => {
             try {
                 let id = subBlockId();
+                if (id) {
+                    // Reusing a sub-block id persisted on the parent's meta from a
+                    // prior mount — but a sub-block, unlike its parent agent block,
+                    // does not survive a full app restart (it's gone from the object
+                    // store entirely, not just missing its in-memory controller).
+                    // Verify it's still real before trusting it: resync throws
+                    // "block <id> not found" for a stale reference. Reconnecting to
+                    // a dead id otherwise renders whatever history is left (once
+                    // persisted) with no live process behind it — the terminal
+                    // looks normal but silently accepts no input. Confirmed live
+                    // via CDP against a session that had been through several dev
+                    // rebuild restarts.
+                    try {
+                        await RpcApi.ControllerResyncCommand(TabRpcClient, {
+                            tabid: staticTabId(),
+                            blockid: id,
+                            forcerestart: false,
+                        });
+                    } catch (e) {
+                        console.warn(
+                            "AgentShellSubblock: existing sub-block is stale, creating a fresh one:",
+                            e
+                        );
+                        id = undefined;
+                    }
+                }
                 if (!id) {
                     const oref = await RpcApi.CreateSubBlockCommand(TabRpcClient, {
                         parentblockid: props.parentBlockId,
