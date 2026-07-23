@@ -13,7 +13,17 @@
     // exactly [tab][+] wide, no trailing dead space. Grows tab-by-tab as
     // more open; only reaches full pane width once enough tabs fill it.
     // See docs/specs/SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md §3.1.
+    //
+    // Codex review on PR #2282: `display: inline-flex` alone only governs
+    // how THIS element lays out its own children — it does nothing to
+    // prevent the element ITSELF from being stretched by a parent flex
+    // container. Both real consumers (`.view-term`, `.agent-view`) are
+    // column flex containers with the default `align-items: stretch`,
+    // which was blowing the strip back out to full pane width regardless
+    // of inline-flex. `align-self: flex-start` opts this item out of that
+    // stretch so its own (now content-driven) width is what's rendered.
     display: inline-flex;
+    align-self: flex-start;
     max-width: 100%;
     flex-direction: row;
     align-items: stretch;
