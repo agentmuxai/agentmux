@@ -52,6 +52,7 @@ import { useAgentCommands } from "./hooks/useAgentCommands";
 import { useAgentFailure } from "./hooks/useAgentFailure";
 import { PaneRow } from "./components/PaneRow";
 import { PaneTabStrip } from "@/app/element/PaneTabStrip";
+import { PaneTabRenameInput } from "@/app/element/PaneTabRenameInput";
 import { useForkSet } from "./fork/useForkSet";
 import { getLayoutModelForStaticTab, pushBlockOntoStack, setActiveBlockInStack } from "@/layout/index";
 import { useAgentDropAttach } from "./hooks/useAgentDropAttach";
@@ -185,6 +186,28 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             setActiveBlockInStack(layoutModel, myNode.id, entry.blockId);
         } else {
             refocusNode(entry.blockId);
+        }
+    };
+    // Double-click a fork tab to rename it —
+    // SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md §3.3/§4.
+    // No local override needed (unlike the terminal tab strip): the RPC
+    // broadcasts `agents:changed`, which `useAgentDefinitions()` already
+    // subscribes to, so `forks()`/`switchableForks()` pick up the new title
+    // through the normal reactive chain once the round-trip completes.
+    const [renamingForkId, setRenamingForkId] = createSignal<string | null>(null);
+    const handleForkRenameConfirm = async (definitionId: string, title: string): Promise<void> => {
+        setRenamingForkId(null);
+        try {
+            await RpcApi.RenameAgentDefinitionTitleCommand(TabRpcClient, { id: definitionId, title });
+        } catch (e: unknown) {
+            pushNotification({
+                icon: "fa-triangle-exclamation",
+                title: "Rename failed",
+                message: e instanceof Error ? e.message : String(e),
+                timestamp: new Date().toISOString(),
+                type: "error",
+                expiration: Date.now() + 8000,
+            });
         }
     };
     // "+" on the fork tab strip — Phase 4. Reuses the existing launch
@@ -1164,6 +1187,18 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 getId={(f) => f.definitionId}
                 getLabel={(f) => f.title}
                 onActivate={handleForkSwitch}
+                onTabDoubleClick={(f) => setRenamingForkId(f.definitionId)}
+                renderLabel={(f) =>
+                    renamingForkId() === f.definitionId ? (
+                        <PaneTabRenameInput
+                            initialValue={f.title}
+                            onConfirm={(title) => void handleForkRenameConfirm(f.definitionId, title)}
+                            onCancel={() => setRenamingForkId(null)}
+                        />
+                    ) : (
+                        <span class="pane-tab-label">{f.title}</span>
+                    )
+                }
                 onAdd={() => void handleForkCreate()}
                 addTitle="Fork this conversation"
             />

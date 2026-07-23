@@ -9,8 +9,12 @@
 // docs/specs/SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md §3.1.
 
 .pane-tab-strip {
-    flex: 0 0 auto;
-    display: flex;
+    // Shrink-to-fit (not full pane width) — with one tab open, the strip is
+    // exactly [tab][+] wide, no trailing dead space. Grows tab-by-tab as
+    // more open; only reaches full pane width once enough tabs fill it.
+    // See docs/specs/SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md §3.1.
+    display: inline-flex;
+    max-width: 100%;
     flex-direction: row;
     align-items: stretch;
     height: 28px;
@@ -21,19 +25,28 @@
 
 // Tooltip wrapper (shared Tooltip component) — carries the flex sizing the
 // tab used to own, so wrapping the tab for a hover tooltip doesn't change
-// layout.
+// layout. `flex: 0 0 auto` — no grow (doesn't stretch into free strip
+// space), hypothetical size follows content (the tab's label + padding),
+// hard-clamped at max-width regardless of shrink factor. `min-width: 0` lets
+// that clamp actually squeeze the box below its content's natural width
+// instead of overflowing it — required for the tab's ellipsis (below) to
+// ever engage.
 .pane-tab-tip {
-    flex: 1 1 140px;
-    min-width: 80px;
-    max-width: 200px;
+    flex: 0 0 auto;
+    min-width: 0;
+    max-width: 240px;
     display: flex;
     align-items: stretch;
 }
 
 .pane-tab {
+    // Fills (and, when the wrapper above is clamped by its max-width,
+    // shrinks within) its Tooltip wrapper — NOT the strip. min-width: 0
+    // overrides the flex default (min-width: auto = content's intrinsic
+    // width), which would otherwise block shrinking below the label's full
+    // unclamped width.
     flex: 1 1 auto;
     min-width: 0;
-    width: 100%;
     display: flex;
     align-items: center;
     gap: var(--space-1);
@@ -76,9 +89,26 @@
 
 .pane-tab-label {
     flex: 1;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+// The inline rename input swapped in via renderLabel (PaneTabRenameInput) —
+// same box as the plain label it replaces, styled to look native to the tab
+// rather than like a distinct form control.
+.pane-tab-rename-input {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    outline: none;
+    padding: 0;
+    margin: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: text;
 }
 
 .pane-tab-close {
