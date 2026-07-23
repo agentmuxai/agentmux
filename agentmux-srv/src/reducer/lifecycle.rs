@@ -101,3 +101,178 @@ pub(super) fn handle_goodbye(state: &mut State, ctx: &Ctx) -> Vec<Event> {
         version: v,
     }]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::reducer::test_support::*;
+    use crate::reducer::update;
+    use agentmux_common::ipc::Command;
+
+    #[test]
+    fn first_register_transitions_to_running() {
+        let mut state = State::default();
+        let events = update(
+            &mut state,
+            Command::Register {
+                kind: ClientKind::Host,
+                pid: 100,
+                version: "0.0.0".into(),
+            },
+            &ctx(1),
+        );
+        assert_eq!(state.lifecycle, LifecyclePhase::Running);
+        assert!(state.processes.contains_key(&100));
+        assert_eq!(events.len(), 3);
+        assert!(matches!(&events[0], Event::ProcessSpawned { pid: 100, .. }));
+        assert!(matches!(
+            &events[1],
+            Event::LifecyclePhaseChanged {
+                from: LifecyclePhase::Starting,
+                to: LifecyclePhase::Running,
+                ..
+            }
+        ));
+        assert!(matches!(&events[2], Event::Registered { .. }));
+    }
+
+    #[test]
+    fn second_register_does_not_re_emit_lifecycle_change() {
+        let mut state = State::default();
+        let _ = update(
+            &mut state,
+            Command::Register {
+                kind: ClientKind::Host,
+                pid: 100,
+                version: "v1".into(),
+            },
+            &ctx(1),
+        );
+        let events = update(
+            &mut state,
+            Command::Register {
+                kind: ClientKind::Tool,
+                pid: 200,
+                version: "v2".into(),
+            },
+            &ctx(2),
+        );
+        assert_eq!(state.lifecycle, LifecyclePhase::Running);
+        // ProcessSpawned + Registered, no LifecyclePhaseChanged.
+        assert_eq!(events.len(), 2);
+        assert!(events
+            .iter()
+            .all(|e| !matches!(e, Event::LifecyclePhaseChanged { .. })));
+    }
+
+    #[test]
+    fn duplicate_register_returns_already_registered_error() {
+        let mut state = State::default();
+        let _ = update(
+            &mut state,
+            Command::Register {
+                kind: ClientKind::Host,
+                pid: 100,
+                version: "v1".into(),
+            },
+            &ctx(1),
+        );
+        let events = update(
+            &mut state,
+            Command::Register {
+                kind: ClientKind::Host,
+                pid: 100,
+                version: "v2".into(),
+            },
+            &ctx(2),
+        );
+        assert!(matches!(
+            &events[0],
+            Event::Error {
+                code: ErrorCode::AlreadyRegistered,
+                ..
+            }
+        ));
+        // Original record preserved.
+        assert_eq!(&state.processes[&100].version, "v1");
+    }
+
+    #[test]
+    fn register_replaces_exited_record_for_recycled_pid() {
+        let mut state = State::default();
+        let _ = update(
+            &mut state,
+            Command::Register {
+                kind: ClientKind::Host,
+                pid: 100,
+                version: "v1".into(),
+            },
+            &ctx(1),
+        );
+        let _ = update(&mut state, Command::Goodbye, &ctx_with_pid(1, 100));
+        // Re-register with same PID — allowed because prior is Exited.
+        let events = update(
+            &mut state,
+            Command::Register {
+                kind: ClientKind::Host,
+                pid: 100,
+                version: "v2".into(),
+            },
+            &ctx(2),
+        );
+        assert!(matches!(&events[0], Event::ProcessSpawned { .. }));
+        assert_eq!(&state.processes[&100].version, "v2");
+        assert!(matches!(state.processes[&100].state, ProcessState::Running));
+    }
+
+    #[test]
+    fn ping_returns_pong_with_same_nonce() {
+        let mut state = State::default();
+        let events = update(&mut state, Command::Ping { nonce: 42 }, &ctx(1));
+        assert!(matches!(&events[0], Event::Pong { nonce: 42, .. }));
+    }
+
+    #[test]
+    fn goodbye_marks_process_exited() {
+        let mut state = State::default();
+        let _ = update(
+            &mut state,
+            Command::Register {
+                kind: ClientKind::Host,
+                pid: 100,
+                version: "v".into(),
+            },
+            &ctx(1),
+        );
+        let events = update(&mut state, Command::Goodbye, &ctx_with_pid(1, 100));
+        assert!(matches!(
+            &events[0],
+            Event::ProcessExited { pid: 100, code: 0, .. }
+        ));
+        assert!(matches!(
+            state.processes[&100].state,
+            ProcessState::Exited { code: 0 }
+        ));
+    }
+
+    #[test]
+    fn versions_strictly_monotonic_across_sequence() {
+        let mut state = State::default();
+        let mut versions = vec![];
+        for pid in [100, 200, 300] {
+            let events = update(
+                &mut state,
+                Command::Register {
+                    kind: ClientKind::Host,
+                    pid,
+                    version: "v".into(),
+                },
+                &ctx(pid as u64),
+            );
+            versions.extend(events.iter().map(extract_version));
+        }
+        for w in versions.windows(2) {
+            assert!(w[1] > w[0], "version regression: {} -> {}", w[0], w[1]);
+        }
+    }
+}
