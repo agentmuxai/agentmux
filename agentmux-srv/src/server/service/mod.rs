@@ -22,8 +22,16 @@ mod misc;
 mod object;
 mod object_helpers;
 mod reducer_helpers;
+mod tab_lifecycle;
+mod tab_move;
+mod tear_off;
 mod window;
+mod window_close;
+mod window_create;
+mod window_mutate;
+mod window_query;
 mod workspace;
+mod workspace_lifecycle;
 
 use axum::{extract::State, response::Json};
 

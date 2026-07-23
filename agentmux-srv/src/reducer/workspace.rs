@@ -153,3 +153,215 @@ pub(super) fn handle_update_workspace_meta(
         version: v,
     }]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::reducer::test_support::*;
+    use crate::reducer::update;
+    use agentmux_common::ipc::Command;
+
+    #[test]
+    fn create_workspace_inserts_record_and_emits_event() {
+        let mut state = State::default();
+        let events = update(
+            &mut state,
+            Command::CreateWorkspace {
+                name: "myws".into(),
+            },
+            &ctx(1),
+        );
+        assert_eq!(events.len(), 1);
+        let Event::WorkspaceCreated {
+            workspace_id, name, ..
+        } = &events[0]
+        else {
+            panic!("expected WorkspaceCreated, got {:?}", events[0]);
+        };
+        assert_eq!(name, "myws");
+        assert!(state.workspaces.contains_key(workspace_id));
+        assert_eq!(state.workspaces[workspace_id].name, "myws");
+    }
+
+    #[test]
+    fn delete_workspace_removes_record_and_emits_event() {
+        let mut state = State::default();
+        let events = update(
+            &mut state,
+            Command::CreateWorkspace {
+                name: "to-delete".into(),
+            },
+            &ctx(1),
+        );
+        let Event::WorkspaceCreated { workspace_id, .. } = &events[0] else {
+            panic!();
+        };
+        let ws_id = workspace_id.clone();
+        let events = update(
+            &mut state,
+            Command::DeleteWorkspace {
+                workspace_id: ws_id.clone(),
+                force: false,
+            },
+            &ctx(2),
+        );
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0],
+            Event::WorkspaceDeleted { workspace_id, .. } if workspace_id == &ws_id
+        ));
+        assert!(!state.workspaces.contains_key(&ws_id));
+    }
+
+    #[test]
+    fn delete_workspace_unknown_is_silent_no_op() {
+        let mut state = State::default();
+        let events = update(
+            &mut state,
+            Command::DeleteWorkspace {
+                workspace_id: "does-not-exist".into(),
+                force: false,
+            },
+            &ctx(1),
+        );
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn delete_workspace_cascades_tabs() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let _ = update(
+            &mut state,
+            Command::CreateTab {
+                workspace_id: ws_id.clone(),
+                name: "t1".into(),
+            },
+            &ctx(1),
+        );
+        let _ = update(
+            &mut state,
+            Command::CreateTab {
+                workspace_id: ws_id.clone(),
+                name: "t2".into(),
+            },
+            &ctx(2),
+        );
+        assert_eq!(state.tabs.len(), 2);
+        let events = update(
+            &mut state,
+            Command::DeleteWorkspace {
+                workspace_id: ws_id.clone(),
+                force: false,
+            },
+            &ctx(3),
+        );
+        assert!(matches!(&events[0], Event::WorkspaceDeleted { .. }));
+        assert!(state.tabs.is_empty());
+        assert!(!state.workspaces.contains_key(&ws_id));
+    }
+
+    #[test]
+    fn delete_workspace_emits_cascaded_block_ids_across_all_tabs() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let tab1_id = create_tab(&mut state, &ws_id, "t1");
+        let tab2_id = create_tab(&mut state, &ws_id, "t2");
+        let mut expected = Vec::new();
+        for (i, tab_id) in [&tab1_id, &tab2_id].into_iter().enumerate() {
+            for j in 0..2 {
+                let block_id = match &update(
+                    &mut state,
+                    Command::CreateBlock { tab_id: tab_id.clone(), meta: serde_json::Value::Null },
+                    &ctx(10 + (i * 2 + j) as u64),
+                )[0] {
+                    Event::BlockCreated { block_id, .. } => block_id.clone(),
+                    other => panic!("expected BlockCreated, got {:?}", other),
+                };
+                expected.push(block_id);
+            }
+        }
+        assert_eq!(expected.len(), 4);
+        let events = update(
+            &mut state,
+            Command::DeleteWorkspace { workspace_id: ws_id.clone(), force: false },
+            &ctx(20),
+        );
+        match &events[0] {
+            Event::WorkspaceDeleted { block_ids, .. } => {
+                assert_eq!(block_ids.len(), 4);
+                for b in &expected {
+                    assert!(block_ids.contains(b));
+                }
+            }
+            other => panic!("expected WorkspaceDeleted, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn delete_workspace_cascades_through_tabs_to_blocks() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let tab_id = create_tab(&mut state, &ws_id, "t");
+        let _ = update(
+            &mut state,
+            Command::CreateBlock { tab_id: tab_id.clone(), meta: serde_json::Value::Null },
+            &ctx(2),
+        );
+        let _ = update(
+            &mut state,
+            Command::CreateBlock { tab_id, meta: serde_json::Value::Null },
+            &ctx(3),
+        );
+        assert_eq!(state.blocks.len(), 2);
+        let _ = update(
+            &mut state,
+            Command::DeleteWorkspace { workspace_id: ws_id, force: false },
+            &ctx(4),
+        );
+        assert!(state.blocks.is_empty());
+        assert!(state.tabs.is_empty());
+    }
+
+    #[test]
+    fn delete_workspace_drops_pointing_windows_and_emits_events() {
+        let mut state = State::default();
+        let ws_a = create_workspace(&mut state, "a");
+        let ws_b = create_workspace(&mut state, "b");
+        let _ = update(
+            &mut state,
+            Command::CreateWindow {
+                window_id: "win-a".into(),
+                workspace_id: ws_a.clone(),
+            },
+            &ctx(2),
+        );
+        let _ = update(
+            &mut state,
+            Command::CreateWindow {
+                window_id: "win-b".into(),
+                workspace_id: ws_b.clone(),
+            },
+            &ctx(3),
+        );
+        // Delete workspace A; only win-a should be dropped + emit
+        // SrvWindowClosed; win-b survives.
+        let events = update(
+            &mut state,
+            Command::DeleteWorkspace { workspace_id: ws_a, force: false },
+            &ctx(4),
+        );
+        assert!(matches!(&events[0], Event::WorkspaceDeleted { .. }));
+        assert!(events.iter().any(|e| matches!(
+            e,
+            Event::SrvWindowClosed { window_id, .. } if window_id == "win-a"
+        )));
+        // Verify win-b was NOT closed.
+        assert!(!events.iter().any(|e| matches!(
+            e,
+            Event::SrvWindowClosed { window_id, .. } if window_id == "win-b"
+        )));
+        assert!(!state.windows.contains_key("win-a"));
+        assert_eq!(state.windows["win-b"].workspace_id, ws_b);
+    }
+}
