@@ -403,7 +403,9 @@ pub(super) async fn handle_reactive_unregister(
     agent_registry::remove(&data_dir, &req.agent_id);
     // Drop the subagent filesystem watcher (handle + channel + task) — the
     // symmetric teardown for the watch_agent() call in the register handler.
-    state.subagent_watcher.unwatch_agent(&req.agent_id);
+    // Passes block_id (captured above) so a shared-agent-id watcher with
+    // another still-open dependent block survives this one's teardown.
+    state.subagent_watcher.unwatch_agent(&req.agent_id, block_id.as_deref());
     // Notify cloud subscriber so it stops subscribing for this agent
     if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
         sub.remove_agent(&req.agent_id);

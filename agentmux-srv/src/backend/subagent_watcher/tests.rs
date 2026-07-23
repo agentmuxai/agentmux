@@ -74,7 +74,7 @@ fn unwatch_agent_prunes_only_matching_parent_subagents() {
         sessions.insert("s2".to_string(), s2);
     }
 
-    watcher.unwatch_agent("parent-1");
+    watcher.unwatch_agent("parent-1", None);
 
     let sessions = watcher.sessions.lock().unwrap();
     // s1: parent-1's subagent gone, parent-2's remains.
@@ -194,7 +194,7 @@ fn unwatch_agent_on_unknown_agent_is_noop() {
         sessions.insert("s1".to_string(), s1);
     }
 
-    watcher.unwatch_agent("never-watched");
+    watcher.unwatch_agent("never-watched", None);
 
     let sessions = watcher.sessions.lock().unwrap();
     assert!(sessions.get("s1").unwrap().subagents.contains_key("sub-a"));
@@ -322,7 +322,7 @@ fn unwatch_agent_also_prunes_matching_dispatches_and_pending_activity() {
         pending.insert("wf_2".to_string(), PendingDispatchActivity::new("parent-2", "block-2", "s1"));
     }
 
-    watcher.unwatch_agent("parent-1");
+    watcher.unwatch_agent("parent-1", None);
 
     let dispatches = watcher.dispatches.lock().unwrap();
     assert!(!dispatches.contains_key("wf_1"));
@@ -915,6 +915,45 @@ async fn prune_block_does_not_kill_a_watcher_still_depended_on_by_another_block(
         watcher.watched_agents.lock().unwrap().len(),
         0,
         "once the last dependent block is pruned, the watcher must be torn down"
+    );
+
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[tokio::test]
+async fn unwatch_agent_does_not_kill_a_watcher_still_depended_on_by_another_block() {
+    // Regression test for reagent's P1 on the second version of this fix:
+    // unwatch_agent is the PRIMARY teardown path (called on every graceful
+    // pane close via /agentmux/reactive/unregister — far more common than
+    // prune_block's crash/API-delete backstop). It must respect the same
+    // parent_block_ids dependency set prune_block/unwatch_block do, or two
+    // blocks sharing one agent_id still kill each other's live tracking the
+    // moment either one gracefully closes.
+    let home = dirs::home_dir().expect("test requires a resolvable home dir");
+    let root = home.join(format!("amx-unwatch-agent-shared-test-{}", now_millis()));
+    std::fs::create_dir_all(&root).unwrap();
+    let config_dir = root.join("claude-shared-agent");
+
+    let watcher = Arc::new(fixture_watcher());
+    watcher.watch_agent("shared-agent", "block-1", config_dir.clone());
+    watcher.watch_agent("shared-agent", "block-2", config_dir.clone());
+    assert_eq!(watcher.watched_agents.lock().unwrap().len(), 1);
+
+    // block-1's process disconnects gracefully.
+    watcher.unwatch_agent("shared-agent", Some("block-1"));
+    {
+        let watched = watcher.watched_agents.lock().unwrap();
+        assert_eq!(watched.len(), 1, "watcher must survive: block-2 still depends on it");
+        assert!(!watched[0].parent_block_ids.contains("block-1"));
+        assert!(watched[0].parent_block_ids.contains("block-2"));
+    }
+
+    // block-2's process disconnects too — now the watcher must go.
+    watcher.unwatch_agent("shared-agent", Some("block-2"));
+    assert_eq!(
+        watcher.watched_agents.lock().unwrap().len(),
+        0,
+        "once the last dependent block is unwatched, the watcher must be torn down"
     );
 
     std::fs::remove_dir_all(&root).ok();

@@ -455,10 +455,29 @@ impl SubagentWatcher {
         ) == session_id
     }
 
-    /// Stop watching an agent: drop its filesystem watcher, which closes the
-    /// debounce channel — so the processing task self-terminates on the next
-    /// `rx.recv()` returning `None`. Idempotent: a no-op if the agent isn't
-    /// currently watched.
+    /// Stop watching an agent from the graceful `/agentmux/reactive/unregister`
+    /// path: remove `block_id` as a dependent of its watcher (same
+    /// mechanism as `unwatch_block`, keyed by `agent_id` first since that's
+    /// what the caller has), tearing down the underlying filesystem watcher
+    /// — which closes the debounce channel, so the processing task
+    /// self-terminates on its next `rx.recv()` returning `None` — only once
+    /// no block depends on it anymore. Idempotent: a no-op if the agent
+    /// isn't currently watched.
+    ///
+    /// `block_id` is `None` when the reactive registry has no record of
+    /// this agent_id (already unregistered, or never registered) — nothing
+    /// to disassociate in that case, so the watcher-teardown step is
+    /// skipped entirely rather than guessing.
+    ///
+    /// `watch_agent` dedupes by `agent_id`: two blocks registering the same
+    /// agent_id share one `WatchedAgent` entry. Removing that whole entry
+    /// unconditionally here (as this method used to) killed the shared
+    /// watcher — and with it, live tracking — for every OTHER still-open
+    /// block sharing that agent identity the moment any ONE of them
+    /// gracefully closed, since this is the primary, far-more-common
+    /// teardown path (`unwatch_block` only covers the crash/API-delete
+    /// backstop). See `WatchedAgent::parent_block_ids`'s doc comment and
+    /// docs/retro/retro-subagent-watcher-shared-dir-fanout-and-leak-2026-07-23.md.
     ///
     /// Without this, `watched_agents` was push-only: every distinct agent that
     /// ever ran leaked one OS watch handle + channel + idle task for the rest of
@@ -474,14 +493,20 @@ impl SubagentWatcher {
     /// pruning added alongside `prune_block`'s block-scoped equivalent,
     /// below — this method previously only pruned `sessions`, silently
     /// leaking a Workflow-kind `DispatchState` for the agent's lifetime.)
-    pub fn unwatch_agent(&self, agent_id: &str) {
-        let mut watched = self.watched_agents.lock().unwrap();
-        let before = watched.len();
-        watched.retain(|w| w.agent_id != agent_id);
-        if watched.len() != before {
-            tracing::info!(agent = %agent_id, "stopped watching subagent dir");
+    pub fn unwatch_agent(&self, agent_id: &str, block_id: Option<&str>) {
+        if let Some(block_id) = block_id {
+            let mut watched = self.watched_agents.lock().unwrap();
+            for w in watched.iter_mut() {
+                if w.agent_id == agent_id {
+                    w.parent_block_ids.remove(block_id);
+                }
+            }
+            let before = watched.len();
+            watched.retain(|w| !(w.agent_id == agent_id && w.parent_block_ids.is_empty()));
+            if watched.len() != before {
+                tracing::info!(agent = %agent_id, block_id = %block_id, "stopped watching subagent dir");
+            }
         }
-        drop(watched);
 
         let mut sessions = self.sessions.lock().unwrap();
         let mut pruned_subagents = 0usize;
