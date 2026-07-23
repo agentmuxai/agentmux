@@ -30,8 +30,6 @@ enum State {
 
 /// A complete, normalised OSC title event.
 pub struct OscEvent {
-    /// OSC parameter number (0 or 2).
-    pub ps: u16,
     /// Payload with Claude Code prefixes stripped and bare startup titles discarded.
     pub payload: String,
 }
@@ -168,7 +166,7 @@ impl OscExtractor {
             return None;
         }
 
-        Some(OscEvent { ps, payload })
+        Some(OscEvent { payload })
     }
 }
 

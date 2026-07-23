@@ -32,7 +32,7 @@ These instructions cover setting up dependencies and building AgentMux from sour
    - Download: https://visualstudio.microsoft.com/visual-cpp-build-tools/
    - Install: "Desktop development with C++"
 
-3. **WebView2** is pre-installed on Windows 10/11. If missing, it will auto-install on first launch.
+3. No WebView2 install is needed — AgentMux embeds Chromium via CEF and bundles its own runtime.
 
 #### macOS
 
@@ -124,8 +124,9 @@ task dev
 
 Features:
 - Frontend hot reload (Solid Refresh via Vite)
-- Auto-rebuild on Rust changes
 - DevTools available (Ctrl+Shift+I)
+
+Rust changes are **not** auto-rebuilt — run `task build:backend` (or `task build:host`) and restart `task dev`, see below.
 
 **Important:** Always use `task dev` for development.
 
@@ -153,14 +154,14 @@ This rebuilds:
 Create a local portable build (Windows):
 
 ```bash
-task package             # branch-scoped data dir (session persists across rebuilds)
-task package -- --fresh  # throwaway data dir for a clean-slate test
-task package -- ~/Desktop/staging   # alternate output dir
+task package                         # portable build, per-build data dir
+task package -- --fresh              # no-op — every build is already isolated (kept for muscle memory)
+task package -- ~/Desktop/staging    # alternate output dir
 ```
 
 Output: `~/Desktop/agentmux-<version>+g<sha>[.dirty].<stamp>-x64-portable/` and `.zip`
 
-`task package` is for **local** builds. It does **not** bump the version and does **not** touch git — the artifact carries an ephemeral build *label* (the part after `+` is semver build metadata, ignored for precedence), not a new release version. Every build gets a unique stamped folder (so a running instance never locks the next build) and a per-branch data dir keyed on the `local-<branch>` channel (so agents/panes/auth survive an iterate-rebuild loop). `--fresh` suffixes the channel with the build stamp for a one-off clean dir. The committed version moves only through `task release` (changesets, below). Full rationale: [docs/specs/SPEC_LOCAL_BUILD_VERSIONING_2026_05_28.md](./docs/specs/SPEC_LOCAL_BUILD_VERSIONING_2026_05_28.md).
+`task package` is for **local** builds. It does **not** bump the version and does **not** touch git — the artifact carries an ephemeral build *label* (the part after `+` is semver build metadata, ignored for precedence), not a new release version. Every build bakes a unique per-build channel (`local-<branch>-<hash>-<build-id>`), so each build is its own AgentMux instance with its own data dir and cef-cache — a running instance never blocks the next build, and two builds never collide on disk. Agents and auth are global and carry over across builds; only pane layout and memories start fresh per build. `--fresh` is redundant given per-build isolation and is a no-op. The committed version moves only through `task release` (changesets, below). Full rationale: [docs/specs/SPEC_LOCAL_BUILD_VERSIONING_2026_05_28.md](./docs/specs/SPEC_LOCAL_BUILD_VERSIONING_2026_05_28.md) and [docs/specs/SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md](./docs/specs/SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md).
 
 ---
 
@@ -280,19 +281,17 @@ Logs appear in the Console tab.
 
 ### Backend Logs
 
-Rust backend logs (agentmux-srv):
-- **Development:** `~/.agentmux-dev/agentmux.log`
-- **Production:** `~/.agentmux/agentmux.log`
-
-View logs in real-time:
+Use the `muxlog` helper (shipped in every AgentMux terminal) — it discovers and
+renders NDJSON logs across every running instance (shared dir, each `task dev`
+branch under `~/.agentmux/dev/<branch>/`, and per-build channels), defaulting
+to the most-recently-active one:
 
 ```bash
-# Development
-tail -f ~/.agentmux-dev/agentmux.log
-
-# Production
-tail -f ~/.agentmux/agentmux.log
+muxlog srv          # tail the active sidecar (agentmux-srv) log, follow
+muxlog ls            # list every instance's logs first if several are running
 ```
+
+Full reference: [docs/MUXLOG.md](docs/MUXLOG.md).
 
 ### Host Logs
 
@@ -398,7 +397,7 @@ git push origin main --tags
 ### Windows
 
 - Uses **NSIS** for installers
-- WebView2 runtime required (auto-installs if missing)
+- CEF bundles its own Chromium runtime — no WebView2 required
 - No CGO / no Zig required (pure Rust)
 
 ### macOS

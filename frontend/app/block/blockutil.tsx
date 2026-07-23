@@ -32,7 +32,6 @@ export function blockViewToIcon(view: string): string {
 
 const VIEW_LABELS: Record<string, string> = {
     agent: "Agent",
-    "agent-def": "Agent Definition",
     browser: "Browser",
     drone: "Drone",
     editor: "Editor",

@@ -23,18 +23,28 @@
 //!   tool_use.
 //! - `user.message.content[].type=tool_result` — emits
 //!   `AgentEvent::ToolResult`.
-//! - `result.cost_usd` + `result.usage` — emits
-//!   `AgentEvent::Cost` followed by `AgentEvent::Done`. The Done's
-//!   `response` is the explicit `result.result` field if present,
-//!   otherwise the accumulated text from streamed text_deltas.
+//! - `stream_event.message_start` with `message.role=user` — same
+//!   `tool_result` extraction as above (Anthropic sometimes carries
+//!   tool results here instead of a top-level `user` frame; mirrors
+//!   TS's `handleMessageStart`).
+//! - `result.cost_usd` + `result.usage` — emits `AgentEvent::Cost`.
+//!   Then, if `result.is_error` is true, emits `AgentEvent::Error`
+//!   (mirrors TS's `error_result`); otherwise emits `AgentEvent::Done`
+//!   whose `response` is the explicit `result.result` field if
+//!   present, otherwise the accumulated text from streamed
+//!   text_deltas.
 //!
 //! Unknown frame types and malformed shapes produce an empty `Vec`
 //! rather than panicking — the runner falls back to whatever the
 //! parallel raw-byte WPS path published, so an unfamiliar frame
 //! degrades gracefully.
 //!
-//! `thinking_delta` and `message_delta` / `message_stop` are
-//! discarded (the agent pane filters them too).
+//! `thinking_delta`, `message_delta` / `message_stop` are discarded
+//! (the agent pane filters them too). `rate_limit_event` (TS:
+//! `provider_waiting`) is also currently discarded — surfacing it
+//! here would need a new `AgentEvent` variant, and `types.rs`
+//! explicitly reserves that decision rather than shipping it
+//! casually; left as a deliberate follow-up, not an oversight.
 
 use std::collections::HashMap;
 
@@ -171,7 +181,20 @@ fn handle_stream_event(t: &mut ClaudeTranslator, frame: &Value, out: &mut Vec<Ag
                 });
             }
         }
-        _ => {} // message_start, message_delta, message_stop — discard
+        // Anthropic sometimes carries tool_result blocks on the
+        // message_start frame instead of (or in addition to) a
+        // top-level `user` frame. Mirrors TS's `handleMessageStart`.
+        "message_start" => {
+            if let Some(content) = event
+                .get("message")
+                .filter(|m| m.get("role").and_then(|v| v.as_str()) == Some("user"))
+                .and_then(|m| m.get("content"))
+                .and_then(|c| c.as_array())
+            {
+                extract_tool_results(t, content, out);
+            }
+        }
+        _ => {} // message_delta, message_stop — discard
     }
 }
 
@@ -183,6 +206,13 @@ fn handle_user_message(t: &mut ClaudeTranslator, frame: &Value, out: &mut Vec<Ag
     else {
         return;
     };
+    extract_tool_results(t, content, out);
+}
+
+/// Shared by `handle_user_message` (top-level `user` frames) and the
+/// `message_start` case in `handle_stream_event` — both carry
+/// `tool_result` blocks in the same `content` array shape.
+fn extract_tool_results(t: &mut ClaudeTranslator, content: &[Value], out: &mut Vec<AgentEvent>) {
     for block in content {
         if block.get("type").and_then(|v| v.as_str()) != Some("tool_result") {
             continue;
@@ -252,6 +282,27 @@ fn handle_result(t: &mut ClaudeTranslator, frame: &Value, out: &mut Vec<AgentEve
         .unwrap_or(0.0);
     let tokens = parse_usage(frame.get("usage"));
     out.push(AgentEvent::Cost { cost_usd, tokens });
+
+    // A terminal error is mutually exclusive with Done — mirrors TS's
+    // `error_result` (claude-translator.ts) and gives `AgentEvent::Error`
+    // (types.rs) its first real producer. The runner's own raw-frame
+    // `is_error_result_frame` check (failure.rs) independently fails the
+    // run either way; this only affects what the live event stream shows.
+    if frame.get("is_error").and_then(|v| v.as_bool()) == Some(true) {
+        let api_error_status = frame.get("api_error_status").and_then(|v| v.as_i64());
+        let message = frame
+            .get("result")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| match api_error_status {
+                Some(code) if code > 0 => format!("API error {code}"),
+                _ => "Agent encountered an error".to_string(),
+            });
+        t.accumulated_response.clear();
+        t.transcript.clear();
+        out.push(AgentEvent::Error { message });
+        return;
+    }
 
     let response = frame
         .get("result")
@@ -652,5 +703,123 @@ mod tests {
             AgentEvent::Done { response, .. } => assert_eq!(response, ""),
             other => panic!("expected empty Done response, got {other:?}"),
         }
+    }
+
+    // ── Bug fix regression tests (audit REPORT_REPO_HEALTH_AUDIT_2026_07_20 §1.1) ──
+
+    #[test]
+    fn result_is_error_emits_error_not_done() {
+        let mut t = ClaudeTranslator::new();
+        t.translate(text_delta("partial output before the failure"));
+        let events = t.translate(json!({
+            "type": "result",
+            "cost_usd": 0.002,
+            "is_error": true,
+            "api_error_status": 429,
+        }));
+        assert_eq!(events.len(), 2, "expected Cost + Error, got {events:?}");
+        assert!(matches!(events[0], AgentEvent::Cost { .. }));
+        match &events[1] {
+            AgentEvent::Error { message } => assert_eq!(message, "API error 429"),
+            other => panic!("expected Error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn result_is_error_prefers_explicit_result_text_over_status_code() {
+        let mut t = ClaudeTranslator::new();
+        let events = t.translate(json!({
+            "type": "result",
+            "cost_usd": 0.0,
+            "is_error": true,
+            "result": "network error: connection reset",
+        }));
+        match &events[1] {
+            AgentEvent::Error { message } => {
+                assert_eq!(message, "network error: connection reset")
+            }
+            other => panic!("expected Error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn result_is_error_with_no_status_or_text_gets_generic_message() {
+        let mut t = ClaudeTranslator::new();
+        let events = t.translate(json!({
+            "type": "result",
+            "cost_usd": 0.0,
+            "is_error": true,
+        }));
+        match &events[1] {
+            AgentEvent::Error { message } => {
+                assert_eq!(message, "Agent encountered an error")
+            }
+            other => panic!("expected Error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn result_without_is_error_still_emits_done_as_before() {
+        let mut t = ClaudeTranslator::new();
+        let events = t.translate(json!({ "type": "result", "cost_usd": 0.0, "result": "ok" }));
+        match &events[1] {
+            AgentEvent::Done { response, .. } => assert_eq!(response, "ok"),
+            other => panic!("expected Done, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn message_start_with_user_role_extracts_tool_result() {
+        let mut t = ClaudeTranslator::new();
+        let events = t.translate(json!({
+            "type": "stream_event",
+            "event": {
+                "type": "message_start",
+                "message": {
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": "t9",
+                        "content": "output",
+                        "is_error": false
+                    }]
+                }
+            }
+        }));
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            AgentEvent::ToolResult {
+                tool_use_id,
+                output,
+                is_error,
+            } => {
+                assert_eq!(tool_use_id, "t9");
+                assert_eq!(output, &json!("output"));
+                assert!(!is_error);
+            }
+            other => panic!("expected ToolResult, got {other:?}"),
+        }
+        // Also lands in the transcript, same as the top-level `user` path.
+        let done = t.translate(json!({ "type": "result", "cost_usd": 0.0 }));
+        match &done[1] {
+            AgentEvent::Done { transcript, .. } => {
+                assert_eq!(transcript.len(), 1);
+                assert_eq!(transcript[0].role, "tool_result");
+            }
+            other => panic!("expected Done, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn message_start_with_assistant_role_is_ignored() {
+        let mut t = ClaudeTranslator::new();
+        let events = t.translate(json!({
+            "type": "stream_event",
+            "event": {
+                "type": "message_start",
+                "message": { "role": "assistant", "content": [] }
+            }
+        }));
+        assert!(events.is_empty());
     }
 }

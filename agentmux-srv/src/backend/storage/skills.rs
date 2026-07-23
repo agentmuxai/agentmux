@@ -343,31 +343,6 @@ impl Store {
         }
     }
 
-    /// Upsert a standalone skill. Caller must have already stripped is_global escalation.
-    pub fn skill_upsert(&self, skill: &Skill) -> Result<(), StoreError> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "INSERT INTO db_skills (id, name, trigger, skill_type, description, content, is_global, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-             ON CONFLICT(id) DO UPDATE SET
-               name=excluded.name, trigger=excluded.trigger, skill_type=excluded.skill_type,
-               description=excluded.description, content=excluded.content,
-               updated_at=excluded.updated_at",
-            params![
-                skill.id,
-                skill.name,
-                skill.trigger,
-                skill.skill_type,
-                skill.description,
-                skill.content,
-                if skill.is_global { 1i64 } else { 0i64 },
-                skill.created_at,
-                skill.updated_at,
-            ],
-        )?;
-        Ok(())
-    }
-
     /// Delete a standalone skill and purge its ref rows. Returns true if deleted.
     pub fn skill_delete(&self, id: &str) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();

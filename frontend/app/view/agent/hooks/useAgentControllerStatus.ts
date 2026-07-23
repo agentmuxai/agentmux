@@ -39,8 +39,8 @@ import { RpcApi } from "@/app/store/rpc-api";
 import * as WOS from "@/app/store/wos";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { runLaunchFlow } from "../flows/launch-flow";
-import { forceProviderLogin } from "../flows/force-login";
-import { seedGlobalLogin } from "../flows/seed-global-login";
+import { persistAndLinkAccount, runProviderLogin } from "../flows/run-provider-login";
+import { registerSeededAccount } from "../flows/register-seeded-account";
 import type { ProviderDefinition } from "../providers";
 
 import type { LogFn } from "../types";
@@ -110,8 +110,9 @@ export interface UseAgentControllerStatus {
      * Open a real terminal window (CREATE_NEW_CONSOLE on Windows) running the
      * provider's login command so the OS can open the browser — the piped/PTY
      * paths that `runCliLogin` uses are headless and block the browser. After
-     * spawning, polls `seedGlobalLogin` every 5s for up to 5 minutes; seeds
-     * the isolated dir as soon as credentials appear.
+     * spawning, polls every 5s for up to 5 minutes; once credentials appear,
+     * seeds a real per-account isolated dir and registers/links the account
+     * (not just a file — PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md §7).
      */
     loginViaTerminal: () => Promise<void>;
     cancelLogin: () => void;
@@ -253,6 +254,24 @@ export function useAgentControllerStatus(
         }
     };
 
+    /** Look up the account already bound to THIS agent for `providerId`, if
+     *  any — pass as `runProviderLogin`'s `existingAccountId` so a recovery
+     *  action reuses/refreshes the same account instead of minting and
+     *  orphaning a new one on every retry (the same class of gap reagent
+     *  caught in launch-flow.ts's Phase 2 — this hook's `relogin`/
+     *  `loginViaTerminal` had it too, just never flagged directly since
+     *  neither reported "auth_failed" the same visible way Phase 2 did). */
+    const existingAccountIdFor = async (providerId: string): Promise<string | undefined> => {
+        const agentDefinitionId = getBlockMetaKeyAtom(opts.blockId, "agentId")() as string | undefined;
+        if (!agentDefinitionId) return undefined;
+        try {
+            const links = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, { agent_id: agentDefinitionId });
+            return links.find((l) => l.provider === providerId)?.account_id;
+        } catch {
+            return undefined;
+        }
+    };
+
     /** Auth env for recovery actions: block meta `cmd:env` when present, else rebuilt. */
     const recoveryAuthEnv = async (prov: ProviderDefinition): Promise<Record<string, string>> => {
         const envMeta = getBlockMetaKeyAtom(opts.blockId, "cmd:env")();
@@ -278,9 +297,10 @@ export function useAgentControllerStatus(
         }
         setAuthNotice(null);
         // Clear any OAuth URL box left by a PRIOR attempt before starting a
-        // fresh one — otherwise a subsequent "no-url" outcome would stack the
-        // error notice below a stale, contradictory URL box (reagent P2).
+        // fresh one — otherwise a subsequent no-progress outcome would stack
+        // the error notice below a stale, contradictory URL box (reagent P2).
         setAuthUrl(null);
+        loginCancelled = false;
         // The CLI path + auth env are written to block meta at launch; reuse
         // them instead of re-resolving (the agent is already running, so the
         // CLI is installed). If `cmd` is missing, resolve it directly — see
@@ -295,15 +315,119 @@ export function useAgentControllerStatus(
                 if (!cliPath) return;
             }
             const authEnv = await recoveryAuthEnv(prov);
-            const outcome = await forceProviderLogin({ provider: prov, cliPath, authEnv, setAuthUrl, log: opts.log });
-            if (outcome === "no-url") {
-                // Never fail silently (retro §5.1): tell the user nothing
-                // opened and point at the recovery paths that do work.
-                setAuthNotice(
-                    "Couldn't start a browser login — the CLI didn't produce a login URL, so nothing was opened. " +
-                    "Use “Login via terminal” to complete the login in a real terminal window" +
-                    (prov.id === "claude" ? ", or “Use existing login” to copy your global Claude login into this agent." : "."),
-                );
+            // runProviderLogin falls through URL-capture -> global-login-copy ->
+            // real-terminal-with-poll before giving up (retro-headless-login-
+            // browser-open-2026-07-20) — "Login Again" used to dead-end the
+            // instant the CLI produced no URL, which is every time for Claude
+            // Code v2.1.x. linkTarget lets a tier-2/3 success register a real
+            // Armory account and bind it to THIS agent (single-point
+            // enforcement, PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md
+            // §7) instead of just seeding a file nothing tracks.
+            const agentDefinitionId = getBlockMetaKeyAtom(opts.blockId, "agentId")() as string | undefined;
+            // Tier 1 mints the account dir but does NOT persist/link it (it
+            // returns "opened" before confirming completion) — captured here
+            // so a poll below can call persistAndLinkAccount once IT confirms
+            // the login actually finished. reagent P1: without this, a tier-1
+            // login that succeeds for any provider whose CLI actually prints
+            // a URL (not requiresLoginTty, e.g. codex) via "Login Again" left
+            // the minted account unpersisted/unlinked — the resolver's spawn
+            // gate then blocks the agent on its very next spawn with no error
+            // ever surfaced, since relogin's own "opened" case used to just
+            // `break` and report nothing.
+            let openedAccountId: string | undefined;
+            let openedAccountDir: string | undefined;
+            let recheckAuthEnv = authEnv;
+            const outcome = await runProviderLogin({
+                provider: prov,
+                cliPath,
+                authEnv,
+                setAuthUrl,
+                log: opts.log,
+                isCancelled: () => loginCancelled,
+                linkTarget: agentDefinitionId
+                    ? { blockId: opts.blockId, agentDefinitionId }
+                    : undefined,
+                existingAccountId: await existingAccountIdFor(prov.id),
+                onAccountRegistered: (accountId, dir) => {
+                    openedAccountId = accountId;
+                    openedAccountDir = dir;
+                    if (prov.authConfigDirEnvVar) {
+                        recheckAuthEnv = { ...authEnv, [prov.authConfigDirEnvVar]: dir };
+                    }
+                },
+            });
+            switch (outcome) {
+                case "opened": {
+                    // A real OAuth URL was captured and opened — poll until
+                    // the user finishes there, cancels, or 5 minutes elapse
+                    // (same pattern as launch-flow.ts's own "opened" case).
+                    opts.log("auth", "waiting for login to complete...");
+                    let authenticated = false;
+                    const deadline = Date.now() + 5 * 60 * 1000;
+                    while (!loginCancelled && Date.now() < deadline && !authenticated) {
+                        await new Promise<void>((r) => setTimeout(r, 2000));
+                        if (loginCancelled) break;
+                        try {
+                            const recheck = await RpcApi.CheckCliAuthCommand(TabRpcClient, {
+                                cli_path: cliPath,
+                                auth_check_args: prov.authCheckCommand,
+                                auth_env: recheckAuthEnv,
+                            }, { timeout: 10000 });
+                            if (recheck.authenticated) authenticated = true;
+                        } catch {
+                            // keep polling on transient RPC errors
+                        }
+                    }
+                    if (authenticated && openedAccountId && openedAccountDir) {
+                        await persistAndLinkAccount(
+                            {
+                                provider: prov,
+                                cliPath,
+                                authEnv,
+                                setAuthUrl,
+                                log: opts.log,
+                                linkTarget: agentDefinitionId
+                                    ? { blockId: opts.blockId, agentDefinitionId }
+                                    : undefined,
+                            },
+                            openedAccountId,
+                            openedAccountDir,
+                        );
+                        opts.log("auth", "Login successful — retrying…");
+                        setAuthNotice(null);
+                        opts.onRecovered?.();
+                    } else if (!loginCancelled) {
+                        setAuthNotice(
+                            "Opened a login page, but no login was detected within 5 minutes. " +
+                            "Complete the login there, then click “Login Again”.",
+                        );
+                    }
+                    break;
+                }
+                case "seeded":
+                    opts.log("auth", "Signed in from your global login — retrying…");
+                    setAuthNotice(null);
+                    opts.onRecovered?.();
+                    break;
+                case "terminal-success":
+                    opts.log("auth", "Login successful — retrying…");
+                    setAuthNotice(null);
+                    opts.onRecovered?.();
+                    break;
+                case "terminal-timeout":
+                    // Never fail silently (retro §5.1): tell the user nothing
+                    // completed and point at the recovery path that's left.
+                    setAuthNotice(
+                        "Opened a terminal window for login, but no login was detected within 5 minutes. " +
+                        "Complete the login there, then click “Use existing login”.",
+                    );
+                    break;
+                case "terminal-unavailable":
+                    setAuthNotice(
+                        "Couldn't start a browser login or open a terminal window on this platform." +
+                        (prov.id === "claude" ? " Try “Use existing login” if you're already signed in elsewhere." : ""),
+                    );
+                    break;
             }
         } catch (err: any) {
             const msg = `Re-login failed: ${err?.message ?? String(err)}`;
@@ -330,17 +454,46 @@ export function useAgentControllerStatus(
         setAuthNotice(null);
         seedInFlight = true;
         try {
-            // Seed into the agent's RESOLVED auth dir (from cmd:env), not a
-            // guessed one; the host guards it to ~/.agentmux so the seed never
-            // writes the user's ~/.claude (SPEC_PROVIDER_ISOLATION §4.5).
-            const envMeta = getBlockMetaKeyAtom(opts.blockId, "cmd:env")();
-            let configDir: string | undefined;
-            if (prov.authConfigDirEnvVar && envMeta && typeof envMeta === "object") {
-                const v = (envMeta as Record<string, unknown>)[prov.authConfigDirEnvVar];
-                if (typeof v === "string") configDir = v;
-            }
-            const seeded = await seedGlobalLogin(prov.id, opts.log, configDir);
-            if (seeded) {
+            // Mint a REAL per-account isolated dir and persist an
+            // IdentityAccount row — not just a seed into whatever dir was
+            // already resolved. The resolver's spawn gate now requires a
+            // real bound account for oauth-class providers, no ambient
+            // exception (PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md
+            // §7), so a bare file-copy into the old shared/resolved dir
+            // would leave this agent blocked on its next turn regardless of
+            // how valid the credential file itself is.
+            const reg = await registerSeededAccount(prov.id, opts.log, await existingAccountIdFor(prov.id));
+            if (reg.ok && reg.accountId && reg.dir) {
+                const agentDefinitionId = getBlockMetaKeyAtom(opts.blockId, "agentId")() as string | undefined;
+                if (agentDefinitionId) {
+                    try {
+                        await RpcApi.LinkAgentIdentityCommand(TabRpcClient, {
+                            agent_id: agentDefinitionId,
+                            account_id: reg.accountId,
+                            provider: prov.id,
+                        });
+                        if (prov.authConfigDirEnvVar) {
+                            const envMeta = getBlockMetaKeyAtom(opts.blockId, "cmd:env")();
+                            const prevEnv: Record<string, string> = {};
+                            if (envMeta && typeof envMeta === "object") {
+                                for (const [k, v] of Object.entries(envMeta as Record<string, unknown>)) {
+                                    if (typeof v === "string") prevEnv[k] = v;
+                                }
+                            }
+                            const oref = WOS.makeORef("block", opts.blockId);
+                            await RpcApi.SetMetaCommand(TabRpcClient, {
+                                oref,
+                                meta: { "cmd:env": { ...prevEnv, [prov.authConfigDirEnvVar]: reg.dir } },
+                            });
+                        }
+                    } catch (e: any) {
+                        opts.log(
+                            "auth",
+                            `account created but couldn't be linked to this agent: ${e?.message ?? String(e)}`,
+                            "warn",
+                        );
+                    }
+                }
                 // Credential is now valid on disk — but the agent spawns fresh
                 // per turn and the failure row only clears on the next turn, so
                 // a successful seed looks like it "did nothing". Drive the
@@ -363,7 +516,17 @@ export function useAgentControllerStatus(
     };
 
     // Open a real visible terminal window so the browser OAuth flow works,
-    // then poll for credentials seeding into the isolated dir.
+    // then poll for credentials landing (or for the CLI itself to report
+    // authenticated, for non-Claude providers). Shares runProviderLogin's
+    // tier 2/3 logic (skipTier1 — the user explicitly asked for a terminal
+    // login, no point trying headless first) instead of reimplementing it.
+    // This used to be a separate, hand-rolled copy of the same logic —
+    // reagent caught it reproducing a bug (codex/openclaw could never
+    // actually complete a login here: minting was claude-only and the poll
+    // called a host command that hard-rejects every other provider) already
+    // fixed once in runProviderLogin itself. A second hand-rolled copy would
+    // only let that exact class of bug reappear the next time one of the two
+    // was fixed and the other wasn't.
     const loginViaTerminal = async () => {
         if (reloginInFlight) return;
         loginCancelled = false;
@@ -390,38 +553,39 @@ export function useAgentControllerStatus(
                 if (!cliPath) return;
             }
             const authEnv = await recoveryAuthEnv(prov);
-            const configDir = prov.authConfigDirEnvVar ? authEnv[prov.authConfigDirEnvVar] : undefined;
-
-            // Strip CLAUDE_CONFIG_DIR (and equivalents) from the terminal env so the
-            // login writes to the user's global ~/.claude instead of the isolated dir.
-            // seedGlobalLogin polls the global dir and copies on success — if we kept
-            // the isolated dir key the poll would look in global but the creds would
-            // land in isolated, and a terminal-fresh login would never be detected.
-            const terminalEnv: Record<string, string> = { ...authEnv };
-            if (prov.authConfigDirEnvVar) delete terminalEnv[prov.authConfigDirEnvVar];
-
-            await getApi().openLoginTerminal(cliPath, prov.authLoginCommand, terminalEnv);
-            opts.log("auth", "A terminal window opened — complete the login there, then come back.");
-
-            // Poll silently every 5s for up to 5 minutes; seed on first hit.
-            const POLL_MS = 5_000;
-            const TIMEOUT_MS = 5 * 60 * 1_000;
-            const deadline = performance.now() + TIMEOUT_MS;
-            const silentLog: typeof opts.log = () => {};
-            let seeded = false;
-            while (!seeded && performance.now() < deadline && !loginCancelled) {
-                await new Promise<void>((r) => setTimeout(r, POLL_MS));
-                if (loginCancelled) break;
-                seeded = await seedGlobalLogin(prov.id, silentLog, configDir);
-            }
-            if (seeded) {
-                opts.log("auth", "Login successful — retrying…");
-                setAuthNotice(null);
-                opts.onRecovered?.();
-            } else if (!loginCancelled) {
-                const msg = "No login detected after 5 minutes. Complete the login in the terminal, then click “Use existing login”.";
-                opts.log("auth", msg, "warn");
-                setAuthNotice(msg);
+            const agentDefinitionId = getBlockMetaKeyAtom(opts.blockId, "agentId")() as string | undefined;
+            const outcome = await runProviderLogin({
+                provider: prov,
+                cliPath,
+                authEnv,
+                setAuthUrl,
+                log: opts.log,
+                isCancelled: () => loginCancelled,
+                skipTier1: true,
+                linkTarget: agentDefinitionId
+                    ? { blockId: opts.blockId, agentDefinitionId }
+                    : undefined,
+                existingAccountId: await existingAccountIdFor(prov.id),
+            });
+            switch (outcome) {
+                case "opened":
+                    break;
+                case "seeded":
+                case "terminal-success":
+                    opts.log("auth", "Login successful — retrying…");
+                    setAuthNotice(null);
+                    opts.onRecovered?.();
+                    break;
+                case "terminal-timeout":
+                    if (!loginCancelled) {
+                        const msg = "No login detected after 5 minutes. Complete the login in the terminal, then click “Use existing login”.";
+                        opts.log("auth", msg, "warn");
+                        setAuthNotice(msg);
+                    }
+                    break;
+                case "terminal-unavailable":
+                    setAuthNotice("Couldn't open a terminal window for login on this platform.");
+                    break;
             }
         } catch (err: any) {
             const msg = `Terminal login failed: ${err?.message ?? String(err)}`;

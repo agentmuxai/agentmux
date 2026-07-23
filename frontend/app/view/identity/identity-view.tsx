@@ -41,62 +41,6 @@ const STATUS_DOT: Record<string, string> = {
     unknown: "status-dot status-unknown",
 };
 
-// ── Root view ────────────────────────────────────────────────────────────────
-
-export function IdentityView(props: ViewComponentProps<IdentityViewModel>): JSX.Element {
-    return <IdentityPanel model={props.model} />;
-}
-
-// ── IdentityPanel — reusable body ────────────────────────────────────────────
-//
-// Takes the model directly (no ViewComponentProps wrapper) so it can be
-// composed inside other views — notably the per-agent settings panel
-// in the agent picker. See
-// specs/SPEC_CONSOLIDATE_FORGE_IDENTITY_INTO_AGENT_2026_04_13.md (PR 3).
-
-export function IdentityPanel(props: { model: IdentityViewModel }): JSX.Element {
-    const model = props.model;
-
-    return (
-        <div class="identity-view">
-            <div class="identity-header">
-                <span class="identity-header-title">Identity</span>
-                <div class="identity-tabs">
-                    <button
-                        class={`identity-tab${model.tabAtom() === "accounts" ? " active" : ""}`}
-                        onClick={() => model.setTab("accounts")}
-                    >
-                        Accounts
-                    </button>
-                    <button
-                        class={`identity-tab${model.tabAtom() === "assignments" ? " active" : ""}`}
-                        onClick={() => model.setTab("assignments")}
-                    >
-                        Assignments
-                    </button>
-                </div>
-                <button class="identity-add-btn" onClick={() => model.openAddForm()} title="Add account">
-                    + Add
-                </button>
-            </div>
-
-            <div class="identity-body">
-                <Show when={model.tabAtom() === "accounts"}>
-                    <AccountsTab model={model} />
-                </Show>
-                <Show when={model.tabAtom() === "assignments"}>
-                    <AssignmentsTab model={model} />
-                </Show>
-            </div>
-
-            {/* Add/Edit form overlay */}
-            <Show when={model.formOpenAtom()}>
-                <AccountForm model={model} />
-            </Show>
-        </div>
-    );
-}
-
 // ── Accounts tab ─────────────────────────────────────────────────────────────
 
 export function AccountsTab({ model }: { model: IdentityViewModel }): JSX.Element {
@@ -365,89 +309,6 @@ function DetailField({ label, value }: { label: string; value: string }): JSX.El
     );
 }
 
-// ── Assignments tab ──────────────────────────────────────────────────────────
-
-function AssignmentsTab({ model }: { model: IdentityViewModel }): JSX.Element {
-    const accounts = () => model.accountsAtom();
-    const providers = (): AccountProvider[] => ["github", "google", "aws", "openai", "anthropic", "slack", "custom", "agentmux"];
-
-    // Collect all unique agent IDs across all accounts
-    const agentIds = () => {
-        const ids = new Set<string>();
-        for (const a of accounts()) {
-            for (const id of a.assigned_agents ?? []) ids.add(id);
-        }
-        return [...ids].sort();
-    };
-
-    const accountForAgentProvider = (agentId: string, provider: AccountProvider): Account | undefined => {
-        return accounts().find((a) => a.provider === provider && (a.assigned_agents ?? []).includes(agentId));
-    };
-
-    return (
-        <div class="identity-assignments">
-            <Show
-                when={accounts().length > 0}
-                fallback={<div class="identity-empty"><p>No accounts configured yet.</p></div>}
-            >
-                <table class="identity-matrix">
-                    <thead>
-                        <tr>
-                            <th>Agent</th>
-                            <For each={providers().filter((p) => accounts().some((a) => a.provider === p))}>
-                                {(p) => <th>{PROVIDER_LABELS[p]}</th>}
-                            </For>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <Show
-                            when={agentIds().length > 0}
-                            fallback={
-                                <tr>
-                                    <td colSpan={5} class="identity-matrix-empty">
-                                        No agents assigned to any account yet. Edit an account to assign agents.
-                                    </td>
-                                </tr>
-                            }
-                        >
-                            <For each={agentIds()}>
-                                {(agentId) => (
-                                    <tr>
-                                        <td class="identity-matrix-agent">{agentId}</td>
-                                        <For each={providers().filter((p) => accounts().some((a) => a.provider === p))}>
-                                            {(p) => {
-                                                const acct = accountForAgentProvider(agentId, p);
-                                                return (
-                                                    <td class="identity-matrix-cell">
-                                                        <Show when={acct} fallback={<span class="identity-matrix-empty-cell">—</span>}>
-                                                            <span
-                                                                class={`identity-provider-badge provider-${p} matrix-badge`}
-                                                                title={acct!.name}
-                                                            >
-                                                                <Show
-                                                                    when={acct!.display_name}
-                                                                    fallback={<ProviderLogo provider={p} size={14} />}
-                                                                >
-                                                                    {acct!.display_name}
-                                                                </Show>
-                                                            </span>
-                                                            <span class={STATUS_DOT[acct!.status] ?? STATUS_DOT["unknown"]} />
-                                                        </Show>
-                                                    </td>
-                                                );
-                                            }}
-                                        </For>
-                                    </tr>
-                                )}
-                            </For>
-                        </Show>
-                    </tbody>
-                </table>
-            </Show>
-        </div>
-    );
-}
-
 // ── Add/Edit form ─────────────────────────────────────────────────────────────
 
 // Default account kind for a provider — used to reset the Kind select on a
@@ -487,7 +348,6 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
     const [awsRegion, setAwsRegion] = createSignal(editing()?.context.aws_region ?? "");
     const [anthropicModel, setAnthropicModel] = createSignal(editing()?.context.anthropic_model ?? "");
     const [description, setDescription] = createSignal(editing()?.context.description ?? "");
-    const [assignedAgents, setAssignedAgents] = createSignal(editing()?.assigned_agents.join(", ") ?? "");
 
     // ── Armory secure-key lifecycle (SPEC_TRUST_CENTER §5) ──
     // Active when secretBackend === "keychain": the user pastes a key and
@@ -568,11 +428,6 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
 
         const context = buildContext();
 
-        const agents = assignedAgents()
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean);
-
         return {
             name: n,
             provider: provider(),
@@ -580,7 +435,10 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
             display_name: displayName().trim() || undefined,
             secret_ref: secretRef,
             context,
-            assigned_agents: agents,
+            // assigned_agents is deprecated and never read by the backend —
+            // see identity-model.ts's Account.assigned_agents doc comment.
+            // Real assignment happens via the agent-side reverse index.
+            assigned_agents: [],
         };
     };
 
@@ -898,10 +756,6 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
                             <input class="identity-input" type="text" value={anthropicModel()} onInput={(e) => setAnthropicModel(e.currentTarget.value)} placeholder="claude-sonnet-4-6" />
                         </FormField>
                     </Show>
-
-                    <FormField label="Assigned agents (comma-separated IDs)">
-                        <input class="identity-input" type="text" value={assignedAgents()} onInput={(e) => setAssignedAgents(e.currentTarget.value)} placeholder="AgentY, Agent1, Agent2" />
-                    </FormField>
 
                     <FormField label="Notes">
                         <input class="identity-input" type="text" value={description()} onInput={(e) => setDescription(e.currentTarget.value)} placeholder="Optional description" />

@@ -22,8 +22,6 @@ export interface BlockKindMeta {
     description: string;
     /** Hex color for the node header strip. */
     color: string;
-    /** FontAwesome-class icon string (legacy; superseded by `emoji`). */
-    icon: string;
     /** Default per-kind data fields the node ships with. */
     defaultData: Record<string, unknown>;
     /** xyflow handle definitions for the canvas. */
@@ -38,7 +36,6 @@ export const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
         label: "Variables",
         description: "Declare drone-scope variables. Read via {{var.name}}.",
         color: "#a855f7",
-        icon: "font-awesome-flag",
         defaultData: {
             entries: [{ name: "example", value: "hello" }],
         },
@@ -51,7 +48,6 @@ export const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
         label: "Agent",
         description: "Run an agent with a per-call task prompt.",
         color: "#3b82f6",
-        icon: "sparkles",
         defaultData: {
             // Phase 1.5: forge_agent_id was replaced by AgentRef (#835).
             // Empty strings = blank singletons (ambient creds, vanilla CLI).
@@ -72,7 +68,6 @@ export const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
         label: "API",
         description: "Make an HTTP request. Headers and body support {{...}}.",
         color: "#10b981",
-        icon: "globe",
         defaultData: {
             method: "GET",
             url: "",
@@ -88,7 +83,6 @@ export const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
         label: "Condition",
         description: "Boolean expression. Output `result` is true / false.",
         color: "#eab308",
-        icon: "code-branch",
         defaultData: {
             expr: "",
         },
@@ -104,7 +98,6 @@ export const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
         label: "Response",
         description: "Terminal output. Exactly one per drone.",
         color: "#ef4444",
-        icon: "flag-checkered",
         defaultData: {
             template: "",
         },

@@ -155,6 +155,107 @@ describe("AuthFlowController", () => {
         });
     });
 
+    it("wasCancelled() is true only after an explicit cancel() — not for any other exit from `waiting` (reagent P2 on #2262)", async () => {
+        await createRoot(async (dispose) => {
+            const timers = fakeTimers();
+            const ctrl = new AuthFlowController({
+                rpc: fakeRpc({
+                    start: async () => ({ sessionId: "s1" }),
+                    cancel: async () => {},
+                }),
+                timers,
+            });
+            ctrl.selected("claude", "", "needs-account");
+            expect(ctrl.wasCancelled()).toBe(false);
+
+            await ctrl.connect({
+                cliPath: "/x",
+                authLoginArgs: [],
+                authCheckArgs: [],
+            });
+            expect(ctrl.state().kind).toBe("waiting");
+            expect(ctrl.wasCancelled()).toBe(false);
+
+            // Leaving `waiting` for a reason OTHER than a user cancel (e.g.
+            // switching provider mid-flow) must NOT read as cancelled.
+            ctrl.selected("openai", "", "needs-account");
+            expect(ctrl.wasCancelled()).toBe(false);
+
+            // A fresh connect + a real cancel() DOES flip it.
+            await ctrl.connect({
+                cliPath: "/x",
+                authLoginArgs: [],
+                authCheckArgs: [],
+            });
+            await ctrl.cancel();
+            expect(ctrl.wasCancelled()).toBe(true);
+
+            dispose();
+        });
+    });
+
+    describe("beginTtyLogin() / endTtyLogin()", () => {
+        it("beginTtyLogin() claims the slot once and rejects a second concurrent call, until endTtyLogin() releases it (reagent P1 on #2262)", () => {
+            const ctrl = new AuthFlowController({ rpc: fakeRpc({}) });
+
+            expect(ctrl.beginTtyLogin()).toBe(true);
+            // A second click while the first is still in flight — must be
+            // rejected, not queued or silently allowed through, since a
+            // requiresLoginTty Reconnect leaves state().kind stuck at
+            // "ready" the whole time and can't itself signal "in flight."
+            expect(ctrl.beginTtyLogin()).toBe(false);
+            expect(ctrl.beginTtyLogin()).toBe(false);
+
+            ctrl.endTtyLogin();
+            // Released — a fresh attempt can claim it again.
+            expect(ctrl.beginTtyLogin()).toBe(true);
+            ctrl.endTtyLogin();
+        });
+    });
+
+    describe("currentActionToken() / isStaleAction()", () => {
+        it("a token captured before selected()/cancel()/dispose() reads as stale afterward (reagent P1 on #2262)", async () => {
+            await createRoot(async (dispose) => {
+                const timers = fakeTimers();
+                const ctrl = new AuthFlowController({
+                    rpc: fakeRpc({ start: async () => ({ sessionId: "s1" }) }),
+                    timers,
+                });
+                ctrl.selected("claude", "", "needs-account");
+                const token = ctrl.currentActionToken();
+                expect(ctrl.isStaleAction(token)).toBe(false);
+
+                // Changing selection mid-flight is the exact scenario
+                // PreLaunchAuthPanel.tsx's requiresLoginTty branch guards
+                // against: a login already in flight for the OLD selection
+                // must not have its outcome dispatched once it resolves.
+                ctrl.selected("openai", "", "needs-account");
+                expect(ctrl.isStaleAction(token)).toBe(true);
+
+                // Fresh capture after the new selection reads as current again.
+                const token2 = ctrl.currentActionToken();
+                expect(ctrl.isStaleAction(token2)).toBe(false);
+
+                await ctrl.connect({ cliPath: "/x", authLoginArgs: [], authCheckArgs: [] });
+                await ctrl.cancel();
+                expect(ctrl.isStaleAction(token2)).toBe(true);
+
+                dispose();
+            });
+        });
+
+        it("dispose() also invalidates a captured token", async () => {
+            await createRoot(async (dispose) => {
+                const ctrl = new AuthFlowController({ rpc: fakeRpc({}) });
+                ctrl.selected("claude", "", "needs-account");
+                const token = ctrl.currentActionToken();
+                ctrl.dispose();
+                expect(ctrl.isStaleAction(token)).toBe(true);
+                dispose();
+            });
+        });
+    });
+
     it("selected() during waiting cancels the backend session", async () => {
         // Reagent + Codex P2 on #850 round 6: switching selection
         // mid-OAuth must fire auth.cancel for the live sessionId so

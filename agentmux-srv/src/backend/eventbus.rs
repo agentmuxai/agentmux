@@ -145,12 +145,6 @@ impl EventBus {
         }
     }
 
-    /// Send an event to a single connection by conn_id, on the priority lane.
-    /// No-op if not found.
-    pub fn send_to_conn(&self, conn_id: &str, event: &WSEventType) {
-        self.send_to_conn_lane(conn_id, event, Lane::Priority);
-    }
-
     /// Send an event to a single connection by conn_id on a specific lane.
     /// No-op if not found.
     pub fn send_to_conn_lane(&self, conn_id: &str, event: &WSEventType, lane: Lane) {

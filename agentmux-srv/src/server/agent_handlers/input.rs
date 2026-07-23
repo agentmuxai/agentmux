@@ -201,7 +201,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                 // MuxBus cloud token — injects MUXBUS_TOKEN + MUXBUS_COGNITO_DOMAIN
                 // if the user has authenticated via muxbus.login. No-op if no
                 // credentials are stored. Auto-refreshes if token is nearly expired.
-                crate::server::muxbus_handlers::inject_muxbus_env(&id_store, &mut env_vars);
+                crate::server::muxbus_handlers::inject_muxbus_env(&id_store, &mut env_vars).await;
                 // Streaming-bash wrapper auth + discovery
                 // (SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §7).
                 //
