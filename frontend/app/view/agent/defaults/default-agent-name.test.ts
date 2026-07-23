@@ -36,9 +36,14 @@ describe("defaultAgentName", () => {
         expect(defaultAgentName("Claude Code", new Set(["Claude Agent"]))).toBe("Claude Agent 2");
     });
 
-    it("takes the lowest unused suffix, not filling gaps", () => {
+    it("takes the lowest unused suffix against the live set — a gap (here, a never-used '3') is used before climbing past the taken '4'", () => {
         const existing = new Set(["Claude Agent", "Claude Agent 2", "Claude Agent 4"]);
         expect(defaultAgentName("Claude Code", existing)).toBe("Claude Agent 3");
+    });
+
+    it("reuses a freed name — existingNames is a live snapshot, not persisted counter state, so a since-deleted 'Claude Agent 2' is returned again", () => {
+        const existing = new Set(["Claude Agent"]); // "Claude Agent 2" once existed, since deleted
+        expect(defaultAgentName("Claude Code", existing)).toBe("Claude Agent 2");
     });
 
     it("keeps climbing past a long run of taken names", () => {
