@@ -246,6 +246,37 @@ async fn cors_rejects_non_loopback_origin() {
 }
 
 #[tokio::test]
+async fn cors_exposes_zonefileinfo_header_to_cross_origin_callers() {
+    // SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md §2.1 follow-up —
+    // without `expose_headers`, a cross-origin fetch() can't read
+    // X-ZoneFileInfo even when the server sends it: `Response.headers.get()`
+    // silently returns null for any header not in this list, indistinguishable
+    // from the server never having sent it at all. Checked on an actual
+    // response (not the OPTIONS preflight — Access-Control-Expose-Headers is
+    // a real-response header per the CORS spec, preflight only negotiates
+    // allowed methods/headers for the request itself).
+    let app = test_router();
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri("/agentmux/file?zoneid=nonexistent&name=term")
+        .header("Origin", "http://localhost:5173")
+        .header("X-AuthKey", "test-secret-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    let expose = resp
+        .headers()
+        .get("access-control-expose-headers")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(
+        expose.to_lowercase().contains("x-zonefileinfo"),
+        "expected X-ZoneFileInfo in Access-Control-Expose-Headers, got {:?}",
+        expose
+    );
+}
+
+#[tokio::test]
 async fn service_get_client_data() {
     let app = test_router();
     let req = Request::builder()
