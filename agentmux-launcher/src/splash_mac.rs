@@ -138,6 +138,15 @@ struct StageRow {
     subs: Vec<SubRow>,
 }
 
+/// Identifies which row a `Begin` event created, so `run_until_dismissed`'s
+/// drain loop can recognize when a matching `End` arrives for a row that was
+/// *itself* created in this same drain pass — see the count-up note there.
+#[derive(PartialEq)]
+enum BeginKey {
+    Stage(&'static str),
+    Sub(&'static str, String),
+}
+
 /// Same state machine as splash.rs's (Windows) `apply_event` /
 /// splash_linux's `StageList::apply` — see the module doc above for why this
 /// isn't shared code yet.
@@ -175,6 +184,65 @@ fn apply_event(stages: &mut Vec<StageRow>, ev: StartupEvent) {
             }
         }
     }
+}
+
+/// Applies one tick's worth of already-fetched events to `stages`. Returns
+/// `true` if anything changed. Pulled out of `run_until_dismissed` as a pure
+/// function (taking a plain `Vec<StartupEvent>` instead of draining
+/// `self.startup_rx` directly) so the deferral logic is unit-testable
+/// without a live splash window.
+///
+/// A row is created `done: None` on Begin and only shows a live "running"
+/// time once a render happens before its End is applied (`flatten_rows`). If
+/// a step finishes fast enough that both its Begin and End are already
+/// queued by the time a tick drains, they'd otherwise be applied back-to-back
+/// in this same pass — the row is created already-done and no "running"
+/// frame is ever painted, so it just snaps to its final value instead of
+/// visibly counting up (docs/analysis/ANALYSIS_SPLASH_SCREEN_TIMING_2026_07_20.md
+/// §2). Fix: apply anything deferred from the *previous* tick first
+/// (guaranteeing its row spent at least one tick — and one render, since
+/// `run_until_dismissed` always redraws while `ready_at.is_none()` — in the
+/// "running" state), then apply this tick's fresh events, holding back any
+/// End whose matching Begin was *also* seen in this same batch rather than
+/// applying it immediately.
+fn apply_tick(
+    stages: &mut Vec<StageRow>,
+    deferred: &mut Vec<StartupEvent>,
+    fresh: Vec<StartupEvent>,
+) -> bool {
+    let mut changed = false;
+    for ev in deferred.drain(..) {
+        apply_event(stages, ev);
+        changed = true;
+    }
+    let mut began_this_tick: Vec<BeginKey> = Vec::new();
+    for ev in fresh {
+        let defer = match &ev {
+            StartupEvent::StageEnd { stage, .. } => {
+                began_this_tick.contains(&BeginKey::Stage(stage))
+            }
+            StartupEvent::SubEnd { stage, id, .. } => {
+                began_this_tick.contains(&BeginKey::Sub(stage, id.clone()))
+            }
+            _ => false,
+        };
+        if defer {
+            deferred.push(ev);
+            continue;
+        }
+        match &ev {
+            StartupEvent::StageBegin { stage, .. } => {
+                began_this_tick.push(BeginKey::Stage(stage));
+            }
+            StartupEvent::SubBegin { stage, id, .. } => {
+                began_this_tick.push(BeginKey::Sub(stage, id.clone()));
+            }
+            _ => {}
+        }
+        apply_event(stages, ev);
+        changed = true;
+    }
+    changed
 }
 
 fn trunc(s: &str, max: usize) -> String {
@@ -689,6 +757,10 @@ impl Splash {
         let mut hold_duration = Duration::ZERO;
         let mut total_ms: u64 = 0;
         let mut stages: Vec<StageRow> = Vec::new();
+        // Events held back from a tick where their matching Begin *also*
+        // landed, applied at the start of the next tick instead — see the
+        // count-up note in the drain loop below.
+        let mut deferred: Vec<StartupEvent> = Vec::new();
 
         loop {
             // NSApp event pump (not bare CFRunLoop) so a reopen Apple Event that
@@ -697,12 +769,14 @@ impl Splash {
                 pump_app_events(0.016);
             }
 
-            // Drain pending startup events (non-blocking) into the stage list.
-            let mut changed = false;
+            // Drain pending startup events (non-blocking) into the stage
+            // list. See `apply_tick`'s doc comment for why this isn't a
+            // plain "apply everything as it arrives" drain.
+            let mut fresh = Vec::new();
             while let Ok(ev) = self.startup_rx.try_recv() {
-                apply_event(&mut stages, ev);
-                changed = true;
+                fresh.push(ev);
             }
+            let mut changed = apply_tick(&mut stages, &mut deferred, fresh);
 
             let t = start.elapsed().as_secs_f64();
 
@@ -1201,5 +1275,140 @@ mod tests {
         assert_eq!(rows.len(), MAX_STAGE_ROWS);
         assert!(other_row_text(&rows).is_none());
         assert!(total_row_text(&rows).is_some());
+    }
+
+    fn stage_row<'a>(stages: &'a [StageRow], stage: &str) -> &'a StageRow {
+        stages.iter().find(|s| s.stage == stage).unwrap()
+    }
+
+    #[test]
+    fn a_same_tick_begin_and_end_pair_is_deferred_not_snapped_done() {
+        // The count-up bug: if a step's Begin and End are both already
+        // queued by the time a tick drains, applying both immediately would
+        // create the row already-done — no "running" frame ever painted.
+        let mut stages = Vec::new();
+        let mut deferred = Vec::new();
+        let fresh = vec![
+            StartupEvent::StageBegin { stage: "prep", label: "Prep" },
+            StartupEvent::StageEnd {
+                stage: "prep",
+                duration_ms: 5,
+                status: StartupStatus::Ok,
+                detail: None,
+            },
+        ];
+        let changed = apply_tick(&mut stages, &mut deferred, fresh);
+        assert!(changed);
+        // Begin applied, End held back — row exists but is still "running".
+        assert_eq!(stages.len(), 1);
+        assert!(stage_row(&stages, "prep").done.is_none());
+        assert_eq!(deferred.len(), 1);
+    }
+
+    #[test]
+    fn the_deferred_end_applies_on_the_next_tick() {
+        let mut stages = Vec::new();
+        let mut deferred = Vec::new();
+        apply_tick(
+            &mut stages,
+            &mut deferred,
+            vec![
+                StartupEvent::StageBegin { stage: "prep", label: "Prep" },
+                StartupEvent::StageEnd {
+                    stage: "prep",
+                    duration_ms: 5,
+                    status: StartupStatus::Ok,
+                    detail: None,
+                },
+            ],
+        );
+        // Next tick: nothing fresh, just the deferred End flushing in.
+        let changed = apply_tick(&mut stages, &mut deferred, Vec::new());
+        assert!(changed);
+        assert!(deferred.is_empty());
+        assert_eq!(stage_row(&stages, "prep").done.as_ref().unwrap().0, 5);
+    }
+
+    #[test]
+    fn a_begin_and_end_landing_in_different_ticks_is_never_deferred() {
+        // The common/expected case (step genuinely takes longer than one
+        // tick) must not be held back an *extra* tick on top of that.
+        let mut stages = Vec::new();
+        let mut deferred = Vec::new();
+        apply_tick(
+            &mut stages,
+            &mut deferred,
+            vec![StartupEvent::StageBegin { stage: "host", label: "Host" }],
+        );
+        assert!(deferred.is_empty());
+        assert!(stage_row(&stages, "host").done.is_none());
+
+        let changed = apply_tick(
+            &mut stages,
+            &mut deferred,
+            vec![StartupEvent::StageEnd {
+                stage: "host",
+                duration_ms: 40,
+                status: StartupStatus::Ok,
+                detail: None,
+            }],
+        );
+        assert!(changed);
+        assert!(deferred.is_empty());
+        assert_eq!(stage_row(&stages, "host").done.as_ref().unwrap().0, 40);
+    }
+
+    #[test]
+    fn a_same_tick_sub_begin_and_end_pair_is_deferred_too() {
+        let mut stages = vec![running_stage("migrations", "Migrations")];
+        let mut deferred = Vec::new();
+        let fresh = vec![
+            StartupEvent::SubBegin {
+                stage: "migrations",
+                id: "001".into(),
+                label: "001_init".into(),
+            },
+            StartupEvent::SubEnd {
+                stage: "migrations",
+                id: "001".into(),
+                duration_ms: 3,
+                status: StartupStatus::Ok,
+                detail: None,
+            },
+        ];
+        apply_tick(&mut stages, &mut deferred, fresh);
+        let sub = &stage_row(&stages, "migrations").subs[0];
+        assert!(sub.done.is_none());
+        assert_eq!(deferred.len(), 1);
+    }
+
+    #[test]
+    fn unrelated_deferred_and_fresh_events_do_not_interfere() {
+        // A deferred End from a previous tick and a brand-new, unrelated
+        // same-tick Begin+End pair in this tick must each be judged on their
+        // own — the deferred flush must not seed `began_this_tick`.
+        let mut stages = Vec::new();
+        let mut deferred = vec![StartupEvent::StageEnd {
+            stage: "prep",
+            duration_ms: 5,
+            status: StartupStatus::Ok,
+            detail: None,
+        }];
+        stages.push(running_stage("prep", "Prep"));
+        let fresh = vec![
+            StartupEvent::StageBegin { stage: "migrations", label: "Migrations" },
+            StartupEvent::StageEnd {
+                stage: "migrations",
+                duration_ms: 2,
+                status: StartupStatus::Ok,
+                detail: None,
+            },
+        ];
+        apply_tick(&mut stages, &mut deferred, fresh);
+        // "prep"'s deferred End flushed in this tick.
+        assert_eq!(stage_row(&stages, "prep").done.as_ref().unwrap().0, 5);
+        // "migrations" is new-and-fast this tick — its own End is deferred.
+        assert!(stage_row(&stages, "migrations").done.is_none());
+        assert_eq!(deferred.len(), 1);
     }
 }
