@@ -33,6 +33,7 @@ pub(crate) fn test_state() -> AppState {
     let process_tracker = Arc::new(
         crate::backend::process_tracker::registry::AgentProcessRegistry::new(Some(broker.clone())),
     );
+    let process_broker = Arc::new(crate::broker::ProcessBroker::new(Some(broker.clone())));
 
     AppState {
         auth_key: "test-secret-key".to_string(),
@@ -63,6 +64,7 @@ pub(crate) fn test_state() -> AppState {
         )),
         lsp_supervisor: Arc::new(crate::backend::lsp::LspSupervisor::new(event_bus.clone())),
         process_tracker,
+        process_broker,
         // Phase E.2c.2 — workspace RPC dispatches through reducer.
         // Tests get fresh state + a dummy broadcast bus.
         srv_state: Arc::new(tokio::sync::Mutex::new(crate::state::State::default())),

@@ -295,7 +295,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     };
 
     // Wire the pane-scoped modal callback into the model so the single
-    // title-bar "Agent setup" (id-card) icon can open the unified tabbed
+    // title-bar "Agent setup" (vault) icon can open the unified tabbed
     // modal (Accounts + Memory) without holding a SolidJS context in the
     // model. Mirrors the former _setOverlayTab pattern; supersedes the
     // separate _openIdentityModal / _openMemoryModal callbacks.

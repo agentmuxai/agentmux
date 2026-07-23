@@ -34,6 +34,7 @@ use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::Message};
 use crate::backend::reactive::handler::get_global_handler;
 use crate::backend::reactive::types::InjectionRequest;
 use crate::backend::storage::store::Store;
+use crate::broker::RefreshErrorKind;
 
 // Dedicated custom domain on the API Gateway WebSocket API (apigatewayv2
 // DomainName + ApiMapping), not a path under muxbus.agentmux.ai's CloudFront
@@ -56,6 +57,14 @@ const MAX_RECONNECT_DELAY_SECS: u64 = 60;
 // so a normal data frame is what actually keeps the connection alive in
 // production (see ClientMsg::Ping's doc comment).
 const CLIENT_PING_INTERVAL_SECS: u64 = 240;
+// How often the broker's background sweep re-checks the stored MuxBus
+// credential and proactively refreshes it if it's nearing expiry — now the
+// SOLE proactive-refresh trigger (see `run_loop`'s registration call and the
+// broker module doc); replaces what used to be two independent, uncoordinated
+// checks (the outer reconnect loop's `load_valid_token`, and an inline check
+// on every WS ping tick). Cheap (one DB read) when not actually stale, so a
+// short interval is fine.
+const BROKER_SWEEP_INTERVAL_SECS: u64 = 60;
 
 // ── Wire protocol ─────────────────────────────────────────────────────────────
 
@@ -183,6 +192,88 @@ async fn run_loop(
     let http = reqwest::Client::new();
     let mut delay_secs = RECONNECT_DELAY_SECS;
 
+    // Register this credential with the global broker scheduler once, up
+    // front. The broker's own background sweep (spawned inside
+    // `crate::broker::init_global`) now owns proactive refresh entirely —
+    // it keeps the stored token fresh even while this WS session is
+    // disconnected/backing off, which the old ping-tick-only check could not.
+    let scheduler = crate::broker::init_global(Duration::from_secs(BROKER_SWEEP_INTERVAL_SECS));
+    {
+        let wstore_fresh = wstore.clone();
+        let wstore_refresh = wstore.clone();
+        let http_refresh = http.clone();
+        scheduler
+            .register(
+                crate::muxbus::CREDENTIAL_ID,
+                // muxbus_is_fresh, not muxbus_load — reagent P2 on #2260:
+                // register()'s own contract requires is_fresh to be
+                // side-effect-free (called under the per-id lock on every
+                // ensure_fresh/sweep tick), but muxbus_load's lazy-migration
+                // branch can perform a keychain write + SQL update for a
+                // legacy row. muxbus_is_fresh shares the same read logic
+                // with that branch disabled.
+                //
+                // spawn_blocking, not a direct call — reagent P1 on #2260:
+                // muxbus_is_fresh does a synchronous OS-keychain read, which
+                // can hang on a slow/unresponsive Secret Service D-Bus
+                // daemon (a scenario headless Linux specifically has to
+                // handle). Without this, that hang stalls the tokio worker
+                // thread `run_sweep_loop` runs on, and via the scheduler's
+                // held per-id lock, can block OTHER credentials' refreshes
+                // too — the exact convention this codebase already applies
+                // to keychain reads elsewhere (see
+                // app_api/mod.rs's account_validate_impl).
+                move || {
+                    let wstore = wstore_fresh.clone();
+                    Box::pin(async move {
+                        tokio::task::spawn_blocking(move || wstore.muxbus_is_fresh())
+                            .await
+                            .unwrap_or(false)
+                    })
+                },
+                move || {
+                    let wstore = wstore_refresh.clone();
+                    let http = http_refresh.clone();
+                    Box::pin(async move {
+                        let load_store = wstore.clone();
+                        let current = tokio::task::spawn_blocking(move || load_store.muxbus_load())
+                            .await
+                            .map_err(|e| RefreshErrorKind::Transient(format!("muxbus_load task: {e}")))?
+                            .map_err(|e| RefreshErrorKind::Transient(e.to_string()))?
+                            // Nothing stored at all — not a transient storage
+                            // blip, there's genuinely no credential to refresh;
+                            // only a fresh login produces one.
+                            .ok_or_else(|| {
+                                RefreshErrorKind::PermanentAuthFailure(
+                                    "no muxbus credentials stored".to_string(),
+                                )
+                            })?;
+                        if current.refresh_token.is_empty() {
+                            // Same reasoning: no refresh_token will ever
+                            // appear on its own — only re-login fixes it.
+                            return Err(RefreshErrorKind::PermanentAuthFailure(
+                                "no refresh_token stored".to_string(),
+                            ));
+                        }
+                        // Preserve-on-failure: `refresh_token` returning Err
+                        // here means `muxbus_save` is simply never called —
+                        // the last-known-good credential in the store is
+                        // left untouched rather than overwritten with a
+                        // failed/partial result.
+                        let refreshed = crate::muxbus::pkce::refresh_token(&current, &http)
+                            .await
+                            .map_err(classify_refresh_token_error)?;
+                        let save_store = wstore.clone();
+                        tokio::task::spawn_blocking(move || save_store.muxbus_save(&refreshed))
+                            .await
+                            .map_err(|e| RefreshErrorKind::Transient(format!("muxbus_save task: {e}")))?
+                            .map_err(|e| RefreshErrorKind::Transient(e.to_string()))
+                    })
+                },
+            )
+            .await;
+    }
+
     loop {
         // Load token — refresh if expired.
         // Two distinct None cases:
@@ -192,13 +283,34 @@ async fn run_loop(
         //   - access_token present AND still valid (use it now), OR
         //   - access_token expired but refresh_token present (can refresh).
         // An expired token with no refresh_token is a permanent failure → park like no-creds.
-        let has_stored_creds = wstore
-            .muxbus_load()
-            .ok()
-            .flatten()
-            .map(|c| !c.access_token.is_empty() && (c.is_valid() || !c.refresh_token.is_empty()))
-            .unwrap_or(false);
-        let token = match load_valid_token(&wstore, &http).await {
+        //
+        // A real load ERROR (keychain locked/unavailable, distinct from
+        // muxbus_load's Ok(None) "genuinely nothing stored" — see that
+        // function's own reagent-fixed error handling) must NOT collapse to
+        // has_stored_creds=false: that would park indefinitely waiting for a
+        // muxbus.login the user was never actually missing, instead of
+        // backing off and retrying once the transient failure clears.
+        // spawn_blocking — reagent P1 on #2260: muxbus_load does a
+        // synchronous OS-keychain read; a hang there (slow/unresponsive
+        // Secret Service D-Bus daemon) must not stall this loop's tokio
+        // worker thread.
+        let has_stored_creds_load = {
+            let wstore = wstore.clone();
+            tokio::task::spawn_blocking(move || wstore.muxbus_load()).await
+        };
+        let has_stored_creds = match has_stored_creds_load {
+            Ok(Ok(Some(c))) => !c.access_token.is_empty() && (c.is_valid() || !c.refresh_token.is_empty()),
+            Ok(Ok(None)) => false,
+            Ok(Err(e)) => {
+                tracing::warn!(error = %e, "cloud_subscriber: muxbus_load failed — assuming credentials exist and retrying with backoff");
+                true
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "cloud_subscriber: muxbus_load task panicked — assuming credentials exist and retrying with backoff");
+                true
+            }
+        };
+        let token = match load_valid_token(&wstore, &scheduler).await {
             Some(t) => t,
             None if !has_stored_creds => {
                 // No credentials at all — wait for muxbus.login to signal us
@@ -241,7 +353,7 @@ async fn run_loop(
         tracing::info!("cloud_subscriber: connecting to {}", MUXBUS_WS_URL);
         let session_start = std::time::Instant::now();
 
-        match connect_and_run(&token, agents.clone(), &mut ctrl_rx, &wstore, &http).await {
+        match connect_and_run(&token, agents.clone(), &mut ctrl_rx, &http).await {
             Ok(()) => {
                 // Apply the same >30s healthy-session guard as the error branch: a server
                 // that immediately closes after handshake must not suppress back-off.
@@ -286,7 +398,6 @@ async fn connect_and_run(
     token: &str,
     agents: Arc<Mutex<HashSet<String>>>,
     ctrl_rx: &mut mpsc::UnboundedReceiver<CtrlMsg>,
-    _wstore: &Arc<Store>,
     http: &reqwest::Client,
 ) -> Result<(), String> {
     use tokio_tungstenite::tungstenite::ClientRequestBuilder;
@@ -337,7 +448,13 @@ async fn connect_and_run(
 
     loop {
         tokio::select! {
-            // Keepalive — see CLIENT_PING_INTERVAL_SECS.
+            // Keepalive — see CLIENT_PING_INTERVAL_SECS. Proactive credential
+            // freshness is no longer piggybacked on this tick: the broker's
+            // own background sweep (registered once in `run_loop`, see
+            // `crate::broker`) now keeps `db_muxbus_credentials` fresh on its
+            // own schedule regardless of whether a WS session happens to be
+            // open, so a long-lived session no longer needs to special-case
+            // its own credential check here.
             _ = ping_interval.tick() => {
                 let ping_msg = serde_json::to_string(&ClientMsg::Ping)
                     .map_err(|e| format!("serialize ping: {e}"))?;
@@ -619,43 +736,132 @@ async fn handle_server_msg(
     Ok(())
 }
 
-/// Load a valid (non-expired) access token, refreshing via refresh_token if needed.
-/// Saves refreshed credentials back to the store. Returns None if no credentials
-/// are stored, the token is expired and refresh fails, or the refresh_token is absent.
-async fn load_valid_token(wstore: &Store, http: &reqwest::Client) -> Option<String> {
-    let creds = match wstore.muxbus_load() {
-        Ok(Some(c)) if !c.access_token.is_empty() => c,
-        _ => return None,
-    };
-    if creds.is_valid() && !creds.nearly_expired() {
-        return Some(creds.access_token);
+/// Load a valid (non-expired) access token via the broker, refreshing first
+/// if the stored credential is missing/stale. Returns None if no credentials
+/// are stored, the token is expired and refresh fails, or the refresh_token
+/// is absent — `ensure_fresh`'s own single-flight guard means this can run
+/// concurrently with the broker's background sweep for the same credential
+/// without either one duplicating the other's refresh attempt.
+async fn load_valid_token(
+    wstore: &Arc<Store>,
+    scheduler: &crate::broker::RefreshScheduler,
+) -> Option<String> {
+    if let Err(e) = scheduler.ensure_fresh(crate::muxbus::CREDENTIAL_ID).await {
+        tracing::warn!(error = %e, "cloud_subscriber: token refresh failed");
     }
-    // Token expired or expiring within 300s — proactively refresh
-    tracing::info!("cloud_subscriber: access token expired, attempting refresh");
-    match crate::muxbus::pkce::refresh_token(&creds, http).await {
-        Ok(refreshed) => {
-            if let Err(e) = wstore.muxbus_save(&refreshed) {
-                tracing::warn!(error = %e, "cloud_subscriber: failed to save refreshed credentials");
-            }
-            Some(refreshed.access_token)
+    // Preserve-on-failure means a failed refresh leaves the last-known-good
+    // credential in place — re-read regardless of ensure_fresh's outcome and
+    // fall back to it if it's still within its validity window, matching the
+    // pre-broker behavior: a transient refresh failure should not prevent
+    // connecting with a token that's still technically valid.
+    //
+    // spawn_blocking — reagent P1 on #2260: same synchronous-keychain-read
+    // concern as every other muxbus_load call site in this file.
+    let load_store = wstore.clone();
+    let creds = tokio::task::spawn_blocking(move || load_store.muxbus_load())
+        .await
+        .ok()
+        .and_then(|r| r.ok())
+        .flatten();
+    match creds {
+        Some(c) if c.is_valid() => Some(c.access_token),
+        _ => None,
+    }
+}
+
+/// Classify a `pkce::refresh_token` failure for the broker's
+/// `RefreshErrorKind` — `NoRefreshToken`/`Rejected` in the 4xx range mean
+/// the credential itself is the problem (only a fresh `muxbus.login` fixes
+/// it) *except* 408/429, which mean the request itself was throttled or
+/// timed out, not that the refresh_token was rejected — treating those as
+/// permanent would strand the credential in `NeedsReauth` past a temporary
+/// rate limit (reagent P2 on #2275). Everything else (network blips, 5xx,
+/// response parse failures) is worth retrying on the next sweep tick.
+fn classify_refresh_token_error(e: crate::muxbus::pkce::RefreshTokenError) -> RefreshErrorKind {
+    use crate::muxbus::pkce::RefreshTokenError;
+    match &e {
+        RefreshTokenError::NoRefreshToken => RefreshErrorKind::PermanentAuthFailure(e.to_string()),
+        RefreshTokenError::Rejected { status, .. }
+            if (400..500).contains(status) && !matches!(status, 408 | 429) =>
+        {
+            RefreshErrorKind::PermanentAuthFailure(e.to_string())
         }
-        Err(e) => {
-            tracing::warn!(error = %e, "cloud_subscriber: proactive refresh failed");
-            // Fall back to the existing token if it's still within its validity window.
-            // A transient refresh failure should not prevent connecting with a working token.
-            if creds.is_valid() {
-                Some(creds.access_token)
-            } else {
-                None
-            }
-        }
+        RefreshTokenError::Rejected { .. }
+        | RefreshTokenError::Network(_)
+        | RefreshTokenError::ParseFailed(_) => RefreshErrorKind::Transient(e.to_string()),
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::classify_refresh_token_error;
+    use crate::broker::RefreshErrorKind;
+    use crate::muxbus::pkce::RefreshTokenError;
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
     use tokio_tungstenite::tungstenite::ClientRequestBuilder;
+
+    #[test]
+    fn no_refresh_token_is_permanent() {
+        assert!(matches!(
+            classify_refresh_token_error(RefreshTokenError::NoRefreshToken),
+            RefreshErrorKind::PermanentAuthFailure(_)
+        ));
+    }
+
+    #[test]
+    fn a_4xx_rejection_is_permanent() {
+        assert!(matches!(
+            classify_refresh_token_error(RefreshTokenError::Rejected {
+                status: 400,
+                body: "invalid_grant".into(),
+            }),
+            RefreshErrorKind::PermanentAuthFailure(_)
+        ));
+    }
+
+    #[test]
+    fn a_5xx_rejection_is_transient() {
+        assert!(matches!(
+            classify_refresh_token_error(RefreshTokenError::Rejected {
+                status: 503,
+                body: "unavailable".into(),
+            }),
+            RefreshErrorKind::Transient(_)
+        ));
+    }
+
+    #[test]
+    fn rate_limit_and_timeout_rejections_are_transient_not_permanent() {
+        // A 429/408 means the request was throttled/timed out, not that the
+        // refresh_token itself was rejected — must not strand the
+        // credential in NeedsReauth past a temporary rate limit.
+        assert!(matches!(
+            classify_refresh_token_error(RefreshTokenError::Rejected {
+                status: 429,
+                body: "rate limited".into(),
+            }),
+            RefreshErrorKind::Transient(_)
+        ));
+        assert!(matches!(
+            classify_refresh_token_error(RefreshTokenError::Rejected {
+                status: 408,
+                body: "request timeout".into(),
+            }),
+            RefreshErrorKind::Transient(_)
+        ));
+    }
+
+    #[test]
+    fn network_and_parse_errors_are_transient() {
+        assert!(matches!(
+            classify_refresh_token_error(RefreshTokenError::Network("timeout".into())),
+            RefreshErrorKind::Transient(_)
+        ));
+        assert!(matches!(
+            classify_refresh_token_error(RefreshTokenError::ParseFailed("bad json".into())),
+            RefreshErrorKind::Transient(_)
+        ));
+    }
 
     /// Regression for issue #2091: every connection attempt failed the
     /// WebSocket handshake with "Missing, duplicated or incorrect header

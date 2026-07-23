@@ -145,28 +145,6 @@ impl Store {
         }
     }
 
-    /// Upsert a standalone MCP server. Caller must have stripped is_global escalation.
-    pub fn mcp_server_upsert(&self, server: &McpServer) -> Result<(), StoreError> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "INSERT INTO db_mcp_servers (id, name, transport, config, is_global, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-             ON CONFLICT(id) DO UPDATE SET
-               name=excluded.name, transport=excluded.transport, config=excluded.config,
-               updated_at=excluded.updated_at",
-            params![
-                server.id,
-                server.name,
-                server.transport,
-                server.config,
-                if server.is_global { 1i64 } else { 0i64 },
-                server.created_at,
-                server.updated_at,
-            ],
-        )?;
-        Ok(())
-    }
-
     /// Delete a standalone MCP server and purge ref rows. Returns true if deleted.
     pub fn mcp_server_delete(&self, id: &str) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();

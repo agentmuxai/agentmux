@@ -163,44 +163,6 @@ impl AcpController {
         }).to_string()
     }
 
-    /// Send a user message via ACP session/prompt.
-    /// If the process isn't spawned yet, spawns it first (the first prompt is
-    /// deferred until the session is established — see `pending_prompt`).
-    pub fn send_message(&self, message: String, cli_command: String, cli_args: Vec<String>, working_dir: String, env_vars: HashMap<String, String>) -> Result<(), String> {
-        if !self.is_running() {
-            // First turn: spawn and stash the prompt — the stdout reader will
-            // send it once the session/create response arrives.
-            {
-                let mut inner = self.inner.lock().unwrap();
-                inner.pending_prompt = Some(message.clone());
-            }
-            self.health_monitor.set_active_turn(true);
-            return self.spawn_process(cli_command, cli_args, working_dir, env_vars);
-        }
-
-        // Subsequent turns: session_id is already populated.
-        let session_id = {
-            let inner = self.inner.lock().unwrap();
-            inner.session_id.clone().unwrap_or_default()
-        };
-
-        let req = self.make_request("session/prompt", serde_json::json!({
-            "sessionId": session_id,
-            "prompt": {
-                "type": "text",
-                "text": message,
-            }
-        }));
-
-        self.health_monitor.set_active_turn(true);
-
-        let inner = self.inner.lock().unwrap();
-        let tx = inner.stdin_tx.as_ref()
-            .ok_or("ACP process not running after spawn")?;
-        tx.try_send(req)
-            .map_err(|e| format!("ACP stdin send failed: {e}"))
-    }
-
     /// Spawn the ACP agent process and perform the initialize handshake.
     fn spawn_process(&self, cli_command: String, cli_args: Vec<String>, working_dir: String, env_vars: HashMap<String, String>) -> Result<(), String> {
         let mut cmd = crate::server::cli_handlers::make_cli_cmd(&cli_command);

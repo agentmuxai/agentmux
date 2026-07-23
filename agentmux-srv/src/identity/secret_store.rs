@@ -48,6 +48,23 @@ pub fn get(account_id: &str) -> Result<Zeroizing<String>, String> {
     Ok(Zeroizing::new(pw))
 }
 
+/// Read the secret for `account_id`, distinguishing "no entry stored yet"
+/// (`Ok(None)`) from a real storage failure (`Err`) — a locked keychain, no
+/// Secret Service daemon running, permission denied, etc. `get` collapses
+/// both into the same `Err` variant, which is correct for its own callers
+/// (a spawn-time credential resolve should fail either way), but is the
+/// wrong shape for a caller that needs to tell "genuinely never logged in"
+/// apart from "storage is transiently broken" — treating a transient
+/// failure as "no credential" can silently present as a full logout. Use
+/// this variant when that distinction matters.
+pub fn get_optional(account_id: &str) -> Result<Option<Zeroizing<String>>, String> {
+    match entry(account_id)?.get_password() {
+        Ok(pw) => Ok(Some(Zeroizing::new(pw))),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(format!("keychain read failed: {e}")),
+    }
+}
+
 /// Delete the secret for `account_id`. A missing entry is treated as
 /// success (idempotent delete).
 pub fn delete(account_id: &str) -> Result<(), String> {

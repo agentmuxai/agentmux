@@ -200,14 +200,8 @@ impl ShellSessionRegistry {
         n
     }
 
-    /// Clone the stdin sender for `ShellInput`. Returns None if not running.
-    /// Sending to the clone is non-blocking — the relay task handles the write.
-    pub fn get_stdin_tx(&self, shell_id: &str) -> Option<mpsc::UnboundedSender<String>> {
-        self.shells.lock().get(shell_id).and_then(|e| e.stdin_tx.clone())
-    }
-
-    /// Resolve where a `ShellInput` write should go, distinguishing the two
-    /// failure modes that `get_stdin_tx` collapses into `None`:
+    /// Resolve where a `ShellInput` write should go, distinguishing two
+    /// failure modes:
     /// - `Ok(tx)`            — running with captured stdin
     /// - `Err(StdinNotCaptured)` — running but created without capture_stdin
     /// - `Err(NotRunning)`   — unknown id or already exited

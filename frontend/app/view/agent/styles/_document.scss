@@ -123,14 +123,6 @@
         }
     }
 
-    // Legacy class — keep for any non-virtualized callers; remove
-    // once Phase 2 is fully wired in everywhere.
-    .agent-document-node-wrapper {
-        content-visibility: auto;
-        contain-intrinsic-size: auto 80px;
-        contain: layout style;
-    }
-
     // === New-message enter animation ===
     // Uses transition + @starting-style (not @keyframes — @keyframes fires on
     // ANY selector-match change, including adding [data-animate] to a parent).

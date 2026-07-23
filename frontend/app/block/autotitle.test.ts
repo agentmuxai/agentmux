@@ -4,7 +4,6 @@
 import { assert, describe, test } from "vitest";
 import {
     detectAgentFromEnv,
-    detectAgentFromPath,
     detectAgentFromWorkspacesPath,
     generateAutoTitle,
     getEffectiveTitle,
@@ -99,47 +98,14 @@ describe("detectAgentFromWorkspacesPath", () => {
     });
 
     test("returns null for hostname-based paths (only checks workspaces)", () => {
-        // This path would be detected by detectAgentFromPath but NOT by detectAgentFromWorkspacesPath
         const path = "C:\\Systems\\wavemux";
         const result = detectAgentFromWorkspacesPath(path);
         assert.equal(result, null);
     });
-});
-
-describe("detectAgentFromPath", () => {
-    test("detects agent from Unix path", () => {
-        const path = "/home/user/agent-workspaces/agent2/wavemux";
-        const result = detectAgentFromPath(path);
-        assert.equal(result, "Agent2");
-    });
-
-    test("detects agent from Windows path", () => {
-        const path = "C:\\Code\\agent-workspaces\\agent3\\project";
-        const result = detectAgentFromPath(path);
-        assert.equal(result, "Agent3");
-    });
-
-    test("detects agentx (case-insensitive)", () => {
-        const path = "/code/agent-workspaces/agentx/task";
-        const result = detectAgentFromPath(path);
-        assert.equal(result, "AgentX");
-    });
-
-    test("returns null for non-agent paths", () => {
-        const path = "/home/user/projects/myapp";
-        const result = detectAgentFromPath(path);
-        assert.equal(result, null);
-    });
-
-    test("returns null for empty/null paths", () => {
-        assert.equal(detectAgentFromPath(undefined), null);
-        assert.equal(detectAgentFromPath(""), null);
-        assert.equal(detectAgentFromPath(null as any), null);
-    });
 
     test("handles mixed case agent-workspaces", () => {
         const path = "D:\\Code\\Agent-Workspaces\\AGENT5\\src";
-        const result = detectAgentFromPath(path);
+        const result = detectAgentFromWorkspacesPath(path);
         assert.equal(result, "Agent5");
     });
 });

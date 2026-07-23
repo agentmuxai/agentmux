@@ -247,6 +247,12 @@ pub fn delete_controller(block_id: &str) {
     if let Some(registry) = crate::backend::process_tracker::registry::global() {
         registry.remove(block_id);
     }
+    // Drop the Process Broker's cached status for this block, so a closed
+    // pane's stale entry doesn't linger unreachable (get_all_controllers()
+    // already won't list it — see ProcessBroker::forget's doc comment).
+    if let Some(broker) = crate::broker::process::global() {
+        broker.forget(block_id);
+    }
 }
 
 /// Get all controllers (snapshot).

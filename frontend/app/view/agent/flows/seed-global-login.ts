@@ -34,15 +34,61 @@ export async function seedGlobalLogin(
     // seeds into it only if it's under ~/.agentmux; a stale ~/.claude is
     // rejected there and falls back to the shared dir — the seed never writes
     // the user's own login (SPEC_PROVIDER_ISOLATION §4.5 / INV-R).
-    const res = await getApi().seedProviderAuthFromGlobal(providerId, configDir);
-    if (res?.seeded) {
-        log("auth", "copied your existing login — just send your message again");
-        return true;
+    //
+    // reagent P0: seed_provider_auth_from_global (providers.rs) hard-rejects
+    // (throws) for every provider except claude — this function is
+    // documented as Claude-specific in its own name, but nothing previously
+    // stopped a caller from invoking it for another provider, and when that
+    // happened the throw propagated as an unhandled rejection through every
+    // caller (pollForGlobalLoginSeed's loop below included), instead of the
+    // graceful "not seeded" this function's own return-false convention
+    // implies. Callers should route non-claude providers elsewhere entirely
+    // (see run-provider-login.ts's per-provider tier-3 strategy), but this
+    // function must never throw regardless — it's a shared utility, and a
+    // host command rejecting an entire class of input is a landmine for any
+    // future caller, not just the ones already found.
+    try {
+        const res = await getApi().seedProviderAuthFromGlobal(providerId, configDir);
+        if (res?.seeded) {
+            log("auth", "copied your existing login — just send your message again");
+            return true;
+        }
+        if (res?.status === "expired") {
+            log("auth", "your global Claude login is also expired — use “Login Again” to re-authenticate", "warn");
+        } else {
+            log("auth", "no valid global Claude login found — use “Login Again” to authenticate", "warn");
+        }
+        return false;
+    } catch (e: any) {
+        log("auth", `seed-from-global failed: ${e?.message ?? String(e)}`, "warn");
+        return false;
     }
-    if (res?.status === "expired") {
-        log("auth", "your global Claude login is also expired — use “Login Again” to re-authenticate", "warn");
-    } else {
-        log("auth", "no valid global Claude login found — use “Login Again” to authenticate", "warn");
+}
+
+/**
+ * Poll `seedGlobalLogin` on an interval until it succeeds, the deadline
+ * passes, or `isCancelled` reports true. Shared by "Login via terminal"
+ * (useAgentControllerStatus) and the terminal-fallback tier of
+ * `runProviderLogin` (retro-headless-login-browser-open-2026-07-20) — both
+ * open a real terminal window for the user to complete an OAuth flow in,
+ * then need to notice the credential landing on disk without the user
+ * having to click anything else.
+ */
+export async function pollForGlobalLoginSeed(
+    providerId: string,
+    configDir: string | undefined,
+    isCancelled: () => boolean,
+    opts: { pollMs?: number; timeoutMs?: number } = {},
+): Promise<boolean> {
+    const pollMs = opts.pollMs ?? 5_000;
+    const timeoutMs = opts.timeoutMs ?? 5 * 60 * 1_000;
+    const deadline = performance.now() + timeoutMs;
+    const silentLog: LogFn = () => {};
+    while (performance.now() < deadline) {
+        if (isCancelled()) return false;
+        await new Promise<void>((r) => setTimeout(r, pollMs));
+        if (isCancelled()) return false;
+        if (await seedGlobalLogin(providerId, silentLog, configDir)) return true;
     }
     return false;
 }

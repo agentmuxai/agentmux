@@ -35,7 +35,6 @@ pub struct ToolSpec {
     /// If absent, version probing is skipped and the catalog version is reported.
     #[serde(default)]
     pub version_arg: Option<String>,
-    pub bundled: bool,
     pub platforms: HashMap<String, PlatformSpec>,
 }
 
