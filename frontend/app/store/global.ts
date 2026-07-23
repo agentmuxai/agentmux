@@ -6,23 +6,7 @@
 import { WpsEvent } from "@/app/store/wps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { markEnd, markStart } from "@/perf";
-import {
-    getLayoutModelForStaticTab,
-    LayoutTreeActionType,
-    LayoutTreeInsertNodeAction,
-    markBlockRecentlyCreated,
-    newLayoutNode,
-} from "@/layout/index";
-import {
-    LayoutTreeReplaceNodeAction,
-    LayoutTreeSplitHorizontalAction,
-    LayoutTreeSplitVerticalAction,
-} from "@/layout/lib/types";
-import { getWebServerEndpoint } from "@/util/endpoints";
-import { fetch } from "@/util/fetchutil";
 import { setPlatform } from "@/util/platformutil";
-import { fireAndForget, isBlank } from "@/util/util";
 import { createMemo, createSignal } from "solid-js";
 import { reconnectWS } from "./ws";
 import {
@@ -35,9 +19,6 @@ import {
 import { openModal } from "./modalmodel";
 import { AboutModal } from "@/app/modals/about";
 import { UserInputModal } from "@/app/modals/userinputmodal";
-import { TAB_COLORS } from "@/app/tab/tab";
-import { ClientService, ObjectService, WorkspaceService } from "./services";
-import { holdRevealGate, scheduleRevealLift } from "./tab-reveal";
 import * as WOS from "./wos";
 import { getFileSubject, waveEventSubscribe } from "./wps";
 import { getApi } from "./app-api";
@@ -63,53 +44,29 @@ import {
     useBlockAtom,
     useBlockDataLoaded,
 } from "./block-atom-cache";
+import {
+    windowId,
+    setWindowId,
+    clientId,
+    setClientId,
+    staticTabId,
+    setStaticTabId,
+    client,
+    waveWindow,
+    workspace,
+    tabAtom,
+    activeTabId,
+    uiContext,
+} from "./window-identity";
+import { allConnStatus } from "./conn-status";
+import { flashErrors, notifications, notificationPopoverMode } from "./flash-notifications";
 
 // ---------------------------------------------------------------------------
 // Global signals (replace Jotai atoms)
 // ---------------------------------------------------------------------------
 
-// Window identity — set once at init, never change.
-export const [windowId, setWindowId] = createSignal("");
-export const [clientId, setClientId] = createSignal("");
-export const [staticTabId, setStaticTabId] = createSignal("");
-
-// Derived objects from WOS
-export const client = createMemo<Client>(() => {
-    const cid = clientId();
-    if (!cid) return null;
-    return WOS.getObjectValue(WOS.makeORef("client", cid));
-});
-
-export const waveWindow = createMemo<WaveWindow>(() => {
-    const wid = windowId();
-    if (!wid) return null;
-    return WOS.getObjectValue<WaveWindow>(WOS.makeORef("window", wid));
-});
-
-export const workspace = createMemo<Workspace>(() => {
-    const win = waveWindow();
-    if (!win) return null;
-    return WOS.getObjectValue(WOS.makeORef("workspace", win.workspaceid));
-});
-
-export const tabAtom = createMemo<Tab>(() => {
-    return WOS.getObjectValue(WOS.makeORef("tab", staticTabId()));
-});
-
-export const activeTabId = createMemo<string>(() => {
-    const ws = workspace();
-    const tabId = staticTabId();
-    if (!ws) return tabId;
-    return ws.activetabid || ws.pinnedtabids?.[0] || ws.tabids?.[0] || tabId;
-});
-
-// NOTE: uiContext must use activeTabId (derived from workspace), NOT staticTabId.
-// staticTabId is set once at init and never changes. activeTabId tracks the
-// workspace's current active tab so backend service calls get the correct tab.
-export const uiContext = createMemo<UIContext>(() => ({
-    windowid: windowId(),
-    activetabid: activeTabId(),
-}));
+// Window identity — moved to window-identity.ts (see below for re-export);
+// imported above for use in the `atoms` back-compat object and initGlobalSignals.
 
 export { fullConfigAtom, setFullConfigAtom, settingsAtom, hasCustomAIPresetsAtom };
 
@@ -141,17 +98,6 @@ export { backendStatusAtom, setBackendStatusAtom, backendDeathInfoAtom, setBacke
 export const [typeAheadModalAtom, setTypeAheadModalAtom] = createSignal<Record<string, unknown>>({});
 export const [modalOpen, setModalOpen] = createSignal(false);
 
-// Connection status map: connName → ConnStatus signal
-const [connStatusMap, setConnStatusMap] = createSignal(new Map<string, [() => ConnStatus, (v: ConnStatus) => void]>());
-
-export const allConnStatus = createMemo<ConnStatus[]>(() => {
-    const map = connStatusMap();
-    return Array.from(map.values()).map(([get]) => get());
-});
-
-export const [flashErrors, setFlashErrors] = createSignal<FlashErrorType[]>([]);
-export const [notifications, setNotifications] = createSignal<NotificationType[]>([]);
-export const [notificationPopoverMode, setNotificationPopoverMode] = createSignal(false);
 export const [reinitVersion, setReinitVersion] = createSignal(0);
 export const [isTermMultiInput, setIsTermMultiInput] = createSignal(false);
 
@@ -391,451 +337,84 @@ export {
     useBlockDataLoaded,
 } from "./block-atom-cache";
 
-// ---------------------------------------------------------------------------
-// Block creation / layout actions
-// ---------------------------------------------------------------------------
+// Window identity — moved to window-identity.ts; re-exported below for
+// backward-compat (97 files import from this module). Also imported above
+// (see top of file) for use in the `atoms` object and initGlobalSignals.
+export {
+    windowId,
+    setWindowId,
+    clientId,
+    setClientId,
+    staticTabId,
+    setStaticTabId,
+    client,
+    waveWindow,
+    workspace,
+    tabAtom,
+    activeTabId,
+    uiContext,
+};
 
-export async function createBlockSplitHorizontally(
-    blockDef: BlockDef,
-    targetBlockId: string,
-    position: "before" | "after"
-): Promise<string> {
-    const layoutModel = getLayoutModelForStaticTab();
-    const rtOpts: RuntimeOpts = { termsize: { rows: 25, cols: 80 } };
-    const newBlockId = await ObjectService.CreateBlock(blockDef, rtOpts);
-    markBlockRecentlyCreated(newBlockId);
-    const targetNodeId = layoutModel.getNodeByBlockId(targetBlockId)?.id;
-    if (targetNodeId == null) throw new Error(`targetNodeId not found for blockId: ${targetBlockId}`);
-    const splitAction: LayoutTreeSplitHorizontalAction = {
-        type: LayoutTreeActionType.SplitHorizontal,
-        targetNodeId,
-        newNode: newLayoutNode(undefined, undefined, undefined, { blockId: newBlockId }),
-        position,
-        focused: true,
-    };
-    layoutModel.treeReducer(splitAction);
-    return newBlockId;
-}
+// Block creation / layout actions — moved to block-layout-actions.ts;
+// re-exported below for backward-compat (97 files import from this module).
+export {
+    createBlockSplitHorizontally,
+    createBlockSplitVertically,
+    createBlock,
+    replaceBlock,
+    setNodeFocus,
+} from "./block-layout-actions";
 
-export async function createBlockSplitVertically(
-    blockDef: BlockDef,
-    targetBlockId: string,
-    position: "before" | "after"
-): Promise<string> {
-    const layoutModel = getLayoutModelForStaticTab();
-    const rtOpts: RuntimeOpts = { termsize: { rows: 25, cols: 80 } };
-    const newBlockId = await ObjectService.CreateBlock(blockDef, rtOpts);
-    markBlockRecentlyCreated(newBlockId);
-    const targetNodeId = layoutModel.getNodeByBlockId(targetBlockId)?.id;
-    if (targetNodeId == null) throw new Error(`targetNodeId not found for blockId: ${targetBlockId}`);
-    const splitAction: LayoutTreeSplitVerticalAction = {
-        type: LayoutTreeActionType.SplitVertical,
-        targetNodeId,
-        newNode: newLayoutNode(undefined, undefined, undefined, { blockId: newBlockId }),
-        position,
-        focused: true,
-    };
-    layoutModel.treeReducer(splitAction);
-    return newBlockId;
-}
+// Block component model registry — moved to block-component-registry.ts;
+// re-exported below for backward-compat (97 files import from this module).
+export {
+    registerBlockComponentModel,
+    unregisterBlockComponentModel,
+    getBlockComponentModel,
+    getAllBlockComponentModels,
+    getFocusedBlockId,
+    refocusNode,
+    openOrFocusPaneByView,
+} from "./block-component-registry";
 
-export async function createBlock(blockDef: BlockDef, magnified = false, ephemeral = false): Promise<string> {
-    const layoutModel = getLayoutModelForStaticTab();
-    const rtOpts: RuntimeOpts = { termsize: { rows: 25, cols: 80 } };
-    const blockId = await ObjectService.CreateBlock(blockDef, rtOpts);
-    // Mark BEFORE branching — the ephemeral path (below) also inserts this
-    // block into the local tree (via addEphemeralNodeToLayout, later) ahead
-    // of tab.blockids catching up, same race as the non-ephemeral path.
-    markBlockRecentlyCreated(blockId);
-    if (ephemeral) {
-        layoutModel.newEphemeralNode(blockId);
-        return blockId;
-    }
-    const insertNodeAction: LayoutTreeInsertNodeAction = {
-        type: LayoutTreeActionType.InsertNode,
-        node: newLayoutNode(undefined, undefined, undefined, { blockId }),
-        magnified,
-        focused: true,
-    };
-    layoutModel.treeReducer(insertNodeAction);
-    return blockId;
-}
+// Wave file fetching — moved to wave-file.ts; re-exported below for
+// backward-compat (97 files import from this module).
+export { fetchWaveFile } from "./wave-file";
 
-export async function replaceBlock(blockId: string, blockDef: BlockDef, focus: boolean): Promise<string> {
-    const layoutModel = getLayoutModelForStaticTab();
-    const rtOpts: RuntimeOpts = { termsize: { rows: 25, cols: 80 } };
-    const newBlockId = await ObjectService.CreateBlock(blockDef, rtOpts);
-    markBlockRecentlyCreated(newBlockId);
-    setTimeout(() => {
-        fireAndForget(() => ObjectService.DeleteBlock(blockId));
-    }, 300);
-    const targetNodeId = layoutModel.getNodeByBlockId(blockId)?.id;
-    if (targetNodeId == null) throw new Error(`targetNodeId not found for blockId: ${blockId}`);
-    const replaceNodeAction: LayoutTreeReplaceNodeAction = {
-        type: LayoutTreeActionType.ReplaceNode,
-        targetNodeId,
-        newNode: newLayoutNode(undefined, undefined, undefined, { blockId: newBlockId }),
-        focused: focus,
-    };
-    layoutModel.treeReducer(replaceNodeAction);
-    return newBlockId;
-}
+// Connection status — moved to conn-status.ts; re-exported below for
+// backward-compat (97 files import from this module). Also imported above
+// (see top of file) for use in the `atoms` object.
+export {
+    connStatusMap,
+    allConnStatus,
+    loadConnStatus,
+    subscribeToConnEvents,
+    makeDefaultConnStatus,
+    getOrCreateConnStatusPair,
+    getConnStatusAtom,
+} from "./conn-status";
 
-// ---------------------------------------------------------------------------
-// Wave file fetching
-// ---------------------------------------------------------------------------
+// Flash errors / notifications — moved to flash-notifications.ts;
+// re-exported below for backward-compat (97 files import from this module).
+// Also imported above (see top of file) for use in the `atoms` object.
+export {
+    flashErrors,
+    setFlashErrors,
+    notifications,
+    setNotifications,
+    notificationPopoverMode,
+    setNotificationPopoverMode,
+    pushFlashError,
+    addOrUpdateNotification,
+    pushNotification,
+    removeNotificationById,
+    removeFlashError,
+    removeNotification,
+} from "./flash-notifications";
 
-export async function fetchWaveFile(
-    zoneId: string,
-    fileName: string,
-    offset?: number
-): Promise<{ data: Uint8Array; fileInfo: WaveFile }> {
-    const usp = new URLSearchParams();
-    usp.set("zoneid", zoneId);
-    usp.set("name", fileName);
-    if (offset != null) usp.set("offset", offset.toString());
-    // Use X-AuthKey header instead of `?authkey=` query-string fallback.
-    // The fallback was removed in the 2026-05-11 audit (C3) for everything
-    // except the /ws upgrade route, where headers aren't possible.
-    const headers: Record<string, string> = {};
-    if (globalThis.window != null) {
-        const authKey = getApi()?.getAuthKey?.();
-        if (authKey) headers["X-AuthKey"] = authKey;
-    }
-    const resp = await fetch(getWebServerEndpoint() + "/agentmux/file?" + usp.toString(), { headers });
-    if (!resp.ok) {
-        if (resp.status === 404) return { data: null, fileInfo: null };
-        throw new Error("error getting wave file: " + resp.statusText);
-    }
-    if (resp.status == 204) return { data: null, fileInfo: null };
-    const fileInfo64 = resp.headers.get("X-ZoneFileInfo");
-    if (fileInfo64 == null) throw new Error(`missing zone file info for ${zoneId}:${fileName}`);
-    const fileInfo = JSON.parse(atob(fileInfo64));
-    const data = await resp.arrayBuffer();
-    return { data: new Uint8Array(data), fileInfo };
-}
-
-// ---------------------------------------------------------------------------
-// Focus / node
-// ---------------------------------------------------------------------------
-
-export function setNodeFocus(nodeId: string) {
-    getLayoutModelForStaticTab().focusNode(nodeId);
-}
-
-// ---------------------------------------------------------------------------
-// Block component model registry
-// ---------------------------------------------------------------------------
-
-const blockComponentModelMap = new Map<string, BlockComponentModel>();
-
-export function registerBlockComponentModel(blockId: string, bcm: BlockComponentModel) {
-    blockComponentModelMap.set(blockId, bcm);
-}
-
-export function unregisterBlockComponentModel(blockId: string, owner?: BlockComponentModel) {
-    // Owner-checked delete (SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR §3.4):
-    // every tab stays mounted, so a block can be transiently mounted twice
-    // (e.g. a dangling layout leaf during a cross-tab move). Registration is
-    // last-writer-wins; without this check the FIRST mount's unmount deletes
-    // the SECOND mount's live registration and tears down its atom cache —
-    // leaving the surviving pane unreachable by focus routing (the
-    // "non-responsive tab"). Callers pass the exact bcm they registered; the
-    // delete only proceeds if that bcm still owns the key.
-    if (owner !== undefined && blockComponentModelMap.get(blockId) !== owner) {
-        return;
-    }
-    blockComponentModelMap.delete(blockId);
-    cleanupBlockAtomCache(blockId);
-}
-
-export function getBlockComponentModel(blockId: string): BlockComponentModel {
-    return blockComponentModelMap.get(blockId);
-}
-
-export function getAllBlockComponentModels(): BlockComponentModel[] {
-    return Array.from(blockComponentModelMap.values());
-}
-
-export function getFocusedBlockId(): string {
-    const layoutModel = getLayoutModelForStaticTab();
-    const focusedLayoutNode = layoutModel.focusedNode();
-    return focusedLayoutNode?.data?.blockId;
-}
-
-export function refocusNode(blockId: string) {
-    if (blockId == null) {
-        blockId = getFocusedBlockId();
-        if (blockId == null) return;
-    }
-    const layoutModel = getLayoutModelForStaticTab();
-    const layoutNodeId = layoutModel.getNodeByBlockId(blockId);
-    if (layoutNodeId?.id == null) return;
-    layoutModel.focusNode(layoutNodeId.id);
-    const bcm = getBlockComponentModel(blockId);
-    const ok = bcm?.viewModel?.giveFocus?.();
-    if (!ok) {
-        const inputElem = document.getElementById(`${blockId}-dummy-focus`);
-        inputElem?.focus();
-    }
-}
-
-/**
- * Open or focus a pane by view type.
- * If a block with the given viewType already exists in the current tab's layout,
- * focus it. Otherwise create a new block using blockDef (defaults to `{ meta: { view: viewType } }`).
- */
-export async function openOrFocusPaneByView(viewType: string, blockDef?: BlockDef): Promise<void> {
-    const layoutModel = getLayoutModelForStaticTab();
-    for (const bcm of blockComponentModelMap.values()) {
-        if (bcm.viewModel?.viewType === viewType) {
-            const blockId = (bcm.viewModel as any).blockId as string | undefined;
-            if (blockId) {
-                const node = layoutModel.getNodeByBlockId(blockId);
-                if (node?.id != null) {
-                    // Block is in the active tab — focus it.
-                    layoutModel.focusNode(node.id);
-                    bcm.viewModel.giveFocus?.();
-                    return;
-                }
-                // Block exists on another tab; fall through and open a fresh one here.
-            }
-        }
-    }
-    await createBlock(blockDef ?? { meta: { view: viewType } });
-}
-
-// ---------------------------------------------------------------------------
-// Counters (dev tooling)
-// ---------------------------------------------------------------------------
-
-const Counters = new Map<string, number>();
-
-export function countersClear() {
-    Counters.clear();
-}
-
-export function counterInc(name: string, incAmt = 1) {
-    let count = Counters.get(name) ?? 0;
-    count += incAmt;
-    Counters.set(name, count);
-}
-
-export function countersPrint() {
-    let outStr = "";
-    for (const [name, count] of Counters.entries()) {
-        outStr += `${name}: ${count}\n`;
-    }
-    console.log(outStr);
-}
-
-// ---------------------------------------------------------------------------
-// Connection status
-// ---------------------------------------------------------------------------
-
-export async function loadConnStatus() {
-    const connStatusArr = await ClientService.GetAllConnStatus();
-    if (connStatusArr == null) return;
-    for (const connStatus of connStatusArr) {
-        const [, setter] = getOrCreateConnStatusPair(connStatus.connection);
-        setter(connStatus);
-    }
-}
-
-export function subscribeToConnEvents() {
-    waveEventSubscribe({
-        eventType: WpsEvent.ConnChange,
-        handler: (event: WaveEvent) => {
-            try {
-                const connStatus = event.data as ConnStatus;
-                if (connStatus == null || isBlank(connStatus.connection)) return;
-                console.log("connstatus update", connStatus);
-                const [, setter] = getOrCreateConnStatusPair(connStatus.connection);
-                setter(connStatus);
-            } catch (e) {
-                console.log("connchange error", e);
-            }
-        },
-    });
-}
-
-function makeDefaultConnStatus(conn: string, connected: boolean, hasconnected: boolean): ConnStatus {
-    return {
-        connection: conn,
-        connected,
-        error: null,
-        status: connected ? "connected" : "disconnected",
-        hasconnected,
-        activeconnnum: 0,
-    };
-}
-
-function getOrCreateConnStatusPair(conn: string): [() => ConnStatus, (v: ConnStatus) => void] {
-    const map = connStatusMap();
-    let pair = map.get(conn);
-    if (pair == null) {
-        const initial =
-            isBlank(conn) || conn.startsWith("aws:")
-                ? makeDefaultConnStatus(conn, true, true)
-                : makeDefaultConnStatus(conn, false, false);
-        const [get, set] = createSignal<ConnStatus>(initial);
-        pair = [get, set];
-        const newMap = new Map(map);
-        newMap.set(conn, pair);
-        setConnStatusMap(newMap);
-    }
-    return pair;
-}
-
-export function getConnStatusAtom(conn: string): () => ConnStatus {
-    return getOrCreateConnStatusPair(conn)[0];
-}
-
-// ---------------------------------------------------------------------------
-// Flash errors / notifications
-// ---------------------------------------------------------------------------
-
-export function pushFlashError(ferr: FlashErrorType) {
-    if (ferr.expiration == null) ferr.expiration = Date.now() + 5000;
-    ferr.id = crypto.randomUUID();
-    setFlashErrors((prev) => [...prev, ferr]);
-}
-
-export function addOrUpdateNotification(notif: NotificationType) {
-    setNotifications((prev) => {
-        const withoutThis = prev.filter((n) => n.id !== notif.id);
-        return [...withoutThis, notif];
-    });
-}
-
-export function pushNotification(notif: NotificationType) {
-    if (!notif.id && notif.persistent) return;
-    notif.id = notif.id ?? crypto.randomUUID();
-    addOrUpdateNotification(notif);
-}
-
-export function removeNotificationById(id: string) {
-    setNotifications((prev) => prev.filter((n) => n.id !== id));
-}
-
-export function removeFlashError(id: string) {
-    setFlashErrors((prev) => prev.filter((ferr) => ferr.id !== id));
-}
-
-export function removeNotification(id: string) {
-    setNotifications((prev) => prev.filter((n) => n.id !== id));
-}
-
-// ---------------------------------------------------------------------------
-// Tab management
-// ---------------------------------------------------------------------------
-
-/**
- * Picks a random color for a newly-created tab, so successive tabs read
- * as visually distinct at a glance instead of all defaulting to the same
- * hue. The first (startup) tab is unaffected — it keeps its fixed "Blue"
- * standard color, applied separately by the startup-tab backfill in
- * tabbar.tsx. Users can still change the colour per-tab via the
- * right-click menu after creation.
- */
-function randomNewTabColor(): string {
-    return TAB_COLORS[Math.floor(Math.random() * TAB_COLORS.length)].hex;
-}
-
-export function createTab() {
-    const ws = workspace();
-    if (ws == null) return;
-    fireAndForget(async () => {
-        // Pin the gate while CreateTab + UpdateObjectMeta + preset import
-        // + applyTabPreset run. Calling scheduleRevealLift here would let
-        // the 80ms SETTLE window elapse during the (longtask-free) RPCs
-        // and layout-model polling inside applyTabPreset, so the gate
-        // would lift before the agent/sysinfo/swarm blocks have mounted
-        // and the user would still see the piecemeal cascade. The
-        // detector is started in `finally` once the preset apply has
-        // returned (or failed) — at that point SETTLE / MAX_GATE measure
-        // the actual mount window. See issue #774 /
-        // SPEC_TAB_CONTENT_REVEAL_GATE.md.
-        holdRevealGate();
-        try {
-            const tabId = await WorkspaceService.CreateTab(ws.oid, "", true, false);
-            await ObjectService.UpdateObjectMeta(
-                WOS.makeORef("tab", tabId),
-                { "tab:color": randomNewTabColor() } as MetaType,
-            );
-            // Default-layout preset (agent + sysinfo + swarm). Lives in
-            // a single central module so any future tab-creation path
-            // (duplicate, tear-off destination, startup-tab backfill)
-            // can reuse the same panes layout. See
-            // frontend/app/tab/tab-presets.ts.
-            const { applyTabPreset, DEFAULT_TAB_PRESET } = await import("@/app/tab/tab-presets");
-            await applyTabPreset(tabId, DEFAULT_TAB_PRESET);
-        } catch (e) {
-            console.error("[createTab] failed:", e);
-        } finally {
-            // Pair with holdRevealGate above — without this the gate
-            // would stay pinned forever on the error path.
-            scheduleRevealLift();
-        }
-    });
-}
-
-// Tracks an in-flight tab-switch measurement so rapid back-to-back
-// switches (held Ctrl+Tab, programmatic bursts) don't collide on the
-// shared `tab-switch:start` mark name. performance.mark throws on
-// duplicates and the second call would silently drop its measurement.
-// Sequence guard ensures the prior switch's pending double-rAF
-// markEnd doesn't close the new switch's measurement instead.
-let tabSwitchInFlight = false;
-let tabSwitchSeq = 0;
-
-export async function setActiveTab(tabId: string): Promise<void> {
-    const ws = workspace();
-    if (ws == null) return;
-    const fromTabId = activeTabId();
-    if (fromTabId === tabId) return;
-    // Canonical chokepoint for tab-switch perf marks. Wraps every entry
-    // path: click (tabbar), keyboard (Ctrl+Tab/1..9 in keymodel),
-    // palette (command-registry), test app API (cef-api). markEnd lands
-    // two rAFs after the IPC so the duration captures user-perceived
-    // switch cost — IPC + Solid fan-out + layout + paint — not just IPC.
-    // Backend-driven switches (tearoff merge, cross-drag) bypass this
-    // function and are not measured here; they're rare and observable
-    // via the long-task timeline.
-    if (tabSwitchInFlight) {
-        // Close prior measurement (truncated) so the new markStart
-        // doesn't collide. The prior call's pending rAF markEnd will
-        // see its sequence is stale and skip.
-        markEnd("tab-switch", "interrupted");
-    }
-    const mySeq = ++tabSwitchSeq;
-    tabSwitchInFlight = true;
-    markStart("tab-switch", { from: fromTabId, to: tabId });
-    // Pin the gate during the SetActiveTab RPC so the destination
-    // tab can't paint piecemeal once the workspace update lands.
-    // The auto-lift detector is started in `finally` (i.e. AFTER
-    // the active-tab update lands) so SETTLE / MAX_GATE measure the
-    // destination mount window, not the longtask-free RPC duration.
-    // Honours rapid Ctrl-Tab spam — each call resets the detector.
-    // See issue #774 / SPEC_TAB_CONTENT_REVEAL_GATE.md.
-    holdRevealGate();
-    try {
-        await WorkspaceService.SetActiveTab(ws.oid, tabId);
-    } finally {
-        // Pair with holdRevealGate above. Also lifts the gate on
-        // the RPC-throws path so the user isn't stuck on a hidden
-        // source tab.
-        scheduleRevealLift();
-        requestAnimationFrame(() =>
-            requestAnimationFrame(() => {
-                if (mySeq === tabSwitchSeq) {
-                    markEnd("tab-switch");
-                    tabSwitchInFlight = false;
-                }
-            })
-        );
-    }
-}
+// Tab management — moved to tab-actions.ts; re-exported below for
+// backward-compat (97 files import from this module).
+export { createTab, randomNewTabColor, setActiveTab } from "./tab-actions";
 
 // ---------------------------------------------------------------------------
 // Telemetry
@@ -846,39 +425,13 @@ export function recordTEvent(event: string, props?: TEventProps) {
     RpcApi.RecordTEventCommand(TabRpcClient, { event, props }, { noresponse: true });
 }
 
-// ---------------------------------------------------------------------------
-// Misc utilities
-// ---------------------------------------------------------------------------
+// Counters (dev tooling) — moved to dev-counters.ts; re-exported below for
+// backward-compat (97 files import from this module).
+export { countersClear, counterInc, countersPrint } from "./dev-counters";
 
-const objectIdWeakMap = new WeakMap();
-let objectIdCounter = 0;
-
-export function getObjectId(obj: any): number {
-    if (!objectIdWeakMap.has(obj)) objectIdWeakMap.set(obj, objectIdCounter++);
-    return objectIdWeakMap.get(obj);
-}
-
-let cachedIsDev: boolean = null;
-export function isDev() {
-    if (cachedIsDev == null) cachedIsDev = getApi().getIsDev();
-    return cachedIsDev;
-}
-
-let cachedUserName: string = null;
-export function getUserName(): string {
-    if (cachedUserName == null) cachedUserName = getApi().getUserName();
-    return cachedUserName;
-}
-
-let cachedHostName: string = null;
-export function getHostName(): string {
-    if (cachedHostName == null) cachedHostName = getApi().getHostName();
-    return cachedHostName;
-}
-
-export async function openLink(uri: string) {
-    getApi().openExternal(uri);
-}
+// Misc utilities — moved to misc-utils.ts; re-exported below for
+// backward-compat (97 files import from this module).
+export { getObjectId, isDev, getUserName, getHostName, openLink } from "./misc-utils";
 
 // Re-export WOS, getApi, and setPlatform for call-sites that import them from here
 export { WOS, setPlatform, getApi };
