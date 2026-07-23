@@ -4,11 +4,15 @@
 
 On Windows, the executable users actually launch is `agentmux.exe` — `scripts/package-portable.sh` builds it by copying `agentmux-launcher.exe`, and `packaging/windows/agentmux.iss` installs it under that name. The launcher owns `agentmux-srv`'s lifecycle directly and spawns `agentmux-cef` itself (see the Architecture section of `CLAUDE.md`).
 
+This table is not a small fixed enum — on Windows, `supervisor/windows.rs` can also **pass through the CEF host's or `agentmux-srv`'s own raw OS exit code** once a restart/recovery budget is exhausted (`break code`, e.g. after repeated abnormal host exits or repeated system-OOM restarts) or a relaunch attempt itself fails to spawn. Codes below are the launcher's own, not inherited ones.
+
 | Exit Code | Description |
 |-----------|-------------|
 | **0** | Clean exit — the launcher supervisor finished normally (host exited, a `--diag` subcommand succeeded, or on macOS/Linux, `second_instance.rs` detected a running peer and exited cleanly as the second instance) |
 | **1** | Fatal startup/supervision error — causes include: the supervisor thread panicking, the runtime being misconfigured (host binary resolves to the launcher itself), the CEF host binary not found in `runtime/`, or a `--diag sagas` failure |
-| **2** | Fatal setup error unrelated to `--diag`: on Windows, a `--diag` CLI usage error (missing or unknown topic; known topics: `wrr`, `srv`, `sagas`); on macOS/Linux, `second_instance.rs::bind_socket_with_recovery` failing to bind/recover the IPC socket (initial bind failure, lockfile open failure, `flock` failure, post-lock or post-recovery rebind failure) |
+| **2** | Fatal IPC setup failure unrelated to `--diag`: on Windows, `supervisor/windows.rs` failing to bind/forward the named pipe (also used for the `--diag` CLI usage-error case: missing or unknown topic, known topics `wrr`/`srv`/`sagas`); on macOS/Linux, `second_instance.rs::bind_socket_with_recovery` failing to bind/recover the IPC Unix socket (initial bind failure, lockfile open failure, `flock` failure, post-lock or post-recovery rebind failure) |
+| **86** | Windows-only: `TEARDOWN_BACKSTOP_EXIT_CODE` (`supervisor/windows.rs`) — the CEF host wedged with zero user windows open and stopped responding to UI-thread liveness probes past the grace period; the launcher force-terminates the job and exits with this distinct code so the failure is unambiguous in log/exit-code triage |
+| *(other)* | Windows-only: the host's or `agentmux-srv`'s own raw exit code, passed through after `supervisor/windows.rs` gives up retrying that failure class (host/srv restart budget exhausted, OOM-recovery budget exhausted, or a relaunch attempt itself failed to spawn) |
 
 ## agentmux-cef (Desktop Host)
 
