@@ -78,13 +78,31 @@ pub(crate) async fn run_unix(
     launcher_exe_dir: &std::path::Path,
     real_exe: &std::path::Path,
     args: &[String],
-    // Linux: pre-created sink whose rx was handed to the splash thread.
-    // macOS / other Unix: None; a fresh sink (rx dropped) is created below.
+    // macOS/Linux: pre-created sink whose rx was already handed to the
+    // splash thread in main() (both platforms paint the splash before
+    // calling into here). Other Unix / splash disabled: None; a fresh sink
+    // (rx dropped) is created below.
     startup_sink_opt: Option<startup_events::StartupEventSink>,
 ) {
     use tokio::signal::unix::{signal, SignalKind};
 
     let version = env!("CARGO_PKG_VERSION");
+
+    // Startup telemetry bus, resolved up front (rather than after the
+    // pre-supervisor work below, where it used to live) so that work itself
+    // can be wrapped in a "prep" stage — previously invisible in the splash
+    // panel on every platform (confirmed via grep: only "migrations"/
+    // "backend"/"host" were ever reported; the selftest fixture's "prep"/
+    // "Launcher setup" fixture data implied this stage already existed for
+    // real, but it never did). See
+    // docs/specs/PLAN_SPLASH_TELEMETRY_OPEN_ITEMS_2026_07_22.md item 4.
+    let startup_sink = startup_sink_opt.unwrap_or_else(|| {
+        let (s, rx) = startup_events::StartupEventSink::new();
+        drop(rx);
+        s
+    });
+    startup_sink.stage_begin("prep", "Launcher setup");
+    let prep_t = std::time::Instant::now();
 
     // 1. Resolve + create data dirs (same authority as run_windows: srv +
     //    host receive these via env so they can't drift).
@@ -235,16 +253,16 @@ pub(crate) async fn run_unix(
         }
     }
 
-    // Startup telemetry bus.
-    // Linux: sink was created in main() before the splash thread launched;
-    // its rx is already being drained by the splash — reuse it so stage
-    // events flow live. macOS/other: create a fresh sink and drop rx
-    // (macOS splash doesn't yet consume typed events).
-    let startup_sink = startup_sink_opt.unwrap_or_else(|| {
-        let (s, rx) = startup_events::StartupEventSink::new();
-        drop(rx);
-        s
-    });
+    // "prep" ends here — everything above (paths, IPC socket, single-instance
+    // handshake, other-instances check, event log, saga registry legacy
+    // cleanup) is done. What follows (saga coordinator + IPC server setup,
+    // srv spawn) has its own stages/overlap already.
+    startup_sink.stage_end(
+        "prep",
+        prep_t.elapsed().as_millis() as u64,
+        startup_events::StartupStatus::Ok,
+        None,
+    );
 
     // Saga coordinator-setup/IPC-server-startup run concurrently with the
     // srv boot below (tokio::join!) instead of sequentially before it.

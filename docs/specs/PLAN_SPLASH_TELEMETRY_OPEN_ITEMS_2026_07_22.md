@@ -22,7 +22,7 @@ a full read of its own body names 7).
 | 1 | **Count-up race** — rows whose Begin+End land in the same tick snap instead of animating | **High** | Low | ✅ **Fixed this pass** |
 | 2 | **B.7-1** — verify whether `cef`/`frontend`/channel-pruner stage events were ever wired | High (cheap) | ~0 | ✅ **Verified this pass — not wired** |
 | 3 | **B.7-2** — verify Linux's shipped `SUMMARY_HOLD_MS`/hold-equivalent value | High (cheap) | ~0 | ✅ **Verified this pass — see finding** |
-| 4 | Pre-supervisor stage instrumentation (macOS/Windows) | Medium | Low | Open |
+| 4 | Pre-supervisor stage instrumentation (macOS+Linux via `unix.rs`) | Medium | Low | ✅ **Done this pass** (Windows still open — see below) |
 | 5 | §B.4.3 — consolidate `StageRow`/`apply_event` across Windows/Linux/macOS into one shared module | Medium (maintainability) | Medium | Open |
 | 6 | A.4.4 — IPC-signal-based splash dismiss instead of file-existence poll | Low | Medium | Open (deferred by design) |
 | 7 | Extend the `"host"` stage to cover full spawn→first-paint (currently spawn-latency only) | Medium | Medium-High | Open (blocked on #6's signal work) |
@@ -65,9 +65,13 @@ More importantly, this also confirms a **semantic mismatch** the spec didn't fla
 
 ---
 
-## 4. Pre-supervisor stage instrumentation (macOS/Windows) — open
+## 4. Pre-supervisor stage instrumentation — ✅ done for macOS+Linux, still open for Windows
 
-Only Linux currently creates its `StartupEventSink` early enough in `main()` to capture a pre-supervisor (binary-path resolution etc.) stage. macOS and Windows create it later, so that window of startup work is invisible in both splashes' telemetry panels. Mechanical, low-risk, mirrors an already-working pattern — good next pickup. Not attempted this pass; deferred to keep this pass scoped to the two verified-cheap items + the one real bug fix.
+**Correction to the original spec's framing:** its claim was "only Linux creates its `StartupEventSink` early enough in `main()`." Re-verified against current code and that's stale — macOS has created its sink in `main()` at the same point as Linux (before the splash exists) since the original macOS splash consumer landed (#1933). The **actual** gap, confirmed by grep across every real (non-selftest) call site of `stage_begin`/`stage_end`/`sub_begin`/`sub_end`, was different: only three stages were ever reported anywhere — `"migrations"`, `"backend"` (both `srv_spawner.rs`), and `"host"` (`unix.rs`/`windows.rs`). The pre-supervisor work in `run_unix` — path resolution, IPC socket setup, the single-instance handshake, the older-running-instances check, event-log/saga-registry setup — was never wrapped in any stage at all, on any platform. (The selftest fixture's synthetic `"prep"`/`"Launcher setup"` row in `main.rs` implied this stage already existed for real; it never did.)
+
+**Fixed this pass, macOS+Linux (`agentmux-launcher/src/supervisor/unix.rs`):** moved the `startup_sink` resolution to the top of `run_unix` and wrapped everything from function entry through the single-instance handshake / event-log / saga-registry setup in a new `"prep"` stage, ending right before the `tokio::join!` that overlaps saga-coordinator setup with srv spawn. `cargo check`/`cargo test -p agentmux-launcher` both clean (222/222 passing) — purely additive, same `stage_begin`/`stage_end` idiom already used by the `"host"` stage, no control-flow changes.
+
+**Windows still genuinely open, for a different and larger reason than "sink timing":** `run_windows` creates its *own* `startup_sink`/spawns its *own* splash internally (`supervisor/windows.rs:259,274`), well after its own pre-supervisor work (path resolution, Job Object creation) already ran — unlike macOS/Linux, Windows' splash doesn't exist yet at that point, so there's no live splash to report a "prep" stage to at all. Closing this gap needs restructuring `main.rs`'s Windows branch to create the splash earlier (mirroring the macOS/Linux pattern), which is a real, Windows-specific behavior change I can't build or verify from this (macOS) environment — correctly left open rather than attempted blind.
 
 ## 5. §B.4.3 — StageRow/apply_event consolidation — open
 
@@ -87,6 +91,6 @@ Blocked by a real dependency: the host's env vars (`ws_endpoint`, etc.) are pars
 
 ---
 
-## Why items 4-8 weren't attempted this pass
+## Why items 5-8 (and Windows' half of item 4) weren't attempted this pass
 
-This pass intentionally stopped after the highest-ROI items (#1-3): #1 is the actual user-facing bug that prompted this consolidation, and #2-3 were free (pure verification, no code risk). Items 4-8 are each real, but every one of them either (a) needs cross-platform verification this single-platform (macOS) environment can't provide safely, or (b) was already deliberately deferred with sound reasoning that still holds. Picking one of them up should be a separate, individually-scoped pass — not bundled reactively into this one, per the same discipline the original spec called for and which this consolidation exists to make easier to follow going forward.
+This pass worked through the highest-ROI items in order: #1 is the actual user-facing bug that prompted this consolidation; #2-3 were free (pure verification, no code risk); #4's macOS+Linux half was low-effort and used an already-proven idiom, so it got picked up too once the real gap was understood precisely. Items 5-8, and Windows' half of #4, are each real, but every one of them either (a) needs Windows-specific verification this single-platform (macOS) environment can't provide safely, or (b) was already deliberately deferred with sound reasoning that still holds. Picking one of them up should be a separate, individually-scoped pass — not bundled reactively into this one, per the same discipline the original spec called for and which this consolidation exists to make easier to follow going forward.
