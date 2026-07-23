@@ -51,12 +51,22 @@ struct RegisteredClosures {
     refresh: Box<dyn Fn() -> BoxFuture<'static, Result<(), RefreshErrorKind>> + Send + Sync>,
 }
 
+// Bundled behind ONE mutex (not two) so a `states`/`generations` pair is
+// always read and written atomically — the reducer needs both together to
+// tell a stale, superseded-registration completion apart from a current one
+// (see `state::Event::RunFreshnessCheck`'s doc comment).
+#[derive(Default)]
+struct ReducerTables {
+    states: HashMap<String, CredentialState>,
+    generations: HashMap<String, u64>,
+}
+
 pub struct RefreshScheduler {
     closures: AsyncMutex<HashMap<String, Arc<RegisteredClosures>>>,
     // Reducer-owned coordination state. std::sync::Mutex, not AsyncMutex —
     // the reducer never awaits, every hold is sub-millisecond, matching the
     // discipline every other reducer in this codebase follows.
-    states: Mutex<HashMap<String, CredentialState>>,
+    tables: Mutex<ReducerTables>,
     // Per-id wake signal for concurrent `ensure_fresh` callers waiting on an
     // in-flight check/refresh (the reducer decides single-flight; this just
     // wakes waiters once that decision resolves).
@@ -73,7 +83,7 @@ impl RefreshScheduler {
     pub fn new() -> Self {
         Self {
             closures: AsyncMutex::new(HashMap::new()),
-            states: Mutex::new(HashMap::new()),
+            tables: Mutex::new(ReducerTables::default()),
             notifiers: Mutex::new(HashMap::new()),
         }
     }
@@ -109,8 +119,9 @@ impl RefreshScheduler {
             );
         }
         {
-            let mut states = self.states.lock().unwrap();
-            state::update(&mut states, Command::Register { id: id.clone() });
+            let mut tables = self.tables.lock().unwrap();
+            let ReducerTables { states, generations } = &mut *tables;
+            state::update(states, generations, Command::Register { id: id.clone() });
         }
         self.notifiers
             .lock()
@@ -122,8 +133,13 @@ impl RefreshScheduler {
     pub async fn unregister(&self, credential_id: &str) {
         self.closures.lock().await.remove(credential_id);
         let events = {
-            let mut states = self.states.lock().unwrap();
-            state::update(&mut states, Command::Unregister { id: credential_id.to_string() })
+            let mut tables = self.tables.lock().unwrap();
+            let ReducerTables { states, generations } = &mut *tables;
+            state::update(
+                states,
+                generations,
+                Command::Unregister { id: credential_id.to_string() },
+            )
         };
         self.trace(&events);
         // A caller elsewhere may be parked on notified().await after seeing
@@ -137,7 +153,7 @@ impl RefreshScheduler {
     /// from a routine in-progress refresh). Not used by `ensure_fresh`
     /// itself, which always dispatches through the reducer regardless.
     pub fn state(&self, credential_id: &str) -> Option<CredentialState> {
-        self.states.lock().unwrap().get(credential_id).cloned()
+        self.tables.lock().unwrap().states.get(credential_id).cloned()
     }
 
     /// Ensure `credential_id` is fresh, single-flight-guarded. If another
@@ -161,8 +177,9 @@ impl RefreshScheduler {
             let notified = notify.notified();
 
             let events = {
-                let mut states = self.states.lock().unwrap();
-                state::update(&mut states, Command::CheckRequested { id: id.clone() })
+                let mut tables = self.tables.lock().unwrap();
+                let ReducerTables { states, generations } = &mut *tables;
+                state::update(states, generations, Command::CheckRequested { id: id.clone() })
             };
             match events.as_slice() {
                 [Event::Unregistered { .. }] => {
@@ -172,7 +189,8 @@ impl RefreshScheduler {
                     notified.await;
                     continue;
                 }
-                [Event::RunFreshnessCheck { .. }] => {
+                [Event::RunFreshnessCheck { generation, .. }] => {
+                    let generation = *generation;
                     let Some(closures) = self.closures.lock().await.get(&id).cloned() else {
                         // Unregistered concurrently between the dispatch
                         // above and this lookup. Wake any other caller
@@ -185,30 +203,45 @@ impl RefreshScheduler {
                     };
                     let is_fresh = (closures.is_fresh)().await;
                     let events = {
-                        let mut states = self.states.lock().unwrap();
-                        state::update(&mut states, Command::FreshnessChecked { id: id.clone(), is_fresh })
+                        let mut tables = self.tables.lock().unwrap();
+                        let ReducerTables { states, generations } = &mut *tables;
+                        state::update(
+                            states,
+                            generations,
+                            Command::FreshnessChecked { id: id.clone(), is_fresh, generation },
+                        )
                     };
                     self.trace(&events);
                     if is_fresh {
                         self.wake(&id);
                         return Ok(());
                     }
-                    debug_assert!(matches!(events.as_slice(), [Event::RunRefresh { .. }]));
+                    // events is normally [RunRefresh{..}], but can be empty
+                    // if this completion lost a race with a concurrent
+                    // register()/unregister() — the reducer discards a
+                    // stale-epoch result rather than let it clobber newer
+                    // state (see state::Event::RunFreshnessCheck's doc
+                    // comment). Either way THIS caller still proceeds with
+                    // its own refresh using its own already-captured
+                    // closures; its return value reflects what it actually
+                    // observed regardless of whether the broker's shared
+                    // state accepted the transition.
                     let result = (closures.refresh)().await;
                     let (msg, cmd) = match result {
-                        Ok(()) => (None, Command::RefreshSucceeded { id: id.clone() }),
+                        Ok(()) => (None, Command::RefreshSucceeded { id: id.clone(), generation }),
                         Err(error) => {
                             let msg = match &error {
                                 RefreshErrorKind::Transient(m) | RefreshErrorKind::PermanentAuthFailure(m) => {
                                     m.clone()
                                 }
                             };
-                            (Some(msg), Command::RefreshFailed { id: id.clone(), error })
+                            (Some(msg), Command::RefreshFailed { id: id.clone(), error, generation })
                         }
                     };
                     let events = {
-                        let mut states = self.states.lock().unwrap();
-                        state::update(&mut states, cmd)
+                        let mut tables = self.tables.lock().unwrap();
+                        let ReducerTables { states, generations } = &mut *tables;
+                        state::update(states, generations, cmd)
                     };
                     self.trace(&events);
                     self.wake(&id);
@@ -240,7 +273,7 @@ impl RefreshScheduler {
             };
             for id in ids {
                 let needs_reauth = matches!(
-                    self.states.lock().unwrap().get(&id),
+                    self.tables.lock().unwrap().states.get(&id),
                     Some(CredentialState::NeedsReauth { .. })
                 );
                 if needs_reauth {

@@ -86,17 +86,39 @@ pub enum Command {
     /// is fresh.
     CheckRequested { id: String },
     /// The orchestrator ran `is_fresh()` and is reporting the result.
-    FreshnessChecked { id: String, is_fresh: bool },
-    RefreshSucceeded { id: String },
-    RefreshFailed { id: String, error: RefreshErrorKind },
+    /// `generation` is the value from the `RunFreshnessCheck` event that
+    /// triggered this call — see `Event::RunFreshnessCheck`'s doc comment.
+    FreshnessChecked {
+        id: String,
+        is_fresh: bool,
+        generation: u64,
+    },
+    /// `generation` carried forward from the `RunRefresh` event that
+    /// triggered this call.
+    RefreshSucceeded { id: String, generation: u64 },
+    RefreshFailed {
+        id: String,
+        error: RefreshErrorKind,
+        generation: u64,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
     /// Orchestrator should call the registered `is_fresh()` closure now.
-    RunFreshnessCheck { id: String },
+    /// `generation` is this id's registration epoch at dispatch time — the
+    /// orchestrator must echo it back unchanged in the resulting
+    /// `Command::FreshnessChecked` (and, if a refresh follows, in
+    /// `RefreshSucceeded`/`RefreshFailed` too). This lets the reducer detect
+    /// a stale completion: if `register()` replaces this id's closures
+    /// (bumping its generation) while `is_fresh()`/`refresh()` is still
+    /// awaiting, the eventual result would otherwise silently clobber the
+    /// freshly re-registered credential's state with a verdict about
+    /// closures that no longer apply (reagent re-review on #2275).
+    RunFreshnessCheck { id: String, generation: u64 },
     /// Orchestrator should call the registered `refresh()` closure now.
-    RunRefresh { id: String },
+    /// `generation` carries the same epoch forward from `RunFreshnessCheck`.
+    RunRefresh { id: String, generation: u64 },
     /// Another caller is already checking/refreshing this id — the
     /// orchestrator should wait on the id's `Notify` and re-dispatch
     /// `CheckRequested` once woken.
@@ -120,9 +142,16 @@ fn now_unix() -> u64 {
         .unwrap_or(0)
 }
 
-/// `states` is the orchestrator's whole coordination table — one reducer
+/// `states` is the orchestrator's whole coordination table; `generations`
+/// tracks each id's registration epoch (bumped on every `Register`) so a
+/// completion from a superseded registration can be told apart from a
+/// current one — see `Event::RunFreshnessCheck`'s doc comment. One reducer
 /// call per dispatched command, sub-millisecond, never awaits.
-pub fn update(states: &mut HashMap<String, CredentialState>, cmd: Command) -> Vec<Event> {
+pub fn update(
+    states: &mut HashMap<String, CredentialState>,
+    generations: &mut HashMap<String, u64>,
+    cmd: Command,
+) -> Vec<Event> {
     match cmd {
         Command::Register { id } => {
             // Replacing an already-registered id is safe here specifically
@@ -130,11 +159,15 @@ pub fn update(states: &mut HashMap<String, CredentialState>, cmd: Command) -> Ve
             // not by an external lock a caller could be left blocked on
             // (the pre-refactor design's latent race). A caller currently
             // waiting via AlreadyInFlight re-dispatches CheckRequested once
-            // woken and just sees the fresh entry's is_fresh() result.
+            // woken and just sees the fresh entry's is_fresh() result. The
+            // generation bump is what lets a stale in-flight completion from
+            // the OLD registration be told apart from this new one.
+            *generations.entry(id.clone()).or_insert(0) += 1;
             states.insert(id, CredentialState::Fresh);
             Vec::new()
         }
         Command::Unregister { id } => {
+            generations.remove(&id);
             states.remove(&id);
             vec![Event::Unregistered { id }]
         }
@@ -156,16 +189,21 @@ pub fn update(states: &mut HashMap<String, CredentialState>, cmd: Command) -> Ve
                     CredentialState::Refreshing { .. } => unreachable!("matched above"),
                 };
                 states.insert(id.clone(), CredentialState::Refreshing { prior_failures });
-                vec![Event::RunFreshnessCheck { id }]
+                let generation = *generations.get(&id).unwrap_or(&0);
+                vec![Event::RunFreshnessCheck { id, generation }]
             }
         },
-        Command::FreshnessChecked { id, is_fresh } => {
-            if !states.contains_key(&id) {
-                // Unregistered while this in-flight check's is_fresh() was
-                // still awaiting — don't resurrect a phantom entry for a
-                // credential nothing still owns; the sweep loop only walks
-                // registered closures, so a resurrected entry would leak
-                // forever (reagent re-review on #2275).
+        Command::FreshnessChecked {
+            id,
+            is_fresh,
+            generation,
+        } => {
+            if generations.get(&id).copied() != Some(generation) {
+                // Stale completion: id was unregistered (generation gone)
+                // or re-registered (generation bumped) while is_fresh() was
+                // still awaiting. Either way this result is about closures
+                // that no longer apply — discard it rather than clobber the
+                // current epoch's state (reagent re-review on #2275).
                 return Vec::new();
             }
             if is_fresh {
@@ -178,20 +216,24 @@ pub fn update(states: &mut HashMap<String, CredentialState>, cmd: Command) -> Ve
                 }
             } else {
                 // Stays Refreshing — orchestrator now runs the actual refresh.
-                vec![Event::RunRefresh { id }]
+                vec![Event::RunRefresh { id, generation }]
             }
         }
-        Command::RefreshSucceeded { id } => {
-            if !states.contains_key(&id) {
-                // Same phantom-entry hazard as FreshnessChecked above.
+        Command::RefreshSucceeded { id, generation } => {
+            if generations.get(&id).copied() != Some(generation) {
+                // Same stale-epoch hazard as FreshnessChecked above.
                 return Vec::new();
             }
             states.insert(id.clone(), CredentialState::Fresh);
             vec![Event::BecameFresh { id }]
         }
-        Command::RefreshFailed { id, error } => {
-            if !states.contains_key(&id) {
-                // Same phantom-entry hazard as FreshnessChecked above.
+        Command::RefreshFailed {
+            id,
+            error,
+            generation,
+        } => {
+            if generations.get(&id).copied() != Some(generation) {
+                // Same stale-epoch hazard as FreshnessChecked above.
                 return Vec::new();
             }
             let reason = error.message().to_string();
@@ -232,10 +274,38 @@ pub fn update(states: &mut HashMap<String, CredentialState>, cmd: Command) -> Ve
 mod tests {
     use super::*;
 
-    fn registered() -> HashMap<String, CredentialState> {
-        let mut m = HashMap::new();
-        update(&mut m, Command::Register { id: "cred".into() });
-        m
+    /// Bundles `states` + `generations` so tests can dispatch commands
+    /// without threading two maps through every call site by hand.
+    struct Harness {
+        states: HashMap<String, CredentialState>,
+        generations: HashMap<String, u64>,
+    }
+
+    impl Harness {
+        fn dispatch(&mut self, cmd: Command) -> Vec<Event> {
+            update(&mut self.states, &mut self.generations, cmd)
+        }
+
+        fn get(&self, id: &str) -> Option<&CredentialState> {
+            self.states.get(id)
+        }
+
+        fn contains_key(&self, id: &str) -> bool {
+            self.states.contains_key(id)
+        }
+
+        fn generation_of(&self, id: &str) -> u64 {
+            *self.generations.get(id).expect("id should be registered")
+        }
+    }
+
+    fn registered() -> Harness {
+        let mut h = Harness {
+            states: HashMap::new(),
+            generations: HashMap::new(),
+        };
+        h.dispatch(Command::Register { id: "cred".into() });
+        h
     }
 
     #[test]
@@ -247,8 +317,15 @@ mod tests {
     #[test]
     fn check_on_fresh_transitions_to_refreshing_and_requests_a_check() {
         let mut m = registered();
-        let events = update(&mut m, Command::CheckRequested { id: "cred".into() });
-        assert_eq!(events, vec![Event::RunFreshnessCheck { id: "cred".into() }]);
+        let gen = m.generation_of("cred");
+        let events = m.dispatch(Command::CheckRequested { id: "cred".into() });
+        assert_eq!(
+            events,
+            vec![Event::RunFreshnessCheck {
+                id: "cred".into(),
+                generation: gen
+            }]
+        );
         assert_eq!(
             m.get("cred"),
             Some(&CredentialState::Refreshing { prior_failures: 0 })
@@ -258,8 +335,8 @@ mod tests {
     #[test]
     fn a_second_check_while_refreshing_gets_already_in_flight_not_a_second_run() {
         let mut m = registered();
-        update(&mut m, Command::CheckRequested { id: "cred".into() });
-        let events = update(&mut m, Command::CheckRequested { id: "cred".into() });
+        m.dispatch(Command::CheckRequested { id: "cred".into() });
+        let events = m.dispatch(Command::CheckRequested { id: "cred".into() });
         assert_eq!(events, vec![Event::AlreadyInFlight { id: "cred".into() }]);
         // Still just one credential, still Refreshing — the second dispatch
         // did not disturb the in-flight state.
@@ -272,14 +349,13 @@ mod tests {
     #[test]
     fn freshness_checked_true_returns_to_fresh_and_reports_became_fresh() {
         let mut m = registered();
-        update(&mut m, Command::CheckRequested { id: "cred".into() });
-        let events = update(
-            &mut m,
-            Command::FreshnessChecked {
-                id: "cred".into(),
-                is_fresh: true,
-            },
-        );
+        let gen = m.generation_of("cred");
+        m.dispatch(Command::CheckRequested { id: "cred".into() });
+        let events = m.dispatch(Command::FreshnessChecked {
+            id: "cred".into(),
+            is_fresh: true,
+            generation: gen,
+        });
         assert_eq!(m.get("cred"), Some(&CredentialState::Fresh));
         assert_eq!(events, vec![Event::BecameFresh { id: "cred".into() }]);
     }
@@ -287,15 +363,20 @@ mod tests {
     #[test]
     fn freshness_checked_false_requests_a_refresh_and_stays_refreshing() {
         let mut m = registered();
-        update(&mut m, Command::CheckRequested { id: "cred".into() });
-        let events = update(
-            &mut m,
-            Command::FreshnessChecked {
+        let gen = m.generation_of("cred");
+        m.dispatch(Command::CheckRequested { id: "cred".into() });
+        let events = m.dispatch(Command::FreshnessChecked {
+            id: "cred".into(),
+            is_fresh: false,
+            generation: gen,
+        });
+        assert_eq!(
+            events,
+            vec![Event::RunRefresh {
                 id: "cred".into(),
-                is_fresh: false,
-            },
+                generation: gen
+            }]
         );
-        assert_eq!(events, vec![Event::RunRefresh { id: "cred".into() }]);
         assert_eq!(
             m.get("cred"),
             Some(&CredentialState::Refreshing { prior_failures: 0 })
@@ -305,16 +386,18 @@ mod tests {
     #[test]
     fn refresh_succeeded_returns_to_fresh_and_resets_any_failure_count() {
         let mut m = registered();
-        update(&mut m, Command::CheckRequested { id: "cred".into() });
-        update(
-            &mut m,
-            Command::RefreshFailed {
-                id: "cred".into(),
-                error: RefreshErrorKind::Transient("boom".into()),
-            },
-        );
-        update(&mut m, Command::CheckRequested { id: "cred".into() });
-        let events = update(&mut m, Command::RefreshSucceeded { id: "cred".into() });
+        let gen = m.generation_of("cred");
+        m.dispatch(Command::CheckRequested { id: "cred".into() });
+        m.dispatch(Command::RefreshFailed {
+            id: "cred".into(),
+            error: RefreshErrorKind::Transient("boom".into()),
+            generation: gen,
+        });
+        m.dispatch(Command::CheckRequested { id: "cred".into() });
+        let events = m.dispatch(Command::RefreshSucceeded {
+            id: "cred".into(),
+            generation: gen,
+        });
         assert_eq!(events, vec![Event::BecameFresh { id: "cred".into() }]);
         assert_eq!(m.get("cred"), Some(&CredentialState::Fresh));
     }
@@ -322,14 +405,13 @@ mod tests {
     #[test]
     fn refresh_failed_transient_moves_to_failed_with_count_one() {
         let mut m = registered();
-        update(&mut m, Command::CheckRequested { id: "cred".into() });
-        let events = update(
-            &mut m,
-            Command::RefreshFailed {
-                id: "cred".into(),
-                error: RefreshErrorKind::Transient("network blip".into()),
-            },
-        );
+        let gen = m.generation_of("cred");
+        m.dispatch(Command::CheckRequested { id: "cred".into() });
+        let events = m.dispatch(Command::RefreshFailed {
+            id: "cred".into(),
+            error: RefreshErrorKind::Transient("network blip".into()),
+            generation: gen,
+        });
         assert_eq!(
             events,
             vec![Event::BecameFailed {
@@ -352,30 +434,34 @@ mod tests {
         // Port of the pre-refactor scheduler test — a second check after a
         // failure must retry (not treat the failed attempt as success).
         let mut m = registered();
-        update(&mut m, Command::CheckRequested { id: "cred".into() });
-        update(
-            &mut m,
-            Command::RefreshFailed {
-                id: "cred".into(),
-                error: RefreshErrorKind::Transient("nope".into()),
-            },
-        );
+        let gen = m.generation_of("cred");
+        m.dispatch(Command::CheckRequested { id: "cred".into() });
+        m.dispatch(Command::RefreshFailed {
+            id: "cred".into(),
+            error: RefreshErrorKind::Transient("nope".into()),
+            generation: gen,
+        });
         assert!(!matches!(m.get("cred"), Some(CredentialState::Fresh)));
-        let events = update(&mut m, Command::CheckRequested { id: "cred".into() });
-        assert_eq!(events, vec![Event::RunFreshnessCheck { id: "cred".into() }]);
+        let events = m.dispatch(Command::CheckRequested { id: "cred".into() });
+        assert_eq!(
+            events,
+            vec![Event::RunFreshnessCheck {
+                id: "cred".into(),
+                generation: gen
+            }]
+        );
     }
 
     #[test]
     fn permanent_auth_failure_skips_straight_to_needs_reauth_on_the_first_failure() {
         let mut m = registered();
-        update(&mut m, Command::CheckRequested { id: "cred".into() });
-        let events = update(
-            &mut m,
-            Command::RefreshFailed {
-                id: "cred".into(),
-                error: RefreshErrorKind::PermanentAuthFailure("invalid_grant".into()),
-            },
-        );
+        let gen = m.generation_of("cred");
+        m.dispatch(Command::CheckRequested { id: "cred".into() });
+        let events = m.dispatch(Command::RefreshFailed {
+            id: "cred".into(),
+            error: RefreshErrorKind::PermanentAuthFailure("invalid_grant".into()),
+            generation: gen,
+        });
         assert!(matches!(
             events.as_slice(),
             [Event::BecameNeedsReauth { .. }]
@@ -389,28 +475,25 @@ mod tests {
     #[test]
     fn five_consecutive_transient_failures_escalate_to_needs_reauth() {
         let mut m = registered();
+        let gen = m.generation_of("cred");
         for i in 1..=(NEEDS_REAUTH_THRESHOLD - 1) {
-            update(&mut m, Command::CheckRequested { id: "cred".into() });
-            let events = update(
-                &mut m,
-                Command::RefreshFailed {
-                    id: "cred".into(),
-                    error: RefreshErrorKind::Transient(format!("attempt {i}")),
-                },
-            );
+            m.dispatch(Command::CheckRequested { id: "cred".into() });
+            let events = m.dispatch(Command::RefreshFailed {
+                id: "cred".into(),
+                error: RefreshErrorKind::Transient(format!("attempt {i}")),
+                generation: gen,
+            });
             assert!(
                 matches!(events.as_slice(), [Event::BecameFailed { .. }]),
                 "attempt {i} should still be a transient Failed, not NeedsReauth yet"
             );
         }
-        update(&mut m, Command::CheckRequested { id: "cred".into() });
-        let events = update(
-            &mut m,
-            Command::RefreshFailed {
-                id: "cred".into(),
-                error: RefreshErrorKind::Transient("final straw".into()),
-            },
-        );
+        m.dispatch(Command::CheckRequested { id: "cred".into() });
+        let events = m.dispatch(Command::RefreshFailed {
+            id: "cred".into(),
+            error: RefreshErrorKind::Transient("final straw".into()),
+            generation: gen,
+        });
         assert!(matches!(
             events.as_slice(),
             [Event::BecameNeedsReauth { .. }]
@@ -427,30 +510,38 @@ mod tests {
         // since the credential was marked NeedsReauth — on-demand checks
         // (unlike the sweep loop) must not just give up permanently.
         let mut m = registered();
-        update(&mut m, Command::CheckRequested { id: "cred".into() });
-        update(
-            &mut m,
-            Command::RefreshFailed {
+        let gen = m.generation_of("cred");
+        m.dispatch(Command::CheckRequested { id: "cred".into() });
+        m.dispatch(Command::RefreshFailed {
+            id: "cred".into(),
+            error: RefreshErrorKind::PermanentAuthFailure("dead".into()),
+            generation: gen,
+        });
+        let events = m.dispatch(Command::CheckRequested { id: "cred".into() });
+        assert_eq!(
+            events,
+            vec![Event::RunFreshnessCheck {
                 id: "cred".into(),
-                error: RefreshErrorKind::PermanentAuthFailure("dead".into()),
-            },
+                generation: gen
+            }]
         );
-        let events = update(&mut m, Command::CheckRequested { id: "cred".into() });
-        assert_eq!(events, vec![Event::RunFreshnessCheck { id: "cred".into() }]);
     }
 
     #[test]
     fn check_requested_on_an_unregistered_id_reports_unregistered() {
-        let mut m: HashMap<String, CredentialState> = HashMap::new();
-        let events = update(&mut m, Command::CheckRequested { id: "nope".into() });
+        let mut m = Harness {
+            states: HashMap::new(),
+            generations: HashMap::new(),
+        };
+        let events = m.dispatch(Command::CheckRequested { id: "nope".into() });
         assert_eq!(events, vec![Event::Unregistered { id: "nope".into() }]);
     }
 
     #[test]
     fn unregister_then_check_reports_unregistered() {
         let mut m = registered();
-        update(&mut m, Command::Unregister { id: "cred".into() });
-        let events = update(&mut m, Command::CheckRequested { id: "cred".into() });
+        m.dispatch(Command::Unregister { id: "cred".into() });
+        let events = m.dispatch(Command::CheckRequested { id: "cred".into() });
         assert_eq!(events, vec![Event::Unregistered { id: "cred".into() }]);
     }
 
@@ -463,15 +554,22 @@ mod tests {
         // cleanly to Fresh, and the next CheckRequested from any caller
         // (old or new) just sees that fresh state.
         let mut m = registered();
-        update(&mut m, Command::CheckRequested { id: "cred".into() });
+        m.dispatch(Command::CheckRequested { id: "cred".into() });
         assert_eq!(
             m.get("cred"),
             Some(&CredentialState::Refreshing { prior_failures: 0 })
         );
-        update(&mut m, Command::Register { id: "cred".into() });
+        m.dispatch(Command::Register { id: "cred".into() });
         assert_eq!(m.get("cred"), Some(&CredentialState::Fresh));
-        let events = update(&mut m, Command::CheckRequested { id: "cred".into() });
-        assert_eq!(events, vec![Event::RunFreshnessCheck { id: "cred".into() }]);
+        let new_gen = m.generation_of("cred");
+        let events = m.dispatch(Command::CheckRequested { id: "cred".into() });
+        assert_eq!(
+            events,
+            vec![Event::RunFreshnessCheck {
+                id: "cred".into(),
+                generation: new_gen
+            }]
+        );
     }
 
     #[test]
@@ -481,32 +579,82 @@ mod tests {
         // for an id nothing owns anymore — the sweep loop only walks
         // registered closures, so a resurrected entry would leak forever
         // and scheduler.state(id) would misreport it as still registered.
-        for stale_completion in [
+        fn mid_check_then_unregistered() -> (Harness, u64) {
+            let mut m = registered();
+            let gen = m.generation_of("cred");
+            m.dispatch(Command::CheckRequested { id: "cred".into() });
+            m.dispatch(Command::Unregister { id: "cred".into() });
+            assert!(!m.contains_key("cred"));
+            (m, gen)
+        }
+
+        // A fresh registration's generation is always 1 (Register starts
+        // the counter at 0 and increments once) — hardcoded below just to
+        // build the Command literals; the real value is still read back via
+        // mid_check_then_unregistered()'s own gen for the actual dispatch.
+        let stale_completions = [
             Command::FreshnessChecked {
                 id: "cred".into(),
                 is_fresh: true,
+                generation: 1,
             },
             Command::FreshnessChecked {
                 id: "cred".into(),
                 is_fresh: false,
+                generation: 1,
             },
-            Command::RefreshSucceeded { id: "cred".into() },
+            Command::RefreshSucceeded {
+                id: "cred".into(),
+                generation: 1,
+            },
             Command::RefreshFailed {
                 id: "cred".into(),
                 error: RefreshErrorKind::Transient("late".into()),
+                generation: 1,
             },
-        ] {
-            let mut m = registered();
-            update(&mut m, Command::CheckRequested { id: "cred".into() });
-            update(&mut m, Command::Unregister { id: "cred".into() });
-            assert!(!m.contains_key("cred"));
-
-            let events = update(&mut m, stale_completion);
+        ];
+        for stale_completion in stale_completions {
+            let (mut m, gen) = mid_check_then_unregistered();
+            assert_eq!(gen, 1, "sanity: a fresh registration's generation is 1");
+            let events = m.dispatch(stale_completion);
             assert_eq!(events, Vec::new());
             assert!(
                 !m.contains_key("cred"),
                 "a stale completion must not resurrect the entry"
             );
         }
+    }
+
+    #[test]
+    fn a_stale_completion_after_re_register_does_not_clobber_the_new_epoch() {
+        // reagent re-review on #2275: if register() is called again for an
+        // id while an OLD in-flight check/refresh for that same id is still
+        // awaiting, the stale completion (belonging to the pre-registration
+        // closures) must not overwrite the freshly re-registered
+        // credential's Fresh state — it belongs to a superseded epoch and
+        // has nothing meaningful to say about the current one.
+        let mut m = registered();
+        let old_gen = m.generation_of("cred");
+        m.dispatch(Command::CheckRequested { id: "cred".into() });
+
+        // Re-register while the "old" check/refresh is still in flight —
+        // bumps the generation and resets to Fresh.
+        m.dispatch(Command::Register { id: "cred".into() });
+        assert_eq!(m.get("cred"), Some(&CredentialState::Fresh));
+        let new_gen = m.generation_of("cred");
+        assert_ne!(old_gen, new_gen);
+
+        // The old attempt's belated failure must not land.
+        let events = m.dispatch(Command::RefreshFailed {
+            id: "cred".into(),
+            error: RefreshErrorKind::PermanentAuthFailure("stale invalid_grant".into()),
+            generation: old_gen,
+        });
+        assert_eq!(events, Vec::new());
+        assert_eq!(
+            m.get("cred"),
+            Some(&CredentialState::Fresh),
+            "a stale completion from a superseded registration must not mask the new one"
+        );
     }
 }
