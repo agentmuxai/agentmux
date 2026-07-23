@@ -24,7 +24,8 @@
 import { createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import type { BlockNodeModel } from "@/app/block/blocktypes";
 import { IdentityViewModel } from "@/app/view/identity/identity-model";
-import { AccountsTab, AccountForm } from "@/app/view/identity/identity-view";
+import { AccountsTab } from "@/app/view/identity/identity-accounts-tab";
+import { AccountForm } from "@/app/view/identity/identity-account-form";
 import { ProviderLogo } from "@/element/ProviderLogo";
 import { AccountsGallery } from "./AccountsGallery";
 import { AgentMuxConnectPanel, useMuxBusStatus } from "./AgentMuxConnectPanel";
