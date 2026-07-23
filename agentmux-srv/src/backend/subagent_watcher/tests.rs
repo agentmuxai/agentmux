@@ -333,6 +333,39 @@ fn unwatch_agent_also_prunes_matching_dispatches_and_pending_activity() {
     assert!(pending.contains_key("wf_2"));
 }
 
+// ── session_belongs_to_block (docs/retro/retro-subagent-watcher-shared-dir-fanout-and-leak-2026-07-23.md) ──
+
+#[test]
+fn session_belongs_to_block_matches_only_the_blocks_own_persisted_session() {
+    let watcher = fixture_watcher();
+    let mut meta = crate::backend::obj::MetaMapType::new();
+    meta.insert(
+        crate::backend::blockcontroller::core::META_SESSION_ID.to_string(),
+        serde_json::Value::String("s1".to_string()),
+    );
+    let mut block = crate::backend::obj::Block {
+        oid: "block-1".to_string(),
+        meta,
+        ..Default::default()
+    };
+    watcher.wstore.insert(&mut block).unwrap();
+
+    assert!(watcher.session_belongs_to_block("block-1", "s1"));
+    assert!(
+        !watcher.session_belongs_to_block("block-1", "s2"),
+        "a different session id must not match, even for a real block"
+    );
+}
+
+#[test]
+fn session_belongs_to_block_is_false_for_a_block_that_no_longer_exists() {
+    let watcher = fixture_watcher();
+    assert!(
+        !watcher.session_belongs_to_block("closed-block", "s1"),
+        "a closed/deleted block owns nothing — must reject, not fall through"
+    );
+}
+
 #[test]
 fn subagent_events_are_capped_at_max() {
     let mut state = fixture_state("parent-1", "sub-a", "s1");
@@ -817,6 +850,105 @@ async fn watch_agent_falls_back_to_nearest_existing_ancestor_when_config_dir_is_
     assert_eq!(watcher.watched_agents.lock().unwrap().len(), 1);
 
     std::fs::remove_dir_all(&root).ok();
+}
+
+#[tokio::test]
+async fn prune_block_also_tears_down_that_blocks_filesystem_watcher() {
+    // Regression test for docs/retro/retro-subagent-watcher-shared-dir-
+    // fanout-and-leak-2026-07-23.md Bug B: prune_block used to only clear
+    // derived session/dispatch/pending-activity state, leaving the
+    // underlying notify watcher (and its dedicated tokio task) running
+    // forever for a closed block — which kept re-creating fresh
+    // (mis-)attributed entries the next time another agent sharing its
+    // watched directory wrote to its own subagent transcript.
+    let home = dirs::home_dir().expect("test requires a resolvable home dir");
+    let root = home.join(format!("amx-prune-watch-test-{}", now_millis()));
+    std::fs::create_dir_all(&root).unwrap();
+
+    let watcher = Arc::new(fixture_watcher());
+    watcher.watch_agent("agent-1", "block-1", root.join("claude-agent-1"));
+    watcher.watch_agent("agent-2", "block-2", root.join("claude-agent-2"));
+    assert_eq!(watcher.watched_agents.lock().unwrap().len(), 2);
+
+    watcher.prune_block("block-1");
+
+    let watched = watcher.watched_agents.lock().unwrap();
+    assert_eq!(watched.len(), 1, "prune_block must tear down the closed block's own watcher");
+    assert_eq!(watched[0].parent_block_id, "block-2", "a different, still-open block's watcher must be untouched");
+    drop(watched);
+
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[tokio::test]
+async fn live_fs_event_is_not_misattributed_to_a_block_that_does_not_own_the_session() {
+    // End-to-end regression test for docs/retro/retro-subagent-watcher-
+    // shared-dir-fanout-and-leak-2026-07-23.md Bug A: two blocks share
+    // one config_dir (the common case — every agent without a per-
+    // identity bundle override resolves to the same default provider
+    // path), so both watchers see the same raw filesystem event. Only
+    // the block that actually owns the session (via its own persisted
+    // agent:sessionid meta) may record the subagent; the other must
+    // drop the event, not misattribute it to itself.
+    let home = dirs::home_dir().expect("test requires a resolvable home dir");
+    let config_dir = home.join(format!("amx-shared-dir-fanout-test-{}", now_millis()));
+    let session_id = "owned-session";
+    let subagents_dir = config_dir.join("projects").join("ws-enc").join(session_id).join("subagents");
+    std::fs::create_dir_all(&subagents_dir).unwrap();
+
+    let watcher = Arc::new(fixture_watcher());
+
+    let mut owner_block = crate::backend::obj::Block {
+        oid: "block-owner".to_string(),
+        meta: {
+            let mut m = crate::backend::obj::MetaMapType::new();
+            m.insert(
+                crate::backend::blockcontroller::core::META_SESSION_ID.to_string(),
+                serde_json::Value::String(session_id.to_string()),
+            );
+            m
+        },
+        ..Default::default()
+    };
+    watcher.wstore.insert(&mut owner_block).unwrap();
+
+    let mut other_block = crate::backend::obj::Block {
+        oid: "block-other".to_string(),
+        meta: {
+            let mut m = crate::backend::obj::MetaMapType::new();
+            m.insert(
+                crate::backend::blockcontroller::core::META_SESSION_ID.to_string(),
+                serde_json::Value::String("some-other-session".to_string()),
+            );
+            m
+        },
+        ..Default::default()
+    };
+    watcher.wstore.insert(&mut other_block).unwrap();
+
+    // Both watch the SAME shared config_dir — simulating two agents
+    // without a per-identity bundle override.
+    watcher.watch_agent("agent-owner", "block-owner", config_dir.clone());
+    watcher.watch_agent("agent-other", "block-other", config_dir.clone());
+
+    std::fs::write(
+        subagents_dir.join("agent-x.jsonl"),
+        "{\"type\":\"result\",\"result\":\"done\"}\n",
+    )
+    .unwrap();
+
+    // Debounce is 200ms; give the watcher's async task ample margin to
+    // observe the write and process it.
+    tokio::time::sleep(Duration::from_millis(800)).await;
+
+    let active = watcher.list_active();
+    assert_eq!(active.len(), 1, "the subagent must be recorded exactly once");
+    assert_eq!(
+        active[0].parent_block_id, "block-owner",
+        "must be attributed to the block that actually owns the session, never the other block sharing its watched directory"
+    );
+
+    std::fs::remove_dir_all(&config_dir).ok();
 }
 
 /// Regression test for the observed flood: reopening a pane for an

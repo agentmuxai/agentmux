@@ -200,6 +200,7 @@ pub(super) struct DispatchState {
 #[allow(dead_code)]
 pub(super) struct WatchedAgent {
     pub(super) agent_id: String,
+    pub(super) parent_block_id: String,
     pub(super) config_dir: PathBuf,
     pub(super) _watcher: RecommendedWatcher,
 }
