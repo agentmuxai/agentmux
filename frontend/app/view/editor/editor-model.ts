@@ -995,18 +995,19 @@ export class EditorViewModel implements ViewModel {
      *     BlockDef mirrors exactly what the backend's build_pane_meta
      *     (agentmux-srv/src/server/app_api/pane.rs) would have produced for
      *     `pane.open { view: "editor", file }` on the openToTheSide path.
-     *  3. Explicit setActiveTab() AFTER the block exists. CreateTab's own
-     *     `activate` arg looks like it should switch focus to the new tab,
-     *     but the reducer only auto-activates a workspace's very FIRST tab
+     *  3. Explicit setActiveTab() AFTER the block exists. Belt-and-suspenders
+     *     alongside CreateTab's own `activate=true` (3rd arg below): the
+     *     reducer itself only auto-activates a workspace's very FIRST tab
      *     ever (see create_tab_second_tab_does_not_steal_active in
-     *     reducer.rs) — `activate` is accepted by the RPC and silently
-     *     dropped before it reaches the reducer for every tab after the
-     *     first. This looks like a latent bug in createTab()'s own
-     *     hamburger/titlebar "New Tab" action too (same activate=true, same
-     *     silent no-op past the first tab) — out of scope here, flagging
-     *     for a separate fix. Called last so the destination tab already
-     *     has its content when the switch's reveal-gate opens — avoids a
-     *     flash of an empty tab. */
+     *     reducer.rs), but the service layer already compensates —
+     *     `agentmux-srv/src/server/service/workspace.rs`'s CreateTab handler
+     *     dispatches a follow-up SetActiveTab whenever `activate=true` and
+     *     the reducer didn't auto-activate, so this call is redundant in
+     *     practice, not a workaround for a live bug (#2155's "activate arg
+     *     silently dropped" half was already fixed server-side by the time
+     *     it was filed). Kept anyway: harmless, and it's still what makes
+     *     the destination tab already have its content when the switch's
+     *     reveal-gate opens — avoids a flash of an empty tab. */
     async openInNewTab(filePath: string): Promise<void> {
         const ws = workspace();
         if (!ws) return;
