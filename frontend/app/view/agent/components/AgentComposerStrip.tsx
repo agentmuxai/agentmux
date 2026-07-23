@@ -11,8 +11,10 @@
  *         (Shell is rightmost — SPEC_COMPOSER_STRIP_LAYOUT_MIC_CENTER_MODEL_DEFAULTS_2026_07_10.md)
  *
  * The strip bar itself is not clickable. "Shell" is the sole toggle for
- * the details drawer (ActivityLogPanel + the AgentShellSubblock terminal,
- * SPEC_AGENT_SHELL_XTERM_TERMINAL_2026_07_03.md). Mode/Model/Effort used to be
+ * the details drawer (the AgentShellSubblock terminal — activity-log lines
+ * write directly into it rather than a separate panel, see agent-view.tsx's
+ * `log`/`handleShellTermReady`. SPEC_AGENT_SHELL_XTERM_TERMINAL_2026_07_03.md).
+ * Mode/Model/Effort used to be
  * three separate FlyoutMenu drop-up pills here (SPEC_COMPOSER_STRIP_MODE_TOPLEVEL_2026_07_02
  * Fix 7); they're now consolidated into one AgentRuntimeDropup trigger + panel
  * — see docs/specs/SPEC_AGENT_RUNTIME_DROPUP_2026_07_09.md.
@@ -211,7 +213,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                     type="button"
                     class="agent-composer-strip-log-btn"
                     classList={{ "agent-composer-strip-log-btn--active": props.logOpen }}
-                    title={props.logOpen ? "Hide the shell" : "Show the shell (activity log + interactive terminal)"}
+                    title={props.logOpen ? "Hide the shell" : "Show the shell"}
                     onClick={() => props.onToggleLog()}
                 >
                     Shell

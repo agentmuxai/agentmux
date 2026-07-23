@@ -39,6 +39,22 @@ interface AgentShellSubblockProps {
      * independent controls (see `termFontSize` below).
      */
     agentPaneZoom: Accessor<number>;
+    /**
+     * Fired once the terminal has finished `init()`, handing the parent a
+     * closure that writes pre-formatted (already ANSI-colored, no trailing
+     * newline) text directly into the terminal's local render buffer via
+     * `Terminal.write` — the same local-only mechanism `AgentInstallModal.tsx`
+     * uses for its synthetic install-log lines. This never touches the PTY
+     * (that's `sendDataHandler`/`blockinput` above, a separate path), so
+     * writes here can't be interpreted as shell input. Used to redirect the
+     * agent pane's activity-log lines into the shell instead of a separate
+     * log panel — see agent-view.tsx's `log` wrapper.
+     */
+    onTermReady?: (write: (text: string) => void) => void;
+    /** Fired on unmount (drawer close) — pairs with `onTermReady` so the
+     *  parent can drop its write closure rather than risk calling `.write`
+     *  on a disposed `Terminal` (`TermWrap.dispose()` doesn't null it out). */
+    onTermDispose?: () => void;
 }
 
 const BASE_FONT_SIZE = 13;
@@ -155,6 +171,11 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
                 );
                 termWrap = wrap;
                 await wrap.init();
+                if (!disposed) {
+                    props.onTermReady?.((text: string) => {
+                        termWrap?.terminal.write(`${text}\r\n`);
+                    });
+                }
 
                 // Reflow the PTY grid whenever the container is resized — drag-
                 // resizing the details drawer (ResizableDetailsDrawer), the pane
@@ -184,6 +205,7 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
         disposed = true;
         termWrap?.dispose();
         resizeObserver?.disconnect();
+        props.onTermDispose?.();
     });
 
     return (

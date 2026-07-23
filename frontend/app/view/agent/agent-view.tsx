@@ -63,7 +63,6 @@ import { handleAgentIdChange } from "@/app/view/term/termagent";
 import { DragOverlay } from "@/app/element/dragoverlay";
 import { AgentControlBar } from "./components/AgentControlBar";
 import { ActivityDock } from "./components/ActivityDock";
-import { ActivityLogPanel } from "./components/ActivityLogPanel";
 import { AgentDecisionPanel } from "./components/AgentDecisionPanel";
 import { AgentQuestionPanel } from "./components/AgentQuestionPanel";
 import { AgentDisconnectedBanner } from "./components/AgentDisconnectedBanner";
@@ -475,10 +474,40 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     }
 
     // Activity log — collects per-session diagnostic entries from launch
-    // flow, subprocess lifecycle, slash commands, errors, etc. Rendered
-    // in the collapsible `<ActivityLogPanel>` above the composer.
-    // `log` is passed down to every hook whose signature takes a `LogFn`.
-    const { lines: logLines, append: log } = useActivityLog();
+    // flow, subprocess lifecycle, slash commands, errors, etc. No longer
+    // rendered as its own panel — written directly into the shell terminal
+    // instead (AgentShellSubblock's `onTermReady`), so the shell is the only
+    // place this surfaces. `logLines` stays as a backlog: the terminal is
+    // unmounted/remounted every time the details drawer closes/reopens
+    // (`<Show>`), so its xterm buffer doesn't persist across that — on each
+    // reopen the backlog replays into the fresh terminal before new writes
+    // go live. `log` is passed down to every hook whose signature takes a
+    // `LogFn`.
+    const { lines: logLines, append: appendLog } = useActivityLog();
+    const [termWrite, setTermWrite] = createSignal<((text: string) => void) | null>(null);
+
+    const formatLogLine = (tag: string, text: string, level?: "info" | "error" | "warn"): string => {
+        const body = `[${tag}] ${text}`;
+        if (level === "error") return `\x1b[31m${body}\x1b[0m`;
+        if (level === "warn") return `\x1b[33m${body}\x1b[0m`;
+        return `\x1b[90m${body}\x1b[0m`;
+    };
+
+    const log = (tag: string, text: string, level?: "info" | "error" | "warn") => {
+        appendLog(tag, text, level);
+        termWrite()?.(formatLogLine(tag, text, level));
+    };
+
+    // Fired once per terminal mount (drawer open) — replays everything
+    // logged so far (including while the drawer was closed), then keeps the
+    // write function around so `log` above writes live from here on.
+    const handleShellTermReady = (write: (text: string) => void) => {
+        for (const line of logLines()) {
+            write(formatLogLine(line.tag, line.text, line.level));
+        }
+        setTermWrite(() => write);
+    };
+    const handleShellTermDispose = () => setTermWrite(null);
 
     // Startup sequence callback ref — assigned after commands + handleSendMessage
     // are defined (below), so the onReady callback can reference them.
@@ -816,9 +845,10 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // Mark turn as active when the user sends a message — TurnStart
     // also clears stale sessionStats from the prior turn.
     const handleSendMessage = (message: string): Promise<void> => {
-        // Bang commands (`!cmd`) output goes to the ActivityLogPanel inside the
-        // details region. Auto-open the details panel so the output is immediately
-        // visible — without this, the user sees no feedback if the panel is closed.
+        // Bang commands (`!cmd`) output writes into the shell terminal (see
+        // `log`/`handleShellTermReady` above). Auto-open the details drawer so
+        // the shell — and thus the output — is immediately visible; without
+        // this the user sees no feedback if the drawer is closed.
         if (message.trim().startsWith("!")) {
             agentAtoms().detailsOpenAtom[1](true);
         }
@@ -1390,18 +1420,18 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             />
 
             <div class="agent-composer-region">
-                {/* Details panel — activity log + control bar. */}
+                {/* Details panel — just the shell + control bar now. Activity-log
+                    lines write directly into the terminal (handleShellTermReady)
+                    instead of a separate panel here. */}
                 <Show when={agentAtoms().detailsOpenAtom[0]()}>
                     <div class="agent-composer-details" id={`agent-composer-details-${model.blockId}`}>
-                        {/* Drag-to-height drawer wrapping the log + terminal — the
-                            actual scrollable/resizable content. AgentControlBar
-                            stays outside it as a fixed-height footer.
-                            SPEC_LOG_TO_SHELL_PANE_2026_07_02.md §5.1. */}
+                        {/* Drag-to-height drawer wrapping the terminal — the actual
+                            scrollable/resizable content. AgentControlBar stays
+                            outside it as a fixed-height footer. */}
                         <ResizableDetailsDrawer
                             blockId={model.blockId}
                             persistedHeight={block()?.meta?.["term:shellheight"] as number | undefined}
                         >
-                            <ActivityLogPanel entries={logLines} />
                             {/* Phase 0 spike (SPEC_AGENT_SHELL_XTERM_TERMINAL_2026_07_03.md):
                                 real xterm+PTY terminal, spawned lazily on first
                                 drawer open via a headless term sub-block. */}
@@ -1421,6 +1451,8 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                                         meta: { "term:shellsubblockid": subBlockId } as any,
                                     });
                                 }}
+                                onTermReady={handleShellTermReady}
+                                onTermDispose={handleShellTermDispose}
                             />
                         </ResizableDetailsDrawer>
                         <AgentControlBar
