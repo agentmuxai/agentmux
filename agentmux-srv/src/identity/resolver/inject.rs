@@ -1,443 +1,32 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Identity → env-var resolver.
+//! The credential-injection entry points and the layer-3 spawn gate.
 //!
-//! Per-provider matrix of which env vars carry which credential. The
-//! GitHub PAT becomes both `GITHUB_TOKEN` and `GH_TOKEN` because both
-//! the official `gh` CLI and direct API consumers (curl, oct.js) read
-//! one or the other; emitting both is the lowest-friction way to make
-//! every common workflow Just Work.
+//! Split out of the single ~2193-line `resolver.rs` (pure relocation, no
+//! behavior change): `inject_identity_env` / `inject_identity_env_async`
+//! (thin public wrappers), `IdentityBinding` + `resolve_bindings_for_instance`
+//! (direct-link lookup), and `inject_identity_env_with_broker` — the
+//! security-critical credential-injection gate. Every test that exercises
+//! `inject_identity_env_with_broker` moved here WITH it, as one atomic unit,
+//! per the module split's constraint that this function and its tests must
+//! never be separated.
 //!
 //! **Before touching `gate_oauth_failure` / `inject_identity_env_with_broker`:**
-//! this module is where `SPEC_PROVIDER_ISOLATION_2026_06_20.md`'s INV-A
-//! ("never the user's global `~/.<P>` dir") is enforced — or, once already,
-//! silently stopped being enforced. Read
-//! `docs/retro/retro-auth-isolation-invariant-silently-orphaned-2026-07-14.md`
-//! first. Short version: an unbound oauth-class provider used to
-//! auto-route to an AgentMux-owned isolated dir (no user action, no global
-//! exposure); a 2026-07-08 refactor orphaned that path without meaning to,
-//! and it was never restored — today's gate only chooses between "block"
-//! and "true ambient" (`use_ambient_login=true`, zero isolation), not the
-//! isolated-auto-provision option that used to exist implicitly.
+//! see the warning doc comment directly above `inject_identity_env_with_broker`
+//! below.
 
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::backend::storage::error::StoreError;
 use crate::backend::storage::store::{SecretRef, Store};
 use crate::backend::wps::{Broker, WaveEvent};
 
-/// Canonical-value enumeration for OAuth-class `IdentityAccount.status`.
-///
-/// `IdentityAccount.status` is a `String` (free-form) at the SQLite layer
-/// — api-key rows keep using whatever the legacy paths wrote
-/// (`"unknown"`, `"ok"`, etc.). For oauth-class bindings we pin a small
-/// closed set per spec §4.4 so the frontend status-badge dispatch is
-/// deterministic and the resolver's expiry probe can never write an
-/// off-the-spec string. Every place the resolver SETS or READS an
-/// oauth-class status uses these constants.
-pub mod oauth_status {
-    /// Token file present and (probed) not expired.
-    pub const VALID: &str = "valid";
-    /// Access token expired; refresh likely succeeds.
-    pub const EXPIRED: &str = "expired";
-    /// Refresh rejected / file missing / parse error; user must Reconnect.
-    pub const NEEDS_REAUTH: &str = "needs_reauth";
-}
-
-/// Result of probing a per-bundle OAuth token directory.
-///
-/// Computed by [`probe_oauth_status`] reading the CLI's on-disk token
-/// file (e.g. `<dir>/.credentials.json` for Claude Code). Maps directly
-/// to [`oauth_status`] strings. Returned as an enum so the caller can
-/// branch without re-parsing the string.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OAuthProbeStatus {
-    Valid,
-    Expired,
-    NeedsReauth,
-}
-
-impl OAuthProbeStatus {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Valid => oauth_status::VALID,
-            Self::Expired => oauth_status::EXPIRED,
-            Self::NeedsReauth => oauth_status::NEEDS_REAUTH,
-        }
-    }
-}
-
-/// Cheap on-disk probe of the per-bundle OAuth token file for a
-/// provider. No network calls — just reads + parses the token JSON,
-/// then compares `expiresAt` against `now_ms`.
-///
-/// **Provider token-file shape (spec §4.4 + §4.5):**
-/// - `claude` — `<dir>/.credentials.json` with
-///   `{ "claudeAiOauth": { "accessToken", "refreshToken", "expiresAt": <ms> } }`
-///   (Anthropic's documented format — see
-///   `docs/specs/agentmux-isolated-auth.md` §1.6).
-/// - `codex` — `<dir>/.credentials.json` (MCP OAuth). Exact field
-///   layout undocumented by OpenAI; for now we treat presence-of-file
-///   as `Valid` and absence as `NeedsReauth`, deferring strict expiry
-///   parsing until the shape is pinned down. Falls through to the
-///   Claude parser as a best-effort — if the file is shape-compatible
-///   (some CLIs reuse Anthropic's format) the expiry check still works.
-/// - `openclaw` — same fallback as codex.
-///
-/// **Returns** `Some(status)` on a definitive read, `None` when probing
-/// isn't supported for the provider (so the caller skips status
-/// updates rather than mis-writing `needs_reauth` for a provider whose
-/// file we just don't know how to parse yet).
-pub fn probe_oauth_status(
-    provider: &str,
-    dir: &str,
-    now_ms: i64,
-) -> Option<OAuthProbeStatus> {
-    let probe_path: std::path::PathBuf = match provider {
-        // Claude Code + codex + openclaw all write to
-        // `<config_dir>/.credentials.json` per
-        // `docs/specs/provider-auth-isolation.md` (the agentmux-managed
-        // dir is what CLAUDE_CONFIG_DIR / CODEX_HOME / OPENCLAW_HOME
-        // point at). Codex / openclaw token field-layout is not
-        // publicly documented; the parser below treats unrecognised
-        // shapes as `Valid` so we don't false-positive a Reconnect on
-        // a working session — strict expiry parsing for those two is
-        // a follow-up once their JSON is pinned down.
-        "claude" | "codex" | "openclaw" => Path::new(dir).join(".credentials.json"),
-        _ => return None,
-    };
-
-    let contents = match std::fs::read_to_string(&probe_path) {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::debug!(
-                target: "identity",
-                provider,
-                path = %probe_path.display(),
-                error = %e,
-                "oauth probe: token file unreadable — status=needs_reauth"
-            );
-            return Some(OAuthProbeStatus::NeedsReauth);
-        }
-    };
-    let json: serde_json::Value = match serde_json::from_str(&contents) {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::debug!(
-                target: "identity",
-                provider,
-                path = %probe_path.display(),
-                error = %e,
-                "oauth probe: token file parse failed — status=needs_reauth"
-            );
-            return Some(OAuthProbeStatus::NeedsReauth);
-        }
-    };
-
-    // Claude shape — `claudeAiOauth.expiresAt` is ms since epoch.
-    // Many shape-compatible providers nest under the same key; try
-    // that first, then fall back to any top-level `expiresAt` /
-    // `expires_at` an alternative provider might use.
-    let expires_at_ms = json
-        .get("claudeAiOauth")
-        .and_then(|o| o.get("expiresAt"))
-        .and_then(|v| v.as_i64())
-        .or_else(|| json.get("expiresAt").and_then(|v| v.as_i64()))
-        .or_else(|| json.get("expires_at").and_then(|v| v.as_i64()));
-
-    let has_refresh = json
-        .get("claudeAiOauth")
-        .and_then(|o| o.get("refreshToken"))
-        .and_then(|v| v.as_str())
-        .map(|s| !s.is_empty())
-        .unwrap_or(false)
-        || json
-            .get("refresh_token")
-            .and_then(|v| v.as_str())
-            .map(|s| !s.is_empty())
-            .unwrap_or(false);
-
-    match expires_at_ms {
-        Some(exp) if exp <= now_ms => {
-            // Past expiry. If a refresh token is present, the next
-            // CLI call will likely refresh it cleanly → `expired`
-            // (transient, not user-actionable). Without a refresh
-            // token the user must re-OAuth → `needs_reauth`.
-            if has_refresh {
-                Some(OAuthProbeStatus::Expired)
-            } else {
-                Some(OAuthProbeStatus::NeedsReauth)
-            }
-        }
-        Some(_) => Some(OAuthProbeStatus::Valid),
-        None => {
-            // Shape doesn't expose an expiry we can parse. Treat the
-            // file's existence as `Valid` rather than guess — false
-            // `needs_reauth` would force the user to reconnect a
-            // working session. codex / openclaw fall here today.
-            tracing::debug!(
-                target: "identity",
-                provider,
-                path = %probe_path.display(),
-                "oauth probe: file present but no parseable expiry — status=valid (best-effort)"
-            );
-            Some(OAuthProbeStatus::Valid)
-        }
-    }
-}
-
-/// Blocking spawn-gate error — layer 3 of
-/// SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md (§2.2).
-///
-/// Returned by the injection entry points when an **oauth-class** provider
-/// the agent is supposed to have credentials for (a binding exists, or the
-/// provider is the agent definition's own CLI provider) has no resolvable
-/// account AND the agent has not opted into ambient login
-/// (`use_ambient_login = 0`, the default). The spawn callers surface
-/// `Display` verbatim in the agent pane (same `error_during_execution`
-/// frame other spawn failures use) — the wording is the spec's.
-///
-/// Api-key-class bindings keep the historical log-and-skip behavior; this
-/// error exists only for the oauth class, where silent fallback meant the
-/// CLI would read the user's global login (`~/.claude`) after an account
-/// was deleted.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SpawnGateError {
-    /// The gate's credentials verdict: no resolvable account, no opt-in.
-    MissingCredentials { provider: String },
-    /// The injection task itself could not run to completion (task-join
-    /// failure — e.g. a panic inside the blocking closure, which also
-    /// poisons the `Store` mutex for every later call). The gate FAILS
-    /// CLOSED on this: an open fallback would silently convert one panic
-    /// anywhere in the store into a permanent, systemic bypass of
-    /// `use_ambient_login = false` (reagent P1, PR #2164 round 1). A
-    /// blocked spawn is retryable and visible; a silent ambient launch
-    /// is neither.
-    InjectionUnavailable { detail: String },
-}
-
-impl std::fmt::Display for SpawnGateError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            // "Bind an account in the Armory" is now the ONLY path — the
-            // ambient/"use global CLI login" opt-in this used to also
-            // suggest was retired (PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_
-            // 2026_07_20.md §7): it let a credential the app couldn't
-            // attribute to any account run indefinitely, invisible to
-            // Armory. Don't point users at a toggle that no longer works.
-            SpawnGateError::MissingCredentials { provider } => write!(
-                f,
-                "no credentials for {}: the bound account was deleted or is \
-                 unresolvable. Bind an account for this provider in the Armory.",
-                provider,
-            ),
-            SpawnGateError::InjectionUnavailable { detail } => write!(
-                f,
-                "credential injection could not run ({detail}); the spawn was \
-                 refused rather than falling back to the global CLI login. \
-                 Retry, and check `muxlog auth` if it persists.",
-            ),
-        }
-    }
-}
-
-impl std::error::Error for SpawnGateError {}
-
-/// Errors specific to the resolver. Every variant is recoverable
-/// (the spawn proceeds with whatever env vars resolved successfully)
-/// — they exist for tracing visibility, not control flow.
-#[derive(Debug, thiserror::Error)]
-pub enum ResolverError {
-    #[error("account not found: {0}")]
-    AccountNotFound(String),
-
-    #[error("env var not set in srv environment: {0}")]
-    EnvVarMissing(String),
-
-    #[error("AWS Secrets Manager backend not yet supported (Phase 3)")]
-    SecretsManagerUnsupported,
-
-    #[error("PlaintextDev secrets are disabled in release builds")]
-    PlaintextDevDisabledInRelease,
-
-    /// `OAuthConfigDir` is a filesystem pointer, not a secret string —
-    /// `resolve_secret` cannot turn it into a credential value because
-    /// the credential lives in a CLI-managed token file inside the dir.
-    /// Oauth-class providers must be routed through the config-dir
-    /// injection path that PR B adds to `inject_identity_env`. Seeing
-    /// this error from `resolve_secret` means the caller forgot to
-    /// dispatch by provider class first.
-    #[error("OAuthConfigDir is a config-dir pointer, not a resolvable secret — routed via the oauth-class injection path, not resolve_secret")]
-    OAuthConfigDirNotASecret,
-
-    /// The OS keychain read failed (no entry, locked store, or no Secret
-    /// Service agent). Armory API keys (`SecretRef::Keychain`) live
-    /// in the OS keychain; this surfaces a resolution failure at spawn.
-    #[error("keychain error: {0}")]
-    KeychainError(String),
-
-    #[error("storage error: {0}")]
-    Storage(#[from] StoreError),
-}
-
-/// What kind of credential a provider uses, and how
-/// `inject_identity_env` puts it into the agent's env at spawn time.
-/// Per `specs/archive/SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md` §4.3.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ProviderClass {
-    /// **API-key class.** The binding's `SecretRef` resolves to a
-    /// single secret string, injected as the listed env vars. All
-    /// listed vars receive the same value — multi-var emission
-    /// covers "two CLIs want different var names for the same secret"
-    /// (e.g. github writes both `GITHUB_TOKEN` and `GH_TOKEN`).
-    ApiKey { env_vars: &'static [&'static str] },
-    /// **OAuth class.** The binding's `SecretRef` is a
-    /// `SecretRef::OAuthConfigDir` pointer; the resolver sets
-    /// `config_dir_env_var = <dir>` at spawn so the CLI reads its
-    /// OAuth tokens from the per-bundle directory.
-    OAuth { config_dir_env_var: &'static str },
-}
-
-/// Classify a provider id. `None` for unknown providers — the
-/// resolver logs and skips them.
-///
-/// reagent P1 on #2263: this used to match only canonical IDs directly, but
-/// `backend/providers.rs` registers aliases (`gemini-cli`→`gemini`,
-/// `copilot-cli`/`github-copilot`→`copilot`, `claude-code`→`claude`, etc.)
-/// that `get_provider` already resolves — meaning `provider_class` and
-/// `get_provider` could disagree on a definition/link still using an alias
-/// ID, silently skipping both the spawn gate and config-dir injection for
-/// it. Resolve to the canonical ID first so the two can never drift.
-///
-/// `resolve_provider_alias` only knows the CLI-tool registry (claude/codex/
-/// gemini/etc.) — it returns `""` as a sentinel for anything outside that
-/// registry, which includes the api-key-class service identifiers below
-/// ("github"/"anthropic"/"openai"/"kimi"/"aws" — a completely different
-/// namespace, not CLI tools). Only substitute the resolved value when it's
-/// non-empty; otherwise keep matching on the original id so that namespace
-/// is untouched.
-pub fn provider_class(provider: &str) -> Option<ProviderClass> {
-    let resolved = crate::backend::providers::resolve_provider_alias(provider);
-    let provider = if resolved.is_empty() { provider } else { resolved };
-    match provider {
-        // ── API-key class ─────────────────────────────────────────
-        // ApiKey.env_vars values match the legacy provider_env_vars
-        // matrix exactly — the new dispatch is additive.
-        "github" => Some(ProviderClass::ApiKey {
-            env_vars: &["GITHUB_TOKEN", "GH_TOKEN"],
-        }),
-        "anthropic" => Some(ProviderClass::ApiKey {
-            env_vars: &["ANTHROPIC_API_KEY"],
-        }),
-        "openai" => Some(ProviderClass::ApiKey {
-            env_vars: &["OPENAI_API_KEY"],
-        }),
-        "kimi" => Some(ProviderClass::ApiKey {
-            env_vars: &["MOONSHOT_API_KEY"],
-        }),
-        "aws" => Some(ProviderClass::ApiKey {
-            env_vars: &["AWS_ACCESS_KEY_ID"],
-        }),
-        // ── OAuth class ───────────────────────────────────────────
-        // Env-var names come from the CLI provider registry
-        // (`agentmux-srv/src/backend/providers.rs` —
-        // `ProviderConfig::auth_config_dir_env_var`) so the resolver
-        // can never drift from the launcher spawn path: there is one
-        // source of truth per CLI for which env var redirects its
-        // config / auth directory. The match arm enumerates which
-        // providers we currently treat as OAuth-class for identity
-        // bundles. Originally just claude / codex / openclaw (spec
-        // §4.3) — gemini and copilot were added later
-        // (REPORT_AUTH_ARCHITECTURE_STATE_AND_RETHINK_2026_07_21.md
-        // §2.5 / §6, Phase C) to close a drift gap: the frontend's
-        // `ProviderDefinition` table already marked both
-        // `authType: "oauth"`, but this match arm (the actual gate
-        // for the spawn-time enforcement AND the per-account
-        // isolation-dir minting in identity_handlers.rs, both of
-        // which key off this single function) hadn't caught up —
-        // meaning neither actually applied to them despite the UI
-        // already presenting them as oauth-class. See
-        // `oauth_class_matches_frontend_authtype_oauth_set` below,
-        // which pins this set staying in sync with the frontend going
-        // forward so this doesn't silently drift again.
-        "claude" | "codex" | "openclaw" | "gemini" | "copilot" => {
-            crate::backend::providers::get_provider(provider).map(|cfg| {
-                ProviderClass::OAuth {
-                    config_dir_env_var: cfg.auth_config_dir_env_var,
-                }
-            })
-        }
-        _ => None,
-    }
-}
-
-/// Legacy convenience: env vars for an api-key provider. Delegates to
-/// [`provider_class`]; returns empty for oauth-class providers (their
-/// resolution path doesn't go through string-secret env-var injection)
-/// and for unknown providers.
-pub fn provider_env_vars(provider: &str) -> Vec<&'static str> {
-    match provider_class(provider) {
-        Some(ProviderClass::ApiKey { env_vars }) => env_vars.to_vec(),
-        _ => Vec::new(),
-    }
-}
-
-/// Resolve a `SecretRef` to the plaintext credential string. Each
-/// backend has a distinct path:
-///
-/// - **Env**: read `env_var` from the srv process's own environment.
-///   Caller is expected to have set this in their shell or a
-///   .env-style loader before launching AgentMux.
-/// - **PlaintextDev**: return the literal stored string. **Debug
-///   builds only** — guarded behind `cfg(debug_assertions)`. In
-///   release builds, the same call returns
-///   [`ResolverError::PlaintextDevDisabledInRelease`] so a forgotten
-///   dev-secret never leaks into a packaged binary. Reagent P1 on
-///   PR #751 caught the missing guard. Phase 3's encrypted vault is
-///   the production path.
-/// - **SecretsManager**: deferred. Returns
-///   [`ResolverError::SecretsManagerUnsupported`].
-pub fn resolve_secret(secret_ref: &SecretRef) -> Result<String, ResolverError> {
-    match secret_ref {
-        SecretRef::Env { env_var } => std::env::var(env_var)
-            .map_err(|_| ResolverError::EnvVarMissing(env_var.clone())),
-        SecretRef::PlaintextDev { plaintext_dev } => {
-            #[cfg(debug_assertions)]
-            {
-                Ok(plaintext_dev.clone())
-            }
-            #[cfg(not(debug_assertions))]
-            {
-                let _ = plaintext_dev;
-                Err(ResolverError::PlaintextDevDisabledInRelease)
-            }
-        }
-        SecretRef::SecretsManager { .. } => Err(ResolverError::SecretsManagerUnsupported),
-        SecretRef::OAuthConfigDir { dir } => {
-            // Read but ignored — the resolver doesn't consume the
-            // pointer; PR B's oauth-class dispatch in
-            // `inject_identity_env` reads `dir` and sets the
-            // provider's config-dir env var directly, bypassing
-            // `resolve_secret` entirely.
-            let _ = dir;
-            Err(ResolverError::OAuthConfigDirNotASecret)
-        }
-        SecretRef::Keychain { account, .. } => {
-            // Armory API keys: pull the plaintext from the OS
-            // keychain at spawn time. The account string is
-            // `acct:<account_id>`; secret_store reconstructs the key
-            // from the id, so strip the namespace prefix here.
-            let account_id = account.strip_prefix("acct:").unwrap_or(account);
-            crate::identity::secret_store::get(account_id)
-                .map(|z| z.to_string())
-                .map_err(ResolverError::KeychainError)
-        }
-    }
-}
+use super::errors::SpawnGateError;
+use super::oauth_probe::probe_oauth_status;
+use super::provider::{provider_class, ProviderClass};
+use super::secret::resolve_secret;
 
 /// Inject identity-derived env vars into the spawn map for a block.
 ///
@@ -622,6 +211,17 @@ fn resolve_bindings_for_instance(
         .collect()
 }
 
+/// **Before touching `gate_oauth_failure` / `inject_identity_env_with_broker`:**
+/// this module is where `SPEC_PROVIDER_ISOLATION_2026_06_20.md`'s INV-A
+/// ("never the user's global `~/.<P>` dir") is enforced — or, once already,
+/// silently stopped being enforced. Read
+/// `docs/retro/retro-auth-isolation-invariant-silently-orphaned-2026-07-14.md`
+/// first. Short version: an unbound oauth-class provider used to
+/// auto-route to an AgentMux-owned isolated dir (no user action, no global
+/// exposure); a 2026-07-08 refactor orphaned that path without meaning to,
+/// and it was never restored — today's gate only chooses between "block"
+/// and "true ambient" (`use_ambient_login=true`, zero isolation), not the
+/// isolated-auto-provision option that used to exist implicitly.
 pub fn inject_identity_env_with_broker(
     wstore: Arc<Store>,
     id_store: Arc<Store>,
@@ -938,6 +538,7 @@ pub fn inject_identity_env_with_broker(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::oauth_probe::oauth_status;
     use crate::backend::storage::store::{
         AgentInstance, IdentityAccount, InstanceStatus, SecretRef,
     };
@@ -1007,127 +608,6 @@ mod tests {
             working_directory: String::new(),
             display_hidden: false,
         }
-    }
-
-    #[test]
-    fn provider_env_vars_matrix() {
-        assert_eq!(provider_env_vars("github"), vec!["GITHUB_TOKEN", "GH_TOKEN"]);
-        assert_eq!(provider_env_vars("anthropic"), vec!["ANTHROPIC_API_KEY"]);
-        assert_eq!(provider_env_vars("openai"), vec!["OPENAI_API_KEY"]);
-        assert_eq!(provider_env_vars("kimi"), vec!["MOONSHOT_API_KEY"]);
-        assert_eq!(provider_env_vars("aws"), vec!["AWS_ACCESS_KEY_ID"]);
-        assert!(provider_env_vars("unknown").is_empty());
-    }
-
-    // PlaintextDev-using tests are gated behind cfg(debug_assertions)
-    // because release builds reject PlaintextDev with
-    // ResolverError::PlaintextDevDisabledInRelease, so the assertions
-    // below would fail under `cargo test --release`. Reagent P2
-    // (PR #751). The Env / SecretsManager / unknown-provider paths
-    // are tested separately and have no debug-only dependency.
-
-    #[cfg(debug_assertions)]
-    #[test]
-    fn resolve_plaintext_dev() {
-        let s = resolve_secret(&SecretRef::PlaintextDev {
-            plaintext_dev: "ghp_test123".to_string(),
-        })
-        .unwrap();
-        assert_eq!(s, "ghp_test123");
-    }
-
-    #[test]
-    fn resolve_env_var_missing() {
-        let res = resolve_secret(&SecretRef::Env {
-            env_var: "AGENTMUX_TEST_NEVER_SET_X9Q".to_string(),
-        });
-        assert!(matches!(res, Err(ResolverError::EnvVarMissing(_))));
-    }
-
-    #[test]
-    fn resolve_secrets_manager_unsupported() {
-        let res = resolve_secret(&SecretRef::SecretsManager {
-            sm_path: "ignored".to_string(),
-            sm_json_path: None,
-        });
-        assert!(matches!(res, Err(ResolverError::SecretsManagerUnsupported)));
-    }
-
-    #[test]
-    fn provider_class_oauth_providers() {
-        // The known oauth providers must classify as OAuth with the SAME
-        // config-dir env vars the CLI provider registry defines (single
-        // source of truth). Pinning the expected strings here catches drift
-        // in either direction — if the registry changes a value, this test
-        // fails and the change becomes deliberate.
-        assert_eq!(
-            provider_class("claude"),
-            Some(ProviderClass::OAuth { config_dir_env_var: "CLAUDE_CONFIG_DIR" }),
-        );
-        assert_eq!(
-            provider_class("codex"),
-            Some(ProviderClass::OAuth { config_dir_env_var: "CODEX_HOME" }),
-        );
-        assert_eq!(
-            provider_class("openclaw"),
-            Some(ProviderClass::OAuth { config_dir_env_var: "OPENCLAW_HOME" }),
-        );
-        assert_eq!(
-            provider_class("gemini"),
-            Some(ProviderClass::OAuth { config_dir_env_var: "GEMINI_CLI_HOME" }),
-        );
-        assert_eq!(
-            provider_class("copilot"),
-            Some(ProviderClass::OAuth { config_dir_env_var: "COPILOT_HOME" }),
-        );
-    }
-
-    #[test]
-    fn oauth_class_matches_frontend_authtype_oauth_set() {
-        // REPORT_AUTH_ARCHITECTURE_STATE_AND_RETHINK_2026_07_21.md §2.5
-        // found gemini/copilot marked `authType: "oauth"` in the frontend's
-        // `ProviderDefinition` table (frontend/app/view/agent/providers/
-        // index.ts) while this function — the actual gate for both the
-        // spawn-time enforcement AND the per-account isolation-dir minting
-        // — hadn't caught up, so neither mechanism applied to them despite
-        // the UI already presenting them as oauth-class. This pins the two
-        // sets staying equal going forward. There's no automated cross-
-        // language check available, so this list is a manually-maintained
-        // mirror of the frontend table — if you add a new `authType:
-        // "oauth"` provider there, update FRONTEND_OAUTH_TYPED here too, in
-        // the SAME change, not as a follow-up.
-        const FRONTEND_OAUTH_TYPED: &[&str] = &["claude", "codex", "gemini", "openclaw", "copilot"];
-        const ALL_KNOWN_PROVIDERS: &[&str] = &[
-            "claude", "codex", "muxcode", "gemini", "qwen", "openclaw", "kimi", "copilot", "pi",
-        ];
-        for p in ALL_KNOWN_PROVIDERS {
-            let is_oauth_class = matches!(provider_class(p), Some(ProviderClass::OAuth { .. }));
-            let is_frontend_oauth_typed = FRONTEND_OAUTH_TYPED.contains(p);
-            assert_eq!(
-                is_oauth_class, is_frontend_oauth_typed,
-                "provider '{p}': backend OAuth-class ({is_oauth_class}) must match \
-                 frontend authType:\"oauth\" ({is_frontend_oauth_typed}) — see this \
-                 test's doc comment",
-            );
-        }
-    }
-
-    #[test]
-    fn provider_class_resolves_aliases_to_the_same_result_as_canonical() {
-        // reagent P1 on #2263: provider_class used to match only canonical
-        // IDs, silently disagreeing with get_provider (which already
-        // resolves aliases) for any definition/link still using one.
-        assert_eq!(provider_class("claude-code"), provider_class("claude"));
-        assert_eq!(provider_class("claude_code"), provider_class("claude"));
-        assert_eq!(provider_class("codex-cli"), provider_class("codex"));
-        assert_eq!(provider_class("openclaw-cli"), provider_class("openclaw"));
-        assert_eq!(provider_class("open-claw"), provider_class("openclaw"));
-        // Api-key-class aliases must resolve identically too — this isn't
-        // gated on oauth-class providers specifically.
-        assert_eq!(provider_class("kimi-cli"), provider_class("kimi"));
-        // A truly unknown id must still classify as None, not panic or
-        // silently match something via an empty-string fallback.
-        assert_eq!(provider_class("totally-unknown-provider-xyz"), None);
     }
 
     #[cfg(debug_assertions)]
@@ -1436,21 +916,6 @@ mod tests {
             Err(SpawnGateError::MissingCredentials { provider: "claude".to_string() }),
         );
         assert!(env.is_empty());
-    }
-
-    #[test]
-    fn resolve_oauth_config_dir_is_not_a_secret() {
-        // OAuthConfigDir is a pointer to a CLI-managed token directory,
-        // not a resolvable secret string. PR B's oauth-class dispatch
-        // in `inject_identity_env` reads `dir` and sets the provider's
-        // config-dir env var directly, bypassing `resolve_secret`. The
-        // error here is a guard against a caller forgetting that
-        // dispatch — pre-PR-B nothing produces this variant, but the
-        // arm has to exist for the match to be exhaustive.
-        let res = resolve_secret(&SecretRef::OAuthConfigDir {
-            dir: "/path/to/bundle/claude".to_string(),
-        });
-        assert!(matches!(res, Err(ResolverError::OAuthConfigDirNotASecret)));
     }
 
     #[test]
@@ -1934,12 +1399,14 @@ mod tests {
         assert!(env.is_empty());
     }
 
-    // ── PR D — OAuth expiry probe + status semantics ───────────────────
-
     /// Helper: write a Claude-shape `.credentials.json` into a temp dir
     /// and return the dir path. `expires_ms` controls validity; `with_refresh`
     /// toggles the refreshToken field so the resolver can distinguish
     /// `Expired` (refresh present) from `NeedsReauth` (no refresh).
+    ///
+    /// Duplicated from `oauth_probe::tests` (same helper, different file)
+    /// rather than shared cross-module — kept the modularization split a
+    /// pure relocation with no new cross-file test-only visibility surface.
     fn write_claude_creds(
         dir: &std::path::Path,
         expires_ms: i64,
@@ -1958,78 +1425,6 @@ mod tests {
             serde_json::to_string(&body).unwrap(),
         )
         .unwrap();
-    }
-
-    #[test]
-    fn probe_oauth_status_unknown_provider_returns_none() {
-        // Probing a provider that isn't in the oauth-class set is a
-        // signal to the caller to leave `status` alone — None ≠
-        // NeedsReauth. Guards against silent mis-classification of
-        // api-key providers if a future caller accidentally feeds
-        // them through here.
-        let r = probe_oauth_status("github", "/tmp/whatever", 0);
-        assert_eq!(r, None);
-    }
-
-    #[test]
-    fn probe_oauth_status_missing_dir_is_needs_reauth() {
-        let r = probe_oauth_status("claude", "/definitely/does/not/exist-xyz-9q", 0);
-        assert_eq!(r, Some(OAuthProbeStatus::NeedsReauth));
-    }
-
-    #[test]
-    fn probe_oauth_status_future_expiry_is_valid() {
-        let tmp = tempfile::tempdir().unwrap();
-        let now_ms = 1_700_000_000_000;
-        write_claude_creds(tmp.path(), now_ms + 3_600_000, true);
-        let r = probe_oauth_status("claude", tmp.path().to_str().unwrap(), now_ms);
-        assert_eq!(r, Some(OAuthProbeStatus::Valid));
-    }
-
-    #[test]
-    fn probe_oauth_status_past_expiry_with_refresh_is_expired() {
-        let tmp = tempfile::tempdir().unwrap();
-        let now_ms = 1_700_000_000_000;
-        write_claude_creds(tmp.path(), now_ms - 1, true);
-        let r = probe_oauth_status("claude", tmp.path().to_str().unwrap(), now_ms);
-        assert_eq!(r, Some(OAuthProbeStatus::Expired));
-    }
-
-    #[test]
-    fn probe_oauth_status_past_expiry_no_refresh_is_needs_reauth() {
-        // No refresh token in the file → the CLI can't auto-refresh
-        // and the user has to OAuth again. Maps to `needs_reauth`,
-        // NOT `expired` (per spec §4.4).
-        let tmp = tempfile::tempdir().unwrap();
-        let now_ms = 1_700_000_000_000;
-        write_claude_creds(tmp.path(), now_ms - 1, false);
-        let r = probe_oauth_status("claude", tmp.path().to_str().unwrap(), now_ms);
-        assert_eq!(r, Some(OAuthProbeStatus::NeedsReauth));
-    }
-
-    #[test]
-    fn probe_oauth_status_malformed_json_is_needs_reauth() {
-        let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(tmp.path().join(".credentials.json"), "{ not json").unwrap();
-        let r = probe_oauth_status("claude", tmp.path().to_str().unwrap(), 0);
-        assert_eq!(r, Some(OAuthProbeStatus::NeedsReauth));
-    }
-
-    #[test]
-    fn probe_oauth_status_codex_unknown_shape_is_valid_best_effort() {
-        // codex / openclaw token-file layouts aren't publicly
-        // documented; our parser falls through to "Valid" when the
-        // file exists but lacks any parseable expiry. Better than
-        // false `needs_reauth` on a working session — strict parsing
-        // is a follow-up once the shape is pinned.
-        let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(
-            tmp.path().join(".credentials.json"),
-            r#"{"some":"opaque-codex-blob"}"#,
-        )
-        .unwrap();
-        let r = probe_oauth_status("codex", tmp.path().to_str().unwrap(), 0);
-        assert_eq!(r, Some(OAuthProbeStatus::Valid));
     }
 
     #[cfg(debug_assertions)]
