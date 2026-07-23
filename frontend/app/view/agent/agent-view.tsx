@@ -477,14 +477,19 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // flow, subprocess lifecycle, slash commands, errors, etc. No longer
     // rendered as its own panel — written directly into the shell terminal
     // instead (AgentShellSubblock's `onTermReady`), so the shell is the only
-    // place this surfaces. `logLines` stays as a backlog: the terminal is
-    // unmounted/remounted every time the details drawer closes/reopens
-    // (`<Show>`), so its xterm buffer doesn't persist across that — on each
-    // reopen the backlog replays into the fresh terminal before new writes
-    // go live. `log` is passed down to every hook whose signature takes a
-    // `LogFn`.
+    // place this surfaces. `logLines` stays as a backlog so a line logged
+    // while the drawer is closed still gets shown once it reopens.
+    // `logFlushedCount` tracks how many of `logLines()` have already been
+    // written into *some* terminal instance (live or replayed) — every
+    // write, whether live or catch-up, advances it. Without this, each
+    // drawer close/reopen replayed the *entire* backlog again on top of
+    // whatever real PTY content the terminal (now durably) restored
+    // (SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md), burying it under
+    // an ever-repeating copy of the same log lines — confirmed live via CDP.
+    // `log` is passed down to every hook whose signature takes a `LogFn`.
     const { lines: logLines, append: appendLog } = useActivityLog();
     const [termWrite, setTermWrite] = createSignal<((text: string) => void) | null>(null);
+    let logFlushedCount = 0;
 
     const formatLogLine = (tag: string, text: string, level?: "info" | "error" | "warn"): string => {
         const body = `[${tag}] ${text}`;
@@ -495,16 +500,24 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
 
     const log = (tag: string, text: string, level?: "info" | "error" | "warn") => {
         appendLog(tag, text, level);
-        termWrite()?.(formatLogLine(tag, text, level));
+        const write = termWrite();
+        if (write) {
+            write(formatLogLine(tag, text, level));
+            logFlushedCount = logLines().length;
+        }
     };
 
-    // Fired once per terminal mount (drawer open) — replays everything
-    // logged so far (including while the drawer was closed), then keeps the
-    // write function around so `log` above writes live from here on.
+    // Fired once per terminal mount (drawer open) — replays only the log
+    // lines added since the last flush (whether that flush was this same
+    // catch-up on a prior mount, or a live write while the drawer was open),
+    // then keeps the write function around so `log` above writes live from
+    // here on.
     const handleShellTermReady = (write: (text: string) => void) => {
-        for (const line of logLines()) {
-            write(formatLogLine(line.tag, line.text, line.level));
+        const all = logLines();
+        for (let i = logFlushedCount; i < all.length; i++) {
+            write(formatLogLine(all[i].tag, all[i].text, all[i].level));
         }
+        logFlushedCount = all.length;
         setTermWrite(() => write);
     };
     const handleShellTermDispose = () => setTermWrite(null);
