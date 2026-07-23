@@ -92,6 +92,37 @@ import { loadAccounts, type AgentAccounts } from "@/app/view/identity/identity-m
 import { buildStartupPayload, resolveAccounts } from "./startup/buildStartupPayload";
 import "./agent-view.scss";
 
+// Matches a CSI or OSC ANSI escape sequence (the standard sindresorhus/ansi-regex
+// pattern). Used by sanitizeLogTextForTerminal below to strip escape sequences
+// out of arbitrary text (e.g. a bang command's subprocess stdout/stderr) before
+// it's wrapped in formatLogLine's own SGR color codes and written into the live
+// shell Terminal — otherwise embedded sequences in that text could move the
+// cursor, recolor arbitrary regions, or otherwise corrupt the shared terminal's
+// rendered state (this text is not our own trusted output; it's shell-command
+// output the user chose to run).
+const ANSI_SEQUENCE_RE = new RegExp(
+    "[\\u001B\\u009B][[\\]()#;?]*(?:(?:(?:(?:;[-a-zA-Z\\d/#&.:=?%@~_]+)*|" +
+        "[a-zA-Z\\d]+(?:;[-a-zA-Z\\d/#&.:=?%@~_]*)*)?\\u0007)|" +
+        "(?:(?:\\d{1,4}(?:;\\d{0,4})*)?[\\dA-PR-TZcf-ntqry=><~]))",
+    "g"
+);
+
+/**
+ * Strips ANSI escape sequences and other terminal control bytes from `text`,
+ * then converts bare `\n` to `\r\n` so multi-line text renders as separate
+ * lines instead of a cursor staircase (xterm.js, like a real terminal,
+ * treats `\n` as line-feed-only — it doesn't imply carriage return).
+ */
+const sanitizeLogTextForTerminal = (text: string): string => {
+    const withoutAnsi = text
+        .replace(ANSI_SEQUENCE_RE, "")
+        // Any stray control byte not part of a matched sequence above
+        // (malformed/truncated escapes, bare ESC, BEL, CR, etc.) — \t and \n
+        // are kept; \n is converted to \r\n next.
+        .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "");
+    return withoutAnsi.replace(/\n/g, "\r\n");
+};
+
 /**
  * Top-level wrapper — switches between agent picker and presentation view.
  *
@@ -498,7 +529,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     let logFlushedCount = 0;
 
     const formatLogLine = (tag: string, text: string, level?: "info" | "error" | "warn"): string => {
-        const body = `[${tag}] ${text}`;
+        const body = `[${tag}] ${sanitizeLogTextForTerminal(text)}`;
         if (level === "error") return `\x1b[31m${body}\x1b[0m`;
         if (level === "warn") return `\x1b[33m${body}\x1b[0m`;
         return `\x1b[90m${body}\x1b[0m`;
