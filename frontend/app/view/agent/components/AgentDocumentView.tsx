@@ -14,9 +14,9 @@
  * component.
  *
  * Diagnostic / launch-flow logs used to render inline at the top of this
- * scroll area. That moved to the dedicated `<ActivityLogPanel>` docked
- * above the composer in the activity-log-panel PR — see
- * `agentmux-ai/AGENT_PANE_ACTIVITY_LOG_SPEC.md`.
+ * scroll area, then moved to a dedicated activity-log panel docked above
+ * the composer, then redirected into the shell terminal (agent-view.tsx's
+ * `log`/`handleShellTermReady`) — see `agentmux-ai/AGENT_PANE_ACTIVITY_LOG_SPEC.md`.
  */
 
 import { createSignal, onMount, Show, type Accessor, type JSX } from "solid-js";

@@ -39,6 +39,41 @@ interface AgentShellSubblockProps {
      * independent controls (see `termFontSize` below).
      */
     agentPaneZoom: Accessor<number>;
+    /**
+     * Fired once the terminal has finished `init()`, handing the parent a
+     * closure that writes pre-formatted (already ANSI-colored, no trailing
+     * newline) text directly into the terminal's local render buffer via
+     * `Terminal.write`. This never touches the PTY (that's
+     * `sendDataHandler`/`blockinput` above, a separate path), so writes here
+     * can't be interpreted as shell input. Used to redirect the agent pane's
+     * activity-log lines into the shell instead of a separate log panel —
+     * see agent-view.tsx's `log` wrapper.
+     *
+     * Unlike `AgentInstallModal.tsx`'s synthetic terminal (which has exactly
+     * one writer — no PTY, no live stream), THIS `Terminal` instance also has
+     * a second, independent writer: TermWrap's own `doTerminalWrite`, driven
+     * by live PTY output arriving over the WS file-subject. `Terminal.write`
+     * is safe to call from multiple sites — xterm.js internally queues and
+     * processes writes strictly in call order (single `_innerWrite` in
+     * flight at a time), so two overlapping calls never interleave at the
+     * byte/escape-sequence level. But nothing coordinates *placement*: a log
+     * line can still be queued in between two chunks of live PTY output,
+     * landing mid-line (e.g. inside a user's in-progress prompt, or a TUI's
+     * in-place redraw) — the closure below forces a leading `\r\n` so the
+     * log line always starts its own fresh line regardless of where the
+     * cursor happened to be. It intentionally calls `terminal.write`
+     * directly rather than routing through TermWrap's `doTerminalWrite`:
+     * that helper advances `ptyOffset`/`dataBytesProcessed`, which must only
+     * ever track bytes that actually came from the "term" PTY file — this
+     * synthetic text isn't part of that file, and inflating those counters
+     * would desync the reconnect-offset accounting in
+     * SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md.
+     */
+    onTermReady?: (write: (text: string) => void) => void;
+    /** Fired on unmount (drawer close) — pairs with `onTermReady` so the
+     *  parent can drop its write closure rather than risk calling `.write`
+     *  on a disposed `Terminal` (`TermWrap.dispose()` doesn't null it out). */
+    onTermDispose?: () => void;
 }
 
 const BASE_FONT_SIZE = 13;
@@ -181,6 +216,14 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
                 );
                 termWrap = wrap;
                 await wrap.init();
+                if (!disposed) {
+                    props.onTermReady?.((text: string) => {
+                        // Leading \r\n forces this line to start fresh regardless of
+                        // where the cursor was left by concurrently-arriving live PTY
+                        // output — see the onTermReady doc comment above.
+                        termWrap?.terminal.write(`\r\n${text}\r\n`);
+                    });
+                }
 
                 // Reflow the PTY grid whenever the container is resized — drag-
                 // resizing the details drawer (ResizableDetailsDrawer), the pane
@@ -210,6 +253,7 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
         disposed = true;
         termWrap?.dispose();
         resizeObserver?.disconnect();
+        props.onTermDispose?.();
     });
 
     return (
