@@ -29,7 +29,12 @@
     align-items: stretch;
     height: 28px;
     border-bottom: 1px solid var(--border-color);
-    background: var(--secondary-bg-color, var(--block-bg-color));
+    // No fill on the container itself — only .pane-tab (active/hover) and
+    // .pane-tab-strip-add (hover) paint a background. Any stray width the
+    // container ends up with beyond its actual tabs/+ (rounding, a flex
+    // edge case in a given renderer) reads as transparent instead of a
+    // stray colored block.
+    background: transparent;
     overflow-x: hidden;
 }
 
