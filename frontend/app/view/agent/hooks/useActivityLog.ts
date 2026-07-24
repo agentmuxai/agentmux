@@ -11,11 +11,12 @@
  *   - History pagination, subagent events
  *   - Errors routed via `log("error", …, "error")`
  *
- * Rendered in `<ActivityLogPanel>` as a collapsible pane docked above
- * the composer. Used to be called `useLaunchLogs` and lived at the top
- * of the conversation scroll area; renamed + relocated in the
- * activity-log-panel PR. See
- * `agentmux-ai/AGENT_PANE_ACTIVITY_LOG_SPEC.md`.
+ * Written directly into the shell terminal rather than its own panel (see
+ * agent-view.tsx's `log`/`handleShellTermReady`) — `lines` now serves purely
+ * as a backlog, replayed into the terminal each time it (re)mounts. Used to
+ * be called `useLaunchLogs` and lived at the top of the conversation scroll
+ * area; renamed + relocated in the activity-log-panel PR, then redirected
+ * into the shell terminal. See `agentmux-ai/AGENT_PANE_ACTIVITY_LOG_SPEC.md`.
  *
  * Returns:
  *   - `lines` — reactive accessor for the current `LogLine[]` (FIFO)

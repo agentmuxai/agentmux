@@ -143,9 +143,8 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
         // Legacy free-text errors pass through unchanged.
         const t = translateError(err);
         // Log the retry hint FIRST so the error line is the most
-        // recent entry — `ActivityLogPanel` derives the panel's
-        // failed-state styling from the most recent log entry's
-        // level (`agent-activity-log--has-error`).
+        // recent entry — reads better in the shell terminal with the
+        // error message last, right before the user's eye.
         if (t.retry) log("cli", t.retry, "warn");
         log("cli", `${t.title}: ${t.message}`, "error");
         return "fatal";
@@ -357,7 +356,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
                 // entry renders with the catalog's friendly title +
                 // retry hint, matching the typed-error pattern used
                 // elsewhere. Same retry-first / error-last ordering
-                // so ActivityLogPanel keeps failed-state styling.
+                // as above.
                 const t = translateError({
                     code: "AMX-AUTH-002",
                     details: { provider: provider.id, seconds: 300 },

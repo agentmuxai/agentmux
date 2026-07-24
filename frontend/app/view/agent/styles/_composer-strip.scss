@@ -255,7 +255,8 @@
 }
 
 // ── Resizable details drawer (ResizableDetailsDrawer.tsx) ──────────────────
-// Wraps ActivityLogPanel + AgentShellSubblock in a drag-to-height container.
+// Wraps AgentShellSubblock in a drag-to-height container — activity-log
+// lines write directly into its terminal rather than a separate panel.
 // AgentControlBar stays outside it as a fixed-height footer (see agent-view.tsx).
 
 .agent-composer-details-resizable {
@@ -287,25 +288,6 @@
     min-height: 0;
     overflow: hidden;
     position: relative;
-
-    // Cap the log to a SHARE OF THE DRAWER, not ActivityLogPanel's own
-    // viewport-relative 30vh (agent-activity-log:36-39) -- that assumes it's
-    // the only content in a tall pane. Here it shares a resizable drawer with
-    // the terminal below it; an oversized log combined with flex-shrink:0
-    // would squeeze the terminal toward zero height whenever 30vh of the
-    // window exceeds the drawer's own (often much smaller) height -- this
-    // was almost certainly why the terminal appeared to render over/under
-    // the log instead of the two being cleanly stacked, separately
-    // scrollable panels.
-    .agent-activity-log {
-        flex-shrink: 0;
-        max-height: 45%;
-        overflow: hidden;
-
-        .agent-activity-log-body {
-            max-height: 100%;
-        }
-    }
 }
 
 .agent-shell-subblock {

@@ -13,8 +13,9 @@
  * pane lifecycle: launch flow (CLI resolution, install progress, auth
  * check, login poll), subprocess lifecycle (spawned / turn complete /
  * exit codes), slash-command outcomes, history pagination, subagent
- * events, errors. Collected into an array by `useActivityLog` and
- * rendered in the collapsible `<ActivityLogPanel>` above the composer.
+ * events, errors. Collected into an array by `useActivityLog` and written
+ * directly into the shell terminal (agent-view.tsx's `log`/
+ * `handleShellTermReady`) rather than a separate panel.
  */
 export interface LogLine {
     /** Stable id used as the key for per-line expanded-state (hover strip
