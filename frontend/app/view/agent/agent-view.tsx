@@ -900,6 +900,28 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // mounts via scrollToBottomRef.
     let scrollToBottomFn: (() => void) | null = null;
 
+    // Tracks AgentWorkingRow's rendered height (0 when hidden) so
+    // .agent-document can reserve exactly that much bottom padding — the
+    // row now floats over the scroll region instead of pushing it up as a
+    // normal-flow sibling (SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md
+    // §3.2), so without this, "scrolled to true bottom" would leave the
+    // last message hidden underneath the floating row instead of above it.
+    // Exposed to .agent-document (nested inside AgentDocumentView, several
+    // component boundaries away) via a CSS custom property set on the
+    // shared .agent-document-scroll-region ancestor — custom properties
+    // cascade through the DOM tree regardless of component boundaries.
+    let workingRowAnchorRef: HTMLDivElement | undefined;
+    const [workingRowHeight, setWorkingRowHeight] = createSignal(0);
+    onMount(() => {
+        if (typeof ResizeObserver === "undefined" || !workingRowAnchorRef) return;
+        const ro = new ResizeObserver((entries) => {
+            const h = entries[0]?.contentRect.height ?? 0;
+            setWorkingRowHeight(h);
+        });
+        ro.observe(workingRowAnchorRef);
+        onCleanup(() => ro.disconnect());
+    });
+
     // User-message send + /login /clear slash intercepts + back-to-picker.
     // See hooks/useAgentCommands.ts.
     const commands = useAgentCommands({
@@ -1296,66 +1318,85 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             />
 
 
-            <AgentDocumentView
-                documentAtom={agentAtoms().documentAtom}
-                documentStateAtom={agentAtoms().documentStateAtom}
-                authUrl={status.authUrl}
-                authNotice={status.authNotice}
-                onDismissAuthNotice={() => status.setAuthNotice(null)}
-                authProviderId={provider()?.id ?? providerKey()}
-                onSubagentClick={handleSubagentClick}
-                onAgentErrorLogin={() => {
-                    // Must match onLoginAgain above: the button is labeled "Login
-                    // Again", so it has to force a fresh OAuth regardless of
-                    // provider. A prior version special-cased Claude into
-                    // useGlobalLogin() instead — silently reusing the (possibly
-                    // equally-stale) global credential under a "Login Again"
-                    // label, which is exactly the kind of no-op this button
-                    // exists to avoid (retro-agent-auth-relogin-noop-2026-07-01).
-                    log("auth", "Login Again (inline error node) — forcing a fresh provider login");
-                    void status.relogin();
-                }}
-                onLoadOlder={history.loadOlder}
-                loadingOlder={history.loadingOlder}
-                scrollCommand={scroll.command}
-                scrollToBottomRef={(fn) => { scrollToBottomFn = fn; }}
-                highlightNodeId={search.highlightId}
-                registerHistoryReadyCallback={(fn) => { historyReadyFn = fn; }}
-                zoomFactor={zoomFactor}
-                blockId={model.blockId}
-                layoutView={layoutView}
-            />
-
-            {/* Working indicator — bottom of conversation area.
-                Shows spinner + elapsed while loading, "✓ Worked · Ns" on completion.
-                Acts as a visual turn delimiter; stays until next message is sent.
-                See SPEC_AGENT_PANE_STATUS_GRADIENT_2026_06_14.md §2. */}
-            <Show when={
-                status.isLoading()
-                || workingFromPhase(agentAtoms().turnPhaseAtom[0]())
-                || agentAtoms().sessionStatsAtom[0]() != null
-            }>
-                <AgentWorkingRow
-                    loading={status.isLoading() || workingFromPhase(agentAtoms().turnPhaseAtom[0]())}
-                    stopping={agentAtoms().turnPhaseAtom[0]().kind === "Interrupting"}
-                    currentTool={agentAtoms().currentToolAtom[0]()}
-                    currentToolArg={agentAtoms().currentToolArgAtom[0]()}
-                    sessionStats={agentAtoms().sessionStatsAtom[0]()}
-                    turnTokens={agentAtoms().turnTokensAtom[0]()}
-                    waitingReason={
-                        (() => {
-                            const phase = agentAtoms().turnPhaseAtom[0]();
-                            return phase.kind === "Streaming" ? (phase.waitingReason ?? null) : null;
-                        })()
-                    }
-                    retryAfterMs={
-                        (() => {
-                            const phase = agentAtoms().turnPhaseAtom[0]();
-                            return phase.kind === "Streaming" ? (phase.retryAfterMs ?? null) : null;
-                        })()
-                    }
+            {/* Scroll region wrapper — .agent-document (inside AgentDocumentView)
+                is absolutely positioned to fill this box, and AgentWorkingRow
+                floats over its bottom edge instead of pushing it up as a
+                normal-flow sibling. Lets the message list's scrollbar reach
+                all the way to the bottom of this region instead of stopping
+                short by AgentWorkingRow's own height.
+                See docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md §3.2. */}
+            <div
+                class="agent-document-scroll-region"
+                style={{ "--agent-working-row-height": `${workingRowHeight()}px` }}
+            >
+                <AgentDocumentView
+                    documentAtom={agentAtoms().documentAtom}
+                    documentStateAtom={agentAtoms().documentStateAtom}
+                    authUrl={status.authUrl}
+                    authNotice={status.authNotice}
+                    onDismissAuthNotice={() => status.setAuthNotice(null)}
+                    authProviderId={provider()?.id ?? providerKey()}
+                    onSubagentClick={handleSubagentClick}
+                    onAgentErrorLogin={() => {
+                        // Must match onLoginAgain above: the button is labeled "Login
+                        // Again", so it has to force a fresh OAuth regardless of
+                        // provider. A prior version special-cased Claude into
+                        // useGlobalLogin() instead — silently reusing the (possibly
+                        // equally-stale) global credential under a "Login Again"
+                        // label, which is exactly the kind of no-op this button
+                        // exists to avoid (retro-agent-auth-relogin-noop-2026-07-01).
+                        log("auth", "Login Again (inline error node) — forcing a fresh provider login");
+                        void status.relogin();
+                    }}
+                    onLoadOlder={history.loadOlder}
+                    loadingOlder={history.loadingOlder}
+                    scrollCommand={scroll.command}
+                    scrollToBottomRef={(fn) => { scrollToBottomFn = fn; }}
+                    highlightNodeId={search.highlightId}
+                    registerHistoryReadyCallback={(fn) => { historyReadyFn = fn; }}
+                    zoomFactor={zoomFactor}
+                    blockId={model.blockId}
+                    layoutView={layoutView}
+                    workingRowHeight={workingRowHeight}
                 />
-            </Show>
+
+                {/* Working indicator — floats over the bottom of the scroll
+                    region instead of occupying its own flex row. The ref'd
+                    wrapper collapses to 0 height when the Show is false, so
+                    the ResizeObserver above naturally reports 0 (no working
+                    row currently rendered) without extra branching.
+                    Shows spinner + elapsed while loading, "✓ Worked · Ns" on completion.
+                    Acts as a visual turn delimiter; stays until next message is sent.
+                    See SPEC_AGENT_PANE_STATUS_GRADIENT_2026_06_14.md §2. */}
+                <div class="agent-working-row-anchor" ref={workingRowAnchorRef}>
+                    <Show when={
+                        status.isLoading()
+                        || workingFromPhase(agentAtoms().turnPhaseAtom[0]())
+                        || agentAtoms().sessionStatsAtom[0]() != null
+                    }>
+                        <AgentWorkingRow
+                            loading={status.isLoading() || workingFromPhase(agentAtoms().turnPhaseAtom[0]())}
+                            stopping={agentAtoms().turnPhaseAtom[0]().kind === "Interrupting"}
+                            currentTool={agentAtoms().currentToolAtom[0]()}
+                            currentToolArg={agentAtoms().currentToolArgAtom[0]()}
+                            sessionStats={agentAtoms().sessionStatsAtom[0]()}
+                            turnTokens={agentAtoms().turnTokensAtom[0]()}
+                            waitingReason={
+                                (() => {
+                                    const phase = agentAtoms().turnPhaseAtom[0]();
+                                    return phase.kind === "Streaming" ? (phase.waitingReason ?? null) : null;
+                                })()
+                            }
+                            retryAfterMs={
+                                (() => {
+                                    const phase = agentAtoms().turnPhaseAtom[0]();
+                                    return phase.kind === "Streaming" ? (phase.retryAfterMs ?? null) : null;
+                                })()
+                            }
+                        />
+                    </Show>
+                </div>
+            </div>
 
             <Show when={status.canRetry()}>
                 <div class="agent-retry-bar">
@@ -1410,22 +1451,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 `StreamSubscribe` arm clears the phase to Idle. Spec
                 docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md
                 §6.4. */}
-            {/* Runtime pin row — accent + title differentiate host vs container.
-                agentMode defaults to "host" at launch time (agent-model.ts), so
-                this row is always shown for agents launched after that default
-                was introduced. The Show guard keeps legacy blocks (no agentMode
-                key at all) from rendering a stale "host" row. */}
-            <Show when={block()?.meta?.["agentMode"] === "host" || block()?.meta?.["agentMode"] === "container"}>
-                <PaneRow
-                    sigil={block()?.meta?.["agentMode"] === "container" ? "□" : "⚙"}
-                    title={
-                        block()?.meta?.["agentMode"] === "container"
-                            ? "Container — isolated Docker sandbox"
-                            : "Host — full system access"
-                    }
-                    accent={block()?.meta?.["agentMode"] === "container" ? "done" : "idle"}
-                />
-            </Show>
             {/* Credentials-revoked disclosure chip — appears when an identity
                 account this agent was linked to is deleted (or unlinked)
                 while the pane is live. Honest wording: the running process
@@ -1504,6 +1529,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 blockId={model.blockId}
                 blockAtom={block}
                 providerId={provider()?.id ?? ""}
+                agentMode={block()?.meta?.["agentMode"] as string | undefined}
             />
 
             <div class="agent-composer-region">

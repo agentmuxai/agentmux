@@ -25,6 +25,7 @@ import { compactionThreshold } from "@/app/store/agent-pane-state/context-window
 import { Show, createEffect, createMemo, createSignal, type JSX } from "solid-js";
 import type { SessionStats, TurnTokens } from "../types";
 import { AgentRuntimeDropup } from "./AgentRuntimeDropup";
+import { RuntimeBadge } from "./RuntimeBadge";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -97,6 +98,12 @@ interface AgentComposerStripProps {
     blockAtom?: () => Block | undefined;
     /** Provider id — needed for applyRuntimeChange. */
     providerId?: string;
+    /** `block.meta["agentMode"]` — "host" or "container". Drives the compact
+     *  HOST/SANDBOX tag next to the model selector (replaces the old,
+     *  confirmed-inert "Host — full system access" / "Container — isolated
+     *  Docker sandbox" pane row — see
+     *  docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md §3.2). */
+    agentMode?: string;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
@@ -168,6 +175,17 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                         blockAtom={props.blockAtom ?? (() => undefined)}
                         providerId={props.providerId ?? ""}
                     />
+                </Show>
+                {/* HOST/SANDBOX tag — not gated by showControls(): agent mode
+                    applies to every provider, not just Claude. Replaces the
+                    old "Host — full system access" / "Container — isolated
+                    Docker sandbox" pane row (confirmed inert — no click
+                    handler) with a compact label reusing the same
+                    RuntimeBadge component MyAgentsList/HostPopover already
+                    use elsewhere for this distinction (size="tag" — see
+                    RuntimeBadge.tsx). */}
+                <Show when={props.agentMode === "host" || props.agentMode === "container"}>
+                    <RuntimeBadge runtime={props.agentMode!} size="tag" />
                 </Show>
             </span>
 
