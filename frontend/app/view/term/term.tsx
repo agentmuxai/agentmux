@@ -122,6 +122,10 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
             return { blockId: id, label: overrides[id] ?? persistedTitle ?? `Terminal ${i + 1}` };
         });
     });
+    // Only render tab pills once there's something to switch BETWEEN — a
+    // lone terminal shows just the "+" (no pill for itself). The moment a
+    // 2nd tab exists, both (including the first) appear as tabs.
+    const visibleTermTabs = createMemo(() => (termTabs().length > 1 ? termTabs() : []));
     const activeBlockId = createMemo(() => {
         layoutModel.localTreeStateAtom();
         return layoutModel.getNodeByBlockId(blockId)?.data?.activeBlockId ?? blockId;
@@ -512,14 +516,14 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
             style={{ position: "relative" }}
         >
             {/* Tab strip — top region, above everything else, matching the
-                editor's and agent pane's own tab-strip placement. Always
-                shown once >0 tabs exist (i.e. always, since the active tab
-                is always one) — the "+" is exactly how you'd get a second
-                tab, so hiding the whole strip until a second one already
-                exists would make that action undiscoverable (same
-                reasoning as the agent-pane fork strip, Phase 4). */}
+                editor's and agent pane's own tab-strip placement. The "+"
+                always renders (that's how you'd get a second tab), but the
+                tab pill itself stays hidden until there's something to
+                switch BETWEEN — a lone terminal shows only the "+"; the
+                moment a 2nd tab exists, both appear.
+                SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md. */}
             <PaneTabStrip
-                tabs={termTabs()}
+                tabs={visibleTermTabs()}
                 activeId={activeBlockId()}
                 getId={(t) => t.blockId}
                 getLabel={(t) => t.label}
