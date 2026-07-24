@@ -9,11 +9,15 @@ obvious explanations holds. The next step that can actually narrow this further 
 memory trace during confirmed-idle hours — process-level counters (`Private Bytes`, `Committed
 Bytes`) cannot see inside the GPU process's own allocator, which is exactly where the
 "unattributed" bucket lives.
-**Status:** Tier 2 (§2.2) implemented same-day — `agentmux-cef/src/commands/window/gpu_trace.rs`,
-`begin_gpu_trace`/`end_gpu_trace` RPC commands, `cargo check -p agentmux-cef` clean. Tier 1 (§2.1)
-is still just a documented recipe — no code needed there, nothing to implement. Neither tier has
-been run live yet (`task dev` on this branch is separately blocked — unrelated Gap B PATH issue,
-see conversation history — so this is verified by typecheck only, not a live capture).
+**Status:** Tier 2 (§2.2) implemented, PR #2294 (2 rounds of real review fixes: UI-thread
+marshaling, dev-gating, path confinement — see PR thread). **Run live, same day, after fixing
+the separate `task dev` Gap B PATH blocker** (see §6 — that fix was a prerequisite, not part of
+this spec, but is what made a live run possible at all). Real capture executed: `begin_gpu_trace`
+→ 20 minutes on a live idle-ish dev instance → `end_gpu_trace`, produced an 863 MB real Chromium
+trace file. **Result: the scaffolding works end-to-end, but the capture as currently configured
+does not contain the data this investigation needs — see §6 for why and what's next.** Not a
+failure of the code; a real, evidenced limit of the exposed CEF API surface, documented so nobody
+re-discovers it by repeating the same 20-minute wait.
 
 ---
 
@@ -180,3 +184,66 @@ that hours of dumps stay a reasonably sized file.
   building.
 - Not designing the eventual mitigation (§11's "proactive renderer recycle" idea from the status
   doc) — that's downstream of knowing what the trace actually shows.
+
+## 6. Live run result (2026-07-24) — scaffolding works, capture is missing the payload data
+
+**Prerequisite fixed first:** `task dev` was separately blocked all session by a Gap B PATH bug
+(`bash: executable file not found` deep inside go-task's `build:host:windows` step) — root cause
+turned out to be a cmd.exe quoting bug (`set "PATH=...;%PATH%"`, quoted, silently failed to
+actually update the environment variable; `set PATH=...` unquoted works). Not part of this spec,
+but the reason a live run was possible at all this session.
+
+**The run:** `begin_gpu_trace` (default categories) → confirmed `gpu_trace: started` in the srv
+log → left running 20 minutes on an otherwise-idle dev instance → `end_gpu_trace` → confirmed
+flush, 863 MB trace file written to `<data dir>/gpu-traces/`.
+
+**The problem:** the file contains real `GlobalMemoryDump` events (70 of them — periodic dumps
+genuinely fired, roughly every ~30s, matching Chromium's default background interval) but
+**zero** allocator/size payload data (`grep -c '"size"'` → 0, `grep -c "allocator"` → 0). Each
+dump's own args explain why: `"dump_type":"summary_only","level_of_detail":"background"`.
+Chromium's **background-level** dumps (the ones a bare category-filter string triggers by
+default) are deliberately near-zero-cost telemetry — they record *that* a dump happened, not the
+per-category size breakdown. That breakdown only exists in **detailed**-level dumps, which
+require an explicit `memory_dump_config.triggers[].mode: "detailed"` — normally set via a full
+JSON `TraceConfig`, not the simple comma-separated category-filter string.
+
+**Tried and empirically ruled out:** passing a full JSON `TraceConfig` string (with
+`memory_dump_config`) as `begin_gpu_trace`'s `categories` argument, on the theory that Chromium's
+`TraceConfig` constructor auto-detects JSON vs. category-filter shorthand from the same string
+parameter. Tested live with a short (40s) capture: the resulting trace had **no**
+`GlobalMemoryDump` events at all and no `disabled-by-default-memory-infra` events either — the
+JSON string was very likely parsed as a (nonsensical, matching nothing) category filter, not
+recognized as a config object. Also confirmed by direct binding search: `cef::begin_tracing`'s
+signature (`categories: Option<&CefString>, callback: Option<&mut CompletionCallback>`) has no
+separate parameter for a dump-trigger config, and the vendored crate source has no
+`RequestGlobalMemoryDump`-equivalent or richer `TraceConfig`-accepting entry point at all —
+checked directly against the exact resolved crate version, not assumed.
+
+**This is a real, hard limit of the exposed CEF API surface**, not a bug in `gpu_trace.rs` — the
+scaffolding correctly does everything `cef::begin_tracing`/`cef::end_tracing` support; those two
+functions just don't support requesting detailed dumps.
+
+### What would actually work (not implemented — next scoped step for whoever continues this)
+
+1. **Check whether CEF exposes a lower-level tracing API** beyond `begin_tracing`/`end_tracing` —
+   e.g. a way to submit a raw Perfetto `TraceConfig` protobuf, or a Chromium IPC/mojo interface
+   for `RequestGlobalMemoryDump` with an explicit `DETAILED` level. This may require going below
+   CEF's public API into Chromium internals CEF doesn't wrap, which likely isn't feasible from
+   `agentmux-cef` at all without patching CEF itself — worth a quick check before ruling it out,
+   but treat "not possible without a CEF patch" as a live, real possibility.
+2. **Chromium's own `--trace-startup-file` command-line path (Tier 1) may behave differently** —
+   it goes through `TracingController::StartTracing` with a config built from
+   `base::trace_event::TraceConfig::TraceConfig(category_filter_string, trace_option)`, which is
+   a different code path than `cef_begin_tracing`'s. Worth testing Tier 1 specifically (not yet
+   done — this session only validated Tier 2) before concluding detailed dumps are unreachable
+   from CEF entirely.
+3. **Fall back to a non-tracing measurement**: if detailed GPU memory-infra dumps prove
+   unreachable via any CEF-exposed path, the investigation may need a different instrument
+   entirely — e.g. Windows' own ETW GPU provider (`Microsoft-Windows-DxgKrnl`), or a
+   vendor-specific tool (PIX, Nsight), run externally against the GPU process PID rather than
+   through CEF/Chromium's own tracing at all. This sidesteps the CEF API limitation completely at
+   the cost of losing Chromium's own category/allocator semantics.
+
+The 863 MB (and a smaller ~79 KB failed-JSON-config) capture files are left in
+`<dev data dir>/gpu-traces/` in case someone wants to double-check this reading of the data
+before pursuing (1)-(3).
