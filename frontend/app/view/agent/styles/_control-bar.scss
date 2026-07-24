@@ -196,11 +196,16 @@
             // Opaque — same reasoning as --worked (commit 6e4497b): this row
             // floats over the scrollable message list now, so a user
             // scrolling up mid-stream saw history bleed through the old
-            // color-mix(...4%, transparent) background. Mixed into
-            // --main-bg-color (opaque, same value .agent-view's own root
-            // uses) instead of transparent — same subtle accent wash,
-            // fully opaque result.
-            background: color-mix(in srgb, var(--accent-color) 4%, var(--main-bg-color));
+            // color-mix(...4%, transparent) background. Reagent P1 on a
+            // later round: --main-bg-color is itself
+            // `rgba(34, 34, 34, var(--window-opacity, 0.45))` — alpha-aware
+            // by design, for window transparency — so it is NOT actually
+            // opaque under the default (or any lowered) --window-opacity,
+            // and mixing into it doesn't fix the bleed-through. Using
+            // --elevated-bg-color instead (aliases --modal-bg-color, a
+            // plain per-theme hex literal with no window-opacity coupling —
+            // see theme.scss) — same dark value, genuinely always opaque.
+            background: color-mix(in srgb, var(--accent-color) 4%, var(--elevated-bg-color));
 
             .agent-working-row-left {
                 flex: 1;
@@ -279,11 +284,16 @@
             // opaque; opacity moves onto the text-bearing children below so
             // the same dimmed look is preserved without exposing what's
             // scrolling past behind it. --block-bg-color is only 50% alpha
-            // (confirmed via computed style) — not opaque enough on its own
-            // to mask scrolled text; --main-bg-color (95% alpha, same value
-            // .agent-view's own root background already uses) reads as
-            // effectively opaque and matches the rest of the pane.
-            background: var(--main-bg-color);
+            // (confirmed via computed style) — not opaque enough. Reagent
+            // P1 on a later round: --main-bg-color isn't opaque either — it's
+            // `rgba(34, 34, 34, var(--window-opacity, 0.45))`, alpha-aware
+            // by design for window transparency, so it stayed translucent
+            // under the default (or any lowered) --window-opacity despite
+            // reading as opaque on a test window where opacity happened to
+            // be 1. --elevated-bg-color (aliases --modal-bg-color, a plain
+            // per-theme hex literal — see theme.scss) is genuinely always
+            // opaque and the same dark value.
+            background: var(--elevated-bg-color);
 
             .agent-working-row-left {
                 flex: 1;
