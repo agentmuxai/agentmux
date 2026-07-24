@@ -182,7 +182,13 @@
         display: flex;
         align-items: center;
         gap: 5px;
-        padding: var(--space-1) var(--space-3) var(--space-1-5);
+        // Right padding bumped past the left/top/bottom (space-3 → space-4):
+        // this row's right edge sits flush against .agent-document's native
+        // scrollbar (both it and the row fill the same
+        // .agent-document-scroll-region box), so the right-side elapsed-
+        // time/"Worked · Ns" text needs a bit more breathing room there than
+        // the rest of the row needs elsewhere.
+        padding: var(--space-1) var(--space-4) var(--space-1-5) var(--space-3);
         pointer-events: auto; // opt back in — the anchor wrapper disables it
 
         &--loading {
