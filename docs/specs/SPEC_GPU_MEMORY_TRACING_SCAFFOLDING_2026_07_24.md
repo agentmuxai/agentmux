@@ -105,12 +105,25 @@ prior usage of that macro pattern existed anywhere in `agentmux-cef` — this is
 `state`/`args`/`Result<Value, String>` contract, dispatched the same way through `ipc.rs`):
 `agentmux-cef/src/commands/window/gpu_trace.rs` — `begin_gpu_trace` (guards against overlapping
 calls with a module-local `AtomicBool`, defaults to the categories listed in §1, fire-and-forget
-per the reasoning in the file's own doc comment) and `end_gpu_trace` (requires a `path` arg, wraps
-completion in a `GpuTraceEndCallback` via `wrap_end_tracing_callback!` that logs the flushed file
-path + size via `tracing::info!` once CEF's callback fires). Wired into `ipc.rs`'s dispatch table
-next to `toggle_devtools`/`inspect_element_at`, and re-exported from
-`commands/window/mod.rs` the same way every sibling module in that directory is. `cargo check -p
-agentmux-cef` is clean — zero warnings or errors in the new file.
+per the reasoning in the file's own doc comment) and `end_gpu_trace` (requires a `filename` arg —
+a bare file name, not a path; see below — wraps completion in a `GpuTraceEndCallback` via
+`wrap_end_tracing_callback!` that logs the flushed file path + size via `tracing::info!` once
+CEF's callback fires). Wired into `ipc.rs`'s dispatch table next to
+`toggle_devtools`/`inspect_element_at`, and re-exported from `commands/window/mod.rs` the same way
+every sibling module in that directory is. `cargo check -p agentmux-cef` is clean — zero warnings
+or errors in the new file.
+
+**Post-review hardening (reagentx `CHANGES_REQUESTED`, PR #2294):** the first pass shipped both
+commands reachable unconditionally in every build and let `end_gpu_trace` write to any
+caller-supplied absolute path. Both fixed before merge:
+- Both commands now call `require_dev_mode()` first — a runtime `AGENTMUX_DEV=1` check (the same
+  pattern `app/mod.rs`'s GPU-tier switch already uses), not a build-identity check. No legitimate
+  production caller for a diagnostics-only tracing toggle.
+- `end_gpu_trace`'s arg changed from an arbitrary `path` to a `filename` — rejected outright if it
+  contains a path separator or `..`/`.`. The real output path is always
+  `<instance data dir>/gpu-traces/<filename>` (`resolve_trace_path`, creates the subdirectory if
+  missing). This confines the write target *by construction* rather than validating an
+  attacker-suppliable absolute path after the fact.
 
 ## 3. Long-duration capture — avoiding an unbounded trace file over multiple hours
 
