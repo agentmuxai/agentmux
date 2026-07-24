@@ -70,10 +70,15 @@ can't cover the full multi-hour window tier 2 is built for.
 
 Launch with:
 ```
-AGENTMUX_CEF_EXTRA_FLAGS="trace-startup=-*,disabled-by-default-memory-infra;trace-startup-file=C:\path\to\trace.json;trace-startup-duration=1800"
+AGENTMUX_CEF_EXTRA_FLAGS="trace-startup=-*,disabled-by-default-memory-infra trace-startup-file=C:\path\to\trace.json trace-startup-duration=1800"
 ```
-(matches the existing `k=v` parsing already in `on_before_command_line_processing` for this env
-var — semicolon-separated, `=` splits switch from value).
+**Space-separated, not semicolon-separated** — `on_before_command_line_processing`
+(`agentmux-cef/src/app/mod.rs`) parses this env var with `.split_whitespace()`, then `=` splits
+each token into switch/value (verified against the actual parsing code, not assumed — an earlier
+draft of this recipe used semicolons, which that parser doesn't recognize as a separator, so it
+silently produced no trace file). Corollary: the output path can't contain a space, since
+`split_whitespace()` doesn't respect quoting — pick a path like `C:\Users\<you>\trace.json`, not
+one under a directory with a space in its name.
 
 Output is a Chrome trace JSON, viewable in `chrome://tracing` (load file) or
 [Perfetto UI](https://ui.perfetto.dev) — group by process, look at the GPU process's `gpu`
