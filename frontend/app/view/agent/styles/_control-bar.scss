@@ -261,8 +261,22 @@
 
         &--worked {
             color: var(--secondary-text-color);
-            opacity: 0.55;
             justify-content: space-between;
+            // Opaque — this row floats over the scrollable message list now
+            // (SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md
+            // §3.2). Opacity used to live on the whole row when it was a
+            // normal-flow sibling with nothing behind it; now that scrolled
+            // history passes underneath, dimming the WHOLE row (background
+            // included) let that history bleed through and visually
+            // distort the "Worked · Ns" text. Background stays fully
+            // opaque; opacity moves onto the text-bearing children below so
+            // the same dimmed look is preserved without exposing what's
+            // scrolling past behind it. --block-bg-color is only 50% alpha
+            // (confirmed via computed style) — not opaque enough on its own
+            // to mask scrolled text; --main-bg-color (95% alpha, same value
+            // .agent-view's own root background already uses) reads as
+            // effectively opaque and matches the rest of the pane.
+            background: var(--main-bg-color);
 
             .agent-working-row-left {
                 flex: 1;
@@ -270,6 +284,7 @@
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
+                opacity: 0.55;
             }
 
             .agent-working-row-right {
@@ -278,6 +293,7 @@
                 display: inline-flex;
                 align-items: center;
                 gap: var(--space-1-5);
+                opacity: 0.55;
             }
 
             .agent-working-row-secondary {
