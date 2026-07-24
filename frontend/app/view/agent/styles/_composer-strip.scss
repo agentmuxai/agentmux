@@ -43,27 +43,6 @@
     justify-self: start;
 }
 
-// HOST/SANDBOX tag — replaces the old "Host — full system access" pane row.
-// See docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md §3.2.
-.agent-composer-strip-mode-tag {
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    padding: 1px 5px;
-    border-radius: 3px;
-    line-height: 1.4;
-
-    &--host {
-        color: var(--error-color);
-        background: color-mix(in srgb, var(--error-color) 10%, transparent);
-    }
-
-    &--sandbox {
-        color: var(--main-text-color);
-        background: color-mix(in srgb, var(--main-text-color) 8%, transparent);
-    }
-}
-
 // ── Stats zone (center column) ──────────────────────────────────────────────
 
 .agent-composer-strip-stats-zone {

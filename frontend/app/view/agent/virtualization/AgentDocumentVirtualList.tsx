@@ -111,6 +111,20 @@ export interface AgentDocumentVirtualListProps {
      * instead of TanStack's virtual items.
      */
     layoutView?: Accessor<LayoutView | null>;
+    /**
+     * AgentWorkingRow's current rendered height in px (0 when hidden) —
+     * agent-view.tsx measures it via ResizeObserver and uses the same value
+     * to size .agent-document's bottom padding (the row floats over this
+     * scroll container as an overlay; see
+     * docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md
+     * §3.2). Tracked by the stick-to-bottom effect below for the same
+     * reason nodes().length and layoutView().totalSize are: when this
+     * grows while pinned to bottom (a turn starts, tool-name text
+     * widens the row), .agent-document's effective content height grows
+     * too, and without re-pinning, the newly-taller overlay can end up
+     * covering the previously-visible tail of the message list.
+     */
+    workingRowHeight?: Accessor<number>;
 }
 
 export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): JSX.Element {
@@ -385,10 +399,21 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // (rows are absolutely positioned, outside anchor-candidate selection),
     // and stickToBottom itself never flips — the drop is invisible in state
     // inspection. See docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md §2.
+    //
+    // Also tracks workingRowHeight (below) — reagent P1 on #2292: that same
+    // spec's §3.2 overlay (AgentWorkingRow floating over this scroll
+    // container's bottom edge, sized via .agent-document's padding-bottom)
+    // introduced an identical gap. When the row appears or grows while
+    // pinned to bottom (a turn starts, tool-name text widens it),
+    // .agent-document's effective content height changes without any
+    // node-count or layoutView change, so without this dependency the
+    // newly-taller overlay could end up covering the message that was
+    // previously visible at the bottom.
     createEffect(() => {
         // Track length changes — Solid will re-run when nodes() emits.
         const _len = props.viewState.nodes().length;
         const _totalSize = props.layoutView?.()?.totalSize;
+        const _workingRowHeight = props.workingRowHeight?.();
         if (props.viewState.stickToBottom() && scrollRef) {
             // queueMicrotask so the new content has rendered before we scroll.
             queueMicrotask(() => {

@@ -25,6 +25,7 @@ import { compactionThreshold } from "@/app/store/agent-pane-state/context-window
 import { Show, createEffect, createMemo, createSignal, type JSX } from "solid-js";
 import type { SessionStats, TurnTokens } from "../types";
 import { AgentRuntimeDropup } from "./AgentRuntimeDropup";
+import { RuntimeBadge } from "./RuntimeBadge";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -179,23 +180,12 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                     applies to every provider, not just Claude. Replaces the
                     old "Host — full system access" / "Container — isolated
                     Docker sandbox" pane row (confirmed inert — no click
-                    handler) with a compact label; the full sentence survives
-                    as this tag's tooltip. */}
+                    handler) with a compact label reusing the same
+                    RuntimeBadge component MyAgentsList/HostPopover already
+                    use elsewhere for this distinction (size="tag" — see
+                    RuntimeBadge.tsx). */}
                 <Show when={props.agentMode === "host" || props.agentMode === "container"}>
-                    <span
-                        class="agent-composer-strip-mode-tag"
-                        classList={{
-                            "agent-composer-strip-mode-tag--host": props.agentMode === "host",
-                            "agent-composer-strip-mode-tag--sandbox": props.agentMode === "container",
-                        }}
-                        title={
-                            props.agentMode === "container"
-                                ? "Container — isolated Docker sandbox"
-                                : "Host — full system access"
-                        }
-                    >
-                        {props.agentMode === "container" ? "SANDBOX" : "HOST"}
-                    </span>
+                    <RuntimeBadge runtime={props.agentMode!} size="tag" />
                 </Show>
             </span>
 

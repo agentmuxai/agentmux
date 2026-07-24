@@ -1357,6 +1357,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     zoomFactor={zoomFactor}
                     blockId={model.blockId}
                     layoutView={layoutView}
+                    workingRowHeight={workingRowHeight}
                 />
 
                 {/* Working indicator — floats over the bottom of the scroll
