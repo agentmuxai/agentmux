@@ -10,7 +10,7 @@
  */
 
 import clsx from "clsx";
-import { For, Show, createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 import { capChars, createChunkCapper, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
@@ -21,7 +21,7 @@ import {
     type DispatchDetail,
     type SubagentEvent,
 } from "../../swarm/swarm-model";
-import { KIND_SIGIL, type PinnedActivity } from "../activity/types";
+import { EXIT_FLASH_MS, KIND_SIGIL, type PinnedActivity } from "../activity/types";
 import type { ToolLogChunk } from "../types";
 
 /** One-line text summary per subagent event kind — deliberately simpler than
@@ -68,6 +68,9 @@ interface ActivityRowProps {
     /** Reactive accessor — returns undefined if the activity just left. */
     activity: () => PinnedActivity | undefined;
     expanded: () => boolean;
+    /** True once this row is past its retention window and only still
+     *  mounted for the departure flash — see ActivityDock's `isLeaving`. */
+    leaving: () => boolean;
     onToggle: () => void;
     onStop: () => void;
     onDismiss: () => void;
@@ -75,6 +78,16 @@ interface ActivityRowProps {
 
 export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
     const tick = useTick(1000);
+
+    // Landing flash on first mount — same visual as a tab landing after a
+    // drag/drop (tab-bounce, tabbar.scss), reused here rather than a new
+    // bespoke animation. Cleared after EXIT_FLASH_MS so it plays once, not
+    // on every re-render.
+    const [entering, setEntering] = createSignal(true);
+    onMount(() => {
+        const timer = setTimeout(() => setEntering(false), EXIT_FLASH_MS);
+        onCleanup(() => clearTimeout(timer));
+    });
 
     const elapsed = createMemo(() => {
         const a = props.activity();
@@ -154,6 +167,8 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
                 <div
                     class={clsx("agent-activity-row", a().kind, a().status, {
                         expanded: props.expanded(),
+                        "activity-flash-in": entering(),
+                        "activity-flash-out": !entering() && props.leaving(),
                     })}
                 >
                     <div class="agent-activity-summary" onClick={props.onToggle}>
