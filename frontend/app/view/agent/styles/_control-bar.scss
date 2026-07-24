@@ -193,7 +193,14 @@
 
         &--loading {
             color: var(--accent-color);
-            background: color-mix(in srgb, var(--accent-color) 4%, transparent);
+            // Opaque — same reasoning as --worked (commit 6e4497b): this row
+            // floats over the scrollable message list now, so a user
+            // scrolling up mid-stream saw history bleed through the old
+            // color-mix(...4%, transparent) background. Mixed into
+            // --main-bg-color (opaque, same value .agent-view's own root
+            // uses) instead of transparent — same subtle accent wash,
+            // fully opaque result.
+            background: color-mix(in srgb, var(--accent-color) 4%, var(--main-bg-color));
 
             .agent-working-row-left {
                 flex: 1;
