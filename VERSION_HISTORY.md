@@ -1,5 +1,23 @@
 # AgentMux Version History
 
+## 0.54.4 — 2026-07-23
+
+- fix: batch of small triaged issue fixes (#1397, #780, #859, #2155)
+- fix(auth): open_login_terminal no longer nulls stdin on Windows, restoring browser-open
+- feat(process-broker): unify agent process/status tracking behind one broker (Phase A)
+- docs(reports): large-file modularization scan across Rust backend, CEF/launcher host, and frontend
+- refactor(broker): reducer-based state machine for credential refresh coordination
+- fix(launcher): macOS splash rows now animate instead of snapping to their final value
+- feat(agent): drop the shell's activity-log panel, write output into the terminal instead
+- fix(term): terminal scrollback now survives reconnect (all view:term panes)
+- refactor: implement Tier 1 modularization items (state.rs, service handlers, reducer tests, TileLayout dedup, global.ts, providers, modal.tsx)
+- feat(tabs): shrink-to-fit pane tab strip sizing + double-click rename for agent fork and terminal tabs
+- refactor: implement Tier 2 modularization items (12 large files across Rust backend, CEF/launcher host, and frontend)
+- fix(agent): Accounts tab in Agent setup wrote to a dead column
+- fix(subagent-watcher): scope live fs events to the owning block and tear down watchers on block delete
+- refactor: implement Tier 3 modularization items (main.rs bootstrap, lib.rs macOS compat, identity/resolver.rs, useAgentStream.ts)
+
+
 ## 0.54.3 — 2026-07-22
 
 - fix(identity): restore resolve_provider_alias deleted by #2267's dead-code sweep
