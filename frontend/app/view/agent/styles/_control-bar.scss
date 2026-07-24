@@ -154,19 +154,36 @@
     }
 
     // === Working Row ===
-    // Shown immediately below AgentDocumentView in the conversation area.
+    // Floats over the bottom of .agent-document-scroll-region instead of
+    // occupying its own flex row (SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md
+    // §3.2) — the anchor wrapper is the positioning + ResizeObserver target;
+    // .agent-working-row-anchor scopes this selector so it can't collide
+    // with any .agent-working-row rendered elsewhere.
     // No idle placeholder — component returns null when neither loading nor
-    // has completed stats. Direct child selector avoids collisions with any
-    // .agent-working-row inside AgentDocumentView.
+    // has completed stats.
     // SPEC_AGENT_PANE_STATUS_GRADIENT_2026_06_14.md §2.
-    > .agent-working-row {
+    .agent-working-row-anchor {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 2;
+        // The anchor spans the full pane width (left:0/right:0) but the row
+        // itself only fills its own content width — without this, the empty
+        // margin beside the row would still intercept clicks meant for the
+        // message list underneath. Re-enabled on .agent-working-row itself
+        // below so its own text stays selectable/clickable.
+        pointer-events: none;
+    }
+
+    .agent-working-row-anchor .agent-working-row {
         font-size: 10px;
         font-family: var(--fixed-font, monospace);
         display: flex;
         align-items: center;
         gap: 5px;
         padding: var(--space-1) var(--space-3) var(--space-1-5);
-        flex-shrink: 0;
+        pointer-events: auto; // opt back in — the anchor wrapper disables it
 
         &--loading {
             color: var(--accent-color);

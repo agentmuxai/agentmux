@@ -97,6 +97,12 @@ interface AgentComposerStripProps {
     blockAtom?: () => Block | undefined;
     /** Provider id — needed for applyRuntimeChange. */
     providerId?: string;
+    /** `block.meta["agentMode"]` — "host" or "container". Drives the compact
+     *  HOST/SANDBOX tag next to the model selector (replaces the old,
+     *  confirmed-inert "Host — full system access" / "Container — isolated
+     *  Docker sandbox" pane row — see
+     *  docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md §3.2). */
+    agentMode?: string;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
@@ -168,6 +174,28 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                         blockAtom={props.blockAtom ?? (() => undefined)}
                         providerId={props.providerId ?? ""}
                     />
+                </Show>
+                {/* HOST/SANDBOX tag — not gated by showControls(): agent mode
+                    applies to every provider, not just Claude. Replaces the
+                    old "Host — full system access" / "Container — isolated
+                    Docker sandbox" pane row (confirmed inert — no click
+                    handler) with a compact label; the full sentence survives
+                    as this tag's tooltip. */}
+                <Show when={props.agentMode === "host" || props.agentMode === "container"}>
+                    <span
+                        class="agent-composer-strip-mode-tag"
+                        classList={{
+                            "agent-composer-strip-mode-tag--host": props.agentMode === "host",
+                            "agent-composer-strip-mode-tag--sandbox": props.agentMode === "container",
+                        }}
+                        title={
+                            props.agentMode === "container"
+                                ? "Container — isolated Docker sandbox"
+                                : "Host — full system access"
+                        }
+                    >
+                        {props.agentMode === "container" ? "SANDBOX" : "HOST"}
+                    </span>
                 </Show>
             </span>
 

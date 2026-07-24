@@ -374,9 +374,21 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // into view. Streaming-buffer items live in normal flow at the
     // bottom of the scroll container, so MAX_SAFE_INTEGER scrollTo
     // works reliably for them (no virtualizer reflow needed).
+    //
+    // Also tracks layoutView().totalSize (below) — not just nodes().length.
+    // A row's rendered height can change WITHOUT the node count changing
+    // (a tool panel collapsing/expanding, code re-highlighting, an image
+    // loading) — measureRO dispatches RowMeasured for that independently of
+    // this effect, so without this second dependency, an off-screen row's
+    // height change silently desyncs scrollTop from true bottom: nothing
+    // here re-runs, CSS overflow-anchor doesn't reliably cover it either
+    // (rows are absolutely positioned, outside anchor-candidate selection),
+    // and stickToBottom itself never flips — the drop is invisible in state
+    // inspection. See docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md §2.
     createEffect(() => {
         // Track length changes — Solid will re-run when nodes() emits.
         const _len = props.viewState.nodes().length;
+        const _totalSize = props.layoutView?.()?.totalSize;
         if (props.viewState.stickToBottom() && scrollRef) {
             // queueMicrotask so the new content has rendered before we scroll.
             queueMicrotask(() => {
