@@ -220,7 +220,23 @@ pub fn build_router(state: AppState) -> Router {
             "X-AuthKey".parse().unwrap(),
             "X-Requested-With".parse().unwrap(),
             "x-vercel-ai-ui-message-stream".parse().unwrap(),
-        ]);
+        ])
+        // Custom response headers are invisible to cross-origin `fetch()`
+        // callers (Response.headers.get(...) silently returns null) unless
+        // explicitly exposed here — a browser CORS default, not an
+        // allow_headers concern (that list governs REQUEST headers only).
+        // `X-ZoneFileInfo` (files.rs's handle_wave_file) is read by
+        // `fetchWaveFile` on every blockfile GET; without this, any 200
+        // response is indistinguishable from a malformed one to the
+        // frontend ("missing zone file info for ..." — the exact failure
+        // mode `TermWrap.loadInitialTerminalData()` hit once terminal
+        // scrollback write-through started actually producing real 200s
+        // instead of always-404, see
+        // SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md §2.1's
+        // follow-up). Not dev-only — the CEF frontend's own origin is
+        // cross-origin from this server in production too (see the
+        // allow_origin comment above).
+        .expose_headers(vec!["X-ZoneFileInfo".parse().unwrap()]);
 
     // Reactive routes. Previously registered without auth on the
     // assumption that localhost is a trust boundary; the 2026-05-11

@@ -1777,6 +1777,15 @@ declare global {
         filename: string;
         fileop: string;
         data64: string;
+        // File size immediately before this append (the chunk spans
+        // [offset, offset + decoded(data64).length)). Only populated for
+        // filestore-write-through-backed appends (handle_append_block_file);
+        // absent means "no offset info available" — consumers should treat
+        // that as "always new" (the pre-existing, always-write behavior).
+        // Added so TermWrap can reconcile a chunk landing in the reconnect
+        // window against what its own reconnect fetch already covered — see
+        // SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md §2.1 follow-up.
+        offset?: number;
     };
 
     // webcmd.WSRpcCommand

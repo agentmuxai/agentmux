@@ -74,6 +74,17 @@ pub fn persist_to_blockfile_silent(
 ///
 /// The FileStore write is fire-and-forget: if it fails we emit a warning but
 /// never propagate the error back to the hot stdout-reader path.
+/// Outcome of the up-front `stat()` this function needs regardless (to know
+/// whether to lazily `make_file` before appending) — reused to compute the
+/// chunk's start offset for the broadcast event too, rather than stat-ing
+/// twice. `Error` preserves the original behavior of skipping write-through
+/// entirely (and omitting `offset` from the broadcast) on a stat failure.
+enum ExistingFileStat {
+    NeedsCreate,
+    Exists { size: u64 },
+    Error,
+}
+
 pub fn handle_append_block_file(
     broker: &wps::Broker,
     block_id: &str,
@@ -84,11 +95,47 @@ pub fn handle_append_block_file(
 ) {
     let data64 = base64::engine::general_purpose::STANDARD.encode(data);
 
+    // Stat once, up front — needed both to decide whether make_file() is
+    // required below AND to compute this chunk's start offset (the file's
+    // size immediately before this append) for the broadcast event, so a
+    // client reconnecting mid-stream can reconcile a chunk arriving during
+    // its own reconnect fetch against what that fetch already covers.
+    // Before the write-through fix (§2.1 of the spec below), "term" reads
+    // always 404'd, so this race was latent — a reconnecting TermWrap had
+    // nothing from the fetch to double-count against. Now that reads
+    // return real content, a chunk landing in the subscribe-then-fetch-
+    // then-flush-held-data window could be written twice (once from the
+    // fetch's response, once from the live/held replay), corrupting
+    // ptyOffset for future reconnects.
+    // See SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md §2.1 follow-up.
+    let existing_stat = match filestore {
+        None => None,
+        Some(fs) => Some(match fs.stat(block_id, filename) {
+            Ok(None) => ExistingFileStat::NeedsCreate,
+            Ok(Some(info)) => ExistingFileStat::Exists { size: info.size as u64 },
+            Err(e) => {
+                tracing::warn!(
+                    block_id = %block_id,
+                    filename = %filename,
+                    error = %e,
+                    "filestore stat failed; skipping write-through"
+                );
+                ExistingFileStat::Error
+            }
+        }),
+    };
+    let start_offset = match &existing_stat {
+        None | Some(ExistingFileStat::Error) => None,
+        Some(ExistingFileStat::NeedsCreate) => Some(0),
+        Some(ExistingFileStat::Exists { size }) => Some(*size),
+    };
+
     let event_data = wps::WSFileEventData {
         zoneid: block_id.to_string(),
         filename: filename.to_string(),
         fileop: wps::FILE_OP_APPEND.to_string(),
         data64,
+        offset: start_offset,
     };
 
     let event = wps::WaveEvent {
@@ -105,18 +152,12 @@ pub fn handle_append_block_file(
     // Create the file lazily on first append; if the file already exists
     // we skip make_file and go straight to append_data.
     if let Some(fs) = filestore {
-        let needs_create = match fs.stat(block_id, filename) {
-            Ok(None) => true,
-            Ok(Some(_)) => false,
-            Err(e) => {
-                tracing::warn!(
-                    block_id = %block_id,
-                    filename = %filename,
-                    error = %e,
-                    "filestore stat failed; skipping write-through"
-                );
-                return;
-            }
+        let needs_create = match existing_stat {
+            Some(ExistingFileStat::NeedsCreate) => true,
+            Some(ExistingFileStat::Exists { .. }) => false,
+            // Error already warned above; preserve the original
+            // skip-write-through-entirely behavior.
+            Some(ExistingFileStat::Error) | None => return,
         };
 
         if needs_create {
@@ -228,6 +269,7 @@ pub fn handle_truncate_block_file(broker: &wps::Broker, block_id: &str, filename
         filename: filename.to_string(),
         fileop: wps::FILE_OP_TRUNCATE.to_string(),
         data64: String::new(),
+        offset: None,
     };
 
     let event = wps::WaveEvent {

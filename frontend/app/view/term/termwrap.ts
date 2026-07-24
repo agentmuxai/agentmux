@@ -76,7 +76,13 @@ export class TermWrap {
     serializeAddon: SerializeAddon;
     mainFileSubject: SubjectWithRef<WSFileEventData>;
     loaded: boolean;
-    heldData: Uint8Array[];
+    // Chunks buffered while !loaded (subscribed but the initial fetch hasn't
+    // resolved yet). `offset` is the chunk's start position in the server-side
+    // file, when known (see WSFileEventData.offset) — used by flushHeldData to
+    // reconcile against what loadInitialTerminalData's fetch already covered,
+    // so a chunk landing in that window isn't rendered (and counted into
+    // ptyOffset) twice. See SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md §2.1.
+    heldData: { data: Uint8Array; offset?: number }[];
     handleResize_debounced: () => void;
     hasResized: boolean;
     multiInputCallback: (data: string) => void;
@@ -515,7 +521,7 @@ export class TermWrap {
                 if (decodedData.length <= 32) markStart('term-echo-render');
                 this.doTerminalWrite(decodedData, null);
             } else {
-                this.heldData.push(decodedData);
+                this.heldData.push({ data: decodedData, offset: msg.offset });
             }
         } else {
             console.log("bad fileop for terminal", msg);
@@ -695,8 +701,30 @@ export class TermWrap {
     }
 
     private flushHeldData() {
-        for (const data of this.heldData) {
-            this.doTerminalWrite(data, null);
+        // this.ptyOffset is a fixed snapshot here (set by loadInitialTerminalData,
+        // which already awaited/settled before flushHeldData is called) — the
+        // server-side file size as of that fetch. Each held chunk's `offset` is
+        // its own start position in that same file, so comparing every chunk
+        // against this single boundary is correct regardless of processing
+        // order: a chunk fully below the boundary was already delivered by the
+        // fetch and must be dropped (not re-rendered, not double-counted into
+        // ptyOffset); a chunk straddling it needs its covered prefix trimmed.
+        const fetchBoundary = this.ptyOffset;
+        for (const { data, offset } of this.heldData) {
+            if (offset == null) {
+                // No offset info (older server, or a non-write-through event) —
+                // fall back to the pre-existing always-write behavior.
+                this.doTerminalWrite(data, null);
+                continue;
+            }
+            const chunkEnd = offset + data.length;
+            if (chunkEnd <= fetchBoundary) {
+                continue; // fully covered by the initial fetch; skip
+            } else if (offset < fetchBoundary) {
+                this.doTerminalWrite(data.subarray(fetchBoundary - offset), null);
+            } else {
+                this.doTerminalWrite(data, null);
+            }
         }
         this.heldData = [];
     }

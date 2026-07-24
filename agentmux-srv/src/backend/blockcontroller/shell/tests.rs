@@ -114,6 +114,7 @@ use std::sync::Arc;
             None,
             None,
             None,
+            None,
         );
         assert_eq!(ctrl.controller_type(), "shell");
         assert_eq!(ctrl.block_id(), "block-1");
@@ -130,6 +131,7 @@ use std::sync::Arc;
             "shell".to_string(),
             "tab-1".to_string(),
             "block-1".to_string(),
+            None,
             None,
             None,
             None,
@@ -162,6 +164,7 @@ use std::sync::Arc;
             None,
             None,
             None,
+            None,
         );
 
         let mut meta = make_shell_meta();
@@ -184,6 +187,7 @@ use std::sync::Arc;
             "shell".to_string(),
             "tab-1".to_string(),
             "block-1".to_string(),
+            None,
             None,
             None,
             None,
@@ -217,6 +221,7 @@ use std::sync::Arc;
             None,
             None,
             None,
+            None,
         );
 
         // Set a custom factory that returns a mock with exit code 42
@@ -239,6 +244,7 @@ use std::sync::Arc;
             "shell".to_string(),
             "tab-1".to_string(),
             "block-1".to_string(),
+            None,
             None,
             None,
             None,
@@ -267,6 +273,7 @@ use std::sync::Arc;
             None,
             None,
             None,
+            None,
         );
 
         let result = ctrl.send_input(BlockInputUnion::data(b"hello".to_vec()), None);
@@ -280,6 +287,7 @@ use std::sync::Arc;
             "shell".to_string(),
             "tab-1".to_string(),
             "block-1".to_string(),
+            None,
             None,
             None,
             None,
@@ -300,11 +308,35 @@ use std::sync::Arc;
     }
 
     #[test]
+    fn test_shell_controller_stores_filestore_for_write_through() {
+        // SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md §2.1 — confirms
+        // the constructor wiring itself (the actual PTY read loop's use of
+        // `filestore_read.as_ref()` is inside a real-PTY code path, `set_
+        // conn_factory`'s mock path is a separate, simpler branch that
+        // doesn't reach it — `handle_append_block_file`'s own Some-filestore
+        // behavior is already covered by `test_handle_append_block_file_
+        // writes_to_filestore` above).
+        let fs = Arc::new(FileStore::open_in_memory().expect("filestore"));
+        let ctrl = ShellController::new(
+            "shell".to_string(),
+            "tab-1".to_string(),
+            "block-1".to_string(),
+            None,
+            None,
+            None,
+            Some(fs.clone()),
+        );
+        assert!(ctrl.filestore.is_some());
+        assert!(Arc::ptr_eq(ctrl.filestore.as_ref().unwrap(), &fs));
+    }
+
+    #[test]
     fn test_controller_trait_as_arc() {
         let ctrl: Arc<dyn Controller> = Arc::new(ShellController::new(
             "shell".to_string(),
             "tab-1".to_string(),
             "block-1".to_string(),
+            None,
             None,
             None,
             None,
@@ -477,6 +509,7 @@ use std::sync::Arc;
             None,
             None,
             None,
+            None,
         ));
 
         super::super::register_controller("test-register-block", ctrl.clone());
@@ -570,6 +603,85 @@ use std::sync::Arc;
         handle_append_block_file(&broker, block_id, filename, b"line three\n", Some(&fs), None);
         let stat_after = fs.stat(block_id, filename).unwrap().unwrap();
         assert_eq!(stat_after.size, (line1.len() + line2.len() + b"line three\n".len()) as i64);
+    }
+
+    /// Minimal WpsClient that records every event delivered to it, so tests
+    /// can assert on the broadcast payload (not just the FileStore side effect).
+    struct RecordingClient {
+        events: std::sync::Mutex<Vec<wps::WaveEvent>>,
+    }
+
+    impl RecordingClient {
+        fn new() -> Self {
+            Self { events: std::sync::Mutex::new(Vec::new()) }
+        }
+    }
+
+    impl wps::WpsClient for Arc<RecordingClient> {
+        fn send_event(&self, _route_id: &str, event: wps::WaveEvent) {
+            self.events.lock().unwrap().push(event);
+        }
+    }
+
+    #[test]
+    fn test_handle_append_block_file_broadcasts_start_offset() {
+        use crate::backend::storage::filestore::FileStore;
+
+        let broker = wps::Broker::new();
+        let client = Arc::new(RecordingClient::new());
+        broker.set_client(Box::new(Arc::clone(&client)));
+        broker.subscribe(
+            "test-route-offset",
+            wps::SubscriptionRequest {
+                event: wps::EVENT_BLOCK_FILE.to_string(),
+                scopes: vec!["block:offset-block".to_string()],
+                allscopes: false,
+            },
+        );
+
+        let fs = Arc::new(FileStore::open_in_memory().expect("open in-memory filestore"));
+        let block_id = "offset-block";
+        let filename = "term";
+
+        // First append — file doesn't exist yet, so the chunk starts at offset 0.
+        handle_append_block_file(&broker, block_id, filename, b"hello ", Some(&fs), None);
+        // Second append — file now has 6 bytes, so this chunk starts at offset 6.
+        handle_append_block_file(&broker, block_id, filename, b"world\n", Some(&fs), None);
+
+        let events = client.events.lock().unwrap();
+        assert_eq!(events.len(), 2);
+        let offsets: Vec<Option<u64>> = events
+            .iter()
+            .map(|e| {
+                let data: wps::WSFileEventData =
+                    serde_json::from_value(e.data.clone().unwrap()).unwrap();
+                data.offset
+            })
+            .collect();
+        assert_eq!(offsets, vec![Some(0), Some(6)]);
+    }
+
+    #[test]
+    fn test_handle_append_block_file_omits_offset_without_filestore() {
+        let broker = wps::Broker::new();
+        let client = Arc::new(RecordingClient::new());
+        broker.set_client(Box::new(Arc::clone(&client)));
+        broker.subscribe(
+            "test-route-no-fs",
+            wps::SubscriptionRequest {
+                event: wps::EVENT_BLOCK_FILE.to_string(),
+                scopes: vec!["block:no-fs-block".to_string()],
+                allscopes: false,
+            },
+        );
+
+        handle_append_block_file(&broker, "no-fs-block", "term", b"hi", None, None);
+
+        let events = client.events.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        let data: wps::WSFileEventData =
+            serde_json::from_value(events[0].data.clone().unwrap()).unwrap();
+        assert_eq!(data.offset, None);
     }
 
     // ────────────────────────────────────────────────────────────────

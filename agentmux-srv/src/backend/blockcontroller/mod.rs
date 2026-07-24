@@ -435,6 +435,7 @@ pub fn resync_controller(
                 broker,
                 event_bus,
                 wstore,
+                filestore,
             );
             let ctrl = Arc::new(ctrl);
             register_controller(block_id, ctrl.clone());
