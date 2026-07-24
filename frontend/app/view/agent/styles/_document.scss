@@ -4,15 +4,36 @@
 // Document container + status log (terminal-style). Wrapped in .agent-view so the cascade chain matches
 // the pre-split file (SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24).
 .agent-view {
+    // Wraps AgentDocumentView + the AgentWorkingRow anchor — takes over the
+    // flex-1 slot .agent-document used to occupy directly. .agent-document
+    // fills this box via position:absolute so AgentWorkingRow can float
+    // over its bottom edge instead of shrinking it as a normal-flow
+    // sibling — the scrollbar now reaches this box's true bottom edge.
+    // See docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md §3.2.
+    .agent-document-scroll-region {
+        position: relative;
+        flex: 1;
+        min-height: 0;
+        overflow: hidden; // .agent-document inside owns the real scrolling
+    }
+
     // === Document Container ===
     .agent-document {
-        flex: 1;
+        position: absolute;
+        inset: 0;
         overflow-y: auto;
         // Stop scroll chaining from leaving the pane once it hits its own
         // top/bottom (e.g. OS-level swipe-navigation gestures). Nested tool
         // previews get their own `contain` too — see SPEC_TOOL_PREVIEW_SCROLL_CHAINING_2026_07_03.
         overscroll-behavior: contain;
         padding: var(--space-0-5) var(--space-1);
+        // Reserves exactly AgentWorkingRow's current rendered height (0 when
+        // hidden) so scrolling to true bottom leaves the last message above
+        // the floating row, not hidden underneath it. Set on
+        // .agent-document-scroll-region by agent-view.tsx's ResizeObserver;
+        // custom properties cascade through the DOM regardless of the
+        // AgentDocumentView/AgentDocumentVirtualList component boundary.
+        padding-bottom: calc(var(--space-0-5) + var(--agent-working-row-height, 0px));
         display: flex;
         flex-direction: column;
         gap: 4px;

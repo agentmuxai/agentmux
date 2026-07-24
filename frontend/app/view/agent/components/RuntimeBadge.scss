@@ -20,6 +20,16 @@
         padding: 2px 6px;
     }
 
+    // Minimal icon-less text tag — agent composer strip, next to the model
+    // selector. No border/icon; red HOST / plain-white SANDBOX per explicit
+    // design spec (overrides &--container/&--host below via the compound
+    // selectors, which win on specificity regardless of source order).
+    &--tag {
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        border: none;
+    }
+
     &--container {
         background: color-mix(in srgb, var(--success-color, #22c55e) 15%, transparent);
         color: var(--success-color, #22c55e);
@@ -30,6 +40,18 @@
         background: color-mix(in srgb, var(--warning-color, #f59e0b) 15%, transparent);
         color: var(--warning-color, #f59e0b);
         border: 1px solid color-mix(in srgb, var(--warning-color, #f59e0b) 30%, transparent);
+    }
+
+    &--tag&--host {
+        color: var(--error-color);
+        background: color-mix(in srgb, var(--error-color) 10%, transparent);
+        border: none;
+    }
+
+    &--tag&--container {
+        color: var(--main-text-color);
+        background: color-mix(in srgb, var(--main-text-color) 8%, transparent);
+        border: none;
     }
 
     &--unknown {
