@@ -213,6 +213,17 @@
     &.stopped  { border-left-color: var(--secondary-text-color); opacity: 0.6; }
 
     & + & { border-top: 1px solid var(--border-color); }
+
+    // Landing/departure flash — reuses `tab-bounce` (tabbar.scss), the same
+    // spring-bounce played when a dragged tab lands, so a dock row appearing
+    // or about to disappear reads the same way a tab drop does elsewhere in
+    // the app. Both are transform-only (no layout shift) so they're safe to
+    // fire on a row that's about to be removed from the list.
+    &.activity-flash-in,
+    &.activity-flash-out {
+        transform-origin: center bottom;
+        animation: tab-bounce 300ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    }
 }
 
 .agent-activity-summary {
