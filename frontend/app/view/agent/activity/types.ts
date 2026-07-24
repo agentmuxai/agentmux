@@ -57,10 +57,20 @@ export const KIND_SIGIL: Record<ActivityKind, string> = {
 };
 
 /** Milliseconds a terminal row lingers in the dock before auto-dismiss (D4).
- *  `error` is Infinity — it persists until the user acknowledges it. */
+ *  `error` used to be Infinity (persist until the user manually dismissed it)
+ *  — in practice this let failed background shells rack up in the dock
+ *  indefinitely across a long session. 15s gives the user time to actually
+ *  read the error (well above `done`/`stopped`) while still self-clearing. */
 export const RETENTION_MS: Record<ActivityStatus, number> = {
     running: Infinity,
     done: 8_000,
     stopped: 3_000,
-    error: Infinity,
+    error: 15_000,
 };
+
+/** Duration of the landing/departure flash (ActivityRow) — matches the tab
+ *  landing bounce's own clear-timeout (tab-reorder.ts / tab-tearoff-events.ts)
+ *  so a row visually reads the same way a dropped tab does. The dock's own
+ *  visibility window is extended by this much past RETENTION_MS so the exit
+ *  flash has time to actually play before the row leaves the DOM. */
+export const EXIT_FLASH_MS = 400;

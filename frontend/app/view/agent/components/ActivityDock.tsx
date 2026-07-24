@@ -27,7 +27,7 @@ import { ActivityRow } from "./ActivityRow";
 import { shellActivities } from "../activity/shell-adapter";
 import { subagentActivities } from "../activity/subagent-adapter";
 import { allSubagentsAtom } from "../activity/subagent-source";
-import { RETENTION_MS, type ActivityKind, type ActivityStatus, type PinnedActivity } from "../activity/types";
+import { EXIT_FLASH_MS, RETENTION_MS, type ActivityKind, type ActivityStatus, type PinnedActivity } from "../activity/types";
 import type { SignalPair } from "../state";
 import type { DocumentNode } from "../types";
 
@@ -91,7 +91,9 @@ export const ActivityDock = (props: ActivityDockProps): JSX.Element => {
         let maxExpiry = 0;
         for (const a of activities) {
             if (a.status !== "running" && RETENTION_MS[a.status] !== Infinity && a.endedAt != null) {
-                maxExpiry = Math.max(maxExpiry, a.endedAt + RETENTION_MS[a.status]);
+                // + EXIT_FLASH_MS: the row stays in `visible` a bit past its nominal
+                // retention so the departure flash (below) has time to play.
+                maxExpiry = Math.max(maxExpiry, a.endedAt + RETENTION_MS[a.status] + EXIT_FLASH_MS);
             }
         }
         const remaining = maxExpiry - Date.now();
@@ -104,7 +106,8 @@ export const ActivityDock = (props: ActivityDockProps): JSX.Element => {
         onCleanup(() => clearTimeout(timer));
     });
 
-    // D4 — running always; terminal within its retention window; never dismissed.
+    // D4 — running always; terminal within its retention window (+ a grace
+    // period so the departure flash below can play) — never dismissed.
     const visible = createMemo(() => {
         const dm = dismissed();
         const t = hasExpiring() ? (tick(), Date.now()) : Date.now();
@@ -112,10 +115,21 @@ export const ActivityDock = (props: ActivityDockProps): JSX.Element => {
             if (dm.has(a.id)) return false;
             if (a.status === "running") return true;
             const ret = RETENTION_MS[a.status];
-            if (ret === Infinity) return true; // error → until acknowledged
-            return a.endedAt != null && t - a.endedAt < ret;
+            if (ret === Infinity) return true;
+            return a.endedAt != null && t - a.endedAt < ret + EXIT_FLASH_MS;
         });
     });
+
+    // True once a row has passed its nominal retention window and is only
+    // still mounted for the departure flash — ActivityRow uses this to play
+    // the flash and stays out of the way of D4's actual removal logic above.
+    const isLeaving = (id: string): boolean => {
+        const a = activityById().get(id);
+        if (!a || a.status === "running" || a.endedAt == null) return false;
+        const ret = RETENTION_MS[a.status];
+        if (ret === Infinity) return false;
+        return (hasExpiring() ? (tick(), Date.now()) : Date.now()) - a.endedAt >= ret;
+    };
 
     // D3 — running-first, expanded-first, newest-first.
     const ordered = createMemo(() => {
@@ -211,6 +225,7 @@ export const ActivityDock = (props: ActivityDockProps): JSX.Element => {
                         <ActivityRow
                             activity={() => activityById().get(id)}
                             expanded={() => expandedIds().has(id)}
+                            leaving={() => isLeaving(id)}
                             onToggle={() => togglePin(id)}
                             onStop={() => stop(id)}
                             onDismiss={() => dismiss(id)}
