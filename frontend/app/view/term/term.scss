@@ -12,6 +12,14 @@
 }
 
 .view-term {
+    // .view-term itself never painted a background — xterm's own canvas
+    // (starting only where .term-connectelem sits, below the tab strip)
+    // was the only opaque content in the pane. Nothing covered the tab
+    // strip's reserved row once its own background went transparent
+    // (compact-sizing work), so the ancestor block frame's translucent
+    // fill (.block-frame-default-inner, rgba(..., 0.5)) showed through
+    // there — same convention .agent-view already uses.
+    background: var(--main-bg-color);
     display: flex;
     flex-direction: column;
     width: 100%;
