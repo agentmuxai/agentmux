@@ -200,6 +200,10 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // unopenable fork simply isn't offered as a tab at all, rather than
     // being offered and then silently doing nothing.
     const switchableForks = createMemo(() => forks().filter((f) => f.isActive || !!f.blockId));
+    // Only render tab pills once there's something to switch BETWEEN — a
+    // lone conversation shows just the "+" (no pill for itself). The
+    // moment a 2nd fork exists, both (including the first) appear as tabs.
+    const visibleForkTabs = createMemo(() => (switchableForks().length > 1 ? switchableForks() : []));
     // Activating a fork tab has two cases, both "switch," neither "create":
     // (1) the fork's block already lives in THIS pane's own block-stack
     //     (only possible once Phase 4 ships pushBlockOntoStack) — swap the
@@ -1253,16 +1257,14 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
 
             {/* Fork tab strip — top region, above everything else, matching
                 the editor's own tab-strip placement and every general
-                tabbed-UI convention. Phase 4 note: unlike Phase 3's
-                read-only bar (which hid itself entirely with only one
-                conversation, since there was nothing to switch to), the
-                strip is now always shown once an agent is running — the
-                "+" is exactly how you'd get to a second conversation, so
-                hiding the whole strip until a second one already exists
-                would make that action undiscoverable. See
-                SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md §3.3. */}
+                tabbed-UI convention. The "+" always renders once an agent
+                is running — that's how you'd get to a second conversation —
+                but the tab pill itself stays hidden until there's something
+                to switch BETWEEN — a lone conversation shows only the "+";
+                the moment a fork exists, both appear.
+                SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md. */}
             <PaneTabStrip
-                tabs={switchableForks()}
+                tabs={visibleForkTabs()}
                 activeId={agentId}
                 getId={(f) => f.definitionId}
                 getLabel={(f) => f.title}
