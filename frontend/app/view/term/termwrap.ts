@@ -329,8 +329,12 @@ export class TermWrap {
         // At this point we are fully subscribed and ready to receive data.
         this.customFit();
         this.sendTermSize();
-        await this.resyncController("init");
+        // hasResized must flip before the fire-and-forget resync below: it gates the
+        // TermResyncHandler effect, and the terminal is already sized at this point
+        // (customFit/sendTermSize above), so a reconnect event arriving mid-spawn must
+        // not be dropped. See issue #121.
         this.hasResized = true;
+        void this.resyncController("init"); // fire-and-forget — PTY data subscription is already active
 
         // One re-fit after first paint to catch any remaining layout shift (slow CSS,
         // late style recalculation, font swap that landed after fonts.ready resolved).
