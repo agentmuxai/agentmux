@@ -119,6 +119,13 @@ pub struct WSFileEventData {
     pub fileop: String,
     #[serde(skip_serializing_if = "String::is_empty", default)]
     pub data64: String,
+    /// File size immediately before this append (the chunk spans
+    /// `[offset, offset + data.len())`). Only populated for filestore-
+    /// write-through-backed appends (`handle_append_block_file`); absent
+    /// means "no offset info available" — consumers should treat that as
+    /// "always new" (the pre-existing, always-write behavior).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub offset: Option<u64>,
 }
 
 // ---- Client trait ----

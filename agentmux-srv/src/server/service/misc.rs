@@ -39,7 +39,58 @@ pub(super) async fn handle_misc_service(state: &AppState, call: &WebCallType) ->
                 }
             }
         }
-        ("block", "SendCommand") | ("block", "SaveTerminalState") => {
+        ("block", "SendCommand") => WebReturnType::success_empty(),
+
+        // Periodic terminal-state snapshot (SPEC_TERMINAL_SCROLLBACK_
+        // PERSISTENCE_2026_07_23.md §2.2) — `TermWrap.processAndCacheData()`
+        // (frontend/app/view/term/termwrap.ts) fires this every ~5s of active
+        // output via `fireAndForget`, so this stays best-effort: log and
+        // return success either way rather than surfacing storage errors to
+        // a caller that doesn't check the result. Persisted as the
+        // `cache:term:full` blockfile (`TermCacheFileName` on the frontend),
+        // read back by `loadInitialTerminalData()` on reconnect alongside the
+        // raw `"term"` delta since `ptyOffset` (Part A of the same spec).
+        ("block", "SaveTerminalState") => {
+            let block_id: String = match service::get_arg(args, 0) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            let term_state: String = match service::get_arg(args, 1) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            // stateType is always "full" today (no incremental-snapshot mode
+            // exists); accepted but not branched on.
+            let _state_type: String = service::get_arg(args, 2).unwrap_or_default();
+            let pty_offset: i64 = service::get_arg(args, 3).unwrap_or(0);
+            let term_size: serde_json::Value =
+                service::get_arg(args, 4).unwrap_or(serde_json::Value::Null);
+
+            const CACHE_FILE: &str = "cache:term:full";
+            let fs = &state.filestore;
+
+            let mut meta = std::collections::HashMap::new();
+            meta.insert("ptyoffset".to_string(), serde_json::json!(pty_offset));
+            meta.insert("termsize".to_string(), term_size);
+
+            let exists = matches!(fs.stat(&block_id, CACHE_FILE), Ok(Some(_)));
+            if !exists {
+                if let Err(e) = fs.make_file(
+                    &block_id,
+                    CACHE_FILE,
+                    meta.clone(),
+                    crate::backend::storage::filestore::FileOpts::default(),
+                ) {
+                    tracing::warn!(block_id = %block_id, error = %e, "SaveTerminalState: make_file failed");
+                    return WebReturnType::success_empty();
+                }
+            }
+            if let Err(e) = fs.write_file(&block_id, CACHE_FILE, term_state.as_bytes()) {
+                tracing::warn!(block_id = %block_id, error = %e, "SaveTerminalState: write_file failed");
+            }
+            if let Err(e) = fs.write_meta(&block_id, CACHE_FILE, meta, false) {
+                tracing::warn!(block_id = %block_id, error = %e, "SaveTerminalState: write_meta failed");
+            }
             WebReturnType::success_empty()
         }
 
@@ -201,5 +252,90 @@ pub(super) async fn handle_misc_service(state: &AppState, call: &WebCallType) ->
             "unknown service method: {}.{}",
             call.service, call.method
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::server::tests::test_state;
+
+    fn save_terminal_state_call(block_id: &str, state_str: &str, pty_offset: i64) -> WebCallType {
+        WebCallType {
+            service: "block".to_string(),
+            method: "SaveTerminalState".to_string(),
+            uicontext: None,
+            args: vec![
+                serde_json::json!(block_id),
+                serde_json::json!(state_str),
+                serde_json::json!("full"),
+                serde_json::json!(pty_offset),
+                serde_json::json!({ "rows": 24, "cols": 80 }),
+            ],
+        }
+    }
+
+    #[tokio::test]
+    async fn save_terminal_state_persists_content_and_meta() {
+        // SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md §2.2 — the
+        // previously-stubbed RPC must actually write the "cache:term:full"
+        // blockfile the frontend's `loadInitialTerminalData()` reads back.
+        let state = test_state();
+        let call = save_terminal_state_call("block-1", "serialized-xterm-state", 42);
+
+        let result = handle_misc_service(&state, &call).await;
+        assert!(result.success, "expected success, got {:?}", result.error);
+
+        let content = state
+            .filestore
+            .read_file("block-1", "cache:term:full")
+            .expect("read_file ok")
+            .expect("cache file should exist");
+        assert_eq!(content, b"serialized-xterm-state");
+
+        let file = state
+            .filestore
+            .stat("block-1", "cache:term:full")
+            .expect("stat ok")
+            .expect("file should exist");
+        assert_eq!(file.meta["ptyoffset"], serde_json::json!(42));
+        assert_eq!(file.meta["termsize"], serde_json::json!({ "rows": 24, "cols": 80 }));
+    }
+
+    #[tokio::test]
+    async fn save_terminal_state_overwrites_on_second_snapshot() {
+        // Periodic snapshots replace the previous one wholesale, they don't
+        // accumulate — matches the frontend's "one current snapshot" model.
+        let state = test_state();
+
+        let first = save_terminal_state_call("block-1", "first-snapshot", 10);
+        assert!(handle_misc_service(&state, &first).await.success);
+
+        let second = save_terminal_state_call("block-1", "second-snapshot-longer", 99);
+        assert!(handle_misc_service(&state, &second).await.success);
+
+        let content = state
+            .filestore
+            .read_file("block-1", "cache:term:full")
+            .unwrap()
+            .unwrap();
+        assert_eq!(content, b"second-snapshot-longer");
+
+        let file = state.filestore.stat("block-1", "cache:term:full").unwrap().unwrap();
+        assert_eq!(file.meta["ptyoffset"], serde_json::json!(99));
+    }
+
+    #[tokio::test]
+    async fn save_terminal_state_missing_block_id_errors() {
+        let state = test_state();
+        let call = WebCallType {
+            service: "block".to_string(),
+            method: "SaveTerminalState".to_string(),
+            uicontext: None,
+            args: vec![],
+        };
+        let result = handle_misc_service(&state, &call).await;
+        assert!(!result.success);
+        assert!(result.error.is_some());
     }
 }
