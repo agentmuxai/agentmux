@@ -86,6 +86,14 @@
     color: var(--secondary-text-color);
 }
 
+// Persistent risk disclosure (spec §4 policy #2) — visually distinct from
+// prereqNote above, never suppressed once a server is connected/usable
+// (see .mcp-status-risk in mcp-status-pill.scss for the other surface).
+.mcp-picker-entry-risk {
+    font-size: var(--text-xs);
+    color: var(--warning-color);
+}
+
 .mcp-picker-entry-docs {
     font-size: 10px;
     color: var(--accent-color);
