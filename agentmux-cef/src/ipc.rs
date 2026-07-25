@@ -324,6 +324,10 @@ async fn route_command(
         "set_window_position" => commands::window::set_window_position(state, args),
         "toggle_devtools" => commands::window::toggle_devtools(state, args),
         "inspect_element_at" => commands::window::inspect_element_at(state, args),
+        // Dev-only memory-infra GPU tracing (#2218 diagnostics) — see
+        // docs/specs/SPEC_GPU_MEMORY_TRACING_SCAFFOLDING_2026_07_24.md.
+        "begin_gpu_trace" => commands::window::begin_gpu_trace(state, args),
+        "end_gpu_trace" => commands::window::end_gpu_trace(state, args),
         "show_context_menu" => {
             tracing::debug!("show_context_menu: handled in JS overlay");
             Ok(serde_json::Value::Null)
