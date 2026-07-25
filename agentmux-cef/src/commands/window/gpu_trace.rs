@@ -125,12 +125,16 @@ pub fn end_gpu_trace(state: &Arc<AppState>, args: &serde_json::Value) -> Result<
 /// rules out escaping `TRACE_SUBDIR` regardless of what the caller passes
 /// (no canonicalize-and-check-prefix dance needed, since a bare component
 /// can't traverse anywhere).
+///
+/// `:` is rejected too, on top of the separators above: on Windows, `PathBuf`
+/// treats a `:`-prefixed component like `C:evil.txt` as "has a prefix but no
+/// root" (drive-relative), and `PathBuf::push`/`join` *replaces* the base path
+/// entirely for such a component instead of appending to it — so
+/// `dir.join("C:evil.txt")` would silently discard the `TRACE_SUBDIR` prefix
+/// and resolve outside it. Rejecting any `:` closes that gap without needing
+/// platform-specific logic.
 fn resolve_trace_path(state: &Arc<AppState>, filename: &str) -> Result<std::path::PathBuf, String> {
-    if filename.is_empty()
-        || filename.contains(['/', '\\', '\0'])
-        || filename == "."
-        || filename == ".."
-    {
+    if !is_valid_trace_filename(filename) {
         return Err(format!("invalid trace filename: {filename:?}"));
     }
     let data_dir = state
@@ -141,6 +145,43 @@ fn resolve_trace_path(state: &Arc<AppState>, filename: &str) -> Result<std::path
     let dir = std::path::PathBuf::from(data_dir).join(TRACE_SUBDIR);
     std::fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
     Ok(dir.join(filename))
+}
+
+fn is_valid_trace_filename(filename: &str) -> bool {
+    !filename.is_empty()
+        && !filename.contains(['/', '\\', '\0', ':'])
+        && filename != "."
+        && filename != ".."
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_valid_trace_filename;
+
+    #[test]
+    fn rejects_separators_and_special_components() {
+        assert!(!is_valid_trace_filename(""));
+        assert!(!is_valid_trace_filename("."));
+        assert!(!is_valid_trace_filename(".."));
+        assert!(!is_valid_trace_filename("a/b.json"));
+        assert!(!is_valid_trace_filename("a\\b.json"));
+        assert!(!is_valid_trace_filename("a\0b.json"));
+    }
+
+    /// The Windows drive-relative escape: `PathBuf::join`/`push` replaces the
+    /// base path (rather than appending) for a component with a prefix but no
+    /// root, so `dir.join("C:evil.json")` would land outside `TRACE_SUBDIR`.
+    #[test]
+    fn rejects_windows_drive_relative_component() {
+        assert!(!is_valid_trace_filename("C:evil.json"));
+        assert!(!is_valid_trace_filename("C:\\evil.json"));
+    }
+
+    #[test]
+    fn accepts_plain_filenames() {
+        assert!(is_valid_trace_filename("trace.json"));
+        assert!(is_valid_trace_filename("gpu-2026-07-25.json"));
+    }
 }
 
 wrap_task! {
