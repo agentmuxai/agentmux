@@ -53,6 +53,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { ProviderLogo } from "@/element/ProviderLogo";
+import { Logger } from "@/util/logger";
 import { RuntimeBadge } from "./RuntimeBadge";
 
 /** ms epoch → human-readable relative timestamp. Centralized here +
@@ -124,7 +125,17 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                     // CommandListRecentSessionsData docs.
                     identity_id: id,
                 });
-            } catch {
+            } catch (e) {
+                // Was a silent `catch { return []; }` — indistinguishable from
+                // "genuinely no sessions" in the UI and left zero trace
+                // anywhere (not even a console entry), which is exactly what
+                // made a real regression here look like expected empty state.
+                // `Error` objects serialize to `{}` via structured/JSON clone
+                // (message/stack aren't own-enumerable) — pull them out explicitly.
+                const errInfo = e instanceof Error
+                    ? { name: e.name, message: e.message, stack: e.stack }
+                    : { value: String(e) };
+                Logger.error("agent", "MyAgentsList: ListRecentSessionsCommand failed", { error: errInfo, identityId: id });
                 return [];
             }
         },
