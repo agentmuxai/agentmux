@@ -97,6 +97,11 @@ export class TermWrap {
     private thawTimeoutId: ReturnType<typeof setTimeout> | null = null;
     private thawRafId: number | null = null;
     private disposed: boolean = false;
+    // Tracks the fire-and-forget resyncController("init") call so the
+    // post-paint rAF re-fit (below) can wait for the controller to actually
+    // exist before sending a corrective resize, instead of racing it — see
+    // the comment at the rAF callback for why.
+    private initResyncPromise: Promise<void> = Promise.resolve();
 
     // ── Phase 1: CONSTRUCT (sync) ──────────────────────────────────────
 
@@ -329,20 +334,33 @@ export class TermWrap {
         // At this point we are fully subscribed and ready to receive data.
         this.customFit();
         this.sendTermSize();
-        await this.resyncController("init");
+        // hasResized must flip before the fire-and-forget resync below: it gates the
+        // TermResyncHandler effect, and the terminal is already sized at this point
+        // (customFit/sendTermSize above), so a reconnect event arriving mid-spawn must
+        // not be dropped. See issue #121.
         this.hasResized = true;
+        // fire-and-forget — PTY data subscription is already active. Kept so the rAF
+        // re-fit below can wait for the controller to exist before resizing it: the
+        // backend drops setblocktermsize entirely (no queue/retry) when the block's
+        // controller hasn't been created yet, and resyncController("init") is what
+        // creates it.
+        this.initResyncPromise = this.resyncController("init");
 
         // One re-fit after first paint to catch any remaining layout shift (slow CSS,
         // late style recalculation, font swap that landed after fonts.ready resolved).
         // If dimensions changed, sendTermSize() issues a SIGWINCH to the PTY so the
         // controller redraws against the correct size before producing meaningful output.
+        // Waits on initResyncPromise first (only when a resize is actually needed —
+        // the common no-change case stays instant): otherwise this can race ahead of
+        // the still-in-flight "init" resync and get silently dropped for having no
+        // controller yet, leaving the PTY at stale geometry until a manual resize.
         requestAnimationFrame(() => {
             if (!this.terminal) return;
             const oldRows = this.terminal.rows;
             const oldCols = this.terminal.cols;
             this.customFit();
             if (oldRows !== this.terminal.rows || oldCols !== this.terminal.cols) {
-                this.sendTermSize();
+                void this.initResyncPromise.then(() => this.sendTermSize());
             }
         });
 
