@@ -42,13 +42,16 @@
         border: 1px solid color-mix(in srgb, var(--warning-color, #f59e0b) 30%, transparent);
     }
 
-    &--tag&--host {
+    // `&` can only appear once, at the start of a compound selector — `&--tag&--host`
+    // is invalid Sass. `#{&}` (interpolation) sidesteps that restriction while
+    // compiling to the exact same compound selector: `.runtime-badge--tag.runtime-badge--host`.
+    &--tag#{&}--host {
         color: var(--error-color);
         background: color-mix(in srgb, var(--error-color) 10%, transparent);
         border: none;
     }
 
-    &--tag&--container {
+    &--tag#{&}--container {
         color: var(--main-text-color);
         background: color-mix(in srgb, var(--main-text-color) 8%, transparent);
         border: none;
