@@ -32,6 +32,7 @@ export function McpCatalogPicker(props: { model: McpCatalogModel }): JSX.Element
                             <button type="button" class="mcp-picker-entry" onClick={() => model.startFromCatalog(entry)}>
                                 <span class="mcp-picker-entry-name">{entry.name}</span>
                                 <span class="mcp-picker-entry-note">{entry.prereqNote}</span>
+                                {entry.riskNote && <span class="mcp-picker-entry-risk">⚠ {entry.riskNote}</span>}
                                 <span class="mcp-picker-entry-docs">{entry.docsUrl}</span>
                             </button>
                         )}
