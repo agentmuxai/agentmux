@@ -38,6 +38,11 @@ function McpStatusPill(props: { serverId: string; serverName: string }): JSX.Ele
         if (s === "unknown" || s === "checking" || s === "connected") return null;
         return findPreloadEntryByName(props.serverName)?.prereqNote ?? null;
     };
+    // Unlike remediation() above, this is NOT gated on status — a risk that's
+    // real once the server is connected and usable must stay visible exactly
+    // then, not disappear the moment the server starts working (spec §4
+    // policy #2; this is what Codex flagged on #2298).
+    const riskNote = () => findPreloadEntryByName(props.serverName)?.riskNote ?? null;
 
     return (
         <div class="mcp-status-block">
@@ -49,6 +54,9 @@ function McpStatusPill(props: { serverId: string; serverName: string }): JSX.Ele
             </span>
             <Show when={remediation()}>
                 <p class="mcp-status-remediation">{remediation()}</p>
+            </Show>
+            <Show when={riskNote()}>
+                <p class="mcp-status-risk">⚠ {riskNote()}</p>
             </Show>
         </div>
     );
