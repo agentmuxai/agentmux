@@ -1,5 +1,12 @@
 # Status: Windows Pagefile/Commit-Charge Growth During Live Use — Investigation Handoff (2026-07-24)
 
+> **RESOLVED 2026-07-25 — see §16.** Root cause found and live-proven: the Windows Audio
+> service (Audiosrv) on this machine leaks ~1 pagefile-backed shared-memory Section (~200 KB)
+> per second from boot, ~17 GB/day of commit attributed to no process. `Restart-Service
+> Audiosrv` (elevated) reclaimed 16.4 GB instantly. **AgentMux is exonerated.** §13-§15's
+> GPU-pooling conclusions are superseded — they were artifacts of measuring against this
+> constant background leak. Everything below is preserved as the investigation record.
+
 Written mid-session at the user's request, right before a machine restart, so the next agent
 (possibly a future instance of this same agent) doesn't have to re-derive context. The user is
 restarting specifically to reset system commit charge from **69 GB down to ~8 GB**, then wants
@@ -663,3 +670,91 @@ platform behavior. The user-facing question becomes a product/UX one (how much t
 commit under multi-instance use, whether to nudge users to consolidate concurrent instances) rather
 than an engineering bug. The one remaining piece of actual engineering work is the idle-pool-window
 eviction primitive above, scoped as its own follow-up rather than bundled into this investigation.
+
+## 16. RESOLVED — root cause: Audiosrv leaks ~1 pagefile-backed Section per second (2026-07-25)
+
+§13-§15 are hereby **superseded**. Their GPU-pooling conclusions were measurement artifacts.
+The user's pushback ("just using a different data dir means you cannot reclaim? that doesn't
+sound right") was correct and triggered the re-verification that unraveled everything.
+
+### 16.1 How the wrong conclusion fell apart
+
+1. **Direct GPU counters refuted §14/§15.** Re-ran the two-instance Edge A/B test measuring the
+   actual WDDM counters (`\GPU Adapter Memory(*)\Dedicated/Shared/Total Committed`) instead of
+   the earlier proxy (`SystemCommitted − Σ process private bytes`). GPU adapter memory reclaimed
+   **fully and cleanly** on every teardown — closing one of two instances returned the adapter to
+   within noise of its pre-launch value. (An earlier contradictory reading was traced to a stray
+   Edge process left behind by an incomplete kill — a testing-hygiene error, caught and redone.)
+2. **The "unattributed gap" doesn't respond to browsers at all.** With clean measurement:
+   two full Edge instances added ~3 GB commit, ~90% process-private, fully reclaimed on kill;
+   the unattributed gap moved ±150 MB (noise) across launch AND teardown.
+3. **The gap grows at a perfectly constant ~12 MB/min, 24/7,** regardless of workload — from
+   2.0 GB (05:25 on 7/24) to ~20 GB (7/25 04:00) in near-identical ~230 MB steps every 20 min,
+   through busy periods, idle periods, and overnight (full trace: `mem_sample_v3.csv`).
+   Process churn was separately exonerated (300 process spawns → +16.8 MB).
+4. **The historical rate predates all custom telemetry** (srv `mem_attribution` logs):
+   7/20 ≈ 38 MB/min, 7/21-22 ≈ 26 MB/min, 7/23 ≈ 10 MB/min, 7/24 ≈ 12 MB/min. (The
+   higher earlier rates include attributed growth from busier multi-instance/agent days; the
+   constant unattributed component underlies all of them.)
+
+### 16.2 The identification chain
+
+- Handle-count sweep: **`svchost` PID 3432 held 84,289 handles** — ≈ 1 per second of machine
+  uptime. Service: **Audiosrv (Windows Audio)**.
+- `handle64 -s` breakdown: **83,908 of them were Section handles** (anonymous pagefile-backed
+  shared memory). 84 K × ~205 KB ≈ 18 GB — the gap, exactly. Live growth confirmed at
+  ~0.9 handles/sec, matching the commit slope (200 KB/s ÷ 0.98/s ≈ 205 KB/section).
+- Sections are charged to **no process's private bytes** — invisible to Task Manager, Process
+  Explorer per-process views, and every per-process counter. This is why weeks of
+  process-attribution work could never find it.
+- Ruled out as the triggering client (leak rate unchanged during each test): AgentMux's CEF
+  audio service process (killed, respawned), Traktor (suspended 60s), process churn, audio
+  device-change storms (event logs quiet), the custom PowerShell sampler (leak predates it),
+  parsecd (CPU-implausible for a 1 Hz COM loop: <1 s total CPU in 24 h). The per-second
+  *trigger* remains unidentified — but the *mechanism and remediation* are proven.
+
+### 16.3 The proof (and the reboot-free fix)
+
+`Restart-Service Audiosrv` (elevated, user-approved UAC; peak meters checked silent first):
+
+| | Before | After |
+|---|---|---|
+| Audiosrv handles | 85,084 | 584 |
+| System commit | **27,079.6 MB** | **10,646.2 MB** |
+| Unattributed gap | ~20,000 MB | 3,592 MB |
+
+**16.4 GB reclaimed in ~9 seconds.** The machine's "inevitable" daily climb toward commit
+exhaustion — the original trigger for this entire investigation line, the OOM crashes, the
+restart ritual — is this leak.
+
+### 16.4 Consequences and follow-ups
+
+- **AgentMux's own code is exonerated** for the unattributed portion. The per-instance
+  attributed footprint work (pool eviction etc., §15.3) remains valid product work but is
+  unrelated to the machine's commit exhaustion.
+- **Remediation available to the user today:** elevated `Restart-Service Audiosrv` whenever
+  commit climbs (instant, no reboot; brief audio interruption — Traktor re-attached on its own
+  in testing). Root-fix candidates: Windows Update / audio driver update for the DJ-interface
+  stack (10 active render endpoints is an unusual topology and the likely trigger surface),
+  and identifying the 1 Hz caller with an elevated ETW/ALPC trace if desired.
+- **Product idea worth scoping** (separate issue): `mem_attribution` currently buckets only
+  process-private commit, so this entire leak class is invisible to it. Adding
+  `unattributed = SystemCommitted − Σ private − pools` as a logged metric — plus a heuristic
+  alert on service handle-count anomalies (Audiosrv > ~10 K handles) — would let AgentMux
+  detect-and-suggest ("Windows Audio service leak detected — restart it to reclaim N GB")
+  for any user hitting this Windows bug. That converts this investigation into shipped value.
+- The leak resumed at ~0.4/sec on the fresh Audiosrv instance, so accumulation continues
+  (slower, possibly ramping back). The per-second trigger hunt is the remaining open thread,
+  now cheap to pursue with the measurement kit built here (`audio_session_probe.ps1`,
+  handle-rate sampling, suspend-bisection).
+
+### 16.5 Retro notes (measurement discipline)
+
+- The entire §13-§15 detour came from **trusting a derived proxy** (commit − process sum)
+  without validating against a direct counter, then narrative-fitting partial reclaims to
+  a plausible-sounding driver story. The correction came from (a) the user distrusting the
+  conclusion, (b) swapping to primary-source counters, (c) noticing the constant slope.
+- A constant growth slope independent of workload is a **timer signature** — check for it
+  FIRST before building activity-correlated theories.
+- One incomplete process kill (a lingering Edge tree) manufactured the single most misleading
+  data point of the session. Always re-verify process-tree death before reading the after-state.
