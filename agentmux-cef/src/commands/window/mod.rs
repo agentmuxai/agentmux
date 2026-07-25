@@ -45,6 +45,10 @@ mod meta;
 // Zoom / label / instance-listing / focus / devtools command handlers.
 pub use meta::*;
 
+mod gpu_trace;
+// Dev-only memory-infra GPU tracing (#2218 diagnostics) — begin_gpu_trace/end_gpu_trace.
+pub use gpu_trace::*;
+
 mod creation;
 // open_new_window / open_subwindow + frontend-URL resolution. The setters
 // are `pub` (ipc.rs); `resolve_frontend_base_url` / `assets_missing_data_url`
