@@ -68,7 +68,16 @@ pub enum SecretRef {
     /// conventionally spelled), so the derived name silently stopped
     /// matching stored data — this makes the wire format explicit instead
     /// of relying on the derive macro to guess right for an acronym.
-    #[serde(rename = "oauth_config_dir")]
+    ///
+    /// The `alias` keeps accepting the derive-produced `o_auth_config_dir`
+    /// tag too: any account persisted by a backend running between this
+    /// variant's introduction and this fix would have round-tripped
+    /// self-consistently under that buggy tag, and `identity_list()` aborts
+    /// entirely on the first unparseable row — so dropping read support for
+    /// it would just move the "My Agents empty" incident to a different set
+    /// of accounts. Serialization always writes the canonical
+    /// `oauth_config_dir`; only deserialization accepts both.
+    #[serde(rename = "oauth_config_dir", alias = "o_auth_config_dir")]
     OAuthConfigDir {
         /// Absolute path to the per-bundle, per-provider config
         /// directory — e.g. `~/.agentmux/shared/identities/<id>/claude/`,
@@ -475,6 +484,37 @@ mod tests {
             }
             other => panic!("expected OAuthConfigDir, got {other:?}"),
         }
+    }
+
+    /// Pins the OTHER wire format still sitting in some accounts: whatever
+    /// backend was running between this variant's introduction and the
+    /// `oauth_config_dir` rename above wrote (and read back) the
+    /// derive-produced `o_auth_config_dir` tag. Losing read support for it
+    /// reproduces the exact "My Agents empty" incident for those accounts —
+    /// `identity_list()` aborts entirely on the first unparseable row.
+    #[test]
+    fn secret_ref_deserializes_legacy_derive_produced_tag_json() {
+        let json = r#"{"backend":"o_auth_config_dir","dir":"C:\\Users\\area54\\.agentmux\\shared\\identities\\269c028b-3894-4231-b884-fa5d0ecfabdf\\claude"}"#;
+        let parsed: SecretRef = serde_json::from_str(json).expect("must deserialize legacy derive-produced wire format");
+        match parsed {
+            SecretRef::OAuthConfigDir { dir } => {
+                assert!(dir.ends_with("claude"), "dir should round-trip: {dir}");
+            }
+            other => panic!("expected OAuthConfigDir, got {other:?}"),
+        }
+    }
+
+    /// Serialization must always emit the canonical tag, never the legacy
+    /// alias — the alias is read-only backward compat, not a second valid
+    /// output format.
+    #[test]
+    fn secret_ref_serializes_oauth_config_dir_with_canonical_tag() {
+        let value = SecretRef::OAuthConfigDir {
+            dir: "/tmp/claude".to_string(),
+        };
+        let json = serde_json::to_string(&value).unwrap();
+        assert!(json.contains(r#""backend":"oauth_config_dir""#), "got: {json}");
+        assert!(!json.contains("o_auth_config_dir"), "got: {json}");
     }
 
     fn sample_account(id: &str, provider: &str) -> IdentityAccount {
