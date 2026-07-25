@@ -9,6 +9,7 @@
 import { onCleanup, onMount } from "solid-js";
 import { getApi } from "@/store/global";
 import { fireAndForget } from "@/util/util";
+import { isWindows } from "@/util/platformutil";
 import { WorkspaceService } from "../store/services";
 import {
     computeInsertionPoint,
@@ -61,8 +62,8 @@ export function useTabTearOffEvents(
                 unsub();
             }
         };
-        // Coordinate-space helper. `payload.cursorX/Y` come from
-        // Win32's WH_MOUSE_LL hook in PHYSICAL pixels (Windows
+        // Coordinate-space helper. On Windows, `payload.cursorX/Y` come
+        // from Win32's WH_MOUSE_LL hook in PHYSICAL pixels (Windows
         // reports per-monitor coords for DPI-aware processes, which
         // CEF is). `window.screenX/Y` and `getBoundingClientRect()`
         // return CSS / LOGICAL pixels. Subtract directly and you're
@@ -74,7 +75,16 @@ export function useTabTearOffEvents(
         // Math.max(1, ...) defends against the (rare but possible) browser
         // edge case where devicePixelRatio is 0 or negative; the falsy-||
         // already covered undefined/NaN. (gemini PR #567 round-8 MEDIUM)
-        const dpr = () => Math.max(1, window.devicePixelRatio || 1);
+        //
+        // On macOS, `payload.cursorX/Y` come from CGEventTap's
+        // CGEvent.location(), which reports coordinates in POINTS —
+        // the same unit `window.screenX/Y` already uses (macOS has no
+        // physical/logical pixel distinction at this level; Retina scale
+        // is baked into rendering, never exposed here). Dividing those
+        // by DPR would silently shrink them on any Retina display, so
+        // the conversion only applies on Windows.
+        // See SPEC_MACOS_TAB_REDOCK_PARITY_2026_07_24.md §3.
+        const dpr = () => (isWindows() ? Math.max(1, window.devicePixelRatio || 1) : 1);
         const physicalToClientX = (px: number) => px / dpr() - window.screenX;
         const physicalToClientY = (py: number) => py / dpr() - window.screenY;
         fireAndForget(async () => {
