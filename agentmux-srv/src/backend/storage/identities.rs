@@ -59,6 +59,16 @@ pub enum SecretRef {
     /// providers; the resolver (PR B) dispatches to a config-dir
     /// env-var injection mode rather than the api-key env-var path.
     /// See `docs/specs/archive/SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md`.
+    ///
+    /// Explicit `rename` — the enum-wide `rename_all = "snake_case"` splits
+    /// at every capital letter, including inside "OAuth" itself, producing
+    /// `o_auth_config_dir` (verified: that's what a live deserialization
+    /// failure actually expected). Every real account on disk was written
+    /// with `oauth_config_dir` (no extra underscore — how "OAuth" is
+    /// conventionally spelled), so the derived name silently stopped
+    /// matching stored data — this makes the wire format explicit instead
+    /// of relying on the derive macro to guess right for an acronym.
+    #[serde(rename = "oauth_config_dir")]
     OAuthConfigDir {
         /// Absolute path to the per-bundle, per-provider config
         /// directory — e.g. `~/.agentmux/shared/identities/<id>/claude/`,
@@ -443,6 +453,29 @@ mod tests {
 
     use super::super::store::{AgentDefinition, Store};
     use super::*;
+
+    /// Pins the on-disk wire format directly, rather than round-tripping
+    /// through this crate's own serializer (which would happily agree with
+    /// itself even if `rename_all`'s derived tag drifted from what's
+    /// actually stored). `oauth_config_dir` here is copied verbatim from a
+    /// real account row in `~/.agentmux/shared/store.db` — this is the
+    /// literal regression that broke `identity_list()` (and therefore "My
+    /// Agents"/recent-sessions, which aborts entirely on the first
+    /// unparseable row) for every account written before the enum-wide
+    /// `rename_all = "snake_case"` derive silently started expecting
+    /// `o_auth_config_dir` instead (serde splits at every capital letter,
+    /// including inside "OAuth" itself).
+    #[test]
+    fn secret_ref_deserializes_real_stored_oauth_config_dir_json() {
+        let json = r#"{"backend":"oauth_config_dir","dir":"C:\\Users\\area54\\.agentmux\\shared\\identities\\bfa59d03-7a99-420e-b912-716bba1c462d\\claude"}"#;
+        let parsed: SecretRef = serde_json::from_str(json).expect("must deserialize real stored wire format");
+        match parsed {
+            SecretRef::OAuthConfigDir { dir } => {
+                assert!(dir.ends_with("claude"), "dir should round-trip: {dir}");
+            }
+            other => panic!("expected OAuthConfigDir, got {other:?}"),
+        }
+    }
 
     fn sample_account(id: &str, provider: &str) -> IdentityAccount {
         IdentityAccount {
