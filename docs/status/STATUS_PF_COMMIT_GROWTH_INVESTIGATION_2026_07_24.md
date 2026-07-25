@@ -708,10 +708,16 @@ sound right") was correct and triggered the re-verification that unraveled every
   Explorer per-process views, and every per-process counter. This is why weeks of
   process-attribution work could never find it.
 - Ruled out as the triggering client (leak rate unchanged during each test): AgentMux's CEF
-  audio service process (killed, respawned), Traktor (suspended 60s), process churn, audio
-  device-change storms (event logs quiet), the custom PowerShell sampler (leak predates it),
-  parsecd (CPU-implausible for a 1 Hz COM loop: <1 s total CPU in 24 h). The per-second
-  *trigger* remains unidentified — but the *mechanism and remediation* are proven.
+  audio service process (killed, respawned), process churn, audio device-change storms (event
+  logs quiet), the custom PowerShell sampler (leak predates it), parsecd (CPU-implausible for
+  a 1 Hz COM loop: <1 s total CPU in 24 h). The per-second *trigger* remains unidentified —
+  but the *mechanism and remediation* are proven.
+- **Traktor is entangled, not exonerated** (post-fix data point): against the fresh Audiosrv's
+  ~0.4/s baseline, suspending Traktor for 120 s made the leak **4× FASTER** (197 handles/120 s
+  ≈ 1.6/s), while the first suspension test (against the old saturated instance) showed no
+  change. Something interacts with Traktor's always-active audio session about once a second,
+  and when Traktor is frozen, that interaction appears to fail-and-retry, leaking more. Traktor
+  (or its DJ-interface driver relationship) is the best remaining lead for the trigger.
 
 ### 16.3 The proof (and the reboot-free fix)
 
