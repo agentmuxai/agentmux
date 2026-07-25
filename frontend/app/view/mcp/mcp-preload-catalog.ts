@@ -35,6 +35,13 @@ export interface McpPreloadEntry {
      *  acceptance bar: a user who hasn't opened the app yet should see this
      *  sentence in the Armory, not a bare "Error"). */
     prereqNote: string;
+    /** Set only for Tier B entries with real code-exec risk inside the
+     *  third-party app (SPEC_ARMORY_PRELOADED_CREATIVE_MCP_CONNECTORS
+     *  _2026_07_10.md §4 policy #2). Rendered as a persistent callout
+     *  regardless of connection status — unlike prereqNote, this must NOT
+     *  disappear once the server is connected and actually usable, since
+     *  that's exactly when the risk is live. Not fine print. */
+    riskNote?: string;
     docsUrl: string;
 }
 
@@ -55,16 +62,24 @@ export const MCP_PRELOAD_CATALOG: McpPreloadEntry[] = [
         id: "touchdesigner",
         name: "TouchDesigner",
         transport: "stdio",
-        config: { command: "npx", args: ["-y", "touchdesigner-mcp-server@latest", "--stdio"] },
+        // Pinned per spec §4 policy #1 — validated against 1.5.0 this session
+        // (real TD + Ableton instance, router up with all 12 routes). Bump
+        // this deliberately and re-validate; never widen back to @latest.
+        // (Spec §4 policy #3 also calls for a mandatory `verifiedAgainst`
+        // field with a review cadence — not added here, out of scope for
+        // this fix; neither catalog entry has it yet.)
+        config: { command: "npx", args: ["-y", "touchdesigner-mcp-server@1.5.0", "--stdio"] },
         prereqNote:
             "Requires TouchDesigner already running with mcp_webserver_base.tox imported into the " +
-            "project (download touchdesigner-mcp-td.zip from the latest release at " +
-            "github.com/8beeeaaat/touchdesigner-mcp/releases, import mcp_webserver_base.tox — " +
+            "project (download touchdesigner-mcp-td.zip from the v1.5.0 release at " +
+            "github.com/8beeeaaat/touchdesigner-mcp/releases/tag/v1.5.0, import mcp_webserver_base.tox — " +
             "/project1/mcp_webserver_base is recommended — and keep its modules/ folder alongside " +
-            "it; the component references those files by relative path). Includes exec_python_script " +
-            "— arbitrary Python execution inside the running TouchDesigner instance — as a first-class " +
-            "tool, more exposed than a typically-scoped bridge. This bridge cannot launch TouchDesigner " +
-            "or import the component for you.",
+            "it; the component references those files by relative path. This bridge cannot launch " +
+            "TouchDesigner or import the component for you.",
+        riskNote:
+            "This connector's tool list includes exec_python_script — arbitrary Python execution " +
+            "inside the running TouchDesigner instance — as a first-class, non-opt-in tool. More " +
+            "exposed than a typically-scoped bridge (e.g. Ableton's, above).",
         docsUrl: "https://github.com/8beeeaaat/touchdesigner-mcp",
     },
 ];
