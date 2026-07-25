@@ -6,8 +6,9 @@ request ("clean up our open issues/discussions"). 5 parallel agents read every i
 log) before classifying — nothing was closed/merged on title alone.
 
 **Starting state:** 36 open issues + 13 open discussions = 49 items.
-**Ending state:** 33 open issues + 8 open discussions = 41 items open, 16 closed, 1 code fix
-shipped via PR.
+**Ending state:** 25 open issues + 8 open discussions = 33 items open, 16 closed (11 issues + 5
+discussions, across §1's 13 and §2's 3), 1 code fix implemented with a PR open (§3, not yet
+merged — see §5).
 
 ## 1. Closed as stale / already shipped / superseded (13)
 
@@ -41,7 +42,7 @@ GitHub keeps the closed item's discussion intact and cross-linked.
 | [#1461](https://github.com/agentmuxai/agentmux/issues/1461) Browser-pane redock: black page | [#1205](https://github.com/agentmuxai/agentmux/discussions/1205) | Superseded by #1205's deeper 3-race diagnosis and structural §9 fix plan |
 | [Discussion #943](https://github.com/agentmuxai/agentmux/discussions/943) Service Supervision (Ideas) | [#942](https://github.com/agentmuxai/agentmux/issues/942) | Split thread — real status updates reverted to and continued on #942 |
 
-## 3. Easy fix — implemented and shipped (1)
+## 3. Easy fix — implemented, PR open (1)
 
 **[#121](https://github.com/agentmuxai/agentmux/issues/121)** — perf: PTY spawn serializes on
 concurrent pane creation (opening N terminal panes stalled the UI by N×~10ms).

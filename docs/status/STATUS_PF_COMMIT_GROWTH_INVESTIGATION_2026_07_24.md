@@ -15,12 +15,14 @@ exactly what's driving the growth back up.
 
 ## TL;DR
 
-- **This is a live, unresolved investigation, not a fixed bug.** Nothing has shipped from this
-  session. Don't confuse it with issue **#2218** (renderer-pool/GPU-driver commit growth from
-  *opening new panes/windows*) — that one's three fix PRs (#2220, #2221, #2222) are already
-  merged and confirmed shipped in `main`/`v0.54.4`. This is a **different, newer, still-open**
-  symptom: PF growth during **normal interactive use of an already-open agent pane**, reported
-  directly by the user watching Task Manager live.
+- **RESOLVED — see §16.** Root cause is an Audiosrv Section-handle leak on this machine, not
+  AgentMux. The investigation below was live/unresolved as of the mid-session point where it was
+  originally written; §§11-16 (appended after a machine restart) supersede everything from here
+  through §10, including the GPU-pooling conclusions in §13-§15. Kept in full as the record of how
+  the investigation actually unfolded, including the dead ends. Don't confuse any of this with issue
+  **#2218** (renderer-pool/GPU-driver commit growth from *opening new panes/windows*) — that one's
+  three fix PRs (#2220, #2221, #2222) are already merged and confirmed shipped in `main`/`v0.54.4`,
+  and is unrelated to the Audiosrv leak found here.
 - **Key user-supplied clue, not yet acted on:** the user says **macOS does not show this
   problem**. Whatever the mechanism, it is either Windows-specific in cause, or Windows-specific
   in how visibly it's reported (commit-charge accounting vs. macOS's RSS/compression reporting).
@@ -636,6 +638,13 @@ a slower driver-side trim/GC pass, or a genuinely sticky residue that only clear
 with a longer observation window.
 
 ### 15.3 Conclusion — reclassifying this issue
+
+> **Superseded by §16.** The Edge control test below reproduced only ~0.8-0.9 GB of
+> unattributed commit, far short of the ~6-8 GB this investigation was chasing (§10,
+> §13-§14) — a real but much smaller Chromium/WDDM effect, not the actual mechanism.
+> The actual root cause (an Audiosrv Section-handle leak, unrelated to AgentMux or
+> Chromium) was found and live-proven the next day; see §16. Kept as-written below
+> for the record of how this conclusion was reached and why it turned out incomplete.
 
 **AgentMux is not leaking GPU-driver commit charge.** The pooled, per-adapter, partial-reclaim-
 on-instance-close behavior documented across §13/§14/§15 is a Windows WDDM / Chromium
