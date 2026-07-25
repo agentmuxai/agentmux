@@ -17,10 +17,12 @@
  * creating it from the catalog — acceptable known limitation for Phase B,
  * not silently hidden.
  *
- * Scope per spec §7/§8 Q1: ship Ableton MCP alone; expand only after this
- * pattern validates. TouchDesigner/ComfyUI research lives in
- * docs/specs/SPEC_ARMORY_PRELOADED_CREATIVE_MCP_CONNECTORS_2026_07_10.md as
- * candidate follow-on entries, not shipped here.
+ * Scope per spec §7/§8 Q1: ship Ableton MCP first, expand only after that
+ * pattern validates. TouchDesigner (researched as a candidate in
+ * docs/specs/SPEC_ARMORY_PRELOADED_CREATIVE_MCP_CONNECTORS_2026_07_10.md)
+ * is the first expansion, added after end-to-end manual validation against
+ * a real TouchDesigner + Ableton Live instance (router up with all 12
+ * routes, AbletonOSC bridge live). ComfyUI remains an unshipped candidate.
  */
 
 export interface McpPreloadEntry {
@@ -48,6 +50,22 @@ export const MCP_PRELOAD_CATALOG: McpPreloadEntry[] = [
             "and selected as the active Control Surface (Preferences → Link, Tempo & MIDI). " +
             "This bridge cannot launch Live or install the Remote Script for you.",
         docsUrl: "https://github.com/ahujasid/ableton-mcp",
+    },
+    {
+        id: "touchdesigner",
+        name: "TouchDesigner",
+        transport: "stdio",
+        config: { command: "npx", args: ["-y", "touchdesigner-mcp-server@latest", "--stdio"] },
+        prereqNote:
+            "Requires TouchDesigner already running with mcp_webserver_base.tox imported into the " +
+            "project (download touchdesigner-mcp-td.zip from the latest release at " +
+            "github.com/8beeeaaat/touchdesigner-mcp/releases, import mcp_webserver_base.tox — " +
+            "/project1/mcp_webserver_base is recommended — and keep its modules/ folder alongside " +
+            "it; the component references those files by relative path). Includes exec_python_script " +
+            "— arbitrary Python execution inside the running TouchDesigner instance — as a first-class " +
+            "tool, more exposed than a typically-scoped bridge. This bridge cannot launch TouchDesigner " +
+            "or import the component for you.",
+        docsUrl: "https://github.com/8beeeaaat/touchdesigner-mcp",
     },
 ];
 
