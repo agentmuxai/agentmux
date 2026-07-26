@@ -63,6 +63,21 @@ impl CliLoginStdin {
 /// pane was closed without its cleanup firing).
 const LOGIN_REAP_TIMEOUT_SECS: u64 = 6 * 60;
 
+/// Cap on how long run_cli_login_pty blocks waiting for a scrapeable OAuth
+/// URL before giving up and returning auth_url=None. Frontend callers that
+/// know in advance a provider never prints one (Claude — see catalog.ts's
+/// headlessLoginUrlUnsupported flag) skip this call entirely via
+/// runProviderLogin's skipTier1, so in practice this only bounds providers
+/// that plausibly DO print a URL (Codex/Gemini/OpenClaw).
+///
+/// Left at 15s, NOT shortened as a "safety margin" for Claude: Claude never
+/// reaches this function at all now (skipTier1 above), so shortening it
+/// would only affect Codex/Gemini/OpenClaw — providers that legitimately
+/// need up to this long to print their URL. reagent P1 on PR #2300 caught
+/// an earlier attempt to cut this to 5s, which would have killed valid
+/// in-progress OpenClaw logins and forced an unnecessary terminal fallback.
+const URL_CAPTURE_TIMEOUT_SECS: u64 = 15;
+
 /// Spawn a CLI auth login flow.
 pub async fn run_cli_login(
     state: Arc<AppState>,
@@ -620,7 +635,8 @@ async fn run_cli_login_pty(
 
     // Synchronously read from the master in a blocking task, scanning
     // each line for an OAuth URL. portable_pty's reader is sync.
-    // The 15 s cap is enforced async-side via tokio::time::timeout —
+    // The URL_CAPTURE_TIMEOUT_SECS cap is enforced async-side via
+    // tokio::time::timeout —
     // BufRead::read_line itself blocks indefinitely without per-read
     // timeout support, so a child that pauses before its first line
     // (or sits at a prompt with no newline) would wedge `url_rx.await`
@@ -694,7 +710,7 @@ async fn run_cli_login_pty(
     });
 
     let auth_url: Option<String> = match tokio::time::timeout(
-        std::time::Duration::from_secs(15),
+        std::time::Duration::from_secs(URL_CAPTURE_TIMEOUT_SECS),
         url_rx,
     )
     .await
@@ -705,7 +721,9 @@ async fn run_cli_login_pty(
     if let Some(ref url) = auth_url {
         tracing::info!(url = %url, "run_cli_login_pty: captured auth URL");
     } else {
-        tracing::warn!("run_cli_login_pty: no auth URL captured within 15s");
+        tracing::warn!(
+            "run_cli_login_pty: no auth URL captured within {URL_CAPTURE_TIMEOUT_SECS}s"
+        );
     }
 
     // Reap the child in a blocking task. The PtyPair (master + slave)
@@ -1175,6 +1193,26 @@ mod redact_tests {
         assert!(!red.contains("AAAA"));
         assert!(!red.contains("BBBB"));
         assert_eq!(red.matches("…REDACTED").count(), 2);
+    }
+}
+
+#[cfg(test)]
+mod url_capture_timeout_tests {
+    use super::URL_CAPTURE_TIMEOUT_SECS;
+
+    // Regression guard for the deterministic-login-UX fix: Claude no longer
+    // reaches this function at all (catalog.ts's headlessLoginUrlUnsupported
+    // flag routes it around run_cli_login_pty entirely via skipTier1), so
+    // this constant only bounds providers that legitimately DO print a URL
+    // (Codex/Gemini/OpenClaw). reagent P1 on PR #2300: an earlier attempt to
+    // shorten this to 5s "as a safety margin" would have killed valid
+    // in-progress OpenClaw logins, which can take close to the full 15s to
+    // print their URL. Pinned at a sane, bounded value — not "short" for
+    // its own sake — so a future edit can't reintroduce that regression.
+    #[test]
+    fn is_a_sane_bounded_value_for_providers_that_actually_print_a_url() {
+        assert!(URL_CAPTURE_TIMEOUT_SECS > 0);
+        assert!(URL_CAPTURE_TIMEOUT_SECS <= 30);
     }
 }
 

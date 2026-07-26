@@ -41,6 +41,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { runLaunchFlow } from "../flows/launch-flow";
 import { persistAndLinkAccount, runProviderLogin } from "../flows/run-provider-login";
 import { registerSeededAccount } from "../flows/register-seeded-account";
+import { LOGIN_LINK_CAPTURE_LABEL_MS, type LaunchPhase } from "../flows/launch-phase";
 import type { ProviderDefinition } from "../providers";
 
 import type { LogFn } from "../types";
@@ -88,6 +89,9 @@ export interface UseAgentControllerStatus {
     agentReady: Accessor<boolean>;
     isLoading: Accessor<boolean>;
     loginWaiting: Accessor<boolean>;
+    /** What the flow is doing right now, for a specific footer label instead
+     *  of a generic "Working…" — see launch-phase.ts. */
+    launchPhase: Accessor<LaunchPhase | null>;
     startLaunchFlow: () => Promise<void>;
     /**
      * Force a provider re-login, bypassing the auth-status check. Wired to the
@@ -163,6 +167,10 @@ export function useAgentControllerStatus(
     const [flowRunning, setFlowRunning] = createSignal(false);
     const [agentReady, setAgentReady] = createSignal(false);
     const [loginWaiting, setLoginWaiting] = createSignal(false);
+    // What the flow is actually doing right now — see launch-phase.ts. Lets
+    // AgentFooter show a specific status (and, for timed phases, a "waiting
+    // on X, up to Ys" label) instead of a generic "Working…" for every phase.
+    const [launchPhase, setLaunchPhase] = createSignal<LaunchPhase | null>(null);
 
     // Derived spinner state — caller wires this into the AgentFooter loading prop
     const isLoading = createMemo(() => flowRunning() || !agentReady());
@@ -181,6 +189,7 @@ export function useAgentControllerStatus(
         // relogin) so it can't linger past a "Retry Login" the user just
         // clicked and mislead them about this attempt's outcome.
         setAuthNotice(null);
+        setLaunchPhase(null);
         const prov = opts.provider();
         try {
             const authEnv = await buildAuthEnv(prov);
@@ -191,6 +200,7 @@ export function useAgentControllerStatus(
                 setAuthUrl,
                 isCancelled: () => loginCancelled,
                 setLoginWaiting,
+                setLaunchPhase,
                 authEnv,
                 onLoginSuccess: opts.onLoginSuccess,
                 getInitialTermSize: opts.getInitialTermSize,
@@ -208,6 +218,7 @@ export function useAgentControllerStatus(
             setAgentReady(true); // clear spinner on error
         } finally {
             setFlowRunning(false);
+            setLaunchPhase(null);
         }
     };
 
@@ -311,9 +322,15 @@ export function useAgentControllerStatus(
         setLoginWaiting(true);
         try {
             if (!cliPath) {
+                // reagent P2 on PR #2300: this step is resolving the CLI path,
+                // not checking auth — "checking-auth" here mislabeled a wait
+                // that can take up to 5 minutes (resolveCliForRecovery's own
+                // install wait) as the wrong, much shorter step.
+                setLaunchPhase({ kind: "resolving-cli" });
                 cliPath = (await resolveCliForRecovery(prov, "re-login")) ?? undefined;
                 if (!cliPath) return;
             }
+            setLaunchPhase({ kind: "checking-auth" });
             const authEnv = await recoveryAuthEnv(prov);
             // runProviderLogin falls through URL-capture -> global-login-copy ->
             // real-terminal-with-poll before giving up (retro-headless-login-
@@ -337,6 +354,11 @@ export function useAgentControllerStatus(
             let openedAccountId: string | undefined;
             let openedAccountDir: string | undefined;
             let recheckAuthEnv = authEnv;
+            setLaunchPhase(
+                prov.headlessLoginUrlUnsupported
+                    ? { kind: "opening-login-terminal" }
+                    : { kind: "waiting-for-login-link", deadlineMs: Date.now() + LOGIN_LINK_CAPTURE_LABEL_MS },
+            );
             const outcome = await runProviderLogin({
                 provider: prov,
                 cliPath,
@@ -355,6 +377,20 @@ export function useAgentControllerStatus(
                         recheckAuthEnv = { ...authEnv, [prov.authConfigDirEnvVar]: dir };
                     }
                 },
+                // See catalog.ts's DEAD END note — skip tier 1's ~15s
+                // URL-capture wait for providers that can never produce one.
+                skipTier1: prov.headlessLoginUrlUnsupported === true,
+                // See launch-flow.ts's identical wiring — without this the
+                // phase set just above never updates again for the rest of
+                // this call, even though tier 2/3 inside it can run for up
+                // to 5 more minutes. reagent P1 on PR #2300.
+                onTierChange: (event) => {
+                    if (event.tier === "fallback") {
+                        setLaunchPhase({ kind: "opening-login-terminal" });
+                    } else {
+                        setLaunchPhase({ kind: "waiting-for-login-completion", deadlineMs: event.deadlineMs });
+                    }
+                },
             });
             switch (outcome) {
                 case "opened": {
@@ -363,7 +399,9 @@ export function useAgentControllerStatus(
                     // (same pattern as launch-flow.ts's own "opened" case).
                     opts.log("auth", "waiting for login to complete...");
                     let authenticated = false;
+                    let authedEmail: string | null = null;
                     const deadline = Date.now() + 5 * 60 * 1000;
+                    setLaunchPhase({ kind: "waiting-for-login-completion", deadlineMs: deadline });
                     while (!loginCancelled && Date.now() < deadline && !authenticated) {
                         await new Promise<void>((r) => setTimeout(r, 2000));
                         if (loginCancelled) break;
@@ -373,7 +411,10 @@ export function useAgentControllerStatus(
                                 auth_check_args: prov.authCheckCommand,
                                 auth_env: recheckAuthEnv,
                             }, { timeout: 10000 });
-                            if (recheck.authenticated) authenticated = true;
+                            if (recheck.authenticated) {
+                                authenticated = true;
+                                authedEmail = recheck.email ?? null;
+                            }
                         } catch {
                             // keep polling on transient RPC errors
                         }
@@ -395,6 +436,12 @@ export function useAgentControllerStatus(
                         );
                         opts.log("auth", "Login successful — retrying…");
                         setAuthNotice(null);
+                        // Post a visible confirmation into the pane itself — this used to
+                        // ONLY happen on the very first auto-login (launch-flow.ts); "Login
+                        // Again" retried the failed turn silently, so a user with nothing
+                        // queued to retry (or who didn't notice the retry) never saw ANY
+                        // acknowledgement that the login actually succeeded.
+                        opts.onLoginSuccess?.(authedEmail);
                         opts.onRecovered?.();
                     } else if (!loginCancelled) {
                         setAuthNotice(
@@ -407,11 +454,13 @@ export function useAgentControllerStatus(
                 case "seeded":
                     opts.log("auth", "Signed in from your global login — retrying…");
                     setAuthNotice(null);
+                    opts.onLoginSuccess?.(null);
                     opts.onRecovered?.();
                     break;
                 case "terminal-success":
                     opts.log("auth", "Login successful — retrying…");
                     setAuthNotice(null);
+                    opts.onLoginSuccess?.(null);
                     opts.onRecovered?.();
                     break;
                 case "terminal-timeout":
@@ -436,6 +485,7 @@ export function useAgentControllerStatus(
         } finally {
             reloginInFlight = false;
             setLoginWaiting(false);
+            setLaunchPhase(null);
         }
     };
 
@@ -500,6 +550,7 @@ export function useAgentControllerStatus(
                 // recovery: retry the failed turn (fresh spawn picks up the new
                 // token and TurnStart clears the row).
                 opts.log("auth", "Signed in from your global login — retrying…");
+                opts.onLoginSuccess?.(null);
                 opts.onRecovered?.();
             } else {
                 const msg = "Couldn't use your global login — no valid global Claude credential was found. Try “Login via terminal”.";
@@ -549,9 +600,14 @@ export function useAgentControllerStatus(
             if (!cliPath) {
                 // Same H2 trap as relogin: the gated launch flow would trust the
                 // auth check and skip the login the user explicitly asked for.
+                // reagent P2 on PR #2300: label this step "resolving-cli", not
+                // "opening-login-terminal" — no terminal opens until after this
+                // resolve, which can itself take up to 5 minutes on a fresh install.
+                setLaunchPhase({ kind: "resolving-cli" });
                 cliPath = (await resolveCliForRecovery(prov, "login via terminal")) ?? undefined;
                 if (!cliPath) return;
             }
+            setLaunchPhase({ kind: "opening-login-terminal" });
             const authEnv = await recoveryAuthEnv(prov);
             const agentDefinitionId = getBlockMetaKeyAtom(opts.blockId, "agentId")() as string | undefined;
             const outcome = await runProviderLogin({
@@ -566,6 +622,19 @@ export function useAgentControllerStatus(
                     ? { blockId: opts.blockId, agentDefinitionId }
                     : undefined,
                 existingAccountId: await existingAccountIdFor(prov.id),
+                // "fallback" still fires here even though skipTier1 is true —
+                // run-provider-login.ts fires it unconditionally right after
+                // the (skipped) tier-1 block, not conditioned on skipTier1 —
+                // but this flow has nothing displayed for tier 1 to begin
+                // with, so there's nothing to update on that event; only
+                // "polling" (once the terminal actually opens) needs a phase
+                // update here, giving an accurate deadline instead of leaving
+                // the phase on a static "opening terminal" for the whole wait.
+                onTierChange: (event) => {
+                    if (event.tier === "polling") {
+                        setLaunchPhase({ kind: "waiting-for-login-completion", deadlineMs: event.deadlineMs });
+                    }
+                },
             });
             switch (outcome) {
                 case "opened":
@@ -574,6 +643,7 @@ export function useAgentControllerStatus(
                 case "terminal-success":
                     opts.log("auth", "Login successful — retrying…");
                     setAuthNotice(null);
+                    opts.onLoginSuccess?.(null);
                     opts.onRecovered?.();
                     break;
                 case "terminal-timeout":
@@ -594,6 +664,7 @@ export function useAgentControllerStatus(
         } finally {
             reloginInFlight = false;
             setLoginWaiting(false);
+            setLaunchPhase(null);
         }
     };
 
@@ -601,6 +672,10 @@ export function useAgentControllerStatus(
         loginCancelled = true;
         getApi().cancelCliLogin().catch(() => {});
         opts.log("auth", "login cancelled", "warn");
+        // Immediate UI feedback — the in-flight poll loop notices
+        // loginCancelled on its own next tick (up to 2s), but the phase
+        // label/cancel button should disappear the instant the user clicks.
+        setLaunchPhase(null);
     };
 
     const notifyControllerHealthy = () => {
@@ -632,6 +707,7 @@ export function useAgentControllerStatus(
         agentReady,
         isLoading,
         loginWaiting,
+        launchPhase,
         startLaunchFlow,
         relogin,
         useGlobalLogin,
