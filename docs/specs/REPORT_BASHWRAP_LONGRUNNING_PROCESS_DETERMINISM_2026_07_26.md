@@ -2,8 +2,9 @@
 
 **Date:** 2026-07-26
 **Author:** AgentA
-**Status:** Report — analysis, grounded in two fresh, personally-reproduced incidents from today plus this
-codebase's own prior-art trail. No implementation in this PR.
+**Status:** Decided — open questions in §6 resolved 2026-07-26 (see §7); target architecture specified.
+Grounded in two fresh, personally-reproduced incidents from today plus this codebase's own prior-art trail.
+No implementation in this PR.
 **Ground truth basis:** `agentmuxai/agentmux` `main` at commit `6962f81f`, pulled fresh for this report.
 **Related (read in full while preparing this report, not just cited secondhand):**
 - [`REPORT_PROCESS_ARCHITECTURE_STATE_AND_RETHINK_2026_07_22.md`](REPORT_PROCESS_ARCHITECTURE_STATE_AND_RETHINK_2026_07_22.md)
@@ -342,6 +343,114 @@ category (explicit states over inferred ones) is the right shape of fix for both
    idle/success race this test guards against is inherently timing-fragile** in a way that a design change
    (not just a tighter implementation) would resolve more durably than the current test-and-patch cycle? Not
    investigated deeply here — flagged because it surfaced, unprompted, in this same session's CI run.
+
+---
+
+## 7. Decisions
+
+Resolving §6, in order, against the same industry precedent `REPORT_PROCESS_ARCHITECTURE_STATE_AND_RETHINK`'s
+§4 already grounded this codebase in (systemd/Kubernetes/supervisord/Docker), plus that report's own §3.0.3
+principle of **graceful degradation over aggressive action under uncertainty**.
+
+### 7.1 (§6.1) No heartbeat mechanism. Declared-background calls skip the idle-kill entirely.
+
+Rejected: bashwrap emitting or requiring a synthetic heartbeat from wrapped processes. This would reintroduce
+the exact ambiguity the pager-hang bug already exposed — inferring liveness from a signal the wrapper doesn't
+actually control or understand — and it's the same anti-pattern that broke the Agent1 incident's *other*
+system (a hand-rolled heartbeat kept one liveness clock alive while a second, independent one froze). Adding
+a bashwrap-native heartbeat is a more sophisticated version of the same mistake, just moved one layer down.
+
+**Decision:** once `run_in_background` is threaded through (per §5 Recommendation 1), a call declared
+background **never** gets the output-silence idle-kill. The 600s heuristic exists specifically for the
+foreground case — a caller blocked synchronously on a result, where 10 minutes of literal silence is
+overwhelmingly a stuck interactive prompt, not legitimate work (per `bash_wrap.rs`'s own doc comment: a
+command with real, continuous output is already exempt regardless of total runtime). That foreground rationale
+does not transfer to a background call, where the caller explicitly isn't waiting and silence is the expected
+steady state for a GUI app, a dev server, or a watch loop.
+
+This mirrors Docker's healthcheck model more closely than systemd's watchdog model, deliberately: Docker's
+healthcheck is opt-in and author-defined per container, not an ambient default every container must satisfy;
+systemd's `WatchdogSec` requires the *service itself* to actively call `sd_notify`, which is closer to the
+rejected heartbeat option. The caller's own `run_in_background` declaration is the simplest possible signal —
+no new protocol, no new code in the wrapped process, just trusting information that already exists at the
+call site and today gets silently discarded (§1.2).
+
+**What bounds a background task's lifetime instead:** not an output heuristic, but the same job-object/
+process-group lifecycle binding `process_tracker` (mechanism #2) already gets right for controller-managed
+processes (`REPORT_PROCESS_ARCHITECTURE_STATE_AND_RETHINK` §3.0.3 point 3) — tie the spawned child to the
+owning session/pane's job object so it's reaped when that session ends, rather than judged on its output
+pattern. Confirming bashwrap's children already inherit the right job membership (or wiring it if not) is an
+implementation-time verification, not re-litigated here.
+
+### 7.2 (§6.2) `ShellNodeRunner`'s no-timeout behavior is correct as-is — keep it, don't add one.
+
+**Decision:** no idle-kill for `mcp__agentmux__Shell`-spawned processes. Choosing that tool at all is itself
+the same kind of explicit declaration `run_in_background` is for bashwrap — the caller is stating "this is
+long-running and I want it tracked," which is precisely why it already feeds the dock. Adding an output
+heuristic here would reintroduce, on the one surface that gets this right today, the exact failure this report
+opened with. The two surfaces converge on one **policy**, arrived at independently for each: *an explicit
+declaration of long-running intent — however each surface's caller expresses it — suppresses any
+silence-based kill decision.*
+
+The only gap worth closing on this surface is the same one as §7.1's second half: confirm session/pane-
+lifecycle cleanup is the actual backstop against a truly abandoned shell (one whose owning pane closed without
+an explicit `ShellStop`), not an assumption. If a gap is found there, close it with lifecycle binding, not a
+timer.
+
+### 7.3 (§6.3) No code convergence. Converge on a shared policy + shared future registration contract.
+
+**Decision:** do not merge `agentmux-bashwrap` and `shell_node.rs` into one implementation. Their operational
+contracts are genuinely different in a way that matters: bashwrap must remain a fast, standalone binary
+invocable directly from Claude Code's own `PreToolUse` hook with no RPC round-trip at startup (base64'd argv,
+no daemon, §1.1); `shell_node.rs` is inherently backend-owned and RPC-managed, feeding the dock/tracking
+system by design. Forcing these into one code path would compromise the constraint that makes each one work
+for its actual caller — the same "don't copy the precedent literally where the domains genuinely differ"
+caution `REPORT_PROCESS_ARCHITECTURE_STATE_AND_RETHINK` §3.0.3 already applied to the credential-broker
+analogy, applied here a second time between these two surfaces instead of between auth and process domains.
+
+What *does* converge, per §7.1/§7.2's shared policy: both surfaces should, once the Process Broker
+(`REPORT_PROCESS_ARCHITECTURE_STATE_AND_RETHINK` §5) exists, register their declared-long-running/background
+processes into it — bashwrap's `exec` emitting the broker's equivalent of `ProcessEvent::PidObserved` once it
+knows a call is backgrounded, `shell_node.rs` continuing to do so as part of closing that report's own §5.2
+controller-type coverage gap. This is sequencing, not new scope: it's an addendum to the Process Broker
+initiative, owned by whoever picks that report up, not a separate initiative competing with it. Until that
+broker exists, §7.1/§7.2's policy changes stand on their own and don't depend on it landing first.
+
+### 7.4 (§6.4) The idle/success race is a structural tie-break problem — recommend `select!` bias, not another patch.
+
+**Decision:** treat the recurring flake as a real, still-open structural issue, not fully closed by the prior
+"idle/success misclassification race" fix (`bash_wrap.rs`'s history already shows one dedicated fix for
+exactly this race, and it still flaked in CI today on an unrelated PR). `tokio::select!` picks pseudo-randomly
+between two simultaneously-ready branches by design; if the idle timer and the child's exit both become ready
+in the same instant, the current unbiased race can still choose the idle branch and misclassify a fast,
+genuinely successful exit as an idle-kill. The fix is structural, not another round of timing adjustment:
+give the exit-detection branch priority — either `select! { biased; wait_task => ..., idle_rx => ... }` so a
+resolved exit always wins a simultaneous race, or check `wait_task`'s completion before treating an idle-timer
+tick as authoritative. Either removes the coin-flip instead of narrowing the window it can land in.
+
+This is lower-priority after §7.1: restricting the idle-kill to foreground-only calls (§7.1's decision)
+already shrinks how often this race can even trigger in practice, since most multi-minute-silent commands in
+this codebase's actual usage are backgrounded dev servers and watch loops, not foreground waits. The bias fix
+is still worth doing — it's small and removes a real, demonstrated flake — but it's no longer gating on
+§7.1/§7.2 landing first.
+
+### 7.5 Resulting target architecture, summarized
+
+One policy, expressed identically by both execution surfaces, each in the vocabulary already available to it:
+
+| Surface | Signal that suppresses silence-based killing | What still bounds its lifetime |
+|---|---|---|
+| `agentmux-bashwrap` (foreground call, the default) | none — kill-on-600s-silence stays, unchanged | the idle-kill itself (with the §7.4 bias fix) |
+| `agentmux-bashwrap` (`run_in_background: true`) | the caller's own declaration, once threaded through (§5 Rec. 1) | job-object/session-lifecycle binding, verified not assumed |
+| `mcp__agentmux__Shell` (`ShellNodeRunner`) | choosing this tool at all — already true today, kept as-is | explicit `ShellStop` + session-lifecycle binding, verified not assumed |
+
+No new heartbeat protocol, no forced code merge, no new timeout tuning exercise. The two surfaces stay
+separate implementations permanently, converging only on (a) this shared "declared-intent suppresses
+inference" policy and (b) a shared future registration contract with the Process Broker once it exists. This
+is deliberately the smaller, more conservative move available at each decision point — every rejected
+alternative (heartbeats, an idle-kill for `ShellNodeRunner`, code-level convergence) added a new mechanism or
+new inferred-liveness heuristic; the accepted decisions instead all reuse a signal or a lifecycle primitive
+that already exists somewhere in this codebase today.
 
 ---
 
