@@ -68,10 +68,15 @@ const LOGIN_REAP_TIMEOUT_SECS: u64 = 6 * 60;
 /// know in advance a provider never prints one (Claude — see catalog.ts's
 /// headlessLoginUrlUnsupported flag) skip this call entirely via
 /// runProviderLogin's skipTier1, so in practice this only bounds providers
-/// that plausibly DO print a URL (Codex/Gemini/OpenClaw). Kept short as a
-/// safety margin for any caller that reaches this function without going
-/// through that gate.
-const URL_CAPTURE_TIMEOUT_SECS: u64 = 5;
+/// that plausibly DO print a URL (Codex/Gemini/OpenClaw).
+///
+/// Left at 15s, NOT shortened as a "safety margin" for Claude: Claude never
+/// reaches this function at all now (skipTier1 above), so shortening it
+/// would only affect Codex/Gemini/OpenClaw — providers that legitimately
+/// need up to this long to print their URL. reagent P1 on PR #2300 caught
+/// an earlier attempt to cut this to 5s, which would have killed valid
+/// in-progress OpenClaw logins and forced an unnecessary terminal fallback.
+const URL_CAPTURE_TIMEOUT_SECS: u64 = 15;
 
 /// Spawn a CLI auth login flow.
 pub async fn run_cli_login(
@@ -1195,17 +1200,19 @@ mod redact_tests {
 mod url_capture_timeout_tests {
     use super::URL_CAPTURE_TIMEOUT_SECS;
 
-    // Regression guard for the deterministic-login-UX fix: this cap used to
-    // be 15s and was hit unconditionally for Claude (which never prints a
-    // scrapeable URL — see catalog.ts's headlessLoginUrlUnsupported flag,
-    // which now skips run_cli_login_pty for Claude entirely). Kept short as
-    // a safety margin for any caller that reaches this function without
-    // going through that gate; a future accidental widening back toward the
-    // old 15s would silently reintroduce the stall for such a caller.
+    // Regression guard for the deterministic-login-UX fix: Claude no longer
+    // reaches this function at all (catalog.ts's headlessLoginUrlUnsupported
+    // flag routes it around run_cli_login_pty entirely via skipTier1), so
+    // this constant only bounds providers that legitimately DO print a URL
+    // (Codex/Gemini/OpenClaw). reagent P1 on PR #2300: an earlier attempt to
+    // shorten this to 5s "as a safety margin" would have killed valid
+    // in-progress OpenClaw logins, which can take close to the full 15s to
+    // print their URL. Pinned at a sane, bounded value — not "short" for
+    // its own sake — so a future edit can't reintroduce that regression.
     #[test]
-    fn is_a_short_safety_margin_not_the_old_15s_stall() {
+    fn is_a_sane_bounded_value_for_providers_that_actually_print_a_url() {
         assert!(URL_CAPTURE_TIMEOUT_SECS > 0);
-        assert!(URL_CAPTURE_TIMEOUT_SECS <= 10);
+        assert!(URL_CAPTURE_TIMEOUT_SECS <= 30);
     }
 }
 
