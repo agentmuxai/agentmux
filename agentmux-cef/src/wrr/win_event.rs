@@ -826,6 +826,32 @@ unsafe extern "system" fn win_event_callback(
             // Normal on-screen position reporting, debounced to ~20 Hz.
             if position_debounce::should_emit(raw_hwnd) {
                 launcher_ipc::report_hwnd_position_changed(raw_hwnd, rect);
+                // Second, independent consumer of the same position stream:
+                // debounced srv write-through so a full process-tree
+                // restart (launcher included) can still reproject secondary
+                // windows at their exact last geometry — see
+                // `commands::window::position_persist` for the full
+                // rationale. Does not touch the launcher-IPC forward above.
+                //
+                // IsIconic guard (reagent P1 on PR #2302): a minimize can
+                // reach this branch too — the pool-move check above only
+                // returns early when `IsIconic(hwnd) == 0`, so a minimized
+                // window's LOCATIONCHANGE (reporting GetWindowRect's
+                // (-32000,-32000) sentinel, same one the comment above this
+                // block already documents) falls through here. That sentinel
+                // has a positive width/height (it's a real rect, just
+                // off-screen), so `backend_get_window_pos_and_size`'s
+                // zero-size guard alone wouldn't catch it — without this
+                // check, a full restart would reproject the window
+                // off-screen. The launcher-IPC forward above is left as-is
+                // (pre-existing behavior, unrelated to this write-through).
+                if IsIconic(hwnd) == 0 {
+                    if let Some(state) = app_state().get() {
+                        crate::commands::window::position_persist::report_position_for_srv_writethrough(
+                            state, hwnd, rect,
+                        );
+                    }
+                }
             }
         }
         _ => {}
