@@ -234,6 +234,32 @@ describe("runLaunchFlow — skipTier1 wiring", () => {
         expect(last.text).toMatch(/resumed/i);
     });
 
+    it("reagent P1 on PR #2303: also notifies 'Resumed...' for shellprocstatus 'running' — a persistent controller can resume while still alive/mid-turn, not just 'done'", async () => {
+        hub.checkCliAuth
+            .mockReset()
+            .mockResolvedValueOnce({ authenticated: false })
+            .mockResolvedValue({ authenticated: true, email: "user@example.com" });
+        hub.getControllerStatus.mockResolvedValue({ shellprocstatus: "running" });
+        const phases: string[] = [];
+        const notices: Array<{ text: string; style: string }> = [];
+        const result = await runLaunchFlow({
+            blockId: "block-1",
+            provider: claude,
+            log: vi.fn(),
+            setAuthUrl: vi.fn(),
+            isCancelled: () => false,
+            setLoginWaiting: vi.fn(),
+            setLaunchPhase: (p) => { if (p) phases.push(p.kind); },
+            onNotify: (text, style) => notices.push({ text, style }),
+        });
+
+        expect(result).toBe("success");
+        expect(phases[phases.length - 1]).toBe("resumed-ready");
+        expect(phases).not.toContain("fresh-ready");
+        const last = notices[notices.length - 1];
+        expect(last.text).toMatch(/resumed/i);
+    });
+
     it("reagent P1: updates the phase via onTierChange instead of freezing on a stale waiting-for-login-link deadline once tier 1 fails and tier 2/3 take over", async () => {
         // Codex doesn't have headlessLoginUrlUnsupported, so it gets the
         // deadline-bearing "waiting-for-login-link" phase before this call —
