@@ -383,6 +383,7 @@ export function useAgentControllerStatus(
                     // (same pattern as launch-flow.ts's own "opened" case).
                     opts.log("auth", "waiting for login to complete...");
                     let authenticated = false;
+                    let authedEmail: string | null = null;
                     const deadline = Date.now() + 5 * 60 * 1000;
                     setLaunchPhase({ kind: "waiting-for-login-completion", deadlineMs: deadline });
                     while (!loginCancelled && Date.now() < deadline && !authenticated) {
@@ -394,7 +395,10 @@ export function useAgentControllerStatus(
                                 auth_check_args: prov.authCheckCommand,
                                 auth_env: recheckAuthEnv,
                             }, { timeout: 10000 });
-                            if (recheck.authenticated) authenticated = true;
+                            if (recheck.authenticated) {
+                                authenticated = true;
+                                authedEmail = recheck.email ?? null;
+                            }
                         } catch {
                             // keep polling on transient RPC errors
                         }
@@ -416,6 +420,12 @@ export function useAgentControllerStatus(
                         );
                         opts.log("auth", "Login successful — retrying…");
                         setAuthNotice(null);
+                        // Post a visible confirmation into the pane itself — this used to
+                        // ONLY happen on the very first auto-login (launch-flow.ts); "Login
+                        // Again" retried the failed turn silently, so a user with nothing
+                        // queued to retry (or who didn't notice the retry) never saw ANY
+                        // acknowledgement that the login actually succeeded.
+                        opts.onLoginSuccess?.(authedEmail);
                         opts.onRecovered?.();
                     } else if (!loginCancelled) {
                         setAuthNotice(
@@ -428,11 +438,13 @@ export function useAgentControllerStatus(
                 case "seeded":
                     opts.log("auth", "Signed in from your global login — retrying…");
                     setAuthNotice(null);
+                    opts.onLoginSuccess?.(null);
                     opts.onRecovered?.();
                     break;
                 case "terminal-success":
                     opts.log("auth", "Login successful — retrying…");
                     setAuthNotice(null);
+                    opts.onLoginSuccess?.(null);
                     opts.onRecovered?.();
                     break;
                 case "terminal-timeout":
@@ -522,6 +534,7 @@ export function useAgentControllerStatus(
                 // recovery: retry the failed turn (fresh spawn picks up the new
                 // token and TurnStart clears the row).
                 opts.log("auth", "Signed in from your global login — retrying…");
+                opts.onLoginSuccess?.(null);
                 opts.onRecovered?.();
             } else {
                 const msg = "Couldn't use your global login — no valid global Claude credential was found. Try “Login via terminal”.";
@@ -597,6 +610,7 @@ export function useAgentControllerStatus(
                 case "terminal-success":
                     opts.log("auth", "Login successful — retrying…");
                     setAuthNotice(null);
+                    opts.onLoginSuccess?.(null);
                     opts.onRecovered?.();
                     break;
                 case "terminal-timeout":
