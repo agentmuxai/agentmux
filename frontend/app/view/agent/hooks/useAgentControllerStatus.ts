@@ -41,6 +41,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { runLaunchFlow } from "../flows/launch-flow";
 import { persistAndLinkAccount, runProviderLogin } from "../flows/run-provider-login";
 import { registerSeededAccount } from "../flows/register-seeded-account";
+import type { LaunchPhase } from "../flows/launch-phase";
 import type { ProviderDefinition } from "../providers";
 
 import type { LogFn } from "../types";
@@ -88,6 +89,9 @@ export interface UseAgentControllerStatus {
     agentReady: Accessor<boolean>;
     isLoading: Accessor<boolean>;
     loginWaiting: Accessor<boolean>;
+    /** What the flow is doing right now, for a specific footer label instead
+     *  of a generic "Working…" — see launch-phase.ts. */
+    launchPhase: Accessor<LaunchPhase | null>;
     startLaunchFlow: () => Promise<void>;
     /**
      * Force a provider re-login, bypassing the auth-status check. Wired to the
@@ -163,6 +167,10 @@ export function useAgentControllerStatus(
     const [flowRunning, setFlowRunning] = createSignal(false);
     const [agentReady, setAgentReady] = createSignal(false);
     const [loginWaiting, setLoginWaiting] = createSignal(false);
+    // What the flow is actually doing right now — see launch-phase.ts. Lets
+    // AgentFooter show a specific status (and, for timed phases, a "waiting
+    // on X, up to Ys" label) instead of a generic "Working…" for every phase.
+    const [launchPhase, setLaunchPhase] = createSignal<LaunchPhase | null>(null);
 
     // Derived spinner state — caller wires this into the AgentFooter loading prop
     const isLoading = createMemo(() => flowRunning() || !agentReady());
@@ -181,6 +189,7 @@ export function useAgentControllerStatus(
         // relogin) so it can't linger past a "Retry Login" the user just
         // clicked and mislead them about this attempt's outcome.
         setAuthNotice(null);
+        setLaunchPhase(null);
         const prov = opts.provider();
         try {
             const authEnv = await buildAuthEnv(prov);
@@ -191,6 +200,7 @@ export function useAgentControllerStatus(
                 setAuthUrl,
                 isCancelled: () => loginCancelled,
                 setLoginWaiting,
+                setLaunchPhase,
                 authEnv,
                 onLoginSuccess: opts.onLoginSuccess,
                 getInitialTermSize: opts.getInitialTermSize,
@@ -208,6 +218,7 @@ export function useAgentControllerStatus(
             setAgentReady(true); // clear spinner on error
         } finally {
             setFlowRunning(false);
+            setLaunchPhase(null);
         }
     };
 
@@ -309,6 +320,7 @@ export function useAgentControllerStatus(
         let cliPath = getBlockMetaKeyAtom(opts.blockId, "cmd")() as string | undefined;
         reloginInFlight = true;
         setLoginWaiting(true);
+        setLaunchPhase({ kind: "checking-auth" });
         try {
             if (!cliPath) {
                 cliPath = (await resolveCliForRecovery(prov, "re-login")) ?? undefined;
@@ -337,6 +349,11 @@ export function useAgentControllerStatus(
             let openedAccountId: string | undefined;
             let openedAccountDir: string | undefined;
             let recheckAuthEnv = authEnv;
+            setLaunchPhase(
+                prov.headlessLoginUrlUnsupported
+                    ? { kind: "opening-login-terminal" }
+                    : { kind: "waiting-for-login-link", deadlineMs: Date.now() + 15_000 },
+            );
             const outcome = await runProviderLogin({
                 provider: prov,
                 cliPath,
@@ -355,6 +372,9 @@ export function useAgentControllerStatus(
                         recheckAuthEnv = { ...authEnv, [prov.authConfigDirEnvVar]: dir };
                     }
                 },
+                // See catalog.ts's DEAD END note — skip tier 1's ~15s
+                // URL-capture wait for providers that can never produce one.
+                skipTier1: prov.headlessLoginUrlUnsupported === true,
             });
             switch (outcome) {
                 case "opened": {
@@ -364,6 +384,7 @@ export function useAgentControllerStatus(
                     opts.log("auth", "waiting for login to complete...");
                     let authenticated = false;
                     const deadline = Date.now() + 5 * 60 * 1000;
+                    setLaunchPhase({ kind: "waiting-for-login-completion", deadlineMs: deadline });
                     while (!loginCancelled && Date.now() < deadline && !authenticated) {
                         await new Promise<void>((r) => setTimeout(r, 2000));
                         if (loginCancelled) break;
@@ -436,6 +457,7 @@ export function useAgentControllerStatus(
         } finally {
             reloginInFlight = false;
             setLoginWaiting(false);
+            setLaunchPhase(null);
         }
     };
 
@@ -544,6 +566,7 @@ export function useAgentControllerStatus(
         // first, reset in finally.
         reloginInFlight = true;
         setLoginWaiting(true);
+        setLaunchPhase({ kind: "opening-login-terminal" });
         try {
             let cliPath = getBlockMetaKeyAtom(opts.blockId, "cmd")() as string | undefined;
             if (!cliPath) {
@@ -594,6 +617,7 @@ export function useAgentControllerStatus(
         } finally {
             reloginInFlight = false;
             setLoginWaiting(false);
+            setLaunchPhase(null);
         }
     };
 
@@ -601,6 +625,10 @@ export function useAgentControllerStatus(
         loginCancelled = true;
         getApi().cancelCliLogin().catch(() => {});
         opts.log("auth", "login cancelled", "warn");
+        // Immediate UI feedback — the in-flight poll loop notices
+        // loginCancelled on its own next tick (up to 2s), but the phase
+        // label/cancel button should disappear the instant the user clicks.
+        setLaunchPhase(null);
     };
 
     const notifyControllerHealthy = () => {
@@ -632,6 +660,7 @@ export function useAgentControllerStatus(
         agentReady,
         isLoading,
         loginWaiting,
+        launchPhase,
         startLaunchFlow,
         relogin,
         useGlobalLogin,

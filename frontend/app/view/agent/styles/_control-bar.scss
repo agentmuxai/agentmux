@@ -269,6 +269,22 @@
                 opacity: 0.7;
                 margin-left: var(--space-2);
             }
+
+            .agent-working-row-cancel-login {
+                margin-left: var(--space-2);
+                padding: 0;
+                background: none;
+                border: none;
+                color: inherit;
+                font: inherit;
+                text-decoration: underline;
+                opacity: 0.85;
+                cursor: default;
+
+                &:hover {
+                    opacity: 1;
+                }
+            }
         }
 
         &--worked {

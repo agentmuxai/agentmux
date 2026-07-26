@@ -63,6 +63,16 @@ impl CliLoginStdin {
 /// pane was closed without its cleanup firing).
 const LOGIN_REAP_TIMEOUT_SECS: u64 = 6 * 60;
 
+/// Cap on how long run_cli_login_pty blocks waiting for a scrapeable OAuth
+/// URL before giving up and returning auth_url=None. Frontend callers that
+/// know in advance a provider never prints one (Claude — see catalog.ts's
+/// headlessLoginUrlUnsupported flag) skip this call entirely via
+/// runProviderLogin's skipTier1, so in practice this only bounds providers
+/// that plausibly DO print a URL (Codex/Gemini/OpenClaw). Kept short as a
+/// safety margin for any caller that reaches this function without going
+/// through that gate.
+const URL_CAPTURE_TIMEOUT_SECS: u64 = 5;
+
 /// Spawn a CLI auth login flow.
 pub async fn run_cli_login(
     state: Arc<AppState>,
@@ -620,7 +630,8 @@ async fn run_cli_login_pty(
 
     // Synchronously read from the master in a blocking task, scanning
     // each line for an OAuth URL. portable_pty's reader is sync.
-    // The 15 s cap is enforced async-side via tokio::time::timeout —
+    // The URL_CAPTURE_TIMEOUT_SECS cap is enforced async-side via
+    // tokio::time::timeout —
     // BufRead::read_line itself blocks indefinitely without per-read
     // timeout support, so a child that pauses before its first line
     // (or sits at a prompt with no newline) would wedge `url_rx.await`
@@ -694,7 +705,7 @@ async fn run_cli_login_pty(
     });
 
     let auth_url: Option<String> = match tokio::time::timeout(
-        std::time::Duration::from_secs(15),
+        std::time::Duration::from_secs(URL_CAPTURE_TIMEOUT_SECS),
         url_rx,
     )
     .await
@@ -705,7 +716,9 @@ async fn run_cli_login_pty(
     if let Some(ref url) = auth_url {
         tracing::info!(url = %url, "run_cli_login_pty: captured auth URL");
     } else {
-        tracing::warn!("run_cli_login_pty: no auth URL captured within 15s");
+        tracing::warn!(
+            "run_cli_login_pty: no auth URL captured within {URL_CAPTURE_TIMEOUT_SECS}s"
+        );
     }
 
     // Reap the child in a blocking task. The PtyPair (master + slave)
@@ -1175,6 +1188,24 @@ mod redact_tests {
         assert!(!red.contains("AAAA"));
         assert!(!red.contains("BBBB"));
         assert_eq!(red.matches("…REDACTED").count(), 2);
+    }
+}
+
+#[cfg(test)]
+mod url_capture_timeout_tests {
+    use super::URL_CAPTURE_TIMEOUT_SECS;
+
+    // Regression guard for the deterministic-login-UX fix: this cap used to
+    // be 15s and was hit unconditionally for Claude (which never prints a
+    // scrapeable URL — see catalog.ts's headlessLoginUrlUnsupported flag,
+    // which now skips run_cli_login_pty for Claude entirely). Kept short as
+    // a safety margin for any caller that reaches this function without
+    // going through that gate; a future accidental widening back toward the
+    // old 15s would silently reintroduce the stall for such a caller.
+    #[test]
+    fn is_a_short_safety_margin_not_the_old_15s_stall() {
+        assert!(URL_CAPTURE_TIMEOUT_SECS > 0);
+        assert!(URL_CAPTURE_TIMEOUT_SECS <= 10);
     }
 }
 

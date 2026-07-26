@@ -81,6 +81,9 @@ export const loginCommand: SlashCommand = {
                         recheckAuthEnv = { ...authEnv, [prov.authConfigDirEnvVar]: dir };
                     }
                 },
+                // See catalog.ts's DEAD END note — skip tier 1's ~15s
+                // URL-capture wait for providers that can never produce one.
+                skipTier1: prov.headlessLoginUrlUnsupported === true,
             });
             switch (outcome) {
                 case "opened": {

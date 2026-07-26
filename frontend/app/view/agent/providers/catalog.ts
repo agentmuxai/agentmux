@@ -50,6 +50,11 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // the CLI fully interactive (isTTY + a controlling terminal), so it
         // stays alive for the paste. See docs / run_cli_login_pty.
         requiresLoginTty: true,
+        // Per the DEAD END note above: `claude auth login` never prints a
+        // scrapeable OAuth URL through our PTY spawn (v2.1.x's login is a
+        // self-driving TUI, not a stdout URL) — skip tier 1's URL-capture
+        // attempt entirely rather than burning its ~15s timeout every login.
+        headlessLoginUrlUnsupported: true,
         npmPackage: "@anthropic-ai/claude-code",
         // Keep in sync with agentmux-srv/src/backend/providers.rs `pinned_version`,
         // agentmux-cef/src/commands/providers.rs `CLAUDE_VERSION`, and
