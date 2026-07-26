@@ -74,9 +74,6 @@ Phase 3: ControllerResync + GetControllerStatus
 mount
   │
   ▼
-classify: fresh vs resume (has prior turn history?) ── no notification yet;
-  │                                                     remembered for Phase 3's single line
-  ▼
 Phase 0/1 (unchanged, silent unless install needed — Q3)
   │
   ▼
@@ -97,17 +94,16 @@ Phase 2: CheckCliAuth
                           onLoginSuccess → "✓ Logged in as X" (existing, unchanged)
   │
   ▼
-Phase 3 → the ONE end-of-flow line, reflecting the classification from step 1
-  (this is the only notification for the fully-smooth path — no separate
-  early "Starting…" line; the footer's existing LaunchPhase labels already
-  give real-time feedback while this runs):
-  "Ready — type a message to start"          (fresh)
-  "Resumed — continuing where you left off"  (resume)
+Phase 3 → the ONE end-of-flow line, sourced directly from GetControllerStatus's
+  existing shellprocstatus ("init" vs "done" — this IS the fresh/resume signal,
+  no separate up-front classification step needed):
+  "Ready — type a message to start"          (status "init", fresh)
+  "Resumed — continuing where you left off"  (status "done", resume)
 ```
 
 Two design decisions baked into this diagram (both resolved in §8, not left open):
 - The `authenticated:false` warning is posted **before** `runProviderLogin()` is called, not after — satisfying G1 by ordering, and it **proceeds automatically** after posting (Q2) rather than blocking on a confirmation click; the existing cancel button is the escape hatch.
-- The smooth path gets exactly **one** conversation line, at the end, not one at start and one at end — the footer's spinner labels already cover "something is happening" in real time (Q1).
+- The smooth path gets exactly **one** conversation line, at the end, not one at start and one at end — the footer's spinner labels already cover "something is happening" in real time (Q1). There's no separate early "Starting…"/"Resuming…" state either: fresh-vs-resume isn't actually knowable until Phase 3's `GetControllerStatus` call returns, so there was never a real moment to post it any earlier than the existing end-of-flow line.
 
 ## 6. Proposed reducer: `LaunchAuthState`
 
@@ -117,25 +113,26 @@ Mirrors the existing `AuthState` pattern (`frontend/app/view/agent/auth/auth-sta
 
 | `kind` | Meaning | Conversation notification | Footer label (unchanged from PR #2300 where applicable) |
 |---|---|---|---|
-| `classifying` | Just mounted; checking for prior turn history | none — remembered for the Phase-3 line, not shown yet | — |
-| `starting` | Fresh agent, no prior history | none — footer only (Q1) | resolving-cli |
-| `resuming` | Prior turn history exists | none — footer only (Q1) | resolving-cli |
+| `resolving-cli` | Resolving/installing the CLI (existing) | none unless install needed (Q3) | resolving-cli |
 | `checking-auth` | Running `CheckCliAuth` | none (instant, <1s typical) | checking-auth |
 | `auth-ok-quiet` | Authenticated, no login needed | none — folds into the Phase-3 line below (Q1) | (clears immediately) |
 | `auth-expired` | **New.** Token check failed; about to attempt recovery, automatically (Q2) | "⚠ Your login has expired — signing back in…" + Cancel | checking-auth → opening-login-terminal |
 | `waiting-for-login-link` | tier 1 URL-capture (existing) | existing `AuthUrlBox` | unchanged |
 | `opening-login-terminal` | tier 2/3 (existing) | "Opening a terminal for login…" | unchanged |
 | `waiting-for-login-completion` | (existing) | (existing) | unchanged |
+| `verifying` | Post-seed/terminal-success one-shot recheck (existing) | none (transient, <10s) | verifying |
 | `login-success` | (existing `onLoginSuccess`) | "✓ Logged in as X" (existing, unchanged) | ready |
-| `resumed-ready` | **New.** Phase 3 `status === "done"`, resumed from `classifying` | "Resumed — continuing where you left off" | ready |
-| `fresh-ready` | **New.** Phase 3 `status === "init"`, fresh from `classifying` | "Ready — type a message to start" | ready |
+| `resumed-ready` | **New.** Phase 3 `status === "done"` | "Resumed — continuing where you left off" | ready |
+| `fresh-ready` | **New.** Phase 3 `status === "init"` | "Ready — type a message to start" | ready |
 | `failed` | (existing) | existing failure banner + Retry | failed |
+
+No separate `classifying`/`starting`/`resuming` states — see §5's note on why fresh-vs-resume is only knowable at Phase 3, not before.
 
 Every row has a notification column filled in and a stated reason when it's intentionally quiet — that's the concrete answer to G3: a reviewer can scan this one table and confirm no terminal state was *accidentally* left silent, instead of re-deriving it from five files the way this gap was found.
 
 ## 7. Relationship to other state machines (avoiding collisions)
 
-- **`AuthState` (pre-launch modal):** governs bundle/identity selection before a pane exists at all. `LaunchAuthState` never runs concurrently with it — by the time `LaunchAuthState.classifying` starts, `AuthState` has already reached its terminal `ready` and the pane has been created. No shared state, no need to unify them into one machine — the naming ("Launch*" vs "Auth*") should stay distinct enough not to imply they're the same reducer.
+- **`AuthState` (pre-launch modal):** governs bundle/identity selection before a pane exists at all. `LaunchAuthState` never runs concurrently with it — by the time `LaunchAuthState`'s first state (`resolving-cli`) starts, `AuthState` has already reached its terminal `ready` and the pane has been created. No shared state, no need to unify them into one machine — the naming ("Launch*" vs "Auth*") should stay distinct enough not to imply they're the same reducer.
 - **`CredentialState` (MuxBus broker, `broker/state.rs`):** unrelated today. **Naming decision (§8 Q4):** the new reducer is named `LaunchAuthState`, not "auth broker" — even though that's the term used when this spec was first requested — specifically to avoid future confusion with the *actual* `CredentialState` broker once its Phase C+ work lands and potentially does start covering CLI-provider credentials.
 
 ## 8. Decisions (resolved 2026-07-26)
