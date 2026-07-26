@@ -171,7 +171,7 @@ Every row has a notification column filled in and a stated reason when it's inte
 
 ## 10. References
 
-- PR #2300 — deterministic login UX, `LaunchPhase`, `onLoginSuccess`. Line numbers throughout this doc are approximate as of that PR's current revision and will shift as it and PR #2304 (the implementation of this spec) iterate — the quoted condition/function text is the stable reference, not the line number.
+- PR #2300 — deterministic login UX, `LaunchPhase`, `onLoginSuccess`. This doc intentionally cites no line numbers for code on that PR's branch (still under active review, so any number would go stale the next commit) — the quoted condition/function text is the stable reference instead.
 - `frontend/app/view/agent/agent-view.tsx` — `onMount`'s `status.startLaunchFlow()` call (mount site) and the `onLoginSuccess` handler passed into `useAgentControllerStatus`.
 - `frontend/app/view/agent/flows/launch-flow.ts` — Phase 2's `if (needsLogin) {...}` block and Phase 3's `status === "init"`/`"done"`/`"running"` branch (see §5's update — `"running"` was missing from the original draft, reagent P1 on PR #2303).
 - `frontend/app/view/agent/components/AgentDocumentView.tsx` — header comment documenting the log()-to-hidden-channel routing this spec works around.
