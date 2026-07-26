@@ -17,9 +17,9 @@ Manually testing PR #2300 surfaced two related gaps, both traced to the same roo
 
 Specifically, as of PR #2300:
 
-1. **A login can open with zero warning.** `agent-view.tsx:781` calls `startLaunchFlow()` unconditionally on every mount — there is no `isContinue`/resume distinction anywhere in that file. If a previously-working agent's cached credential has gone stale, Phase 2's `CheckCliAuthCommand` reports `authenticated: false` and the flow goes **straight into `runProviderLogin`** — a browser tab or terminal window can appear with no prior message in the pane's conversation. The only textual trace is `log("auth", "not authenticated — starting login flow...")` (`launch-flow.ts:216`), which routes to the activity-log/shell-terminal channel per `AgentDocumentView.tsx`'s own header comment — **not** the visible conversation the user is looking at. This reads as "the app randomly popped open a login."
+1. **A login can open with zero warning.** `agent-view.tsx`'s `onMount` calls `status.startLaunchFlow()` unconditionally (line 797 as of PR #2300's current revision — line numbers in this doc shift as the stacked PRs iterate; treat them as approximate, the landmark text is the stable reference) — there is no `isContinue`/resume distinction anywhere in that file. If a previously-working agent's cached credential has gone stale, Phase 2's `CheckCliAuthCommand` reports `authenticated: false` and the flow goes **straight into `runProviderLogin`** — a browser tab or terminal window can appear with no prior message in the pane's conversation. The only textual trace is `log("auth", "not authenticated — starting login flow...")` inside `launch-flow.ts`'s `if (needsLogin) {...}` block, which routes to the activity-log/shell-terminal channel per `AgentDocumentView.tsx`'s own header comment — **not** the visible conversation the user is looking at. This reads as "the app randomly popped open a login."
 
-2. **Nothing confirms what happened on an ordinary resume.** The common case — reopening an agent that's already authenticated — produces exactly one line, `log("auth", "authenticated as X (method)")`, into that same hidden channel. `onLoginSuccess` (the callback that posts a permanent, visible "✓ Logged in as X" node into the conversation, `agent-view.tsx:751-763`) is scoped inside `if (needsLogin) {...}` (`launch-flow.ts:215-411`) and structurally **cannot** fire on this path — confirmed by reading, not inferred. Phase 3's resume-vs-fresh distinction (`status === "done"` vs `"init"`, `launch-flow.ts:429-437`) is likewise only ever `log("agent", ...)`'d into the hidden channel — a user reopening a long-running agent gets no on-screen confirmation that they're looking at a resumed conversation versus a fresh one.
+2. **Nothing confirms what happened on an ordinary resume.** The common case — reopening an agent that's already authenticated — produces exactly one line, `log("auth", "authenticated as X (method)")`, into that same hidden channel. `onLoginSuccess` (the callback that posts a permanent, visible "✓ Logged in as X" node into the conversation, `agent-view.tsx`'s `onLoginSuccess` handler passed to `useAgentControllerStatus`) is scoped inside `launch-flow.ts`'s `if (needsLogin) {...}` block (starts at line 209 as of PR #2300's current revision) and structurally **cannot** fire on this path — confirmed by reading, not inferred. Phase 3's resume-vs-fresh distinction (`if (status === "init") {...} else if (status === "done") {...}`, line 440 as of PR #2300's current revision) is likewise only ever `log("agent", ...)`'d into the hidden channel — a user reopening a long-running agent gets no on-screen confirmation that they're looking at a resumed conversation versus a fresh one.
 
 3. **No single source of truth for "what phase is this pane in."** Today's signals are scattered: `LaunchPhase` (PR #2300, footer label only), `needsLogin`/`loginWaiting` booleans, the `onLoginSuccess` callback, and Phase 3's inline `if/else`. This is exactly why the `onLoginSuccess`-not-wired-to-`relogin()`/`loginViaTerminal()`/`useGlobalLogin()` gap (fixed as a same-day follow-up to #2300) was easy to miss in the first place — there was no one place to check "does every terminal state actually notify the user."
 
@@ -102,10 +102,17 @@ Phase 2: CheckCliAuth
   │
   ▼
 Phase 3 → the ONE end-of-flow line, sourced directly from GetControllerStatus's
-  existing shellprocstatus ("init" vs "done" — this IS the fresh/resume signal,
-  no separate up-front classification step needed):
+  existing shellprocstatus — this IS the fresh/resume signal, no separate
+  up-front classification step needed. THREE values are possible
+  (STATUS_INIT/STATUS_RUNNING/STATUS_DONE in agentmux-srv's persistent
+  controller — reagent P1 on PR #2303 caught that "running" was missing
+  from the original draft, which meant a persistent controller resumed
+  while still alive/mid-turn stayed completely silent, not just unstyled):
   "Ready — type a message to start"          (status "init", fresh)
-  "Resumed — continuing where you left off"  (status "done", resume)
+  "Resumed — continuing where you left off"  (status "done" OR "running" — both
+                                               mean this agent has a turn on
+                                               record, "running" if anything a
+                                               STRONGER resume signal than "done")
 ```
 
 Two design decisions baked into this diagram (both resolved in §8, not left open):
@@ -130,8 +137,8 @@ Mirrors the existing `AuthState` pattern (`frontend/app/view/agent/auth/auth-sta
 | `waiting-for-login-completion` | (existing) | (existing) | unchanged |
 | `verifying` | Post-seed/terminal-success one-shot recheck (existing) | none (transient, <10s) | verifying |
 | `login-success` | (existing `onLoginSuccess`) | "✓ Logged in as X" (existing, unchanged) | ready |
-| `resumed-ready` | **New.** Phase 3 `status === "done"` | "Resumed — continuing where you left off" | ready |
-| `fresh-ready` | **New.** Phase 3 `status === "init"` | "Ready — type a message to start" | ready |
+| `resumed-ready` | **New.** Phase 3 `status === "done"` **or `"running"`** (a persistent controller resumed while still alive/mid-turn is at least as much a resume as "done" — reagent P1 on PR #2303, "running" was missing from the original draft) | "Resumed — continuing where you left off" | ready |
+| `fresh-ready` | **New.** Phase 3 `status === "init"` (the only value meaning "never run") | "Ready — type a message to start" | ready |
 | `failed` | (existing) | existing failure banner + Retry | failed |
 
 No separate `classifying`/`starting`/`resuming` states — see §5's note on why fresh-vs-resume is only knowable at Phase 3, not before.
@@ -164,8 +171,9 @@ Every row has a notification column filled in and a stated reason when it's inte
 
 ## 10. References
 
-- PR #2300 — deterministic login UX, `LaunchPhase`, `onLoginSuccess`.
-- `frontend/app/view/agent/agent-view.tsx:781` — mount call site.
-- `frontend/app/view/agent/flows/launch-flow.ts:196-437` — Phase 2/3, the exact lines cited throughout this doc.
-- `frontend/app/view/agent/components/AgentDocumentView.tsx:16-19` — header comment documenting the log()-to-hidden-channel routing this spec works around.
+- PR #2300 — deterministic login UX, `LaunchPhase`, `onLoginSuccess`. Line numbers throughout this doc are approximate as of that PR's current revision and will shift as it and PR #2304 (the implementation of this spec) iterate — the quoted condition/function text is the stable reference, not the line number.
+- `frontend/app/view/agent/agent-view.tsx` — `onMount`'s `status.startLaunchFlow()` call (mount site) and the `onLoginSuccess` handler passed into `useAgentControllerStatus`.
+- `frontend/app/view/agent/flows/launch-flow.ts` — Phase 2's `if (needsLogin) {...}` block and Phase 3's `status === "init"`/`"done"`/`"running"` branch (see §5's update — `"running"` was missing from the original draft, reagent P1 on PR #2303).
+- `frontend/app/view/agent/components/AgentDocumentView.tsx` — header comment documenting the log()-to-hidden-channel routing this spec works around.
 - `frontend/app/view/agent/auth/auth-state.ts` — the sibling reducer pattern this spec's `LaunchAuthState` mirrors.
+- `docs/retro/retro-agentmux-srv-9min-crash-2026-07-26.md` — lands via PR #2301 (sibling PR, not yet merged to `main` as of this spec's own review — it exists on that PR's branch).
