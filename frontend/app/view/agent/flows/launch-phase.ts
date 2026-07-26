@@ -13,6 +13,16 @@
  * is ever silent (see the maintainer's rule: a timer without a visible
  * notification is a bug, not an implementation detail).
  */
+/** Display-only estimate for how long tier 1's URL-capture wait takes,
+ *  shown as a countdown while `waiting-for-login-link` is active. Must
+ *  track cli_login.rs's actual URL_CAPTURE_TIMEOUT_SECS (currently 15s) —
+ *  the frontend can't read that Rust constant directly, so this is a
+ *  second source of truth kept in sync by hand. Shared here (not
+ *  duplicated per call site) so there's exactly one place to update.
+ *  reagent flagged a stale duplicate literal in useAgentControllerStatus.ts
+ *  on PR #2300. */
+export const LOGIN_LINK_CAPTURE_LABEL_MS = 15_000;
+
 export type LaunchPhase =
     | { kind: "resolving-cli" }
     | { kind: "checking-auth" }

@@ -424,6 +424,56 @@ describe("runProviderLogin", () => {
         expect(hub.openPane).not.toHaveBeenCalled();
     });
 
+    it("reagent P1: fires onTierChange({tier: 'fallback'}) once tier 1 fails, so a caller's stale URL-capture countdown doesn't freeze while tier 2/3 (up to 5 more minutes) take over", async () => {
+        hub.runCliLogin.mockResolvedValue(null); // tier 1: no URL captured
+        hub.seedProviderAuthFromGlobal.mockResolvedValue({ seeded: true }); // tier 2 succeeds fast
+        const onTierChange = vi.fn();
+
+        const outcome = await runProviderLogin({
+            provider: claude,
+            cliPath: "x",
+            authEnv: { CLAUDE_CONFIG_DIR: "C:/auth" },
+            setAuthUrl: vi.fn(),
+            log: vi.fn(),
+            onTierChange,
+        });
+
+        expect(outcome).toBe("seeded");
+        expect(onTierChange).toHaveBeenCalledWith({ tier: "fallback" });
+        // Tier 2 resolved before any terminal opened — no "polling" event yet.
+        expect(onTierChange).not.toHaveBeenCalledWith(expect.objectContaining({ tier: "polling" }));
+    });
+
+    it("reagent P1: fires onTierChange({tier: 'polling', deadlineMs}) once the terminal actually opens, with a live ~5-minute deadline matching the real poll timeout", async () => {
+        vi.useFakeTimers();
+        const before = Date.now();
+        hub.runCliLogin.mockResolvedValue(null);
+        hub.seedProviderAuthFromGlobal
+            .mockResolvedValueOnce({ seeded: false, status: "missing" }) // tier 2: no global login yet
+            .mockResolvedValueOnce({ seeded: true }); // first tier-3 poll succeeds
+        const onTierChange = vi.fn();
+
+        const promise = runProviderLogin({
+            provider: claude,
+            cliPath: "x",
+            authEnv: { CLAUDE_CONFIG_DIR: "C:/auth" },
+            setAuthUrl: vi.fn(),
+            log: vi.fn(),
+            onTierChange,
+        });
+        await vi.advanceTimersByTimeAsync(5_000);
+        await promise;
+
+        expect(onTierChange).toHaveBeenCalledWith({ tier: "fallback" });
+        const pollingCall = onTierChange.mock.calls.find((c) => c[0].tier === "polling");
+        expect(pollingCall).toBeDefined();
+        const { deadlineMs } = pollingCall![0];
+        // Matches pollForGlobalLoginSeed's own default timeoutMs (5 min) —
+        // if that default ever changes, this assertion should move with it.
+        expect(deadlineMs).toBeGreaterThanOrEqual(before + 5 * 60 * 1000 - 1000);
+        expect(deadlineMs).toBeLessThanOrEqual(before + 5 * 60 * 1000 + 1000);
+    });
+
     it("existingAccountId is threaded through to tier 2's account minting — reconnects the SAME account instead of minting a new one (reagent P1: retries were orphaning a new account every time)", async () => {
         hub.runCliLogin.mockResolvedValue(null);
         hub.seedProviderAuthFromGlobal.mockResolvedValue({ seeded: true });
