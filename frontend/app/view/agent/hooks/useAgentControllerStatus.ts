@@ -41,7 +41,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { runLaunchFlow } from "../flows/launch-flow";
 import { persistAndLinkAccount, runProviderLogin } from "../flows/run-provider-login";
 import { registerSeededAccount } from "../flows/register-seeded-account";
-import type { LaunchPhase } from "../flows/launch-phase";
+import { LOGIN_LINK_CAPTURE_LABEL_MS, type LaunchPhase } from "../flows/launch-phase";
 import type { ProviderDefinition } from "../providers";
 
 import type { LogFn } from "../types";
@@ -355,7 +355,7 @@ export function useAgentControllerStatus(
             setLaunchPhase(
                 prov.headlessLoginUrlUnsupported
                     ? { kind: "opening-login-terminal" }
-                    : { kind: "waiting-for-login-link", deadlineMs: Date.now() + 15_000 },
+                    : { kind: "waiting-for-login-link", deadlineMs: Date.now() + LOGIN_LINK_CAPTURE_LABEL_MS },
             );
             const outcome = await runProviderLogin({
                 provider: prov,
@@ -378,6 +378,17 @@ export function useAgentControllerStatus(
                 // See catalog.ts's DEAD END note — skip tier 1's ~15s
                 // URL-capture wait for providers that can never produce one.
                 skipTier1: prov.headlessLoginUrlUnsupported === true,
+                // See launch-flow.ts's identical wiring — without this the
+                // phase set just above never updates again for the rest of
+                // this call, even though tier 2/3 inside it can run for up
+                // to 5 more minutes. reagent P1 on PR #2300.
+                onTierChange: (event) => {
+                    if (event.tier === "fallback") {
+                        setLaunchPhase({ kind: "opening-login-terminal" });
+                    } else {
+                        setLaunchPhase({ kind: "waiting-for-login-completion", deadlineMs: event.deadlineMs });
+                    }
+                },
             });
             switch (outcome) {
                 case "opened": {
@@ -605,6 +616,15 @@ export function useAgentControllerStatus(
                     ? { blockId: opts.blockId, agentDefinitionId }
                     : undefined,
                 existingAccountId: await existingAccountIdFor(prov.id),
+                // skipTier1 is always true here, so "fallback" never fires —
+                // but "polling" still does once the terminal actually opens,
+                // giving an accurate deadline instead of leaving the phase
+                // on a static "opening terminal" for the whole wait.
+                onTierChange: (event) => {
+                    if (event.tier === "polling") {
+                        setLaunchPhase({ kind: "waiting-for-login-completion", deadlineMs: event.deadlineMs });
+                    }
+                },
             });
             switch (outcome) {
                 case "opened":
