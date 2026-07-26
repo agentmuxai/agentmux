@@ -57,9 +57,18 @@ mod creation;
 pub use creation::*;
 pub(crate) use creation::{assets_missing_data_url, resolve_frontend_base_url};
 
-pub(crate) mod position_persist;
 // Debounced srv write-through for window position/size (the position-side
-// counterpart to `transparency`'s opacity write-through). Not glob-exported
-// — called via the full path (`crate::commands::window::position_persist::
-// report_position_for_srv_writethrough`) from its one caller in
-// `wrr::win_event`, same as this module's own doc comment describes.
+// counterpart to `transparency`'s opacity write-through). Windows-only,
+// matching its one caller: `wrr::win_event`'s EVENT_OBJECT_LOCATIONCHANGE
+// hook (`wrr` itself is only compiled on Windows — see `wrr/mod.rs` — macOS/
+// Linux have no equivalent WinEvent-based live position stream today, so
+// there is nothing for this module to hook into there). Reagent P0 on
+// PR #2302: this module unconditionally uses `windows_sys::HWND` and
+// `AppState::label_for_hwnd` (itself `#[cfg(windows)]`), so it must not be
+// declared on other platforms — `windows-sys` is only a dependency under
+// `[target.'cfg(target_os = "windows")'.dependencies]` in Cargo.toml. Not
+// glob-exported — called via the full path
+// (`crate::commands::window::position_persist::
+// report_position_for_srv_writethrough`) from its one caller.
+#[cfg(target_os = "windows")]
+pub(crate) mod position_persist;
