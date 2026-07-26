@@ -157,4 +157,44 @@ describe("runLaunchFlow — skipTier1 wiring", () => {
         expect(phases).toContain("opening-login-terminal");
         expect(phases[phases.length - 1]).toBe("ready");
     });
+
+    it("reagent P1: updates the phase via onTierChange instead of freezing on a stale waiting-for-login-link deadline once tier 1 fails and tier 2/3 take over", async () => {
+        // Codex doesn't have headlessLoginUrlUnsupported, so it gets the
+        // deadline-bearing "waiting-for-login-link" phase before this call —
+        // exactly the phase that used to freeze once tier 1's own timeout
+        // expired and runProviderLogin's internal tier 2/3 (up to 5 more
+        // minutes) took over with zero further signal to the caller.
+        hub.checkCliAuth
+            .mockReset()
+            .mockResolvedValueOnce({ authenticated: false })
+            .mockResolvedValue({ authenticated: true, email: "user@example.com" });
+        hub.runProviderLogin.mockReset().mockImplementation(async (params: any) => {
+            // Simulate tier 1 failing, then a terminal opening and polling —
+            // exactly what run-provider-login.ts's real onTierChange calls do.
+            params.onTierChange?.({ tier: "fallback" });
+            params.onTierChange?.({ tier: "polling", deadlineMs: Date.now() + 5 * 60 * 1000 });
+            return "terminal-success";
+        });
+        const phases: Array<{ kind: string; deadlineMs?: number }> = [];
+        await runLaunchFlow({
+            blockId: "block-1",
+            provider: codex,
+            log: vi.fn(),
+            setAuthUrl: vi.fn(),
+            isCancelled: () => false,
+            setLoginWaiting: vi.fn(),
+            setLaunchPhase: (p) => { if (p) phases.push(p as any); },
+        });
+
+        const linkPhaseIndex = phases.findIndex((p) => p.kind === "waiting-for-login-link");
+        const fallbackIndex = phases.findIndex((p) => p.kind === "opening-login-terminal");
+        const pollingIndex = phases.findIndex((p) => p.kind === "waiting-for-login-completion");
+        expect(linkPhaseIndex).toBeGreaterThanOrEqual(0);
+        // The stale-deadline phase must not be the last thing shown — both
+        // onTierChange transitions must land AFTER it, in order.
+        expect(fallbackIndex).toBeGreaterThan(linkPhaseIndex);
+        expect(pollingIndex).toBeGreaterThan(fallbackIndex);
+        const pollingPhase = phases[pollingIndex];
+        expect(pollingPhase.deadlineMs).toBeGreaterThan(Date.now());
+    });
 });

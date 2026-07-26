@@ -40,14 +40,8 @@ import * as WOS from "@/app/store/wos";
 import { BlockService } from "@/app/store/services";
 import { getApi, staticTabId } from "@/app/store/global";
 import { persistAndLinkAccount, runProviderLogin } from "./run-provider-login";
-import type { LaunchPhase } from "./launch-phase";
+import { LOGIN_LINK_CAPTURE_LABEL_MS, type LaunchPhase } from "./launch-phase";
 import type { ProviderDefinition } from "../providers";
-
-// Approximate label lifetime for tier 1's URL-capture wait — the real cap
-// lives backend-side (cli_login.rs's URL_CAPTURE_TIMEOUT_SECS) and varies
-// slightly by spawn path (PTY vs. pipe); this is a display value only, not
-// something the frontend enforces.
-const LOGIN_LINK_CAPTURE_LABEL_MS = 15_000;
 
 import type { LogFn } from "../types";
 export type { LogFn };
@@ -298,6 +292,19 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
                 // cannot ever succeed, so skip its ~15s capture wait instead
                 // of running (and always losing) it on every login.
                 skipTier1: provider.headlessLoginUrlUnsupported === true,
+                // Without this, the phase set just above (a URL-capture
+                // countdown, or a static "opening terminal" for skipTier1)
+                // never updates again for the rest of this single await —
+                // tier 2/3 inside runProviderLogin can run for up to 5 more
+                // minutes with the footer frozen on whatever was true when
+                // this call started. reagent P1 on PR #2300.
+                onTierChange: (event) => {
+                    if (event.tier === "fallback") {
+                        setPhase({ kind: "opening-login-terminal" });
+                    } else {
+                        setPhase({ kind: "waiting-for-login-completion", deadlineMs: event.deadlineMs });
+                    }
+                },
             });
 
             let authenticated = false;
