@@ -181,6 +181,7 @@ fn mime_from_path(path: &std::path::Path) -> &'static str {
         Some("webm") => "video/webm",
         Some("mp4") => "video/mp4",
         Some("mov") => "video/quicktime",
+        Some("wav") => "audio/wav",
         Some("woff2") => "font/woff2",
         Some("woff") => "font/woff",
         _ => "application/octet-stream",

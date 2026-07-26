@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { extOf, joinPath } from "./media";
+import { dirnameOf, extOf } from "./media";
 
 describe("extOf", () => {
     it("returns the lowercase extension without a dot", () => {
@@ -20,16 +20,16 @@ describe("extOf", () => {
     });
 });
 
-describe("joinPath", () => {
-    it("joins with a trailing slash for posix-style dirs", () => {
-        expect(joinPath("/home/user/clips", "shot.webm")).toBe("/home/user/clips/shot.webm");
+describe("dirnameOf", () => {
+    it("strips the last posix segment", () => {
+        expect(dirnameOf("/home/user/clips/shot.webm")).toBe("/home/user/clips");
     });
 
-    it("joins with a trailing backslash for windows-style dirs", () => {
-        expect(joinPath("C:\\Users\\asafe\\clips", "shot.webm")).toBe("C:\\Users\\asafe\\clips\\shot.webm");
+    it("strips the last windows segment", () => {
+        expect(dirnameOf("C:\\Users\\asafe\\clips\\shot.webm")).toBe("C:\\Users\\asafe\\clips");
     });
 
-    it("doesn't double up a separator already present", () => {
-        expect(joinPath("/home/user/clips/", "shot.webm")).toBe("/home/user/clips/shot.webm");
+    it("returns empty string when there's no separator", () => {
+        expect(dirnameOf("shot.webm")).toBe("");
     });
 });

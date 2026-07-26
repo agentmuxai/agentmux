@@ -174,6 +174,10 @@ declare global {
         onQuicklook: (filePath: string) => void;
         openNativePath(filePath: string): void;
         revealInFileExplorer(filePath: string): void;
+        /** Native "open file" dialog. Resolves to the chosen absolute path,
+         *  or null if the user cancelled. See
+         *  docs/specs/SPEC_MEDIA_PANE_2026_07_26.md. */
+        showOpenFileDialog(): Promise<string | null>;
         captureScreenshot(rect: { x: number; y: number; width: number; height: number }): Promise<string>;
         setKeyboardChordMode: () => void;
         openAgent: (agentId: string) => Promise<void>;

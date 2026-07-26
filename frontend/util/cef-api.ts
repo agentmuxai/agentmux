@@ -389,6 +389,9 @@ export function buildCefApi(): AppApi {
         revealInFileExplorer: (filePath: string) => {
             invokeCommand("reveal_in_file_explorer", { filePath }).catch(console.error);
         },
+        showOpenFileDialog: () => {
+            return invokeCommand<string | null>("show_open_file_dialog");
+        },
         onQuicklook: (filePath: string) => {
             invokeCommand("quicklook", { filePath }).catch(console.error);
         },

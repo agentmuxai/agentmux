@@ -1,12 +1,11 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Media pane — view an image or video file from local disk. If the target
-// path is a directory, shows the most-recently-modified matching file in it
-// and live-updates whenever a new/changed file appears (a fresh ComfyUI
-// render landing in a project's `clips/` folder, for example) — no manual
-// reload. If the target path is a single file, it's shown as-is with no
-// watch (nothing to "watch for" on a fixed single file in v1).
+// Media pane — view an image or video file from local disk, picked via a
+// native file dialog (no path text entry). Once a file is picked, its
+// containing directory is watched — if a newer matching file appears there
+// (a fresh ComfyUI render landing in a project's `clips/` folder, for
+// example) the pane live-swaps to it automatically, no manual reload.
 //
 // Spec: docs/specs/SPEC_MEDIA_PANE_2026_07_26.md
 
@@ -26,21 +25,49 @@ const META_PATH = "media:path" as const;
 
 const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp"];
 const VIDEO_EXTENSIONS = ["webm", "mp4", "mov"];
+// PCM WAV only — Chromium's <audio> element supports it natively and
+// unconditionally (open format, no codec-licensing gate), unlike MP4/MOV
+// which need the CEF build's proprietary-codec flag. Not adding mkv:
+// Chromium's <video> element doesn't reliably accept the Matroska
+// container itself for direct playback regardless of codec support
+// (browsers generally only support WebM, a constrained Matroska profile —
+// see the "Post-implementation corrections" note in the spec doc).
+const AUDIO_EXTENSIONS = ["wav"];
 // Fixed default filter for directory-mode watching — not user-configurable
 // in v1 (SPEC_MEDIA_PANE_2026_07_26.md open question #3 leans toward this).
-const ALL_MEDIA_EXTENSIONS = [...IMAGE_EXTENSIONS, ...VIDEO_EXTENSIONS];
+const ALL_MEDIA_EXTENSIONS = [...IMAGE_EXTENSIONS, ...VIDEO_EXTENSIONS, ...AUDIO_EXTENSIONS];
 
 export function extOf(path: string): string {
     const idx = path.lastIndexOf(".");
     return idx === -1 ? "" : path.slice(idx + 1).toLowerCase();
 }
 
-// Best-effort join matching whichever separator style the parent path
-// already uses — good enough for the paths ListEditorDirCommand echoes back
-// (it round-trips the OS's own separator), not a general path library.
-export function joinPath(dir: string, name: string): string {
-    const sep = dir.includes("\\") && !dir.includes("/") ? "\\" : "/";
-    return dir.endsWith(sep) ? dir + name : dir + sep + name;
+// Containing directory of `path`, matching whichever separator style it
+// uses. Empty string if `path` has no separator (shouldn't happen for an
+// absolute path from the native dialog, but fail closed rather than throw).
+export function dirnameOf(path: string): string {
+    const lastSlash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+    return lastSlash === -1 ? "" : path.slice(0, lastSlash);
+}
+
+// Surfaces the browser's actual MediaError code/message instead of a
+// generic "failed" string — code 4 (MEDIA_ERR_SRC_NOT_SUPPORTED) is what
+// Chromium reports when it has no registered decoder for the file's codec,
+// which is exactly what happens for H.264/AAC MP4s on a CEF build compiled
+// without proprietary_codecs=true. Distinguishing that from a genuinely
+// corrupt file (would show as code 3, MEDIA_ERR_DECODE) is the whole point
+// of showing this instead of one flat message for every failure.
+function describeMediaError(el: HTMLMediaElement | undefined): string {
+    const err = el?.error;
+    if (!err) return "unknown error";
+    const codeNames: Record<number, string> = {
+        1: "MEDIA_ERR_ABORTED",
+        2: "MEDIA_ERR_NETWORK",
+        3: "MEDIA_ERR_DECODE",
+        4: "MEDIA_ERR_SRC_NOT_SUPPORTED (likely a missing/disabled codec for this container, not a corrupt file)",
+    };
+    const codeName = codeNames[err.code] ?? `code ${err.code}`;
+    return err.message ? `${codeName}: ${err.message}` : codeName;
 }
 
 function streamUrl(path: string): string {
@@ -82,7 +109,6 @@ class MediaViewModel implements ViewModel {
 }
 
 function MediaView({ model }: { model: MediaViewModel }): JSX.Element {
-    const [pathInput, setPathInput] = createSignal("");
     const [displayPath, setDisplayPath] = createSignal("");
     // Bumped on every WPS change event, even ones that leave displayPath's
     // string value unchanged (a pipeline overwriting a stable filename in
@@ -137,43 +163,36 @@ function MediaView({ model }: { model: MediaViewModel }): JSX.Element {
         });
     };
 
-    // Resolve `path` to what should actually be shown: if it's a directory,
-    // pick the newest matching file in it and start watching for new ones;
-    // otherwise show it directly as a single fixed file (no watch).
-    const resolveAndShow = async (path: string) => {
+    // Show `path` directly, and start watching its containing directory —
+    // if a newer matching file lands there (a fresh render from the same
+    // pipeline), the pane live-swaps to it via the WPS handler above.
+    const showPath = (path: string) => {
         setErrorMsg("");
-        if (!path) {
-            stopWatching();
-            setDisplayPath("");
-            return;
-        }
-        try {
-            const { entries } = await RpcApi.ListEditorDirCommand(TabRpcClient, { path });
-            const candidates = entries
-                .filter((e) => !e.is_dir && ALL_MEDIA_EXTENSIONS.includes(extOf(e.name)))
-                .sort((a, b) => (b.mtime ?? 0) - (a.mtime ?? 0));
-            startWatching(path);
-            if (candidates.length === 0) {
-                setDisplayPath("");
-                setErrorMsg("No image/video files in this directory yet.");
-                return;
-            }
-            setDisplayPath(joinPath(path, candidates[0].name));
-        } catch {
-            // Not a directory (or doesn't exist as one) — treat as a direct
-            // file path. stream-local-file itself reports a clearer error
-            // (not found / not a file) if this guess is wrong too.
-            stopWatching();
-            setDisplayPath(path);
-        }
+        setDisplayPath(path);
+        const dir = dirnameOf(path);
+        if (dir) startWatching(dir);
+    };
+
+    // Native "open file" dialog — the only way to point this pane at
+    // something (no path text entry, per design). Persists the pick so it
+    // survives a pane reload.
+    const pickFile = async () => {
+        const path = await getApi()?.showOpenFileDialog?.();
+        if (!path) return; // user cancelled
+        fireAndForget(() =>
+            RpcApi.SetMetaCommand(TabRpcClient, {
+                oref: makeORef("block", model.blockId),
+                meta: { [META_PATH]: path },
+            }),
+        );
+        showPath(path);
     };
 
     onMount(() => {
         const blockData = getWaveObjectAtom<Block>(makeORef("block", model.blockId))();
         const saved = blockData?.meta?.[META_PATH];
         if (typeof saved === "string" && saved.length > 0) {
-            setPathInput(saved);
-            void resolveAndShow(saved);
+            showPath(saved);
         }
     });
 
@@ -223,50 +242,56 @@ function MediaView({ model }: { model: MediaViewModel }): JSX.Element {
         })();
     });
 
-    const commitPath = () => {
-        const path = pathInput().trim();
-        fireAndForget(() =>
-            RpcApi.SetMetaCommand(TabRpcClient, {
-                oref: makeORef("block", model.blockId),
-                meta: { [META_PATH]: path || null },
-            }),
-        );
-        void resolveAndShow(path);
-    };
-
     const kind = () => {
         const ext = extOf(displayPath());
         if (IMAGE_EXTENSIONS.includes(ext)) return "image";
         if (VIDEO_EXTENSIONS.includes(ext)) return "video";
+        if (AUDIO_EXTENSIONS.includes(ext)) return "audio";
         return "none";
     };
 
+    // Fills the whole content area (not just the text's own bounding box) so
+    // clicking anywhere in the pane's background opens the file picker, not
+    // only the label itself.
+    const emptyStateStyle: JSX.CSSProperties = {
+        position: "absolute",
+        inset: "0",
+        cursor: "pointer",
+        color: "var(--secondary-text-color, #888)",
+        "text-align": "center",
+        display: "flex",
+        "flex-direction": "column",
+        "align-items": "center",
+        "justify-content": "center",
+        gap: "6px",
+        padding: "24px",
+    };
+    const explainerStyle: JSX.CSSProperties = {
+        "font-size": "0.85em",
+        opacity: 0.7,
+        "max-width": "320px",
+    };
+    const supportedTypesText =
+        `Images (${IMAGE_EXTENSIONS.join(", ").toUpperCase()}), videos (${VIDEO_EXTENSIONS.join(", ").toUpperCase()}), and audio (${AUDIO_EXTENSIONS.join(", ").toUpperCase()}).`;
+
     return (
         <div class="media-view flex flex-col w-full h-full">
-            <div class="media-view-pathbar flex" style={{ gap: "6px", padding: "6px 8px" }}>
-                <input
-                    class="media-view-path-input"
-                    style={{ flex: 1 }}
-                    value={pathInput()}
-                    placeholder="Absolute path to a file or directory…"
-                    onInput={(e) => setPathInput(e.currentTarget.value)}
-                    onKeyDown={(e) => {
-                        if (e.key === "Enter") commitPath();
-                    }}
-                    onBlur={commitPath}
-                />
-            </div>
-            <div class="media-view-content flex-1 flex items-center justify-center" style={{ position: "relative", overflow: "hidden" }}>
+            <div class="media-view-content flex-1" style={{ position: "relative", overflow: "hidden" }}>
                 <Show when={errorMsg()}>
-                    <div class="media-view-empty">{errorMsg()}</div>
+                    <div style={emptyStateStyle} onClick={() => void pickFile()}>
+                        <div>{errorMsg()}</div>
+                        <div style={explainerStyle}>Click anywhere to pick a different file.</div>
+                    </div>
                 </Show>
                 <Show when={!errorMsg() && displayPath() && !objectUrl()}>
-                    <div class="media-view-empty">Loading…</div>
+                    <div class="flex items-center justify-center w-full h-full" style={{ color: "var(--secondary-text-color, #888)" }}>
+                        Loading…
+                    </div>
                 </Show>
                 <Show when={!errorMsg() && kind() === "image" && objectUrl()}>
                     <img
                         class="media-view-media max-w-full max-h-full"
-                        style={{ "object-fit": "contain", opacity: mediaReady() ? 1 : 0, transition: "opacity 120ms ease" }}
+                        style={{ "object-fit": "contain", opacity: mediaReady() ? 1 : 0, transition: "opacity 120ms ease", position: "absolute", inset: "0", margin: "auto" }}
                         src={objectUrl()}
                         onLoad={() => setMediaReady(true)}
                         onError={() => setErrorMsg("Failed to display media (unsupported format or corrupt file).")}
@@ -275,15 +300,51 @@ function MediaView({ model }: { model: MediaViewModel }): JSX.Element {
                 <Show when={!errorMsg() && kind() === "video" && objectUrl()}>
                     <video
                         class="media-view-media max-w-full max-h-full"
-                        style={{ "object-fit": "contain", opacity: mediaReady() ? 1 : 0, transition: "opacity 120ms ease" }}
+                        style={{ "object-fit": "contain", opacity: mediaReady() ? 1 : 0, transition: "opacity 120ms ease", position: "absolute", inset: "0", margin: "auto" }}
                         src={objectUrl()}
                         controls
                         onLoadedData={() => setMediaReady(true)}
-                        onError={() => setErrorMsg("Failed to display media (unsupported format or corrupt file).")}
+                        onError={(e) => setErrorMsg(`Failed to play video — ${describeMediaError(e.currentTarget)}`)}
+                    />
+                </Show>
+                <Show when={!errorMsg() && kind() === "audio" && objectUrl()}>
+                    <audio
+                        style={{ opacity: mediaReady() ? 1 : 0, transition: "opacity 120ms ease", width: "80%" }}
+                        src={objectUrl()}
+                        controls
+                        onLoadedData={() => setMediaReady(true)}
+                        onError={(e) => setErrorMsg(`Failed to play audio — ${describeMediaError(e.currentTarget)}`)}
                     />
                 </Show>
                 <Show when={!errorMsg() && kind() === "none" && !displayPath()}>
-                    <div class="media-view-empty">Point this pane at an image, video, or a directory containing one.</div>
+                    <div style={emptyStateStyle} onClick={() => void pickFile()}>
+                        <div style={{ "font-size": "1.05em" }}>Click to load media</div>
+                        <div style={explainerStyle}>
+                            {supportedTypesText} If you pick a file from a folder your agent is
+                            actively generating into, this pane updates automatically as new
+                            matching files appear there — no need to reopen it.
+                        </div>
+                    </div>
+                </Show>
+                <Show when={!errorMsg() && displayPath()}>
+                    <button
+                        title="Pick a different file"
+                        onClick={() => void pickFile()}
+                        style={{
+                            position: "absolute",
+                            top: "6px",
+                            right: "6px",
+                            "z-index": 1,
+                            opacity: 0.6,
+                            background: "var(--block-bg-color, rgba(0,0,0,0.4))",
+                            border: "none",
+                            "border-radius": "4px",
+                            padding: "4px 7px",
+                            cursor: "pointer",
+                        }}
+                    >
+                        <i class="fa fa-folder-open" />
+                    </button>
                 </Show>
             </div>
         </div>

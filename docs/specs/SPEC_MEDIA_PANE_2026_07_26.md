@@ -13,7 +13,10 @@ its watcher pattern), `docs/specs/ARCHITECTURE_ARMORY_2026_07_20.md`,
 (a UI-transition pitfall this design should not repeat), `CLAUDE.md`'s
 Widgets table (`agentmux-srv/src/config/widgets.json` is the canonical,
 closed widget list — adding this pane means adding a real entry there, not
-inventing one ad hoc).
+inventing one ad hoc), `docs/reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md`
+(confirmed while testing this pane: MP4/MOV playback fails on this app's
+CEF build for any standard H.264/AAC file — a whole-app build limitation,
+not a pane bug; see that report for the root cause and options).
 
 ## Motivation
 
