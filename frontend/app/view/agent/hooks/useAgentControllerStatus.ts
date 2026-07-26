@@ -320,12 +320,17 @@ export function useAgentControllerStatus(
         let cliPath = getBlockMetaKeyAtom(opts.blockId, "cmd")() as string | undefined;
         reloginInFlight = true;
         setLoginWaiting(true);
-        setLaunchPhase({ kind: "checking-auth" });
         try {
             if (!cliPath) {
+                // reagent P2 on PR #2300: this step is resolving the CLI path,
+                // not checking auth — "checking-auth" here mislabeled a wait
+                // that can take up to 5 minutes (resolveCliForRecovery's own
+                // install wait) as the wrong, much shorter step.
+                setLaunchPhase({ kind: "resolving-cli" });
                 cliPath = (await resolveCliForRecovery(prov, "re-login")) ?? undefined;
                 if (!cliPath) return;
             }
+            setLaunchPhase({ kind: "checking-auth" });
             const authEnv = await recoveryAuthEnv(prov);
             // runProviderLogin falls through URL-capture -> global-login-copy ->
             // real-terminal-with-poll before giving up (retro-headless-login-
@@ -590,15 +595,19 @@ export function useAgentControllerStatus(
         // first, reset in finally.
         reloginInFlight = true;
         setLoginWaiting(true);
-        setLaunchPhase({ kind: "opening-login-terminal" });
         try {
             let cliPath = getBlockMetaKeyAtom(opts.blockId, "cmd")() as string | undefined;
             if (!cliPath) {
                 // Same H2 trap as relogin: the gated launch flow would trust the
                 // auth check and skip the login the user explicitly asked for.
+                // reagent P2 on PR #2300: label this step "resolving-cli", not
+                // "opening-login-terminal" — no terminal opens until after this
+                // resolve, which can itself take up to 5 minutes on a fresh install.
+                setLaunchPhase({ kind: "resolving-cli" });
                 cliPath = (await resolveCliForRecovery(prov, "login via terminal")) ?? undefined;
                 if (!cliPath) return;
             }
+            setLaunchPhase({ kind: "opening-login-terminal" });
             const authEnv = await recoveryAuthEnv(prov);
             const agentDefinitionId = getBlockMetaKeyAtom(opts.blockId, "agentId")() as string | undefined;
             const outcome = await runProviderLogin({
