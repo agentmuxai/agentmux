@@ -462,7 +462,14 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
         if (rts) opts.onControllerStatus?.(rts);
         if (status === "init") {
             log("agent", "ready — type a message below to start");
-        } else if (status === "done") {
+        } else if (status === "done" || status === "running") {
+            // "running" means a persistent controller resumed while its
+            // process was still alive (possibly mid-turn) — if anything a
+            // STRONGER resume signal than "done". Missing this case (as an
+            // earlier revision of this file did) left that path completely
+            // silent — not just unstyled, no log line at all. reagent P1 on
+            // PR #2303 (confirmed real via persistent.rs's STATUS_RUNNING
+            // and useControllerStatusEvents.test.ts).
             resumed = true;
             log("agent", "previous turn complete — send a message to continue");
         }
