@@ -56,3 +56,10 @@ mod creation;
 // so they're re-exported explicitly (the `*` glob only covers `pub` items).
 pub use creation::*;
 pub(crate) use creation::{assets_missing_data_url, resolve_frontend_base_url};
+
+pub(crate) mod position_persist;
+// Debounced srv write-through for window position/size (the position-side
+// counterpart to `transparency`'s opacity write-through). Not glob-exported
+// — called via the full path (`crate::commands::window::position_persist::
+// report_position_for_srv_writethrough`) from its one caller in
+// `wrr::win_event`, same as this module's own doc comment describes.

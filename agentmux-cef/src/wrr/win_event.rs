@@ -826,6 +826,17 @@ unsafe extern "system" fn win_event_callback(
             // Normal on-screen position reporting, debounced to ~20 Hz.
             if position_debounce::should_emit(raw_hwnd) {
                 launcher_ipc::report_hwnd_position_changed(raw_hwnd, rect);
+                // Second, independent consumer of the same position stream:
+                // debounced srv write-through so a full process-tree
+                // restart (launcher included) can still reproject secondary
+                // windows at their exact last geometry — see
+                // `commands::window::position_persist` for the full
+                // rationale. Does not touch the launcher-IPC forward above.
+                if let Some(state) = app_state().get() {
+                    crate::commands::window::position_persist::report_position_for_srv_writethrough(
+                        state, hwnd, rect,
+                    );
+                }
             }
         }
         _ => {}
