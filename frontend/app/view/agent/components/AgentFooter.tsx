@@ -78,7 +78,12 @@ interface AgentWorkingRowProps {
     onCancelLogin?: () => void;
 }
 
-const CANCELLABLE_LAUNCH_PHASES = new Set(["opening-login-terminal", "waiting-for-login-completion"]);
+const CANCELLABLE_LAUNCH_PHASES = new Set([
+    "first-login",
+    "auth-expired",
+    "opening-login-terminal",
+    "waiting-for-login-completion",
+]);
 
 /** The exact string the loading row's left zone shows right now — pulled out
  *  of the JSX ternary chain so both the type-out reveal effect and the

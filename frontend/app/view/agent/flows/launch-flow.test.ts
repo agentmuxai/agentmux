@@ -28,6 +28,7 @@ const hub = vi.hoisted(() => ({
     runProviderLogin: vi.fn(),
     persistAndLinkAccount: vi.fn(),
     waveEventSubscribe: vi.fn(),
+    getWaveObjectAtom: vi.fn(),
 }));
 
 vi.mock("@/app/errors/translate", () => ({
@@ -51,7 +52,7 @@ vi.mock("@/app/store/wps", () => ({ waveEventSubscribe: (...args: unknown[]) => 
 vi.mock("@/app/store/wps-events", () => ({ WpsEvent: { InstallProgress: "install_progress" } }));
 vi.mock("@/app/store/wos", () => ({
     makeORef: (kind: string, id: string) => `${kind}:${id}`,
-    getWaveObjectAtom: () => () => ({ meta: { agentMode: "host", agentId: "agent-1" } }),
+    getWaveObjectAtom: (...args: unknown[]) => hub.getWaveObjectAtom(...args),
 }));
 vi.mock("@/app/store/services", () => ({
     BlockService: { GetControllerStatus: (...args: unknown[]) => hub.getControllerStatus(...args) },
@@ -98,6 +99,10 @@ beforeEach(() => {
     hub.runProviderLogin.mockReset().mockResolvedValue("seeded");
     hub.persistAndLinkAccount.mockReset().mockResolvedValue(true);
     hub.waveEventSubscribe.mockReset().mockReturnValue(() => {});
+    // Default: a brand-new agent that has never resolved its CLI before
+    // (no "cmd" in meta) — see the first-login vs auth-expired tests below
+    // for the "has run before" case.
+    hub.getWaveObjectAtom.mockReset().mockReturnValue(() => ({ meta: { agentMode: "host", agentId: "agent-1" } }));
 });
 afterEach(() => {
     vi.clearAllMocks();
@@ -154,7 +159,78 @@ describe("runLaunchFlow — skipTier1 wiring", () => {
         expect(result).toBe("success");
         expect(phases[0]).toBe("resolving-cli");
         expect(phases).toContain("checking-auth");
+        // No prior "cmd" in meta (see beforeEach) — this is a first-ever
+        // login, not a lapsed one.
+        expect(phases).toContain("first-login");
         expect(phases).toContain("opening-login-terminal");
-        expect(phases[phases.length - 1]).toBe("ready");
+        // getControllerStatus defaults to shellprocstatus: "init" (beforeEach).
+        expect(phases[phases.length - 1]).toBe("fresh-ready");
+    });
+
+    it("reports auth-expired (not first-login) when the agent has resolved its CLI before — meta.cmd already set", async () => {
+        hub.getWaveObjectAtom.mockReturnValue(() => ({
+            meta: { agentMode: "host", agentId: "agent-1", cmd: "C:/prior/claude.cmd" },
+        }));
+        const phases: string[] = [];
+        await runLaunchFlow({
+            blockId: "block-1",
+            provider: claude,
+            log: vi.fn(),
+            setAuthUrl: vi.fn(),
+            isCancelled: () => false,
+            setLoginWaiting: vi.fn(),
+            setLaunchPhase: (p) => { if (p) phases.push(p.kind); },
+        });
+
+        expect(phases).toContain("auth-expired");
+        expect(phases).not.toContain("first-login");
+    });
+
+    it("notifies with a warning before an expired-token relogin, and a neutral message for a first-ever login", async () => {
+        const notices: Array<{ text: string; style: string }> = [];
+        hub.getWaveObjectAtom.mockReturnValue(() => ({
+            meta: { agentMode: "host", agentId: "agent-1", cmd: "C:/prior/claude.cmd" },
+        }));
+        await runLaunchFlow({
+            blockId: "block-1",
+            provider: claude,
+            log: vi.fn(),
+            setAuthUrl: vi.fn(),
+            isCancelled: () => false,
+            setLoginWaiting: vi.fn(),
+            onNotify: (text, style) => notices.push({ text, style }),
+        });
+
+        expect(notices[0].style).toBe("warning");
+        expect(notices[0].text).toMatch(/expired/i);
+    });
+
+    it("notifies 'Resumed...' (not 'Ready...') when GetControllerStatus reports a prior turn (shellprocstatus: done)", async () => {
+        // Needs the login to actually succeed (auth_failed returns before
+        // Phase 3 ever runs) — same recheck-succeeds pattern as the
+        // "reports a launchPhase for every visible phase" test above.
+        hub.checkCliAuth
+            .mockReset()
+            .mockResolvedValueOnce({ authenticated: false })
+            .mockResolvedValue({ authenticated: true, email: "user@example.com" });
+        hub.getControllerStatus.mockResolvedValue({ shellprocstatus: "done" });
+        const phases: string[] = [];
+        const notices: Array<{ text: string; style: string }> = [];
+        const result = await runLaunchFlow({
+            blockId: "block-1",
+            provider: claude,
+            log: vi.fn(),
+            setAuthUrl: vi.fn(),
+            isCancelled: () => false,
+            setLoginWaiting: vi.fn(),
+            setLaunchPhase: (p) => { if (p) phases.push(p.kind); },
+            onNotify: (text, style) => notices.push({ text, style }),
+        });
+
+        expect(result).toBe("success");
+        expect(phases[phases.length - 1]).toBe("resumed-ready");
+        expect(phases).not.toContain("fresh-ready");
+        const last = notices[notices.length - 1];
+        expect(last.text).toMatch(/resumed/i);
     });
 });
