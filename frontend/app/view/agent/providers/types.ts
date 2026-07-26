@@ -84,6 +84,12 @@ export interface ProviderDefinition {
     // `openclaw models auth login --provider <id>`. The host's
     // `run_cli_login` reads this flag and chooses the PTY branch.
     requiresLoginTty?: boolean;
+    // Set when this provider's login subcommand is known to NEVER print a
+    // scrapeable OAuth URL (distinct from requiresLoginTty — OpenClaw needs a
+    // TTY but does print a URL through it). When true, runProviderLogin's
+    // tier-1 PTY/pipe URL-capture attempt is skipped entirely instead of
+    // burning its ~15s capture timeout on a documented dead end.
+    headlessLoginUrlUnsupported?: boolean;
     /** System tools the provider's CLI needs at runtime. Probed before
      *  the user launches the agent so we can show install links
      *  instead of letting the CLI fail with cryptic stderr. */

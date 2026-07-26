@@ -40,6 +40,7 @@ import * as WOS from "@/app/store/wos";
 import { BlockService } from "@/app/store/services";
 import { getApi, staticTabId } from "@/app/store/global";
 import { persistAndLinkAccount, runProviderLogin } from "./run-provider-login";
+import { LOGIN_LINK_CAPTURE_LABEL_MS, type LaunchPhase } from "./launch-phase";
 import type { ProviderDefinition } from "../providers";
 
 import type { LogFn } from "../types";
@@ -52,6 +53,11 @@ export interface LaunchFlowOptions {
     setAuthUrl: (url: string | null) => void;
     isCancelled: () => boolean;
     setLoginWaiting: (v: boolean) => void;
+    /** Reports which phase of the flow is currently running, so the caller
+     *  can show a specific status (and, for phases carrying a deadline, a
+     *  "waiting on X, up to Ys" label) instead of a generic spinner. See
+     *  launch-phase.ts. Optional so existing callers/tests are unaffected. */
+    setLaunchPhase?: (phase: LaunchPhase | null) => void;
     authEnv?: Record<string, string>;
     /** Called once when login is confirmed — append a success message to the chat. */
     onLoginSuccess?: (email: string | null) => void;
@@ -77,12 +83,15 @@ export type LaunchFlowResult = "success" | "auth_failed" | "fatal";
 
 export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlowResult> {
     const { blockId, provider, log, setAuthUrl, isCancelled, setLoginWaiting, authEnv } = opts;
+    const setPhase = opts.setLaunchPhase ?? (() => {});
 
     if (!provider) {
         log("error", "no provider definition — cannot resolve CLI", "error");
+        setPhase({ kind: "failed", reason: "no provider definition" });
         return "fatal";
     }
 
+    setPhase({ kind: "resolving-cli" });
     const oref = WOS.makeORef("block", blockId);
 
     // Phase 0: Container agents require a container runtime. Reads the
@@ -102,6 +111,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
         if (docker.status !== "available") {
             log("docker", "Container runtime not found", "error");
             log("docker", "Container agents require a compatible container runtime (e.g. Docker) to run.", "error");
+            setPhase({ kind: "failed", reason: "container runtime not found" });
             return "fatal";
         }
         log("docker", "container runtime available");
@@ -147,6 +157,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
         // error message last, right before the user's eye.
         if (t.retry) log("cli", t.retry, "warn");
         log("cli", `${t.title}: ${t.message}`, "error");
+        setPhase({ kind: "failed", reason: t.message });
         return "fatal";
     }
     unsubInstall();
@@ -174,6 +185,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
     });
 
     // Phase 2: Auth Check → auto-login if not authenticated
+    setPhase({ kind: "checking-auth" });
     log("auth", `checking ${provider.cliCommand} authentication...`);
     let needsLogin = false;
     try {
@@ -252,6 +264,14 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
             // reports now.
             let openedAccountId: string | undefined;
             let openedAccountDir: string | undefined;
+            // See catalog.ts's DEAD END note — providers with
+            // headlessLoginUrlUnsupported skip straight past tier 1's
+            // URL-capture wait, so there's no login-link timer to label here.
+            setPhase(
+                provider.headlessLoginUrlUnsupported
+                    ? { kind: "opening-login-terminal" }
+                    : { kind: "waiting-for-login-link", deadlineMs: Date.now() + LOGIN_LINK_CAPTURE_LABEL_MS },
+            );
             const outcome = await runProviderLogin({
                 provider,
                 cliPath: cliResult.cli_path,
@@ -268,6 +288,23 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
                         recheckAuthEnv = { ...(authEnv ?? {}), [provider.authConfigDirEnvVar]: dir };
                     }
                 },
+                // See catalog.ts's DEAD END note — for these providers tier 1
+                // cannot ever succeed, so skip its ~15s capture wait instead
+                // of running (and always losing) it on every login.
+                skipTier1: provider.headlessLoginUrlUnsupported === true,
+                // Without this, the phase set just above (a URL-capture
+                // countdown, or a static "opening terminal" for skipTier1)
+                // never updates again for the rest of this single await —
+                // tier 2/3 inside runProviderLogin can run for up to 5 more
+                // minutes with the footer frozen on whatever was true when
+                // this call started. reagent P1 on PR #2300.
+                onTierChange: (event) => {
+                    if (event.tier === "fallback") {
+                        setPhase({ kind: "opening-login-terminal" });
+                    } else {
+                        setPhase({ kind: "waiting-for-login-completion", deadlineMs: event.deadlineMs });
+                    }
+                },
             });
 
             let authenticated = false;
@@ -278,6 +315,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
                 // user finishes there, cancels, or 5 minutes elapse.
                 log("auth", "waiting for login to complete...");
                 const deadline = Date.now() + 5 * 60 * 1000;
+                setPhase({ kind: "waiting-for-login-completion", deadlineMs: deadline });
                 while (!isCancelled() && Date.now() < deadline && !authenticated) {
                     await new Promise<void>((r) => setTimeout(r, 2000));
                     if (isCancelled()) break;
@@ -318,6 +356,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
                 // global login, or completed in the terminal-fallback tier,
                 // which already polled internally) — one-shot confirm instead
                 // of polling again.
+                setPhase({ kind: "verifying" });
                 try {
                     const recheck = await RpcApi.CheckCliAuthCommand(TabRpcClient, {
                         cli_path: cliResult.cli_path,
@@ -344,6 +383,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
             setAuthUrl(null);
 
             if (isCancelled()) {
+                setPhase({ kind: "failed", reason: "cancelled" });
                 return "auth_failed";
             }
 
@@ -363,6 +403,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
                 });
                 log("auth", `retry: ${t.retry ?? `run '${provider.cliCommand} ${provider.authLoginCommand.join(" ")}' manually`}`, "warn");
                 log("auth", `${t.title}: ${t.message}`, "error");
+                setPhase({ kind: "failed", reason: t.message });
                 return "auth_failed";
             }
         } catch (err: any) {
@@ -371,11 +412,13 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
             setAuthUrl(null);
             log("auth", `login failed: ${err?.message ?? String(err)}`, "error");
             log("auth", `run: ${provider.cliCommand} ${provider.authLoginCommand.join(" ")}`, "warn");
+            setPhase({ kind: "failed", reason: err?.message ?? String(err) });
             return "auth_failed";
         }
     }
 
     // Phase 3: Controller Registration
+    setPhase({ kind: "verifying" });
     log("controller", "registering subprocess controller...");
     try {
         // Seed the PTY at the pane's current width so the agent CLI wraps
@@ -408,5 +451,6 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
         log("controller", `resync failed: ${err?.message ?? String(err)}`, "error");
     }
 
+    setPhase({ kind: "ready" });
     return "success";
 }

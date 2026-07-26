@@ -20,6 +20,7 @@
  */
 
 import { createSignal, onMount, Show, type Accessor, type JSX } from "solid-js";
+import { Button } from "@/element/button";
 import type { SignalPair } from "../state";
 import type { DocumentNode, DocumentState, SubagentLinkNode } from "../types";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
@@ -42,6 +43,10 @@ interface AgentDocumentViewProps {
     onDismissAuthNotice?: () => void;
     /** Provider ID for the active auth flow — used when submitting a pasted auth code. */
     authProviderId?: string;
+    /** Cancel the in-flight login (kills the host CLI child) — shown as a
+     *  button on the auth-URL box so a stuck login has an exit besides
+     *  closing the pane. Wired to useAgentControllerStatus's cancelLogin. */
+    onCancelLogin?: () => void;
     onSubagentClick?: (node: SubagentLinkNode) => void;
     /** Re-run the provider login flow — forwarded to the list so an inline
      *  auth-error node can offer a "Login Again" CTA (SPEC_REAUTH_FROM_AUTH_ERROR §7). */
@@ -166,7 +171,9 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
                 <div class="agent-history-loading">Loading older messages...</div>
             </Show>
             <Show when={props.authUrl?.()}>
-                {(url) => <AuthUrlBox url={url()} authProviderId={props.authProviderId} />}
+                {(url) => (
+                    <AuthUrlBox url={url()} authProviderId={props.authProviderId} onCancel={props.onCancelLogin} />
+                )}
             </Show>
             <Show when={props.authNotice?.()}>
                 {(notice) => (
@@ -216,6 +223,7 @@ AgentDocumentView.displayName = "AgentDocumentView";
 interface AuthUrlBoxProps {
     url: string;
     authProviderId?: string;
+    onCancel?: () => void;
 }
 
 /**
@@ -331,6 +339,9 @@ function AuthUrlBox(props: AuthUrlBoxProps): JSX.Element {
             </div>
             <Show when={pasteResult()}>
                 <div class="agent-auth-paste-result">{pasteResult()}</div>
+            </Show>
+            <Show when={props.onCancel}>
+                <Button onClick={() => props.onCancel?.()}>Cancel login</Button>
             </Show>
         </div>
     );

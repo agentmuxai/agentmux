@@ -778,6 +778,16 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         },
     });
 
+    // status.isLoading() is `flowRunning() || !agentReady()` — it never
+    // becomes true during relogin()/loginViaTerminal()/useGlobalLogin(),
+    // since the agent is already ready by the time those recovery flows
+    // run. Without launchPhase() in this gate too, the working row (and
+    // its phase label + Cancel button), the top progress bar, and the
+    // composer status strip all stay invisible for the entire up-to-5-
+    // minute recovery poll — exactly the flows this launchPhase work was
+    // meant to make visible. reagent P1 on PR #2300.
+    const showingLaunchActivity = () => status.isLoading() || status.launchPhase() != null;
+
     onMount(() => {
         const name = block()?.meta?.["agentName"] ?? agentId;
         const provName = provider()?.displayName ?? providerKey();
@@ -1264,7 +1274,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             <div
                 class="agent-pane-progress-bar"
                 classList={{
-                    "agent-pane-progress-bar--active": status.isLoading() || workingFromPhase(agentAtoms().turnPhaseAtom[0]()),
+                    "agent-pane-progress-bar--active": showingLaunchActivity() || workingFromPhase(agentAtoms().turnPhaseAtom[0]()),
                     "agent-pane-progress-bar--stopping": agentAtoms().turnPhaseAtom[0]().kind === "Interrupting",
                 }}
                 role="progressbar"
@@ -1335,6 +1345,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     authUrl={status.authUrl}
                     authNotice={status.authNotice}
                     onDismissAuthNotice={() => status.setAuthNotice(null)}
+                    onCancelLogin={status.cancelLogin}
                     authProviderId={provider()?.id ?? providerKey()}
                     onSubagentClick={handleSubagentClick}
                     onAgentErrorLogin={() => {
@@ -1370,17 +1381,20 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     See SPEC_AGENT_PANE_STATUS_GRADIENT_2026_06_14.md §2. */}
                 <div class="agent-working-row-anchor" ref={workingRowAnchorRef}>
                     <Show when={
-                        status.isLoading()
+                        showingLaunchActivity()
                         || workingFromPhase(agentAtoms().turnPhaseAtom[0]())
                         || agentAtoms().sessionStatsAtom[0]() != null
                     }>
                         <AgentWorkingRow
-                            loading={status.isLoading() || workingFromPhase(agentAtoms().turnPhaseAtom[0]())}
+                            loading={showingLaunchActivity() || workingFromPhase(agentAtoms().turnPhaseAtom[0]())}
                             stopping={agentAtoms().turnPhaseAtom[0]().kind === "Interrupting"}
                             currentTool={agentAtoms().currentToolAtom[0]()}
                             currentToolArg={agentAtoms().currentToolArgAtom[0]()}
                             sessionStats={agentAtoms().sessionStatsAtom[0]()}
                             turnTokens={agentAtoms().turnTokensAtom[0]()}
+                            launchPhase={status.launchPhase()}
+                            onCancelLogin={status.cancelLogin}
+                            hasAuthUrl={!!status.authUrl()}
                             waitingReason={
                                 (() => {
                                     const phase = agentAtoms().turnPhaseAtom[0]();
@@ -1511,7 +1525,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 State (detailsOpen) is reducer-owned (PR #1068). */}
             <AgentComposerStrip
                 loading={
-                    status.isLoading()
+                    showingLaunchActivity()
                     || workingFromPhase(agentAtoms().turnPhaseAtom[0]())
                 }
                 sessionTotals={agentAtoms().sessionTotalsAtom[0]()}

@@ -131,6 +131,18 @@ export interface RunProviderLoginParams extends ForceLoginParams {
      *  point trying headless first). Default false — existing callers are
      *  unaffected. */
     skipTier1?: boolean;
+    /** Reports tier transitions as they actually happen, so a caller
+     *  showing a phase/deadline (see launch-phase.ts) can keep it accurate
+     *  instead of freezing on whatever it guessed before this call started.
+     *  Without this, a caller that sets e.g. "waiting for login link, up to
+     *  15s" before calling this function has no way to know when tier 1
+     *  actually gives up and tier 2/3 (which can run for up to 5 more
+     *  minutes) takes over — the displayed countdown hits 0 and just sits
+     *  there for the rest of the wait. reagent P1 on PR #2300. */
+    onTierChange?: (event:
+        | { tier: "fallback" } // tier 1 conclusively failed; trying tier 2 (fast) or heading to tier 3
+        | { tier: "polling"; deadlineMs: number } // a terminal opened; now polling for completion
+    ) => void;
 }
 
 export type ProviderLoginOutcome =
@@ -289,6 +301,10 @@ export async function runProviderLogin(p: RunProviderLoginParams): Promise<Provi
     // call even if nothing is running — see useAgentControllerStatus.ts's
     // and launch-flow.ts's existing best-effort uses of the same call).
     await getApi().cancelCliLogin().catch(() => {});
+    // Whatever the caller displayed for tier 1 (a URL-capture countdown, or
+    // nothing if skipTier1) is stale now — tier 2/3 from here can run for
+    // up to 5 more minutes with zero further signal otherwise.
+    p.onTierChange?.({ tier: "fallback" });
 
     // Claude-only: seed-from-global. seed_provider_auth_from_global
     // hard-rejects every other provider server-side, so this tier is
@@ -347,6 +363,10 @@ export async function runProviderLogin(p: RunProviderLoginParams): Promise<Provi
         return "terminal-unavailable";
     }
     p.log("auth", "a terminal window opened — complete the login there");
+    // Matches pollForGlobalLoginSeed/pollForCliAuthReady's own default
+    // timeoutMs below (neither call passes a custom one) — if either
+    // default ever changes, this display value must move with it.
+    p.onTierChange?.({ tier: "polling", deadlineMs: Date.now() + 5 * 60 * 1_000 });
 
     const isCancelled = p.isCancelled ?? (() => false);
     if (isClaude) {
