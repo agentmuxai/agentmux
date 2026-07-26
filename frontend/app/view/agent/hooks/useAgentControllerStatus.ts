@@ -613,10 +613,14 @@ export function useAgentControllerStatus(
                     ? { blockId: opts.blockId, agentDefinitionId }
                     : undefined,
                 existingAccountId: await existingAccountIdFor(prov.id),
-                // skipTier1 is always true here, so "fallback" never fires —
-                // but "polling" still does once the terminal actually opens,
-                // giving an accurate deadline instead of leaving the phase
-                // on a static "opening terminal" for the whole wait.
+                // "fallback" still fires here even though skipTier1 is true —
+                // run-provider-login.ts fires it unconditionally right after
+                // the (skipped) tier-1 block, not conditioned on skipTier1 —
+                // but this flow has nothing displayed for tier 1 to begin
+                // with, so there's nothing to update on that event; only
+                // "polling" (once the terminal actually opens) needs a phase
+                // update here, giving an accurate deadline instead of leaving
+                // the phase on a static "opening terminal" for the whole wait.
                 onTierChange: (event) => {
                     if (event.tier === "polling") {
                         setLaunchPhase({ kind: "waiting-for-login-completion", deadlineMs: event.deadlineMs });
