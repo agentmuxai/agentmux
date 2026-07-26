@@ -67,6 +67,12 @@ export interface LaunchFlowOptions {
     authEnv?: Record<string, string>;
     /** Called once when login is confirmed — append a success message to the chat. */
     onLoginSuccess?: (email: string | null) => void;
+    /** Posts a permanent, visible line into the pane's conversation — for
+     *  anything that isn't a login *success* (that's `onLoginSuccess`) but
+     *  still shouldn't be silent: a warning before an automatic relogin
+     *  attempt, or the end-of-mount "ready"/"resumed" summary. See
+     *  docs/specs/SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26.md. */
+    onNotify?: (text: string, style: "info" | "warning") => void;
     /**
      * Returns the pane's current `{rows, cols}` (or undefined if not laid out
      * yet). Used to seed the PTY size on the Phase-3 resync so the agent CLI is
@@ -90,6 +96,7 @@ export type LaunchFlowResult = "success" | "auth_failed" | "fatal";
 export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlowResult> {
     const { blockId, provider, log, setAuthUrl, isCancelled, setLoginWaiting, authEnv } = opts;
     const setPhase = opts.setLaunchPhase ?? (() => {});
+    const notify = opts.onNotify ?? (() => {});
 
     if (!provider) {
         log("error", "no provider definition — cannot resolve CLI", "error");
@@ -213,6 +220,21 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
     }
 
     if (needsLogin) {
+        // blockData was captured at the top of this function, before this
+        // run's own Phase-1 SetMetaCommand write below it — so it reflects
+        // whether a PRIOR run ever resolved this agent's CLI, not this one.
+        // That's the cheapest available signal for "has this agent ever
+        // logged in before" (see SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26.md
+        // §8 Q6): a brand-new agent needing its first login isn't "expired,"
+        // and telling the user otherwise would be both wrong and alarming.
+        const hadPriorCmd = !!blockData?.meta?.["cmd"];
+        if (hadPriorCmd) {
+            setPhase({ kind: "auth-expired" });
+            notify(`Your ${provider.displayName} login has expired — signing back in…`, "warning");
+        } else {
+            setPhase({ kind: "first-login" });
+            notify(`Signing in to ${provider.displayName}…`, "info");
+        }
         log("auth", "not authenticated — starting login flow...");
         setLoginWaiting(true);
         try {
@@ -413,6 +435,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
     // Phase 3: Controller Registration
     setPhase({ kind: "verifying" });
     log("controller", "registering subprocess controller...");
+    let resumed = false;
     try {
         // Seed the PTY at the pane's current width so the agent CLI wraps
         // correctly from its first byte — the backend opens the PTY at this
@@ -433,6 +456,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
         if (status === "init") {
             log("agent", "ready — type a message below to start");
         } else if (status === "done") {
+            resumed = true;
             log("agent", "previous turn complete — send a message to continue");
         }
     } catch (err: any) {
@@ -440,10 +464,18 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
         // that previously masked every resync error (including the commit-
         // pressure admission gate's "memory full" refusal) with a misleading
         // all-clear a line later. Surface the actual failure at "error" so it's
-        // the last, most visible line in the panel.
+        // the last, most visible line in the panel. `resumed` stays false here
+        // (unknown, not confirmed) — fresh-ready's wording is the safer default
+        // when the resync itself failed to tell us which case this is.
         log("controller", `resync failed: ${err?.message ?? String(err)}`, "error");
     }
 
-    setPhase({ kind: "ready" });
+    if (resumed) {
+        setPhase({ kind: "resumed-ready" });
+        notify("Resumed — continuing where you left off", "info");
+    } else {
+        setPhase({ kind: "fresh-ready" });
+        notify("Ready — type a message to start", "info");
+    }
     return "success";
 }
