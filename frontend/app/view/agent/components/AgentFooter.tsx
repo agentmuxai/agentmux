@@ -17,6 +17,7 @@ import { MicButton } from "@/app/element/MicButton";
 import type { AgentViewModel } from "../agent-model";
 import type { SlashCommand } from "../commands/types";
 import type { SessionStats, TurnTokens } from "../types";
+import { formatPhaseLabel, type LaunchPhase } from "../flows/launch-phase";
 import { SlashAutocomplete } from "./SlashAutocomplete";
 
 function pickThinkingPhrase(_exclude?: string): string {
@@ -66,18 +67,31 @@ interface AgentWorkingRowProps {
     waitingReason?: "rate_limited" | null;
     /** Milliseconds until next retry (from provider Retry-After). Shown when waitingReason is set. */
     retryAfterMs?: number | null;
+    /** What the launch/login flow is doing right now — shown in place of the
+     *  generic thinking phrase so a timed wait (login link, login completion)
+     *  never renders as bare "Working…". See launch-phase.ts. */
+    launchPhase?: LaunchPhase | null;
+    /** Cancel the in-flight login. Shown as a small button while launchPhase
+     *  is a pre-authUrl wait (opening-login-terminal /
+     *  waiting-for-login-completion) — AuthUrlBox has its own cancel button
+     *  once a URL exists, but before that this is the only affordance. */
+    onCancelLogin?: () => void;
 }
+
+const CANCELLABLE_LAUNCH_PHASES = new Set(["opening-login-terminal", "waiting-for-login-completion"]);
 
 /** The exact string the loading row's left zone shows right now — pulled out
  *  of the JSX ternary chain so both the type-out reveal effect and the
  *  render itself read the same computed value. */
-function loadingLeftText(props: AgentWorkingRowProps, phrase: string): string {
+function loadingLeftText(props: AgentWorkingRowProps, phrase: string, nowMs: number): string {
     if (props.stopping) return "Stopping…";
     if (props.waitingReason === "rate_limited") {
         return props.retryAfterMs != null
             ? `Rate limited — retrying in ${Math.ceil(props.retryAfterMs / 1000)}s`
             : "Rate limited — retrying…";
     }
+    const phaseLabel = formatPhaseLabel(props.launchPhase, nowMs);
+    if (phaseLabel) return phaseLabel;
     if (props.currentTool) {
         return props.currentToolArg
             ? `${props.currentTool}  ·  ${abbreviateArg(props.currentToolArg, 40)}`
@@ -109,7 +123,9 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
     // essential, looping "still working" signal, not large/parallax motion,
     // so it slows down (CSS below) rather than disappearing entirely.
     const reducedMotion = atoms.prefersReducedMotionAtom;
-    const leftText = createMemo(() => loadingLeftText(props, phrase()));
+    // tick() re-runs this memo every second so a phase's "up to Ys" countdown
+    // (formatPhaseLabel) stays live — see useTick.ts's "always-on tick" pattern.
+    const leftText = createMemo(() => loadingLeftText(props, phrase(), (tick(), Date.now())));
     const [revealed, setRevealed] = createSignal(leftText().length);
     const [typing, setTyping] = createSignal(false);
     const REVEAL_CHAR_MS = 28;
@@ -204,6 +220,10 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
         return right.join("  ·  ");
     });
 
+    const showCancelLogin = createMemo(
+        () => !!props.onCancelLogin && !!props.launchPhase && CANCELLABLE_LAUNCH_PHASES.has(props.launchPhase.kind),
+    );
+
     return (
         <Show
             when={props.loading}
@@ -225,7 +245,17 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
                 <span class="agent-working-row-left agent-working-shimmer" classList={{ "is-typing": typing() }}>
                     {leftText().slice(0, revealed())}
                 </span>
-                <span class="agent-working-row-right">{rightText()}</span>
+                <span class="agent-working-row-right">
+                    {rightText()}
+                    <Show when={showCancelLogin()}>
+                        <button
+                            class="agent-working-row-cancel-login"
+                            onClick={() => props.onCancelLogin?.()}
+                        >
+                            Cancel
+                        </button>
+                    </Show>
+                </span>
             </span>
         </Show>
     );

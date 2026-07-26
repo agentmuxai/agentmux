@@ -1335,6 +1335,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     authUrl={status.authUrl}
                     authNotice={status.authNotice}
                     onDismissAuthNotice={() => status.setAuthNotice(null)}
+                    onCancelLogin={status.cancelLogin}
                     authProviderId={provider()?.id ?? providerKey()}
                     onSubagentClick={handleSubagentClick}
                     onAgentErrorLogin={() => {
@@ -1381,6 +1382,8 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                             currentToolArg={agentAtoms().currentToolArgAtom[0]()}
                             sessionStats={agentAtoms().sessionStatsAtom[0]()}
                             turnTokens={agentAtoms().turnTokensAtom[0]()}
+                            launchPhase={status.launchPhase()}
+                            onCancelLogin={status.cancelLogin}
                             waitingReason={
                                 (() => {
                                     const phase = agentAtoms().turnPhaseAtom[0]();
