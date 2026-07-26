@@ -82,9 +82,16 @@ Phase 2: CheckCliAuth
   ├─ authenticated:true ──► no notification here — folds into Phase 3's line (Q1)
   │                          ──► Phase 3
   │
-  └─ authenticated:false ──► POST WARNING FIRST:
-                              "⚠ Your Claude login has expired — signing back in…"
-                              (+ Cancel, reusing PR #2300's cancel-login button)
+  └─ authenticated:false ──► has this agent run before? (`blockData?.meta?.["cmd"]`
+      │                       already set — cheap, synchronous, no new RPC — see §8 Q6)
+      │
+      ├─ never run before ──► POST (neutral, not alarming — this is completely
+      │                        expected for a brand-new agent, nothing "expired"):
+      │                        "Signing in to Claude…"
+      │
+      └─ ran before ────────► POST WARNING (this is the actually-surprising case):
+                               "⚠ Your Claude login has expired — signing back in…"
+                              (either branch: + Cancel, reusing PR #2300's cancel-login button)
                              │
                              ▼
                           runProviderLogin() ── now the FIRST visible action
@@ -116,7 +123,8 @@ Mirrors the existing `AuthState` pattern (`frontend/app/view/agent/auth/auth-sta
 | `resolving-cli` | Resolving/installing the CLI (existing) | none unless install needed (Q3) | resolving-cli |
 | `checking-auth` | Running `CheckCliAuth` | none (instant, <1s typical) | checking-auth |
 | `auth-ok-quiet` | Authenticated, no login needed | none — folds into the Phase-3 line below (Q1) | (clears immediately) |
-| `auth-expired` | **New.** Token check failed; about to attempt recovery, automatically (Q2) | "⚠ Your login has expired — signing back in…" + Cancel | checking-auth → opening-login-terminal |
+| `first-login` | **New.** Never run before (`meta.cmd` unset — Q6), needs its first login | "Signing in to Claude…" (neutral) + Cancel | checking-auth → opening-login-terminal |
+| `auth-expired` | **New.** Ran before (`meta.cmd` set), but the token is now stale | "⚠ Your login has expired — signing back in…" + Cancel | checking-auth → opening-login-terminal |
 | `waiting-for-login-link` | tier 1 URL-capture (existing) | existing `AuthUrlBox` | unchanged |
 | `opening-login-terminal` | tier 2/3 (existing) | "Opening a terminal for login…" | unchanged |
 | `waiting-for-login-completion` | (existing) | (existing) | unchanged |
@@ -144,12 +152,14 @@ Every row has a notification column filled in and a stated reason when it's inte
 | Q3 | Should Phase 0/1 (container check, CLI install) get their own notification lines? | **No** — silent unless something goes wrong, matching today. | Rarely the interesting part of a resume; PR #2300 already covers CLI-install progress via a separate mechanism. |
 | Q4 | What should the reducer be called? | **`LaunchAuthState`** / `launch-auth-reducer.ts`. | Avoids colliding with the name of the actual `CredentialState` broker (§7) — that name is reserved for the system this spec explicitly stays out of. |
 | Q5 | Does "resumed" need a stronger signal than a text line (composer placeholder, a divider)? | **Out of scope for v1** — text line only. | Revisit once the text-only version is in use and it's clear whether it reads clearly enough on its own. |
+| Q6 | The `auth-expired` wording ("Your login has expired") is wrong for a brand-new agent's very first login — nothing expired, it never had one. How to tell the two apart? | Check `blockData?.meta?.["cmd"]` (already read synchronously at the top of `runLaunchFlow`, already the established signal elsewhere in this file for "has this agent's CLI ever been resolved before" — e.g. `resolveCliForRecovery`'s doc comment). Unset → `first-login` ("Signing in to Claude…"); set → `auth-expired` ("⚠ …has expired…"). | `meta.cmd` is written once, right after Phase 1's first successful CLI resolve, and persists on the block across remounts — it's a free, accurate, zero-new-RPC proxy for "has this agent completed at least one launch before," which is exactly what determines whether "expired" is true or misleading. |
 
 ## 9. Acceptance criteria (for whenever this moves past draft)
 
 - [ ] No login-related window (URL open, terminal spawn) can appear without a preceding conversation-visible message in the same pane, on every one of the three auto-login call sites (mount, relogin, `/login`) and the two explicit-action paths (`loginViaTerminal`, `useGlobalLogin`).
 - [ ] Every `LaunchAuthState.kind` in §6's table has an explicit, tested notification behavior — including the states that are decided to be intentionally quiet (§8 Q1/Q3) — verified by a test that asserts the table itself, not just spot-checked flows.
 - [ ] Resuming an agent with prior history visibly says so; starting a fresh one visibly says so; the two are distinguishable from the conversation alone.
+- [ ] A brand-new agent's first-ever login never says "expired"; an agent that has run before and lost its credential does. Both still notify before the login attempt (Q6).
 - [ ] `LaunchPhase`'s existing footer-label timings (from PR #2300) are unchanged — this is additive, not a rework of the timing work already shipped.
 
 ## 10. References
