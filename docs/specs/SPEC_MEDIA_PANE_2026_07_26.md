@@ -1,9 +1,9 @@
 # Spec: Media pane — live-updating image/video viewer for agent-generated files
 
-**Status:** Draft — design only, no implementation. Written after a
-research pass through the pane/widget registration system, the tool-preview
-precedent, the real-time update mechanism, and backend file-serving. No code
-changed.
+**Status:** Implemented (PR #2299). Phase 1 + Phase 2 both shipped in one
+pass rather than split across separate PRs as originally sketched below —
+see "Post-implementation corrections" for what changed once real review
+(ReAgent + Codex) exercised the code.
 **Author:** Agent2
 **Date:** 2026-07-26
 **Related:** `docs/specs/SPEC_EDITOR_LIVE_FILE_RELOAD_2026_07_18.md` (the
@@ -326,6 +326,47 @@ the two pre-existing dead-code call sites (`termsticker.tsx`,
 **Phase 3 (stretch, not scoped here)** — gallery/grid view for a watched
 directory's full history rather than "most recent file only," if that
 turns out to be wanted once Phase 1/2 are in real use.
+
+## Post-implementation corrections
+
+Real review (ReAgent + Codex, both against the initial PR #2299 commit)
+caught two things this design got wrong that weren't visible from reading
+the code alone — worth recording since they'd bite any similar
+"stream a local file to an `<img>`/`<video>` element" design in this
+codebase, not just this one:
+
+1. **`<img src>`/`<video src>` cannot carry the `X-AuthKey` header
+   `stream-local-file` requires.** This design's Phase 1 write-up above
+   just says "renders `<img>` for image extensions... based on
+   `stream-local-file`'s reported MIME type," implicitly assuming a direct
+   URL assignment works — it doesn't. `stream-local-file` sits in
+   `authed_routes`, and the query-string `?authkey=` fallback is
+   deliberately restricted to the `/ws` upgrade route only (2026-05-11
+   security audit, C3 — see `auth_middleware`'s comment in
+   `agentmux-srv/src/server/mod.rs`). Every direct-URL `<img>`/`<video>`
+   request would 401 silently. **Fix:** fetch the bytes in JS with the
+   header (same pattern `fetchWaveFile` in `wave-file.ts` already uses),
+   and hand the element a `URL.createObjectURL(blob)` instead of the raw
+   endpoint URL. This also retroactively explains why `termsticker.tsx`'s
+   pre-existing `stream-local-file` call site was dead code in the first
+   place — it has the identical bug and was never exercised, so nothing
+   ever surfaced it.
+2. **`std::fs::read` inside an async Axum handler blocks a shared Tokio
+   worker thread and fully materializes the file in memory** — a real
+   problem at this route's size ceiling (500MB) and given the pane's
+   live-update re-fetch pattern. Fixed by switching to `tokio::fs::File` +
+   `tokio_util::io::ReaderStream` + `axum::body::Body::from_stream` (needed
+   adding tokio-util's `io` feature). No change to the route's external
+   contract, purely an internal fix.
+
+Also fixed from the same review pass, smaller: the live-update WPS handler
+didn't clear a stale "no files yet" error message when a real file arrived
+(both render branches gated on `!errorMsg()`, so the message would stick
+forever), and setting `displayPath` to a value equal to its current value
+is a no-op for a Solid signal — a pipeline that overwrites a *stable*
+filename in place would never visibly refresh. Fixed with an explicit
+`revision` counter bumped on every change event, decoupled from whether
+the path string itself changed.
 
 ## Files
 

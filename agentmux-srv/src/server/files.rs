@@ -212,7 +212,13 @@ pub(super) async fn handle_stream_local_file(
     let expanded = expand_home_dir_safe(raw_path);
     let path = expanded.as_path();
 
-    let metadata = match std::fs::metadata(path) {
+    // Async metadata + streamed read, not std::fs::read — the earlier
+    // synchronous-read version blocked a shared Tokio worker thread and
+    // materialized the whole file in memory for every request, which is a
+    // real problem at this route's size ceiling (up to 500MB) and given the
+    // Media pane's live-update re-fetch pattern (repeated large reads as
+    // watched files change). Flagged in review (ReAgent P1, Codex P2).
+    let metadata = match tokio::fs::metadata(path).await {
         Ok(m) => m,
         Err(e) => {
             return (
@@ -237,16 +243,21 @@ pub(super) async fn handle_stream_local_file(
             .into_response();
     }
 
-    match std::fs::read(path) {
-        Ok(data) => Response::builder()
-            .status(StatusCode::OK)
-            .header("Content-Type", mime_from_path(path))
-            .body(Body::from(data))
-            .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response()),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("stream-local-file: {e}")})),
-        )
-            .into_response(),
-    }
+    let file = match tokio::fs::File::open(path).await {
+        Ok(f) => f,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("stream-local-file: {e}")})),
+            )
+                .into_response()
+        }
+    };
+    let stream = tokio_util::io::ReaderStream::new(file);
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", mime_from_path(path))
+        .header("Content-Length", metadata.len().to_string())
+        .body(Body::from_stream(stream))
+        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }

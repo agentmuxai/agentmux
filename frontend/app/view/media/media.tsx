@@ -10,6 +10,7 @@
 //
 // Spec: docs/specs/SPEC_MEDIA_PANE_2026_07_26.md
 
+import { getApi } from "@/app/store/app-api";
 import { BlockNodeModel } from "@/app/block/blocktypes";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -17,6 +18,7 @@ import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import { getWebServerEndpoint } from "@/util/endpoints";
+import { fetch } from "@/util/fetchutil";
 import { fireAndForget } from "@/util/util";
 import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 
@@ -45,6 +47,26 @@ function streamUrl(path: string): string {
     return getWebServerEndpoint() + "/agentmux/stream-local-file?path=" + encodeURIComponent(path);
 }
 
+// `<img src>`/`<video src>` can't attach the `X-AuthKey` header
+// stream-local-file requires (it lives in `authed_routes`, and the
+// query-string `?authkey=` fallback is deliberately restricted to the
+// `/ws` upgrade route only — see auth_middleware's 2026-05-11 audit
+// comment in agentmux-srv/src/server/mod.rs). Fetch the bytes ourselves
+// with the header (same pattern as fetchWaveFile in wave-file.ts) and
+// hand the element a blob object URL instead. Caller owns revoking it.
+async function fetchMediaBlob(path: string): Promise<Blob> {
+    const headers: Record<string, string> = {};
+    if (globalThis.window != null) {
+        const authKey = getApi()?.getAuthKey?.();
+        if (authKey) headers["X-AuthKey"] = authKey;
+    }
+    const resp = await fetch(streamUrl(path), { headers });
+    if (!resp.ok) {
+        throw new Error(`${resp.status} ${resp.statusText}`);
+    }
+    return await resp.blob();
+}
+
 class MediaViewModel implements ViewModel {
     viewType: string;
     blockId: string;
@@ -62,11 +84,19 @@ class MediaViewModel implements ViewModel {
 function MediaView({ model }: { model: MediaViewModel }): JSX.Element {
     const [pathInput, setPathInput] = createSignal("");
     const [displayPath, setDisplayPath] = createSignal("");
+    // Bumped on every WPS change event, even ones that leave displayPath's
+    // string value unchanged (a pipeline overwriting a stable filename in
+    // place) — Solid's signal wouldn't otherwise notice anything changed
+    // and the fetch effect below would never re-run. Codex review.
+    const [revision, setRevision] = createSignal(0);
+    const [objectUrl, setObjectUrl] = createSignal<string | null>(null);
     const [errorMsg, setErrorMsg] = createSignal("");
     const [mediaReady, setMediaReady] = createSignal(false);
 
     let watchedDir: string | null = null;
     let unsubFileChanged: () => void = () => {};
+    let currentObjectUrl: string | null = null;
+    let fetchToken = 0;
 
     const stopWatching = () => {
         if (watchedDir != null) {
@@ -95,7 +125,14 @@ function MediaView({ model }: { model: MediaViewModel }): JSX.Element {
             scope: makeORef("block", model.blockId),
             handler: (event) => {
                 const path = (event as any)?.data?.path as string | undefined;
-                if (path) setDisplayPath(path);
+                if (!path) return;
+                // Clear a stale "no files yet" message the moment a
+                // matching file actually arrives — both render branches
+                // below require !errorMsg(), so leaving it set would keep
+                // showing the empty-directory message forever. Codex review.
+                setErrorMsg("");
+                setDisplayPath(path);
+                setRevision((r) => r + 1);
             },
         });
     };
@@ -142,11 +179,48 @@ function MediaView({ model }: { model: MediaViewModel }): JSX.Element {
 
     onCleanup(() => {
         stopWatching();
+        if (currentObjectUrl) URL.revokeObjectURL(currentObjectUrl);
     });
 
+    // Fetch the current path's bytes (with auth) into a blob object URL
+    // whenever it changes — including a same-path "revision" bump from an
+    // in-place file overwrite, which wouldn't otherwise re-trigger a plain
+    // signal dependency on the path string alone.
     createEffect(() => {
-        displayPath();
+        const path = displayPath();
+        revision();
+        const myToken = ++fetchToken;
         setMediaReady(false);
+
+        if (!path) {
+            if (currentObjectUrl) {
+                URL.revokeObjectURL(currentObjectUrl);
+                currentObjectUrl = null;
+            }
+            setObjectUrl(null);
+            return;
+        }
+
+        void (async () => {
+            try {
+                const blob = await fetchMediaBlob(path);
+                if (myToken !== fetchToken) return; // superseded by a newer request
+                const url = URL.createObjectURL(blob);
+                const prev = currentObjectUrl;
+                currentObjectUrl = url;
+                setObjectUrl(url);
+                setErrorMsg("");
+                if (prev) URL.revokeObjectURL(prev);
+            } catch (e) {
+                if (myToken !== fetchToken) return;
+                if (currentObjectUrl) {
+                    URL.revokeObjectURL(currentObjectUrl);
+                    currentObjectUrl = null;
+                }
+                setObjectUrl(null);
+                setErrorMsg(`Failed to load media: ${(e as Error)?.message ?? e}`);
+            }
+        })();
     });
 
     const commitPath = () => {
@@ -186,21 +260,26 @@ function MediaView({ model }: { model: MediaViewModel }): JSX.Element {
                 <Show when={errorMsg()}>
                     <div class="media-view-empty">{errorMsg()}</div>
                 </Show>
-                <Show when={!errorMsg() && kind() === "image"}>
+                <Show when={!errorMsg() && displayPath() && !objectUrl()}>
+                    <div class="media-view-empty">Loading…</div>
+                </Show>
+                <Show when={!errorMsg() && kind() === "image" && objectUrl()}>
                     <img
                         class="media-view-media max-w-full max-h-full"
                         style={{ "object-fit": "contain", opacity: mediaReady() ? 1 : 0, transition: "opacity 120ms ease" }}
-                        src={streamUrl(displayPath())}
+                        src={objectUrl()}
                         onLoad={() => setMediaReady(true)}
+                        onError={() => setErrorMsg("Failed to display media (unsupported format or corrupt file).")}
                     />
                 </Show>
-                <Show when={!errorMsg() && kind() === "video"}>
+                <Show when={!errorMsg() && kind() === "video" && objectUrl()}>
                     <video
                         class="media-view-media max-w-full max-h-full"
                         style={{ "object-fit": "contain", opacity: mediaReady() ? 1 : 0, transition: "opacity 120ms ease" }}
-                        src={streamUrl(displayPath())}
+                        src={objectUrl()}
                         controls
                         onLoadedData={() => setMediaReady(true)}
+                        onError={() => setErrorMsg("Failed to display media (unsupported format or corrupt file).")}
                     />
                 </Show>
                 <Show when={!errorMsg() && kind() === "none" && !displayPath()}>
