@@ -214,15 +214,38 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
     }
 
     if (needsLogin) {
-        // blockData was captured at the top of this function, before this
-        // run's own Phase-1 SetMetaCommand write below it — so it reflects
-        // whether a PRIOR run ever resolved this agent's CLI, not this one.
-        // That's the cheapest available signal for "has this agent ever
-        // logged in before" (see SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26.md
-        // §8 Q6): a brand-new agent needing its first login isn't "expired,"
-        // and telling the user otherwise would be both wrong and alarming.
-        const hadPriorCmd = !!blockData?.meta?.["cmd"];
-        if (hadPriorCmd) {
+        const agentDefinitionId = blockData?.meta?.agentId as string | undefined;
+
+        // Reuse the account already bound to this agent for this provider,
+        // if any — reagent P1: without this, every retry through this flow
+        // minted a brand-new account+dir instead of refreshing the one
+        // already in use, orphaning an unlinked IdentityAccount row/dir on
+        // every failed "Retry Login" click. Computed up front (not just
+        // where it's used below) because it doubles as the "has this agent
+        // ever actually logged in before" signal for the notification
+        // below — a REAL account link can only exist if a prior login
+        // completed and got persisted (persistAndLinkAccount/
+        // finalizeAccount), unlike blockData?.meta?.["cmd"] (an earlier,
+        // broken attempt at this signal — reagent P1 on PR #2304: agent-
+        // model.ts's launchAgent() writes `cmd` into meta unconditionally
+        // at agent-CREATION time, before any login ever happens, so it was
+        // true on every genuine first-ever login too).
+        let existingAccountId: string | undefined;
+        if (agentDefinitionId) {
+            try {
+                const links = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, {
+                    agent_id: agentDefinitionId,
+                });
+                existingAccountId = links.find((l) => l.provider === provider.id)?.account_id;
+            } catch {
+                // Best-effort — a fresh account still gets minted below if this lookup fails.
+            }
+        }
+
+        // See docs/specs/SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26.md §8
+        // Q6: a brand-new agent needing its first login isn't "expired," and
+        // telling the user otherwise would be both wrong and alarming.
+        if (existingAccountId) {
             setPhase({ kind: "auth-expired" });
             notify(`Your ${provider.displayName} login has expired — signing back in…`, "warning");
         } else {
@@ -245,24 +268,6 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
             // nothing tracks (PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md
             // §7 — required now that the resolver's spawn gate has no
             // ambient exception).
-            const agentDefinitionId = blockData?.meta?.agentId as string | undefined;
-
-            // Reuse the account already bound to this agent for this
-            // provider, if any — reagent P1: without this, every retry
-            // through this flow minted a brand-new account+dir instead of
-            // refreshing the one already in use, orphaning an unlinked
-            // IdentityAccount row/dir on every failed "Retry Login" click.
-            let existingAccountId: string | undefined;
-            if (agentDefinitionId) {
-                try {
-                    const links = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, {
-                        agent_id: agentDefinitionId,
-                    });
-                    existingAccountId = links.find((l) => l.provider === provider.id)?.account_id;
-                } catch {
-                    // Best-effort — a fresh account still gets minted below if this lookup fails.
-                }
-            }
 
             // Tier 2/3 mint (or reuse) an isolated account dir that's
             // DIFFERENT from the pre-login `authEnv` closure above — this
@@ -443,6 +448,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
     setPhase({ kind: "verifying" });
     log("controller", "registering subprocess controller...");
     let resumed = false;
+    let resyncFailed = false;
     try {
         // Seed the PTY at the pane's current width so the agent CLI wraps
         // correctly from its first byte — the backend opens the PTY at this
@@ -482,9 +488,20 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
         // (unknown, not confirmed) — fresh-ready's wording is the safer default
         // when the resync itself failed to tell us which case this is.
         log("controller", `resync failed: ${err?.message ?? String(err)}`, "error");
+        resyncFailed = true;
     }
 
-    if (resumed) {
+    // reagent P1 on PR #2304: this used to fall through to the cheerful
+    // ready/resumed-ready notification below even when the try block above
+    // threw — exactly the misrepresentation the comment above claims to
+    // avoid. `resyncFailed` breaks that fallthrough. The function's return
+    // value stays "success" (unchanged pre-existing contract for this path —
+    // widening it to a new failure variant is a bigger, separate change);
+    // this only stops the visible notification from lying about it.
+    if (resyncFailed) {
+        setPhase({ kind: "fresh-ready" });
+        notify("Something went wrong finishing setup — if the agent doesn't respond, try reopening this pane.", "warning");
+    } else if (resumed) {
         setPhase({ kind: "resumed-ready" });
         notify("Resumed — continuing where you left off", "info");
     } else {
