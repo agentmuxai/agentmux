@@ -167,10 +167,15 @@ describe("runLaunchFlow — skipTier1 wiring", () => {
         expect(phases[phases.length - 1]).toBe("fresh-ready");
     });
 
-    it("reports auth-expired (not first-login) when the agent has resolved its CLI before — meta.cmd already set", async () => {
+    it("reports auth-expired (not first-login) when a real account link already exists for this agent+provider", async () => {
         hub.getWaveObjectAtom.mockReturnValue(() => ({
-            meta: { agentMode: "host", agentId: "agent-1", cmd: "C:/prior/claude.cmd" },
+            meta: { agentMode: "host", agentId: "agent-1" },
         }));
+        // A real, persisted prior login — the only trustworthy "has logged in
+        // before" signal (see agent-model.ts's launchAgent(): meta.cmd is set
+        // unconditionally at agent-creation time, before any login, so it
+        // can't be used for this — reagent P1 on PR #2304).
+        hub.listAgentIdentities.mockResolvedValue([{ provider: "claude", account_id: "acct-1" }]);
         const phases: string[] = [];
         await runLaunchFlow({
             blockId: "block-1",
@@ -189,8 +194,9 @@ describe("runLaunchFlow — skipTier1 wiring", () => {
     it("notifies with a warning before an expired-token relogin, and a neutral message for a first-ever login", async () => {
         const notices: Array<{ text: string; style: string }> = [];
         hub.getWaveObjectAtom.mockReturnValue(() => ({
-            meta: { agentMode: "host", agentId: "agent-1", cmd: "C:/prior/claude.cmd" },
+            meta: { agentMode: "host", agentId: "agent-1" },
         }));
+        hub.listAgentIdentities.mockResolvedValue([{ provider: "claude", account_id: "acct-1" }]);
         await runLaunchFlow({
             blockId: "block-1",
             provider: claude,
@@ -258,6 +264,36 @@ describe("runLaunchFlow — skipTier1 wiring", () => {
         expect(phases).not.toContain("fresh-ready");
         const last = notices[notices.length - 1];
         expect(last.text).toMatch(/resumed/i);
+    });
+
+    it("reagent P1 on PR #2304: never posts a cheerful ready/resumed notification when ControllerResync itself fails", async () => {
+        // Before this fix, a thrown resync (e.g. the commit-pressure admission
+        // gate refusing the controller) was logged but still fell through to
+        // the unconditional ready/resumed-ready notification — misrepresenting
+        // a failed, possibly-unusable agent as ready.
+        hub.checkCliAuth
+            .mockReset()
+            .mockResolvedValueOnce({ authenticated: false })
+            .mockResolvedValue({ authenticated: true, email: "user@example.com" });
+        hub.controllerResync.mockRejectedValue(new Error("memory full"));
+        const phases: string[] = [];
+        const notices: Array<{ text: string; style: string }> = [];
+        const result = await runLaunchFlow({
+            blockId: "block-1",
+            provider: claude,
+            log: vi.fn(),
+            setAuthUrl: vi.fn(),
+            isCancelled: () => false,
+            setLoginWaiting: vi.fn(),
+            setLaunchPhase: (p) => { if (p) phases.push(p.kind); },
+            onNotify: (text, style) => notices.push({ text, style }),
+        });
+
+        expect(result).toBe("success");
+        const last = notices[notices.length - 1];
+        expect(last.style).toBe("warning");
+        expect(last.text).not.toMatch(/^Ready/i);
+        expect(last.text).not.toMatch(/^Resumed/i);
     });
 
     it("reagent P1: updates the phase via onTierChange instead of freezing on a stale waiting-for-login-link deadline once tier 1 fails and tier 2/3 take over", async () => {
