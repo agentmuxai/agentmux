@@ -1,0 +1,320 @@
+// Copyright 2025-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+//! Filesystem watcher for directories a Media pane is pointed at — detects
+//! new/changed media files (e.g. a freshly-downloaded ComfyUI render
+//! landing in a project's `clips/` folder) and pushes a per-block "a
+//! matching file changed" wake signal so panes update without a manual
+//! reload.
+//!
+//! Directory-mode sibling of `editor_file_watcher.rs`'s single-file watcher:
+//! that one watches individually-opened files (one entry per open tab);
+//! this one watches whole directories directly, filtered by a per-subscriber
+//! extension set, since a Media pane's job is "show me the latest render in
+//! this folder," not "watch this one exact file."
+//!
+//! Spec: docs/specs/SPEC_MEDIA_PANE_2026_07_26.md
+
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use serde_json::json;
+use tokio::sync::mpsc;
+
+use super::wps::{Broker, WaveEvent};
+
+/// WPS event fired when a file matching a Media pane's extension filter is
+/// created/modified inside a directory that pane is watching. Scoped
+/// per-block (`block:<id>`) via `WaveEvent::scopes`, matching
+/// `EVENT_EDITOR_FILE_CHANGED`'s pattern. Payload is just the changed file's
+/// path — a wake signal, not content; the frontend re-fetches via
+/// `GET /agentmux/stream-local-file`.
+pub const EVENT_MEDIA_FILE_CHANGED: &str = "media:file_changed";
+
+const DEBOUNCE: Duration = Duration::from_millis(300);
+
+struct Inner {
+    /// Canonicalized directory -> (block id -> lowercase extensions that
+    /// block cares about, no leading dot). A directory is under active OS
+    /// watch exactly while this map has at least one entry for it.
+    watched_dirs: HashMap<PathBuf, HashMap<String, HashSet<String>>>,
+}
+
+/// Per-file debounce generation counters, same collapsing-burst-writes
+/// purpose as `editor_file_watcher.rs`'s, keyed by the full changed-file
+/// path (not the directory) so unrelated files in the same watched
+/// directory debounce independently.
+type DebounceGens = Mutex<HashMap<PathBuf, Arc<AtomicU64>>>;
+
+pub struct MediaFileWatcher {
+    _watcher: Mutex<RecommendedWatcher>,
+    inner: Mutex<Inner>,
+    debounce_gens: DebounceGens,
+    broker: Arc<Broker>,
+}
+
+impl MediaFileWatcher {
+    /// Construct and start the watcher. Returns `None` if the underlying
+    /// `notify` watcher can't be created — live-update is a nice-to-have,
+    /// not a boot requirement (matches `EditorFileWatcher::new`).
+    pub fn new(broker: Arc<Broker>) -> Option<Arc<Self>> {
+        let (tx, mut rx) = mpsc::unbounded_channel::<PathBuf>();
+
+        let watcher = match notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+            match res {
+                Ok(event) => {
+                    if matches!(event.kind, EventKind::Modify(_) | EventKind::Create(_)) {
+                        for path in event.paths {
+                            let _ = tx.send(path);
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "media file watcher error");
+                }
+            }
+        }) {
+            Ok(w) => w,
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to create media file watcher");
+                return None;
+            }
+        };
+
+        let this = Arc::new(Self {
+            _watcher: Mutex::new(watcher),
+            inner: Mutex::new(Inner { watched_dirs: HashMap::new() }),
+            debounce_gens: Mutex::new(HashMap::new()),
+            broker,
+        });
+
+        let worker = this.clone();
+        tokio::spawn(async move {
+            while let Some(changed_path) = rx.recv().await {
+                worker.handle_fs_event(changed_path);
+            }
+        });
+
+        Some(this)
+    }
+
+    /// Start watching `dir` on behalf of `block_id`, notifying only for
+    /// files whose extension (lowercase, no dot — e.g. "webm") appears in
+    /// `extensions`. Idempotent for the same (dir, block_id) — a second call
+    /// replaces that block's extension set rather than adding a duplicate
+    /// subscription. Called when a Media pane points at a directory.
+    pub fn watch_directory(&self, dir: &Path, block_id: &str, extensions: &[String]) {
+        let canonical = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+        let ext_set: HashSet<String> = extensions.iter().map(|e| e.to_lowercase()).collect();
+
+        let mut inner = self.inner.lock().unwrap();
+        let subscribers = inner.watched_dirs.entry(canonical.clone()).or_default();
+        let is_new_dir = subscribers.is_empty();
+        subscribers.insert(block_id.to_string(), ext_set);
+
+        if is_new_dir {
+            let mut w = self._watcher.lock().unwrap();
+            if let Err(e) = w.watch(&canonical, RecursiveMode::NonRecursive) {
+                tracing::warn!(dir = %canonical.display(), error = %e, "failed to watch media directory");
+            }
+        }
+        tracing::debug!(dir = %canonical.display(), block_id, "media dir watch: started/updated");
+    }
+
+    /// Stop watching `dir` on behalf of `block_id`. No-op if that pairing
+    /// wasn't watched. Called on path change / pane dispose.
+    pub fn unwatch_directory(&self, dir: &Path, block_id: &str) {
+        let canonical = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+        let mut inner = self.inner.lock().unwrap();
+        let Some(subscribers) = inner.watched_dirs.get_mut(&canonical) else {
+            return;
+        };
+        subscribers.remove(block_id);
+        if !subscribers.is_empty() {
+            return;
+        }
+        inner.watched_dirs.remove(&canonical);
+        drop(inner);
+
+        let mut w = self._watcher.lock().unwrap();
+        let _ = w.unwatch(&canonical);
+        drop(w);
+
+        // Prune debounce entries for files under this now-unwatched dir —
+        // same rationale as EditorFileWatcher::unwatch_path: don't let
+        // debounce_gens grow unbounded across a long process lifetime.
+        let mut gens = self.debounce_gens.lock().unwrap();
+        gens.retain(|path, _| path.parent() != Some(canonical.as_path()));
+
+        tracing::debug!(dir = %canonical.display(), block_id, "media dir watch: stopped");
+    }
+
+    fn handle_fs_event(self: &Arc<Self>, changed_path: PathBuf) {
+        let Some(dir) = changed_path.parent().map(Path::to_path_buf) else {
+            return;
+        };
+        let canonical_dir = dir.canonicalize().unwrap_or_else(|_| dir.clone());
+
+        let matched_block_ids: Vec<String> = {
+            let inner = self.inner.lock().unwrap();
+            // `notify` events aren't always pre-canonicalized (symlinked
+            // ancestors, `\\?\` UNC prefixing on Windows) — try both,
+            // mirroring EditorFileWatcher::handle_fs_event.
+            let subscribers = inner
+                .watched_dirs
+                .get(&canonical_dir)
+                .or_else(|| inner.watched_dirs.get(&dir));
+            let Some(subscribers) = subscribers else { return };
+
+            let ext = changed_path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.to_lowercase())
+                .unwrap_or_default();
+            if ext.is_empty() {
+                return;
+            }
+            subscribers
+                .iter()
+                .filter(|(_, exts)| exts.contains(&ext))
+                .map(|(block_id, _)| block_id.clone())
+                .collect()
+        };
+        if matched_block_ids.is_empty() {
+            return;
+        }
+
+        let gen_counter = {
+            let mut gens = self.debounce_gens.lock().unwrap();
+            gens.entry(changed_path.clone())
+                .or_insert_with(|| Arc::new(AtomicU64::new(0)))
+                .clone()
+        };
+        let my_gen = gen_counter.fetch_add(1, Ordering::SeqCst) + 1;
+
+        let this = self.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(DEBOUNCE).await;
+            if gen_counter.load(Ordering::SeqCst) != my_gen {
+                return; // superseded by a later event for this file
+            }
+            publish_media_file_changed(&this.broker, &changed_path, &matched_block_ids);
+        });
+    }
+}
+
+/// Publish `EVENT_MEDIA_FILE_CHANGED`, scoped to every block watching the
+/// changed file's directory with a matching extension. Mirrors
+/// `publish_editor_file_changed`'s per-block scoping — never a global
+/// broadcast.
+fn publish_media_file_changed(broker: &Broker, path: &Path, block_ids: &[String]) {
+    broker.publish(WaveEvent {
+        event: EVENT_MEDIA_FILE_CHANGED.to_string(),
+        scopes: block_ids.iter().map(|id| format!("block:{id}")).collect(),
+        sender: String::new(),
+        persist: 0,
+        data: Some(json!({ "path": path.to_string_lossy() })),
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex as StdMutex;
+
+    struct TestClient {
+        events: StdMutex<Vec<(String, WaveEvent)>>,
+    }
+
+    impl super::super::wps::WpsClient for Arc<TestClient> {
+        fn send_event(&self, route_id: &str, event: WaveEvent) {
+            self.events.lock().unwrap().push((route_id.to_string(), event));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_watch_unwatch_refcounting_does_not_panic() {
+        let broker = Arc::new(Broker::new());
+        let watcher = MediaFileWatcher::new(broker).expect("watcher should construct");
+
+        let tmp_dir = std::env::temp_dir().join("agentmux_media_watch_test");
+        std::fs::create_dir_all(&tmp_dir).unwrap();
+        let exts = vec!["webm".to_string(), "png".to_string()];
+
+        watcher.watch_directory(&tmp_dir, "block-1", &exts);
+        watcher.watch_directory(&tmp_dir, "block-2", &exts);
+        {
+            let inner = watcher.inner.lock().unwrap();
+            let canonical = tmp_dir.canonicalize().unwrap();
+            assert_eq!(inner.watched_dirs.get(&canonical).map(|s| s.len()), Some(2));
+        }
+
+        watcher.unwatch_directory(&tmp_dir, "block-1");
+        {
+            let inner = watcher.inner.lock().unwrap();
+            let canonical = tmp_dir.canonicalize().unwrap();
+            assert_eq!(inner.watched_dirs.get(&canonical).map(|s| s.len()), Some(1));
+        }
+
+        watcher.unwatch_directory(&tmp_dir, "block-2");
+        {
+            let inner = watcher.inner.lock().unwrap();
+            let canonical = tmp_dir.canonicalize().unwrap();
+            assert!(!inner.watched_dirs.contains_key(&canonical));
+        }
+
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn test_publish_scopes_to_every_subscribed_block() {
+        let broker = Arc::new(Broker::new());
+        let client = Arc::new(TestClient { events: StdMutex::new(Vec::new()) });
+        broker.set_client(Box::new(client.clone()));
+
+        broker.subscribe(
+            "route-1",
+            super::super::wps::SubscriptionRequest {
+                event: EVENT_MEDIA_FILE_CHANGED.to_string(),
+                scopes: vec!["block:abc".to_string()],
+                allscopes: false,
+            },
+        );
+
+        publish_media_file_changed(&broker, Path::new("/tmp/clips/shot.webm"), &["abc".to_string(), "xyz".to_string()]);
+
+        let events = client.events.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].0, "route-1");
+        assert_eq!(events[0].1.event, EVENT_MEDIA_FILE_CHANGED);
+    }
+
+    #[test]
+    fn test_extension_filter_excludes_non_matching_block() {
+        // A block watching only "png" should not be scoped in when a
+        // ".webm" file changes in the same directory.
+        let broker = Arc::new(Broker::new());
+        let client = Arc::new(TestClient { events: StdMutex::new(Vec::new()) });
+        broker.set_client(Box::new(client.clone()));
+
+        broker.subscribe(
+            "route-png-only",
+            super::super::wps::SubscriptionRequest {
+                event: EVENT_MEDIA_FILE_CHANGED.to_string(),
+                scopes: vec!["block:png-block".to_string()],
+                allscopes: false,
+            },
+        );
+
+        // Simulate what handle_fs_event's filtering step would decide: only
+        // "webm-block" matched, "png-block" did not, so only it is published.
+        publish_media_file_changed(&broker, Path::new("/tmp/clips/shot.webm"), &["webm-block".to_string()]);
+
+        let events = client.events.lock().unwrap();
+        assert_eq!(events.len(), 0, "png-only block must not receive a .webm change event");
+    }
+}

@@ -1271,6 +1271,9 @@ declare global {
         "term:mode"?: string;
         "term:theme"?: string;
         "help:zoom"?: number;
+        /** Absolute path to a file or directory the Media pane is pointed
+         *  at. See docs/specs/SPEC_MEDIA_PANE_2026_07_26.md. */
+        "media:path"?: string;
         "term:localshellpath"?: string;
         "term:localshellopts"?: string[];
         "term:scrollback"?: number;

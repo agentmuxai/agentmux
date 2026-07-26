@@ -164,6 +164,26 @@ export const FileApi = {
         return client.rpcCall("listeditordir", data, opts);
     },
 
+    // Media pane (SPEC_MEDIA_PANE_2026_07_26.md): watch a directory for
+    // new/changed files matching `extensions` (lowercase, no dot). Backend
+    // publishes `media:file_changed` (scoped to `block:<block_id>`) with
+    // `{ path }` when a matching file is created/modified.
+    WatchMediaDirCommand(
+        client: RpcClient,
+        data: { path: string; block_id: string; extensions: string[] },
+        opts?: RpcOpts,
+    ): Promise<void> {
+        return client.rpcCall("watchmediadir", data, opts);
+    },
+
+    UnwatchMediaDirCommand(
+        client: RpcClient,
+        data: { path: string; block_id: string },
+        opts?: RpcOpts,
+    ): Promise<void> {
+        return client.rpcCall("unwatchmediadir", data, opts);
+    },
+
     GetEditorHomeCommand(
         client: RpcClient,
         data: Record<string, never> = {},

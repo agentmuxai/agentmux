@@ -27,6 +27,9 @@ export function blockViewToIcon(view: string): string {
     if (view == "drone") {
         return "diagram-project";
     }
+    if (view == "media") {
+        return "photo-film";
+    }
     return "square";
 }
 
@@ -37,6 +40,7 @@ const VIEW_LABELS: Record<string, string> = {
     editor: "Editor",
     help: "Help",
     identity: "Identity",
+    media: "Media",
     memory: "Memory",
     subagent: "Subagent",
     swarm: "Swarm",

@@ -85,6 +85,7 @@ pub(crate) fn test_state() -> AppState {
             broker,
         ),
         editor_file_watcher: None,
+        media_file_watcher: None,
     }
 }
 

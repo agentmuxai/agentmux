@@ -11,6 +11,7 @@ use axum::{
 };
 use serde_json::json;
 
+use crate::backend::base::expand_home_dir_safe;
 use crate::backend::{docsite, schema};
 
 use super::AppState;
@@ -22,6 +23,18 @@ pub(super) struct FileQueryParams {
     #[serde(default)]
     offset: i64,
 }
+
+#[derive(serde::Deserialize)]
+pub(super) struct LocalFileQueryParams {
+    path: Option<String>,
+}
+
+// Media pane (SPEC_MEDIA_PANE_2026_07_26.md): local video/image files run
+// larger than the 10MB text-editor cap `readeditorfile` uses — this
+// session's own generated clips ranged 6-28MB for a few seconds of
+// 1920x1080 footage. Sized for local video, not copied from the editor's
+// text-oriented number.
+const STREAM_LOCAL_FILE_MAX_BYTES: u64 = 500_000_000;
 
 pub(super) async fn handle_wave_file(
     State(state): State<AppState>,
@@ -155,7 +168,7 @@ pub(super) async fn handle_docsite(AxumPath(path): AxumPath<String>) -> Response
 }
 
 fn mime_from_path(path: &std::path::Path) -> &'static str {
-    match path.extension().and_then(|e| e.to_str()) {
+    match path.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).as_deref() {
         Some("html") => "text/html; charset=utf-8",
         Some("css") => "text/css; charset=utf-8",
         Some("js") => "application/javascript; charset=utf-8",
@@ -163,8 +176,77 @@ fn mime_from_path(path: &std::path::Path) -> &'static str {
         Some("png") => "image/png",
         Some("jpg") | Some("jpeg") => "image/jpeg",
         Some("svg") => "image/svg+xml",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("webm") => "video/webm",
+        Some("mp4") => "video/mp4",
+        Some("mov") => "video/quicktime",
         Some("woff2") => "font/woff2",
         Some("woff") => "font/woff",
         _ => "application/octet-stream",
+    }
+}
+
+/// Media pane (SPEC_MEDIA_PANE_2026_07_26.md): serve an arbitrary local file
+/// by absolute path, for `<img>`/`<video>` display. Deliberately matches
+/// `readeditorfile`'s existing posture (any absolute path the frontend
+/// sends, gated by OS-level permissions rather than an in-app allowlist —
+/// see `editor_handlers.rs:47-53`'s "root scoping, not a sandbox" note) so
+/// this route isn't a stricter one-off next to an already-shipped read path
+/// with the same shape. Size-capped (see `STREAM_LOCAL_FILE_MAX_BYTES`)
+/// rather than truly unbounded.
+pub(super) async fn handle_stream_local_file(
+    Query(params): Query<LocalFileQueryParams>,
+) -> Response {
+    let raw_path = match &params.path {
+        Some(p) if !p.is_empty() => p.as_str(),
+        _ => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "missing path"})),
+            )
+                .into_response()
+        }
+    };
+
+    let expanded = expand_home_dir_safe(raw_path);
+    let path = expanded.as_path();
+
+    let metadata = match std::fs::metadata(path) {
+        Ok(m) => m,
+        Err(e) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": format!("stream-local-file: {e}")})),
+            )
+                .into_response()
+        }
+    };
+    if !metadata.is_file() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "stream-local-file: not a file"})),
+        )
+            .into_response();
+    }
+    if metadata.len() > STREAM_LOCAL_FILE_MAX_BYTES {
+        return (
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Json(json!({"error": "stream-local-file: file too large (>500MB)"})),
+        )
+            .into_response();
+    }
+
+    match std::fs::read(path) {
+        Ok(data) => Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", mime_from_path(path))
+            .body(Body::from(data))
+            .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response()),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("stream-local-file: {e}")})),
+        )
+            .into_response(),
     }
 }

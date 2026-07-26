@@ -107,6 +107,7 @@ fn inject_global_bundles(claude_md: &str, id_store: &Arc<Store>) -> String {
 pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let id_store = state.id_store.clone();
     let editor_file_watcher = state.editor_file_watcher.clone();
+    let media_file_watcher = state.media_file_watcher.clone();
 
     // watcheditorfile → start live-reload watching for a (path, block_id)
     // pair. Called by the frontend once a tab's content finishes loading.
@@ -150,6 +151,55 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     if let Some(w) = watcher {
                         let expanded = expand_home_dir_safe(&cmd.path);
                         w.unwatch_path(expanded.as_path(), &cmd.block_id);
+                    }
+                    Ok(None)
+                })
+            }),
+        );
+    }
+
+    // watchmediadir → start live-update watching for a Media pane pointed
+    // at a directory. Called by the frontend whenever the pane's target
+    // path resolves to a directory (not a single file — a fixed single
+    // file has nothing new to "watch for," it's just re-fetched on demand).
+    // Spec: docs/specs/SPEC_MEDIA_PANE_2026_07_26.md
+    {
+        let watcher = media_file_watcher.clone();
+        engine.register_handler(
+            "watchmediadir",
+            Box::new(move |data, _ctx| {
+                let watcher = watcher.clone();
+                Box::pin(async move {
+                    #[derive(serde::Deserialize)]
+                    struct Cmd { path: String, block_id: String, extensions: Vec<String> }
+                    let cmd: Cmd = serde_json::from_value(data)
+                        .map_err(|e| format!("watchmediadir: {e}"))?;
+                    if let Some(w) = watcher {
+                        let expanded = expand_home_dir_safe(&cmd.path);
+                        w.watch_directory(expanded.as_path(), &cmd.block_id, &cmd.extensions);
+                    }
+                    Ok(None)
+                })
+            }),
+        );
+    }
+
+    // unwatchmediadir → stop live-update watching. Called when the Media
+    // pane's target path changes away from that directory, or on dispose.
+    {
+        let watcher = media_file_watcher.clone();
+        engine.register_handler(
+            "unwatchmediadir",
+            Box::new(move |data, _ctx| {
+                let watcher = watcher.clone();
+                Box::pin(async move {
+                    #[derive(serde::Deserialize)]
+                    struct Cmd { path: String, block_id: String }
+                    let cmd: Cmd = serde_json::from_value(data)
+                        .map_err(|e| format!("unwatchmediadir: {e}"))?;
+                    if let Some(w) = watcher {
+                        let expanded = expand_home_dir_safe(&cmd.path);
+                        w.unwatch_directory(expanded.as_path(), &cmd.block_id);
                     }
                     Ok(None)
                 })
