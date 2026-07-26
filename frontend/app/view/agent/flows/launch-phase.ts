@@ -26,16 +26,20 @@ export const LOGIN_LINK_CAPTURE_LABEL_MS = 15_000;
 export type LaunchPhase =
     | { kind: "resolving-cli" }
     | { kind: "checking-auth" }
-    /** Auth check failed and this agent has NEVER resolved its CLI before
-     *  (`blockData?.meta?.["cmd"]` unset) — its very first login, not a
-     *  lapsed one. Kept distinct from `auth-expired` so the conversation
+    /** Auth check failed and no real account link exists yet for this
+     *  agent+provider (`ListAgentIdentitiesCommand` returns nothing) — its
+     *  very first login, not a lapsed one. `blockData?.meta?.["cmd"]` was an
+     *  earlier, broken attempt at this signal: agent-model.ts's launchAgent()
+     *  sets it unconditionally at agent-creation time, before any login ever
+     *  happens, so it was true on every genuine first-ever login too (reagent
+     *  P1 on PR #2304). Kept distinct from `auth-expired` so the conversation
      *  notification never wrongly implies something broke. See
      *  docs/specs/SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26.md §8 Q6. */
     | { kind: "first-login" }
-    /** Auth check failed but this agent HAS resolved its CLI before — a
-     *  previously-working credential has gone stale. This is the case the
-     *  notification needs to actually warn about before a browser/terminal
-     *  pops open with no explanation. */
+    /** Auth check failed but a real account link already exists for this
+     *  agent+provider — a previously-working credential has gone stale. This
+     *  is the case the notification needs to actually warn about before a
+     *  browser/terminal pops open with no explanation. */
     | { kind: "auth-expired" }
     /** Tier 1's PTY/pipe URL-capture attempt — only reachable for providers
      *  where `headlessLoginUrlUnsupported` is NOT set (Codex/Gemini/OpenClaw).
