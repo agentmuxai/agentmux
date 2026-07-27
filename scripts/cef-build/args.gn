@@ -26,6 +26,33 @@ use_qt5=false
 use_qt6=false
 use_sysroot=false
 
+# --- proprietary codec support (added 2026-07-26): wide file-type coverage ---
+# See docs/specs/SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md and
+# docs/reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md for the root
+# cause (MP4/MOV, and formats needing these below, failed to play anywhere
+# in the app — DEMUXER_ERROR_NO_SUPPORTED_STREAMS — because no CEF build in
+# this pipeline ever enabled these).
+#
+# proprietary_codecs + ffmpeg_branding="Chrome" is the core gate: H.264,
+# AAC, MP3, MP4 demuxing. enable_hevc_parser_and_hw_decoder is already
+# true by default here (proprietary_codecs && is_linux, per Chromium's own
+# media/media_options.gni) — set explicitly anyway so the file is
+# self-describing rather than relying on an unstated default.
+# enable_platform_ac3_eac3_audio and enable_platform_dolby_vision default
+# to FALSE on desktop Linux (their defaults only cover Cast devices/tvOS/
+# — Dolby Vision defaults true on Windows only) — both need the explicit
+# override below to get AC3/EAC3 (common in MP4/MKV rips) and Dolby Vision
+# HDR video working here too.
+#
+# Widevine (enable_widevine=true below, pre-existing) is the same class of
+# licensed/gated component — this isn't a new kind of decision for this
+# build, just a new instance of one already made.
+proprietary_codecs=true
+ffmpeg_branding="Chrome"
+enable_hevc_parser_and_hw_decoder=true
+enable_platform_ac3_eac3_audio=true
+enable_platform_dolby_vision=true
+
 # --- size reduction (added 2026-06-14): official-build optimizations ---
 # is_official_build=true is THE size lever — it enables thin-LTO,
 # identical-code-folding, and full optimization, roughly halving libcef.so

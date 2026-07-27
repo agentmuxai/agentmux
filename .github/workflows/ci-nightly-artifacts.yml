@@ -20,6 +20,8 @@ jobs:
   windows:
     name: Windows portable + installer
     runs-on: windows-latest
+    env:
+      CEF_RUNTIME_DIR_WINDOWS: ${{ github.workspace }}/cef-runtime-windows
     steps:
       - uses: actions/checkout@v4
 
@@ -37,6 +39,47 @@ jobs:
         run: choco install ninja go-task innosetup -y
 
       - uses: Swatinem/rust-cache@v2
+
+      # Codec-enabled CEF runtime — same pattern as the linux job's patched
+      # libcef.so provisioning below, adapted for Windows (libcef.dll, .zip,
+      # AGENTMUX_CEF_RUNTIME_DIR_WINDOWS). See
+      # docs/specs/SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md.
+      - name: Resolve codec-enabled CEF runtime tag
+        id: cef
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.CEF_RUNTIME_TOKEN }}
+        run: |
+          TAG=$(gh release list --repo agentmuxai/cef --limit 30 \
+                  --json tagName --jq '[.[].tagName | select(startswith("cef-windows-x86_64-"))][0]')
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Cache codec-enabled CEF runtime
+        id: cef-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CEF_RUNTIME_DIR_WINDOWS }}
+          key: cef-runtime-windows-${{ steps.cef.outputs.tag }}
+
+      - name: Download codec-enabled CEF runtime
+        if: steps.cef-cache.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.CEF_RUNTIME_TOKEN }}
+        run: |
+          mkdir -p /tmp/cef-extract "$CEF_RUNTIME_DIR_WINDOWS"
+          gh release download "${{ steps.cef.outputs.tag }}" \
+            --repo agentmuxai/cef --pattern "*.zip" \
+            --dir /tmp/cef-extract --clobber
+          unzip -q /tmp/cef-extract/*.zip -d /tmp/cef-extract/unpacked
+          LIBCEF=$(find /tmp/cef-extract/unpacked -name "libcef.dll" | head -1)
+          if [ -z "$LIBCEF" ]; then echo "ERROR: libcef.dll not found in zip"; exit 1; fi
+          cp -r "$(dirname "$LIBCEF")/." "$CEF_RUNTIME_DIR_WINDOWS/"
+          rm -rf /tmp/cef-extract
+
+      - name: Set AGENTMUX_CEF_RUNTIME_DIR_WINDOWS
+        shell: bash
+        run: echo "AGENTMUX_CEF_RUNTIME_DIR_WINDOWS=$CEF_RUNTIME_DIR_WINDOWS" >> "$GITHUB_ENV"
 
       # Full build + assemble portable. Outputs:
       #   artifacts/agentmux-<LABEL>-x64-portable/   ← unpacked tree

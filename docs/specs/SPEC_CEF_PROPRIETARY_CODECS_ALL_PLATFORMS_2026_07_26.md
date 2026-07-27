@@ -108,13 +108,41 @@ works there via Win32).
 
 ## Plan
 
-### 1. GN args (Linux, macOS — small changes to existing files)
+### 1. GN args — expanded for wide file-type coverage, not just H.264/AAC
 
-Add to `scripts/cef-build/args.gn` and `scripts/cef-build/args-darwin.gn`:
+Confirmed directly against Chromium's own `media/media_options.gni`
+source (the authoritative declaration site, not a community guide) that
+`proprietary_codecs=true` alone doesn't turn everything on for a desktop
+build:
+
+| Flag | Default when `proprietary_codecs=true` | Needed here? |
+|---|---|---|
+| `enable_hevc_parser_and_hw_decoder` (H.265/HEVC) | `... \|\| is_win \|\| is_apple \|\| is_android \|\| is_linux` — **already true on all 3 of our platforms** | Set explicitly anyway, for documentation/clarity — costs nothing, makes the args file self-describing rather than relying on an unstated default |
+| `enable_platform_ac3_eac3_audio` (Dolby Digital/Plus audio — common in MP4/MKV rips) | `... \|\| is_cast_media_device \|\| (is_ios && tvos)` — **false on desktop Win/Mac/Linux by default** | **Yes, explicit `true` required** — this is exactly the kind of gap that would otherwise silently limit format coverage |
+| `enable_platform_dolby_vision` (HDR video profile; requires HEVC) | `... \|\| is_cast_media_device \|\| is_win` — true by default on Windows only | **Yes, explicit `true`** on macOS/Linux too, for parity across all three platforms' args files |
+| `media_use_openh264` (H.264 *encoding*, not playback) | `true` by default once proprietary | No change needed — already on |
+
+Open/unencumbered codecs (VP8/VP9/AV1, Opus/Vorbis/FLAC, Theora, WAV/PCM)
+need no flags at all — always compiled in regardless of
+`proprietary_codecs`. MP3 is bundled under the `proprietary_codecs` gate
+itself (Chromium's own arg description: *"Enables proprietary codecs and
+demuxers; e.g. H264, AAC, MP3, and MP4"*), no separate flag.
+
+**Not included, deliberately:** DTS, MPEG-H, and other codecs with no
+open Chromium implementation at all — no GN flag unlocks these; Chromium
+simply doesn't have a decoder for them, licensed or otherwise. "Wide
+coverage" here means everything Chromium's own media stack is *capable*
+of, not literally every codec that exists.
+
+Add to `scripts/cef-build/args.gn`, `scripts/cef-build/args-darwin.gn`,
+and the new `scripts/cef-build/args-windows.gn` (§2 below):
 
 ```
 proprietary_codecs=true
 ffmpeg_branding="Chrome"
+enable_hevc_parser_and_hw_decoder=true
+enable_platform_ac3_eac3_audio=true
+enable_platform_dolby_vision=true
 ```
 
 Both files already carry `enable_widevine=true` — a precedent for
