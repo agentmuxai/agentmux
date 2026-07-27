@@ -331,6 +331,12 @@ pub const COMMAND_SKILL_UNBIND: &str = "skill.unbind";
 pub const COMMAND_SKILL_CATALOG_LIST: &str = "skill.catalog.list";
 pub const COMMAND_SKILL_CATALOG_UPSERT: &str = "skill.catalog.upsert";
 pub const COMMAND_SKILL_CATALOG_DELETE: &str = "skill.catalog.delete";
+// skill.bind is check_s1-gated (agent binds a skill to itself over its own
+// authenticated connection) — the Armory dashboard's WebSocket never
+// authenticates as an agent, so it can never satisfy that gate. This is the
+// catalog-tier sibling the Armory's "Bind to agent" action actually calls.
+// See docs/reports/REPORT_ARMORY_SKILLS_MARKDOWN_AND_BIND_BUG_2026_07_27.md.
+pub const COMMAND_SKILL_CATALOG_BIND: &str = "skill.catalog.bind";
 
 // App API — v1 standalone MCP Server primitives
 pub const COMMAND_MCP_LIST: &str = "mcp.list";
