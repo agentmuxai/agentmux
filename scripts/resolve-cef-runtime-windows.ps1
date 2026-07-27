@@ -46,13 +46,21 @@ WARNING: resolved libcef.dll to the cef-dll-sys cargo cache at $Dir.
          (b) set `$env:AGENTMUX_CEF_RUNTIME_DIR_WINDOWS = "\path\to\your\Release_GN_x64"`.
 "@ -Category NotSpecified -ErrorAction Continue
     }
-    Write-Output $Dir
     return $true
 }
+
+# NOTE: Test-CefDir returns a plain boolean -- it does NOT Write-Output the
+# resolved path itself. Calling a function inside an `if (...)` expression
+# in PowerShell captures its entire output stream into the boolean test
+# value instead of letting it flow to the console, so a Write-Output inside
+# the helper would be silently swallowed on every successful call. Each
+# call site below prints the path itself, after the `if` has already
+# consumed the boolean result.
 
 # 1. Explicit override -- strict, same reasoning as the Linux/macOS resolvers.
 if ($env:AGENTMUX_CEF_RUNTIME_DIR_WINDOWS) {
     if (Test-CefDir -Dir $env:AGENTMUX_CEF_RUNTIME_DIR_WINDOWS -Kind "override") {
+        Write-Output $env:AGENTMUX_CEF_RUNTIME_DIR_WINDOWS
         exit 0
     }
     Write-Error @"
@@ -68,6 +76,7 @@ ERROR: AGENTMUX_CEF_RUNTIME_DIR_WINDOWS=$($env:AGENTMUX_CEF_RUNTIME_DIR_WINDOWS)
 # 2. Standard cef-build layout under $HOME.
 $CefBuildDir = Join-Path $HOME "cef-build\chromium_git\chromium\src\out\Release_GN_x64"
 if (Test-CefDir -Dir $CefBuildDir -Kind "cef-build") {
+    Write-Output $CefBuildDir
     exit 0
 }
 
@@ -75,6 +84,7 @@ if (Test-CefDir -Dir $CefBuildDir -Kind "cef-build") {
 $cargoCandidates = Get-ChildItem -Path (Join-Path $RepoRoot "target") -Recurse -Directory -Filter "cef_windows_x86_64" -Depth 6 -ErrorAction SilentlyContinue
 foreach ($c in $cargoCandidates) {
     if (Test-CefDir -Dir $c.FullName -Kind "cargo-cache") {
+        Write-Output $c.FullName
         exit 0
     }
 }
