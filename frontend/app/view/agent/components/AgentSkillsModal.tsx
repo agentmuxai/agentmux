@@ -12,6 +12,7 @@
  */
 
 import { onCleanup, For, Show, type JSX } from "solid-js";
+import { Markdown } from "@/app/element/markdown";
 import { PrimitiveListDetail } from "@/app/element/primitive-list-detail";
 import { openOrFocusPaneByView } from "@/app/store/global";
 import { AgentSkillModel } from "../agent-skill-model";
@@ -113,7 +114,14 @@ export const AgentSkillsModal = (props: AgentSkillsModalProps): JSX.Element => {
                                             <pre class="agent-primitive-modal-field-value">{skill().trigger}</pre>
                                         </Show>
                                         <span class="agent-primitive-modal-field-label">Content</span>
-                                        <pre class="agent-primitive-modal-field-value">{skill().content || "(none)"}</pre>
+                                        <Show
+                                            when={skill().content}
+                                            fallback={<pre class="agent-primitive-modal-field-value">(none)</pre>}
+                                        >
+                                            <div class="agent-primitive-modal-field-value agent-primitive-modal-field-value--markdown">
+                                                <Markdown text={skill().content} scrollable={false} />
+                                            </div>
+                                        </Show>
                                         <div class="agent-primitive-modal-actions">
                                             <Show
                                                 when={!skill().is_global}

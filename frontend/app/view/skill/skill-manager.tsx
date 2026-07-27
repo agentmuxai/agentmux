@@ -10,6 +10,7 @@
  */
 
 import { onCleanup, For, Show, type JSX } from "solid-js";
+import { Markdown } from "@/app/element/markdown";
 import { PrimitiveListDetail } from "@/app/element/primitive-list-detail";
 import { SkillCatalogModel } from "./skill-model";
 import "../agent/components/AgentPrimitiveModal.scss";
@@ -81,7 +82,14 @@ export const SkillManager = (): JSX.Element => {
                                             <pre class="agent-primitive-modal-field-value">{skill().trigger}</pre>
                                         </Show>
                                         <span class="agent-primitive-modal-field-label">Content</span>
-                                        <pre class="agent-primitive-modal-field-value">{skill().content || "(none)"}</pre>
+                                        <Show
+                                            when={skill().content}
+                                            fallback={<pre class="agent-primitive-modal-field-value">(none)</pre>}
+                                        >
+                                            <div class="agent-primitive-modal-field-value agent-primitive-modal-field-value--markdown">
+                                                <Markdown text={skill().content} scrollable={false} />
+                                            </div>
+                                        </Show>
                                         <span class="agent-primitive-modal-field-label">Bind to agent</span>
                                         <div class="agent-primitive-modal-bind-row">
                                             <select

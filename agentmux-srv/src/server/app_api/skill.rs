@@ -20,6 +20,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_skill_catalog_list(engine, state);
     register_skill_catalog_upsert(engine, state);
     register_skill_catalog_delete(engine, state);
+    register_skill_catalog_bind(engine, state);
 }
 
 fn register_skill_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -311,6 +312,51 @@ fn register_skill_catalog_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     scopes: vec![], sender: String::new(), persist: 0, data: None,
                 });
                 Ok(Some(serde_json::to_value(&skill).map_err(|e| e.to_string())?))
+            })
+        }),
+    );
+}
+
+// Catalog-tier sibling of register_skill_bind (above) — same DB write and
+// "only global skills may be bound" safety check, but no check_s1: the
+// Armory's WebSocket never authenticates as an agent (see this file's
+// module doc comment), so a check_s1-gated bind can never be satisfied from
+// that caller. skill.bind itself is left untouched — it may still be the
+// intended surface for an agent binding a skill to itself over its own
+// authenticated connection, and loosening its gate would silently widen
+// what any authenticated agent connection can do (bind arbitrary skills to
+// *other* agent ids), which nobody asked for.
+// See docs/reports/REPORT_ARMORY_SKILLS_MARKDOWN_AND_BIND_BUG_2026_07_27.md §2.4.
+fn register_skill_catalog_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let wstore = state.wstore.clone();
+    engine.register_handler(
+        COMMAND_SKILL_CATALOG_BIND,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            Box::pin(async move {
+                #[derive(serde::Deserialize)]
+                struct Req { agent_id: String, skill_id: String }
+                let req: Req = serde_json::from_value(data)
+                    .map_err(|e| format!("skill.catalog.bind: {e}"))?;
+                // Only global skills (or ones already bound) may be bound, so the
+                // catalog surface can't be used to bootstrap read access to
+                // another agent's private skill — same rule as skill.bind.
+                match wstore.skill_get(&req.skill_id)
+                    .map_err(|e| format!("skill.catalog.bind: {e}"))?
+                {
+                    None => return Err("skill.catalog.bind: skill not found".to_string()),
+                    Some(s) if !s.is_global => {
+                        if !wstore.skill_is_bound_to(&req.agent_id, &req.skill_id)
+                            .map_err(|e| format!("skill.catalog.bind: {e}"))?
+                        {
+                            return Err("FORBIDDEN: can only bind global skills".to_string());
+                        }
+                    }
+                    Some(_) => {}
+                }
+                wstore.skill_bind(&req.agent_id, &req.skill_id)
+                    .map_err(|e| format!("skill.catalog.bind: {e}"))?;
+                Ok(Some(json!({ "bound": true })))
             })
         }),
     );

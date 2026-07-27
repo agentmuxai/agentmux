@@ -54,6 +54,22 @@ export const ModalLayer: Component<ModalLayerProps> = (props) => {
         if (!submitting()) setCurrent(null);
     };
 
+    // Pure browse/view modals have no in-flight submit or form input a
+    // backdrop click could destroy, unlike the form-like kinds this guard
+    // exists for (launch/install/create-from-template/agent-prereqs/
+    // add-account/new-memory) — so clicking outside should just close
+    // them, like any other dismissible overlay.
+    //
+    // "agent-setup" is the per-agent Accounts/Memories/MCP Servers/Skills
+    // modal — renamed to "agent-stash" by the not-yet-merged
+    // agent3/agent-armory-rename-stash branch (PR #2314); update this key
+    // when that lands.
+    const BACKDROP_DISMISSIBLE_KINDS = new Set<ModalLayerRequest["kind"]>(["agent-setup"]);
+    const closeOnBackdropClick = createMemo(() => {
+        const kind = current()?.kind;
+        return kind != null && BACKDROP_DISMISSIBLE_KINDS.has(kind);
+    });
+
     const api: ModalLayerApi = {
         open: (req) => { setSubmitting(false); setCurrent(req); },
         replace: (next) => {
@@ -110,7 +126,7 @@ export const ModalLayer: Component<ModalLayerProps> = (props) => {
                         open={current() != null}
                         scope={props.scope}
                         onClose={safeClose}
-                        closeOnBackdropClick={false}
+                        closeOnBackdropClick={closeOnBackdropClick()}
                         size="fit"
                         ariaLabel={modalLabel()}
                     >
