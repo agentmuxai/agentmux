@@ -858,6 +858,26 @@ mod macos {
     /// thread via the IPC handler).
     static ACTIVE_HOOK_RUNLOOP: Mutex<Option<CFRunLoop>> = Mutex::new(None);
 
+    /// Serializes `start_tab_drag_tracking` and `stop_active_hook_session`
+    /// against each other — distinct from `ACTIVE_HOOK_RUNLOOP` above,
+    /// which only guards concurrent *access* to the state, not the
+    /// *ordering* of start-vs-stop. Without this, `start_tab_drag_tracking`
+    /// (IPC-dispatched via `spawn_blocking`, taking real time to spawn a
+    /// thread and complete `CGEventTapCreate`) and `stop_active_hook_session`
+    /// (was dispatched synchronously, so much faster) had no ordering
+    /// guarantee relative to each other: a fast drag-then-immediate-release
+    /// could have stop's fast path run — and no-op, since
+    /// `ACTIVE_HOOK_RUNLOOP` isn't populated yet — before start's hook
+    /// thread finished installing, leaving a zombie hook alive to
+    /// misattribute a later, unrelated mouseup/Escape to this drag
+    /// (reagent PR #2310 P1, found by Codex). `start_tab_drag_tracking`
+    /// holds this for its entire critical section (session-takeover stop +
+    /// spawn + ready-wait); `stop_active_hook_session` blocks on it too, so
+    /// a stop that arrives mid-install simply waits for the install to
+    /// finish (and then correctly stops the now-installed hook) instead of
+    /// racing ahead of it.
+    static HOOK_LIFECYCLE_LOCK: Mutex<()> = Mutex::new(());
+
     /// windowNumber → AgentMux window label, populated on the CEF UI
     /// thread (`app/mod.rs`'s `on_window_created`/`on_window_destroyed`)
     /// and read-only from the hook thread. `kCGWindowNumber` in a
@@ -952,16 +972,29 @@ mod macos {
         accessibility_trusted_prompting()
     }
 
-    /// Stop the active hook session, if any. Idempotent — mirrors the
-    /// Windows function of the same name. Called from the session-
-    /// takeover path in `start_tab_drag_tracking` and from the
-    /// frontend's dragend belt-and-suspenders `stop_tab_drag_tracking`
-    /// IPC call.
-    pub fn stop_active_hook_session() {
+    /// Does the actual stop, without acquiring `HOOK_LIFECYCLE_LOCK` itself
+    /// — callers that already hold it (namely `start_tab_drag_tracking`'s
+    /// session-takeover step) call this directly to avoid deadlocking on
+    /// their own lock. The public `stop_active_hook_session` below is a
+    /// thin wrapper that acquires the lock first.
+    fn stop_active_hook_session_locked() {
         let rl = { ACTIVE_HOOK_RUNLOOP.lock().map(|mut g| g.take()).unwrap_or(None) };
         if let Some(rl) = rl {
             rl.stop();
         }
+    }
+
+    /// Stop the active hook session, if any. Idempotent — mirrors the
+    /// Windows function of the same name. Called from the frontend's
+    /// dragend belt-and-suspenders `stop_tab_drag_tracking` IPC call.
+    /// Blocks on `HOOK_LIFECYCLE_LOCK` — see that static's doc comment for
+    /// why this matters (reagent PR #2310 P1): if a `start_tab_drag_tracking`
+    /// is mid-install (holding the lock), this waits for it to finish
+    /// rather than racing ahead and no-oping against not-yet-populated
+    /// state.
+    pub fn stop_active_hook_session() {
+        let _guard = HOOK_LIFECYCLE_LOCK.lock();
+        stop_active_hook_session_locked();
     }
 
     /// Install the CGEventTap for an ordinary in-strip tab drag (cross-
@@ -983,8 +1016,16 @@ mod macos {
         source_ws_id: String,
         is_last_tab: bool,
     ) -> Result<(), String> {
+        // Held for this entire function — see HOOK_LIFECYCLE_LOCK's doc
+        // comment (reagent PR #2310 P1). Uses the _locked variant for the
+        // session-takeover stop below to avoid deadlocking on this same
+        // lock; stop_active_hook_session (the public one, called from the
+        // separate stop_tab_drag_tracking IPC command) acquires it itself
+        // and will correctly block here until this function returns.
+        let _lifecycle_guard = HOOK_LIFECYCLE_LOCK.lock();
+
         // One session at a time, same as Windows.
-        stop_active_hook_session();
+        stop_active_hook_session_locked();
 
         if !accessibility_trusted() {
             tracing::warn!(
@@ -1031,6 +1072,15 @@ mod macos {
                     CGEventTapOptions::ListenOnly,
                     vec![
                         CGEventType::MouseMoved,
+                        // Quartz reports pointer motion as LeftMouseDragged,
+                        // not MouseMoved, whenever the left button is held —
+                        // i.e. for the ENTIRE duration of a tab drag. Without
+                        // this, handle_mouse_move never fired during the
+                        // drag itself: only the final LeftMouseUp hit-test
+                        // worked, so the live hover indicator this hook is
+                        // supposed to drive never actually tracked the
+                        // cursor (found by Codex, reagent PR #2310 P1).
+                        CGEventType::LeftMouseDragged,
                         CGEventType::LeftMouseUp,
                         CGEventType::KeyDown,
                     ],
@@ -1108,7 +1158,10 @@ mod macos {
 
     fn handle_tap_event(etype: CGEventType, event: &CGEvent) {
         match etype {
-            CGEventType::MouseMoved => handle_mouse_move(event),
+            // MouseMoved fires when no button is held; LeftMouseDragged
+            // fires when the left button IS held — i.e. for a tab drag's
+            // entire duration. Both drive the same hover hit-test.
+            CGEventType::MouseMoved | CGEventType::LeftMouseDragged => handle_mouse_move(event),
             CGEventType::LeftMouseUp => {
                 handle_button_up(event);
                 CFRunLoop::get_current().stop();
