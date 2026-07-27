@@ -103,4 +103,16 @@ export const McpApi = {
     ): Promise<McpProbeResult> {
         return client.rpcCall("mcp.catalog.probe", data, opts);
     },
+
+    // Catalog-tier sibling of McpBindCommand — no agent_id/check_s1 gate,
+    // since the Armory's connection is never agent-authenticated and can
+    // never satisfy McpBindCommand's check_s1. See
+    // docs/reports/REPORT_ARMORY_SKILLS_MARKDOWN_AND_BIND_BUG_2026_07_27.md.
+    McpCatalogBindCommand(
+        client: RpcClient,
+        data: { agent_id: string; mcp_id: string },
+        opts?: RpcOpts,
+    ): Promise<{ bound: boolean }> {
+        return client.rpcCall("mcp.catalog.bind", data, opts);
+    },
 };

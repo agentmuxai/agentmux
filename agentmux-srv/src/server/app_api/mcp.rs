@@ -22,6 +22,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_mcp_catalog_upsert(engine, state);
     register_mcp_catalog_delete(engine, state);
     register_mcp_catalog_probe(engine, state);
+    register_mcp_catalog_bind(engine, state);
 }
 
 fn register_mcp_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -359,6 +360,52 @@ fn register_mcp_catalog_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     scopes: vec![], sender: String::new(), persist: 0, data: None,
                 });
                 Ok(Some(serde_json::to_value(&server).map_err(|e| e.to_string())?))
+            })
+        }),
+    );
+}
+
+// Catalog-tier sibling of register_mcp_bind (above) — same DB write and
+// "only global servers may be bound" safety check, but no check_s1: the
+// Armory's WebSocket never authenticates as an agent (see this file's
+// module doc comment), so a check_s1-gated bind can never be satisfied from
+// that caller. mcp.bind itself is left untouched — it may still be the
+// intended surface for an agent binding a server to itself over its own
+// authenticated connection, and loosening its gate would silently widen
+// what any authenticated agent connection can do (bind arbitrary servers to
+// *other* agent ids), which nobody asked for.
+// See docs/reports/REPORT_ARMORY_SKILLS_MARKDOWN_AND_BIND_BUG_2026_07_27.md.
+fn register_mcp_catalog_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let wstore = state.wstore.clone();
+    engine.register_handler(
+        COMMAND_MCP_CATALOG_BIND,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            Box::pin(async move {
+                #[derive(serde::Deserialize)]
+                struct Req { agent_id: String, mcp_id: String }
+                let req: Req = serde_json::from_value(data)
+                    .map_err(|e| format!("mcp.catalog.bind: {e}"))?;
+                // Only global servers (or ones already bound) may be bound, so
+                // the catalog surface can't be used to bootstrap read access
+                // to another agent's private server config — same rule as
+                // mcp.bind.
+                match wstore.mcp_server_get(&req.mcp_id)
+                    .map_err(|e| format!("mcp.catalog.bind: {e}"))?
+                {
+                    None => return Err("mcp.catalog.bind: MCP server not found".to_string()),
+                    Some(s) if !s.is_global => {
+                        if !wstore.mcp_server_is_bound_to(&req.agent_id, &req.mcp_id)
+                            .map_err(|e| format!("mcp.catalog.bind: {e}"))?
+                        {
+                            return Err("FORBIDDEN: can only bind global MCP servers".to_string());
+                        }
+                    }
+                    Some(_) => {}
+                }
+                wstore.mcp_server_bind(&req.agent_id, &req.mcp_id)
+                    .map_err(|e| format!("mcp.catalog.bind: {e}"))?;
+                Ok(Some(json!({ "bound": true })))
             })
         }),
     );
