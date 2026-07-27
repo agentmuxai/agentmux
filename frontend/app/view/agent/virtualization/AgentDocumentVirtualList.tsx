@@ -430,17 +430,30 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         }
     });
 
-    // Re-apply sticky-bottom on hidden → visible. An inactive tab is
-    // display:none (0×0), so the nodes()-driven scroll above is a no-op
-    // while hidden and nothing re-issues it on reactivation. Watch the
-    // container's clientHeight 0 → non-zero transition; re-scroll only
-    // when already sticky (never engages stick, so a user who scrolled
-    // up stays put).
+    // Re-apply sticky-bottom on ANY clientHeight change to this scroll
+    // container — not just hidden → visible. Originally only handled the
+    // inactive-tab case (display:none is 0×0, so the nodes()-driven scroll
+    // above is a no-op while hidden and nothing re-issues it on
+    // reactivation). Broadened per REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md's
+    // scroll-follow-drift investigation: a *sibling* below this scroll
+    // region resizing (the retry bar, AgentDecisionPanel, AgentQuestionPanel,
+    // or PendingMessagesPanel appearing/growing mid-turn — all normal-flow,
+    // flex-shrink:0 rows per SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md
+    // §3.3's own "deferred as rare/transient" admission) shrinks THIS
+    // container's clientHeight via pure CSS reflow — no scroll event fires
+    // (it's a resize, not a scroll), and neither of the pin effect's tracked
+    // deps (nodes().length, layoutView().totalSize, workingRowHeight) change
+    // either, so `stickToBottom` stays silently true while the view falls
+    // short of the new, smaller max scroll position. Rather than adding a
+    // tracked height signal per interposing panel (the whack-a-mole pattern
+    // the 07-24 fix already had to extend once), just re-pin on every resize
+    // this observer reports — idempotent when already at true bottom, and
+    // still gated on `stickToBottom()` so a user who deliberately scrolled
+    // away is never fought.
     onMount(() => {
-        let wasHidden = scrollRef.clientHeight === 0;
         const ro = new ResizeObserver(() => {
             const h = scrollRef.clientHeight;
-            if (h > 0 && wasHidden && props.viewState.stickToBottom()) {
+            if (h > 0 && props.viewState.stickToBottom()) {
                 scrollRef.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: "auto" });
             }
             // Phase 3: the scroll container resizing changes the viewport the
@@ -454,7 +467,6 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                     viewportPx: h,
                 });
             }
-            wasHidden = h === 0;
         });
         ro.observe(scrollRef);
         onCleanup(() => ro.disconnect());

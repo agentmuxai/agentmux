@@ -300,6 +300,58 @@ impl PersistentSubprocessController {
         }
     }
 
+    /// Periodic (low-frequency) republish of the current controllerstatus
+    /// while a turn is active — a self-healing backstop independent of
+    /// `publish_controller_status`'s `persist: 1` (which only helps a
+    /// reconnecting subscriber) and the frontend's focus-triggered reconcile
+    /// (which only fires on a background→foreground transition). If a single
+    /// live push is missed for some other reason (e.g. a throttled/backgrounded
+    /// renderer coalescing WS messages) while the window stays foregrounded
+    /// and connected the whole time, nothing else corrects it until the turn
+    /// actually ends. This shrinks that window from "forever" to at most one
+    /// heartbeat interval. `HEARTBEAT_SECS` is well below the frontend's own
+    /// `STUCK_THRESHOLD_MS` (45s, diagnostic-only) and `LIVENESS_RECOVERY_MS`
+    /// (180s, force-recovery) so a missed push self-heals long before either
+    /// of those fire. See REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md
+    /// §4 item 5. Duplicates `get_status_snapshot`'s field construction
+    /// rather than calling it, since the spawned task only holds cloned
+    /// `Arc`s, not `&self` — matches the existing precedent noted on
+    /// `core::spawn_health_watchdog` ("duplicated verbatim... before this
+    /// extraction"); worth factoring out if a second controller type needs
+    /// the same heartbeat.
+    fn spawn_status_heartbeat(&self) {
+        const HEARTBEAT_SECS: u64 = 20;
+        let inner = Arc::clone(&self.inner);
+        let block_id = self.block_id.clone();
+        let broker = self.broker.clone();
+        let health_monitor = Arc::clone(&self.health_monitor);
+        tokio::spawn(async move {
+            let Some(broker) = broker else { return };
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(HEARTBEAT_SECS));
+            interval.tick().await; // first tick is immediate; publish_status() already ran at turn start
+            loop {
+                interval.tick().await;
+                if !health_monitor.is_active_turn() {
+                    break;
+                }
+                let status = {
+                    let g = inner.lock().unwrap();
+                    BlockControllerRuntimeStatus {
+                        blockid: block_id.clone(),
+                        version: g.status_version,
+                        shellprocstatus: g.proc_status.clone(),
+                        shellprocconnname: "local".to_string(),
+                        shellprocexitcode: g.proc_exit_code,
+                        spawn_ts_ms: None,
+                        is_agent_pane: true,
+                        turn_active: health_monitor.is_active_turn(),
+                    }
+                };
+                super::publish_controller_status(&broker, &status);
+            }
+        });
+    }
+
     fn is_running(&self) -> bool {
         let inner = self.inner.lock().unwrap();
         inner.stdin_tx.is_some()
@@ -356,6 +408,7 @@ impl PersistentSubprocessController {
         let was_active = self.health_monitor.mark_turn_active_returning_was_active();
         if !was_active {
             core::spawn_health_watchdog(&self.health_monitor);
+            self.spawn_status_heartbeat();
         }
         // Publish the turn_active flip so the Swarm view's live
         // ControllerStatus subscription picks it up immediately instead of
@@ -412,6 +465,7 @@ impl PersistentSubprocessController {
         let was_active = self.health_monitor.mark_turn_active_returning_was_active();
         if !was_active {
             core::spawn_health_watchdog(&self.health_monitor);
+            self.spawn_status_heartbeat();
         }
         self.publish_status();
 
@@ -1031,6 +1085,7 @@ impl PersistentSubprocessController {
         // dies (120 s) without producing meaningful output, giving the
         // frontend enough signal to show a "not responding" warning.
         core::spawn_health_watchdog(&self.health_monitor);
+        self.spawn_status_heartbeat();
 
         // Spawn process waiter task
         let block_id_wait = self.block_id.clone();

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { writeText as clipboardWriteText } from "@/util/clipboard";
-import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, on, onCleanup, onMount, Show, type JSX } from "solid-js";
 import type { AgentViewModel } from "./agent-model";
 import { getProvider } from "./providers";
 import { createAgentAtoms } from "./state";
@@ -59,6 +59,8 @@ import { useAgentDropAttach } from "./hooks/useAgentDropAttach";
 import { useSnapshotPersistence } from "./hooks/useSnapshotPersistence";
 import { useAgentDecisions } from "./hooks/useAgentDecisions";
 import { useAgentQuestions } from "./hooks/useAgentQuestions";
+import { BlockService } from "@/app/store/services";
+import { makeWindowFocusSignal } from "@/app/window/window-focus";
 import { useAgentCloseConfirm } from "./hooks/useAgentCloseConfirm";
 import { handleAgentIdChange } from "@/app/view/term/termagent";
 import { DragOverlay } from "@/app/element/dragoverlay";
@@ -764,6 +766,38 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         });
     };
 
+    // Settled-grace invariant: `StreamFlushObserved` (reducer.ts) deliberately
+    // re-promotes Done.completed -> Streaming on any live flush, because the
+    // CLI's session_end fires after every model round, not just true turn
+    // end — a genuine multi-round tool continuation needs this path, so it
+    // can't simply be removed. But once the UI has shown a SETTLED "Worked"
+    // for SETTLE_GRACE_MS with no further activity, that re-promotion must
+    // never silently un-happen the checkmark the user already saw settle —
+    // post a visible notification instead so a later round is disclosed, not
+    // hidden. Purely additive: no reducer/TurnPhase changes, doesn't affect
+    // session-digest correctness. See
+    // docs/reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md §1.
+    const SETTLE_GRACE_MS = 500;
+    let settled = false;
+    let settleTimer: ReturnType<typeof setTimeout> | undefined;
+    createEffect(() => {
+        const phase = agentAtoms().turnPhaseAtom[0]();
+        clearTimeout(settleTimer);
+        if (phase.kind === "Done" && phase.outcome === "completed") {
+            settleTimer = setTimeout(() => {
+                settled = true;
+            }, SETTLE_GRACE_MS);
+        } else if (phase.kind === "Streaming") {
+            if (settled) {
+                postSystemNotification("Picked up more work — starting another round…", "info");
+            }
+            settled = false;
+        } else {
+            settled = false;
+        }
+    });
+    onCleanup(() => clearTimeout(settleTimer));
+
     const status = useAgentControllerStatus({
         blockId: model.blockId,
         provider,
@@ -846,6 +880,30 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         },
     });
 
+    // Focus/visibility-triggered reconcile — the mount-time GetControllerStatus
+    // (onControllerStatus above) is one-shot, and the live useControllerStatusEvents
+    // subscription only self-heals a missed turn-end if a LATER live event
+    // arrives. If the single turn-end push is missed (backgrounded window, a
+    // WPS reconnect gap, a pane remount that doesn't re-trigger the WPS
+    // persisted-event replay — see REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md
+    // §3/§4 item 5) nothing else corrects it until the *next* turn starts.
+    // Re-poll on every background→foreground transition so looking back at a
+    // pane always shows the true current state within one RPC round trip,
+    // independent of event-bus replay semantics. Skips the initial `true` at
+    // mount (already covered by the one-shot above) via `{ defer: true }`.
+    const windowFocused = makeWindowFocusSignal();
+    createEffect(on(windowFocused, (focused) => {
+        if (!focused) return;
+        void BlockService.GetControllerStatus(model.blockId)
+            .then((rts) => {
+                if (rts) reconcileTurnActive(!!rts.turn_active);
+            })
+            .catch(() => {
+                // Best-effort — the live subscription and next mount remain
+                // as fallbacks; nothing user-visible to report on failure.
+            });
+    }, { defer: true }));
+
     // Subscribe to Claude Code OSC window-title extractions and write them
     // to term:osc_title block metadata (free fallback signal — see
     // readActivitySummary()'s precedence in agent-model.ts).
@@ -923,6 +981,13 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         // Jekt direction detection on the live stream: FROM == this agent
         // → outgoing bubble (SPEC_JEKT_SECURITY_AND_VISIBILITY §3.2).
         agentName: agentName(),
+        // Re-engage message-list auto-scroll for a turn that starts from
+        // the queue-drain path — see usePendingMessageAcceptance's
+        // `onTurnStartFromQueue` doc comment. `scrollToBottomFn` is declared
+        // below (assigned once AgentDocumentView mounts); referencing it in
+        // this closure is safe regardless of declaration order since the
+        // closure only runs later, on a live `agent-message-accepted` event.
+        onTurnStartFromQueue: () => scrollToBottomFn?.(),
     });
 
     // Mutable ref to the scrollToBottom function exposed by
