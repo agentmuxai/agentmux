@@ -333,6 +333,29 @@ describe("agent-pane-state reducer", () => {
             expect(r.state.sessionStats).toBe(null);
             expect(r.state.sessionTotals).toBe(null);
         });
+
+        it("TurnStartFailed reverts turnPhase to Idle WITHOUT wiping accumulated sessionTotals — unlike TurnReset", () => {
+            // A transient send failure (no controller registered, spawn gate
+            // blocked, network rejection) on an agent that already has prior
+            // completed turns must not wipe the session's accumulated
+            // cost/token display — reagent/codex P2 on PR #2318.
+            const s0 = ready(100);
+            const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+            const s2 = update(s1, {
+                type: "TurnEnd",
+                stats: { input_tokens: 100, output_tokens: 50, cost_usd: 0.01 } as any,
+            }).state;
+            expect(s2.sessionTotals).not.toBeNull();
+
+            // A new, unrelated turn optimistically starts, then its own send fails.
+            const s3 = update(s2, { type: "TurnStart", at: 200 }).state;
+            const r = update(s3, { type: "TurnStartFailed" });
+
+            expect(r.state.turnPhase.kind).toBe("Idle");
+            expect(r.state.sessionTotals).toMatchObject({ input_tokens: 100, output_tokens: 50, cost_usd: 0.01 });
+            expect(r.state.lastEventMs).not.toBeNull();
+            expect(r.events).toEqual([{ type: "turn-start-failed" }]);
+        });
     });
 
     describe("Tool", () => {

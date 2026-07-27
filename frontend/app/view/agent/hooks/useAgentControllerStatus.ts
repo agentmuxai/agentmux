@@ -514,7 +514,22 @@ export function useAgentControllerStatus(
                         // queued to retry (or who didn't notice the retry) never saw ANY
                         // acknowledgement that the login actually succeeded.
                         opts.onLoginSuccess?.(authedEmail);
-                        if (retryAfterLogin) opts.onRecovered?.();
+                        if (retryAfterLogin) {
+                            opts.onRecovered?.();
+                        } else {
+                            // Mount-time "Log in" success on an agent that never
+                            // reached Phase 3 (no turn ever started — see
+                            // launch-flow.ts's needsLogin bail). onReadyFn only
+                            // ever fires from startLaunchFlow's own success
+                            // branch, so without this a first-time login via
+                            // this button left the agent running with no
+                            // startup sequence ever sent (no instructions,
+                            // identity, or context) — reagent/codex P1 on
+                            // PR #2318. onReadyFn self-guards on
+                            // `agent:sessionid` already being set, so this is a
+                            // safe no-op for anything but a genuine first login.
+                            opts.onReady?.();
+                        }
                     } else if (!loginCancelled) {
                         setAuthNotice(
                             "Opened a login page, but no login was detected within 5 minutes. " +
@@ -546,7 +561,14 @@ export function useAgentControllerStatus(
                         setAuthStatus("authenticated");
                         await forceControllerRefresh();
                         opts.onLoginSuccess?.(null);
-                        if (retryAfterLogin) opts.onRecovered?.();
+                        if (retryAfterLogin) {
+                            opts.onRecovered?.();
+                        } else {
+                            // See the identical "opened" case above — first-time
+                            // login via the mount-time "Log in" button never
+                            // otherwise triggers the startup sequence.
+                            opts.onReady?.();
+                        }
                     } else {
                         setAuthStatus("unauthenticated");
                         setAuthNotice(

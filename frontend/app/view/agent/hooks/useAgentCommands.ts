@@ -453,11 +453,18 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             // PendingMessageRejected only ever removed the ghost pending
             // row above, never touched turnPhase. Only revert when this
             // send is what started the turn — see initiatesTurn's doc
-            // comment. Mirrors the identical TurnReset already used for the
-            // bang-command / handled-slash-command "no real turn happened"
-            // paths above in sendMessage().
+            // comment.
+            //
+            // TurnStartFailed, NOT TurnReset: this used to reuse TurnReset
+            // (the bang-command / handled-slash-command "no real turn
+            // happened" paths above in sendMessage() still do), but
+            // TurnReset is a deliberate wholesale session wipe — it also
+            // clears sessionStats/sessionTotals/lastContextTokens. A
+            // transient send failure on an agent with prior completed turns
+            // must not wipe that accumulated history; TurnStartFailed
+            // touches only turnPhase. reagent/codex P2 on PR #2318.
             if (initiatesTurn) {
-                opts.model.dispatchPane({ type: "TurnReset" }, "system");
+                opts.model.dispatchPane({ type: "TurnStartFailed" }, "system");
             }
             return;
         }
