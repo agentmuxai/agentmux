@@ -1,5 +1,20 @@
 # AgentMux Version History
 
+## 0.54.5 — 2026-07-26
+
+- fix(tabs): hide the single tab pill until a 2nd tab exists, transparent strip background
+- fix(term): give .view-term an opaque background so the tab-strip row doesn't show the block frame's translucent tint
+- fix(term): drop await on init resync to stop N-pane spawn serialization (#121)
+- feat(agent): fix silent auto-scroll drops, extend message-list scrollbar past Working row, replace Host row with a compact tag
+- fix(agent): auto-clear error activity-dock rows after 15s, add landing/departure flash
+- feat(cef): add dev-only GPU memory trace commands for #2218 diagnostics
+- fix(agent): fix invalid Sass compound-selector syntax in RuntimeBadge, blocking dev server
+- fix(identity): oauth_config_dir secret_ref variant mismatched its own derived serde rename, breaking My Agents for every real account
+- feat(armory): add TouchDesigner to the MCP preload catalog
+- fix(auth): skip doomed headless URL-capture wait for Claude login, surface phase status + cancel
+- fix(window): restore exact secondary-window geometry after a full app restart
+
+
 ## 0.54.4 — 2026-07-23
 
 - fix: batch of small triaged issue fixes (#1397, #780, #859, #2155)
