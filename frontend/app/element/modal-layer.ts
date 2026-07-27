@@ -265,7 +265,7 @@ export interface BrowserAuthRequest {
 
 /**
  * Agent pane identity modal — formerly opened by the id-card icon in the
- * agent pane header. Superseded by agent-setup (the unified tabbed modal
+ * agent pane header. Superseded by agent-stash (the unified tabbed modal
  * now hosts this panel as the "Accounts" tab); kept for the dispatch case
  * and any future direct callers. Spec:
  * SPEC_AGENT_PANE_MEMORY_IDENTITY_MODALS_2026_06_19.md.
@@ -281,7 +281,7 @@ export interface AgentIdentityRequest {
 /**
  * Agent pane memory modal — formerly opened by the brain icon in the
  * agent pane header. Shows the native memory folder for the agent.
- * Superseded by agent-setup (the unified tabbed modal now hosts this
+ * Superseded by agent-stash (the unified tabbed modal now hosts this
  * panel as the "Memory" tab); kept for the dispatch case and any future
  * direct callers. Spec: SPEC_AGENT_PANE_MEMORY_IDENTITY_MODALS_2026_06_19.md.
  */
