@@ -287,8 +287,15 @@ interface LanPeer {
 }
 
 async function fetchLanPeers(): Promise<LanPeer[]> {
-    // /api/lan-instances is a public route (no auth required).
-    const resp = await fetch(getWebServerEndpoint() + "/api/lan-instances");
+    // /api/lan-instances sits in `authed_routes` (server/mod.rs) like every
+    // other HTTP route — the 2026-05-11 audit removed all unauthenticated
+    // localhost routes, which predates this section. The original "public
+    // route (no auth required)" comment here was wrong from the start, so
+    // this fetch 401'd from the day it shipped (visible as the LAN
+    // section's inline "GET /api/lan-instances → 401" error).
+    const resp = await fetch(getWebServerEndpoint() + "/api/lan-instances", {
+        headers: authedHeaders(),
+    });
     if (!resp.ok) {
         throw new Error(`warden: GET /api/lan-instances → ${resp.status}`);
     }
@@ -419,29 +426,37 @@ const SECTIONS: LayerSection[] = [
 ];
 
 function WardenView({ model: _model }: { model: WardenViewModel }): JSX.Element {
+    // .warden-container carries the container-query context; .warden-pane
+    // scrolls. Keeping those on separate elements avoids a scrollbar <->
+    // container-query resize feedback loop (observed live as ResizeObserver
+    // loop errors at pane creation) — see warden.scss's comment and
+    // docs/retro/retro-warden-pane-black-render-2026-07-27.md for why this
+    // was hygiene hardening, not the black-pane root cause.
     return (
-        <div class="warden-pane">
-            <header class="warden-header">
-                <span class="warden-title">Warden</span>
-                <span class="warden-subtitle">3-layer operator surface</span>
-            </header>
-            <div class="warden-sections">
-                <For each={SECTIONS}>
-                    {(section) => (
-                        <section
-                            class="warden-section"
-                            data-status={section.status}
-                            data-layer={section.key}
-                        >
-                            <header class="warden-section-header">
-                                <span class="warden-section-title">{section.title}</span>
-                                <span class="warden-section-summary">{section.summary}</span>
-                                <span class="warden-section-status">{section.status}</span>
-                            </header>
-                            <div class="warden-section-body">{section.render()}</div>
-                        </section>
-                    )}
-                </For>
+        <div class="warden-container">
+            <div class="warden-pane">
+                <header class="warden-header">
+                    <span class="warden-title">Warden</span>
+                    <span class="warden-subtitle">3-layer operator surface</span>
+                </header>
+                <div class="warden-sections">
+                    <For each={SECTIONS}>
+                        {(section) => (
+                            <section
+                                class="warden-section"
+                                data-status={section.status}
+                                data-layer={section.key}
+                            >
+                                <header class="warden-section-header">
+                                    <span class="warden-section-title">{section.title}</span>
+                                    <span class="warden-section-summary">{section.summary}</span>
+                                    <span class="warden-section-status">{section.status}</span>
+                                </header>
+                                <div class="warden-section-body">{section.render()}</div>
+                            </section>
+                        )}
+                    </For>
+                </div>
             </div>
         </div>
     );
