@@ -90,6 +90,11 @@ interface AgentComposerStripProps {
     contextTokens?: number | null;
     /** Provider's max context window size. undefined = unknown. */
     contextWindow?: number;
+    /** Durable logged-in/out state (useAgentControllerStatus's authStatus) —
+     *  rendered as a small red/green tag right of the context text. Hidden
+     *  entirely for "unknown" (before the first auth check resolves), so the
+     *  strip doesn't flash a wrong color for an instant on every mount. */
+    authStatus?: "authenticated" | "unauthenticated" | "unknown";
 
     // ── Inline model / effort controls ────────────────────────────
     /** Block id — needed for applyRuntimeChange. */
@@ -225,6 +230,23 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                         }
                     >
                         {ctxText()}
+                    </span>
+                </Show>
+                <Show when={props.authStatus === "authenticated" || props.authStatus === "unauthenticated"}>
+                    <span
+                        class="agent-composer-strip-auth"
+                        classList={{
+                            "agent-composer-strip-auth--ok": props.authStatus === "authenticated",
+                            "agent-composer-strip-auth--bad": props.authStatus === "unauthenticated",
+                        }}
+                        title={
+                            props.authStatus === "authenticated"
+                                ? "Signed in to this agent's provider"
+                                : "Not signed in — click Log in to continue"
+                        }
+                    >
+                        <span class="agent-composer-strip-auth-dot" aria-hidden="true" />
+                        {props.authStatus === "authenticated" ? "Logged in" : "Not logged in"}
                     </span>
                 </Show>
                 <button
