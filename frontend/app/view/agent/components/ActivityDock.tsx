@@ -73,6 +73,13 @@ export const ActivityDock = (props: ActivityDockProps): JSX.Element => {
     // continuous tick.
     const [toolPromotionNonce, setToolPromotionNonce] = createSignal(0);
     createEffect(() => {
+        // Read (subscribe to) the nonce itself so that when the scheduled
+        // timer below fires and bumps it, this effect re-runs and schedules
+        // the *next*-earliest pending promotion — without this, two running
+        // Bash calls at different promotion instants would only ever
+        // promote the earlier one (the effect ran once, scheduled once, and
+        // nothing re-triggered it once that single timer fired).
+        toolPromotionNonce();
         const at = nextToolPromotionAt(nodes(), Date.now());
         if (at == null) return;
         const timer = setTimeout(() => setToolPromotionNonce((n) => n + 1), Math.max(0, at - Date.now()) + 50);
