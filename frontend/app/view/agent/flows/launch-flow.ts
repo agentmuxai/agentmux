@@ -17,8 +17,10 @@
  *      spawns the login command via the CEF host (so the browser opens
  *      correctly on Windows), then polls with 2s cadence until authenticated,
  *      cancelled, or 5 minutes elapse.
- *   3. Controller registration — ControllerResync on the tab, read status, log
- *      "ready" or "done" depending on whether there's a prior turn.
+ *   3. Controller registration — ControllerResync on the tab, read status, post
+ *      a visible "Resumed…"/"Ready…" notification (or, if the resync itself
+ *      failed, an honest warning instead of a false all-clear — see
+ *      `resyncFailed` below) depending on whether there's a prior turn.
  *
  * The caller provides a log sink, a cancellation accessor, and callbacks for
  * two pieces of external state (`authUrl`, `loginWaiting`). All other state

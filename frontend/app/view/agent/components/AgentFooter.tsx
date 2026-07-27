@@ -76,11 +76,21 @@ interface AgentWorkingRowProps {
      *  waiting-for-login-completion) — AuthUrlBox has its own cancel button
      *  once a URL exists, but before that this is the only affordance. */
     onCancelLogin?: () => void;
+    /** True while AuthUrlBox is already showing its own Cancel button (a URL
+     *  was captured — reagent P2 on PR #2300: tier 1's "opened" outcome sets
+     *  launchPhase to "waiting-for-login-completion" too, so without this the
+     *  row rendered a second, redundant Cancel button alongside AuthUrlBox's. */
+    hasAuthUrl?: boolean;
 }
 
+// reagent P2 on PR #2304: "waiting-for-login-link" (tier 1's own up-to-15s
+// countdown) was missing here, so that phase's real timed wait had no cancel
+// affordance anywhere — AuthUrlBox can't show one yet (no URL captured), and
+// the row's own button was withheld for exactly this phase.
 const CANCELLABLE_LAUNCH_PHASES = new Set([
     "first-login",
     "auth-expired",
+    "waiting-for-login-link",
     "opening-login-terminal",
     "waiting-for-login-completion",
 ]);
@@ -226,7 +236,11 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
     });
 
     const showCancelLogin = createMemo(
-        () => !!props.onCancelLogin && !!props.launchPhase && CANCELLABLE_LAUNCH_PHASES.has(props.launchPhase.kind),
+        () =>
+            !!props.onCancelLogin &&
+            !props.hasAuthUrl &&
+            !!props.launchPhase &&
+            CANCELLABLE_LAUNCH_PHASES.has(props.launchPhase.kind),
     );
 
     return (

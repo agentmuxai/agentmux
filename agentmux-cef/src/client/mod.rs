@@ -68,6 +68,11 @@ pub(crate) use helpers::backend_close_window;
 // SPEC_PILLAR1_STEP2 Slice A Phase 2 — durable opacity mirror write-through
 // / read-back, used by `commands/window/transparency.rs`.
 pub(crate) use helpers::{backend_get_window_opacity, backend_set_window_opacity};
+// Durable window position/size mirror write-through / read-back, used by
+// `commands/window/position_persist.rs` and
+// `commands/window/creation.rs::reproject_from_srv` — closes
+// SPEC_PILLAR1_STEP4_CRASH_REPROJECT_2026_07_07.md §4's documented gap.
+pub(crate) use helpers::{backend_get_window_pos_and_size, backend_set_window_pos_and_size};
 // SPEC_PILLAR1_STEP2 Slice B Phase 4 — floating-pane placement write-through,
 // used by `commands/window/chrome.rs`.
 pub(crate) use helpers::backend_update_block_meta;
