@@ -331,11 +331,21 @@ Windows, pass through unchanged on macOS.
 
 Each phase independently mergeable and independently valuable.
 
-**Phase 7a — Accessibility permission gate (silent check only).**
-`AXIsProcessTrustedWithOptions` silent check wired in ahead of
-`CGEventTapCreate`, with graceful no-op fallback to today's
-`DragOverlay` behavior when untrusted. No UI yet — this just makes
-7b safe to land without a silent-failure mode.
+**Phase 7a — Accessibility permission gate.** `AXIsProcessTrustedWithOptions`
+silent check wired in ahead of `CGEventTapCreate`, with graceful no-op
+fallback to today's `DragOverlay` behavior when untrusted.
+
+**Revised during initial live testing:** a silent-only check made the
+feature undiscoverable — with no in-app prompt (that's the rest of
+7c) and no OS dialog either, a user with the permission ungranted saw
+no visible difference from before and no way to grant it. Added a
+minimal stand-in ahead of full 7c: silent check first, and if
+untrusted, prompt with the OS dialog exactly once per process
+lifetime (`PROMPTED_THIS_SESSION`, not persisted across launches —
+that persistence is still 7c's job). Not the full UX (no in-app
+explanation before the OS prompt, no settings deep-link surfaced
+yet), but enough that a user can actually grant the permission and
+try the gesture without editing System Settings by hand.
 
 **Phase 7b — CGEventTap cross-window hit-test + `tabdrag:merge-direct`.**
 The core deliverable: `HookMode::TabDrag`-equivalent hook, point-in-

@@ -15,6 +15,24 @@ export function setGlobalDragTabId(id: string | null): void {
     globalDragTabId = id;
 }
 
+// Set true if Escape is pressed at any point during the current tab drag,
+// reset false at drag start. Checked by tab-reorder.ts's onDrop BEFORE the
+// tear-off/reorder decision — pragmatic-drag-and-drop's underlying HTML5
+// drag session does not itself cancel on Escape (that's a native-OLE-drag
+// behavior some platforms have, not a web DnD standard guarantee), so
+// without this flag Escape has no effect on the commit-on-release outcome:
+// the drag simply continues, and releasing below the strip still tears the
+// tab off into a new window regardless of the Escape keypress in between.
+// Keyboard events, unlike mouse events, ARE reliably delivered to the page
+// during an active HTML5 drag, so a plain `keydown` listener is sufficient
+// here — no native hook needed (this fix is intentionally cross-platform,
+// not scoped to macOS's CGEventTap hook, which only affects cross-window
+// merge-candidate detection and has no bearing on this decision either).
+export let dragEscaped = false;
+export function setDragEscaped(v: boolean): void {
+    dragEscaped = v;
+}
+
 // ── Insertion point ────────────────────────────────────────────────────────
 // The gap between two tabs where the dragged tab will land.
 // null  beforeTabId → gap is before the very first tab

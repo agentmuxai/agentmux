@@ -844,6 +844,11 @@ mod macos {
         is_last_tab: bool,
         current_target: RefCell<Option<String>>,
         finalized: RefCell<bool>,
+        /// Throttle for `candidate_label_under_cursor`'s
+        /// `CGWindowListCopyWindowInfo` call — see that function's doc
+        /// comment for why this exists. `(when the cached result was
+        /// computed, that result)`.
+        last_hit_test: RefCell<(std::time::Instant, Option<String>)>,
     }
 
     /// The currently-running hook session's run loop, if any — mirrors
@@ -885,7 +890,7 @@ mod macos {
     /// successfully but never fire, which would otherwise manifest as a
     /// silent, undebuggable "redock just doesn't work" bug.
     /// See SPEC_MACOS_TAB_REDOCK_PARITY_2026_07_24.md §2.4.
-    pub fn accessibility_trusted() -> bool {
+    fn accessibility_trusted_silent() -> bool {
         unsafe {
             let key = CFString::wrap_under_get_rule(kAXTrustedCheckOptionPrompt);
             let opts = CFDictionary::from_CFType_pairs(&[(
@@ -894,6 +899,57 @@ mod macos {
             )]);
             AXIsProcessTrustedWithOptions(opts.as_concrete_TypeRef())
         }
+    }
+
+    /// Same check, but with the OS prompt enabled — triggers the real
+    /// System Settings → Privacy & Security → Accessibility dialog if not
+    /// already trusted. Only called once per process lifetime (guarded by
+    /// `PROMPTED_THIS_SESSION` below): calling this on every single drag
+    /// attempt while the user hasn't granted it yet would re-pop the OS
+    /// dialog on every drag, which is worse than not prompting at all.
+    ///
+    /// This is a deliberately minimal stand-in for the full Phase 7c UX
+    /// (in-app explanation before the OS prompt, "already asked" persisted
+    /// across app launches, settings deep-link) — see
+    /// SPEC_MACOS_TAB_REDOCK_PARITY_2026_07_24.md §2.4/§4. Built now,
+    /// ahead of that phase, because without SOME request path the feature
+    /// is silently inert and un-discoverable: `accessibility_trusted_silent`
+    /// alone never shows the user any way to grant the permission, so the
+    /// hook just never installs and nothing visibly differs from before.
+    fn accessibility_trusted_prompting() -> bool {
+        unsafe {
+            let key = CFString::wrap_under_get_rule(kAXTrustedCheckOptionPrompt);
+            let opts = CFDictionary::from_CFType_pairs(&[(
+                key.as_CFType(),
+                CFBoolean::true_value().as_CFType(),
+            )]);
+            AXIsProcessTrustedWithOptions(opts.as_concrete_TypeRef())
+        }
+    }
+
+    static PROMPTED_THIS_SESSION: std::sync::atomic::AtomicBool =
+        std::sync::atomic::AtomicBool::new(false);
+
+    /// The check `start_tab_drag_tracking` actually calls: silent first
+    /// (cheap, no dialog), and if untrusted, prompt exactly once per
+    /// process lifetime so the user has a real way to grant the
+    /// permission and try again on their next drag.
+    pub fn accessibility_trusted() -> bool {
+        if accessibility_trusted_silent() {
+            return true;
+        }
+        use std::sync::atomic::Ordering;
+        if PROMPTED_THIS_SESSION.swap(true, Ordering::SeqCst) {
+            // Already prompted this run — don't re-pop the dialog on
+            // every subsequent drag while the user hasn't acted on it
+            // (or has it open) yet.
+            return false;
+        }
+        tracing::info!(
+            target: "dnd:tabdrag:macos",
+            "[dnd:tabdrag:macos] Accessibility not yet granted — triggering the OS permission prompt (first attempt this session)"
+        );
+        accessibility_trusted_prompting()
     }
 
     /// Stop the active hook session, if any. Idempotent — mirrors the
@@ -955,6 +1011,12 @@ mod macos {
                     is_last_tab,
                     current_target: RefCell::new(None),
                     finalized: RefCell::new(false),
+                    // Backdated so the very first hit test always runs
+                    // immediately rather than waiting out the throttle.
+                    last_hit_test: RefCell::new((
+                        std::time::Instant::now() - HIT_TEST_MIN_INTERVAL,
+                        None,
+                    )),
                 };
                 HOOK_CTX.with(|cell| *cell.borrow_mut() = Some(ctx));
 
@@ -1054,10 +1116,27 @@ mod macos {
             CGEventType::KeyDown => {
                 let keycode = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
                 if keycode == KVK_ESCAPE {
-                    // TabDrag mode: ESC cancels the native HTML5 drag on
-                    // its own; there is no torn-off window to cancel
-                    // back (mirrors the Windows keyboard hook's TabDrag
-                    // branch). Just retire the session silently.
+                    // TabDrag mode: this hook doesn't own the underlying
+                    // native HTML5 drag session (pragmatic-drag-and-drop,
+                    // owned by the renderer) — it can't stop that drag by
+                    // itself. Originally this just retired the hook
+                    // session silently, on the assumption the native drag
+                    // would cancel itself on Escape. It doesn't: web DnD
+                    // gives browsers no such obligation, and empirically
+                    // (live testing) the tab still tore off / reordered
+                    // normally on release regardless of Escape.
+                    //
+                    // Fix: tell the SOURCE renderer explicitly via IPC
+                    // event, so its drop handler can skip the tear-off/
+                    // reorder decision at release time. A DOM-level
+                    // `keydown` listener was tried first and didn't work
+                    // either — Chromium's internal native-drag handling
+                    // appears to suppress normal input dispatch to the
+                    // page for the drag's duration. This CGEventTap sees
+                    // the raw OS-level HID keystroke instead, entirely
+                    // outside the renderer's own event pipeline, so it
+                    // isn't subject to that suppression.
+                    // See SPEC_MACOS_TAB_REDOCK_PARITY_2026_07_24.md §5.
                     HOOK_CTX.with(|cell| {
                         let ctx_ref = cell.borrow();
                         if let Some(ctx) = ctx_ref.as_ref() {
@@ -1068,8 +1147,22 @@ mod macos {
                             tracing::info!(
                                 target: "dnd:tabdrag:macos",
                                 tab_id = %ctx.tab_id,
-                                "[dnd:tabdrag:macos] ESC pressed — session retired"
+                                "[dnd:tabdrag:macos] ESC pressed — session aborted"
                             );
+                            crate::events::emit_event_to_window(
+                                &ctx.state,
+                                &ctx.source_label,
+                                "tabdrag:escape-pressed",
+                                &serde_json::json!({ "tabId": ctx.tab_id }),
+                            );
+                            if let Some(target_label) = ctx.current_target.borrow().as_ref() {
+                                crate::events::emit_event_to_window(
+                                    &ctx.state,
+                                    target_label,
+                                    "tearoff:hover-cleared",
+                                    &serde_json::json!({}),
+                                );
+                            }
                         }
                     });
                     CFRunLoop::get_current().stop();
@@ -1088,7 +1181,13 @@ mod macos {
             let loc = event.location();
             let (cursor_x, cursor_y) = (loc.x, loc.y);
 
-            let candidate = candidate_label_under_cursor(ctx, cursor_x, cursor_y);
+            // Throttled — see candidate_label_under_cursor_throttled's doc
+            // comment. A few-ms-stale hover target is imperceptible for a
+            // visual indicator; querying CGWindowListCopyWindowInfo on
+            // every single MouseMoved tap event (up to ~120 Hz) is not
+            // free, and doing so was a genuine, user-reported performance
+            // regression during initial live testing.
+            let candidate = candidate_label_under_cursor_throttled(ctx, cursor_x, cursor_y);
             let prev = ctx.current_target.borrow().clone();
             let candidate_changed = prev != candidate;
 
@@ -1137,7 +1236,11 @@ mod macos {
 
             let loc = event.location();
             let (cursor_x, cursor_y) = (loc.x, loc.y);
-            let candidate = candidate_label_under_cursor(ctx, cursor_x, cursor_y);
+            // Fresh, not throttled — this is a single one-off call (not a
+            // per-move hot path) and it decides the actual merge outcome,
+            // so correctness beats the sub-millisecond cost saved by
+            // reusing a possibly-stale cached candidate.
+            let candidate = candidate_label_under_cursor_uncached(ctx, cursor_x, cursor_y);
 
             tracing::info!(
                 target: "dnd:tabdrag:macos",
@@ -1176,14 +1279,54 @@ mod macos {
         });
     }
 
+    /// Minimum interval between real `CGWindowListCopyWindowInfo` calls
+    /// from the mouse-move hot path (~30 Hz). Unlike Windows'
+    /// `WindowFromPoint` (an O(1) OS-maintained spatial index lookup —
+    /// genuinely cheap per call), `CGWindowListCopyWindowInfo` enumerates
+    /// and builds a full CFArray/CFDictionary description of every
+    /// on-screen window system-wide. Calling it unthrottled on every
+    /// `MouseMoved` tap event (up to ~120 Hz) was a real, user-reported
+    /// performance regression found during initial live testing — this
+    /// throttle is the fix, not a compromise: a stale-by-at-most-33ms
+    /// hover target is imperceptible for a visual indicator, so there is
+    /// no user-visible cost, only the CPU saved.
+    const HIT_TEST_MIN_INTERVAL: std::time::Duration = std::time::Duration::from_millis(33);
+
+    /// Throttled hit test for the mouse-move hot path — reuses the last
+    /// result if it's fresher than `HIT_TEST_MIN_INTERVAL`, otherwise
+    /// re-runs `candidate_label_under_cursor_uncached` and refreshes the
+    /// cache. Do NOT use this for the mouseup finalize decision — see
+    /// `handle_button_up`'s call site for why that one stays uncached.
+    fn candidate_label_under_cursor_throttled(
+        ctx: &MacHookContext,
+        x: f64,
+        y: f64,
+    ) -> Option<String> {
+        {
+            let cached = ctx.last_hit_test.borrow();
+            if cached.0.elapsed() < HIT_TEST_MIN_INTERVAL {
+                return cached.1.clone();
+            }
+        }
+        let fresh = candidate_label_under_cursor_uncached(ctx, x, y);
+        *ctx.last_hit_test.borrow_mut() = (std::time::Instant::now(), fresh.clone());
+        fresh
+    }
+
     /// Point-in-rect hit test against our own on-screen windows via
     /// `CGWindowListCopyWindowInfo` — see this module's doc comment for
     /// why this is the thread-safe choice over any NSWindow-touching
-    /// API. Excludes the source window (mirrors Windows' TabDrag-mode
-    /// exclusion — its own pragmatic-dnd reorder owns the strip while
-    /// the cursor is over it; see the Windows
+    /// API, and `HIT_TEST_MIN_INTERVAL`'s doc comment for why callers on
+    /// the mouse-move hot path go through the throttled wrapper instead
+    /// of calling this directly. Excludes the source window (mirrors
+    /// Windows' TabDrag-mode exclusion — its own pragmatic-dnd reorder
+    /// owns the strip while the cursor is over it; see the Windows
     /// `candidate_label_under_cursor_locked`'s comment).
-    fn candidate_label_under_cursor(ctx: &MacHookContext, x: f64, y: f64) -> Option<String> {
+    fn candidate_label_under_cursor_uncached(
+        ctx: &MacHookContext,
+        x: f64,
+        y: f64,
+    ) -> Option<String> {
         let labels_guard = WINDOW_LABELS_BY_NUMBER.lock().ok()?;
         let labels = labels_guard.as_ref()?;
         if labels.is_empty() {

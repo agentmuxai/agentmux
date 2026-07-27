@@ -26,6 +26,8 @@ import {
     dragActivatedTabIds,
     globalDragTabId,
     setHoveredDropTabId,
+    dragEscaped,
+    setDragEscaped,
 } from "./tabbar-dnd";
 import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
 import type { TearOffTabAtReleaseFn } from "./tab-tearoff-rpc";
@@ -131,6 +133,26 @@ export function useTabDragAndDrop(
             onCleanup(() => window.removeEventListener("dragover", onTearOffDragOver));
         }
 
+        // Escape-to-abort (cross-platform): pragmatic-drag-and-drop's HTML5
+        // drag session doesn't cancel itself on Escape (unlike a native OS
+        // drag loop, the web DnD spec gives browsers no obligation to honor
+        // it), so without this the tab drag simply continues regardless of
+        // Escape and still tears off / reorders normally on release. Mouse
+        // events are unreliable during an active HTML5 drag, but keyboard
+        // events are still delivered to the page normally, so a plain
+        // `keydown` listener works — gated the same way as the Windows
+        // tear-off-cursor listener above (`globalDragTabId` is the shared
+        // "a tab drag is in flight" flag). Sets a flag `onDrop` below checks
+        // before deciding tear-off vs. reorder, rather than trying to
+        // interrupt the drag itself (there's no such API for HTML5 DnD).
+        const onDragEscape = (e: KeyboardEvent) => {
+            if (globalDragTabId == null) return; // not a tab drag
+            if (e.key !== "Escape") return;
+            setDragEscaped(true);
+        };
+        window.addEventListener("keydown", onDragEscape, true);
+        onCleanup(() => window.removeEventListener("keydown", onDragEscape, true));
+
         const cleanup = monitorForElements({
             canMonitor: ({ source }) => source.data.type === tabItemType,
 
@@ -144,6 +166,22 @@ export function useTabDragAndDrop(
             },
 
             onDrop: ({ source, location }) => {
+                // Escape was pressed at some point during this drag (see
+                // the keydown listener above) — abort the WHOLE operation:
+                // no reorder, no tear-off. The tab was never actually moved
+                // (only the insertion-point preview did), so clearing that
+                // and the cross-window payload is enough to fully restore
+                // the pre-drag state; nothing to undo.
+                if (dragEscaped) {
+                    setDragEscaped(false);
+                    setCurrentDragPayload(null);
+                    setInsertionPoint(null);
+                    Logger.info("dnd", "tab drag aborted via Escape", {
+                        draggedTabId: source.data.tabId,
+                    });
+                    return;
+                }
+
                 const ip = insertionPoint();
                 const draggedTabId = source.data.tabId as string;
 

@@ -17,6 +17,7 @@ import {
     markTabMerged,
     setBouncingTabId,
     setInsertionPoint,
+    setDragEscaped,
 } from "./tabbar-dnd";
 import { Logger } from "@/util/logger";
 
@@ -201,6 +202,24 @@ export function useTabTearOffEvents(
             // multi-tab path uses MoveTabToWorkspace (its last-tab guard is
             // desirable) and only the last-tab path uses RestoreTornOffTab
             // (which bypasses the guard and deletes the emptied workspace).
+            // macOS's CGEventTap-driven Esc-abort (SPEC_MACOS_TAB_REDOCK_
+            // PARITY_2026_07_24.md §5): a plain DOM `keydown` listener on
+            // this window doesn't fire during an active native HTML5 drag
+            // (Chromium appears to suppress normal input dispatch to the
+            // page for the drag's duration), so the host's global mouse/
+            // keyboard hook — which sees the raw OS-level keystroke,
+            // outside the renderer's own event pipeline — tells us
+            // directly instead. Setting the flag here is enough:
+            // tab-reorder.ts's onDrop checks it before deciding tear-off
+            // vs. reorder, so this fires (or not) well before that check
+            // runs. No-op on Windows/Linux today (their hooks don't emit
+            // this event), which is fine — the flag just stays false.
+            trackOrDispose(
+                await listenEvent<{ tabId: string }>("tabdrag:escape-pressed", () => {
+                    setDragEscaped(true);
+                }),
+            );
+
             trackOrDispose(
                 await listenEvent<{
                     tabId: string;
