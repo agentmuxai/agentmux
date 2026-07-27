@@ -356,6 +356,13 @@ pub const COMMAND_MCP_CATALOG_LIST: &str = "mcp.catalog.list";
 pub const COMMAND_MCP_CATALOG_UPSERT: &str = "mcp.catalog.upsert";
 pub const COMMAND_MCP_CATALOG_DELETE: &str = "mcp.catalog.delete";
 pub const COMMAND_MCP_CATALOG_PROBE: &str = "mcp.catalog.probe";
+// mcp.bind is check_s1-gated (agent binds a server to itself over its own
+// authenticated connection) — the Armory dashboard's WebSocket never
+// authenticates as an agent, so it can never satisfy that gate. This is the
+// catalog-tier sibling the Armory's "Bind to agent" action actually calls.
+// Same fix as skill.catalog.bind — see
+// docs/reports/REPORT_ARMORY_SKILLS_MARKDOWN_AND_BIND_BUG_2026_07_27.md.
+pub const COMMAND_MCP_CATALOG_BIND: &str = "mcp.catalog.bind";
 
 // App API Tier 1 — session archival commands
 pub const COMMAND_SESSION_ARCHIVE: &str = "session:archive";

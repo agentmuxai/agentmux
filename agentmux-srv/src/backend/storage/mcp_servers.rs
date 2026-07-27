@@ -154,8 +154,32 @@ impl Store {
     }
 
     /// Bind an MCP server to an agent (insert ref row). Idempotent.
+    /// Bind an MCP server to an agent (insert ref row). Idempotent —
+    /// binding an already-bound pair is a silent no-op success.
+    ///
+    /// Errors if `agent_id` isn't a LOCAL agent definition:
+    /// `db_agent_mcp_ref.agent_id` has an ON-enforced FK to
+    /// `db_agent_definitions(id)` (store.rs), but the Armory's agent
+    /// picker (`ListAgentDefinitionsCommand` → `agent_def_list()`) also
+    /// lists cross-channel agents that only exist in another channel's
+    /// local database. Binding one of those would otherwise have the FK
+    /// silently swallow the `INSERT OR IGNORE` — indistinguishable, by
+    /// affected-row-count alone, from the equally-silent "already bound"
+    /// case — reporting success while creating nothing. Same fix as
+    /// skill_bind — see
+    /// docs/reports/REPORT_ARMORY_SKILLS_MARKDOWN_AND_BIND_BUG_2026_07_27.md.
     pub fn mcp_server_bind(&self, agent_id: &str, mcp_id: &str) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
+        let agent_exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM db_agent_definitions WHERE id = ?1)",
+            params![agent_id],
+            |row| row.get(0),
+        )?;
+        if !agent_exists {
+            return Err(StoreError::Other(format!(
+                "agent {agent_id} not found in this channel's local registry — cross-channel MCP server binding is not supported"
+            )));
+        }
         conn.execute(
             "INSERT OR IGNORE INTO db_agent_mcp_ref (agent_id, mcp_id) VALUES (?1, ?2)",
             params![agent_id, mcp_id],
