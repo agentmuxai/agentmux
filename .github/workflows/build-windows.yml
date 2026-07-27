@@ -1,0 +1,222 @@
+name: build-windows
+
+# Windows portable + installer + MSIX release pipeline for AgentMux.
+# Builds with a codec-enabled CEF runtime (H.264/AAC/HEVC/AC3/EAC3/Dolby
+# Vision — see docs/reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md)
+# downloaded from a release in agentmuxai/cef, mirroring build-linux.yml/
+# build-macos.yml's existing pattern exactly. See
+# docs/specs/SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md for
+# full design notes — this is the first Windows-specific custom-CEF CI
+# workflow (Windows never needed one before this; it always used the
+# stock CEF binary with zero override capability).
+#
+# Required repo secrets (Settings → Secrets → Actions):
+#   A5AF_PACKAGES_TOKEN      npm GitHub Packages token (@a5af scope)
+#   CEF_RUNTIME_TOKEN        PAT (contents:read) for agentmuxai/cef
+#   (release upload uses GITHUB_TOKEN with contents:write — no extra PAT needed)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "agentmux ref to build (tag / branch / SHA)"
+        required: true
+        default: main
+      release-tag:
+        description: "GitHub release tag to upload artifacts to (blank = skip upload)"
+        required: false
+        default: ""
+      cef-runtime-tag:
+        description: "agentmuxai/cef release tag for the codec-enabled CEF runtime (blank = latest)"
+        required: false
+        default: ""
+  repository_dispatch:
+    types: [build-windows]
+    # client_payload: { ref: "vX.Y.Z", release_tag: "vX.Y.Z", cef_runtime_tag: "" }
+  workflow_call:
+    # Lets release.yml invoke this as a reusable workflow instead of inlining
+    # a second copy of the CEF-provisioning + packaging steps.
+    inputs:
+      ref:
+        description: "agentmux ref to build (tag / branch / SHA)"
+        required: true
+        type: string
+      release-tag:
+        description: "GitHub release tag to upload artifacts to (blank = skip upload)"
+        required: false
+        type: string
+        default: ""
+      cef-runtime-tag:
+        description: "agentmuxai/cef release tag for the codec-enabled CEF runtime (blank = latest)"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: write   # needed to upload release assets via GITHUB_TOKEN
+
+jobs:
+  build:
+    name: Windows x86_64 — portable + installer + MSIX
+    runs-on: windows-latest
+    env:
+      OUT: ${{ github.workspace }}/artifacts
+      CEF_RUNTIME_DIR_WINDOWS: ${{ github.workspace }}/cef-runtime-windows
+
+    steps:
+      - name: Resolve inputs
+        id: in
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            echo "ref=${{ github.event.client_payload.ref }}"                   >> "$GITHUB_OUTPUT"
+            echo "release_tag=${{ github.event.client_payload.release_tag }}"   >> "$GITHUB_OUTPUT"
+            echo "cef_tag=${{ github.event.client_payload.cef_runtime_tag }}"   >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=${{ inputs.ref }}"                  >> "$GITHUB_OUTPUT"
+            echo "release_tag=${{ inputs.release-tag }}"  >> "$GITHUB_OUTPUT"
+            echo "cef_tag=${{ inputs.cef-runtime-tag }}"  >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.in.outputs.ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Auth npm for @a5af GitHub Packages
+        shell: bash
+        run: |
+          {
+            echo "@a5af:registry=https://npm.pkg.github.com"
+            echo "//npm.pkg.github.com/:_authToken=${{ secrets.A5AF_PACKAGES_TOKEN }}"
+          } >> .npmrc
+
+      - run: npm install
+
+      - name: Install build tools (Ninja, go-task, Inno Setup)
+        shell: pwsh
+        run: choco install ninja go-task innosetup -y
+
+      - uses: Swatinem/rust-cache@v2
+
+      # ── Codec-enabled CEF runtime ────────────────────────────────────────
+      # Same three-step pattern as build-linux.yml/build-macos.yml: resolve
+      # a tag, cache by tag, download+extract, export the resolver env var.
+      - name: Resolve codec-enabled CEF runtime tag
+        id: cef
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.CEF_RUNTIME_TOKEN }}
+        run: |
+          TAG="${{ steps.in.outputs.cef_tag }}"
+          if [ -z "$TAG" ]; then
+            TAG=$(gh release list --repo agentmuxai/cef --limit 30 \
+                    --json tagName \
+                    --jq '[.[].tagName | select(startswith("cef-windows-x86_64-"))][0]')
+          fi
+          if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
+            echo "ERROR: no cef-windows-x86_64-* release found in agentmuxai/cef"; exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Resolved codec-enabled CEF runtime tag: $TAG"
+
+      - name: Cache codec-enabled CEF runtime
+        id: cef-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CEF_RUNTIME_DIR_WINDOWS }}
+          key: cef-runtime-windows-${{ steps.cef.outputs.tag }}
+
+      - name: Download codec-enabled CEF runtime
+        if: steps.cef-cache.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.CEF_RUNTIME_TOKEN }}
+        run: |
+          mkdir -p /tmp/cef-extract "$CEF_RUNTIME_DIR_WINDOWS"
+          gh release download "${{ steps.cef.outputs.tag }}" \
+            --repo agentmuxai/cef \
+            --pattern "*.zip" \
+            --dir /tmp/cef-extract \
+            --clobber
+          unzip -q /tmp/cef-extract/*.zip -d /tmp/cef-extract/unpacked
+          # Find libcef.dll regardless of whether the zip has a top-level dir
+          LIBCEF=$(find /tmp/cef-extract/unpacked -name "libcef.dll" | head -1)
+          if [ -z "$LIBCEF" ]; then echo "ERROR: libcef.dll not found in zip"; exit 1; fi
+          cp -r "$(dirname "$LIBCEF")/." "$CEF_RUNTIME_DIR_WINDOWS/"
+          rm -rf /tmp/cef-extract
+
+      - name: Set AGENTMUX_CEF_RUNTIME_DIR_WINDOWS
+        shell: bash
+        run: echo "AGENTMUX_CEF_RUNTIME_DIR_WINDOWS=$CEF_RUNTIME_DIR_WINDOWS" >> "$GITHUB_ENV"
+
+      # ── Build ─────────────────────────────────────────────────────────────
+      - name: Build portable (RELEASE_CHANNEL=stable, STRIP_MAPS=1)
+        shell: bash
+        run: |
+          mkdir -p "$OUT"
+          STRIP_MAPS=1 RELEASE_CHANNEL=stable bash scripts/package.sh "$OUT"
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $portableDir = Get-ChildItem "$env:OUT" -Directory -Filter "agentmux-*-x64-portable" |
+                         Sort-Object LastWriteTime -Descending |
+                         Select-Object -First 1 -ExpandProperty FullName
+          if (-not $portableDir) { throw "portable dir not found in $env:OUT" }
+          & "${{ github.workspace }}\scripts\package-installer.ps1" `
+            -PortableDir $portableDir `
+            -OutputDir "$env:OUT"
+
+      - name: Build MSIX (unsigned — Store re-signs on ingest)
+        shell: pwsh
+        run: |
+          $msixOut = Join-Path "$env:OUT" "msix"
+          New-Item -ItemType Directory -Force -Path $msixOut | Out-Null
+          $portableDir = Get-ChildItem "$env:OUT" -Directory -Filter "agentmux-*-x64-portable" |
+                         Sort-Object LastWriteTime -Descending |
+                         Select-Object -First 1 -ExpandProperty FullName
+          & "${{ github.workspace }}\scripts\package-msix.ps1" `
+            -PortableDir $portableDir `
+            -OutputDir $msixOut `
+            -SkipBuild
+
+      # ── Upload to GitHub Actions artifacts (always) ────────────────────────
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-portable
+          path: ${{ env.OUT }}/agentmux-*-x64-portable.zip
+          if-no-files-found: error
+          retention-days: 7
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: ${{ env.OUT }}/AgentMux-*-x64-setup.exe
+          if-no-files-found: error
+          retention-days: 7
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-msix
+          path: ${{ env.OUT }}/msix/AgentMux_*_x64.msix
+          if-no-files-found: error
+          retention-days: 7
+
+      # ── Upload to GitHub Release (when release-tag is set) ─────────────────
+      - name: Upload artifacts to GitHub Release
+        if: steps.in.outputs.release_tag != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ steps.in.outputs.release_tag }}" \
+            "$OUT"/agentmux-*-x64-portable.zip \
+            "$OUT"/AgentMux-*-x64-setup.exe \
+            "$OUT"/msix/AgentMux_*_x64.msix \
+            --repo agentmuxai/agentmux --clobber

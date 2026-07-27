@@ -62,89 +62,25 @@ jobs:
           echo "version=$VER" >> "$GITHUB_OUTPUT"
 
   # ── Phase 2: Build all platforms (parallel) ───────────────────────────────
+  # Reuses build-windows.yml's own job instead of inlining a second copy of
+  # the CEF-provisioning + packaging steps — same pattern as build-linux/
+  # build-macos below. release-tag is left blank: the release doesn't exist
+  # yet at this point in the pipeline (publish creates it after all three
+  # platforms finish) — the reused workflow's own actions/upload-artifact
+  # steps (windows-portable/windows-installer/windows-msix) are what
+  # `publish` downloads below, exactly as when this was inlined.
+  # See docs/specs/SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md.
   build-windows:
     name: Build — Windows portable + installer + MSIX
     needs: verify
-    runs-on: windows-latest
-    env:
-      OUT: ${{ github.workspace }}/artifacts
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-
-      - name: Auth npm for @a5af GitHub Packages
-        shell: bash
-        run: |
-          {
-            echo "@a5af:registry=https://npm.pkg.github.com"
-            echo "//npm.pkg.github.com/:_authToken=${{ secrets.A5AF_PACKAGES_TOKEN }}"
-          } >> .npmrc
-
-      - run: npm install
-
-      - name: Install build tools (Ninja, go-task, Inno Setup)
-        shell: pwsh
-        run: choco install ninja go-task innosetup -y
-
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Build portable (RELEASE_CHANNEL=stable, STRIP_MAPS=1)
-        shell: bash
-        run: |
-          mkdir -p "$OUT"
-          STRIP_MAPS=1 RELEASE_CHANNEL=stable bash scripts/package.sh "$OUT"
-
-      - name: Build installer
-        shell: pwsh
-        run: |
-          $portableDir = Get-ChildItem "$env:OUT" -Directory -Filter "agentmux-*-x64-portable" |
-                         Sort-Object LastWriteTime -Descending |
-                         Select-Object -First 1 -ExpandProperty FullName
-          if (-not $portableDir) { throw "portable dir not found in $env:OUT" }
-          & "${{ github.workspace }}\scripts\package-installer.ps1" `
-            -PortableDir $portableDir `
-            -OutputDir "$env:OUT"
-
-      - name: Build MSIX (unsigned — Store re-signs on ingest)
-        shell: pwsh
-        run: |
-          $msixOut = Join-Path "$env:OUT" "msix"
-          New-Item -ItemType Directory -Force -Path $msixOut | Out-Null
-          $portableDir = Get-ChildItem "$env:OUT" -Directory -Filter "agentmux-*-x64-portable" |
-                         Sort-Object LastWriteTime -Descending |
-                         Select-Object -First 1 -ExpandProperty FullName
-          & "${{ github.workspace }}\scripts\package-msix.ps1" `
-            -PortableDir $portableDir `
-            -OutputDir $msixOut `
-            -SkipBuild
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: windows-portable
-          path: ${{ env.OUT }}/agentmux-*-x64-portable.zip
-          if-no-files-found: error
-          retention-days: 7
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: windows-installer
-          path: ${{ env.OUT }}/AgentMux-*-x64-setup.exe
-          if-no-files-found: error
-          retention-days: 7
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: windows-msix
-          path: ${{ env.OUT }}/msix/AgentMux_*_x64.msix
-          if-no-files-found: error
-          retention-days: 7
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build-windows.yml
+    with:
+      ref: ${{ github.event.inputs.tag || github.ref }}
+      release-tag: ""
+      cef-runtime-tag: ""
+    secrets: inherit
 
   # Reuses build-linux.yml's own job instead of inlining a second copy of the
   # CEF-provisioning steps (previously ~100 lines duplicated verbatim — see
