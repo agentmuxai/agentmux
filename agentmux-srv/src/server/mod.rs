@@ -182,6 +182,12 @@ pub struct AppState {
     /// created (live-reload is a nice-to-have, not a boot requirement).
     /// See docs/specs/SPEC_EDITOR_LIVE_FILE_RELOAD_2026_07_18.md.
     pub editor_file_watcher: Option<std::sync::Arc<crate::backend::editor_file_watcher::EditorFileWatcher>>,
+    /// Filesystem watcher for directories a Media pane is pointed at —
+    /// publishes `EVENT_MEDIA_FILE_CHANGED` (scoped per-block) when a
+    /// matching-extension file is created/modified. `None` when the
+    /// underlying `notify` watcher couldn't be created.
+    /// See docs/specs/SPEC_MEDIA_PANE_2026_07_26.md.
+    pub media_file_watcher: Option<std::sync::Arc<crate::backend::media_file_watcher::MediaFileWatcher>>,
 }
 
 /// Build the Axum router with all routes, auth middleware, and CORS.
@@ -284,7 +290,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/agentmux/file", get(files::handle_wave_file))
         .route("/agentmux/stream-file", get(stub_501))
         .route("/agentmux/stream-file/*path", get(stub_501))
-        .route("/agentmux/stream-local-file", get(stub_501))
+        .route("/agentmux/stream-local-file", get(files::handle_stream_local_file))
         .route("/api/post-chat-message", get(stub_501).post(stub_501))
         .route("/docsite/*path", get(files::handle_docsite))
         .route("/schema/*path", get(files::handle_schema))

@@ -28,6 +28,10 @@ export const WpsEvent = {
     // re-fetch via ReadEditorFileCommand. See
     // docs/specs/SPEC_EDITOR_LIVE_FILE_RELOAD_2026_07_18.md.
     EditorFileChanged: "editor:file_changed",
+    // Fired when a file matching a Media pane's extension filter is
+    // created/modified in a directory it's watching. Payload: `{ path }` —
+    // a wake signal only. See docs/specs/SPEC_MEDIA_PANE_2026_07_26.md.
+    MediaFileChanged: "media:file_changed",
     UpgradeMigrationEvent:     "upgrade:migration-event",
     UpgradeMigrationsComplete: "upgrade:migrations-complete",
     UpgradeMigrationsFailed:   "upgrade:migrations-failed",
