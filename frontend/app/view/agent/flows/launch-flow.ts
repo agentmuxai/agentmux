@@ -90,6 +90,22 @@ export interface LaunchFlowOptions {
      * Finding 1.
      */
     onControllerStatus?: (rts: BlockControllerRuntimeStatus) => void;
+    /**
+     * Reports whether Phase 2's auth check actually PROVED the CLI is
+     * authenticated (`authResult.authenticated === true`) versus proceeding
+     * on an unconfirmed check (the RPC itself threw or timed out — logged
+     * as "authentication status unknown — will attempt anyway" and NOT
+     * treated as `auth_failed`, since a transient check failure shouldn't
+     * block launch). Without this, "success" alone is ambiguous: it means
+     * "controller registered, ready for input" (see LaunchFlowResult's own
+     * doc comment) and is returned identically whether or not login was
+     * ever actually confirmed — a caller that maps every "success" straight
+     * to `authStatus: "authenticated"` shows a false green "Logged in" tag
+     * for a credential that was never checked (reagent/codex P2 on
+     * PR #2318). Not called at all on the `auth_failed`/`fatal` paths —
+     * those already have their own explicit outcome.
+     */
+    onAuthCheckResult?: (confirmed: boolean) => void;
 }
 
 export type LaunchFlowResult = "success" | "auth_failed" | "fatal";
@@ -212,12 +228,14 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
             const emailPart = authResult.email ? ` as ${authResult.email}` : "";
             const methodPart = authResult.auth_method ? ` (${authResult.auth_method})` : "";
             log("auth", `authenticated${emailPart}${methodPart}`);
+            opts.onAuthCheckResult?.(true);
         } else {
             needsLogin = true;
         }
     } catch (err: any) {
         log("auth", `check failed: ${err?.message ?? String(err)}`, "warn");
         log("auth", "authentication status unknown — will attempt anyway", "warn");
+        opts.onAuthCheckResult?.(false);
     }
 
     if (needsLogin) {

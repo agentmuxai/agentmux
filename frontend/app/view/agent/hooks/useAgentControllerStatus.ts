@@ -216,6 +216,15 @@ export function useAgentControllerStatus(
         setAuthNotice(null);
         setLaunchPhase(null);
         const prov = opts.provider();
+        // "success" from runLaunchFlow means "controller registered, ready
+        // for input" — NOT "login confirmed" (its own doc comment is
+        // explicit about this: Phase 2 proceeds on an unconfirmed auth
+        // check rather than blocking launch on a transient RPC failure).
+        // Without tracking this separately, every "success" got mapped
+        // straight to authStatus "authenticated", showing a false green
+        // "Logged in" tag for a credential that was never actually checked
+        // (reagent/codex P2 on PR #2318).
+        let authConfirmed = false;
         try {
             const authEnv = await buildAuthEnv(prov);
             const result = await runLaunchFlow({
@@ -231,10 +240,11 @@ export function useAgentControllerStatus(
                 onNotify: opts.onNotify,
                 getInitialTermSize: opts.getInitialTermSize,
                 onControllerStatus: opts.onControllerStatus,
+                onAuthCheckResult: (confirmed) => { authConfirmed = confirmed; },
             });
             if (result === "success") {
                 setAgentReady(true);
-                setAuthStatus("authenticated");
+                setAuthStatus(authConfirmed ? "authenticated" : "unknown");
                 opts.onReady?.();
             } else if (result === "auth_failed" && !loginCancelled) {
                 setCanRetry(true);

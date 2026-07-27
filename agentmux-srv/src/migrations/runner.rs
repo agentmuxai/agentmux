@@ -424,10 +424,14 @@ fn write_error_log(home: &Path, msg: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
 
-    // Process-global env access — serialize so parallel tests don't race.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    // Process-global env access — shared with registry::paths and
+    // migrations::m0011_shared_store_backfill's tests, which mutate the SAME
+    // AGENTMUX_ISOLATED_AUTH/AGENTMUX_INSTANCE_DIR vars. A module-local lock
+    // only serializes tests within this file; Cargo runs a crate's tests in
+    // one multi-threaded process, so a local-only lock still let this
+    // module's tests race against those two (reagent/codex on PR #2318).
+    use crate::test_support::ISOLATED_AUTH_ENV_LOCK as ENV_LOCK;
 
     fn clear() {
         std::env::remove_var("AGENTMUX_HOME_OVERRIDE");

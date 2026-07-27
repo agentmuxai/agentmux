@@ -245,4 +245,41 @@ describe("runLaunchFlow — Phase 3 (already authenticated)", () => {
         expect(last.text).not.toMatch(/^Ready/i);
         expect(last.text).not.toMatch(/^Resumed/i);
     });
+
+    it("reports onAuthCheckResult(true) when CheckCliAuthCommand actually confirms authentication", async () => {
+        const results: boolean[] = [];
+        const result = await runLaunchFlow({
+            blockId: "block-1",
+            provider: claude,
+            log: vi.fn(),
+            setAuthUrl: vi.fn(),
+            isCancelled: () => false,
+            setLoginWaiting: vi.fn(),
+            onAuthCheckResult: (confirmed) => results.push(confirmed),
+        });
+
+        expect(result).toBe("success");
+        expect(results).toEqual([true]);
+    });
+
+    it("reagent/codex P2 on PR #2318: reports onAuthCheckResult(false) — not true — when the auth check itself throws, even though the flow still proceeds to 'success'", async () => {
+        // Phase 2 deliberately doesn't fail launch on a transient auth-check
+        // RPC error ("authentication status unknown — will attempt anyway"),
+        // but the caller must be able to tell this apart from an actually
+        // confirmed login — otherwise it shows a false "Logged in" tag.
+        hub.checkCliAuth.mockReset().mockRejectedValue(new Error("timeout"));
+        const results: boolean[] = [];
+        const result = await runLaunchFlow({
+            blockId: "block-1",
+            provider: claude,
+            log: vi.fn(),
+            setAuthUrl: vi.fn(),
+            isCancelled: () => false,
+            setLoginWaiting: vi.fn(),
+            onAuthCheckResult: (confirmed) => results.push(confirmed),
+        });
+
+        expect(result).toBe("success");
+        expect(results).toEqual([false]);
+    });
 });
