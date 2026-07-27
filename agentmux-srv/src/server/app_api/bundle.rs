@@ -6,6 +6,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_bundle_upsert(engine, state);
     register_bundle_delete(engine, state);
     register_bundle_self_get(engine, state);
+    register_bundle_export(engine, state);
 }
 
 /// Normalize a `bundle.upsert` request body into the shape the `Memory` struct
@@ -189,4 +190,64 @@ fn register_bundle_self_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
     };
     engine.register_handler(COMMAND_BUNDLE_SELF_GET, make(state.clone()));
     engine.register_handler(COMMAND_PRESET_SELF_GET, make(state.clone()));
+}
+
+/// `bundle.export` — Armory Bundle Format (ABF) exporter, Phase 1 of
+/// docs/specs/REPORT_ARMORY_BUNDLE_STANDARD_RESEARCH_2026_07_16.md /
+/// https://docs.agentmux.ai/abf/. Window-scoped (no `check_s1`) like the
+/// rest of `bundle.*` — bundles aren't agent-specific. Reads the bundle
+/// from `id_store` and resolves its referenced skill ids against `wstore`
+/// (skills live in a different Store instance than bundles — see
+/// `Store::skill_get` callers elsewhere in this codebase), then hands both
+/// to the pure `bundle_export::export_bundle`. `format: "zip"` returns a
+/// base64-encoded archive; anything else (including omitted) returns the
+/// raw file list for the caller to write out itself.
+fn register_bundle_export(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let id_store = state.id_store.clone();
+    let wstore = state.wstore.clone();
+    engine.register_handler(
+        COMMAND_BUNDLE_EXPORT,
+        Box::new(move |data, _ctx| {
+            let id_store = id_store.clone();
+            let wstore = wstore.clone();
+            Box::pin(async move {
+                #[derive(serde::Deserialize, Default)]
+                struct Req {
+                    id: String,
+                    #[serde(default)]
+                    format: String,
+                }
+                let req: Req = serde_json::from_value(data)
+                    .map_err(|e| format!("bundle.export: {e}"))?;
+
+                let bundle = id_store
+                    .bundle_memory_get(&req.id)
+                    .map_err(|e| format!("bundle.export: {e}"))?
+                    .ok_or_else(|| format!("bundle.export: no bundle with id {}", req.id))?;
+
+                let skill_ids: Vec<String> =
+                    serde_json::from_str(&bundle.skills).unwrap_or_default();
+                let skills: Vec<crate::backend::storage::Skill> = skill_ids
+                    .iter()
+                    .filter_map(|id| wstore.skill_get(id).ok().flatten())
+                    .collect();
+
+                let export = crate::backend::bundle_export::export_bundle(&bundle, &skills);
+
+                if req.format == "zip" {
+                    let zip_bytes = crate::backend::bundle_export::zip_bundle_export(&export)
+                        .map_err(|e| format!("bundle.export: {e}"))?;
+                    use base64::Engine as _;
+                    let encoded = base64::engine::general_purpose::STANDARD.encode(&zip_bytes);
+                    return Ok(Some(json!({
+                        "root_slug": export.root_slug,
+                        "skipped_skills": export.skipped_skills,
+                        "zip_base64": encoded,
+                    })));
+                }
+
+                Ok(Some(serde_json::to_value(&export).map_err(|e| e.to_string())?))
+            })
+        }),
+    );
 }
