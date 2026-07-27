@@ -41,19 +41,38 @@ describe("deriveSlug", () => {
 });
 
 describe("renderSkillMd", () => {
-    it("wraps content in YAML frontmatter with name + description", () => {
-        const md = renderSkillMd("Deploy Checklist", "Runs the checklist", "1. Test\n2. Deploy");
+    it("wraps content in YAML frontmatter with slug (as name) + description", () => {
+        // First arg is the SLUG (matching the parent directory per the Agent
+        // Skills spec), not the raw display name -- reagent P1 on #2322.
+        const md = renderSkillMd("deploy-checklist", "Runs the checklist", "1. Test\n2. Deploy");
         expect(md).toBe(
-            '---\nname: "Deploy Checklist"\ndescription: "Runs the checklist"\n---\n\n1. Test\n2. Deploy',
+            '---\nname: "deploy-checklist"\ndescription: "Runs the checklist"\n---\n\n1. Test\n2. Deploy',
         );
     });
 
     it("escapes YAML/JSON special characters via JSON.stringify", () => {
-        const md = renderSkillMd('Weird: "Name"', "Has a colon: and \"quotes\"", "body");
+        const md = renderSkillMd("weird-name", "Has a colon: and \"quotes\"", "body");
         const frontmatter = md.split("\n---\n\n")[0];
         // Must round-trip as exactly two lines (name + description) -- no
         // characters leaked out of the quoted scalar onto a new line.
         expect(frontmatter.split("\n")).toHaveLength(3); // "---", name line, description line
+    });
+
+    it("falls back to a placeholder for an empty description", () => {
+        const md = renderSkillMd("deploy-checklist", "", "body");
+        expect(md).toContain('description: "No description provided."');
+    });
+
+    it("falls back to a placeholder for a whitespace-only description", () => {
+        const md = renderSkillMd("deploy-checklist", "   ", "body");
+        expect(md).toContain('description: "No description provided."');
+    });
+
+    it("truncates a description longer than 1024 characters", () => {
+        const md = renderSkillMd("deploy-checklist", "x".repeat(2000), "body");
+        const descLine = md.split("\n").find((l) => l.startsWith("description: "))!;
+        const inner = descLine.slice("description: ".length + 1, -1); // strip quotes
+        expect(inner.length).toBeLessThanOrEqual(1024);
     });
 });
 
@@ -84,7 +103,9 @@ describe("buildConfigFiles — skill materialization", () => {
         ]);
         const skillFile = files.find((f) => f.path === ".claude/skills/deploy-checklist/SKILL.md");
         expect(skillFile).toBeDefined();
-        expect(skillFile!.content).toContain('name: "Deploy Checklist"');
+        // name is the slug, not the raw display name (reagent P1 on #2322).
+        expect(skillFile!.content).toContain('name: "deploy-checklist"');
+        expect(skillFile!.content).not.toContain('name: "Deploy Checklist"');
         expect(files.some((f) => f.path.startsWith(".claude/commands/"))).toBe(false);
     });
 

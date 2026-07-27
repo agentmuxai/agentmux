@@ -492,10 +492,8 @@ pub(super) fn write_agent_config_files(
     agent_slug: &str,
     work_dir: &str,
 ) -> Result<(), String> {
-    // Load agent content and skills
+    // Load agent content
     let contents = wstore.agent_content_get_all(&agent.id)
-        .unwrap_or_default();
-    let skills = wstore.agent_skill_list(&agent.id)
         .unwrap_or_default();
 
     let mut content_map = std::collections::HashMap::new();
@@ -549,28 +547,10 @@ pub(super) fn write_agent_config_files(
 
     // v1 skills: globals are always injected; the agent's OWN ref-bound skills
     // are authoritative when present, otherwise fall back to legacy
-    // db_agent_skills. The fallback decision is gated on *own* refs only — NOT
-    // the global-inclusive list — so adding a global skill never discards a
-    // legacy-only agent's skills.
-    // skill_list now returns each skill wrapped with a per-agent bound_to_agent
-    // flag (for the App API's "bound to me" indicator, tracked in #1960) —
-    // this config-generation path doesn't need it, so unwrap immediately.
-    let visible_skills: Vec<crate::backend::storage::Skill> = wstore.skill_list(&agent.id)
-        .unwrap_or_default()
-        .into_iter()
-        .map(|item| item.skill)
-        .collect(); // own refs + globals
-    let has_own_skill_refs = visible_skills.iter().any(|s| !s.is_global);
-    let effective_skills: Vec<crate::backend::storage::AgentSkill> = if has_own_skill_refs {
-        // Ref-based path: own bound + globals (the full visible list).
-        crate::backend::agent_config::skills_to_agent_skills(&visible_skills, &agent.id)
-    } else {
-        // Legacy path: keep legacy skills, then inject globals on top.
-        // `visible_skills` here contains only globals (no own refs).
-        let mut merged = skills;
-        merged.extend(crate::backend::agent_config::skills_to_agent_skills(&visible_skills, &agent.id));
-        merged
-    };
+    // db_agent_skills. See Store::effective_skills for the merge algorithm —
+    // shared with the `listagentskills` RPC handler so the frontend's
+    // pre-launch skill fetch and this materialization path never diverge.
+    let effective_skills = wstore.effective_skills(&agent.id);
 
     let mut config_files = crate::backend::agent_config::build_config_files(
         &content_map,

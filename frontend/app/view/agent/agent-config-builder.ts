@@ -92,7 +92,7 @@ export function buildConfigFiles(
             const content = expandTemplate(skill.content, templateVars);
             files.push({
                 path: `.claude/skills/${slug}/SKILL.md`,
-                content: renderSkillMd(skill.name, skill.description, content),
+                content: renderSkillMd(slug, skill.description, content),
             });
         } else if (skill.trigger) {
             const content = expandTemplate(skill.content, templateVars);
@@ -157,18 +157,30 @@ export function deriveSlug(name: string): string {
     return trimmed || "agent";
 }
 
+/** Agent Skills spec caps `description` at 1024 characters. */
+const SKILL_DESCRIPTION_MAX_LEN = 1024;
+
 /**
  * Render an Agent Skills-format `SKILL.md`: YAML frontmatter with the two
  * required fields (`name`, `description`), followed by the skill's content
  * as the Markdown body. See https://agentskills.io/specification.
+ *
+ * `slug` (not the skill's raw display name) is REQUIRED here — the spec
+ * requires `name` be lowercase/hyphenated and match its parent directory;
+ * callers must pass the same value used to build the `.claude/skills/<slug>/`
+ * path (reagent P1, PR #2322). `description` is validated: the spec requires
+ * a non-empty value (falls back to a placeholder) capped at 1024 characters.
  *
  * YAML double-quoted scalars use JSON-compatible escaping (YAML 1.2
  * §7.3.1), so `JSON.stringify` on a plain string produces a valid,
  * correctly-escaped YAML value — same reasoning as `render_skill_md` in
  * `agentmux-srv/src/backend/agent_config.rs`, which this mirrors.
  */
-export function renderSkillMd(name: string, description: string, body: string): string {
-    return `---\nname: ${JSON.stringify(name)}\ndescription: ${JSON.stringify(description)}\n---\n\n${body}`;
+export function renderSkillMd(slug: string, description: string, body: string): string {
+    const desc = description.trim()
+        ? description.slice(0, SKILL_DESCRIPTION_MAX_LEN)
+        : "No description provided.";
+    return `---\nname: ${JSON.stringify(slug)}\ndescription: ${JSON.stringify(desc)}\n---\n\n${body}`;
 }
 
 /**

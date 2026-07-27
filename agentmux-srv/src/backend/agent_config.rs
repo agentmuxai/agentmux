@@ -123,7 +123,7 @@ pub fn build_config_files(
             let content = expand_template(&skill.content, &template_vars);
             files.push(AgentConfigFile {
                 filename: format!(".claude/skills/{slug}/SKILL.md"),
-                content: render_skill_md(&skill.name, &skill.description, &content),
+                content: render_skill_md(&slug, &skill.description, &content),
             });
         } else if !skill.trigger.is_empty() {
             let content = expand_template(&skill.content, &template_vars);
@@ -559,20 +559,42 @@ pub fn expand_template(content: &str, vars: &HashMap<String, String>) -> String 
     result
 }
 
+/// Agent Skills spec caps `description` at 1024 characters.
+const SKILL_DESCRIPTION_MAX_LEN: usize = 1024;
+
 /// Render an Agent Skills-format `SKILL.md`: YAML frontmatter with the two
 /// required fields (`name`, `description` — per the spec's six-field
 /// frontmatter; AgentMux doesn't populate the four optional ones today:
 /// `license`, `compatibility`, `metadata`, `allowed-tools`), followed by the
 /// skill's content as the Markdown body. See https://agentskills.io/specification.
 ///
+/// `slug` (not the skill's raw display name) is REQUIRED here — the spec
+/// requires `name` be lowercase/hyphenated and match its parent directory;
+/// callers must pass the same value used to build the `.claude/skills/<slug>/`
+/// path (reagent P1, PR #2322). `description` is validated: the spec requires
+/// a non-empty value (falls back to a placeholder) capped at 1024 characters
+/// (truncated on a char boundary, since the UI permits arbitrary-length free
+/// text with no spec-awareness).
+///
 /// YAML double-quoted scalars use JSON-compatible escaping (YAML 1.2
 /// §7.3.1), so `serde_json::to_string` on a plain string produces a valid,
 /// correctly-escaped YAML value — this avoids hand-rolling YAML escaping or
 /// adding a yaml crate dependency (this workspace has neither today) just
 /// for two scalar fields.
-fn render_skill_md(name: &str, description: &str, body: &str) -> String {
+fn render_skill_md(slug: &str, description: &str, body: &str) -> String {
+    let description = if description.trim().is_empty() {
+        "No description provided."
+    } else if description.len() > SKILL_DESCRIPTION_MAX_LEN {
+        let mut end = SKILL_DESCRIPTION_MAX_LEN;
+        while !description.is_char_boundary(end) {
+            end -= 1;
+        }
+        &description[..end]
+    } else {
+        description
+    };
     let name_yaml =
-        serde_json::to_string(name).expect("string serialization is infallible");
+        serde_json::to_string(slug).expect("string serialization is infallible");
     let description_yaml =
         serde_json::to_string(description).expect("string serialization is infallible");
     format!("---\nname: {name_yaml}\ndescription: {description_yaml}\n---\n\n{body}")
@@ -738,9 +760,11 @@ mod tests {
             .expect("expected .claude/skills/deploy-checklist/SKILL.md");
         assert!(!files.iter().any(|f| f.filename.starts_with(".claude/commands/")));
 
-        // YAML frontmatter with the two required Agent Skills fields
+        // YAML frontmatter with the two required Agent Skills fields.
+        // `name` is the slug (matching its parent directory per the Agent
+        // Skills spec), NOT the raw display name -- reagent P1 on #2322.
         assert!(skill_file.content.starts_with("---\n"));
-        assert!(skill_file.content.contains("name: \"Deploy Checklist\""));
+        assert!(skill_file.content.contains("name: \"deploy-checklist\""));
         assert!(skill_file
             .content
             .contains("description: \"Runs the pre-deploy checklist\""));
@@ -777,6 +801,47 @@ mod tests {
         let frontmatter = &skill_file.content[4..end]; // skip leading "---\n"
         let lines: Vec<&str> = frontmatter.lines().collect();
         assert_eq!(lines.len(), 2, "frontmatter should be exactly name + description lines, got: {lines:?}");
+    }
+
+    #[test]
+    fn test_build_config_files_agent_skill_format_name_is_the_slug_not_display_name() {
+        // reagent P1 (PR #2322): the Agent Skills spec requires `name` be
+        // lowercase/hyphenated and match its parent directory -- the raw
+        // display name (e.g. "Deploy Checklist") is spec-invalid.
+        let content_map = HashMap::new();
+        let skills = vec![make_agent_skill("Deploy Checklist", "desc", "body")];
+        let files = build_config_files(&content_map, &skills, "Aria", "agent-1", "aria", "/tmp/aria");
+        let skill_file = files.iter().find(|f| f.filename.ends_with("SKILL.md")).unwrap();
+        assert!(skill_file.content.contains("name: \"deploy-checklist\""));
+        assert!(!skill_file.content.contains("name: \"Deploy Checklist\""));
+    }
+
+    #[test]
+    fn test_build_config_files_agent_skill_format_empty_description_gets_fallback() {
+        // reagent P1 (PR #2322): the Agent Skills spec requires a non-empty
+        // description; the UI permits creating a skill with none.
+        let content_map = HashMap::new();
+        let skills = vec![make_agent_skill("Deploy Checklist", "", "body")];
+        let files = build_config_files(&content_map, &skills, "Aria", "agent-1", "aria", "/tmp/aria");
+        let skill_file = files.iter().find(|f| f.filename.ends_with("SKILL.md")).unwrap();
+        assert!(!skill_file.content.contains("description: \"\""), "empty description must not reach the spec-invalid empty string: {}", skill_file.content);
+        assert!(skill_file.content.contains("description: \"No description provided.\""));
+    }
+
+    #[test]
+    fn test_build_config_files_agent_skill_format_truncates_long_description() {
+        // reagent P1 (PR #2322): the Agent Skills spec caps description at
+        // 1024 characters.
+        let content_map = HashMap::new();
+        let long_description = "x".repeat(2000);
+        let skills = vec![make_agent_skill("Deploy Checklist", &long_description, "body")];
+        let files = build_config_files(&content_map, &skills, "Aria", "agent-1", "aria", "/tmp/aria");
+        let skill_file = files.iter().find(|f| f.filename.ends_with("SKILL.md")).unwrap();
+        // Extract the description value between the quotes on its line.
+        let desc_line = skill_file.content.lines().find(|l| l.starts_with("description: ")).unwrap();
+        let quoted = desc_line.trim_start_matches("description: ");
+        let inner_len = quoted.len() - 2; // strip surrounding quotes
+        assert!(inner_len <= 1024, "description exceeds spec max of 1024 chars: {inner_len}");
     }
 
     #[test]
