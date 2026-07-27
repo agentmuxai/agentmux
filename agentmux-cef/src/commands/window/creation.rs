@@ -758,6 +758,16 @@ pub(crate) fn reproject_from_srv(state: &Arc<AppState>, main_window_id: String) 
                     pid
                 }
             });
+            // Position/size mirror, added alongside `position_persist`'s
+            // write-through — was unconditionally `None` before (see this
+            // file's git history / SPEC_PILLAR1_STEP4_CRASH_REPROJECT_
+            // 2026_07_07.md §4), the one case the fast path
+            // (`reproject_from_snapshot`, which already has `w.last_rect`
+            // from the launcher's live snapshot) didn't cover: a full
+            // process-tree restart where the launcher died too. `None` here
+            // still falls through to `open_window_with_kind`'s existing
+            // default-placement heuristic, same as before this existed.
+            let last_rect = crate::client::backend_get_window_pos_and_size(&web_endpoint, &auth_key, window_id);
             snapshots.push(agentmux_common::ipc::WindowSnapshot {
                 label: window_id.clone(),
                 kind,
@@ -765,7 +775,7 @@ pub(crate) fn reproject_from_srv(state: &Arc<AppState>, main_window_id: String) 
                 hwnd: None,
                 visible: true,
                 iconic: false,
-                last_rect: None,
+                last_rect,
                 foregrounded_since_open: true,
             });
         }

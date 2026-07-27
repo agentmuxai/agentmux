@@ -1405,6 +1405,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                             turnTokens={agentAtoms().turnTokensAtom[0]()}
                             launchPhase={status.launchPhase()}
                             onCancelLogin={status.cancelLogin}
+                            hasAuthUrl={!!status.authUrl()}
                             waitingReason={
                                 (() => {
                                     const phase = agentAtoms().turnPhaseAtom[0]();

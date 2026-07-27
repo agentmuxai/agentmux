@@ -248,6 +248,88 @@ pub(crate) fn backend_set_window_opacity(web_endpoint: &str, auth_key: &str, win
     }
 }
 
+/// Write-through a window's position/size to srv's `Window.pos`/`winsize`
+/// mirror (via `backend_get_window_pos_and_size` below) so a full
+/// process-tree restart — where the launcher's live in-memory
+/// `WindowMirror.last_rect` is also gone, not just the main window — can
+/// still recreate secondary windows at their exact last geometry instead of
+/// a default placement. Fire-and-forget, same shape as
+/// `backend_set_window_opacity`: raw TCP, always called from its own
+/// background thread (see `report_position_for_srv_writethrough` in
+/// `commands/window/position_persist.rs`) so a slow/failed srv round-trip
+/// never stalls the live window move the user is actively making.
+///
+/// `rect` is Win32 screen-coordinate `left/top/right/bottom`
+/// (`agentmux_common::ipc::Rect`); converted here to srv's `pos: {x, y}` /
+/// `size: {width, height}` shape (`agentmux-srv/src/backend/obj.rs`'s
+/// `Point`/`WinSize`) since the two crates don't share these types directly
+/// — the wire format is plain JSON either way.
+pub(crate) fn backend_set_window_pos_and_size(web_endpoint: &str, auth_key: &str, window_id: &str, rect: agentmux_common::ipc::Rect) {
+    use std::io::Write;
+
+    let Some(addr) = parse_web_endpoint(web_endpoint, "backend_set_window_pos_and_size") else {
+        return;
+    };
+
+    let body = serde_json::json!({
+        "service": "window",
+        "method": "SetWindowPosAndSize",
+        "args": [
+            window_id,
+            { "x": rect.left, "y": rect.top },
+            { "width": rect.right - rect.left, "height": rect.bottom - rect.top },
+        ],
+        "uicontext": null,
+    })
+    .to_string();
+    let request = format!(
+        "POST /agentmux/service HTTP/1.1\r\n\
+         Host: 127.0.0.1\r\n\
+         X-AuthKey: {}\r\n\
+         Content-Type: application/json\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\
+         \r\n\
+         {}",
+        auth_key, body.len(), body
+    );
+
+    let timeout = std::time::Duration::from_millis(2000);
+    match std::net::TcpStream::connect_timeout(&addr, timeout) {
+        Ok(mut stream) => {
+            stream.set_write_timeout(Some(timeout)).ok();
+            stream.set_read_timeout(Some(timeout)).ok();
+            if let Err(e) = stream.write_all(request.as_bytes()) {
+                tracing::warn!(
+                    window_id = %window_id,
+                    error = %e,
+                    "[backend_set_window_pos_and_size] write failed — position mirror not persisted"
+                );
+                return;
+            }
+            use std::io::Read;
+            let mut resp = String::new();
+            let _ = stream.read_to_string(&mut resp);
+            let first_line = resp.lines().next().unwrap_or("(empty)");
+            if !first_line.contains(" 200 ") && !first_line.starts_with("HTTP/1.1 200") {
+                tracing::warn!(
+                    window_id = %window_id,
+                    response = %first_line,
+                    "[backend_set_window_pos_and_size] SetWindowPosAndSize did not succeed — position mirror not persisted"
+                );
+            }
+        }
+        Err(e) => {
+            tracing::warn!(
+                window_id = %window_id,
+                addr = %addr,
+                error = %e,
+                "[backend_set_window_pos_and_size] connect failed — position mirror not persisted"
+            );
+        }
+    }
+}
+
 /// SPEC_PILLAR1_STEP3 Phase 2 — write-through a window's `kind` +
 /// `parent_window_id` to srv, so a future reproject can tell which
 /// native-window creation path to drive for each window. Fire-and-forget,
@@ -388,6 +470,85 @@ pub(crate) fn backend_get_window_opacity(web_endpoint: &str, auth_key: &str, win
         return None;
     }
     parsed.get("data")?.get("opacity")?.as_f64().map(|o| o as f32)
+}
+
+/// Read back the last-persisted position/size for `window_id` from srv —
+/// the slow-path reproject counterpart to `backend_get_window_opacity`
+/// above. Used only by `reproject_from_srv`
+/// (`commands/window/creation.rs`), the full-process-tree-restart path
+/// where the launcher's in-memory `WindowMirror.last_rect` is also gone,
+/// unlike the fast path (`reproject_from_snapshot`) which already has it.
+/// Same raw-TCP/blocking shape and same caller obligation (off the UI
+/// thread — `reproject_from_srv` already runs on its own `std::thread`).
+///
+/// Returns `None` on any failure (parse/connect/non-200/missing field) —
+/// the caller already treats "no rect available" as a valid fallback case
+/// (falls through to the existing default-placement heuristic in
+/// `open_window_with_kind`), same as it does today when this function
+/// doesn't exist at all.
+pub(crate) fn backend_get_window_pos_and_size(web_endpoint: &str, auth_key: &str, window_id: &str) -> Option<agentmux_common::ipc::Rect> {
+    use std::io::Write;
+
+    let addr = parse_web_endpoint(web_endpoint, "backend_get_window_pos_and_size")?;
+
+    let body = serde_json::json!({
+        "service": "window",
+        "method": "GetWindow",
+        "args": [window_id],
+        "uicontext": null,
+    })
+    .to_string();
+    let request = format!(
+        "POST /agentmux/service HTTP/1.1\r\n\
+         Host: 127.0.0.1\r\n\
+         X-AuthKey: {}\r\n\
+         Content-Type: application/json\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\
+         \r\n\
+         {}",
+        auth_key, body.len(), body
+    );
+
+    let timeout = std::time::Duration::from_millis(2000);
+    let mut stream = std::net::TcpStream::connect_timeout(&addr, timeout)
+        .map_err(|e| tracing::warn!(window_id = %window_id, error = %e, "[backend_get_window_pos_and_size] connect failed"))
+        .ok()?;
+    stream.set_write_timeout(Some(timeout)).ok();
+    stream.set_read_timeout(Some(timeout)).ok();
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|e| tracing::warn!(window_id = %window_id, error = %e, "[backend_get_window_pos_and_size] write failed"))
+        .ok()?;
+
+    use std::io::Read;
+    let mut resp = String::new();
+    stream.read_to_string(&mut resp).ok()?;
+
+    let body_str = resp.split_once("\r\n\r\n").map(|(_, b)| b).unwrap_or("");
+    let parsed: serde_json::Value = serde_json::from_str(body_str).ok()?;
+    if parsed.get("success").and_then(|v| v.as_bool()) != Some(true) {
+        return None;
+    }
+    let data = parsed.get("data")?;
+    let x = data.get("pos")?.get("x")?.as_i64()?;
+    let y = data.get("pos")?.get("y")?.as_i64()?;
+    let width = data.get("winsize")?.get("width")?.as_i64()?;
+    let height = data.get("winsize")?.get("height")?.as_i64()?;
+    if width <= 0 || height <= 0 {
+        // Never-written Window.pos/winsize default to zero (Point/WinSize's
+        // #[derive(Default)]), which is indistinguishable from "this row
+        // predates the write-through" — treat a zero-or-negative size as
+        // "no real geometry persisted" rather than recreating a
+        // zero-sized window.
+        return None;
+    }
+    Some(agentmux_common::ipc::Rect {
+        left: x as i32,
+        top: y as i32,
+        right: (x + width) as i32,
+        bottom: (y + height) as i32,
+    })
 }
 
 /// SPEC_PILLAR1_STEP4 Phase 3 — slow-path reproject: read srv's durable
