@@ -17,8 +17,10 @@
  *      spawns the login command via the CEF host (so the browser opens
  *      correctly on Windows), then polls with 2s cadence until authenticated,
  *      cancelled, or 5 minutes elapse.
- *   3. Controller registration — ControllerResync on the tab, read status, log
- *      "ready" or "done" depending on whether there's a prior turn.
+ *   3. Controller registration — ControllerResync on the tab, read status, post
+ *      a visible "Resumed…"/"Ready…" notification (or, if the resync itself
+ *      failed, an honest warning instead of a false all-clear — see
+ *      `resyncFailed` below) depending on whether there's a prior turn.
  *
  * The caller provides a log sink, a cancellation accessor, and callbacks for
  * two pieces of external state (`authUrl`, `loginWaiting`). All other state
@@ -61,6 +63,12 @@ export interface LaunchFlowOptions {
     authEnv?: Record<string, string>;
     /** Called once when login is confirmed — append a success message to the chat. */
     onLoginSuccess?: (email: string | null) => void;
+    /** Posts a permanent, visible line into the pane's conversation — for
+     *  anything that isn't a login *success* (that's `onLoginSuccess`) but
+     *  still shouldn't be silent: a warning before an automatic relogin
+     *  attempt, or the end-of-mount "ready"/"resumed" summary. See
+     *  docs/specs/SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26.md. */
+    onNotify?: (text: string, style: "info" | "warning") => void;
     /**
      * Returns the pane's current `{rows, cols}` (or undefined if not laid out
      * yet). Used to seed the PTY size on the Phase-3 resync so the agent CLI is
@@ -84,6 +92,7 @@ export type LaunchFlowResult = "success" | "auth_failed" | "fatal";
 export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlowResult> {
     const { blockId, provider, log, setAuthUrl, isCancelled, setLoginWaiting, authEnv } = opts;
     const setPhase = opts.setLaunchPhase ?? (() => {});
+    const notify = opts.onNotify ?? (() => {});
 
     if (!provider) {
         log("error", "no provider definition — cannot resolve CLI", "error");
@@ -207,6 +216,44 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
     }
 
     if (needsLogin) {
+        const agentDefinitionId = blockData?.meta?.agentId as string | undefined;
+
+        // Reuse the account already bound to this agent for this provider,
+        // if any — reagent P1: without this, every retry through this flow
+        // minted a brand-new account+dir instead of refreshing the one
+        // already in use, orphaning an unlinked IdentityAccount row/dir on
+        // every failed "Retry Login" click. Computed up front (not just
+        // where it's used below) because it doubles as the "has this agent
+        // ever actually logged in before" signal for the notification
+        // below — a REAL account link can only exist if a prior login
+        // completed and got persisted (persistAndLinkAccount/
+        // finalizeAccount), unlike blockData?.meta?.["cmd"] (an earlier,
+        // broken attempt at this signal — reagent P1 on PR #2304: agent-
+        // model.ts's launchAgent() writes `cmd` into meta unconditionally
+        // at agent-CREATION time, before any login ever happens, so it was
+        // true on every genuine first-ever login too).
+        let existingAccountId: string | undefined;
+        if (agentDefinitionId) {
+            try {
+                const links = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, {
+                    agent_id: agentDefinitionId,
+                });
+                existingAccountId = links.find((l) => l.provider === provider.id)?.account_id;
+            } catch {
+                // Best-effort — a fresh account still gets minted below if this lookup fails.
+            }
+        }
+
+        // See docs/specs/SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26.md §8
+        // Q6: a brand-new agent needing its first login isn't "expired," and
+        // telling the user otherwise would be both wrong and alarming.
+        if (existingAccountId) {
+            setPhase({ kind: "auth-expired" });
+            notify(`Your ${provider.displayName} login has expired — signing back in…`, "warning");
+        } else {
+            setPhase({ kind: "first-login" });
+            notify(`Signing in to ${provider.displayName}…`, "info");
+        }
         log("auth", "not authenticated — starting login flow...");
         setLoginWaiting(true);
         try {
@@ -223,24 +270,6 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
             // nothing tracks (PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md
             // §7 — required now that the resolver's spawn gate has no
             // ambient exception).
-            const agentDefinitionId = blockData?.meta?.agentId as string | undefined;
-
-            // Reuse the account already bound to this agent for this
-            // provider, if any — reagent P1: without this, every retry
-            // through this flow minted a brand-new account+dir instead of
-            // refreshing the one already in use, orphaning an unlinked
-            // IdentityAccount row/dir on every failed "Retry Login" click.
-            let existingAccountId: string | undefined;
-            if (agentDefinitionId) {
-                try {
-                    const links = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, {
-                        agent_id: agentDefinitionId,
-                    });
-                    existingAccountId = links.find((l) => l.provider === provider.id)?.account_id;
-                } catch {
-                    // Best-effort — a fresh account still gets minted below if this lookup fails.
-                }
-            }
 
             // Tier 2/3 mint (or reuse) an isolated account dir that's
             // DIFFERENT from the pre-login `authEnv` closure above — this
@@ -420,6 +449,8 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
     // Phase 3: Controller Registration
     setPhase({ kind: "verifying" });
     log("controller", "registering subprocess controller...");
+    let resumed = false;
+    let resyncFailed = false;
     try {
         // Seed the PTY at the pane's current width so the agent CLI wraps
         // correctly from its first byte — the backend opens the PTY at this
@@ -439,18 +470,53 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
         if (rts) opts.onControllerStatus?.(rts);
         if (status === "init") {
             log("agent", "ready — type a message below to start");
-        } else if (status === "done") {
-            log("agent", "previous turn complete — send a message to continue");
+        } else if (status === "done" || status === "running") {
+            // "running" means a persistent controller resumed while its
+            // process was still alive (possibly mid-turn) — if anything a
+            // STRONGER resume signal than "done". Missing this case (as an
+            // earlier revision of this file did) left that path completely
+            // silent — not just unstyled, no log line at all. reagent P1 on
+            // PR #2303 (confirmed real via persistent.rs's STATUS_RUNNING
+            // and useControllerStatusEvents.test.ts).
+            resumed = true;
+            // "done" and "running" get distinct wording — "previous turn
+            // complete" would contradict "running"'s own meaning (the
+            // controller may still be alive/mid-turn, not complete).
+            log(
+                "agent",
+                status === "running"
+                    ? "resuming a controller that's still alive — send a message to continue"
+                    : "previous turn complete — send a message to continue",
+            );
         }
     } catch (err: any) {
         // Don't follow a real resync failure with the generic "ready" message —
         // that previously masked every resync error (including the commit-
         // pressure admission gate's "memory full" refusal) with a misleading
         // all-clear a line later. Surface the actual failure at "error" so it's
-        // the last, most visible line in the panel.
+        // the last, most visible line in the panel. `resumed` stays false here
+        // (unknown, not confirmed) — fresh-ready's wording is the safer default
+        // when the resync itself failed to tell us which case this is.
         log("controller", `resync failed: ${err?.message ?? String(err)}`, "error");
+        resyncFailed = true;
     }
 
-    setPhase({ kind: "ready" });
+    // reagent P1 on PR #2304: this used to fall through to the cheerful
+    // ready/resumed-ready notification below even when the try block above
+    // threw — exactly the misrepresentation the comment above claims to
+    // avoid. `resyncFailed` breaks that fallthrough. The function's return
+    // value stays "success" (unchanged pre-existing contract for this path —
+    // widening it to a new failure variant is a bigger, separate change);
+    // this only stops the visible notification from lying about it.
+    if (resyncFailed) {
+        setPhase({ kind: "fresh-ready" });
+        notify("Something went wrong finishing setup — if the agent doesn't respond, try reopening this pane.", "warning");
+    } else if (resumed) {
+        setPhase({ kind: "resumed-ready" });
+        notify("Resumed — continuing where you left off", "info");
+    } else {
+        setPhase({ kind: "fresh-ready" });
+        notify("Ready — type a message to start", "info");
+    }
     return "success";
 }

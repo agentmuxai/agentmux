@@ -88,7 +88,17 @@ interface AgentWorkingRowProps {
     hasAuthUrl?: boolean;
 }
 
-const CANCELLABLE_LAUNCH_PHASES = new Set(["opening-login-terminal", "waiting-for-login-completion"]);
+// reagent P2 on PR #2304: "waiting-for-login-link" (tier 1's own up-to-15s
+// countdown) was missing here, so that phase's real timed wait had no cancel
+// affordance anywhere — AuthUrlBox can't show one yet (no URL captured), and
+// the row's own button was withheld for exactly this phase.
+const CANCELLABLE_LAUNCH_PHASES = new Set([
+    "first-login",
+    "auth-expired",
+    "waiting-for-login-link",
+    "opening-login-terminal",
+    "waiting-for-login-completion",
+]);
 
 /** The exact string the loading row's left zone shows right now — pulled out
  *  of the JSX ternary chain so both the type-out reveal effect and the

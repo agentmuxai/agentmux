@@ -26,6 +26,21 @@ export const LOGIN_LINK_CAPTURE_LABEL_MS = 15_000;
 export type LaunchPhase =
     | { kind: "resolving-cli" }
     | { kind: "checking-auth" }
+    /** Auth check failed and no real account link exists yet for this
+     *  agent+provider (`ListAgentIdentitiesCommand` returns nothing) — its
+     *  very first login, not a lapsed one. `blockData?.meta?.["cmd"]` was an
+     *  earlier, broken attempt at this signal: agent-model.ts's launchAgent()
+     *  sets it unconditionally at agent-creation time, before any login ever
+     *  happens, so it was true on every genuine first-ever login too (reagent
+     *  P1 on PR #2304). Kept distinct from `auth-expired` so the conversation
+     *  notification never wrongly implies something broke. See
+     *  docs/specs/SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26.md §8 Q6. */
+    | { kind: "first-login" }
+    /** Auth check failed but a real account link already exists for this
+     *  agent+provider — a previously-working credential has gone stale. This
+     *  is the case the notification needs to actually warn about before a
+     *  browser/terminal pops open with no explanation. */
+    | { kind: "auth-expired" }
     /** Tier 1's PTY/pipe URL-capture attempt — only reachable for providers
      *  where `headlessLoginUrlUnsupported` is NOT set (Codex/Gemini/OpenClaw).
      *  See catalog.ts and cli_login.rs's URL_CAPTURE_TIMEOUT_SECS. */
@@ -35,7 +50,13 @@ export type LaunchPhase =
      *  completion poll — both are a 5-minute CheckCliAuthCommand loop. */
     | { kind: "waiting-for-login-completion"; deadlineMs: number }
     | { kind: "verifying" }
-    | { kind: "ready" }
+    /** Phase 3 finished with GetControllerStatus's shellprocstatus === "init"
+     *  — this agent has never run a turn before. */
+    | { kind: "fresh-ready" }
+    /** Phase 3 finished with shellprocstatus === "done" or "running" — this
+     *  agent has a prior turn on record (or a persistent controller resumed
+     *  while still alive/mid-turn); the pane is resuming, not starting fresh. */
+    | { kind: "resumed-ready" }
     | { kind: "failed"; reason: string };
 
 function fmtRemaining(ms: number): string {
@@ -55,6 +76,10 @@ export function formatPhaseLabel(phase: LaunchPhase | null | undefined, nowMs: n
             return "Resolving CLI";
         case "checking-auth":
             return "Checking authentication";
+        case "first-login":
+            return "Signing in";
+        case "auth-expired":
+            return "Login expired — signing back in";
         case "waiting-for-login-link":
             return `Waiting for login link… up to ${fmtRemaining(phase.deadlineMs - nowMs)}`;
         case "opening-login-terminal":
@@ -63,7 +88,8 @@ export function formatPhaseLabel(phase: LaunchPhase | null | undefined, nowMs: n
             return `Waiting for you to finish logging in… up to ${fmtRemaining(phase.deadlineMs - nowMs)}`;
         case "verifying":
             return "Verifying login";
-        case "ready":
+        case "fresh-ready":
+        case "resumed-ready":
         case "failed":
             return null;
     }
