@@ -25,6 +25,7 @@ import {
     initialState,
     type PaneFailure,
     type TurnPhase,
+    workingFromPhase,
 } from "./agent-pane-state/types";
 import { type CommandSource, recordDispatch } from "./command-source";
 
@@ -92,6 +93,11 @@ export interface AgentPaneProjections {
 interface Slot {
     state: AgentPaneState;
     proj: AgentPaneProjections;
+    // Edge-trigger for the `[wave-turn]` stream-stuck watchdog line — logs
+    // once per stall episode (on the first threshold crossing) instead of
+    // every 5s watchdog tick for as long as the stall lasts. Reset on every
+    // turnPhase.kind transition, see dispatch().
+    stuckLogged: boolean;
 }
 
 const slots = new Map<string, Slot>();
@@ -151,7 +157,7 @@ export function registerPane(
     agentId: string,
     proj: AgentPaneProjections,
 ): void {
-    slots.set(blockId, { state: initialState(agentId), proj });
+    slots.set(blockId, { state: initialState(agentId), proj, stuckLogged: false });
 }
 
 /**
@@ -180,6 +186,47 @@ export function dispatch(
     const prev = slot.state;
     const result = update(prev, command);
     slot.state = result.state;
+
+    // [wave-turn] diagnostics — mirrors app-init.ts's `[wave-title]` line
+    // (tail with `muxlog host '\[fe\] \[wave-turn\]'`). Before this, an
+    // agent debugging "why does this pane say Working" had nothing to
+    // grep: the reducer is a pure function (zero logging of its own) and
+    // `dispatch()`'s eventSink only ever logged `turn-start-suppressed`.
+    // Every other transition, and the watchdog's own reasoning for
+    // whether it recovered a hung turn, was silently discarded. See
+    // docs/reports/REPORT_WORKING_STATE_TELEMETRY_AUDIT_2026_07_27.md §3.
+    //
+    // Gate on `.kind`, not object identity — `StreamFlushObserved` returns a
+    // fresh `turnPhase` object on every RAF-batched flush (up to ~60/sec
+    // while streaming) even when `kind` stays "Streaming" (reagentx P1 on
+    // PR #2321: referential inequality flooded muxlog with a line per frame
+    // for the whole duration of every response).
+    //
+    // `console.info`, not `.debug` — the host's default EnvFilter is "info"
+    // (no RUST_LOG set), which silently drops `debug!`/console.debug lines.
+    // Logging at info keeps this discoverable in a default run, which is the
+    // whole point of a post-incident self-diagnostic line (codex P1 on PR
+    // #2321). Now that the flood above is fixed, real transitions are rare
+    // enough (a handful per turn) that info-level volume is fine.
+    // Any refresh of the liveness clock (lastEventMs) — not just a kind
+    // change — means a new stall episode can happen and should be logged
+    // again. `bumpEvent`-driven tool/token activity refreshes lastEventMs
+    // while `kind` stays "Streaming" throughout, so gating the reset on
+    // `.kind` alone silently dropped the second of two stalls inside one
+    // continuous Streaming phase (reagentx P2 re-review on PR #2321).
+    if (prev.lastEventMs !== slot.state.lastEventMs) {
+        slot.stuckLogged = false;
+    }
+    if (prev.turnPhase.kind !== slot.state.turnPhase.kind) {
+        console.info(
+            "[wave-turn]",
+            `pane=${blockId.slice(0, 7)}`,
+            `${prev.turnPhase.kind} → ${slot.state.turnPhase.kind}`,
+            `cmd=${command.type}`,
+            `toolsActive=${slot.state.turnPhase.kind === "Streaming" ? slot.state.turnPhase.toolsActive : "-"}`,
+            `currentTool=${slot.state.currentTool ?? "-"}`,
+        );
+    }
 
     // Project changes — only call setters for fields that actually
     // changed (referential equality). Avoids redundant signal writes.
@@ -225,6 +272,40 @@ export function dispatch(
     }
 
     for (const ev of result.events) {
+        // Watchdog reasoning — the reducer already computes exactly why it
+        // did or didn't recover a hung turn (reducer.ts's StreamWatchdogTick
+        // branch); surface it instead of discarding it. `EXEMPT` on
+        // stream-stuck is the single highest-value line for self-diagnosing
+        // a "Working for no reason" report: it names the tool that's
+        // keeping the pane from ever being force-recovered.
+        //
+        // `stream-stuck` fires on every 5s watchdog tick once idle passes
+        // STUCK_THRESHOLD_MS — including for panes sitting at Done/Idle,
+        // since `lastEventMs` isn't cleared on those transitions (codex P2
+        // on PR #2321). Gate on `workingFromPhase` so this only fires for
+        // panes actually showing "Working", and edge-trigger via
+        // `slot.stuckLogged` so a genuine stall logs once (on the first
+        // threshold crossing), not every tick for the rest of the stall.
+        if (ev.type === "stream-stuck") {
+            const p = slot.state.turnPhase;
+            if (workingFromPhase(p) && !slot.stuckLogged) {
+                slot.stuckLogged = true;
+                const exempt = p.kind === "Streaming" && p.toolsActive > 0;
+                console.info(
+                    "[wave-turn]",
+                    `pane=${blockId.slice(0, 7)}`,
+                    `watchdog: no recovery — idleSinceMs=${ev.idleSinceMs} thresholdMs=${ev.thresholdMs}`,
+                    exempt ? `EXEMPT toolsActive=${p.toolsActive} currentTool=${slot.state.currentTool ?? "?"}` : "",
+                );
+            }
+        } else if (ev.type === "working-recovered") {
+            slot.stuckLogged = false;
+            console.info(
+                "[wave-turn]",
+                `pane=${blockId.slice(0, 7)}`,
+                `watchdog: FIRED — force-recovered to Idle, idleSinceMs=${ev.idleSinceMs}`,
+            );
+        }
         eventSink(blockId, ev);
         for (const l of extraListeners) {
             try {
