@@ -153,7 +153,6 @@ impl Store {
         Ok(rows > 0)
     }
 
-    /// Bind an MCP server to an agent (insert ref row). Idempotent.
     /// Bind an MCP server to an agent (insert ref row). Idempotent —
     /// binding an already-bound pair is a silent no-op success.
     ///
