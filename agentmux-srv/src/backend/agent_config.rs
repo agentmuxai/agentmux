@@ -12,7 +12,17 @@ use std::collections::HashMap;
 use chrono::Utc;
 use serde_json::{json, Value};
 
-use crate::backend::storage::store::AgentSkill;
+use crate::backend::storage::store::{derive_slug, AgentSkill};
+
+/// `skill_type` value that materializes a skill as an Agent Skills-format
+/// `.claude/skills/<slug>/SKILL.md` instead of a `.claude/commands/<trigger>.md`
+/// slash command. Any other value (in practice, always `"prompt"` today) keeps
+/// the pre-existing slash-command behavior. See
+/// `docs/specs/REPORT_ARMORY_BUNDLE_STANDARD_RESEARCH_2026_07_16.md` Phase 0 —
+/// `skill_type` already existed end-to-end but was never branched on before
+/// this, making it the lowest-friction place to hang the format discriminator
+/// rather than adding a new column.
+pub const SKILL_TYPE_AGENT_SKILL: &str = "agent-skill";
 
 /// A single file to be written to the agent working directory.
 #[derive(Debug, Clone)]
@@ -98,10 +108,23 @@ pub fn build_config_files(
     }
 
     // ----------------------------------------------------------------
-    // Write each skill as a slash command: .claude/commands/{trigger}.md
+    // Write each skill as either a slash command
+    // (.claude/commands/{trigger}.md, default) or an Agent Skills-format
+    // SKILL.md (.claude/skills/{slug}/SKILL.md, skill_type ==
+    // SKILL_TYPE_AGENT_SKILL) for native Claude Code consumption.
     // ----------------------------------------------------------------
     for skill in skills {
-        if !skill.trigger.is_empty() && !skill.content.is_empty() {
+        if skill.content.is_empty() {
+            continue;
+        }
+        if skill.skill_type == SKILL_TYPE_AGENT_SKILL {
+            let slug = derive_slug(&skill.name);
+            let content = expand_template(&skill.content, &template_vars);
+            files.push(AgentConfigFile {
+                filename: format!(".claude/skills/{slug}/SKILL.md"),
+                content: render_skill_md(&skill.name, &skill.description, &content),
+            });
+        } else if !skill.trigger.is_empty() {
             let content = expand_template(&skill.content, &template_vars);
             files.push(AgentConfigFile {
                 filename: format!(".claude/commands/{}.md", skill.trigger),
@@ -535,6 +558,25 @@ pub fn expand_template(content: &str, vars: &HashMap<String, String>) -> String 
     result
 }
 
+/// Render an Agent Skills-format `SKILL.md`: YAML frontmatter with the two
+/// required fields (`name`, `description` — per the spec's six-field
+/// frontmatter; AgentMux doesn't populate the four optional ones today:
+/// `license`, `compatibility`, `metadata`, `allowed-tools`), followed by the
+/// skill's content as the Markdown body. See https://agentskills.io/specification.
+///
+/// YAML double-quoted scalars use JSON-compatible escaping (YAML 1.2
+/// §7.3.1), so `serde_json::to_string` on a plain string produces a valid,
+/// correctly-escaped YAML value — this avoids hand-rolling YAML escaping or
+/// adding a yaml crate dependency (this workspace has neither today) just
+/// for two scalar fields.
+fn render_skill_md(name: &str, description: &str, body: &str) -> String {
+    let name_yaml =
+        serde_json::to_string(name).expect("string serialization is infallible");
+    let description_yaml =
+        serde_json::to_string(description).expect("string serialization is infallible");
+    format!("---\nname: {name_yaml}\ndescription: {description_yaml}\n---\n\n{body}")
+}
+
 // ============================================================
 // Tests
 // ============================================================
@@ -550,6 +592,19 @@ mod tests {
             name: name.to_string(),
             trigger: trigger.to_string(),
             skill_type: "prompt".to_string(),
+            description: description.to_string(),
+            content: content.to_string(),
+            created_at: 0,
+        }
+    }
+
+    fn make_agent_skill(name: &str, description: &str, content: &str) -> AgentSkill {
+        AgentSkill {
+            id: format!("skill-{}", derive_slug(name)),
+            agent_id: "agent-1".to_string(),
+            name: name.to_string(),
+            trigger: String::new(),
+            skill_type: SKILL_TYPE_AGENT_SKILL.to_string(),
             description: description.to_string(),
             content: content.to_string(),
             created_at: 0,
@@ -640,6 +695,65 @@ mod tests {
         // Individual skill command files
         assert!(files.iter().any(|f| f.filename == ".claude/commands/deploy.md"));
         assert!(files.iter().any(|f| f.filename == ".claude/commands/test.md"));
+    }
+
+    #[test]
+    fn test_build_config_files_agent_skill_format_writes_skill_md() {
+        let content_map = HashMap::new();
+        let skills = vec![make_agent_skill(
+            "Deploy Checklist",
+            "Runs the pre-deploy checklist",
+            "1. Run tests\n2. Check migrations\n3. Deploy",
+        )];
+
+        let files = build_config_files(&content_map, &skills, "Aria", "agent-1", "aria", "/tmp/aria");
+
+        // Materializes to .claude/skills/<slug>/SKILL.md, not .claude/commands/
+        let skill_file = files
+            .iter()
+            .find(|f| f.filename == ".claude/skills/deploy-checklist/SKILL.md")
+            .expect("expected .claude/skills/deploy-checklist/SKILL.md");
+        assert!(!files.iter().any(|f| f.filename.starts_with(".claude/commands/")));
+
+        // YAML frontmatter with the two required Agent Skills fields
+        assert!(skill_file.content.starts_with("---\n"));
+        assert!(skill_file.content.contains("name: \"Deploy Checklist\""));
+        assert!(skill_file
+            .content
+            .contains("description: \"Runs the pre-deploy checklist\""));
+        assert!(skill_file.content.contains("---\n\n1. Run tests"));
+
+        // Skills index in CLAUDE.md still lists it (trigger-agnostic)
+        let claude_md = files.iter().find(|f| f.filename == "CLAUDE.md").unwrap();
+        assert!(claude_md.content.contains("Deploy Checklist"));
+    }
+
+    #[test]
+    fn test_build_config_files_agent_skill_format_escapes_yaml_special_chars() {
+        // Names/descriptions with colons, quotes, or newlines must not
+        // corrupt the YAML frontmatter -- serde_json's escaping (valid YAML
+        // double-quoted-scalar syntax per YAML 1.2 §7.3.1) is what protects
+        // this; regression-test it explicitly rather than trusting the
+        // dependency silently.
+        let content_map = HashMap::new();
+        let skills = vec![make_agent_skill(
+            "Weird: \"Name\"",
+            "Has a colon: and \"quotes\"",
+            "body",
+        )];
+
+        let files = build_config_files(&content_map, &skills, "Aria", "agent-1", "aria", "/tmp/aria");
+        let skill_file = files
+            .iter()
+            .find(|f| f.filename.starts_with(".claude/skills/") && f.filename.ends_with("SKILL.md"))
+            .expect("expected a SKILL.md file");
+
+        // Frontmatter must parse as exactly 3 lines before the closing ---
+        // (name, description, and nothing else leaking onto a new line).
+        let end = skill_file.content.find("\n---\n\n").expect("closing frontmatter delimiter");
+        let frontmatter = &skill_file.content[4..end]; // skip leading "---\n"
+        let lines: Vec<&str> = frontmatter.lines().collect();
+        assert_eq!(lines.len(), 2, "frontmatter should be exactly name + description lines, got: {lines:?}");
     }
 
     #[test]

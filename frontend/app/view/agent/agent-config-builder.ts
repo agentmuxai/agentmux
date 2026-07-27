@@ -14,11 +14,20 @@
 import { Logger } from "@/util/logger";
 
 /**
+ * `skill_type` value that materializes a skill as an Agent Skills-format
+ * `.claude/skills/<slug>/SKILL.md` instead of a `.claude/commands/<trigger>.md`
+ * slash command. Mirrors `SKILL_TYPE_AGENT_SKILL` in
+ * `agentmux-srv/src/backend/agent_config.rs` — keep the two in sync.
+ */
+const SKILL_TYPE_AGENT_SKILL = "agent-skill";
+
+/**
  * Build the list of config files to write to the agent working directory.
  * Assembles CLAUDE.md from soul + agentmd + memory + skills index,
- * writes each skill as a slash command in .claude/commands/,
- * writes hooks.json if present, auto-injects AgentMux MCP server,
- * and applies template variable substitution.
+ * writes each skill as a slash command in .claude/commands/ (or an Agent
+ * Skills-format SKILL.md under .claude/skills/, for skill_type ===
+ * SKILL_TYPE_AGENT_SKILL), writes hooks.json if present, auto-injects
+ * AgentMux MCP server, and applies template variable substitution.
  */
 export function buildConfigFiles(
     contentMap: Record<string, string>,
@@ -72,9 +81,19 @@ export function buildConfigFiles(
         files.push({ path: "CLAUDE.md", content: claudeMdParts.join("") });
     }
 
-    // Write each skill as a slash command: .claude/commands/{trigger}.md
+    // Write each skill as either a slash command (.claude/commands/{trigger}.md,
+    // default) or an Agent Skills-format SKILL.md (.claude/skills/{slug}/SKILL.md,
+    // skill_type === SKILL_TYPE_AGENT_SKILL).
     for (const skill of skills) {
-        if (skill.trigger && skill.content) {
+        if (!skill.content) continue;
+        if (skill.skill_type === SKILL_TYPE_AGENT_SKILL) {
+            const slug = deriveSlug(skill.name);
+            const content = expandTemplate(skill.content, templateVars);
+            files.push({
+                path: `.claude/skills/${slug}/SKILL.md`,
+                content: renderSkillMd(skill.name, skill.description, content),
+            });
+        } else if (skill.trigger) {
             const content = expandTemplate(skill.content, templateVars);
             files.push({ path: `.claude/commands/${skill.trigger}.md`, content });
         }
@@ -114,6 +133,41 @@ export function expandTemplate(content: string, vars: Record<string, string>): s
     return content.replace(/\{\{(\w+)\}\}/g, (match, key) => {
         return vars[key] ?? match;
     });
+}
+
+/**
+ * Derive a filesystem-safe slug from a display name. Lowercase, ASCII
+ * alphanumeric + dash/underscore, consecutive dashes collapsed, trimmed to
+ * 64 chars. Falls back to "agent" if the input has no valid characters.
+ *
+ * Mirrors `derive_slug` in `agentmux-srv/src/backend/storage/agents.rs` —
+ * keep the two in sync, or a SKILL.md preview built here won't match the
+ * path the authoritative Rust launch path actually writes to.
+ */
+export function deriveSlug(name: string): string {
+    const filtered = name
+        .toLowerCase()
+        .replace(/[^a-z0-9-_]/g, "-");
+    const collapsed = filtered
+        .split("-")
+        .filter((s) => s.length > 0)
+        .join("-");
+    const trimmed = collapsed.slice(0, 64);
+    return trimmed || "agent";
+}
+
+/**
+ * Render an Agent Skills-format `SKILL.md`: YAML frontmatter with the two
+ * required fields (`name`, `description`), followed by the skill's content
+ * as the Markdown body. See https://agentskills.io/specification.
+ *
+ * YAML double-quoted scalars use JSON-compatible escaping (YAML 1.2
+ * §7.3.1), so `JSON.stringify` on a plain string produces a valid,
+ * correctly-escaped YAML value — same reasoning as `render_skill_md` in
+ * `agentmux-srv/src/backend/agent_config.rs`, which this mirrors.
+ */
+export function renderSkillMd(name: string, description: string, body: string): string {
+    return `---\nname: ${JSON.stringify(name)}\ndescription: ${JSON.stringify(description)}\n---\n\n${body}`;
 }
 
 /**
