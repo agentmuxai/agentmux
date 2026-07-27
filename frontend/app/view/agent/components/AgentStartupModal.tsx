@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AgentStartupModal — the "Startup" tab body inside AgentSetupModal.
+ * AgentStartupModal — the "Startup" tab body inside AgentStashModal.
  *
  * Lets an agent select an existing Armory Bundle to serve as its Session
  * Context "Startup Instructions" (see buildStartupPayload.ts). This is a

@@ -55,8 +55,9 @@
 // not a flex item's. Reflow to a 2-row stack instead of trying to compress
 // content that has no room left to give — the assignment info and the
 // actions cell each get a full-width row of their own.
-// See SPEC_AGENT_PANE_ARMORY_HEADER_ICON_2026_07_20.md §7.3.
-@container agent-setup (max-width: 460px) {
+// See SPEC_AGENT_PANE_ARMORY_HEADER_ICON_2026_07_20.md §7.3 (container name
+// renamed agent-setup → agent-stash by REPORT_ARMORY_STASH_NAMING_2026_07_27.md).
+@container agent-stash (max-width: 460px) {
     .agent-identity-provider-row {
         grid-template-columns: 16px 1fr;
         grid-template-areas:

@@ -353,13 +353,13 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     };
 
     // Wire the pane-scoped modal callback into the model so the single
-    // title-bar "Agent setup" (vault) icon can open the unified tabbed
+    // title-bar "Stash" (backpack) icon can open the unified tabbed
     // modal (Accounts + Memory) without holding a SolidJS context in the
     // model. Mirrors the former _setOverlayTab pattern; supersedes the
     // separate _openIdentityModal / _openMemoryModal callbacks.
     const modalLayer = useModalLayer();
     onMount(() => {
-        model._openAgentSetupModal = () => {
+        model._openAgentStashModal = () => {
             // Prefer cmd:cwd (actual launch cwd, set by launchAgentDefinition)
             // over AgentDefinition.working_directory, which is often empty or a
             // stale default for template-launched and continuation agents.
@@ -370,7 +370,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 "";
             const agent = currentAgent() ?? null;
             modalLayer.open({
-                kind: "agent-setup",
+                kind: "agent-stash",
                 agentId,
                 agentName: agentName(),
                 workingDirectory,
@@ -383,7 +383,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         };
     });
     onCleanup(() => {
-        model._openAgentSetupModal = null;
+        model._openAgentStashModal = null;
     });
 
     const agentAtoms = createMemo(() => createAgentAtoms(model.blockId));
