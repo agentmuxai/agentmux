@@ -14,21 +14,27 @@
  *      to `install_progress` events so the caller's log sink sees each npm
  *      line as it happens.
  *   2. Auth check — calls the provider's check-auth command. If unauthenticated,
- *      spawns the login command via the CEF host (so the browser opens
- *      correctly on Windows), then polls with 2s cadence until authenticated,
- *      cancelled, or 5 minutes elapse.
+ *      this does NOT open a browser/terminal on its own — it posts a visible
+ *      notification explaining that a login is needed and returns
+ *      "auth_failed" immediately. The user must click the resulting "Log in"
+ *      affordance (wired to `relogin()`) to actually trigger a login attempt.
+ *      A login opening with no prior user action was the exact bug this
+ *      changed to fix — see docs/specs/SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26.md.
  *   3. Controller registration — ControllerResync on the tab, read status, post
  *      a visible "Resumed…"/"Ready…" notification (or, if the resync itself
  *      failed, an honest warning instead of a false all-clear — see
  *      `resyncFailed` below) depending on whether there's a prior turn.
  *
- * The caller provides a log sink, a cancellation accessor, and callbacks for
- * two pieces of external state (`authUrl`, `loginWaiting`). All other state
- * is derived from the block_id + provider definition.
+ * The caller provides a log sink and a phase/notify callback. All other
+ * state is derived from the block_id + provider definition. `setAuthUrl`/
+ * `isCancelled`/`setLoginWaiting` remain on `LaunchFlowOptions` for callers
+ * that still pass them, but this function itself no longer drives a login
+ * attempt, so it never touches them.
  *
  * Return values:
  *   - "success"     — controller registered, ready for user input
- *   - "auth_failed" — login timed out, cancelled, or erred (retry makes sense)
+ *   - "auth_failed" — not authenticated; the caller must show a "Log in" affordance
+ *                     (wired to `relogin()`) — this function never attempts a login itself
  *   - "fatal"       — CLI missing, docker missing, provider unknown (retry won't help)
  */
 
@@ -40,9 +46,8 @@ import { waveEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import * as WOS from "@/app/store/wos";
 import { BlockService } from "@/app/store/services";
-import { getApi, staticTabId } from "@/app/store/global";
-import { persistAndLinkAccount, runProviderLogin } from "./run-provider-login";
-import { LOGIN_LINK_CAPTURE_LABEL_MS, type LaunchPhase } from "./launch-phase";
+import { staticTabId } from "@/app/store/global";
+import type { LaunchPhase } from "./launch-phase";
 import type { ProviderDefinition } from "../providers";
 
 import type { LogFn } from "../types";
@@ -85,12 +90,28 @@ export interface LaunchFlowOptions {
      * Finding 1.
      */
     onControllerStatus?: (rts: BlockControllerRuntimeStatus) => void;
+    /**
+     * Reports whether Phase 2's auth check actually PROVED the CLI is
+     * authenticated (`authResult.authenticated === true`) versus proceeding
+     * on an unconfirmed check (the RPC itself threw or timed out — logged
+     * as "authentication status unknown — will attempt anyway" and NOT
+     * treated as `auth_failed`, since a transient check failure shouldn't
+     * block launch). Without this, "success" alone is ambiguous: it means
+     * "controller registered, ready for input" (see LaunchFlowResult's own
+     * doc comment) and is returned identically whether or not login was
+     * ever actually confirmed — a caller that maps every "success" straight
+     * to `authStatus: "authenticated"` shows a false green "Logged in" tag
+     * for a credential that was never checked (reagent/codex P2 on
+     * PR #2318). Not called at all on the `auth_failed`/`fatal` paths —
+     * those already have their own explicit outcome.
+     */
+    onAuthCheckResult?: (confirmed: boolean) => void;
 }
 
 export type LaunchFlowResult = "success" | "auth_failed" | "fatal";
 
 export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlowResult> {
-    const { blockId, provider, log, setAuthUrl, isCancelled, setLoginWaiting, authEnv } = opts;
+    const { blockId, provider, log, authEnv } = opts;
     const setPhase = opts.setLaunchPhase ?? (() => {});
     const notify = opts.onNotify ?? (() => {});
 
@@ -207,26 +228,23 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
             const emailPart = authResult.email ? ` as ${authResult.email}` : "";
             const methodPart = authResult.auth_method ? ` (${authResult.auth_method})` : "";
             log("auth", `authenticated${emailPart}${methodPart}`);
+            opts.onAuthCheckResult?.(true);
         } else {
             needsLogin = true;
         }
     } catch (err: any) {
         log("auth", `check failed: ${err?.message ?? String(err)}`, "warn");
         log("auth", "authentication status unknown — will attempt anyway", "warn");
+        opts.onAuthCheckResult?.(false);
     }
 
     if (needsLogin) {
         const agentDefinitionId = blockData?.meta?.agentId as string | undefined;
 
         // Reuse the account already bound to this agent for this provider,
-        // if any — reagent P1: without this, every retry through this flow
-        // minted a brand-new account+dir instead of refreshing the one
-        // already in use, orphaning an unlinked IdentityAccount row/dir on
-        // every failed "Retry Login" click. Computed up front (not just
-        // where it's used below) because it doubles as the "has this agent
-        // ever actually logged in before" signal for the notification
-        // below — a REAL account link can only exist if a prior login
-        // completed and got persisted (persistAndLinkAccount/
+        // if any — used only to distinguish first-login from auth-expired
+        // wording below. A REAL account link can only exist if a prior
+        // login completed and got persisted (persistAndLinkAccount/
         // finalizeAccount), unlike blockData?.meta?.["cmd"] (an earlier,
         // broken attempt at this signal — reagent P1 on PR #2304: agent-
         // model.ts's launchAgent() writes `cmd` into meta unconditionally
@@ -240,210 +258,31 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
                 });
                 existingAccountId = links.find((l) => l.provider === provider.id)?.account_id;
             } catch {
-                // Best-effort — a fresh account still gets minted below if this lookup fails.
+                // Best-effort — treated as "no existing account" if this lookup fails.
             }
         }
 
-        // See docs/specs/SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26.md §8
-        // Q6: a brand-new agent needing its first login isn't "expired," and
-        // telling the user otherwise would be both wrong and alarming.
+        // DELIBERATELY DOES NOT open a browser/terminal here. This function
+        // used to call runProviderLogin() automatically the instant an
+        // unauthenticated agent was opened — a login window appearing with
+        // no click, no warning, and no way to decline. Per direct user
+        // instruction (2026-07-27, superseding SPEC_AGENT_PANE_AUTH_
+        // NOTIFICATIONS_2026_07_26.md §8 Q2's "notify-then-proceed"
+        // decision): the mount-time flow now only ever posts a notification
+        // and stops — actually starting a login is exclusively a user
+        // action, via the "Log in" button (`agent-view.tsx`) wired to
+        // `relogin()` in `useAgentControllerStatus.ts`. See
+        // docs/specs/SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26.md §8 Q6
+        // for why first-login and auth-expired still get different wording.
         if (existingAccountId) {
             setPhase({ kind: "auth-expired" });
-            notify(`Your ${provider.displayName} login has expired — signing back in…`, "warning");
+            notify(`Your ${provider.displayName} login has expired. Click "Log in" to continue.`, "warning");
         } else {
             setPhase({ kind: "first-login" });
-            notify(`Signing in to ${provider.displayName}…`, "info");
+            notify(`${provider.displayName} needs you to sign in before this agent can start. Click "Log in" to continue.`, "info");
         }
-        log("auth", "not authenticated — starting login flow...");
-        setLoginWaiting(true);
-        try {
-            // Shared with `/login` and the "Login Again" failure-banner action
-            // (retro-headless-login-browser-open-2026-07-20 / retro-login-
-            // three-code-paths-2026-07-20) — this used to be a hand-rolled
-            // `runCliLogin` call with no fallback when the CLI produced no
-            // scrapeable URL, which is every time for Claude Code v2.1.x. That
-            // left this specific call site — the one "Retry Login" actually
-            // triggers — stuck polling CheckCliAuth against a dir nothing was
-            // writing to, for the full 5-minute deadline, every single click.
-            // linkTarget lets a tier-2/3 success register a real Armory
-            // account bound to THIS agent instead of just seeding a file
-            // nothing tracks (PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md
-            // §7 — required now that the resolver's spawn gate has no
-            // ambient exception).
-
-            // Tier 2/3 mint (or reuse) an isolated account dir that's
-            // DIFFERENT from the pre-login `authEnv` closure above — this
-            // local copy is what the post-login recheck below actually
-            // queries, so it must be refreshed. reagent P0: without this,
-            // the "seeded"/"terminal-success" recheck queried the OLD
-            // directory (nothing had ever been written there) and reported
-            // authenticated: false even though the login just succeeded,
-            // defeating the entire "Retry Login" flow this file exists for.
-            let recheckAuthEnv = authEnv ?? {};
-            // Captured for the "opened" case specifically — tier 1 mints
-            // and reports the account but does NOT persist/link it (it
-            // returns before confirming completion); once THIS function's
-            // own poll below confirms authenticated: true, it must call
-            // persistAndLinkAccount itself using these. reagent P0 on
-            // #2263: without this, a tier-1 login that succeeds for any
-            // provider whose CLI actually prints a URL (not
-            // requiresLoginTty — e.g. gemini/copilot) never gets a real
-            // IdentityAccount, and the resolver's spawn gate blocks the
-            // agent on its very next spawn regardless of what this poll
-            // reports now.
-            let openedAccountId: string | undefined;
-            let openedAccountDir: string | undefined;
-            // See catalog.ts's DEAD END note — providers with
-            // headlessLoginUrlUnsupported skip straight past tier 1's
-            // URL-capture wait, so there's no login-link timer to label here.
-            setPhase(
-                provider.headlessLoginUrlUnsupported
-                    ? { kind: "opening-login-terminal" }
-                    : { kind: "waiting-for-login-link", deadlineMs: Date.now() + LOGIN_LINK_CAPTURE_LABEL_MS },
-            );
-            const outcome = await runProviderLogin({
-                provider,
-                cliPath: cliResult.cli_path,
-                authEnv: authEnv ?? {},
-                setAuthUrl,
-                log,
-                isCancelled,
-                linkTarget: agentDefinitionId ? { blockId, agentDefinitionId } : undefined,
-                existingAccountId,
-                onAccountRegistered: (accountId, dir) => {
-                    openedAccountId = accountId;
-                    openedAccountDir = dir;
-                    if (provider.authConfigDirEnvVar) {
-                        recheckAuthEnv = { ...(authEnv ?? {}), [provider.authConfigDirEnvVar]: dir };
-                    }
-                },
-                // See catalog.ts's DEAD END note — for these providers tier 1
-                // cannot ever succeed, so skip its ~15s capture wait instead
-                // of running (and always losing) it on every login.
-                skipTier1: provider.headlessLoginUrlUnsupported === true,
-                // Without this, the phase set just above (a URL-capture
-                // countdown, or a static "opening terminal" for skipTier1)
-                // never updates again for the rest of this single await —
-                // tier 2/3 inside runProviderLogin can run for up to 5 more
-                // minutes with the footer frozen on whatever was true when
-                // this call started. reagent P1 on PR #2300.
-                onTierChange: (event) => {
-                    if (event.tier === "fallback") {
-                        setPhase({ kind: "opening-login-terminal" });
-                    } else {
-                        setPhase({ kind: "waiting-for-login-completion", deadlineMs: event.deadlineMs });
-                    }
-                },
-            });
-
-            let authenticated = false;
-            let authedEmail: string | null = null;
-
-            if (outcome === "opened") {
-                // A real OAuth URL was captured and opened — poll until the
-                // user finishes there, cancels, or 5 minutes elapse.
-                log("auth", "waiting for login to complete...");
-                const deadline = Date.now() + 5 * 60 * 1000;
-                setPhase({ kind: "waiting-for-login-completion", deadlineMs: deadline });
-                while (!isCancelled() && Date.now() < deadline && !authenticated) {
-                    await new Promise<void>((r) => setTimeout(r, 2000));
-                    if (isCancelled()) break;
-                    try {
-                        const recheck = await RpcApi.CheckCliAuthCommand(TabRpcClient, {
-                            cli_path: cliResult.cli_path,
-                            auth_check_args: provider.authCheckCommand,
-                            auth_env: recheckAuthEnv,
-                        }, { timeout: 10000 });
-                        if (recheck.authenticated) {
-                            authenticated = true;
-                            authedEmail = recheck.email ?? null;
-                        }
-                    } catch {
-                        // keep polling on transient RPC errors
-                    }
-                }
-                // Tier 1 minted the account but deliberately didn't persist
-                // it (see run-provider-login.ts's persistAndLinkAccount doc
-                // comment) — now that THIS poll has confirmed the login
-                // actually completed, persist and link it for real.
-                if (authenticated && openedAccountId && openedAccountDir) {
-                    await persistAndLinkAccount(
-                        {
-                            provider,
-                            cliPath: cliResult.cli_path,
-                            authEnv: authEnv ?? {},
-                            setAuthUrl,
-                            log,
-                            linkTarget: agentDefinitionId ? { blockId, agentDefinitionId } : undefined,
-                        },
-                        openedAccountId,
-                        openedAccountDir,
-                    );
-                }
-            } else if (outcome === "seeded" || outcome === "terminal-success") {
-                // A credential already landed on disk (copied from a valid
-                // global login, or completed in the terminal-fallback tier,
-                // which already polled internally) — one-shot confirm instead
-                // of polling again.
-                setPhase({ kind: "verifying" });
-                try {
-                    const recheck = await RpcApi.CheckCliAuthCommand(TabRpcClient, {
-                        cli_path: cliResult.cli_path,
-                        auth_check_args: provider.authCheckCommand,
-                        auth_env: recheckAuthEnv,
-                    }, { timeout: 10000 });
-                    authenticated = recheck.authenticated;
-                    authedEmail = recheck.email ?? null;
-                } catch {
-                    // The credential is on disk even if this recheck RPC
-                    // itself failed transiently — don't block success on it.
-                    authenticated = true;
-                }
-            }
-            // "terminal-timeout" / "terminal-unavailable" leave authenticated
-            // false and fall through to the AMX-AUTH-002 error below.
-
-            setLoginWaiting(false);
-            // Reap the login CLI now the attempt has concluded (success,
-            // timeout, or cancel). On manual-paste success the child self-exits;
-            // if creds appeared without a paste it would otherwise linger at the
-            // prompt. cancelCliLogin is idempotent and host-side.
-            getApi().cancelCliLogin().catch(() => {});
-            setAuthUrl(null);
-
-            if (isCancelled()) {
-                setPhase({ kind: "failed", reason: "cancelled" });
-                return "auth_failed";
-            }
-
-            if (authenticated) {
-                const emailPart = authedEmail ? ` as ${authedEmail}` : "";
-                log("auth", `authenticated${emailPart}`);
-                opts.onLoginSuccess?.(authedEmail);
-            } else {
-                // Synthesize an AMX-AUTH-002 wire payload so the log
-                // entry renders with the catalog's friendly title +
-                // retry hint, matching the typed-error pattern used
-                // elsewhere. Same retry-first / error-last ordering
-                // as above.
-                const t = translateError({
-                    code: "AMX-AUTH-002",
-                    details: { provider: provider.id, seconds: 300 },
-                });
-                log("auth", `retry: ${t.retry ?? `run '${provider.cliCommand} ${provider.authLoginCommand.join(" ")}' manually`}`, "warn");
-                log("auth", `${t.title}: ${t.message}`, "error");
-                setPhase({ kind: "failed", reason: t.message });
-                return "auth_failed";
-            }
-        } catch (err: any) {
-            setLoginWaiting(false);
-            getApi().cancelCliLogin().catch(() => {});
-            setAuthUrl(null);
-            log("auth", `login failed: ${err?.message ?? String(err)}`, "error");
-            log("auth", `run: ${provider.cliCommand} ${provider.authLoginCommand.join(" ")}`, "warn");
-            setPhase({ kind: "failed", reason: err?.message ?? String(err) });
-            return "auth_failed";
-        }
+        log("auth", "not authenticated — waiting for the user to start a login");
+        return "auth_failed";
     }
 
     // Phase 3: Controller Registration

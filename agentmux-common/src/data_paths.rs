@@ -348,8 +348,19 @@ impl DataPaths {
     /// account-wide and version-independent: upgrading agentmux does
     /// not move a user's bundle credentials. Per
     /// `docs/specs/archive/SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md` §4.1.
+    ///
+    /// When [`isolated_auth_enabled`] is set, this resolves to
+    /// `instance_dir/identities/` instead — a channel-scoped credential
+    /// tree for destructive Armory testing (delete-account flows) that
+    /// can never touch the real global identity store other channels/
+    /// instances use. Opt-in only; default behavior above is unchanged.
+    /// See `docs/specs/SPEC_ISOLATED_AUTH_DEV_TESTING_2026_07_27.md`.
     pub fn identities_dir(&self) -> PathBuf {
-        self.shared_dir.join("identities")
+        if isolated_auth_enabled() {
+            self.instance_dir.join("identities")
+        } else {
+            self.shared_dir.join("identities")
+        }
     }
 
     /// `~/.agentmux/shared/identities/<bundle_id>/` — a specific
@@ -386,6 +397,28 @@ impl DataPaths {
     pub fn provider_auth_dir(&self, auth_dir_name: &str) -> PathBuf {
         self.shared_dir.join("providers").join(auth_dir_name)
     }
+}
+
+/// Opt-in flag for isolated per-channel auth (identity accounts + OAuth
+/// credential dirs), for destructive Armory testing (delete-account
+/// flows) that must never touch the real global identity store other
+/// channels/instances depend on. Read directly at every call site
+/// rather than cached on `DataPaths` so `identities_dir()` behaves
+/// consistently regardless of whether the caller built its `DataPaths`
+/// via `resolve()` (launcher) or `from_env()` (downstream host/srv).
+///
+/// Default (unset/false): zero behavior change from today — every
+/// channel/branch/instance shares one global identity store, exactly
+/// as before this flag existed. This is deliberate: re-authenticating
+/// every provider on every branch switch is real daily friction (it's
+/// the whole reason the seed-from-global login tier exists), so
+/// isolation must never be the default.
+///
+/// See `docs/specs/SPEC_ISOLATED_AUTH_DEV_TESTING_2026_07_27.md`.
+pub fn isolated_auth_enabled() -> bool {
+    std::env::var("AGENTMUX_ISOLATED_AUTH")
+        .map(|v| v == "1")
+        .unwrap_or(false)
 }
 
 /// `~/.agentmux/` root, or the test override via
@@ -942,6 +975,71 @@ mod tests {
             assert!(
                 !a.starts_with(&installed.config_dir),
                 "provider auth dir must NOT be under the per-channel config dir"
+            );
+        });
+    }
+
+    /// RAII guard clearing `AGENTMUX_ISOLATED_AUTH` on drop, even on panic —
+    /// mirrors `HomeOverrideGuard` above.
+    struct IsolatedAuthGuard;
+    impl Drop for IsolatedAuthGuard {
+        fn drop(&mut self) {
+            std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
+        }
+    }
+
+    #[test]
+    fn identities_dir_is_shared_by_default() {
+        // Flag unset (the default): identical to today — channel/mode-
+        // independent, lives under shared_dir. Contrast case for the
+        // isolated test below; mirrors provider_auth_dir_is_shared_and_
+        // channel_independent's shape.
+        with_home_override(|_root| {
+            clear_channel_env();
+            std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
+            let installed = DataPaths::resolve("0.42.0", &RuntimeMode::Installed).unwrap();
+            let dev = DataPaths::resolve(
+                "0.42.0",
+                &RuntimeMode::Dev { branch: "some-branch".into(), clone_id: None },
+            )
+            .unwrap();
+
+            assert_eq!(
+                installed.identities_dir(),
+                dev.identities_dir(),
+                "identities_dir must not vary by channel/mode when isolation is off"
+            );
+            assert!(installed.identities_dir().ends_with("shared/identities"));
+        });
+    }
+
+    #[test]
+    fn identities_dir_is_per_channel_when_isolated_auth_set() {
+        with_home_override(|_root| {
+            clear_channel_env();
+            std::env::set_var("AGENTMUX_ISOLATED_AUTH", "1");
+            let _guard = IsolatedAuthGuard;
+
+            let dev_a = DataPaths::resolve(
+                "0.42.0",
+                &RuntimeMode::Dev { branch: "branch-a".into(), clone_id: None },
+            )
+            .unwrap();
+            let dev_b = DataPaths::resolve(
+                "0.42.0",
+                &RuntimeMode::Dev { branch: "branch-b".into(), clone_id: None },
+            )
+            .unwrap();
+
+            assert_ne!(
+                dev_a.identities_dir(),
+                dev_b.identities_dir(),
+                "isolated identities_dir must differ per channel"
+            );
+            assert_eq!(dev_a.identities_dir(), dev_a.instance_dir.join("identities"));
+            assert!(
+                !dev_a.identities_dir().starts_with(&dev_a.shared_dir),
+                "isolated identities_dir must NOT live under the global shared_dir"
             );
         });
     }

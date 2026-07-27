@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use crate::backend::storage::store::Store;
-use crate::registry::resolve_shared_store_path;
+use crate::registry::{resolve_global_shared_root, resolve_shared_store_path};
 
 use super::{MigrationContext, MigrationScope, REGISTRY};
 
@@ -34,6 +34,22 @@ fn emit_summary(applied: usize, skipped: usize) {
     );
 }
 
+/// The true, unconditional `~/.agentmux` root — `MigrationContext.home`.
+///
+/// Deliberately NOT derived from `resolve_shared_store_path()` (which
+/// varies under isolated-auth mode, resolving to a channel-scoped path
+/// instead of the global one) — 17 of 19 registered migrations build
+/// paths directly off `ctx.home` (registry/definitions/transcripts dirs),
+/// and `backup_stores`/`write_error_log` below use it too. All of those
+/// must stay anchored to the real global root regardless of isolation;
+/// only `ctx.shared_store_path` itself is meant to vary. A single shared
+/// helper (not one inline derivation per call site) so the two can't
+/// drift apart. See `registry::resolve_global_shared_root`'s doc comment
+/// and `docs/specs/SPEC_ISOLATED_AUTH_DEV_TESTING_2026_07_27.md`.
+fn resolve_home() -> Option<PathBuf> {
+    resolve_global_shared_root().and_then(|p| p.parent().map(Path::to_path_buf))
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 /// Called from `main.rs` when the `migrate` subcommand is active.
@@ -50,8 +66,8 @@ pub fn run_migrate_command(data_dir: &Path, dry_run: bool, list: bool) -> i32 {
         }
     };
 
-    let home = match shared_store_path.parent().and_then(|p| p.parent()) {
-        Some(p) => p.to_path_buf(),
+    let home = match resolve_home() {
+        Some(p) => p,
         None => {
             emit_summary(0, 0);
             return 0;
@@ -284,9 +300,9 @@ pub fn run_pending_migrations(data_dir: &Path) -> Result<usize, String> {
         }
     }
 
-    let home = match shared_store_path.parent().and_then(|p| p.parent()) {
-        Some(p) => p.to_path_buf(),
-        None => return Err("run_pending_migrations: cannot derive home from shared store path".to_string()),
+    let home = match resolve_home() {
+        Some(p) => p,
+        None => return Err("run_pending_migrations: cannot resolve global shared root".to_string()),
     };
 
     let shared_store = match Store::open_shared(&shared_store_path) {
@@ -403,4 +419,63 @@ fn write_error_log(home: &Path, msg: &str) {
     let path = log_dir.join("migration-error.log");
     let content = format!("{}\n", msg);
     let _ = std::fs::write(path, content);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Process-global env access — shared with registry::paths and
+    // migrations::m0011_shared_store_backfill's tests, which mutate the SAME
+    // AGENTMUX_ISOLATED_AUTH/AGENTMUX_INSTANCE_DIR vars. A module-local lock
+    // only serializes tests within this file; Cargo runs a crate's tests in
+    // one multi-threaded process, so a local-only lock still let this
+    // module's tests race against those two (reagent/codex on PR #2318).
+    use crate::test_support::ISOLATED_AUTH_ENV_LOCK as ENV_LOCK;
+
+    fn clear() {
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+        std::env::remove_var("AGENTMUX_SHARED_DIR");
+        std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
+        std::env::remove_var("AGENTMUX_INSTANCE_DIR");
+    }
+
+    /// The regression test that would have caught the `ctx.home` /
+    /// `shared_store_path` coupling bug before it shipped: `resolve_home()`
+    /// must return the SAME value whether or not isolated-auth is active,
+    /// even though `resolve_shared_store_path()` itself deliberately
+    /// returns a DIFFERENT (channel-scoped) path under isolation. Every
+    /// other Global migration, plus backups and the error log, anchor to
+    /// `home` and must never silently move just because one channel opted
+    /// into isolated auth.
+    #[test]
+    fn home_is_invariant_to_isolated_auth() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", "/tmp/test-home");
+
+        let home_default = resolve_home().unwrap();
+        assert_eq!(home_default, PathBuf::from("/tmp/test-home"));
+
+        let shared_store_path_default = resolve_shared_store_path().unwrap();
+
+        std::env::set_var("AGENTMUX_ISOLATED_AUTH", "1");
+        std::env::set_var("AGENTMUX_INSTANCE_DIR", "/tmp/test-home/dev/some-branch");
+        let home_isolated = resolve_home().unwrap();
+        let shared_store_path_isolated = resolve_shared_store_path().unwrap();
+
+        assert_eq!(
+            home_default, home_isolated,
+            "resolve_home() must be invariant to AGENTMUX_ISOLATED_AUTH/AGENTMUX_INSTANCE_DIR"
+        );
+        // Meanwhile resolve_shared_store_path() DOES vary — confirms the two
+        // functions have genuinely diverged as designed, not that isolation
+        // silently does nothing.
+        assert_ne!(
+            shared_store_path_default, shared_store_path_isolated,
+            "resolve_shared_store_path() must actually change under isolation"
+        );
+
+        clear();
+    }
 }

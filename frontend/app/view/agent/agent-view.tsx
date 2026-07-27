@@ -800,6 +800,18 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // meant to make visible. reagent P1 on PR #2300.
     const showingLaunchActivity = () => status.isLoading() || status.launchPhase() != null;
 
+    // Composer strip's logged-in/out tag. `status.authStatus()` is the
+    // durable signal (set at mount and on every successful login/relogin),
+    // but a mid-turn 401 (credential went stale while the agent was already
+    // marked authenticated) surfaces first as an "auth"-classified failure
+    // row, not a fresh authStatus transition — so a live auth failure
+    // overrides the tag to "unauthenticated" the instant it appears, instead
+    // of waiting for the user to click "Login Again" first.
+    const loginStatus = createMemo((): "authenticated" | "unauthenticated" | "unknown" => {
+        if (agentAtoms().failureAtom[0]()?.data.code === "auth") return "unauthenticated";
+        return status.authStatus();
+    });
+
     onMount(() => {
         const name = block()?.meta?.["agentName"] ?? agentId;
         const provName = provider()?.displayName ?? providerKey();
@@ -1454,8 +1466,22 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
 
             <Show when={status.canRetry()}>
                 <div class="agent-retry-bar">
-                    <button class="agent-retry-btn" onClick={status.startLaunchFlow}>
-                        Retry Login
+                    {/* Wired to relogin(), not startLaunchFlow: the mount-time
+                        launch flow now only ever notifies and stops on
+                        auth_failed (launch-flow.ts), so re-running it here
+                        would immediately hit the same not-authenticated check
+                        and bail again with no login ever attempted — an
+                        infinite dead-end. relogin() is the one path that
+                        actually starts a login.
+                        retryAfterLogin: false — no turn was ever attempted
+                        here (Phase 2 bailed before Phase 3), so there's no
+                        failed turn to retry. Without this, a successful
+                        login on an agent with prior history silently resent
+                        its last old message as a new turn, burying the
+                        "Login successful" notification under that turn's
+                        immediate stream of output. */}
+                    <button class="agent-retry-btn" onClick={() => void status.relogin({ retryAfterLogin: false })}>
+                        Log in
                     </button>
                 </div>
             </Show>
@@ -1580,6 +1606,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 }
                 contextTokens={agentAtoms().contextTokensAtom[0]()}
                 contextWindow={agentAtoms().contextWindowAtom[0]() ?? provider()?.contextWindow}
+                authStatus={loginStatus()}
                 blockId={model.blockId}
                 blockAtom={block}
                 providerId={provider()?.id ?? ""}

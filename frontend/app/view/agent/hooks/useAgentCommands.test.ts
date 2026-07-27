@@ -1,0 +1,149 @@
+// Copyright 2024-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * Pins the fix for a real, user-reported bug: the pane showed "Working…"
+ * forever whenever `AgentInputCommand` itself failed synchronously (no
+ * controller registered for the block — e.g. right after a backend
+ * restart, before the pane is reopened; the identity spawn gate blocking
+ * on a bad credential; any network-level rejection) — completely
+ * independent of whatever happens deeper in the agent's own turn
+ * lifecycle. `handleSendMessage` (agent-view.tsx) dispatches `TurnStart`
+ * OPTIMISTICALLY before this RPC call ever runs; the catch block used to
+ * only remove the pending "ghost" row (`PendingMessageRejected`) and never
+ * reverted `turnPhase`, so it stayed stuck at Submitting/Streaming with no
+ * path back to Idle. See
+ * REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md.
+ */
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createRoot } from "solid-js";
+
+const hub = vi.hoisted(() => ({
+    agentInput: vi.fn(),
+}));
+
+vi.mock("@/app/store/rpc-api", () => ({
+    RpcApi: {
+        AgentInputCommand: (...args: unknown[]) => hub.agentInput(...args),
+        SetMetaCommand: vi.fn().mockResolvedValue(undefined),
+    },
+}));
+vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
+
+import { useAgentCommands } from "./useAgentCommands";
+import {
+    registerPane,
+    unregisterPane,
+    type PaneRegistration,
+} from "@/app/store/agent-pane-registration";
+import { snapshot as paneSnapshot, __resetAllSlots as resetPaneStateSlots } from "@/app/store/agent-pane-state-store";
+import { __resetAllSlots as resetDocSlots } from "@/app/store/agent-document-store";
+import type { AgentPaneProjections } from "@/app/store/agent-pane-state-store";
+
+function noopProjections(): AgentPaneProjections {
+    return {
+        streaming: () => {},
+        sessionStats: () => {},
+        sessionTotals: () => {},
+        currentTool: () => {},
+        turnTokens: () => {},
+        pending: () => {},
+        initPhase: () => {},
+        turnPhase: () => {},
+    };
+}
+
+function fullRegistration(): PaneRegistration {
+    return {
+        agentId: "agent-1",
+        documentSetter: () => {},
+        projections: noopProjections(),
+    };
+}
+
+const BLOCK_ID = "block-send-fail";
+
+beforeEach(() => {
+    hub.agentInput.mockReset();
+});
+afterEach(() => {
+    unregisterPane(BLOCK_ID);
+    resetDocSlots();
+    resetPaneStateSlots();
+});
+
+describe("useAgentCommands — turnPhase recovery on a failed send", () => {
+    it("resets turnPhase to Idle when the idle-send AgentInputCommand rejects", async () => {
+        hub.agentInput.mockRejectedValue(new Error("no controller for block"));
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        // Move past InitPending — a fresh pane blocks sendMessage entirely
+        // until its history fetch resolves. TurnStart also requires a
+        // subscribed stream (state.lastEventMs != null) — mirrors what a
+        // real mount does before the user can ever send.
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                backToPicker: async () => {},
+            });
+
+            // Mirrors handleSendMessage's optimistic TurnStart before calling
+            // commands.sendMessage — see agent-view.tsx.
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            expect(paneSnapshot(BLOCK_ID)?.turnPhase.kind).not.toBe("Idle");
+
+            await commands.sendMessage("u there", false);
+
+            expect(paneSnapshot(BLOCK_ID)?.turnPhase.kind).toBe("Idle");
+            expect(paneSnapshot(BLOCK_ID)?.pending).toEqual([]);
+            dispose();
+        });
+    });
+
+    it("does NOT reset turnPhase when a held (queued-while-busy) message's flush rejects — a real turn is already in flight", async () => {
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                backToPicker: async () => {},
+            });
+
+            // A real turn is genuinely active (e.g. the agent is streaming
+            // the first message) — queue a second message behind it.
+            hub.agentInput.mockResolvedValueOnce(undefined);
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("first message", false);
+            await commands.sendMessage("held message", true);
+            expect(commands.hasHeldMessages()).toBe(true);
+
+            const busyPhase = paneSnapshot(BLOCK_ID)?.turnPhase.kind;
+            expect(busyPhase).not.toBe("Idle");
+
+            // The flush's own delivery fails — the ALREADY-active turn above
+            // must not be cut short by this unrelated failure.
+            hub.agentInput.mockRejectedValueOnce(new Error("transient send failure"));
+            await commands.flushHeldMessages();
+
+            expect(paneSnapshot(BLOCK_ID)?.turnPhase.kind).toBe(busyPhase);
+            dispose();
+        });
+    });
+});

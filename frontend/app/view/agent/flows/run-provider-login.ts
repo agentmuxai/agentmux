@@ -384,9 +384,34 @@ export async function runProviderLogin(p: RunProviderLoginParams): Promise<Provi
     }
 
     if (minted) {
-        if (await persistSeededAccount(p.provider.id, minted.accountId, minted.dir, p.log)) {
+        // Same one-retry safety net as tier 2 above (reagent P2) — a
+        // transient persist hiccup shouldn't report a false "Login
+        // successful" for a credential that's genuinely sitting on disk and
+        // valid. Without EITHER the retry or the loud error below, a persist
+        // failure here used to be invisible: this function still returned
+        // "terminal-success" unconditionally, so every caller displayed
+        // "Login successful" while no IdentityAccount ever existed — the
+        // very next spawn hit the resolver's spawn gate and errored "not
+        // logged in" (REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md).
+        let persisted = await persistSeededAccount(p.provider.id, minted.accountId, minted.dir, p.log);
+        if (!persisted) {
+            p.log("auth", "account registration failed — retrying once…", "warn");
+            persisted = await persistSeededAccount(p.provider.id, minted.accountId, minted.dir, p.log);
+        }
+        if (persisted) {
             p.onAccountRegistered?.(minted.accountId, minted.dir);
             await finalizeAccount(p, minted.accountId, minted.dir);
+        } else {
+            // Deliberately does NOT change the return value — callers gate
+            // their own "Login successful" messaging on whether
+            // onAccountRegistered fired (it didn't), not on this string
+            // alone. See relogin()/loginViaTerminal()/login.ts's matching
+            // `openedAccountId && openedAccountDir` checks.
+            p.log(
+                "auth",
+                "your login succeeded, but AgentMux couldn't save the account record — it may still show as not logged in; try again in a moment",
+                "error",
+            );
         }
     }
     return "terminal-success";
