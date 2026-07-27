@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AgentMcpModal — the "MCP Servers" tab body inside AgentSetupModal.
+ * AgentMcpModal — the "MCP Servers" tab body inside AgentStashModal.
  * List/create/edit/delete for this agent's own MCP servers, plus a
  * bound-state-aware Bind/Unbind toggle for global ones (driven by
  * `bound_to_agent` — see AgentMcpModel's doc comment).

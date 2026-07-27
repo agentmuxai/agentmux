@@ -7,7 +7,7 @@
 // The hosting <Modal> is size="fit", so the root sets explicit
 // dimensions to give the single-pane browser a bounded box (when used via
 // the standalone agent-memory dispatch; neutralized to 100%/100% when
-// embedded in AgentSetupModal — see that file's override).
+// embedded in AgentStashModal — see that file's override).
 //
 // Single-pane list/detail via PrimitiveListDetail (element/primitive-list-
 // detail.scss) — was a fixed two-column split with a non-shrinking 220px

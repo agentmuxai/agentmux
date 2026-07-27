@@ -34,11 +34,13 @@ export class AgentViewModel implements ViewModel {
     nodejsError: string | null = null;
 
     // Callback wired by AgentPresentationView on mount so the title-bar
-    // button can open the pane-scoped Agent-setup modal without holding a
+    // button can open the pane-scoped Stash modal without holding a
     // SolidJS context in the model. Replaced the former separate
     // _openIdentityModal / _openMemoryModal pair (Phase 3 slice 1 — one
-    // "Agent setup" icon opens a unified tabbed modal).
-    _openAgentSetupModal: (() => void) | null = null;
+    // "Stash" icon opens a unified tabbed modal). Named "Stash" (not
+    // "Armory") to distinguish it from the global Armory pane — see
+    // docs/reports/REPORT_ARMORY_STASH_NAMING_2026_07_27.md.
+    _openAgentStashModal: (() => void) | null = null;
 
     // Voice-input target ref. AgentFooter populates this on mount with a
     // textarea-backed handle (and clears it on unmount). The exposed
@@ -132,7 +134,7 @@ export class AgentViewModel implements ViewModel {
             await RpcApi.SetMetaCommand(TabRpcClient, { oref, meta: { agentName: name.trim() } });
         };
 
-        // Pane-frame header button: a single "Agent setup" (vault) icon
+        // Pane-frame header button: a single "Stash" (backpack) icon
         // when an agent is loaded — opens the unified tabbed modal
         // (Accounts + Memory). Hidden when no agent is loaded (picker
         // screen). Always shown when agentId exists: quick-launch panes
@@ -146,15 +148,16 @@ export class AgentViewModel implements ViewModel {
             return [
                 {
                     elemtype: "iconbutton",
-                    // Same "vault" FontAwesome icon as the global Armory pane
-                    // (hamburger menu, failure-accessory banner) — visual
-                    // parity, since this opens the per-agent analogue of it
-                    // (AgentSetupModal: Accounts/Memories/MCP Servers/Skills
-                    // scoped to this one agent). Was "id-card"; same click
-                    // handler, icon only.
-                    icon: "vault",
-                    title: "Agent setup",
-                    click: () => { this._openAgentSetupModal?.(); },
+                    // Deliberately NOT the "vault" icon the global Armory
+                    // pane uses — this opens AgentStashModal, the per-agent
+                    // analogue of Armory, and a distinct name/icon is the
+                    // whole point of the rename (previously shared "vault"
+                    // "for parity," which was exactly the confusion between
+                    // the two surfaces this fixes). See
+                    // docs/reports/REPORT_ARMORY_STASH_NAMING_2026_07_27.md.
+                    icon: "backpack",
+                    title: "Stash",
+                    click: () => { this._openAgentStashModal?.(); },
                 },
             ];
         };

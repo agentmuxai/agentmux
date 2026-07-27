@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AgentSkillsModal — the "Skills" tab body inside AgentSetupModal.
+ * AgentSkillsModal — the "Skills" tab body inside AgentStashModal.
  * List/create/edit/delete for this agent's own skills, plus a
  * bound-state-aware Bind/Unbind toggle for global ones (driven by
  * `bound_to_agent` — see AgentSkillModel's doc comment). Distinct from the
