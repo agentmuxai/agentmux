@@ -781,6 +781,7 @@ impl PersistentSubprocessController {
                             if let Some(ref store) = wstore_stderr {
                                 crate::backend::blockcontroller::session_recovery::mark_resume_failed(
                                     store,
+                                    &event_bus_stderr,
                                     &block_id_stderr,
                                 );
                             }

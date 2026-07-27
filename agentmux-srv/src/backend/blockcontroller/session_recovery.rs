@@ -34,6 +34,7 @@
 
 use std::sync::Arc;
 
+use crate::backend::eventbus::EventBus;
 use crate::backend::obj::{Block, MetaMapType};
 use crate::backend::storage::store::Store;
 
@@ -64,12 +65,39 @@ pub fn mark_active_pid(wstore: &Arc<Store>, block_id: &str, pid: u32) {
 /// `persistent.rs`'s stderr reader the moment it detects the CLI's "No
 /// conversation found with session ID" line, right alongside the existing
 /// `core::persist_session_id(block_id, "", ...)` clear.
-pub fn mark_resume_failed(wstore: &Arc<Store>, block_id: &str) {
+///
+/// Broadcasts `waveobj:update` on success (reagent P1 on the initial PR):
+/// this fires while the user may be actively watching the pane that just
+/// lost its resume, so — unlike `mark_active_pid`/`scan_orphans`, both of
+/// which run before any frontend subscriber could be watching (spawn time /
+/// server boot) — the write must reach an already-open `blockAtom` live, not
+/// only on the pane's next reload/reopen. Mirrors `persist_session_id`'s
+/// broadcast in `core.rs`. `event_bus: None` (tests / no live subscribers)
+/// silently skips the broadcast, matching every other call site's contract.
+pub fn mark_resume_failed(wstore: &Arc<Store>, event_bus: &Option<Arc<EventBus>>, block_id: &str) {
     let mut meta = MetaMapType::new();
     meta.insert(META_SESSION_RESUME_FAILED.to_string(), serde_json::json!(true));
     let oref_str = format!("block:{}", block_id);
     if let Err(e) = crate::server::service::update_object_meta(wstore, &oref_str, &meta) {
         tracing::warn!(block_id = %block_id, error = %e, "session_recovery: failed to mark resume_failed");
+        return;
+    }
+    let Some(ref bus) = event_bus else {
+        return;
+    };
+    if let Ok(updated_block) = wstore.must_get::<Block>(block_id) {
+        let update_data = serde_json::to_value(&crate::backend::obj::WaveObjUpdate {
+            updatetype: "update".into(),
+            otype: "block".into(),
+            oid: block_id.to_string(),
+            obj: Some(crate::backend::obj::wave_obj_to_value(&updated_block)),
+        })
+        .ok();
+        bus.broadcast_event(&crate::backend::eventbus::WSEventType {
+            eventtype: "waveobj:update".to_string(),
+            oref: oref_str,
+            data: update_data,
+        });
     }
 }
 
@@ -264,12 +292,60 @@ mod tests {
         };
         wstore.insert(&mut block).unwrap();
 
-        mark_resume_failed(&wstore, block_id);
+        mark_resume_failed(&wstore, &None, block_id);
 
         let after: Block = wstore.get(block_id).unwrap().unwrap();
         assert_eq!(
             after.meta.get(META_SESSION_RESUME_FAILED).and_then(|v| v.as_bool()),
             Some(true),
+        );
+    }
+
+    /// reagent P1 on the original PR: mark_resume_failed wrote the meta but
+    /// never broadcast waveobj:update, so an already-open pane's blockAtom
+    /// never saw the flag live — the disclosure banner wouldn't render until
+    /// the pane was reloaded, defeating the point of a live-disclosure
+    /// signal. This asserts the broadcast actually reaches a connected
+    /// WebSocket client, not just that the DB write succeeded.
+    #[tokio::test]
+    async fn test_mark_resume_failed_broadcasts_waveobj_update() {
+        let tmp = tempfile::tempdir().unwrap();
+        let wstore = Arc::new(Store::open(&tmp.path().join("objects.db")).unwrap());
+        let event_bus = Arc::new(EventBus::new());
+
+        let block_id = "77777777-7777-7777-7777-777777777777";
+        let mut block = Block {
+            oid: block_id.to_string(),
+            parentoref: String::new(),
+            version: 1,
+            runtimeopts: None,
+            stickers: None,
+            meta: {
+                let mut m = MetaMapType::new();
+                m.insert("view".to_string(), serde_json::json!("agent"));
+                m
+            },
+            subblockids: None,
+        };
+        wstore.insert(&mut block).unwrap();
+
+        let mut receivers = event_bus.register_ws("test-conn", "test-tab");
+
+        mark_resume_failed(&wstore, &Some(event_bus.clone()), block_id);
+
+        let msg = tokio::time::timeout(std::time::Duration::from_secs(2), receivers.priority.recv())
+            .await
+            .expect("timed out waiting for waveobj:update broadcast")
+            .expect("priority channel closed");
+        assert_eq!(msg.get("eventtype").and_then(|v| v.as_str()), Some("waveobj:update"));
+        assert_eq!(msg.get("oref").and_then(|v| v.as_str()), Some(format!("block:{}", block_id).as_str()));
+        let obj = msg.get("data").and_then(|d| d.get("obj")).expect("data.obj present");
+        assert_eq!(
+            obj.get("meta")
+                .and_then(|m| m.get(META_SESSION_RESUME_FAILED))
+                .and_then(|v| v.as_bool()),
+            Some(true),
+            "broadcast payload must carry the flag, not just trigger a generic refetch",
         );
     }
 }
