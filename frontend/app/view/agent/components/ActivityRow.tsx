@@ -121,6 +121,16 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
             }
             return undefined;
         }
+        if (a.tool) {
+            const chunks = a.tool.log?.chunks ?? [];
+            for (let i = chunks.length - 1; i >= 0; i--) {
+                const c = chunks[i];
+                if ((c.kind === "stdout" || c.kind === "stderr") && c.content.trim()) {
+                    return c.content.trim();
+                }
+            }
+            return undefined;
+        }
         if (a.subagent) {
             // Cheap tail from data already on ActiveSubagent — no extra
             // fetch/subscribe just to render a collapsed row's tail (that
@@ -136,12 +146,16 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
         return undefined;
     });
 
-    // Expanded shell log — same cap + renderer as PersistentShellBlock.
+    // Expanded shell/tool log — same cap + renderer as PersistentShellBlock.
+    // A promoted tool call's log is optional (only populated for tools that
+    // stream partials — see ToolNode.log's own doc comment), unlike a
+    // ShellNode's, which always has one.
     const chunkCap = createChunkCapper(MAX_TOOL_OUTPUT_LINES);
     const capped = createMemo(() => {
-        const sh = props.activity()?.shell;
-        return sh
-            ? chunkCap(sh.log.chunks as ToolLogChunk[])
+        const a = props.activity();
+        const chunks = a?.shell?.log.chunks ?? a?.tool?.log?.chunks;
+        return chunks
+            ? chunkCap(chunks as ToolLogChunk[])
             : { chunks: [] as ToolLogChunk[], hiddenLines: 0 };
     });
 
@@ -198,7 +212,7 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
                         </Show>
                     </div>
 
-                    <Show when={props.expanded() && a().shell}>
+                    <Show when={props.expanded() && (a().shell || a().tool)}>
                         <div
                             class="agent-activity-log agent-tool-overlay-log"
                             onClick={(e) => e.stopPropagation()}
@@ -213,7 +227,10 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
                                     </pre>
                                 )}
                             </For>
-                            <Show when={a().shell!.log.open}>
+                            <Show when={capped().chunks.length === 0 && a().tool}>
+                                <pre class="agent-tool-log-line">No output yet</pre>
+                            </Show>
+                            <Show when={a().shell?.log.open ?? a().tool?.log?.open ?? false}>
                                 <div class="agent-shell-streaming-indicator" />
                             </Show>
                         </div>

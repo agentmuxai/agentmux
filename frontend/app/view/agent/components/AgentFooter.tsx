@@ -61,6 +61,11 @@ interface AgentWorkingRowProps {
     /** First significant argument of the active tool (file path, command, etc.).
      *  When set alongside currentTool, shown as "tool · arg" in the left zone. */
     currentToolArg?: string | null;
+    /** True once the current tool call has been promoted to a live
+     *  ActivityDock row (tool-adapter.ts) — the row falls back to the
+     *  cycling "Working…" phrase instead of repeating "tool · arg", since
+     *  the dock already shows it. See REPORT_LONGRUNNING_TOOLCALL_AUTODETECT_STATUS_2026_07_26.md §4.3. */
+    toolPromoted?: boolean;
     sessionStats?: SessionStats | null;
     turnTokens?: TurnTokens | null;
     /** Set when the provider is rate-limited; shows "Rate limited…" in place of thinking phrase. */
@@ -97,7 +102,7 @@ function loadingLeftText(props: AgentWorkingRowProps, phrase: string, nowMs: num
     }
     const phaseLabel = formatPhaseLabel(props.launchPhase, nowMs);
     if (phaseLabel) return phaseLabel;
-    if (props.currentTool) {
+    if (props.currentTool && !props.toolPromoted) {
         return props.currentToolArg
             ? `${props.currentTool}  ·  ${abbreviateArg(props.currentToolArg, 40)}`
             : props.currentTool;
@@ -171,7 +176,7 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
     });
 
     createEffect(() => {
-        if (!props.loading || props.currentTool) return;
+        if (!props.loading || (props.currentTool && !props.toolPromoted)) return;
         setPhrase(pickThinkingPhrase());
         const id = setInterval(() => {
             setPhrase((prev) => {
@@ -192,7 +197,7 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
     });
 
     createEffect(() => {
-        if (props.loading && !props.currentTool) setLastPhrase(phrase());
+        if (props.loading && (!props.currentTool || props.toolPromoted)) setLastPhrase(phrase());
     });
 
     const workedSummary = createMemo((): string | null => {

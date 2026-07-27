@@ -62,6 +62,14 @@ export function useAgentDecisions(opts: UseAgentDecisionsOptions): UseAgentDecis
                 ...n,
                 status: decision.outcome === "allow" ? "running" : "denied",
                 pendingPermission: undefined,
+                // Approval can take arbitrarily long — a call that waited
+                // >30s in pending_approval must not read as already past
+                // any elapsed-time threshold the instant it starts
+                // executing. Refresh `timestamp` to now on allow, so
+                // consumers (ToolElapsedTicker, tool-adapter.ts's dock
+                // promotion) time from actual execution start, not from
+                // when the call was first initiated. reagentx P1, PR #2309.
+                timestamp: decision.outcome === "allow" ? Date.now() : n.timestamp,
             });
         }
         if (updated.length > 0) {

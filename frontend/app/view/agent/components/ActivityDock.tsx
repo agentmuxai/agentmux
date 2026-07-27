@@ -27,6 +27,7 @@ import { ActivityRow } from "./ActivityRow";
 import { shellActivities } from "../activity/shell-adapter";
 import { subagentActivities } from "../activity/subagent-adapter";
 import { allSubagentsAtom } from "../activity/subagent-source";
+import { nextToolPromotionAt, toolActivities } from "../activity/tool-adapter";
 import { EXIT_FLASH_MS, RETENTION_MS, type ActivityKind, type ActivityStatus, type PinnedActivity } from "../activity/types";
 import type { SignalPair } from "../state";
 import type { DocumentNode } from "../types";
@@ -36,7 +37,7 @@ const MAX_INLINE = 3;
 // D3 — running first, then error, stopped, done.
 const STATUS_RANK: Record<ActivityStatus, number> = { running: 0, error: 1, stopped: 2, done: 3 };
 
-const KIND_PLURAL: Record<ActivityKind, string> = { shell: "shell", cron: "cron", subagent: "subagent" };
+const KIND_PLURAL: Record<ActivityKind, string> = { shell: "shell", cron: "cron", subagent: "subagent", tool: "task" };
 
 function overflowSummary(items: PinnedActivity[]): string {
     const counts = new Map<ActivityKind, number>();
@@ -63,10 +64,36 @@ export const ActivityDock = (props: ActivityDockProps): JSX.Element => {
     // expanding in the dock does not also expand the inline PersistentShellBlock.
     const [expandedIds, setExpandedIds] = createSignal<Set<string>>(new Set());
 
-    const allActivities = createMemo(() => [
-        ...shellActivities(nodes()),
-        ...subagentActivities(allSubagentsAtom(), props.blockId),
-    ]);
+    // Tool-call promotion crosses its duration threshold on a plain wall-clock
+    // timer, not a document event — nodes() alone won't re-run allActivities
+    // at the moment a still-running Bash call turns 30s old. Same one-shot
+    // discipline as hasExpiring below: compute the next promotion instant,
+    // schedule exactly one setTimeout for it, and bump a nonce allActivities
+    // subscribes to so it recomputes right then (and only then), instead of a
+    // continuous tick.
+    const [toolPromotionNonce, setToolPromotionNonce] = createSignal(0);
+    createEffect(() => {
+        // Read (subscribe to) the nonce itself so that when the scheduled
+        // timer below fires and bumps it, this effect re-runs and schedules
+        // the *next*-earliest pending promotion — without this, two running
+        // Bash calls at different promotion instants would only ever
+        // promote the earlier one (the effect ran once, scheduled once, and
+        // nothing re-triggered it once that single timer fired).
+        toolPromotionNonce();
+        const at = nextToolPromotionAt(nodes(), Date.now());
+        if (at == null) return;
+        const timer = setTimeout(() => setToolPromotionNonce((n) => n + 1), Math.max(0, at - Date.now()) + 50);
+        onCleanup(() => clearTimeout(timer));
+    });
+
+    const allActivities = createMemo(() => {
+        toolPromotionNonce();
+        return [
+            ...shellActivities(nodes()),
+            ...subagentActivities(allSubagentsAtom(), props.blockId),
+            ...toolActivities(nodes(), Date.now()),
+        ];
+    });
 
     const activityById = createMemo(() => {
         const m = new Map<string, PinnedActivity>();
