@@ -104,11 +104,25 @@ export const loginCommand: SlashCommand = {
                         }
                     }
                     if (authenticated && openedAccountId && openedAccountDir) {
-                        await persistAndLinkAccount(
+                        // reagent P1 (re-review of PR #2318): must check the
+                        // return value — the exact same persist-failure gap
+                        // found and fixed in useAgentControllerStatus.ts's
+                        // relogin() "opened" branch. Without this, a DB-write
+                        // failure here still reported "login complete" while
+                        // leaving no real account behind for the resolver's
+                        // spawn gate to find on the very next turn.
+                        const persisted = await persistAndLinkAccount(
                             { provider: prov, cliPath, authEnv, setAuthUrl: ctx.setAuthUrl, log: ctx.log, linkTarget },
                             openedAccountId,
                             openedAccountDir,
                         );
+                        if (!persisted) {
+                            return {
+                                kind: "error",
+                                message:
+                                    "/login: the login succeeded, but AgentMux couldn't save the account record. Try again in a moment.",
+                            };
+                        }
                         ctx.log("auth", "login complete — run /cost to verify");
                         return { kind: "ok" };
                     }
