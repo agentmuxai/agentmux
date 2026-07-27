@@ -18,6 +18,12 @@
 # included forbid_non_component_debug_builds=false, which gn_args.py only
 # sets `if platform != 'windows'` — confirmed live on 2026-07-26 via the
 # assert(enable_cdm_host_verification) GN gen failure this produced.
+#
+# Validated 2026-07-27 against a real build: 55,367/55,367 ninja targets,
+# zero errors, boot-verified via cefsimple.exe, published as
+# cef-windows-x86_64-148.0.7778.180 on agentmuxai/cef. See
+# docs/cef-build/build-patched-cef-windows.md's "Status" section for the
+# full list of build-config gaps this run surfaced and fixed.
 
 alternate_cdm_storage_id_key="968b476909da4373b08903c28e859454"
 clang_use_chrome_plugins=false
@@ -51,10 +57,11 @@ enable_platform_dolby_vision=true
 
 # --- size reduction: official-build optimizations (same lever as Linux) ---
 # is_official_build=true is the size lever on Linux (roughly halves
-# libcef.so). Applying the same here — unverified for Windows's actual
-# size delta until the first real build; update this comment with real
-# numbers once one exists, matching how args.gn's block cites verified
-# Linux numbers.
+# libcef.so). Applying the same here — the real build produced a 288.8 MiB
+# libcef.dll with these flags on; no non-official Windows build was cut to
+# measure a delta against (would require a second multi-hour build), so
+# unlike args.gn's verified Linux before/after numbers, this is a single
+# absolute data point, not a delta.
 is_official_build=true
 use_thin_lto=true
 is_cfi=false
