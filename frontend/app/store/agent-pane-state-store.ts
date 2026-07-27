@@ -208,8 +208,16 @@ export function dispatch(
     // whole point of a post-incident self-diagnostic line (codex P1 on PR
     // #2321). Now that the flood above is fixed, real transitions are rare
     // enough (a handful per turn) that info-level volume is fine.
-    if (prev.turnPhase.kind !== slot.state.turnPhase.kind) {
+    // Any refresh of the liveness clock (lastEventMs) — not just a kind
+    // change — means a new stall episode can happen and should be logged
+    // again. `bumpEvent`-driven tool/token activity refreshes lastEventMs
+    // while `kind` stays "Streaming" throughout, so gating the reset on
+    // `.kind` alone silently dropped the second of two stalls inside one
+    // continuous Streaming phase (reagentx P2 re-review on PR #2321).
+    if (prev.lastEventMs !== slot.state.lastEventMs) {
         slot.stuckLogged = false;
+    }
+    if (prev.turnPhase.kind !== slot.state.turnPhase.kind) {
         console.info(
             "[wave-turn]",
             `pane=${blockId.slice(0, 7)}`,
