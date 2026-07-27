@@ -44,7 +44,30 @@ pub fn resolve_shared_definitions_dir() -> Option<PathBuf> {
 /// Uses the same root as the agent registry/definitions so
 /// `AGENTMUX_HOME_OVERRIDE` and `AGENTMUX_SHARED_DIR` work consistently.
 /// Returns `None` only when the shared root itself can't be resolved.
+///
+/// When `agentmux_common::isolated_auth_enabled()` is set, resolves to
+/// `<instance_dir>/identity-store.db` instead — a channel-scoped store for
+/// destructive Armory testing (delete-account flows) that can never touch
+/// the real global store other channels/instances depend on. Falls back
+/// to the global path if `AGENTMUX_INSTANCE_DIR` isn't set (e.g. a bare
+/// `cargo run` outside the launcher) rather than failing outright — this
+/// function's existing `None`-on-unresolvable contract is preserved, just
+/// with an extra source to try first. See
+/// `docs/specs/SPEC_ISOLATED_AUTH_DEV_TESTING_2026_07_27.md`.
+///
+/// IMPORTANT: `MigrationContext.home` (`migrations/runner.rs`) must NEVER
+/// be derived from this function's return value (e.g. via
+/// `.parent().parent()`) — it needs the unconditional global root
+/// regardless of isolation, and must call `resolve_global_shared_root()`
+/// directly instead. See that module's comments.
 pub fn resolve_shared_store_path() -> Option<std::path::PathBuf> {
+    if agentmux_common::isolated_auth_enabled() {
+        if let Ok(instance_dir) = std::env::var("AGENTMUX_INSTANCE_DIR") {
+            if !instance_dir.is_empty() {
+                return Some(std::path::PathBuf::from(instance_dir).join("identity-store.db"));
+            }
+        }
+    }
     resolve_global_shared_root().map(|h| h.join("store.db"))
 }
 
@@ -65,8 +88,12 @@ pub fn resolve_shared_transcripts_dir() -> Option<PathBuf> {
     resolve_global_shared_root().map(|h| h.join("agents").join("transcripts"))
 }
 
-/// The global, channel-independent `<home>/shared` root.
-fn resolve_global_shared_root() -> Option<PathBuf> {
+/// The global, channel-independent `<home>/shared` root. Deliberately
+/// UNAFFECTED by `isolated_auth_enabled()` — callers that need the true
+/// `~/.agentmux` home (e.g. `migrations/runner.rs`'s `MigrationContext.home`)
+/// must call this directly rather than deriving it from
+/// `resolve_shared_store_path()`, which DOES vary with isolation.
+pub(crate) fn resolve_global_shared_root() -> Option<PathBuf> {
     if let Ok(s) = std::env::var("AGENTMUX_HOME_OVERRIDE") {
         if !s.is_empty() {
             // Consistent with data_paths everywhere else: the override is the
@@ -95,6 +122,8 @@ mod tests {
         std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
         std::env::remove_var("AGENTMUX_DATA_DIR");
         std::env::remove_var("AGENTMUX_SHARED_DIR");
+        std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
+        std::env::remove_var("AGENTMUX_INSTANCE_DIR");
     }
 
     #[test]
@@ -168,6 +197,49 @@ mod tests {
             r,
             PathBuf::from("/tmp/test-home/shared/agents/definitions")
         );
+        clear();
+    }
+
+    #[test]
+    fn shared_store_path_default_is_global() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", "/tmp/test-home");
+        // Isolation flag unset (the default) — unchanged from today, even
+        // with an instance dir present, since isolation must be opt-in.
+        std::env::set_var("AGENTMUX_INSTANCE_DIR", "/tmp/test-home/dev/some-branch");
+        let r = resolve_shared_store_path().unwrap();
+        assert_eq!(r, PathBuf::from("/tmp/test-home/shared/store.db"));
+        clear();
+    }
+
+    #[test]
+    fn shared_store_path_isolated_uses_instance_dir() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", "/tmp/test-home");
+        std::env::set_var("AGENTMUX_ISOLATED_AUTH", "1");
+        std::env::set_var("AGENTMUX_INSTANCE_DIR", "/tmp/test-home/dev/some-branch");
+        let r = resolve_shared_store_path().unwrap();
+        assert_eq!(
+            r,
+            PathBuf::from("/tmp/test-home/dev/some-branch/identity-store.db"),
+            "isolated shared store must live under the channel's own instance dir"
+        );
+        clear();
+    }
+
+    #[test]
+    fn shared_store_path_isolated_without_instance_dir_falls_back() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", "/tmp/test-home");
+        std::env::set_var("AGENTMUX_ISOLATED_AUTH", "1");
+        // AGENTMUX_INSTANCE_DIR deliberately left unset — e.g. a bare
+        // `cargo run` outside the launcher. Must degrade to the global
+        // path rather than returning None unnecessarily.
+        let r = resolve_shared_store_path().unwrap();
+        assert_eq!(r, PathBuf::from("/tmp/test-home/shared/store.db"));
         clear();
     }
 }

@@ -35,11 +35,20 @@ impl Migration for M0011SharedStoreBackfill {
                 Err(e) => tracing::debug!(path = %ctx.channel_store_path.display(), error = %e, "shared_store_backfill: skip current channel store"),
             }
         }
-        for path in registry::enumerate_objects_dbs(&ctx.home) {
-            if path == ctx.channel_store_path { continue; } // already added above
-            match Store::open_source_readonly(&path) {
-                Ok(s) => sibling_stores.push(s),
-                Err(e) => tracing::debug!(path = %path.display(), error = %e, "shared_store_backfill: skip sibling"),
+        // Isolation boundary, not a bug: an isolated shared store (see
+        // agentmux_common::isolated_auth_enabled) must start genuinely
+        // empty of every OTHER channel's real identity accounts/links —
+        // scanning every sibling objects.db on the machine (ctx.home is
+        // always the true global root, per resolve_home's doc comment)
+        // would defeat the entire point of a disposable test store. This
+        // channel's own local data (added above) is fine to carry in.
+        if !agentmux_common::isolated_auth_enabled() {
+            for path in registry::enumerate_objects_dbs(&ctx.home) {
+                if path == ctx.channel_store_path { continue; } // already added above
+                match Store::open_source_readonly(&path) {
+                    Ok(s) => sibling_stores.push(s),
+                    Err(e) => tracing::debug!(path = %path.display(), error = %e, "shared_store_backfill: skip sibling"),
+                }
             }
         }
 
@@ -87,5 +96,98 @@ impl Migration for M0011SharedStoreBackfill {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::storage::store::{IdentityAccount, SecretRef};
+    use std::sync::Mutex;
+
+    // Process-global env access — serialize so parallel tests don't race.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn clear() {
+        std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
+    }
+
+    fn make_account(id: &str) -> IdentityAccount {
+        IdentityAccount {
+            id: id.to_string(),
+            name: format!("acct-{id}"),
+            provider: "claude".to_string(),
+            kind: "oauth".to_string(),
+            display_name: String::new(),
+            secret_ref: SecretRef::OAuthConfigDir { dir: format!("/tmp/{id}") },
+            context: serde_json::json!({}),
+            status: "valid".to_string(),
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    /// Sets up: a fresh empty shared store, this channel's own (empty)
+    /// objects.db, and ONE sibling dev-branch's objects.db (under
+    /// `<home>/dev/other-branch/data/db/objects.db`, the layout
+    /// `enumerate_objects_dbs` scans) seeded with a real identity account —
+    /// simulating another, unrelated dev branch's real credentials.
+    fn setup() -> (tempfile::TempDir, MigrationContext) {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let home = tmp.path().to_path_buf();
+
+        let sibling_db = home.join("dev").join("other-branch").join("data").join("db").join("objects.db");
+        std::fs::create_dir_all(sibling_db.parent().unwrap()).unwrap();
+        let sibling_store = Store::open(&sibling_db).unwrap();
+        sibling_store.identity_upsert(&make_account("sibling-acct")).unwrap();
+
+        let channel_store_path = home.join("this-channel").join("data").join("db").join("objects.db");
+        std::fs::create_dir_all(channel_store_path.parent().unwrap()).unwrap();
+        Store::open(&channel_store_path).unwrap(); // create, empty — no local accounts
+
+        let shared_store_path = home.join("shared").join("store.db");
+        std::fs::create_dir_all(shared_store_path.parent().unwrap()).unwrap();
+
+        let ctx = MigrationContext {
+            home,
+            data_dir: tmp.path().join("this-channel").join("data"),
+            shared_store_path,
+            channel_store_path,
+        };
+        (tmp, ctx)
+    }
+
+    #[test]
+    fn backfills_sibling_accounts_when_not_isolated() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear();
+        let (_tmp, ctx) = setup();
+
+        M0011SharedStoreBackfill.up(&ctx).unwrap();
+
+        let shared = Store::open_shared(&ctx.shared_store_path).unwrap();
+        let ids: Vec<String> = shared.identity_list(None).unwrap().into_iter().map(|a| a.id).collect();
+        assert!(
+            ids.contains(&"sibling-acct".to_string()),
+            "default (non-isolated) backfill must pick up the sibling branch's real account, got: {ids:?}"
+        );
+    }
+
+    #[test]
+    fn skips_sibling_accounts_when_isolated() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear();
+        std::env::set_var("AGENTMUX_ISOLATED_AUTH", "1");
+        let (_tmp, ctx) = setup();
+
+        M0011SharedStoreBackfill.up(&ctx).unwrap();
+
+        let shared = Store::open_shared(&ctx.shared_store_path).unwrap();
+        let ids: Vec<String> = shared.identity_list(None).unwrap().into_iter().map(|a| a.id).collect();
+        assert!(
+            ids.is_empty(),
+            "isolated backfill must NOT pick up any other channel's real account, got: {ids:?}"
+        );
+        clear();
     }
 }
