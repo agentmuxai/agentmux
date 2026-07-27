@@ -123,6 +123,29 @@ export const AgentControlBar = ({ blockId, blockAtom, providerId }: AgentControl
         }
     };
 
+    // SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27.md §4.2: server
+    // sets `session:resume_failed` when a `--resume <sid>` was rejected by
+    // the CLI (stale/unreachable session, e.g. after a relogin moved this
+    // agent to a different config dir) and it silently fell through to a
+    // fresh conversation. Unlike `was_interrupted`, there's nothing to
+    // "resume on next message" here — the fresh session already started;
+    // this banner only discloses that it happened, since the alternative
+    // (silence) means the user has no way to know their prior conversation
+    // is gone.
+    const resumeFailed = (): boolean =>
+        (blockAtom()?.meta?.["session:resume_failed"] as boolean | undefined) === true;
+
+    const dismissResumeFailed = async () => {
+        try {
+            await RpcApi.SetMetaCommand(TabRpcClient, {
+                oref: WOS.makeORef("block", blockId),
+                meta: { "session:resume_failed": null } as MetaType,
+            });
+        } catch (e) {
+            console.error("failed to clear resume_failed:", e);
+        }
+    };
+
     return (
         <div class="agent-control-bar">
             {/* ── Interrupted-session recovery banner (4.2 multi-day continuity) ── */}
@@ -135,6 +158,22 @@ export const AgentControlBar = ({ blockId, blockAtom, providerId }: AgentControl
                         class="agent-session-btn agent-session-btn-dismiss"
                         onClick={dismissInterrupted}
                         title="Dismiss this notice — your next message resumes the session either way"
+                    >
+                        Dismiss
+                    </button>
+                </div>
+            </Show>
+
+            {/* ── Resume-failed disclosure (continuity guarantee §4.2) ── */}
+            <Show when={resumeFailed()}>
+                <div class="agent-resume-failed-banner">
+                    <span class="agent-resume-failed-label">
+                        Couldn't resume the previous conversation — started a new one.
+                    </span>
+                    <button
+                        class="agent-session-btn agent-session-btn-dismiss"
+                        onClick={dismissResumeFailed}
+                        title="Dismiss this notice"
                     >
                         Dismiss
                     </button>

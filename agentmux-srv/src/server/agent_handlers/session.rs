@@ -144,6 +144,28 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                 let d = rec.data;
                                 let key = (d.definition_id.clone(), d.instance_name.clone());
                                 if let Some(li) = local_by_key.get(&key) {
+                                    // Defense-in-depth (SPEC_PANE_CLOSE_REOPEN_
+                                    // CONTINUITY_GUARANTEE_2026_07_27.md §4.1):
+                                    // the local row is normally the fresher
+                                    // source (persist_session_id keeps it live
+                                    // as of that spec), but fall back to the
+                                    // registry's session_id when the local one
+                                    // is empty rather than surfacing an empty
+                                    // session id the picker's reattach flow
+                                    // would silently treat as "start fresh."
+                                    // Correct regardless of whether the
+                                    // primary live-write fix is in place for
+                                    // this particular row (e.g. it predates
+                                    // that change, or the write raced/failed).
+                                    if li.session_id.is_empty() {
+                                        if let Some(ref registry_sid) = d.session_id {
+                                            if !registry_sid.is_empty() {
+                                                let mut merged = li.clone();
+                                                merged.session_id = registry_sid.clone();
+                                                return merged;
+                                            }
+                                        }
+                                    }
                                     return li.clone();
                                 }
                                 // Reconstruct the absolute workdir from the record's
