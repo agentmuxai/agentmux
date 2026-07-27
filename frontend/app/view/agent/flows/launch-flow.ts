@@ -479,7 +479,15 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
             // PR #2303 (confirmed real via persistent.rs's STATUS_RUNNING
             // and useControllerStatusEvents.test.ts).
             resumed = true;
-            log("agent", "previous turn complete — send a message to continue");
+            // "done" and "running" get distinct wording — "previous turn
+            // complete" would contradict "running"'s own meaning (the
+            // controller may still be alive/mid-turn, not complete).
+            log(
+                "agent",
+                status === "running"
+                    ? "resuming a controller that's still alive — send a message to continue"
+                    : "previous turn complete — send a message to continue",
+            );
         }
     } catch (err: any) {
         // Don't follow a real resync failure with the generic "ready" message —
