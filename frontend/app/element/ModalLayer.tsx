@@ -68,14 +68,22 @@ export const ModalLayer: Component<ModalLayerProps> = (props) => {
 
     // "agent-setup" is only SOMETIMES pure browse/view, though — its own
     // Skills/MCP Servers tabs (AgentSkillsModal/AgentMcpModal) can be
-    // showing a "+ New"/edit draft form with local, un-tracked-by-
-    // `submitting` state (reagentx P1, PR #2315: an accidental backdrop
-    // click while composing a new entry silently discarded it). Rather
-    // than threading a bespoke "has unsaved draft" signal down through
-    // every current and future primitive tab, key off the one thing they
-    // already all share: every create/edit form in this family renders
-    // with the `agent-primitive-modal-form` class (skill-manager.tsx,
-    // mcp-manager.tsx, AgentSkillsModal.tsx, AgentMcpModal.tsx).
+    // showing a "+ New"/edit draft form, and its Memory tab
+    // (AgentNativeMemoryModal) an in-place edit textarea — all local
+    // draft state never tracked by the `submitting` guard (reagentx P1
+    // x2, PR #2315: an accidental backdrop click while composing a new
+    // entry, or editing a memory file, silently discarded it — the
+    // second finding specifically because the first fix's detector only
+    // matched the `agent-primitive-modal-form` class the Skills/MCP forms
+    // share, which the older Memory tab's edit view predates and doesn't
+    // use). Rather than keep chasing one component's specific markup at a
+    // time, key off what every one of these editable surfaces actually
+    // *is* regardless of which primitive owns it: a `<textarea>` — the
+    // only editable-surface kind in this whole modal that can hold
+    // enough free text for losing it to matter (Accounts/Startup are
+    // read-only/selection-only; Skills/MCP/Memory's name/trigger fields
+    // are plain `<input>`s not worth guarding, but their multi-line
+    // content fields, and Memory's whole edit view, are all textareas).
     //
     // Scoped to `.modal-root`'s own subtree via `<Modal>`'s `rootRef`
     // callback below — NOT `mountEl`, which also wraps `props.children`
@@ -94,7 +102,7 @@ export const ModalLayer: Component<ModalLayerProps> = (props) => {
             setHasOpenForm(false);
             return;
         }
-        const recompute = () => setHasOpenForm(root.querySelector(".agent-primitive-modal-form") != null);
+        const recompute = () => setHasOpenForm(root.querySelector("textarea:not([readonly]):not([disabled])") != null);
         recompute();
         const observer = new MutationObserver(recompute);
         observer.observe(root, { childList: true, subtree: true });
