@@ -228,6 +228,29 @@
     50%       { opacity: 0.4; }
 }
 
+// Logged-in/out tag — sits between the context text and the Shell toggle.
+// Simple dot + label, same neutral-chrome-with-a-color-accent treatment as
+// the process badge above rather than a loud filled pill, so it doesn't
+// compete with Shell (the strip's one real call-to-action) for attention.
+.agent-composer-strip-auth {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+    white-space: nowrap;
+
+    &--ok { color: var(--success-color); }
+    &--bad { color: var(--error-color); }
+}
+
+.agent-composer-strip-auth-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    flex-shrink: 0;
+}
+
 @include mixins.respect-reduced-motion {
     .agent-composer-strip-ctx--critical {
         animation-duration: 2.4s;

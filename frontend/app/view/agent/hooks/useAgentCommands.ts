@@ -384,7 +384,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         }
 
         // Idle send: deliver immediately and arm the lost-delivery safety timer.
-        await deliverToBackend(message, messageId, /* armExpiry */ true);
+        await deliverToBackend(message, messageId, /* armExpiry */ true, /* initiatesTurn */ true);
     };
 
     /**
@@ -398,6 +398,14 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         message: string,
         messageId: string,
         armExpiry: boolean,
+        /** True only for the idle-send path (this message is what put the
+         *  pane into Submitting/Streaming via handleSendMessage's optimistic
+         *  `TurnStart`, before this RPC call ever ran). False for a held
+         *  message flushed mid-turn — a real turn is already genuinely in
+         *  flight there, independent of whether THIS specific flushed
+         *  message's delivery succeeds, so its failure must not cut that
+         *  turn short. */
+        initiatesTurn: boolean,
     ): Promise<void> => {
         // Apply runtime args (permission mode, model, effort) before this turn.
         const prov = opts.provider();
@@ -435,6 +443,22 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 type: "PendingMessageRejected",
                 id: messageId,
             });
+            // handleSendMessage (agent-view.tsx) dispatches TurnStart
+            // OPTIMISTICALLY, before this RPC call even runs — a synchronous
+            // AgentInputCommand failure (no controller registered for this
+            // block, e.g. after a backend restart before the pane is
+            // reopened; the identity spawn gate blocking on a bad
+            // credential; any network-level rejection) otherwise left the
+            // pane showing "Working…" forever with no path back to Idle:
+            // PendingMessageRejected only ever removed the ghost pending
+            // row above, never touched turnPhase. Only revert when this
+            // send is what started the turn — see initiatesTurn's doc
+            // comment. Mirrors the identical TurnReset already used for the
+            // bang-command / handled-slash-command "no real turn happened"
+            // paths above in sendMessage().
+            if (initiatesTurn) {
+                opts.model.dispatchPane({ type: "TurnReset" }, "system");
+            }
             return;
         }
 
@@ -472,7 +496,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             // shift() (not a snapshot) so items queued mid-flush are included.
             while (heldQueue.length > 0) {
                 const item = heldQueue.shift()!;
-                await deliverToBackend(item.text, item.id, /* armExpiry */ false);
+                await deliverToBackend(item.text, item.id, /* armExpiry */ false, /* initiatesTurn */ false);
             }
         } finally {
             flushing = false;

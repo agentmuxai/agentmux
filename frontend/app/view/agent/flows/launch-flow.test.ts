@@ -1,16 +1,19 @@
-// Copyright 2026, AgentMux Corp.
+// Copyright 2024-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Pins the deterministic-login-UX fix: runLaunchFlow must pass
- * `skipTier1: true` into runProviderLogin for providers flagged
- * `headlessLoginUrlUnsupported` (Claude) — so the mount-time auto-login
- * path never burns cli_login.rs's URL-capture wait on a documented dead
- * end. See catalog.ts's DEAD END note and run-provider-login.test.ts's
- * own "skipTier1 skips the headless URL-capture attempt entirely" test,
- * which pins that a true skipTier1 keeps getApi().runCliLogin from ever
- * being called — this test pins that runLaunchFlow actually sets that
- * flag for the right providers.
+ * Pins the no-auto-login fix: runLaunchFlow's Phase 2 must NEVER call
+ * runProviderLogin (or open a browser/terminal) on its own. Before this
+ * fix, an unauthenticated agent's mount-time flow silently launched a
+ * login attempt with no click and no way to decline — this is the exact
+ * behavior the user reported as broken across multiple test rounds
+ * ("it will launch the browser immediately without my clicking login").
+ * The flow must instead post a notification, set a terminal phase
+ * (first-login / auth-expired), and return "auth_failed" immediately —
+ * an actual login only ever starts from the user's own click on the
+ * "Log in" button (agent-view.tsx), wired to relogin() in
+ * useAgentControllerStatus.ts, not from this function. See
+ * docs/specs/SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26.md §8 Q6.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -25,8 +28,6 @@ const hub = vi.hoisted(() => ({
     cancelCliLogin: vi.fn(),
     ensureCapability: vi.fn(),
     getCapability: vi.fn(),
-    runProviderLogin: vi.fn(),
-    persistAndLinkAccount: vi.fn(),
     waveEventSubscribe: vi.fn(),
     getWaveObjectAtom: vi.fn(),
 }));
@@ -61,29 +62,18 @@ vi.mock("@/app/store/global", () => ({
     getApi: () => ({ cancelCliLogin: hub.cancelCliLogin }),
     staticTabId: () => "tab-1",
 }));
-vi.mock("./run-provider-login", () => ({
-    runProviderLogin: (...args: unknown[]) => hub.runProviderLogin(...args),
-    persistAndLinkAccount: (...args: unknown[]) => hub.persistAndLinkAccount(...args),
-}));
 
 import { runLaunchFlow } from "./launch-flow";
 
 const claude = {
     id: "claude",
+    displayName: "Claude",
     cliCommand: "claude",
     authCheckCommand: ["auth", "status"],
     authLoginCommand: ["auth", "login"],
     authConfigDirEnvVar: "CLAUDE_CONFIG_DIR",
     requiresLoginTty: true,
     headlessLoginUrlUnsupported: true,
-} as any;
-
-const codex = {
-    id: "codex",
-    cliCommand: "codex",
-    authCheckCommand: ["auth", "status"],
-    authLoginCommand: ["login"],
-    authConfigDirEnvVar: "CODEX_HOME",
 } as any;
 
 beforeEach(() => {
@@ -96,8 +86,6 @@ beforeEach(() => {
     hub.cancelCliLogin.mockReset().mockResolvedValue(undefined);
     hub.ensureCapability.mockReset().mockResolvedValue(undefined);
     hub.getCapability.mockReset().mockReturnValue({ status: "available" });
-    hub.runProviderLogin.mockReset().mockResolvedValue("seeded");
-    hub.persistAndLinkAccount.mockReset().mockResolvedValue(true);
     hub.waveEventSubscribe.mockReset().mockReturnValue(() => {});
     // Default: a brand-new agent that has never resolved its CLI before
     // (no "cmd" in meta) — see the first-login vs auth-expired tests below
@@ -108,9 +96,55 @@ afterEach(() => {
     vi.clearAllMocks();
 });
 
-describe("runLaunchFlow — skipTier1 wiring", () => {
-    it("passes skipTier1: true for a headlessLoginUrlUnsupported provider (Claude) — the auto-login path never attempts tier 1's doomed URL-capture wait", async () => {
-        await runLaunchFlow({
+describe("runLaunchFlow — no auto-login on Phase 2", () => {
+    it("returns auth_failed immediately on an unauthenticated first-ever login, without opening anything", async () => {
+        const phases: string[] = [];
+        const notices: Array<{ text: string; style: string }> = [];
+        const result = await runLaunchFlow({
+            blockId: "block-1",
+            provider: claude,
+            log: vi.fn(),
+            setAuthUrl: vi.fn(),
+            isCancelled: () => false,
+            setLoginWaiting: vi.fn(),
+            setLaunchPhase: (p) => { if (p) phases.push(p.kind); },
+            onNotify: (text, style) => notices.push({ text, style }),
+        });
+
+        expect(result).toBe("auth_failed");
+        expect(phases).toEqual(["resolving-cli", "checking-auth", "first-login"]);
+        // No login attempt of any kind — no terminal-opening / polling phases.
+        expect(phases).not.toContain("opening-login-terminal");
+        expect(phases).not.toContain("waiting-for-login-link");
+        expect(phases).not.toContain("waiting-for-login-completion");
+        expect(notices[0].style).toBe("info");
+        expect(notices[0].text).toMatch(/sign in/i);
+    });
+
+    it("returns auth_failed with auth-expired (not first-login) when a real account link already exists for this agent+provider", async () => {
+        hub.listAgentIdentities.mockResolvedValue([{ provider: "claude", account_id: "acct-1" }]);
+        const phases: string[] = [];
+        const notices: Array<{ text: string; style: string }> = [];
+        const result = await runLaunchFlow({
+            blockId: "block-1",
+            provider: claude,
+            log: vi.fn(),
+            setAuthUrl: vi.fn(),
+            isCancelled: () => false,
+            setLoginWaiting: vi.fn(),
+            setLaunchPhase: (p) => { if (p) phases.push(p.kind); },
+            onNotify: (text, style) => notices.push({ text, style }),
+        });
+
+        expect(result).toBe("auth_failed");
+        expect(phases).toContain("auth-expired");
+        expect(phases).not.toContain("first-login");
+        expect(notices[0].style).toBe("warning");
+        expect(notices[0].text).toMatch(/expired/i);
+    });
+
+    it("does not throw or hang when onNotify/setLaunchPhase are omitted (both optional)", async () => {
+        const result = await runLaunchFlow({
             blockId: "block-1",
             provider: claude,
             log: vi.fn(),
@@ -119,32 +153,16 @@ describe("runLaunchFlow — skipTier1 wiring", () => {
             setLoginWaiting: vi.fn(),
         });
 
-        expect(hub.runProviderLogin).toHaveBeenCalledTimes(1);
-        expect(hub.runProviderLogin.mock.calls[0][0]).toMatchObject({ skipTier1: true });
+        expect(result).toBe("auth_failed");
     });
+});
 
-    it("leaves skipTier1 false for a provider without the flag (Codex) — tier 1 still gets a real chance to capture a URL", async () => {
-        await runLaunchFlow({
-            blockId: "block-1",
-            provider: codex,
-            log: vi.fn(),
-            setAuthUrl: vi.fn(),
-            isCancelled: () => false,
-            setLoginWaiting: vi.fn(),
-        });
-
-        expect(hub.runProviderLogin).toHaveBeenCalledTimes(1);
-        expect(hub.runProviderLogin.mock.calls[0][0]).toMatchObject({ skipTier1: false });
+describe("runLaunchFlow — Phase 3 (already authenticated)", () => {
+    beforeEach(() => {
+        hub.checkCliAuth.mockReset().mockResolvedValue({ authenticated: true, email: "user@example.com" });
     });
 
     it("reports a launchPhase for every visible phase, and never leaves a stale non-terminal phase behind on success", async () => {
-        // First call is Phase 2's initial auth check (unauthenticated, so
-        // needsLogin fires); second is the post-"seeded" one-shot recheck,
-        // which must report success for the flow to reach "ready".
-        hub.checkCliAuth
-            .mockReset()
-            .mockResolvedValueOnce({ authenticated: false })
-            .mockResolvedValue({ authenticated: true, email: "user@example.com" });
         const phases: string[] = [];
         const result = await runLaunchFlow({
             blockId: "block-1",
@@ -157,68 +175,10 @@ describe("runLaunchFlow — skipTier1 wiring", () => {
         });
 
         expect(result).toBe("success");
-        expect(phases[0]).toBe("resolving-cli");
-        expect(phases).toContain("checking-auth");
-        // No prior "cmd" in meta (see beforeEach) — this is a first-ever
-        // login, not a lapsed one.
-        expect(phases).toContain("first-login");
-        expect(phases).toContain("opening-login-terminal");
-        // getControllerStatus defaults to shellprocstatus: "init" (beforeEach).
-        expect(phases[phases.length - 1]).toBe("fresh-ready");
-    });
-
-    it("reports auth-expired (not first-login) when a real account link already exists for this agent+provider", async () => {
-        hub.getWaveObjectAtom.mockReturnValue(() => ({
-            meta: { agentMode: "host", agentId: "agent-1" },
-        }));
-        // A real, persisted prior login — the only trustworthy "has logged in
-        // before" signal (see agent-model.ts's launchAgent(): meta.cmd is set
-        // unconditionally at agent-creation time, before any login, so it
-        // can't be used for this — reagent P1 on PR #2304).
-        hub.listAgentIdentities.mockResolvedValue([{ provider: "claude", account_id: "acct-1" }]);
-        const phases: string[] = [];
-        await runLaunchFlow({
-            blockId: "block-1",
-            provider: claude,
-            log: vi.fn(),
-            setAuthUrl: vi.fn(),
-            isCancelled: () => false,
-            setLoginWaiting: vi.fn(),
-            setLaunchPhase: (p) => { if (p) phases.push(p.kind); },
-        });
-
-        expect(phases).toContain("auth-expired");
-        expect(phases).not.toContain("first-login");
-    });
-
-    it("notifies with a warning before an expired-token relogin, and a neutral message for a first-ever login", async () => {
-        const notices: Array<{ text: string; style: string }> = [];
-        hub.getWaveObjectAtom.mockReturnValue(() => ({
-            meta: { agentMode: "host", agentId: "agent-1" },
-        }));
-        hub.listAgentIdentities.mockResolvedValue([{ provider: "claude", account_id: "acct-1" }]);
-        await runLaunchFlow({
-            blockId: "block-1",
-            provider: claude,
-            log: vi.fn(),
-            setAuthUrl: vi.fn(),
-            isCancelled: () => false,
-            setLoginWaiting: vi.fn(),
-            onNotify: (text, style) => notices.push({ text, style }),
-        });
-
-        expect(notices[0].style).toBe("warning");
-        expect(notices[0].text).toMatch(/expired/i);
+        expect(phases).toEqual(["resolving-cli", "checking-auth", "verifying", "fresh-ready"]);
     });
 
     it("notifies 'Resumed...' (not 'Ready...') when GetControllerStatus reports a prior turn (shellprocstatus: done)", async () => {
-        // Needs the login to actually succeed (auth_failed returns before
-        // Phase 3 ever runs) — same recheck-succeeds pattern as the
-        // "reports a launchPhase for every visible phase" test above.
-        hub.checkCliAuth
-            .mockReset()
-            .mockResolvedValueOnce({ authenticated: false })
-            .mockResolvedValue({ authenticated: true, email: "user@example.com" });
         hub.getControllerStatus.mockResolvedValue({ shellprocstatus: "done" });
         const phases: string[] = [];
         const notices: Array<{ text: string; style: string }> = [];
@@ -241,10 +201,6 @@ describe("runLaunchFlow — skipTier1 wiring", () => {
     });
 
     it("reagent P1 on PR #2303: also notifies 'Resumed...' for shellprocstatus 'running' — a persistent controller can resume while still alive/mid-turn, not just 'done'", async () => {
-        hub.checkCliAuth
-            .mockReset()
-            .mockResolvedValueOnce({ authenticated: false })
-            .mockResolvedValue({ authenticated: true, email: "user@example.com" });
         hub.getControllerStatus.mockResolvedValue({ shellprocstatus: "running" });
         const phases: string[] = [];
         const notices: Array<{ text: string; style: string }> = [];
@@ -271,12 +227,7 @@ describe("runLaunchFlow — skipTier1 wiring", () => {
         // gate refusing the controller) was logged but still fell through to
         // the unconditional ready/resumed-ready notification — misrepresenting
         // a failed, possibly-unusable agent as ready.
-        hub.checkCliAuth
-            .mockReset()
-            .mockResolvedValueOnce({ authenticated: false })
-            .mockResolvedValue({ authenticated: true, email: "user@example.com" });
         hub.controllerResync.mockRejectedValue(new Error("memory full"));
-        const phases: string[] = [];
         const notices: Array<{ text: string; style: string }> = [];
         const result = await runLaunchFlow({
             blockId: "block-1",
@@ -285,7 +236,6 @@ describe("runLaunchFlow — skipTier1 wiring", () => {
             setAuthUrl: vi.fn(),
             isCancelled: () => false,
             setLoginWaiting: vi.fn(),
-            setLaunchPhase: (p) => { if (p) phases.push(p.kind); },
             onNotify: (text, style) => notices.push({ text, style }),
         });
 
@@ -294,45 +244,5 @@ describe("runLaunchFlow — skipTier1 wiring", () => {
         expect(last.style).toBe("warning");
         expect(last.text).not.toMatch(/^Ready/i);
         expect(last.text).not.toMatch(/^Resumed/i);
-    });
-
-    it("reagent P1: updates the phase via onTierChange instead of freezing on a stale waiting-for-login-link deadline once tier 1 fails and tier 2/3 take over", async () => {
-        // Codex doesn't have headlessLoginUrlUnsupported, so it gets the
-        // deadline-bearing "waiting-for-login-link" phase before this call —
-        // exactly the phase that used to freeze once tier 1's own timeout
-        // expired and runProviderLogin's internal tier 2/3 (up to 5 more
-        // minutes) took over with zero further signal to the caller.
-        hub.checkCliAuth
-            .mockReset()
-            .mockResolvedValueOnce({ authenticated: false })
-            .mockResolvedValue({ authenticated: true, email: "user@example.com" });
-        hub.runProviderLogin.mockReset().mockImplementation(async (params: any) => {
-            // Simulate tier 1 failing, then a terminal opening and polling —
-            // exactly what run-provider-login.ts's real onTierChange calls do.
-            params.onTierChange?.({ tier: "fallback" });
-            params.onTierChange?.({ tier: "polling", deadlineMs: Date.now() + 5 * 60 * 1000 });
-            return "terminal-success";
-        });
-        const phases: Array<{ kind: string; deadlineMs?: number }> = [];
-        await runLaunchFlow({
-            blockId: "block-1",
-            provider: codex,
-            log: vi.fn(),
-            setAuthUrl: vi.fn(),
-            isCancelled: () => false,
-            setLoginWaiting: vi.fn(),
-            setLaunchPhase: (p) => { if (p) phases.push(p as any); },
-        });
-
-        const linkPhaseIndex = phases.findIndex((p) => p.kind === "waiting-for-login-link");
-        const fallbackIndex = phases.findIndex((p) => p.kind === "opening-login-terminal");
-        const pollingIndex = phases.findIndex((p) => p.kind === "waiting-for-login-completion");
-        expect(linkPhaseIndex).toBeGreaterThanOrEqual(0);
-        // The stale-deadline phase must not be the last thing shown — both
-        // onTierChange transitions must land AFTER it, in order.
-        expect(fallbackIndex).toBeGreaterThan(linkPhaseIndex);
-        expect(pollingIndex).toBeGreaterThan(fallbackIndex);
-        const pollingPhase = phases[pollingIndex];
-        expect(pollingPhase.deadlineMs).toBeGreaterThan(Date.now());
     });
 });

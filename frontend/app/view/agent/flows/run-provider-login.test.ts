@@ -557,7 +557,10 @@ describe("runProviderLogin", () => {
         expect(onAccountRegistered).toHaveBeenCalledWith(MINTED.accountId, MINTED.dir);
 
         onAccountRegistered.mockClear();
-        hub.upsertIdentityAccount.mockRejectedValueOnce(new Error("db error"));
+        // Rejects on BOTH attempts — tier 3 retries once (reagent P2,
+        // matching tier 2's identical safety net), so a single-rejection
+        // mock would now succeed on the retry and fire onAccountRegistered.
+        hub.upsertIdentityAccount.mockRejectedValue(new Error("db error"));
         hub.seedProviderAuthFromGlobal
             .mockReset()
             .mockResolvedValueOnce({ seeded: false, status: "missing" })
@@ -574,6 +577,33 @@ describe("runProviderLogin", () => {
         await vi.advanceTimersByTimeAsync(5_000);
         await promise2;
         expect(onAccountRegistered).not.toHaveBeenCalled();
+    });
+
+    it("retries persistSeededAccount once on tier 3 too, on a transient failure after terminal-success is detected (reagent P2, mirrors tier 2's identical retry)", async () => {
+        vi.useFakeTimers();
+        hub.runCliLogin.mockResolvedValue(null);
+        hub.seedProviderAuthFromGlobal
+            .mockResolvedValueOnce({ seeded: false, status: "missing" })
+            .mockResolvedValueOnce({ seeded: true });
+        hub.upsertIdentityAccount
+            .mockRejectedValueOnce(new Error("transient RPC error"))
+            .mockResolvedValueOnce({});
+        const onAccountRegistered = vi.fn();
+
+        const promise = runProviderLogin({
+            provider: claude,
+            cliPath: "x",
+            authEnv: { CLAUDE_CONFIG_DIR: "C:/auth" },
+            setAuthUrl: vi.fn(),
+            log: vi.fn(),
+            onAccountRegistered,
+        });
+        await vi.advanceTimersByTimeAsync(5_000);
+        const outcome = await promise;
+
+        expect(outcome).toBe("terminal-success");
+        expect(hub.upsertIdentityAccount).toHaveBeenCalledTimes(2);
+        expect(onAccountRegistered).toHaveBeenCalledWith(MINTED.accountId, MINTED.dir);
     });
 
     it("onAccountRegistered fires on non-claude tier 3 success too", async () => {

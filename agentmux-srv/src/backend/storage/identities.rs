@@ -118,7 +118,18 @@ pub struct IdentityAccount {
     pub context: serde_json::Value,
     #[serde(default = "default_identity_status")]
     pub status: String, // "unknown" | "ok" | "expired" | "invalid"
+    // `#[serde(default)]` — the `upsertidentityaccount` handler (agent_handlers/
+    // identity.rs) server-stamps both fields with `now` when they're `0`, but
+    // that logic runs AFTER `serde_json::from_value` succeeds. Every real
+    // frontend caller (persistSeededAccount, register-seeded-account.ts) omits
+    // both fields entirely, expecting the server to fill them in — without
+    // `default` here, deserialization rejects the payload before the handler's
+    // own timestamp logic ever runs, so every seed-from-global / terminal
+    // login's account-persist call failed 100% of the time with no visible
+    // error (report: REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md).
+    #[serde(default)]
     pub created_at: i64,
+    #[serde(default)]
     pub updated_at: i64,
 }
 
@@ -502,6 +513,34 @@ mod tests {
             }
             other => panic!("expected OAuthConfigDir, got {other:?}"),
         }
+    }
+
+    /// Pins the exact `upsertidentityaccount` payload shape sent by
+    /// `persistSeededAccount` (frontend/app/view/agent/flows/
+    /// register-seeded-account.ts) — no `created_at`/`updated_at` at all,
+    /// since the handler is documented to server-stamp them. Before
+    /// `#[serde(default)]` was added to those two fields, this exact shape
+    /// failed `serde_json::from_value` with "missing field `created_at`" on
+    /// every call, so every seed-from-global / terminal-fallback login
+    /// silently never persisted an account row (the credential landed on
+    /// disk, but no `db_accounts` row or agent link ever existed — see
+    /// REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md).
+    #[test]
+    fn identity_account_deserializes_frontend_seed_payload_missing_timestamps() {
+        let json = r#"{
+            "id": "8d34a369-6ba6-4071-93bd-d4e051cdb457",
+            "name": "claude-oauth",
+            "provider": "claude",
+            "kind": "oauth",
+            "secret_ref": {"backend": "oauth_config_dir", "dir": "/tmp/claude"},
+            "status": "valid"
+        }"#;
+        let parsed: IdentityAccount =
+            serde_json::from_value(serde_json::from_str(json).unwrap())
+                .expect("must deserialize the frontend's timestamp-less seed payload");
+        assert_eq!(parsed.created_at, 0);
+        assert_eq!(parsed.updated_at, 0);
+        assert_eq!(parsed.status, "valid");
     }
 
     /// Serialization must always emit the canonical tag, never the legacy
