@@ -814,6 +814,7 @@ pub struct BackgroundSubsystems {
     pub event_bus: Arc<EventBus>,
     pub broker: Arc<Broker>,
     pub editor_file_watcher: Option<Arc<backend::editor_file_watcher::EditorFileWatcher>>,
+    pub media_file_watcher: Option<Arc<backend::media_file_watcher::MediaFileWatcher>>,
     pub config_watcher: Arc<wconfig::ConfigWatcher>,
     pub reactive_handler: &'static reactive::ReactiveHandler,
     pub poller: Arc<Poller>,
@@ -846,6 +847,14 @@ pub fn spawn_background_subsystems(
     let editor_file_watcher = backend::editor_file_watcher::EditorFileWatcher::new(broker.clone());
     if editor_file_watcher.is_none() {
         tracing::warn!("editor file watcher not started; editor panes will not live-reload on external changes");
+    }
+
+    // Watches directories a Media pane is pointed at, publishing a per-block
+    // wake signal when a matching-extension file changes. See
+    // SPEC_MEDIA_PANE_2026_07_26.md.
+    let media_file_watcher = backend::media_file_watcher::MediaFileWatcher::new(broker.clone());
+    if media_file_watcher.is_none() {
+        tracing::warn!("media file watcher not started; media panes will not live-update on new/changed files");
     }
 
     // Config watcher (created before sysinfo loop so it can read telemetry:interval)
@@ -1123,6 +1132,7 @@ pub fn spawn_background_subsystems(
         event_bus,
         broker,
         editor_file_watcher,
+        media_file_watcher,
         config_watcher,
         reactive_handler,
         poller,
@@ -1436,6 +1446,7 @@ pub fn build_app_state(
             Arc::clone(&broker),
         ),
         editor_file_watcher: bg.editor_file_watcher,
+        media_file_watcher: bg.media_file_watcher,
     }
 }
 

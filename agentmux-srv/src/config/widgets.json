@@ -193,6 +193,19 @@
             }
         }
     },
+    "defwidget@media": {
+        "display:order": 15,
+        "display:pinned": true,
+        "icon": "photo-film",
+        "color": "#10b981",
+        "label": "Media",
+        "description": "View images and video files, with live updates as they change on disk",
+        "blockdef": {
+            "meta": {
+                "view": "media"
+            }
+        }
+    },
     "defwidget@toolchain": {
         "display:order": 20,
         "display:pinned": false,

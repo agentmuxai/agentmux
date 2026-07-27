@@ -361,6 +361,7 @@ mod recent_sessions_tests {
                 broker,
             ),
             editor_file_watcher: None,
+            media_file_watcher: None,
         };
 
         // Seed: 1 SEEDED definition (template), 1 account + direct
@@ -675,6 +676,7 @@ mod recent_sessions_tests {
                 broker,
             ),
             editor_file_watcher: None,
+            media_file_watcher: None,
         };
 
         // One seeded template + one already-user-owned definition.

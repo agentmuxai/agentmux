@@ -39,6 +39,10 @@ resources_path = "resources"
 [dependencies]
 agentmux-common = { path = "../agentmux-common" }
 cef = { version = "148", default-features = false, features = ["build-util"] }
+# Native "pick a file" dialog for the Media pane (SPEC_MEDIA_PANE_2026_07_26.md).
+# Default features pick the right native backend per platform (Win32
+# IFileDialog / macOS NSOpenPanel / Linux GTK3).
+rfd = "0.15"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tracing = "0.1"

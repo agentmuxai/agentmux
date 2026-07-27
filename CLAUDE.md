@@ -156,6 +156,7 @@ The widget bar's visibility logic is in `frontend/app/window/action-widgets.tsx`
 | `defwidget@terminal` | `term` | Terminal | Pinned |
 | `defwidget@sysinfo` | `sysinfo` | Sysinfo | Pinned |
 | `defwidget@editor` | `editor` | Editor | Pinned |
+| `defwidget@media` | `media` | Media | Pinned |
 | `defwidget@drone` | `drone` | Drone | Pinned |
 | `defwidget@help` | `help` | Help | Pinned |
 | `defwidget@swarm` | `swarm` | Swarm | Pinned |
