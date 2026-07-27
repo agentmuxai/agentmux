@@ -181,6 +181,25 @@ export function dispatch(
     const result = update(prev, command);
     slot.state = result.state;
 
+    // [wave-turn] diagnostics — mirrors app-init.ts's `[wave-title]` line
+    // (tail with `muxlog host '\[fe\] \[wave-turn\]'`). Before this, an
+    // agent debugging "why does this pane say Working" had nothing to
+    // grep: the reducer is a pure function (zero logging of its own) and
+    // `dispatch()`'s eventSink only ever logged `turn-start-suppressed`.
+    // Every other transition, and the watchdog's own reasoning for
+    // whether it recovered a hung turn, was silently discarded. See
+    // docs/reports/REPORT_WORKING_STATE_TELEMETRY_AUDIT_2026_07_27.md §3.
+    if (prev.turnPhase !== slot.state.turnPhase) {
+        console.debug(
+            "[wave-turn]",
+            `pane=${blockId.slice(0, 7)}`,
+            `${prev.turnPhase.kind} → ${slot.state.turnPhase.kind}`,
+            `cmd=${command.type}`,
+            `toolsActive=${slot.state.turnPhase.kind === "Streaming" ? slot.state.turnPhase.toolsActive : "-"}`,
+            `currentTool=${slot.state.currentTool ?? "-"}`,
+        );
+    }
+
     // Project changes — only call setters for fields that actually
     // changed (referential equality). Avoids redundant signal writes.
     // Per-setter cascade detection: docs/analysis/LIFECYCLE_DISPATCH_LEAK_2026_05_15.md.
@@ -225,6 +244,28 @@ export function dispatch(
     }
 
     for (const ev of result.events) {
+        // Watchdog reasoning — the reducer already computes exactly why it
+        // did or didn't recover a hung turn (reducer.ts's StreamWatchdogTick
+        // branch); surface it instead of discarding it. `EXEMPT` on
+        // stream-stuck is the single highest-value line for self-diagnosing
+        // a "Working for no reason" report: it names the tool that's
+        // keeping the pane from ever being force-recovered.
+        if (ev.type === "stream-stuck") {
+            const p = slot.state.turnPhase;
+            const exempt = p.kind === "Streaming" && p.toolsActive > 0;
+            console.debug(
+                "[wave-turn]",
+                `pane=${blockId.slice(0, 7)}`,
+                `watchdog: no recovery — idleSinceMs=${ev.idleSinceMs} thresholdMs=${ev.thresholdMs}`,
+                exempt ? `EXEMPT toolsActive=${p.toolsActive} currentTool=${slot.state.currentTool ?? "?"}` : "",
+            );
+        } else if (ev.type === "working-recovered") {
+            console.debug(
+                "[wave-turn]",
+                `pane=${blockId.slice(0, 7)}`,
+                `watchdog: FIRED — force-recovered to Idle, idleSinceMs=${ev.idleSinceMs}`,
+            );
+        }
         eventSink(blockId, ev);
         for (const l of extraListeners) {
             try {
