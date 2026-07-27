@@ -1,5 +1,27 @@
 # AgentMux Version History
 
+## 0.54.6 — 2026-07-27
+
+- feat(macos): tab redock via CGEventTap — cross-window tab drag now merges directly with a live insertion indicator, matching Windows
+- feat(media): add Media pane widget with live directory-watch updates
+- fix(auth): notify before an automatic relogin, and on resume vs fresh start, per LaunchAuthState
+- fix(diag): restore WER crash-dump registration for agentmux-srv, correcting a stale binary filename
+- feat(agent): promote long-running Bash tool calls (sleep, dev servers, builds) to the activity dock after 30s, freeing the Working banner to go calm
+- rename the per-agent 'Agent setup' modal to Stash (backpack icon), distinguishing it from the global Armory pane
+- fix(armory): render Skill content as Markdown and fix the broken catalog Bind-to-agent action
+- fix(agent): pane modals close on backdrop click when they carry no in-flight form state
+- fix(warden): decouple container-query context from the scrolling pane; send auth on LAN fetch
+- fix(armory): MCP Servers Bind-to-agent had the same check_s1 auth gap as Skills — fixed identically
+- feat(cef): Windows codec-enabled CEF build support (proprietary codecs)
+- fix(auth): remove mount-time auto-login trigger, fix login persistence and turn-state races
+- feat(dev): opt-in isolated auth store for destructive Armory testing (AGENTMUX_ISOLATED_AUTH=1)
+- fix(auth): gate relogin() opened-tier success on persist result, restore Log-in button on failure
+- fix(window): first window titles consistently as 'Window 1' instead of sometimes leaking the unrenamed bootstrap workspace name
+- fix(auth): forceControllerRefresh seeds termsize and reports controller status like Phase 3
+- fix(auth): stop isolated boot from rewriting the global registry, fix flaky test lock, distinguish confirmed vs unconfirmed auth
+- fix(auth): gate /login's opened-tier success on persistAndLinkAccount's return, matching relogin()
+
+
 ## 0.54.5 — 2026-07-26
 
 - fix(tabs): hide the single tab pill until a 2nd tab exists, transparent strip background
