@@ -359,7 +359,20 @@ async fn route_command(
             .await
             .map_err(|e| format!("start_tab_drag_tracking join error: {}", e))?
         }
-        "stop_tab_drag_tracking" => commands::drag::stop_tab_drag_tracking(),
+        "stop_tab_drag_tracking" => {
+            // spawn_blocking too, matching start_tab_drag_tracking above —
+            // macOS's stop_active_hook_session now blocks on a lock shared
+            // with start (reagent PR #2310 P1: without serializing them, a
+            // fast drag-then-release could have this run — and no-op, since
+            // ACTIVE_HOOK_RUNLOOP isn't set yet — before start's spawned
+            // hook thread finishes CGEventTapCreate, leaving a zombie hook
+            // alive). Running that (bounded, but real) block on an async
+            // worker thread instead of the blocking pool would be its own
+            // problem.
+            tokio::task::spawn_blocking(commands::drag::stop_tab_drag_tracking)
+                .await
+                .map_err(|e| format!("stop_tab_drag_tracking join error: {}", e))?
+        }
         "pane_pool_window_ready" => commands::drag::pane_pool_window_ready(state, args),
         "tear_off_sc_move_handshake" => {
             // Wrap in spawn_blocking — the handler polls state.browsers

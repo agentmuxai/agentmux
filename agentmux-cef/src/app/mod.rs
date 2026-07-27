@@ -167,6 +167,26 @@ wrap_window_delegate! {
                     "[browser-pane] registered Window in state.windows for pane attachment"
                 );
 
+                // macOS tab-redock (SPEC_MACOS_TAB_REDOCK_PARITY_2026_07_24):
+                // cache this window's NSWindow.windowNumber → label here,
+                // on the CEF UI thread, where reading it off the NSView is
+                // safe — the CGEventTap hook thread only ever does a
+                // read-only Mutex lookup against this cache, never touches
+                // AppKit directly (see tear_off_hook.rs's macOS module doc
+                // comment for why that distinction matters).
+                #[cfg(target_os = "macos")]
+                {
+                    let nsview = window.window_handle() as *mut std::ffi::c_void;
+                    if !nsview.is_null() {
+                        if let Some(number) = unsafe { macos_window_number(nsview) } {
+                            crate::commands::tear_off_hook::macos_register_window_number(
+                                number,
+                                label.clone(),
+                            );
+                        }
+                    }
+                }
+
                 // Startup pool fill — Windows uses the launcher saga path
                 // (saga_dispatch.rs::LiveActionRunner is cfg(windows) only).
                 // Non-Windows has no separate launcher, so the host seeds the
@@ -232,6 +252,13 @@ wrap_window_delegate! {
                     window_label = %label,
                     "[browser-pane] unregistered Window on destroy"
                 );
+
+                // macOS tab-redock: drop this label from the windowNumber
+                // cache too — a stale entry would let the CGEventTap hook
+                // hit-test resolve a merge onto a window that no longer
+                // exists.
+                #[cfg(target_os = "macos")]
+                crate::commands::tear_off_hook::macos_unregister_window_label(label);
             }
         }
 
@@ -358,6 +385,38 @@ wrap_browser_view_delegate! {
             self.runtime_style
         }
     }
+}
+
+/// macOS tab-redock (SPEC_MACOS_TAB_REDOCK_PARITY_2026_07_24): read
+/// `[[nsview window] windowNumber]`. Called only from `on_window_created`,
+/// on the CEF UI thread — safe, one-time read whose result is cached in
+/// `tear_off_hook`'s windowNumber→label map for the CGEventTap hook
+/// thread to consult read-only (that thread must never touch AppKit
+/// directly — see that module's doc comment). Returns `None` if the
+/// NSWindow isn't resolvable (defensive; shouldn't happen for a just-
+/// created top-level window).
+#[cfg(target_os = "macos")]
+unsafe fn macos_window_number(nsview: *mut std::ffi::c_void) -> Option<i64> {
+    use std::ffi::c_void;
+    type Id = *mut c_void;
+    type Sel = *const c_void;
+    extern "C" {
+        fn sel_registerName(name: *const std::ffi::c_char) -> Sel;
+        fn objc_msgSend();
+    }
+    let sel_window = sel_registerName(b"window\0".as_ptr() as _);
+    let get_window: extern "C" fn(Id, Sel) -> Id =
+        std::mem::transmute(objc_msgSend as *const c_void);
+    let nswindow = get_window(nsview, sel_window);
+    if nswindow.is_null() {
+        return None;
+    }
+    let sel_window_number = sel_registerName(b"windowNumber\0".as_ptr() as _);
+    // NSWindow.windowNumber is an NSInteger — i64 on 64-bit (the only
+    // architectures this app targets).
+    let get_window_number: extern "C" fn(Id, Sel) -> i64 =
+        std::mem::transmute(objc_msgSend as *const c_void);
+    Some(get_window_number(nswindow, sel_window_number))
 }
 
 /// macOS: ensure a non-frameless CEF Views window (the DevTools popup) shows the

@@ -105,6 +105,19 @@ winres = "0.1"
 # `spawn_blocking` task that doesn't unwind on outer-task abort).
 libc = "0.2"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# CGEventTap / CFRunLoop / CFMachPort / CGWindowList plumbing for the macOS
+# tab-redock cross-window cursor-tracking hook
+# (SPEC_MACOS_TAB_REDOCK_PARITY_2026_07_24 §2.5) — scoped narrowly to that
+# new surface. Existing macOS AppKit call sites (ui_tasks/drag.rs,
+# macos_compat.rs, ui_tasks/platform_macos.rs) stay on the established raw
+# extern "C" / objc_msgSend idiom unchanged; these crates wrap the
+# lower-level Core Foundation / Core Graphics C APIs specifically, where
+# hand-rolled retain/release and CFDictionary/CFArray traversal is a real
+# correctness risk in a long-lived background thread.
+core-foundation = "0.9"
+core-graphics = "0.23"
+
 [target.'cfg(target_os = "linux")'.dependencies]
 # Vulkan device enumeration for the startup GPU-tier probe (hardware Vulkan →
 # hardware GL → software precedence). Used only to read physical-device types;

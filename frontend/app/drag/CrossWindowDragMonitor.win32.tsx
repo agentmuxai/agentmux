@@ -30,6 +30,7 @@ import { getTabGrabOffset } from "@/app/tab/tab-grab-offset";
 import { onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 import type { LayoutNode } from "@/layout/lib/types";
+import { dragEscaped, setDragEscaped } from "@/app/tab/tabbar-dnd";
 
 // Shared drag state set by TileLayout / TabBar drag handlers
 export type DragItemPayload =
@@ -70,6 +71,19 @@ function CrossWindowDragMonitor(): JSX.Element {
             fallbackTimer = null;
             const payload = _currentDragPayload;
             if (!payload) return;
+
+            // Escape was pressed during this drag — abort the fallback path
+            // too (reagent PR #2310 P1: this file's genuine cross-window
+            // tear-off commit path didn't check it, so an escaped drag could
+            // still spawn a tear-off window via the OLE-dragend-missed
+            // fallback even though the in-window onDrop path correctly
+            // no-ops).
+            if (dragEscaped) {
+                setDragEscaped(false);
+                _currentDragPayload = null;
+                Logger.info("dnd:cross", "cross-window drag fallback aborted via Escape");
+                return;
+            }
 
             // Query Windows directly: is the left mouse button still held?
             let isButtonPressed = false;
@@ -136,6 +150,15 @@ function CrossWindowDragMonitor(): JSX.Element {
             });
 
             if (!payload) return;
+
+            // Escape was pressed during this drag — abort here too, same
+            // reasoning as checkAndFireFallback above (reagent PR #2310 P1).
+            if (dragEscaped) {
+                setDragEscaped(false);
+                getApi().releaseDragCapture().catch(() => {});
+                Logger.info("dnd:cross", "cross-window drag aborted via Escape");
+                return;
+            }
 
             // Release WebView2 mouse capture immediately — IDropSource may leave it active
             // after an out-of-window HTML5 drag, breaking subsequent mousedown delivery.
