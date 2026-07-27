@@ -4,19 +4,22 @@
 /**
  * PinnedActivity — the unified abstraction behind the pinned activity dock.
  *
- * Anything long-running an agent spawns (a shell, a cron, a subagent) maps onto
- * this contract and renders as a uniform row in the dock at the top of the
- * agent pane. Phase 1 implemented the `shell` kind; Phase 2 (this file) adds
- * `subagent`. `cron` still has no adapter — it's sugar over a `shell` per the
- * spec (§6), not yet built.
+ * Anything long-running an agent spawns (a shell, a cron, a subagent, an
+ * overrunning tool call) maps onto this contract and renders as a uniform row
+ * in the dock at the top of the agent pane. Phase 1 implemented the `shell`
+ * kind; Phase 2 added `subagent`. `cron` still has no adapter — it's sugar
+ * over a `shell` per the spec (§6), not yet built. `tool` (this file) closes
+ * the gap where an ordinary Bash tool call (a `sleep`, a backgrounded dev
+ * server) is otherwise invisible to the dock — see
+ * docs/specs/REPORT_LONGRUNNING_TOOLCALL_AUTODETECT_STATUS_2026_07_26.md §3.
  *
  * Spec: docs/specs/SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15.md
  */
 
-import type { ShellNode } from "../types";
+import type { ShellNode, ToolNode } from "../types";
 import type { ActiveSubagent } from "../../swarm/swarm-model";
 
-export type ActivityKind = "shell" | "cron" | "subagent";
+export type ActivityKind = "shell" | "cron" | "subagent" | "tool";
 
 /** Normalized lifecycle across every kind (D3/D4 ordering + retention). */
 export type ActivityStatus = "running" | "done" | "error" | "stopped";
@@ -47,6 +50,9 @@ export interface PinnedActivity {
      *  row appeared per subagent instead of per tool call. Mutually
      *  exclusive with `subagent` above. */
     subagentGroup?: { members: ActiveSubagent[] };
+    /** Present when `kind === "tool"` — an ordinary Bash tool call promoted
+     *  after running past `TOOL_PROMOTION_MS` (tool-adapter.ts). */
+    tool?: ToolNode;
 }
 
 /** Per-kind sigil; colored by status in CSS. */
@@ -54,6 +60,7 @@ export const KIND_SIGIL: Record<ActivityKind, string> = {
     shell: "⟩",
     cron: "⟳",
     subagent: "◆",
+    tool: "$",
 };
 
 /** Milliseconds a terminal row lingers in the dock before auto-dismiss (D4).

@@ -64,6 +64,7 @@ import { handleAgentIdChange } from "@/app/view/term/termagent";
 import { DragOverlay } from "@/app/element/dragoverlay";
 import { AgentControlBar } from "./components/AgentControlBar";
 import { ActivityDock } from "./components/ActivityDock";
+import { nextToolPromotionAt, toolActivities } from "./activity/tool-adapter";
 import { AgentDecisionPanel } from "./components/AgentDecisionPanel";
 import { AgentQuestionPanel } from "./components/AgentQuestionPanel";
 import { AgentDisconnectedBanner } from "./components/AgentDisconnectedBanner";
@@ -932,6 +933,25 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         onCleanup(() => ro.disconnect());
     });
 
+    // True once the pane's in-flight Bash tool call has been promoted to a
+    // live ActivityDock row (tool-adapter.ts) — AgentWorkingRow suppresses
+    // its own "tool · arg" text once this flips, so the dock and the working
+    // row never repeat the same information (report §4.3: "the dock takes
+    // over, AgentWorkingRow goes calm/neutral"). Scheduled the same way as
+    // ActivityDock's own hasExpiring/toolPromotionNonce: one setTimeout for
+    // the exact instant promotion becomes due, not a continuous tick.
+    const [hasPromotedTool, setHasPromotedTool] = createSignal(false);
+    createEffect(() => {
+        const nodes = agentAtoms().documentAtom[0]();
+        setHasPromotedTool(toolActivities(nodes, Date.now()).length > 0);
+        const at = nextToolPromotionAt(nodes, Date.now());
+        if (at == null) return;
+        const timer = setTimeout(() => {
+            setHasPromotedTool(toolActivities(agentAtoms().documentAtom[0](), Date.now()).length > 0);
+        }, Math.max(0, at - Date.now()) + 50);
+        onCleanup(() => clearTimeout(timer));
+    });
+
     // User-message send + /login /clear slash intercepts + back-to-picker.
     // See hooks/useAgentCommands.ts.
     const commands = useAgentCommands({
@@ -1390,6 +1410,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                             stopping={agentAtoms().turnPhaseAtom[0]().kind === "Interrupting"}
                             currentTool={agentAtoms().currentToolAtom[0]()}
                             currentToolArg={agentAtoms().currentToolArgAtom[0]()}
+                            toolPromoted={hasPromotedTool()}
                             sessionStats={agentAtoms().sessionStatsAtom[0]()}
                             turnTokens={agentAtoms().turnTokensAtom[0]()}
                             launchPhase={status.launchPhase()}
