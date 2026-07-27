@@ -38,9 +38,19 @@ $ErrorActionPreference = "Stop"
 
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Host "Elevation required to write HKLM\...\Windows Error Reporting\LocalDumps — relaunching with UAC prompt..."
-    $argList = @("-NoProfile", "-File", $PSCommandPath, "-DumpFolder", $DumpFolder, "-DumpCount", $DumpCount)
-    Start-Process pwsh.exe -Verb RunAs -ArgumentList $argList -Wait
-    exit $LASTEXITCODE
+    # Quote path-like values explicitly — Start-Process builds the elevated
+    # child's command line by joining -ArgumentList with spaces, so an
+    # unquoted $PSCommandPath/$DumpFolder containing a space (a real
+    # possibility for both — repo paths and DumpFolder are user-controlled)
+    # would split into extra, garbled arguments. reagent P2.
+    $argList = @("-NoProfile", "-File", "`"$PSCommandPath`"", "-DumpFolder", "`"$DumpFolder`"", "-DumpCount", $DumpCount)
+    # -PassThru is required to get the elevated child's actual exit code —
+    # without it, Start-Process returns nothing and $LASTEXITCODE reflects
+    # whatever the last external command run in THIS process set it to, not
+    # the elevated child's outcome, silently masking a failure there (e.g.
+    # the throw on a missing package.json version) as success. reagent P2.
+    $proc = Start-Process pwsh.exe -Verb RunAs -ArgumentList $argList -Wait -PassThru
+    exit $proc.ExitCode
 }
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
