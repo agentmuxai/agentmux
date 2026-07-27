@@ -53,8 +53,9 @@ export type LaunchPhase =
     /** Phase 3 finished with GetControllerStatus's shellprocstatus === "init"
      *  — this agent has never run a turn before. */
     | { kind: "fresh-ready" }
-    /** Phase 3 finished with shellprocstatus === "done" — this agent has a
-     *  prior turn on record; the pane is resuming, not starting fresh. */
+    /** Phase 3 finished with shellprocstatus === "done" or "running" — this
+     *  agent has a prior turn on record (or a persistent controller resumed
+     *  while still alive/mid-turn); the pane is resuming, not starting fresh. */
     | { kind: "resumed-ready" }
     | { kind: "failed"; reason: string };
 
