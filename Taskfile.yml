@@ -554,6 +554,27 @@ tasks:
         platforms: [windows]
         cmds:
             - cmd: |
+                # Optional override: substitute a custom-built (e.g. codec-enabled)
+                # CEF runtime into target/release/ BEFORE the version-matched logic
+                # below runs, so everything downstream — including the
+                # verify-cef-version.sh gate — behaves identically whether the
+                # source was this override or the normal cargo-staged files. No-op
+                # when the env var is unset: default behavior is byte-for-byte
+                # unchanged from before this block existed. Mirrors bundle:darwin's
+                # resolver-driven override, adapted to bundle:windows's
+                # "source everything from target/release" design instead of a
+                # separate CEF_DIR variable, since target/release is what every
+                # downstream cp in this task already reads from.
+                # See docs/specs/SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md.
+                if [ -n "${AGENTMUX_CEF_RUNTIME_DIR_WINDOWS:-}" ]; then
+                  echo "AGENTMUX_CEF_RUNTIME_DIR_WINDOWS set — staging override CEF runtime from $AGENTMUX_CEF_RUNTIME_DIR_WINDOWS"
+                  if [ ! -f "$AGENTMUX_CEF_RUNTIME_DIR_WINDOWS/libcef.dll" ] || [ ! -f "$AGENTMUX_CEF_RUNTIME_DIR_WINDOWS/icudtl.dat" ]; then
+                    echo "❌ AGENTMUX_CEF_RUNTIME_DIR_WINDOWS is set but missing libcef.dll + icudtl.dat" >&2
+                    exit 1
+                  fi
+                  mkdir -p target/release
+                  cp -rf "$AGENTMUX_CEF_RUNTIME_DIR_WINDOWS/." target/release/
+                fi
                 # cargo/cef-dll-sys copies the ACTIVE build's full CEF runtime
                 # (libcef.dll + paks + icudtl.dat + GL dlls + en-US locale) into
                 # target/release/ alongside the linked host — always matching the

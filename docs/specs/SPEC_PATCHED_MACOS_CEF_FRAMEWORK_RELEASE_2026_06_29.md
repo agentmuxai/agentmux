@@ -280,4 +280,15 @@ unchanged except for the inserted verify call. No restructuring required.
   next bump).
 - Intel macOS (x86_64) — arm64 only, matching the rest of the macOS pipeline.
 - Changing the frontend drag path (`jsDrivenDrag`) — a dependent follow-up.
-- Windows (already ships its own patched CEF via the launcher bundle).
+- Windows — **correction (2026-07-26): this was stale/incorrect.** Windows
+  does not ship a patched CEF; it uses the plain stock `cef-dll-sys`
+  binary with zero override capability anywhere in the build/CI pipeline
+  (confirmed at every layer — `Taskfile.yml`'s Windows tasks, every CI
+  workflow's Windows job, and a full-repo grep for
+  `AGENTMUX_CEF_RUNTIME_DIR`). Windows was excluded from *this* spec
+  because it never needed the `BeginWindowDrag` patch specifically
+  (native drag already works there via Win32) — not because it already
+  has an equivalent patched build. See
+  `docs/specs/SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md` for
+  the first Windows custom-CEF build work, driven by a different need
+  (proprietary codec support).

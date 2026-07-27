@@ -15,6 +15,19 @@
 #                                     them with `strip -S -x` at bundle time)
 #   - no use_sysroot / use_qt*      (Linux-only knobs)
 
+# --- proprietary codec support (added 2026-07-26): wide file-type coverage ---
+# See docs/specs/SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md.
+# Counterpart to args.gn's same block — see that file's comment for the
+# full rationale (enable_hevc_parser_and_hw_decoder is already true by
+# default here too — proprietary_codecs && is_apple — set explicitly for
+# clarity; enable_platform_ac3_eac3_audio and enable_platform_dolby_vision
+# both default false on desktop macOS and need the explicit override).
+proprietary_codecs=true
+ffmpeg_branding="Chrome"
+enable_hevc_parser_and_hw_decoder=true
+enable_platform_ac3_eac3_audio=true
+enable_platform_dolby_vision=true
+
 alternate_cdm_storage_id_key="968b476909da4373b08903c28e859454"
 clang_use_chrome_plugins=false
 enable_background_mode=false

@@ -1,0 +1,68 @@
+# Canonical GN args for the AgentMux CEF build (Windows x64).
+#
+# NEW for 2026-07-26 — Windows never had a custom CEF build before this
+# (native Win32 window drag never needed the BeginWindowDrag patch that
+# drove the Linux/macOS builds). This one exists purely to enable
+# proprietary codec support (H.264/AAC/HEVC/AC3/EAC3/Dolby Vision) —
+# see docs/specs/SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md
+# and docs/reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md.
+#
+# Base flags below are the canonical CEF-required + recommended set for
+# out/Release_GN_x64, taken verbatim from `python3 cef/tools/gn_args.py
+# windows` (GetRequiredArgs()/GetRecommendedDefaultArgs() in
+# cef/tools/gn_args.py — that script is the actual source of truth CEF's
+# own BUILD.gn assert()s check against, not a value to hand-guess). An
+# earlier draft of this file omitted enable_cdm_host_verification /
+# enable_cdm_storage_id / enable_rlz / alternate_cdm_storage_id_key
+# (required on is_win/is_mac by cef/BUILD.gn's own assert() block) and
+# included forbid_non_component_debug_builds=false, which gn_args.py only
+# sets `if platform != 'windows'` — confirmed live on 2026-07-26 via the
+# assert(enable_cdm_host_verification) GN gen failure this produced.
+#
+# Validated 2026-07-27 against a real build: 55,367/55,367 ninja targets,
+# zero errors, boot-verified via cefsimple.exe, published as
+# cef-windows-x86_64-148.0.7778.180 on agentmuxai/cef. See
+# docs/cef-build/build-patched-cef-windows.md's "Status" section for the
+# full list of build-config gaps this run surfaced and fixed.
+
+alternate_cdm_storage_id_key="968b476909da4373b08903c28e859454"
+clang_use_chrome_plugins=false
+enable_background_mode=false
+enable_backup_ref_ptr_instance_tracer=true
+enable_cdm_host_verification=true
+enable_cdm_storage_id=true
+enable_downgrade_processing=false
+enable_resource_allowlist_generation=false
+enable_rlz=true
+enable_widevine=true
+is_component_build=false
+is_debug=false
+optimize_webui=true
+target_cpu="x64"
+
+# --- proprietary codec support (added 2026-07-26): wide file-type coverage ---
+# See args.gn's matching block for the full rationale.
+# enable_hevc_parser_and_hw_decoder is already true by default on Windows
+# (proprietary_codecs && is_win, per Chromium's media/media_options.gni) —
+# set explicitly for clarity. enable_platform_dolby_vision is ALSO already
+# true by default on Windows specifically (its default OR-clause includes
+# is_win, unlike Linux/macOS) — set explicitly anyway for parity/clarity
+# across all three platforms' args files. enable_platform_ac3_eac3_audio
+# has no is_win default-true case — explicit override required here too.
+proprietary_codecs=true
+ffmpeg_branding="Chrome"
+enable_hevc_parser_and_hw_decoder=true
+enable_platform_ac3_eac3_audio=true
+enable_platform_dolby_vision=true
+
+# --- size reduction: official-build optimizations (same lever as Linux) ---
+# is_official_build=true is the size lever on Linux (roughly halves
+# libcef.so). Applying the same here — the real build produced a 288.8 MiB
+# libcef.dll with these flags on; no non-official Windows build was cut to
+# measure a delta against (would require a second multi-hour build), so
+# unlike args.gn's verified Linux before/after numbers, this is a single
+# absolute data point, not a delta.
+is_official_build=true
+use_thin_lto=true
+is_cfi=false
+chrome_pgo_phase=0
