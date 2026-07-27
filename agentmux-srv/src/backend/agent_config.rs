@@ -608,7 +608,7 @@ fn truncate_utf16_units(s: &str, max_units: usize) -> String {
 /// correctly-escaped YAML value — this avoids hand-rolling YAML escaping or
 /// adding a yaml crate dependency (this workspace has neither today) just
 /// for two scalar fields.
-fn render_skill_md(slug: &str, description: &str, body: &str) -> String {
+pub(crate) fn render_skill_md(slug: &str, description: &str, body: &str) -> String {
     let owned_description;
     let description = if description.trim().is_empty() {
         "No description provided."
@@ -673,8 +673,11 @@ fn skill_name_slug(name: &str) -> String {
 /// `-2`, `-3`, ... until the slug is unique within `used`, truncating the
 /// base first so the suffixed result never exceeds the spec's 64-character
 /// max (Codex P2, PR #2322 — a 64-char base plus `-2` was previously 66
-/// chars).
-fn unique_skill_slug(name: &str, used: &mut HashSet<String>) -> String {
+/// chars). `bundle_export.rs` also reuses this for MCP server export
+/// filenames, where the underscore-free/64-char constraints are stricter
+/// than strictly required but remain filesystem-safe, so sharing this
+/// implementation is still correct there.
+pub(crate) fn unique_skill_slug(name: &str, used: &mut HashSet<String>) -> String {
     const MAX_LEN: usize = 64;
     let base = skill_name_slug(name);
     if used.insert(base.clone()) {
