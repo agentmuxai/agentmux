@@ -64,6 +64,7 @@ import { handleAgentIdChange } from "@/app/view/term/termagent";
 import { DragOverlay } from "@/app/element/dragoverlay";
 import { AgentControlBar } from "./components/AgentControlBar";
 import { ActivityDock } from "./components/ActivityDock";
+import { hasRunningPromotedTool, nextToolPromotionAt } from "./activity/tool-adapter";
 import { AgentDecisionPanel } from "./components/AgentDecisionPanel";
 import { AgentQuestionPanel } from "./components/AgentQuestionPanel";
 import { AgentDisconnectedBanner } from "./components/AgentDisconnectedBanner";
@@ -932,6 +933,33 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         onCleanup(() => ro.disconnect());
     });
 
+    // True once the pane's in-flight Bash tool call has been promoted to a
+    // live ActivityDock row (tool-adapter.ts) — AgentWorkingRow suppresses
+    // its own "tool · arg" text once this flips, so the dock and the working
+    // row never repeat the same information (report §4.3: "the dock takes
+    // over, AgentWorkingRow goes calm/neutral"). Deliberately uses
+    // hasRunningPromotedTool, not toolActivities — a *finished* call still
+    // lingering in the dock during its retention window must not suppress a
+    // different, newly-started tool call's own working-row text.
+    //
+    // Scheduled the same way as ActivityDock's own hasExpiring/
+    // toolPromotionNonce: one setTimeout for the exact instant promotion
+    // becomes due, not a continuous tick. The effect re-reads its own nonce
+    // so that after that timer fires it reschedules for the next-earliest
+    // still-pending promotion, instead of only ever handling one.
+    const [hasPromotedTool, setHasPromotedTool] = createSignal(false);
+    const [toolPromotionCheckNonce, setToolPromotionCheckNonce] = createSignal(0);
+    createEffect(() => {
+        toolPromotionCheckNonce();
+        const nodes = agentAtoms().documentAtom[0]();
+        const now = Date.now();
+        setHasPromotedTool(hasRunningPromotedTool(nodes, now));
+        const at = nextToolPromotionAt(nodes, now);
+        if (at == null) return;
+        const timer = setTimeout(() => setToolPromotionCheckNonce((n) => n + 1), Math.max(0, at - now) + 50);
+        onCleanup(() => clearTimeout(timer));
+    });
+
     // User-message send + /login /clear slash intercepts + back-to-picker.
     // See hooks/useAgentCommands.ts.
     const commands = useAgentCommands({
@@ -1390,6 +1418,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                             stopping={agentAtoms().turnPhaseAtom[0]().kind === "Interrupting"}
                             currentTool={agentAtoms().currentToolAtom[0]()}
                             currentToolArg={agentAtoms().currentToolArgAtom[0]()}
+                            toolPromoted={hasPromotedTool()}
                             sessionStats={agentAtoms().sessionStatsAtom[0]()}
                             turnTokens={agentAtoms().turnTokensAtom[0]()}
                             launchPhase={status.launchPhase()}
