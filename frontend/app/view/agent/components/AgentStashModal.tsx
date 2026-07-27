@@ -2,10 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AgentSetupModal — unified tabbed container for per-agent setup surfaces,
- * opened by the single "Agent setup" (vault) icon in the agent pane
- * header. Consolidates the former two icons (identity + native memory)
- * into one modal with tabs:
+ * AgentStashModal — unified tabbed container for per-agent setup surfaces,
+ * opened by the single "Stash" (backpack) icon in the agent pane header.
+ * This is the per-agent-scoped analogue of the global Armory pane
+ * (frontend/app/view/armory/) — "Stash" vs. "Armory" is a deliberate naming
+ * split so the two are never confused for the same surface (see
+ * docs/reports/REPORT_ARMORY_STASH_NAMING_2026_07_27.md). Consolidates
+ * the former two icons (identity + native memory) into one modal with tabs:
  *   - Accounts    — read-only linked-accounts view (AgentIdentityLinksPanel).
  *                   New bindings are created from the agent-launch flow;
  *                   see that component's own doc comment for why this tab
@@ -30,20 +33,20 @@ import { AgentMcpModal } from "./AgentMcpModal";
 import { AgentNativeMemoryModal } from "./AgentNativeMemoryModal";
 import { AgentSkillsModal } from "./AgentSkillsModal";
 import { AgentStartupModal } from "./AgentStartupModal";
-import "./AgentSetupModal.scss";
+import "./AgentStashModal.scss";
 
-type SetupTabId = "accounts" | "memory" | "mcp" | "skills" | "startup";
+type StashTabId = "accounts" | "memory" | "mcp" | "skills" | "startup";
 
-interface AgentSetupModalProps {
+interface AgentStashModalProps {
     agentId: string;
     agentName: string;
     workingDirectory: string;
-    initialTab?: SetupTabId;
+    initialTab?: StashTabId;
     onClose: () => void;
 }
 
-interface SetupTabDef {
-    id: SetupTabId;
+interface StashTabDef {
+    id: StashTabId;
     label: string;
     /** FontAwesome icon name — same choice as the matching section in the
      *  global Armory pane (armory-view.tsx's RAIL), for visual parity since
@@ -51,10 +54,10 @@ interface SetupTabDef {
     icon: string;
 }
 
-export const AgentSetupModal = (props: AgentSetupModalProps): JSX.Element => {
+export const AgentStashModal = (props: AgentStashModalProps): JSX.Element => {
     // Data-driven tab list — Briefs slots in here later (no backend
     // primitive yet).
-    const tabs: SetupTabDef[] = [
+    const tabs: StashTabDef[] = [
         { id: "accounts", label: "Accounts", icon: "key" },
         { id: "memory", label: "Memories", icon: "brain" },
         { id: "mcp", label: "MCP Servers", icon: "plug" },
@@ -65,18 +68,18 @@ export const AgentSetupModal = (props: AgentSetupModalProps): JSX.Element => {
         { id: "startup", label: "Startup", icon: "layer-group" },
     ];
 
-    const [activeTab, setActiveTab] = createSignal<SetupTabId>(props.initialTab ?? "accounts");
+    const [activeTab, setActiveTab] = createSignal<StashTabId>(props.initialTab ?? "accounts");
 
     return (
-        // agent-setup-modal carries container-type so the tabs below (a
-        // descendant) can be targeted by @container agent-setup queries —
+        // agent-stash-modal carries container-type so the tabs below (a
+        // descendant) can be targeted by @container agent-stash queries —
         // same technique as armory-view.tsx's .armory-container wrapper.
-        <div class="agent-setup-modal">
-            <div class="agent-setup-modal-tabs" role="tablist">
+        <div class="agent-stash-modal">
+            <div class="agent-stash-modal-tabs" role="tablist">
                 <For each={tabs}>
                     {(tab) => (
                         <button
-                            class="agent-setup-modal-tab"
+                            class="agent-stash-modal-tab"
                             classList={{ "is-active": activeTab() === tab.id }}
                             role="tab"
                             aria-selected={activeTab() === tab.id}
@@ -90,7 +93,7 @@ export const AgentSetupModal = (props: AgentSetupModalProps): JSX.Element => {
                 </For>
             </div>
 
-            <div class="agent-setup-modal-panel">
+            <div class="agent-stash-modal-panel">
                 <Show when={activeTab() === "accounts"}>
                     <AgentIdentityLinksPanel agentId={props.agentId} />
                 </Show>
@@ -122,4 +125,4 @@ export const AgentSetupModal = (props: AgentSetupModalProps): JSX.Element => {
     );
 };
 
-AgentSetupModal.displayName = "AgentSetupModal";
+AgentStashModal.displayName = "AgentStashModal";

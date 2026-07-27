@@ -3,7 +3,7 @@
 
 /**
  * AgentSkillModel — view model for the agent pane's Skills tab (part of
- * AgentSetupModal). Drives the list + create/edit/delete/bind lifecycle
+ * AgentStashModal). Drives the list + create/edit/delete/bind lifecycle
  * over the standalone Skill primitive (`skill.*` App API,
  * agentmux-srv/src/server/app_api/skill.rs). Same shape as AgentMcpModel —
  * see its doc comment for the is_global / bound_to_agent details, which
