@@ -121,6 +121,19 @@ pub(crate) fn spawn_health_watchdog(health_monitor: &Arc<HealthMonitor>) {
 /// missing this step (it only set `inner.session_id` in memory) — A5 fixes it
 /// by routing ACP through this same function.
 ///
+/// Also writes through to the matching `db_agent_instances` row's
+/// `session_id` column (SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27.md
+/// §4.1). Without this, that column was set to `""` at instance creation and
+/// never updated again in production — `ListRecentSessionsCommand` prefers
+/// the local row over the shared registry whenever both exist, so the "My
+/// Agents" picker's reattach flow (`AgentPicker.tsx`'s `handleReattach`) was
+/// handed an empty session id even mid-session, and — per
+/// `agent-model.ts`'s own documented invariant that an empty
+/// `continueSessionId` clears `agent:sessionid` on the new block — silently
+/// started a genuinely fresh conversation instead of resuming. Best-effort:
+/// logs and continues on failure, since the block-meta write above (the
+/// live-turn source of truth) already succeeded.
+///
 /// No-ops silently when `wstore` is `None` (e.g. in unit tests that don't wire
 /// up a store).
 pub(crate) fn persist_session_id(
@@ -147,6 +160,8 @@ pub(crate) fn persist_session_id(
             );
         }
         Ok(_) => {
+            sync_instance_session_id(store, block_id, sid);
+
             let Some(ref event_bus) = event_bus else {
                 return;
             };
@@ -169,6 +184,37 @@ pub(crate) fn persist_session_id(
                 });
             }
         }
+    }
+}
+
+/// Write `sid` into the `db_agent_instances` row for `block_id`, if one
+/// exists. Best-effort — no-ops (with a debug log, not a warn — most turns
+/// on a block with no matching instance row are expected, e.g. terminal
+/// panes never have one) when there's nothing to update.
+fn sync_instance_session_id(store: &Arc<Store>, block_id: &str, sid: &str) {
+    let instance = match store.instance_get_by_block_id(block_id) {
+        Ok(Some(i)) => i,
+        Ok(None) => return,
+        Err(e) => {
+            tracing::debug!(
+                block_id = %block_id,
+                error = %e,
+                "sync_instance_session_id: instance lookup failed"
+            );
+            return;
+        }
+    };
+    let upd = crate::backend::storage::InstanceUpdate {
+        session_id: Some(sid.to_string()),
+        ..Default::default()
+    };
+    if let Err(e) = store.instance_update_partial(&instance.id, &upd) {
+        tracing::warn!(
+            block_id = %block_id,
+            instance_id = %instance.id,
+            error = %e,
+            "sync_instance_session_id: failed to write session_id"
+        );
     }
 }
 
@@ -251,5 +297,135 @@ pub(crate) fn persist_last_failure(
                 });
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::obj::{Block, MetaMapType};
+    use crate::backend::storage::store::{AgentDefinition, AgentInstance, InstanceStatus};
+
+    /// Minimal definition satisfying `db_agent_instances`'s FK on
+    /// `definition_id` — field values otherwise irrelevant to these tests.
+    fn sample_agent(id: &str) -> AgentDefinition {
+        AgentDefinition {
+            id: id.to_string(),
+            slug: id.to_string(),
+            name: id.to_string(),
+            icon: "✦".to_string(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: "host".to_string(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+        }
+    }
+
+    /// SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27.md §4.1: this
+    /// is the end-to-end assertion that `persist_session_id` (the live-turn
+    /// call site every controller uses) keeps `db_agent_instances.session_id`
+    /// current, not just the block's own `agent:sessionid` meta — closing the
+    /// gap where "My Agents"'s reattach flow saw a permanently-empty local
+    /// session id.
+    #[test]
+    fn persist_session_id_writes_through_to_the_instance_row() {
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        let block_id = "55555555-5555-5555-5555-555555555555";
+        let mut block = Block {
+            oid: block_id.to_string(),
+            parentoref: String::new(),
+            version: 1,
+            runtimeopts: None,
+            stickers: None,
+            meta: {
+                let mut m = MetaMapType::new();
+                m.insert("view".to_string(), serde_json::json!("agent"));
+                m
+            },
+            subblockids: None,
+        };
+        store.insert(&mut block).unwrap();
+
+        let mut def = sample_agent("def-live");
+        store.agent_def_insert(&mut def).unwrap();
+
+        let inst = AgentInstance {
+            id: "inst-live".to_string(),
+            definition_id: "def-live".to_string(),
+            parent_instance_id: String::new(),
+            block_id: block_id.to_string(),
+            session_id: String::new(),
+            status: InstanceStatus::Running.as_str().to_string(),
+            github_context: String::new(),
+            started_at: 1000,
+            ended_at: 0,
+            created_at: 1000,
+            identity_id: String::new(),
+            memory_id: String::new(),
+            instance_name: String::new(),
+            working_directory: String::new(),
+            display_hidden: false,
+        };
+        store.instance_create(&inst).unwrap();
+
+        persist_session_id(block_id, "sess-abc", &Some(store.clone()), &None);
+
+        // Block meta: the pre-existing behavior.
+        let updated_block: Block = store.get(block_id).unwrap().unwrap();
+        assert_eq!(
+            updated_block.meta.get(META_SESSION_ID).and_then(|v| v.as_str()),
+            Some("sess-abc"),
+        );
+
+        // Instance row: the new write-through.
+        let updated_instance = store.instance_get_by_block_id(block_id).unwrap().unwrap();
+        assert_eq!(updated_instance.session_id, "sess-abc");
+    }
+
+    /// A block with no matching instance row (e.g. a terminal pane) must not
+    /// cause persist_session_id to error or panic — sync_instance_session_id
+    /// is best-effort and silently no-ops.
+    #[test]
+    fn persist_session_id_is_a_noop_for_a_block_with_no_instance_row() {
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        let block_id = "66666666-6666-6666-6666-666666666666";
+        let mut block = Block {
+            oid: block_id.to_string(),
+            parentoref: String::new(),
+            version: 1,
+            runtimeopts: None,
+            stickers: None,
+            meta: MetaMapType::new(),
+            subblockids: None,
+        };
+        store.insert(&mut block).unwrap();
+
+        // Must not panic.
+        persist_session_id(block_id, "sess-xyz", &Some(store.clone()), &None);
+
+        let updated_block: Block = store.get(block_id).unwrap().unwrap();
+        assert_eq!(
+            updated_block.meta.get(META_SESSION_ID).and_then(|v| v.as_str()),
+            Some("sess-xyz"),
+            "block meta write still happens regardless of instance-row presence",
+        );
     }
 }

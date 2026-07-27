@@ -1801,6 +1801,35 @@ impl Store {
         }
     }
 
+    /// Find the `db_agent_instances` row for `block_id`, regardless of
+    /// status — unlike `instance_get_active_for_block`, this reads
+    /// `db_agent_instances` directly (not the `db_agents` consolidated
+    /// projection) and returns the row's REAL `session_id`, so callers
+    /// that need to write back to that exact row (e.g. keeping
+    /// `session_id` live as the CLI emits it — see
+    /// `persist_session_id`/SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27.md
+    /// §4.1) have a real `id` to pass to `instance_update_partial`.
+    /// Most-recently-created row wins if a block_id was somehow reused
+    /// across rows (shouldn't happen in practice, but avoids ambiguity).
+    pub fn instance_get_by_block_id(&self, block_id: &str) -> Result<Option<AgentInstance>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, definition_id, parent_instance_id, block_id, session_id,
+                    status, github_context, started_at, ended_at, created_at,
+                    identity_id, memory_id, instance_name, working_directory,
+                    display_hidden
+             FROM db_agent_instances
+             WHERE block_id = ?1
+             ORDER BY created_at DESC
+             LIMIT 1",
+        )?;
+        match stmt.query_row(params![block_id], map_instance_row) {
+            Ok(a) => Ok(Some(a)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     // Dual-write helpers live in `super::dual_write`.
 }
 
