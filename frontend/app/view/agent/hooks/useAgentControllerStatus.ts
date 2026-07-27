@@ -36,6 +36,7 @@
 import { createMemo, createSignal, onCleanup, type Accessor } from "solid-js";
 import { getApi, getBlockMetaKeyAtom, staticTabId } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
+import { BlockService } from "@/app/store/services";
 import * as WOS from "@/app/store/wos";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { runLaunchFlow } from "../flows/launch-flow";
@@ -306,14 +307,25 @@ export function useAgentControllerStatus(
      *  own SetMetaCommand) actually takes effect. Best-effort: a failure here
      *  just means the stale process persists until its own next natural
      *  respawn. See REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md
-     *  G4/G5. */
+     *  G4/G5.
+     *
+     *  Mirrors launch-flow.ts's Phase 3 registration (termsize seed +
+     *  onControllerStatus) rather than just the bare resync call — for the
+     *  first-ever-login path this IS that pane's only registration, so
+     *  omitting either left a freshly spawned CLI's PTY at the default width
+     *  until the next manual resize, and callers relying on
+     *  `onControllerStatus` never heard about it (reagent P2 on PR #2318). */
     const forceControllerRefresh = async (): Promise<void> => {
         try {
+            const initialTermSize = opts.getInitialTermSize?.();
             await RpcApi.ControllerResyncCommand(TabRpcClient, {
                 tabid: staticTabId(),
                 blockid: opts.blockId,
                 forcerestart: true,
+                ...(initialTermSize ? { rtopts: { termsize: initialTermSize } } : {}),
             });
+            const rts = await BlockService.GetControllerStatus(opts.blockId);
+            if (rts) opts.onControllerStatus?.(rts);
         } catch (e: any) {
             opts.log(
                 "auth",
