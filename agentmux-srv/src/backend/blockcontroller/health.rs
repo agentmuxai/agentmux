@@ -178,6 +178,18 @@ impl HealthMonitor {
             inner.exit_code = None;
         }
         drop(inner);
+        // Backend-authoritative turn-boundary timeline, cross-referenceable
+        // against the frontend's own `[wave-turn]` line (agent-pane-state-
+        // store.ts) via `muxlog srv`/`muxlog host` — closes the "two clocks
+        // disagreeing" blind spot the persistent-agent-working-status-stuck
+        // retro flagged as previously unconfirmable without a live repro.
+        // info, not debug: the sidecar's default EnvFilter ("agentmuxsrv=info,info",
+        // no RUST_LOG set) drops debug! entirely, which would make this
+        // invisible in exactly the default-config incident this line exists
+        // to help diagnose (codex P1 on PR #2321). Fires once per turn
+        // boundary per pane — sparse enough for info.
+        // See docs/reports/REPORT_WORKING_STATE_TELEMETRY_AUDIT_2026_07_27.md §3.3.
+        tracing::info!(block_id = %self.block_id, active, "[health] turn_active flip");
         self.evaluate_and_transition();
     }
 
@@ -199,6 +211,12 @@ impl HealthMonitor {
         inner.errors.reset();
         inner.exit_code = None;
         drop(inner);
+        tracing::info!(
+            block_id = %self.block_id,
+            active = true,
+            was_active,
+            "[health] turn_active flip"
+        );
         self.evaluate_and_transition();
         was_active
     }
@@ -209,6 +227,7 @@ impl HealthMonitor {
         inner.active_turn = false;
         inner.exit_code = Some(exit_code);
         drop(inner);
+        tracing::info!(block_id = %self.block_id, exit_code, "[health] turn_active flip (process exited)");
         self.evaluate_and_transition();
     }
 
