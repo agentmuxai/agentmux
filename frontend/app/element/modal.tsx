@@ -180,6 +180,13 @@ export interface ModalProps {
     ariaDescribedBy?: string;
     /** Element (or accessor) to focus on open. Defaults to the first focusable. */
     initialFocus?: HTMLElement | (() => HTMLElement | null);
+    /** Called with the mounted `.modal-root` element (and `null` on unmount).
+     *  For a caller that needs to observe/query the modal's own rendered
+     *  content directly — e.g. ModalLayer's backdrop-dismissibility check —
+     *  without assuming exactly where in the DOM tree `<Portal>` places it
+     *  relative to whatever ref the caller already holds (it's not always a
+     *  direct child — Portal/Show wrapping can interpose nodes). */
+    rootRef?: (el: HTMLDivElement | null) => void;
     children: JSX.Element;
 }
 
@@ -376,7 +383,11 @@ export const Modal: Component<ModalProps> = (props) => {
                 <Portal mount={mount()}>
                     <ModalTitleIdContext.Provider value={defaultTitleId}>
                         <div
-                            ref={rootRef}
+                            ref={(el) => {
+                                rootRef = el;
+                                props.rootRef?.(el);
+                                onCleanup(() => props.rootRef?.(null));
+                            }}
                             class="modal-root"
                             data-scope={resolvedScope()}
                             data-placement={props.placement ?? "center"}

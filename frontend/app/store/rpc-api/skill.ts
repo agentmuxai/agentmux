@@ -102,4 +102,16 @@ export const SkillApi = {
     ): Promise<{ deleted: boolean }> {
         return client.rpcCall("skill.catalog.delete", data, opts);
     },
+
+    // Catalog-tier sibling of SkillBindCommand — no agent_id/check_s1 gate,
+    // since the Armory's connection is never agent-authenticated and can
+    // never satisfy SkillBindCommand's check_s1. See
+    // docs/reports/REPORT_ARMORY_SKILLS_MARKDOWN_AND_BIND_BUG_2026_07_27.md.
+    SkillCatalogBindCommand(
+        client: RpcClient,
+        data: { agent_id: string; skill_id: string },
+        opts?: RpcOpts,
+    ): Promise<{ bound: boolean }> {
+        return client.rpcCall("skill.catalog.bind", data, opts);
+    },
 };

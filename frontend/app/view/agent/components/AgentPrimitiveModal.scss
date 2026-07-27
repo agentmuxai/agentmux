@@ -153,6 +153,18 @@
     white-space: pre-wrap;
     overflow-wrap: break-word;
     background: var(--panel-bg-color);
+
+    // Skill "Content" is rendered via <Markdown>, not raw text — the base
+    // class's monospace/pre-wrap treatment is for plain-text fields
+    // (description/trigger) and would double-space Markdown's own
+    // paragraph/list/code-block layout instead of rendering it. The
+    // <Markdown> component supplies its own typography; this variant keeps
+    // only the shared field box (padding/background) around it. See
+    // docs/reports/REPORT_ARMORY_SKILLS_MARKDOWN_AND_BIND_BUG_2026_07_27.md.
+    &--markdown {
+        font-family: inherit;
+        white-space: normal;
+    }
 }
 
 .agent-primitive-modal-bind-row {
