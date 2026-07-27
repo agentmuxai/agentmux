@@ -16,10 +16,10 @@ import "./armory-view.scss";
 
 const RAIL: { id: ArmorySection; label: string; icon: string }[] = [
     { id: "accounts", label: "Accounts",    icon: "key" },
-    { id: "brain",    label: "Memories",    icon: "brain" },
+    { id: "memory",   label: "Memories",    icon: "brain" },
     { id: "skills",   label: "Skills",      icon: "wand-magic-sparkles" },
     { id: "mcp",      label: "MCP Servers", icon: "plug" },
-    { id: "memories", label: "Bundles",     icon: "layer-group" },
+    { id: "bundles",  label: "Bundles",     icon: "layer-group" },
 ];
 
 export function ArmoryView(props: ViewComponentProps<ArmoryViewModel>): JSX.Element {
@@ -84,7 +84,7 @@ export function ArmoryView(props: ViewComponentProps<ArmoryViewModel>): JSX.Elem
                     <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "accounts" }}>
                         <AccountsManager />
                     </div>
-                    <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "brain" }}>
+                    <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "memory" }}>
                         <GlobalBrainManager />
                     </div>
                     <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "skills" }}>
@@ -93,7 +93,7 @@ export function ArmoryView(props: ViewComponentProps<ArmoryViewModel>): JSX.Elem
                     <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "mcp" }}>
                         <McpManager />
                     </div>
-                    <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "memories" }}>
+                    <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "bundles" }}>
                         <MemoryManager />
                     </div>
                 </div>

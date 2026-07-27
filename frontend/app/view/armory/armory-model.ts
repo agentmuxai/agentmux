@@ -6,7 +6,7 @@ import { useBlockAtom } from "@/app/store/global";
 import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
 import { createMemo, type Accessor } from "solid-js";
 
-export type ArmorySection = "accounts" | "brain" | "skills" | "mcp" | "memories";
+export type ArmorySection = "accounts" | "memory" | "skills" | "mcp" | "bundles";
 
 export class ArmoryViewModel implements ViewModel {
     viewType = "armory";
