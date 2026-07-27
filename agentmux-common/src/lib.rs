@@ -13,7 +13,7 @@ pub mod runtime_mode;
 pub mod toolchain_path;
 
 pub use cli::make_cli_cmd;
-pub use data_paths::DataPaths;
+pub use data_paths::{isolated_auth_enabled, DataPaths};
 pub use errors::{AgentMuxError, AmxCode};
 pub use layout_types::{
     FlexDirection, LayoutClientSlices, LayoutNode, LayoutNodeData, ResizeOp, SplitPosition,
