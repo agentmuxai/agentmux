@@ -7,22 +7,28 @@
 # see docs/specs/SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md
 # and docs/reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md.
 #
-# Base flags below mirror args.gn (Linux)/args-darwin.gn (macOS)'s shared
-# CEF-standard-Release block, minus Linux-only knobs (use_sysroot, use_qt*,
-# enable_linux_installer) that don't apply on Windows. Treat this as a
-# first-pass draft, not yet verified against a real build the way the
-# other two platforms' files are (their headers cite an exact shipped
-# binary this file can't yet, since no Windows custom build has ever been
-# cut) — reconcile against `cef_create_projects.bat`'s own generated
-# baseline during the first real sync+build and update this comment once
-# a binary has actually shipped from it.
+# Base flags below are the canonical CEF-required + recommended set for
+# out/Release_GN_x64, taken verbatim from `python3 cef/tools/gn_args.py
+# windows` (GetRequiredArgs()/GetRecommendedDefaultArgs() in
+# cef/tools/gn_args.py — that script is the actual source of truth CEF's
+# own BUILD.gn assert()s check against, not a value to hand-guess). An
+# earlier draft of this file omitted enable_cdm_host_verification /
+# enable_cdm_storage_id / enable_rlz / alternate_cdm_storage_id_key
+# (required on is_win/is_mac by cef/BUILD.gn's own assert() block) and
+# included forbid_non_component_debug_builds=false, which gn_args.py only
+# sets `if platform != 'windows'` — confirmed live on 2026-07-26 via the
+# assert(enable_cdm_host_verification) GN gen failure this produced.
 
+alternate_cdm_storage_id_key="968b476909da4373b08903c28e859454"
 clang_use_chrome_plugins=false
 enable_background_mode=false
+enable_backup_ref_ptr_instance_tracer=true
+enable_cdm_host_verification=true
+enable_cdm_storage_id=true
 enable_downgrade_processing=false
 enable_resource_allowlist_generation=false
+enable_rlz=true
 enable_widevine=true
-forbid_non_component_debug_builds=false
 is_component_build=false
 is_debug=false
 optimize_webui=true
