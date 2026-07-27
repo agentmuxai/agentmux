@@ -438,6 +438,19 @@ export type AgentPaneCommand =
      * pending or streaming.
      */
     | { type: "TurnReset" }
+    /**
+     * Revert an OPTIMISTIC `TurnStart` when the turn never actually began —
+     * the initiating send's own RPC call failed synchronously (no
+     * controller registered, the identity spawn gate blocked it, a plain
+     * network rejection). Phase-only: unlike `TurnReset`, this must NOT
+     * touch `sessionStats`/`sessionTotals`/`lastContextTokens` — those
+     * accumulate across a pane's whole lifetime, and a transient send
+     * failure on an agent with prior completed turns must not wipe that
+     * history (reagent/codex P2 on PR #2318 — `TurnReset` was reused here
+     * first and incorrectly cleared them). See
+     * `useAgentCommands.ts`'s `deliverToBackend`.
+     */
+    | { type: "TurnStartFailed" }
 
     // ── Tool ───────────────────────────────────────────────────────
     | { type: "ToolStart"; name: string; arg?: string }
@@ -615,6 +628,7 @@ export type AgentPaneEvent =
           stoppingCleared: boolean;
       }
     | { type: "turn-reset" }
+    | { type: "turn-start-failed" }
     | {
           /**
            * Invariant fire: TurnStart while streaming inactive OR
