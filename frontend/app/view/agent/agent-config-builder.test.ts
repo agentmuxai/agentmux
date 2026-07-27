@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { buildConfigFiles, deriveSlug, renderSkillMd } from "./agent-config-builder";
+import { buildConfigFiles, deriveSlug, renderSkillMd, uniqueSkillSlug } from "./agent-config-builder";
 
 function makeSkill(over: Partial<AgentSkill> = {}): AgentSkill {
     return {
@@ -57,6 +57,20 @@ describe("renderSkillMd", () => {
     });
 });
 
+describe("uniqueSkillSlug", () => {
+    it("appends -2, -3 for colliding slugs in call order", () => {
+        const used = new Set<string>();
+        expect(uniqueSkillSlug("Deploy Checklist", used)).toBe("deploy-checklist");
+        expect(uniqueSkillSlug("Deploy!!!Checklist", used)).toBe("deploy-checklist-2");
+        expect(uniqueSkillSlug("Deploy   Checklist", used)).toBe("deploy-checklist-3");
+    });
+
+    it("does not collide with a pre-existing -2 suffix", () => {
+        const used = new Set<string>(["deploy-checklist", "deploy-checklist-2"]);
+        expect(uniqueSkillSlug("Deploy!!Checklist", used)).toBe("deploy-checklist-3");
+    });
+});
+
 describe("buildConfigFiles — skill materialization", () => {
     it("writes prompt-format skills as .claude/commands/<trigger>.md (default)", () => {
         const files = buildConfigFiles({}, [makeSkill()]);
@@ -72,6 +86,19 @@ describe("buildConfigFiles — skill materialization", () => {
         expect(skillFile).toBeDefined();
         expect(skillFile!.content).toContain('name: "Deploy Checklist"');
         expect(files.some((f) => f.path.startsWith(".claude/commands/"))).toBe(false);
+    });
+
+    it("dedupes SKILL.md paths for names that collide after slugification", () => {
+        // reagent P1 (PR #2322): distinct skills must not silently overwrite
+        // each other's SKILL.md when their names slugify to the same value.
+        const files = buildConfigFiles({}, [
+            makeSkill({ skill_type: "agent-skill", trigger: "", name: "Deploy Checklist", content: "one" }),
+            makeSkill({ skill_type: "agent-skill", trigger: "", name: "Deploy!!!Checklist", content: "two" }),
+        ]);
+        const skillPaths = files.filter((f) => f.path.startsWith(".claude/skills/")).map((f) => f.path);
+        expect(new Set(skillPaths).size).toBe(2);
+        expect(skillPaths).toContain(".claude/skills/deploy-checklist/SKILL.md");
+        expect(skillPaths).toContain(".claude/skills/deploy-checklist-2/SKILL.md");
     });
 
     it("skips skills with empty content regardless of format", () => {

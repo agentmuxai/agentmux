@@ -7,7 +7,7 @@
 //! functions from `frontend/app/view/agent/agent-model.ts`.
 //! All functions are pure — no I/O, no async.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use chrono::Utc;
 use serde_json::{json, Value};
@@ -113,12 +113,13 @@ pub fn build_config_files(
     // SKILL.md (.claude/skills/{slug}/SKILL.md, skill_type ==
     // SKILL_TYPE_AGENT_SKILL) for native Claude Code consumption.
     // ----------------------------------------------------------------
+    let mut used_skill_slugs: HashSet<String> = HashSet::new();
     for skill in skills {
         if skill.content.is_empty() {
             continue;
         }
         if skill.skill_type == SKILL_TYPE_AGENT_SKILL {
-            let slug = derive_slug(&skill.name);
+            let slug = unique_skill_slug(&skill.name, &mut used_skill_slugs);
             let content = expand_template(&skill.content, &template_vars);
             files.push(AgentConfigFile {
                 filename: format!(".claude/skills/{slug}/SKILL.md"),
@@ -577,6 +578,28 @@ fn render_skill_md(name: &str, description: &str, body: &str) -> String {
     format!("---\nname: {name_yaml}\ndescription: {description_yaml}\n---\n\n{body}")
 }
 
+/// Derive a filesystem-safe, COLLISION-FREE slug for a skill within one
+/// `build_config_files` call. `derive_slug` alone can produce identical
+/// output for distinct names that differ only in punctuation/whitespace
+/// (e.g. "Deploy Checklist" and "Deploy!!!Checklist" both ->
+/// "deploy-checklist"), which would otherwise silently overwrite one
+/// skill's `SKILL.md` with another's on disk (reagent P1, PR #2322).
+/// Appends `-2`, `-3`, ... until the slug is unique within `used`.
+fn unique_skill_slug(name: &str, used: &mut HashSet<String>) -> String {
+    let base = derive_slug(name);
+    if used.insert(base.clone()) {
+        return base;
+    }
+    let mut n: u32 = 2;
+    loop {
+        let candidate = format!("{base}-{n}");
+        if used.insert(candidate.clone()) {
+            return candidate;
+        }
+        n += 1;
+    }
+}
+
 // ============================================================
 // Tests
 // ============================================================
@@ -754,6 +777,42 @@ mod tests {
         let frontmatter = &skill_file.content[4..end]; // skip leading "---\n"
         let lines: Vec<&str> = frontmatter.lines().collect();
         assert_eq!(lines.len(), 2, "frontmatter should be exactly name + description lines, got: {lines:?}");
+    }
+
+    #[test]
+    fn test_build_config_files_agent_skill_format_dedupes_colliding_slugs() {
+        // reagent P1 (PR #2322): two distinct skill names that derive_slug
+        // collapses to the same slug must NOT silently overwrite each
+        // other's SKILL.md file.
+        let content_map = HashMap::new();
+        let skills = vec![
+            make_agent_skill("Deploy Checklist", "First skill", "body one"),
+            make_agent_skill("Deploy!!!Checklist", "Second skill", "body two"),
+            make_agent_skill("Deploy   Checklist", "Third skill", "body three"),
+        ];
+
+        let files = build_config_files(&content_map, &skills, "Aria", "agent-1", "aria", "/tmp/aria");
+
+        let skill_files: Vec<&AgentConfigFile> = files
+            .iter()
+            .filter(|f| f.filename.starts_with(".claude/skills/") && f.filename.ends_with("SKILL.md"))
+            .collect();
+        assert_eq!(skill_files.len(), 3, "all three skills must materialize to distinct files");
+
+        let filenames: HashSet<&str> = skill_files.iter().map(|f| f.filename.as_str()).collect();
+        assert_eq!(filenames.len(), 3, "filenames must be unique: {filenames:?}");
+        assert!(filenames.contains(".claude/skills/deploy-checklist/SKILL.md"));
+        assert!(filenames.contains(".claude/skills/deploy-checklist-2/SKILL.md"));
+        assert!(filenames.contains(".claude/skills/deploy-checklist-3/SKILL.md"));
+
+        // Each file's content must correspond to the correct skill (not just
+        // present -- verify no cross-contamination from the dedup logic).
+        let first = skill_files.iter().find(|f| f.filename.ends_with("deploy-checklist/SKILL.md")).unwrap();
+        assert!(first.content.contains("body one"));
+        let second = skill_files.iter().find(|f| f.filename.ends_with("deploy-checklist-2/SKILL.md")).unwrap();
+        assert!(second.content.contains("body two"));
+        let third = skill_files.iter().find(|f| f.filename.ends_with("deploy-checklist-3/SKILL.md")).unwrap();
+        assert!(third.content.contains("body three"));
     }
 
     #[test]

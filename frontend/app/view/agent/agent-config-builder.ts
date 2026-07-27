@@ -84,10 +84,11 @@ export function buildConfigFiles(
     // Write each skill as either a slash command (.claude/commands/{trigger}.md,
     // default) or an Agent Skills-format SKILL.md (.claude/skills/{slug}/SKILL.md,
     // skill_type === SKILL_TYPE_AGENT_SKILL).
+    const usedSkillSlugs = new Set<string>();
     for (const skill of skills) {
         if (!skill.content) continue;
         if (skill.skill_type === SKILL_TYPE_AGENT_SKILL) {
-            const slug = deriveSlug(skill.name);
+            const slug = uniqueSkillSlug(skill.name, usedSkillSlugs);
             const content = expandTemplate(skill.content, templateVars);
             files.push({
                 path: `.claude/skills/${slug}/SKILL.md`,
@@ -168,6 +169,33 @@ export function deriveSlug(name: string): string {
  */
 export function renderSkillMd(name: string, description: string, body: string): string {
     return `---\nname: ${JSON.stringify(name)}\ndescription: ${JSON.stringify(description)}\n---\n\n${body}`;
+}
+
+/**
+ * Derive a filesystem-safe, COLLISION-FREE slug for a skill within one
+ * `buildConfigFiles` call. `deriveSlug` alone can produce identical output
+ * for distinct names that differ only in punctuation/whitespace (e.g.
+ * "Deploy Checklist" and "Deploy!!!Checklist" both -> "deploy-checklist"),
+ * which would otherwise silently overwrite one skill's SKILL.md with
+ * another's (reagent P1, PR #2322). Appends "-2", "-3", ... until unique
+ * within `used`. Mirrors `unique_skill_slug` in
+ * `agentmux-srv/src/backend/agent_config.rs`.
+ */
+export function uniqueSkillSlug(name: string, used: Set<string>): string {
+    const base = deriveSlug(name);
+    if (!used.has(base)) {
+        used.add(base);
+        return base;
+    }
+    let n = 2;
+    for (;;) {
+        const candidate = `${base}-${n}`;
+        if (!used.has(candidate)) {
+            used.add(candidate);
+            return candidate;
+        }
+        n++;
+    }
 }
 
 /**
