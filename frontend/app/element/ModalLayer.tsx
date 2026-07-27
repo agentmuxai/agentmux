@@ -10,7 +10,7 @@
  * ESC is blocked while a submit RPC is in-flight (`safeClose` guard).
  */
 
-import { createMemo, createSignal, Show, type Component, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, Show, type Component, type JSX } from "solid-js";
 
 import { Modal, PaneModalScope, TabModalScope } from "@/element/modal";
 import { ModalLayerContext, type ModalLayerApi, type ModalLayerRequest } from "./modal-layer";
@@ -65,9 +65,45 @@ export const ModalLayer: Component<ModalLayerProps> = (props) => {
     // agent3/agent-armory-rename-stash branch (PR #2314); update this key
     // when that lands.
     const BACKDROP_DISMISSIBLE_KINDS = new Set<ModalLayerRequest["kind"]>(["agent-setup"]);
+
+    // "agent-setup" is only SOMETIMES pure browse/view, though — its own
+    // Skills/MCP Servers tabs (AgentSkillsModal/AgentMcpModal) can be
+    // showing a "+ New"/edit draft form with local, un-tracked-by-
+    // `submitting` state (reagentx P1, PR #2315: an accidental backdrop
+    // click while composing a new entry silently discarded it). Rather
+    // than threading a bespoke "has unsaved draft" signal down through
+    // every current and future primitive tab, key off the one thing they
+    // already all share: every create/edit form in this family renders
+    // with the `agent-primitive-modal-form` class (skill-manager.tsx,
+    // mcp-manager.tsx, AgentSkillsModal.tsx, AgentMcpModal.tsx).
+    //
+    // Scoped to `.modal-root`'s own subtree via `<Modal>`'s `rootRef`
+    // callback below — NOT `mountEl`, which also wraps `props.children`
+    // (the underlying pane's own live content, e.g. a streaming agent
+    // chat mutating constantly); a subtree-wide observer on `mountEl`
+    // would re-scan on every token of unrelated pane activity. `rootRef`
+    // gives the exact node `<Portal>` renders `.modal-root` into (not
+    // necessarily `mountEl`'s direct child — confirmed live it isn't),
+    // so this bounds the scan to just the modal panel's own size and
+    // needs no DOM-structure guessing.
+    const [modalRootEl, setModalRootEl] = createSignal<HTMLDivElement | null>(null);
+    const [hasOpenForm, setHasOpenForm] = createSignal(false);
+    createEffect(() => {
+        const root = modalRootEl();
+        if (!root) {
+            setHasOpenForm(false);
+            return;
+        }
+        const recompute = () => setHasOpenForm(root.querySelector(".agent-primitive-modal-form") != null);
+        recompute();
+        const observer = new MutationObserver(recompute);
+        observer.observe(root, { childList: true, subtree: true });
+        onCleanup(() => observer.disconnect());
+    });
+
     const closeOnBackdropClick = createMemo(() => {
         const kind = current()?.kind;
-        return kind != null && BACKDROP_DISMISSIBLE_KINDS.has(kind);
+        return kind != null && BACKDROP_DISMISSIBLE_KINDS.has(kind) && !hasOpenForm();
     });
 
     const api: ModalLayerApi = {
@@ -127,6 +163,7 @@ export const ModalLayer: Component<ModalLayerProps> = (props) => {
                         scope={props.scope}
                         onClose={safeClose}
                         closeOnBackdropClick={closeOnBackdropClick()}
+                        rootRef={setModalRootEl}
                         size="fit"
                         ariaLabel={modalLabel()}
                     >
