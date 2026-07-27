@@ -3,7 +3,7 @@
 
 /**
  * AgentMcpModel — view model for the agent pane's MCP Servers tab
- * (part of AgentSetupModal). Drives the list + create/edit/delete/bind
+ * (part of AgentStashModal). Drives the list + create/edit/delete/bind
  * lifecycle over the standalone MCP Server primitive (`mcp.*` App API,
  * agentmux-srv/src/server/app_api/mcp.rs).
  *

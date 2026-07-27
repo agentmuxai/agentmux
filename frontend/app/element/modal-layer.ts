@@ -25,7 +25,7 @@ export type ModalLayerRequest =
     | BrowserAuthRequest
     | AgentIdentityRequest
     | AgentMemoryRequest
-    | AgentSetupRequest;
+    | AgentStashRequest;
 
 export interface LaunchAgentRequest {
     kind: "launch-agent";
@@ -265,7 +265,7 @@ export interface BrowserAuthRequest {
 
 /**
  * Agent pane identity modal — formerly opened by the id-card icon in the
- * agent pane header. Superseded by agent-setup (the unified tabbed modal
+ * agent pane header. Superseded by agent-stash (the unified tabbed modal
  * now hosts this panel as the "Accounts" tab); kept for the dispatch case
  * and any future direct callers. Spec:
  * SPEC_AGENT_PANE_MEMORY_IDENTITY_MODALS_2026_06_19.md.
@@ -281,7 +281,7 @@ export interface AgentIdentityRequest {
 /**
  * Agent pane memory modal — formerly opened by the brain icon in the
  * agent pane header. Shows the native memory folder for the agent.
- * Superseded by agent-setup (the unified tabbed modal now hosts this
+ * Superseded by agent-stash (the unified tabbed modal now hosts this
  * panel as the "Memory" tab); kept for the dispatch case and any future
  * direct callers. Spec: SPEC_AGENT_PANE_MEMORY_IDENTITY_MODALS_2026_06_19.md.
  */
@@ -294,15 +294,17 @@ export interface AgentMemoryRequest {
 }
 
 /**
- * Agent setup modal — opened by the single id-card icon in the agent
+ * Agent Stash modal — opened by the single backpack icon in the agent
  * pane header. Unified tabbed container hosting the former Identity
  * ("Accounts") + native Memory surfaces as tabs; supersedes the separate
  * agent-identity / agent-memory icons. Structured so future primitives
  * (MCP Servers · Skills · Briefs · Bundle) slot in as additional tabs.
+ * Named "Stash" (not "Armory") to distinguish it from the global Armory
+ * pane — see docs/reports/REPORT_ARMORY_STASH_NAMING_2026_07_27.md.
  * Spec: SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md §3.2b.
  */
-export interface AgentSetupRequest {
-    kind: "agent-setup";
+export interface AgentStashRequest {
+    kind: "agent-stash";
     /** Provider/definition id — used by the Accounts tab (read-only linked-
      *  accounts view, keyed on agentId alone) and the Memory tab. */
     agentId: string;
