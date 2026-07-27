@@ -3,6 +3,26 @@
 //
 // Warden widget shell. Spec: specs/SPEC_WARDEN_WIDGET_2026-05-25.md
 
+// Container wrapper — carries container-type so the @container warden
+// queries below evaluate against a NON-scrolling element (same technique
+// as armory-view.scss's .armory-container / settings.scss's
+// .settings-container). Putting container-type on the scrolling
+// .warden-pane itself produced a real resize feedback loop: content
+// growth toggles the auto scrollbar, which changes the pane's inline
+// size, which re-evaluates the container query, which reflows content —
+// observed live as a burst of 18 "ResizeObserver loop completed with
+// undelivered notifications" errors at pane creation (zero after this
+// split). NOTE: this was NOT the cause of the 2026-07-27 black-pane
+// incident (disproven by falsification test) — it's convention/hygiene
+// hardening found during that investigation. See
+// docs/retro/retro-warden-pane-black-render-2026-07-27.md.
+.warden-container {
+    width: 100%;
+    height: 100%;
+    container-type: inline-size;
+    container-name: warden;
+}
+
 .warden-pane {
     display: flex;
     flex-direction: column;
@@ -11,8 +31,6 @@
     background: var(--main-bg-color);
     font-size: 13px;
     overflow: auto;
-    container-type: inline-size;
-    container-name: warden;
 }
 
 .warden-header {
