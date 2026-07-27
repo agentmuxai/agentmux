@@ -772,6 +772,19 @@ impl PersistentSubprocessController {
                                  clearing so the next message starts a fresh conversation"
                             );
                             core::persist_session_id(&block_id_stderr, "", &wstore_stderr, &event_bus_stderr);
+                            // Surface this to the user — previously silent
+                            // (only the warn! above). See
+                            // SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27.md
+                            // §4.2: a resumed conversation silently starting
+                            // fresh, with no indication anything happened, is
+                            // exactly the failure mode this flag exists to close.
+                            if let Some(ref store) = wstore_stderr {
+                                crate::backend::blockcontroller::session_recovery::mark_resume_failed(
+                                    store,
+                                    &event_bus_stderr,
+                                    &block_id_stderr,
+                                );
+                            }
                         }
                     }
                 }

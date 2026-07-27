@@ -675,6 +675,50 @@
     }
 
     #[test]
+    fn test_instance_get_by_block_id() {
+        // SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27.md §4.1:
+        // this lookup is what lets persist_session_id write a live
+        // session_id back into db_agent_instances by block_id.
+        let store = v6_test_store();
+        let mut agent = sample_agent("defq", "agent-q");
+        store.agent_def_insert(&mut agent).unwrap();
+        let inst = AgentInstance {
+            id: "instq".to_string(),
+            definition_id: "defq".to_string(),
+            parent_instance_id: String::new(),
+            block_id: "block-q".to_string(),
+            session_id: String::new(),
+            status: InstanceStatus::Running.as_str().to_string(),
+            github_context: String::new(),
+            started_at: 1000,
+            ended_at: 0,
+            created_at: 1000,
+            identity_id: String::new(),
+            memory_id: String::new(),
+            instance_name: String::new(),
+            working_directory: String::new(),
+            display_hidden: false,
+        };
+        store.instance_create(&inst).unwrap();
+
+        let found = store.instance_get_by_block_id("block-q").unwrap().expect("row");
+        assert_eq!(found.id, "instq");
+        assert_eq!(found.session_id, "", "starts empty, matching real launch-time behavior");
+
+        // Writing a live session id through instance_update_partial (as
+        // persist_session_id now does) is visible on the next lookup.
+        use crate::backend::storage::InstanceUpdate;
+        store
+            .instance_update_partial("instq", &InstanceUpdate { session_id: Some("sess-live".into()), ..Default::default() })
+            .unwrap();
+        let found = store.instance_get_by_block_id("block-q").unwrap().expect("row");
+        assert_eq!(found.session_id, "sess-live");
+
+        // No row for this block: None, not an error.
+        assert!(store.instance_get_by_block_id("no-such-block").unwrap().is_none());
+    }
+
+    #[test]
     fn test_agent_def_list_orders_by_last_used() {
         let store = v6_test_store();
         // Three definitions; none launched yet.

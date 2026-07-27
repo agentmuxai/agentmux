@@ -428,6 +428,27 @@
         }
     }
 
+    // SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27.md §4.2 — same
+    // shape as .agent-interrupted-banner (a resume-related session-state
+    // notice), warning-toned instead of accent-toned since this reports a
+    // conversation was actually lost, not just a pending recovery step.
+    .agent-resume-failed-banner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-2);
+        padding: var(--space-1) var(--space-2);
+        background: color-mix(in srgb, var(--warning-color, #d97706) 14%, transparent);
+        border-bottom: 1px solid color-mix(in srgb, var(--warning-color, #d97706) 30%, transparent);
+        font-size: 11px;
+        color: var(--main-text-color);
+
+        .agent-resume-failed-label {
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+    }
+
     .agent-large-session-banner {
         display: flex;
         align-items: center;
