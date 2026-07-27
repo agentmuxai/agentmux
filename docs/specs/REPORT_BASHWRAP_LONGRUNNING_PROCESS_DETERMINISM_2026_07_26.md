@@ -56,10 +56,11 @@ shell command." Every ordinary `git status`, every `npm test`, and — as reprod
 
 This is a **second, independent, uncoordinated liveness heuristic**, sitting entirely outside the six the
 Process Broker report already flagged as fragmented — and it is not hypothetical. §3 reproduces it live,
-today, in a manner that lines up almost exactly with the ~12-hour Agent1 incident from ten days ago (§3.3):
-different agent, different session, same root cause, same category of user-visible symptom (something that's
-actually fine reads as broken, with no way to tell from the UI), independently rediscovered because nothing
-from the first incident changed how bashwrap or its siblings behave.
+today, in a manner that lines up closely with the ~12-hour Agent1 incident from ten days ago (§3.3) — though
+that incident's own retro flags its root-cause attribution as an unconfirmed inference, not a live repro:
+different agent, different session, the same category of user-visible symptom (something that's actually fine
+reads as broken, with no way to tell from the UI), independently rediscovered because nothing from the first
+incident changed how bashwrap or its siblings behave.
 
 Separately, **there are two entirely independent "run a shell command" execution surfaces** in this codebase
 — `agentmux-bashwrap` (behind Claude's native Bash tool) and `ShellNodeRunner`/`shell_node.rs` (behind
@@ -201,47 +202,54 @@ exist; nothing in the moment of failure pointed at it.
 Retrying via `mcp__agentmux__Shell` with `scripts\dev-agent.cmd TITLE=diag2 > /tmp/log 2>&1; echo DONE=$?
 >> /tmp/log` (POSIX-shell syntax appended after a `.cmd` invocation) produced a bizarre, disconnected
 failure: `task`'s own CLI printed its full task list, then `task: Task ";" does not exist`. The actual root
-cause, confirmed by capturing output to a file and reading it directly: Git Bash's automatic `.cmd`/`.bat`
-dispatch-to-`cmd.exe` behavior appears to forward the **entire raw command string** — including the trailing
-POSIX-only `;`, `$?`, and `>>` — into `cmd.exe`'s own (incompatible) syntax, rather than isolating just the
-`.cmd` invocation's own arguments. `cmd.exe` then parses `;` and `$?` as literal argv tokens, which
-`dev-agent.cmd`'s `task dev %*` forwards straight into `task`, producing an error about a task named `;` that
-has nothing to do with the actual mistake (mixing two shell dialects in one command line). Isolating the
-`.cmd` invocation as the sole, complete command fixed it immediately (§3.1's successful relaunch).
+cause, confirmed by capturing output to a file and reading it directly, then verified against source
+(`agentmux-srv/src/backend/shell_node.rs:313-321`): **`ShellNodeRunner::run` spawns `cmd /C <raw string>`
+directly on Windows — there is no Git Bash or `sh` anywhere in this path.** The mistake was purely mine,
+mixing POSIX-shell syntax (`;`, `$?`) into a command line `cmd.exe` interprets directly and literally:
+`cmd.exe` has no concept of `;` as a command separator or `$?` as a variable, so both were passed straight
+through as literal argv tokens. `dev-agent.cmd`'s `task dev %*` forwards those tokens straight into `task`,
+producing an error about a task named `;` that has nothing to do with the actual mistake (writing a
+POSIX-shell command line for an interpreter that isn't one). Isolating the `.cmd` invocation as the sole,
+complete command fixed it immediately (§3.1's successful relaunch). *(Corrected 2026-07-26 — an earlier
+draft of this section attributed the garbling to a nonexistent "Git Bash `.cmd` auto-dispatch" layer
+forwarding the raw string into `cmd.exe`; reagentx-workflow caught that `shell_node.rs` spawns `cmd /C`
+directly with no bash intermediary in this path, so that layer was never real.)*
 
 This is a narrower, more mechanical finding than Incident A, but it belongs in the same report: it is a
 **second, independent way the exact same operation (launch a long-running dev process from an agent) produces
-a confusing, misleading failure** with no signal pointing at the real cause — this time not even bashwrap's
-fault, but a consequence of there being multiple shell-dispatch layers (bash → Git Bash's cmd/bat auto-detect
-→ cmd.exe → task's own CLI parser) that don't agree on where one command's syntax ends and another's begins.
+a confusing, misleading failure** with no signal pointing at the real cause — this time not bashwrap's fault
+at all, but a consequence of not knowing which interpreter (`cmd.exe` here, `sh`/bash elsewhere) is actually
+reading a given command line before writing it.
 
-### 3.3 Corroboration: this is not a one-off — it's the second time, ten days apart
+### 3.3 Corroborating (not confirmed) prior evidence, ten days apart
 
 `docs/retro/retro-persistent-agent-working-status-stuck-2026-07-16.md` documents Agent1's own dev stack
 running for ~12 hours while its pane showed an ambiguous "Waiting…/Working…." That retro's root-cause section
-identifies, almost in passing, the reason Agent1's setup *didn't* trip bashwrap's idle-kill: it had wrapped
+offers, with an explicit hedge, the reason Agent1's setup *didn't* trip bashwrap's idle-kill: it had wrapped
 its own launch in a deliberate heartbeat loop —
 
 ```bash
 while true; do sleep 120; echo "[heartbeat] dev still alive $(date +%H:%M:%S)"; done &
 ```
 
-— which the retro states outright: *"The agent almost certainly added this heartbeat to defeat the idle-kill
-of its background process… not realizing it would also pin the pane's busy indicator on"* (citing
-`agentmux-bashwrap/tests/idle_kill_full_process_tree.rs` directly). That single sentence is the whole finding
-of this report's §1–§3, independently arrived at from the other direction ten days earlier: **an agent had
-already learned, empirically, that launching a long dev-server task through the default Bash tool gets killed
-by bashwrap unless you fight it with a fake heartbeat** — and that workaround then broke a *second*,
-completely unrelated system (the frontend's `LIVENESS_RECOVERY_MS` watchdog, which reads the heartbeat's own
-output as proof the *turn* is still active, not just the attached process). Today's incident is the same root
-cause with no heartbeat workaround in place, so it manifested as an outright kill instead of a 12-hour
-ambiguous hang — arguably the more honest failure mode, but still one with zero user-facing signal.
+— which the retro states as an inference, not a confirmed fact: *"The agent almost certainly added this
+heartbeat to defeat the idle-kill of its background process… not realizing it would also pin the pane's busy
+indicator on"* (citing `agentmux-bashwrap/tests/idle_kill_full_process_tree.rs` directly) — and the retro is
+explicit two sentences later that *"the exact channel the heartbeat feeds... wasn't confirmed without a live
+repro."* So this is corroborating, not confirmed, prior evidence: the retro's own author flagged it as their
+best inference from transcript evidence, not something they reproduced live. Read that way, it's still a
+meaningful data point — **an agent had, by the retro author's own plausible reading, already run into
+bashwrap's idle-kill discouraging long-running background tasks from the default Bash tool** — but this
+report's own Incident A (§3.1) is the first of the two to be a *directly observed, reproduced* instance of the
+idle-kill actually firing, rather than an inference about why it apparently didn't fire that time.
 
-Two independent agents, ten days apart, hit two different downstream symptoms (silent kill vs. 12h stuck
-status) of the identical upstream cause: **bashwrap's idle-kill has no channel to express "this process is
-supposed to run indefinitely," so the only ways an agent can currently cope are to either accept the kill or
-to hand-roll a fake-liveness workaround that corrupts an unrelated status signal.** Nothing changed about
-bashwrap between the two incidents; there was no reason to expect a different outcome today.
+Read together, the two reports describe the same class of problem from two different vantage points, ten days
+apart — one directly observed (this report), one inferred from a downstream symptom and never independently
+confirmed (the Agent1 retro). **Bashwrap's idle-kill has no channel to express "this process is supposed to
+run indefinitely,"** which independently explains both: a directly observed kill today, and a plausible,
+retro-author-flagged-as-unconfirmed heartbeat workaround ten days earlier. Nothing changed about bashwrap
+between the two — there was no reason to expect a different outcome today regardless of which reading of the
+retro is correct.
 
 ---
 
