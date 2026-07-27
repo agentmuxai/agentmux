@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
     EMPTY_FILTERED,
     EMPTY_GLOBAL,
+    FETCH_ERROR,
     formatRelative,
     MyAgentsList,
 } from "./MyAgentsList";
@@ -180,6 +181,44 @@ describe("MyAgentsList — populated", () => {
         render(() => <MyAgentsList onReattach={() => {}} />);
         await screen.findByTestId("agent-my-agents-entry");
         expect(screen.getByText("My Agents")).toBeInTheDocument();
+    });
+});
+
+describe("MyAgentsList — fetch error (retro-my-agents-fresh-channel-regression-2026-07-27.md)", () => {
+    it("renders a distinct error state, not the empty-agents copy, when the RPC rejects", async () => {
+        // Suppress the expected console.error from Logger.error inside the
+        // component's own catch block — this test is asserting that catch
+        // path fires correctly, not treating its logging as a test failure.
+        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockRejectedValue(new Error("backend unreachable"));
+        render(() => <MyAgentsList onReattach={() => {}} />);
+
+        const error = await screen.findByTestId("agent-my-agents-error");
+        expect(error).toHaveTextContent(FETCH_ERROR);
+        // Must NOT also render (or ever have rendered) the "genuinely empty"
+        // copy — that ambiguity is the exact bug this hardening fixes.
+        expect(screen.queryByTestId("agent-my-agents-empty")).toBeNull();
+        expect(screen.queryByText(EMPTY_GLOBAL)).toBeNull();
+
+        consoleErrorSpy.mockRestore();
+    });
+
+    it("retries the RPC when the Retry button is clicked, and shows the list on success", async () => {
+        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        vi.mocked(RpcApi.ListRecentSessionsCommand)
+            .mockRejectedValueOnce(new Error("backend unreachable"))
+            .mockResolvedValueOnce([makeRow({ instance_id: "recovered" })]);
+        render(() => <MyAgentsList onReattach={() => {}} />);
+
+        const retryBtn = await screen.findByTestId("agent-my-agents-retry");
+        await userEvent.click(retryBtn);
+
+        const entries = await screen.findAllByTestId("agent-my-agents-entry");
+        expect(entries).toHaveLength(1);
+        expect(screen.queryByTestId("agent-my-agents-error")).toBeNull();
+        expect(RpcApi.ListRecentSessionsCommand).toHaveBeenCalledTimes(2);
+
+        consoleErrorSpy.mockRestore();
     });
 });
 
