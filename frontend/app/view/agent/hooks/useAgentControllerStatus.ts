@@ -386,6 +386,15 @@ export function useAgentControllerStatus(
         reloginInFlight = true;
         setLoginWaiting(true);
         setLaunchPhase({ kind: "checking-auth" });
+        // Tracks whether this attempt actually reached a genuine success
+        // branch below — declared outside the try so the `finally` block
+        // (which needs to read it) can see it. Used to decide whether to
+        // restore the mount-time "Log in" button (reagent/codex P1 on
+        // PR #2318: every failure exit — timeout, terminal-unavailable,
+        // persistence failure, cancellation, or a thrown exception —
+        // previously left `canRetry` stuck at false with no way back into
+        // a login attempt short of reopening the pane).
+        let succeeded = false;
         try {
             if (!cliPath) {
                 // reagent P2 on PR #2300: this step is resolving the CLI path,
@@ -486,7 +495,16 @@ export function useAgentControllerStatus(
                         }
                     }
                     if (authenticated && openedAccountId && openedAccountDir) {
-                        await persistAndLinkAccount(
+                        // Tier 1's mint-only registration can still fail to
+                        // persist (the same DB-write failure mode this PR's
+                        // own report documents) — the `seeded`/
+                        // `terminal-success` branch below already gates its
+                        // success actions on this; this branch previously
+                        // discarded the return value and reported success
+                        // unconditionally, reproducing the exact "Error: not
+                        // logged in" bug this PR set out to fix (reagent/
+                        // codex P1 on the re-review of PR #2318).
+                        const persisted = await persistAndLinkAccount(
                             {
                                 provider: prov,
                                 cliPath,
@@ -500,35 +518,43 @@ export function useAgentControllerStatus(
                             openedAccountId,
                             openedAccountDir,
                         );
-                        opts.log("auth", retryAfterLogin ? "Login successful — retrying…" : "Login successful");
-                        setAuthNotice(null);
-                        setAuthStatus("authenticated");
-                        // Before onRecovered (which may immediately resend the
-                        // failed turn) — an already-running stale process must
-                        // be refreshed BEFORE anything is sent to it, or the
-                        // resend just hits the same stale credential again.
-                        await forceControllerRefresh();
-                        // Post a visible confirmation into the pane itself — this used to
-                        // ONLY happen on the very first auto-login (launch-flow.ts); "Login
-                        // Again" retried the failed turn silently, so a user with nothing
-                        // queued to retry (or who didn't notice the retry) never saw ANY
-                        // acknowledgement that the login actually succeeded.
-                        opts.onLoginSuccess?.(authedEmail);
-                        if (retryAfterLogin) {
-                            opts.onRecovered?.();
+                        if (persisted) {
+                            opts.log("auth", retryAfterLogin ? "Login successful — retrying…" : "Login successful");
+                            setAuthNotice(null);
+                            setAuthStatus("authenticated");
+                            // Before onRecovered (which may immediately resend the
+                            // failed turn) — an already-running stale process must
+                            // be refreshed BEFORE anything is sent to it, or the
+                            // resend just hits the same stale credential again.
+                            await forceControllerRefresh();
+                            // Post a visible confirmation into the pane itself — this used to
+                            // ONLY happen on the very first auto-login (launch-flow.ts); "Login
+                            // Again" retried the failed turn silently, so a user with nothing
+                            // queued to retry (or who didn't notice the retry) never saw ANY
+                            // acknowledgement that the login actually succeeded.
+                            opts.onLoginSuccess?.(authedEmail);
+                            succeeded = true;
+                            if (retryAfterLogin) {
+                                opts.onRecovered?.();
+                            } else {
+                                // Mount-time "Log in" success on an agent that never
+                                // reached Phase 3 (no turn ever started — see
+                                // launch-flow.ts's needsLogin bail). onReadyFn only
+                                // ever fires from startLaunchFlow's own success
+                                // branch, so without this a first-time login via
+                                // this button left the agent running with no
+                                // startup sequence ever sent (no instructions,
+                                // identity, or context) — reagent/codex P1 on
+                                // PR #2318. onReadyFn self-guards on
+                                // `agent:sessionid` already being set, so this is a
+                                // safe no-op for anything but a genuine first login.
+                                opts.onReady?.();
+                            }
                         } else {
-                            // Mount-time "Log in" success on an agent that never
-                            // reached Phase 3 (no turn ever started — see
-                            // launch-flow.ts's needsLogin bail). onReadyFn only
-                            // ever fires from startLaunchFlow's own success
-                            // branch, so without this a first-time login via
-                            // this button left the agent running with no
-                            // startup sequence ever sent (no instructions,
-                            // identity, or context) — reagent/codex P1 on
-                            // PR #2318. onReadyFn self-guards on
-                            // `agent:sessionid` already being set, so this is a
-                            // safe no-op for anything but a genuine first login.
-                            opts.onReady?.();
+                            setAuthStatus("unauthenticated");
+                            setAuthNotice(
+                                "Your login succeeded, but AgentMux couldn't save the account record. Try again in a moment.",
+                            );
                         }
                     } else if (!loginCancelled) {
                         setAuthNotice(
@@ -561,6 +587,7 @@ export function useAgentControllerStatus(
                         setAuthStatus("authenticated");
                         await forceControllerRefresh();
                         opts.onLoginSuccess?.(null);
+                        succeeded = true;
                         if (retryAfterLogin) {
                             opts.onRecovered?.();
                         } else {
@@ -599,6 +626,19 @@ export function useAgentControllerStatus(
             reloginInFlight = false;
             setLoginWaiting(false);
             setLaunchPhase(null);
+            // Restore the mount-time "Log in" button on any unsuccessful
+            // outcome — timeout, terminal-unavailable, persistence failure,
+            // cancellation, or a thrown exception all fall through to here
+            // via `return`/`break`/the catch above. Scoped to
+            // `!retryAfterLogin`: that's the only case where THIS call set
+            // `canRetry` false in the first place (the "Log in" bar's own
+            // click handler); the `retryAfterLogin: true` ("Login Again")
+            // call site guards against a stale true from a *different*
+            // origin and was never showing that bar to begin with, so it
+            // must not start showing it now (reagent/codex on PR #2318).
+            if (!succeeded && !retryAfterLogin) {
+                setCanRetry(true);
+            }
         }
     };
 
