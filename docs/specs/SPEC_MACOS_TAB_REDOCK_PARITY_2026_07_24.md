@@ -391,10 +391,20 @@ threads / hook install failures.
    a bug) — conflating them would produce a permanently-nonzero
    counter for any user who hasn't granted the permission yet, which
    defeats its purpose as a regression signal.
-
----
-
-## 6. Validation checklist
+5. **Known gap, confirmed via live testing:** the merge itself works
+   end-to-end (`tabdrag:merge-direct` fires, the tab moves into the
+   destination window), but the landing-bounce animation
+   (`setBouncingTabId`, `tab-tearoff-events.ts`) doesn't reliably play.
+   Likely cause: `setBouncingTabId(payload.tabId)` runs immediately
+   after `await WorkspaceService.MoveTabToWorkspace(...)` /
+   `RestoreTornOffTab(...)` resolves, but the destination window's
+   `tabIds()`-driven tab list may not have re-rendered the merged
+   tab's DOM element by that point yet (a possible second async hop
+   between the RPC resolving and the reactive state update reaching
+   this window) — `droppable-tab.tsx`'s `isBouncing` check would then
+   never match anything, or match too late. Not investigated further
+   at the user's call ("redock is in fact working, just not with full
+   notification support") — left as a follow-up, not blocking.
 
 - [ ] In-strip drag onto another AgentMux window's tab strip shows a
       live, cursor-accurate insertion indicator and merges directly
