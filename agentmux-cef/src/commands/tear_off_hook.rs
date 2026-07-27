@@ -1333,6 +1333,21 @@ mod macos {
             return None;
         }
 
+        // `CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly, ...)`
+        // returns windows in FRONT-TO-BACK z-order (Apple's documented
+        // behavior for this option). This matters: we need the TOPMOST
+        // window whose bounds contain the cursor — any app, not just ours
+        // — and only treat it as a redock candidate if that topmost window
+        // happens to be one of our own. Originally this loop skipped
+        // straight past any entry not in our `labels` map before ever
+        // checking its bounds, which meant an AgentMux window whose bounds
+        // contained the cursor but was visually COVERED by some other app's
+        // window on top of it at that exact point would still be reported
+        // as the candidate — occlusion was never considered. Fixed by
+        // checking bounds for every entry, in z-order, and stopping at the
+        // first (frontmost) one that contains the point, exactly mirroring
+        // how Windows' `WindowFromPoint` inherently only ever returns the
+        // single topmost HWND at a point (reagent PR #2310 P2).
         let info = copy_window_info(kCGWindowListOptionOnScreenOnly, 0)?;
         let count = info.len();
         for i in 0..count {
@@ -1343,19 +1358,6 @@ mod macos {
             // owned) to read it safely and typed.
             let dict: CFDictionary<CFType, CFType> =
                 unsafe { CFDictionary::wrap_under_get_rule(*item as CFDictionaryRef) };
-
-            let Some(number_ref) = dict.find(unsafe { CFString::wrap_under_get_rule(kCGWindowNumber) }.as_CFType()) else {
-                continue;
-            };
-            let Some(number) = number_ref.downcast::<CFNumber>().and_then(|n| n.to_i64()) else {
-                continue;
-            };
-            let Some(label) = labels.get(&number) else {
-                continue;
-            };
-            if label == &ctx.source_label {
-                continue;
-            }
 
             let Some(bounds_ref) = dict.find(unsafe { CFString::wrap_under_get_rule(kCGWindowBounds) }.as_CFType()) else {
                 continue;
@@ -1381,10 +1383,32 @@ mod macos {
             ) else {
                 continue;
             };
-
-            if x >= bx && x <= bx + bw && y >= by && y <= by + bh {
-                return Some(label.clone());
+            if !(x >= bx && x <= bx + bw && y >= by && y <= by + bh) {
+                // This entry's bounds don't contain the cursor at all —
+                // irrelevant regardless of z-order, keep scanning.
+                continue;
             }
+
+            // Found the FRONTMOST window (any app) whose bounds contain
+            // the cursor. This is the one and only candidate check for
+            // this hit test — if it isn't one of our own (non-source)
+            // windows, some other window is occluding us here and there
+            // is no valid redock candidate, full stop (do NOT keep
+            // scanning further back for an AgentMux window that's
+            // actually hidden behind this one).
+            let Some(number_ref) = dict.find(unsafe { CFString::wrap_under_get_rule(kCGWindowNumber) }.as_CFType()) else {
+                return None;
+            };
+            let Some(number) = number_ref.downcast::<CFNumber>().and_then(|n| n.to_i64()) else {
+                return None;
+            };
+            let Some(label) = labels.get(&number) else {
+                return None;
+            };
+            if label == &ctx.source_label {
+                return None;
+            }
+            return Some(label.clone());
         }
         None
     }

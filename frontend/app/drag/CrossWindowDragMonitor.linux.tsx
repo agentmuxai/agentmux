@@ -18,6 +18,7 @@ import { onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 import { getLayoutModelForStaticTab, LayoutTreeActionType, LayoutTreeDeleteNodeAction } from "@/layout/index";
 import type { LayoutNode } from "@/layout/lib/types";
+import { dragEscaped, setDragEscaped } from "@/app/tab/tabbar-dnd";
 
 export type DragItemPayload =
     // sourceTabId: the tab the tile drag originated in — consumed by the
@@ -50,6 +51,18 @@ function CrossWindowDragMonitor(): JSX.Element {
             Logger.info("dnd:cross", "dragend fired", { hasPayload: !!payload, dropEffect: e.dataTransfer?.dropEffect });
 
             if (!payload) return;
+
+            // Escape was pressed during this drag — abort here too, same
+            // reasoning as the darwin variant (reagent PR #2310 P1). Linux
+            // doesn't have a native-hook-driven escape signal yet (that's
+            // macOS-only so far), but the DOM keydown fallback in
+            // tab-reorder.ts still sets this flag, so honoring it here costs
+            // nothing and closes the same gap if/when it applies.
+            if (dragEscaped) {
+                setDragEscaped(false);
+                Logger.info("dnd:cross", "cross-window drag aborted via Escape");
+                return;
+            }
 
             // Drop coordinates straight from the DOM event. `screenX/Y` are
             // top-left-origin screen coords in CSS px (= DIP), which is what
