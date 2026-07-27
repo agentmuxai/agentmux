@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { formatWindowTitle, resolveWindowName } from "./window-title";
+import { formatWindowTitle, resolveFloatingPaneName, resolveWindowName } from "./window-title";
 
 describe("resolveWindowName", () => {
     it("uses display name when set", () => {
@@ -83,6 +83,82 @@ describe("resolveWindowName", () => {
                 indexInOpenWindows: 4,
             }),
         ).toBe("Window 5");
+    });
+
+    it("falls through the unrenamed bootstrap workspace name to positional — window 1 must not depend on load timing", () => {
+        expect(
+            resolveWindowName({
+                displayName: undefined,
+                workspaceName: "Starter workspace",
+                indexInOpenWindows: 0,
+            }),
+        ).toBe("Window 1");
+    });
+
+    it("still honors a real workspace name a user happened to rename to the bootstrap default's exact text", () => {
+        // Documented trade-off: a workspace deliberately renamed to the
+        // literal "Starter workspace" is indistinguishable from the
+        // never-renamed bootstrap default and also falls through — no
+        // schema flag exists to tell them apart. Low-risk edge case.
+        expect(
+            resolveWindowName({
+                displayName: undefined,
+                workspaceName: "Starter workspace",
+                indexInOpenWindows: 2,
+            }),
+        ).toBe("Window 3");
+    });
+
+    it("uses the workspace name when it's meaningfully different from the bootstrap default", () => {
+        expect(
+            resolveWindowName({
+                displayName: undefined,
+                workspaceName: "Starter workspace 2",
+                indexInOpenWindows: 0,
+            }),
+        ).toBe("Starter workspace 2");
+    });
+});
+
+describe("resolveFloatingPaneName", () => {
+    it("uses block view label when set", () => {
+        expect(
+            resolveFloatingPaneName({
+                blockViewLabel: "Agent",
+                workspaceName: "Pulse",
+                indexInOpenPanes: 0,
+            }),
+        ).toBe("Agent");
+    });
+
+    it("falls through to workspace name when view label is missing", () => {
+        expect(
+            resolveFloatingPaneName({
+                blockViewLabel: undefined,
+                workspaceName: "Pulse",
+                indexInOpenPanes: 0,
+            }),
+        ).toBe("Pulse");
+    });
+
+    it("falls through the unrenamed bootstrap workspace name to positional", () => {
+        expect(
+            resolveFloatingPaneName({
+                blockViewLabel: undefined,
+                workspaceName: "Starter workspace",
+                indexInOpenPanes: 1,
+            }),
+        ).toBe("Pane 2");
+    });
+
+    it("falls through to positional when both are missing", () => {
+        expect(
+            resolveFloatingPaneName({
+                blockViewLabel: "",
+                workspaceName: "",
+                indexInOpenPanes: 0,
+            }),
+        ).toBe("Pane 1");
     });
 });
 

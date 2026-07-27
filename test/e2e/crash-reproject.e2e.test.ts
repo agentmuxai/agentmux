@@ -115,16 +115,27 @@ describe.skipIf(!RUN)("crash-reproject E2E: host OOM ⇒ session reprojects", ()
         // (sub-second in this session's live verifications) but runs
         // asynchronously relative to the new host's own startup. Poll on
         // "main's real title has settled" specifically, not merely
-        // "more than one target exists" — main's CDP target briefly shows a
-        // generic title before its content finishes loading and sets
-        // `document.title` to "Starter workspace...", so a bare count check
-        // can pass before main is actually the window we expect.
+        // "more than one target exists" — main's CDP target briefly shows
+        // `index.html`'s generic pre-init placeholder title ("AgentMux",
+        // bare, no " - " separator) before its content finishes loading
+        // and `document.title` resolves to the real
+        // `{Window Name} - {Tab} - AgentMux` format, so a bare count check
+        // can pass before main is actually the window we expect. Matched
+        // by `window_transparent=0` (a stable URL param the main window
+        // always carries), not by title text — the window name half of
+        // that format is no longer a fixed "Starter workspace..." string
+        // after frontend/util/window-title.ts's bootstrap-default-name
+        // exclusion fix (it's deterministically "Window 1 - ..." now, but
+        // matching on the URL is the correct identifier regardless of
+        // which of the 3 name tiers ends up resolving).
         const deadline = Date.now() + 15000;
         let targets: CdpTarget[] = [];
         let mainTarget: CdpTarget | undefined;
         while (Date.now() < deadline) {
             targets = await listCdpTargets(port2);
-            mainTarget = targets.find((t) => t.title.includes("Starter workspace"));
+            mainTarget = targets.find(
+                (t) => t.url.includes("window_transparent=0") && t.title !== "AgentMux",
+            );
             if (mainTarget && targets.length > 1) break;
             await sleep(500);
         }

@@ -65,10 +65,20 @@ export function wsSend(ws: WebSocket, method: string, params?: unknown): Promise
     });
 }
 
-/** Evaluate `expression` in the main window's page (found by title substring). */
+/**
+ * Evaluate `expression` in the main window's page. Matched by
+ * `window_transparent=0`, a stable URL param the main window always
+ * carries — NOT by title text: `resolveWindowName`'s tier-2 workspace-name
+ * fallback ("Starter workspace") only ever showed for a fresh data
+ * directory whose default workspace hadn't been renamed, and after
+ * frontend/util/window-title.ts's bootstrap-default exclusion fix, the
+ * title is deterministically "Window 1 - ..." instead — either way, a
+ * title-text match is the wrong kind of identifier for "which target is
+ * the main window" (it can also collide with a user-renamed window/tab).
+ */
 export async function evalInMainWindow(port: number, expression: string): Promise<any> {
     const targets = await listCdpTargets(port);
-    const main = targets.find((t) => t.title.includes("Starter workspace"));
+    const main = targets.find((t) => t.url.includes("window_transparent=0"));
     if (!main) throw new Error("main window's CDP target not found");
     const ws = await wsConnect(main.webSocketDebuggerUrl);
     await wsSend(ws, "Runtime.enable");

@@ -60,13 +60,12 @@ export const ModalLayer: Component<ModalLayerProps> = (props) => {
     // add-account/new-memory) — so clicking outside should just close
     // them, like any other dismissible overlay.
     //
-    // "agent-setup" is the per-agent Accounts/Memories/MCP Servers/Skills
-    // modal — renamed to "agent-stash" by the not-yet-merged
-    // agent3/agent-armory-rename-stash branch (PR #2314); update this key
-    // when that lands.
-    const BACKDROP_DISMISSIBLE_KINDS = new Set<ModalLayerRequest["kind"]>(["agent-setup"]);
+    // "agent-stash" is the per-agent Accounts/Memories/MCP Servers/Skills
+    // modal (PR #2314 renamed it from "agent-setup" to distinguish it from
+    // the global Armory pane).
+    const BACKDROP_DISMISSIBLE_KINDS = new Set<ModalLayerRequest["kind"]>(["agent-stash"]);
 
-    // "agent-setup" is only SOMETIMES pure browse/view, though — its own
+    // "agent-stash" is only SOMETIMES pure browse/view, though — its own
     // Skills/MCP Servers tabs (AgentSkillsModal/AgentMcpModal) can be
     // showing a "+ New"/edit draft form, and its Memory tab
     // (AgentNativeMemoryModal) an in-place edit textarea — all local
