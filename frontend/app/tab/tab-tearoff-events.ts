@@ -9,6 +9,7 @@
 import { onCleanup, onMount } from "solid-js";
 import { getApi } from "@/store/global";
 import { fireAndForget } from "@/util/util";
+import { isWindows } from "@/util/platformutil";
 import { WorkspaceService } from "../store/services";
 import {
     computeInsertionPoint,
@@ -16,6 +17,7 @@ import {
     markTabMerged,
     setBouncingTabId,
     setInsertionPoint,
+    setDragEscaped,
 } from "./tabbar-dnd";
 import { Logger } from "@/util/logger";
 
@@ -61,8 +63,8 @@ export function useTabTearOffEvents(
                 unsub();
             }
         };
-        // Coordinate-space helper. `payload.cursorX/Y` come from
-        // Win32's WH_MOUSE_LL hook in PHYSICAL pixels (Windows
+        // Coordinate-space helper. On Windows, `payload.cursorX/Y` come
+        // from Win32's WH_MOUSE_LL hook in PHYSICAL pixels (Windows
         // reports per-monitor coords for DPI-aware processes, which
         // CEF is). `window.screenX/Y` and `getBoundingClientRect()`
         // return CSS / LOGICAL pixels. Subtract directly and you're
@@ -74,7 +76,16 @@ export function useTabTearOffEvents(
         // Math.max(1, ...) defends against the (rare but possible) browser
         // edge case where devicePixelRatio is 0 or negative; the falsy-||
         // already covered undefined/NaN. (gemini PR #567 round-8 MEDIUM)
-        const dpr = () => Math.max(1, window.devicePixelRatio || 1);
+        //
+        // On macOS, `payload.cursorX/Y` come from CGEventTap's
+        // CGEvent.location(), which reports coordinates in POINTS —
+        // the same unit `window.screenX/Y` already uses (macOS has no
+        // physical/logical pixel distinction at this level; Retina scale
+        // is baked into rendering, never exposed here). Dividing those
+        // by DPR would silently shrink them on any Retina display, so
+        // the conversion only applies on Windows.
+        // See SPEC_MACOS_TAB_REDOCK_PARITY_2026_07_24.md §3.
+        const dpr = () => (isWindows() ? Math.max(1, window.devicePixelRatio || 1) : 1);
         const physicalToClientX = (px: number) => px / dpr() - window.screenX;
         const physicalToClientY = (py: number) => py / dpr() - window.screenY;
         fireAndForget(async () => {
@@ -191,6 +202,24 @@ export function useTabTearOffEvents(
             // multi-tab path uses MoveTabToWorkspace (its last-tab guard is
             // desirable) and only the last-tab path uses RestoreTornOffTab
             // (which bypasses the guard and deletes the emptied workspace).
+            // macOS's CGEventTap-driven Esc-abort (SPEC_MACOS_TAB_REDOCK_
+            // PARITY_2026_07_24.md §5): a plain DOM `keydown` listener on
+            // this window doesn't fire during an active native HTML5 drag
+            // (Chromium appears to suppress normal input dispatch to the
+            // page for the drag's duration), so the host's global mouse/
+            // keyboard hook — which sees the raw OS-level keystroke,
+            // outside the renderer's own event pipeline — tells us
+            // directly instead. Setting the flag here is enough:
+            // tab-reorder.ts's onDrop checks it before deciding tear-off
+            // vs. reorder, so this fires (or not) well before that check
+            // runs. No-op on Windows/Linux today (their hooks don't emit
+            // this event), which is fine — the flag just stays false.
+            trackOrDispose(
+                await listenEvent<{ tabId: string }>("tabdrag:escape-pressed", () => {
+                    setDragEscaped(true);
+                }),
+            );
+
             trackOrDispose(
                 await listenEvent<{
                     tabId: string;

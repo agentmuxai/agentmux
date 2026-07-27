@@ -17,6 +17,7 @@ import { openTearOffWindow, measureSourcePaneSize } from "./tear-off-pool-helper
 import { onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 import type { LayoutNode } from "@/layout/lib/types";
+import { dragEscaped, setDragEscaped } from "@/app/tab/tabbar-dnd";
 
 export type DragItemPayload =
     // sourceTabId: the tab the tile drag originated in — consumed by the
@@ -49,6 +50,22 @@ function CrossWindowDragMonitor(): JSX.Element {
             Logger.info("dnd:cross", "dragend fired", { hasPayload: !!payload, dropEffect: e.dataTransfer?.dropEffect });
 
             if (!payload) return;
+
+            // Escape was pressed during this drag (see the CGEventTap-driven
+            // tabdrag:escape-pressed listener in tab-tearoff-events.ts, or the
+            // DOM keydown fallback in tab-reorder.ts) — abort here too. This
+            // handler is the genuine cross-window tear-off/merge commit path
+            // (reached when the drop lands outside this window's own tab
+            // strip's pragmatic-dnd monitor entirely, e.g. onto another
+            // AgentMux window or the desktop) — reagent PR #2310 P1: without
+            // this check, an escaped drag could still spawn a tear-off window
+            // or merge via this path even though tab-reorder.ts's onDrop
+            // correctly no-ops for the plain in-window case.
+            if (dragEscaped) {
+                setDragEscaped(false);
+                Logger.info("dnd:cross", "cross-window drag aborted via Escape");
+                return;
+            }
 
             // Drop coordinates straight from the DOM event. `screenX/Y` are
             // top-left-origin screen coords in CSS px (= DIP), which is exactly
