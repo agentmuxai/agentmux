@@ -195,7 +195,7 @@
     },
     "defwidget@media": {
         "display:order": 15,
-        "display:pinned": false,
+        "display:pinned": true,
         "icon": "photo-film",
         "color": "#10b981",
         "label": "Media",
