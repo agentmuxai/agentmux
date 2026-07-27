@@ -37,6 +37,10 @@ pub use paths::{
     resolve_shared_definitions_dir, resolve_shared_registry_dir, resolve_shared_store_path,
     resolve_shared_transcripts_dir,
 };
+// crate-internal only — see resolve_global_shared_root's doc comment for why
+// migrations/runner.rs must call this directly instead of deriving `home`
+// from resolve_shared_store_path()'s (isolation-aware) return value.
+pub(crate) use paths::resolve_global_shared_root;
 pub use def_migrate::{migrate_definitions_global_once, DefMigrateStats};
 pub use def_schema::{
     DefContentBlob, DefSkillBlob, DefValidationError, DefinitionRecord, DefinitionRecordV1,

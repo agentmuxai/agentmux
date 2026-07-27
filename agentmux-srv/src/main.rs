@@ -24,6 +24,8 @@ mod muxbus;
 mod util;
 #[cfg(windows)]
 mod crash_monitor;
+#[cfg(test)]
+mod test_support;
 
 use std::future::IntoFuture;
 use std::sync::Arc;

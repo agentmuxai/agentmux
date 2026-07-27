@@ -585,6 +585,17 @@ export function update(
                 events: [{ type: "turn-reset" }],
             };
 
+        case "TurnStartFailed":
+            // Deliberately touches ONLY turnPhase — see this command's doc
+            // comment in types.ts for why TurnReset's wholesale clear is
+            // wrong here (a transient send failure must not wipe
+            // sessionStats/sessionTotals/lastContextTokens accumulated by
+            // prior real turns in this same pane).
+            return {
+                state: { ...state, turnPhase: { kind: "Idle" } },
+                events: [{ type: "turn-start-failed" }],
+            };
+
         case "ToolStart": {
             const nextState = bumpEvent(
                 { ...state, currentTool: command.name, currentToolArg: command.arg ?? null },

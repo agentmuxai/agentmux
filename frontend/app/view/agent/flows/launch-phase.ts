@@ -33,13 +33,18 @@ export type LaunchPhase =
      *  sets it unconditionally at agent-creation time, before any login ever
      *  happens, so it was true on every genuine first-ever login too (reagent
      *  P1 on PR #2304). Kept distinct from `auth-expired` so the conversation
-     *  notification never wrongly implies something broke. See
-     *  docs/specs/SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26.md §8 Q6. */
+     *  notification never wrongly implies something broke.
+     *
+     *  Terminal, not transient: launch-flow.ts posts the notification and
+     *  stops here — it does NOT go on to open a browser/terminal itself.
+     *  Per direct user instruction (2026-07-27), a login attempt only
+     *  starts from the user's own click on the "Log in" button, wired to
+     *  `relogin()`. See docs/specs/SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26.md §8 Q6. */
     | { kind: "first-login" }
     /** Auth check failed but a real account link already exists for this
-     *  agent+provider — a previously-working credential has gone stale. This
-     *  is the case the notification needs to actually warn about before a
-     *  browser/terminal pops open with no explanation. */
+     *  agent+provider — a previously-working credential has gone stale. Also
+     *  terminal, same reasoning as `first-login` above: this only posts the
+     *  warning and stops, it never opens anything on its own. */
     | { kind: "auth-expired" }
     /** Tier 1's PTY/pipe URL-capture attempt — only reachable for providers
      *  where `headlessLoginUrlUnsupported` is NOT set (Codex/Gemini/OpenClaw).
@@ -77,9 +82,9 @@ export function formatPhaseLabel(phase: LaunchPhase | null | undefined, nowMs: n
         case "checking-auth":
             return "Checking authentication";
         case "first-login":
-            return "Signing in";
+            return "Sign-in required";
         case "auth-expired":
-            return "Login expired — signing back in";
+            return "Login expired — sign in required";
         case "waiting-for-login-link":
             return `Waiting for login link… up to ${fmtRemaining(phase.deadlineMs - nowMs)}`;
         case "opening-login-terminal":
