@@ -745,23 +745,34 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         wasTurnActive = active;
     }
 
+    // Posts a permanent, visible line into the pane's own conversation \u2014
+    // distinct from `log()`, which routes to the hidden activity-log/shell-
+    // terminal channel (see docs/specs/SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26.md
+    // \u00a71). "success"/"warning" get a symbol prefix; "info" doesn't (used for
+    // neutral narration like "Signing in..." or "Ready...").
+    const postSystemNotification = (text: string, style: "info" | "warning" | "success" = "info"): void => {
+        const prefix = style === "success" ? "\u2713 " : style === "warning" ? "\u26a0 " : "";
+        const node: import("./types").MarkdownNode = {
+            type: "markdown",
+            id: `system_notification_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            content: `${prefix}${text}`,
+        } as import("./types").MarkdownNode;
+        dispatchDocIfRegistered(model.blockId, {
+            type: "StreamFlush",
+            newNodes: [node],
+            updatedNodes: [],
+        });
+    };
+
     const status = useAgentControllerStatus({
         blockId: model.blockId,
         provider,
         log,
         onLoginSuccess: (email) => {
             const display = email ? `Logged in as **${email}**` : "Login successful";
-            const node: import("./types").MarkdownNode = {
-                type: "markdown",
-                id: `login_success_${Date.now()}`,
-                content: `\u2713 ${display}`,
-            } as import("./types").MarkdownNode;
-            dispatchDocIfRegistered(model.blockId, {
-                type: "StreamFlush",
-                newNodes: [node],
-                updatedNodes: [],
-            });
+            postSystemNotification(display, "success");
         },
+        onNotify: (text, style) => postSystemNotification(text, style),
         onReady: () => onReadyFn?.(),
         // A successful recovery (seed-from-global / terminal login) refreshed
         // the credential — retry the failed turn so the agent recovers in one

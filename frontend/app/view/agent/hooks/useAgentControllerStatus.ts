@@ -52,6 +52,8 @@ export interface UseAgentControllerStatusOptions {
     provider: Accessor<ProviderDefinition | undefined>;
     log: LogFn;
     onLoginSuccess?: (email: string | null) => void;
+    /** Forwarded to the launch flow — see `LaunchFlowOptions.onNotify`. */
+    onNotify?: (text: string, style: "info" | "warning") => void;
     /** Called once when the launch flow completes successfully and the agent is ready to receive messages. */
     onReady?: () => void;
     /**
@@ -203,6 +205,7 @@ export function useAgentControllerStatus(
                 setLaunchPhase,
                 authEnv,
                 onLoginSuccess: opts.onLoginSuccess,
+                onNotify: opts.onNotify,
                 getInitialTermSize: opts.getInitialTermSize,
                 onControllerStatus: opts.onControllerStatus,
             });
@@ -320,6 +323,7 @@ export function useAgentControllerStatus(
         let cliPath = getBlockMetaKeyAtom(opts.blockId, "cmd")() as string | undefined;
         reloginInFlight = true;
         setLoginWaiting(true);
+        setLaunchPhase({ kind: "checking-auth" });
         try {
             if (!cliPath) {
                 // reagent P2 on PR #2300: this step is resolving the CLI path,
@@ -595,6 +599,7 @@ export function useAgentControllerStatus(
         // first, reset in finally.
         reloginInFlight = true;
         setLoginWaiting(true);
+        setLaunchPhase({ kind: "opening-login-terminal" });
         try {
             let cliPath = getBlockMetaKeyAtom(opts.blockId, "cmd")() as string | undefined;
             if (!cliPath) {
