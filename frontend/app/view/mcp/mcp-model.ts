@@ -3,11 +3,13 @@
 
 /**
  * McpCatalogModel — view model for the Armory's MCP Servers tab. Drives
- * list + create/edit/delete over the window-scoped `mcp.catalog.*` App API
- * (agentmux-srv/src/server/app_api/mcp.rs). Every row here is global by
- * construction — the catalog only ever lists/creates/edits is_global rows.
- * Per-agent private servers and bind/unbind live in the Agent-setup modal
- * (AgentMcpModel), not here.
+ * list + create/edit/delete, plus binding a global server to an agent,
+ * over the window-scoped `mcp.catalog.*` App API
+ * (agentmux-srv/src/server/app_api/mcp.rs) — no `agent_id`/`check_s1`
+ * context, since the Armory's connection is never agent-authenticated.
+ * Every row here is global by construction — the catalog only ever
+ * lists/creates/edits is_global rows. Per-agent private servers, and
+ * unbinding, live in the Agent-setup modal (AgentMcpModel), not here.
  */
 
 import { createMemo, createSignal, type Accessor } from "solid-js";
@@ -106,7 +108,7 @@ export class McpCatalogModel {
         }
         this.setError(null);
         try {
-            await RpcApi.McpBindCommand(TabRpcClient, { agent_id: agentId, mcp_id: serverId });
+            await RpcApi.McpCatalogBindCommand(TabRpcClient, { agent_id: agentId, mcp_id: serverId });
             await this.refresh();
         } catch (e) {
             this.setError(`Bind failed: ${(e as Error).message ?? e}`);
