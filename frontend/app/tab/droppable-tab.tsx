@@ -134,6 +134,17 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
                 // by PR #1175 (darwin/linux only). In-window tab reorder still
                 // works via pragmatic-dnd's own drop targets.
                 if (!isWindows()) preventUnhandled.start();
+                // Windows counterpart to preventUnhandled above: dropEffect
+                // (tab-reorder.ts's onTearOffDragOver) only reaches the OS
+                // cursor while the pointer is still over this app's own HTML
+                // content — the moment a tear-off drag crosses the window's
+                // own boundary, no dragover fires here at all and the OS's
+                // OLE drag-feedback falls back to the no-drop circle-slash.
+                // set_drag_cursor's host-level polling thread is the only
+                // thing that still works out there (see its doc comment in
+                // agentmux-cef/src/commands/drag.rs for why a thread, not a
+                // one-shot cursor swap, is required).
+                if (isWindows()) void getApi().setDragCursor?.();
                 setGlobalDragTabId(props.tabId);
                 setDragEscaped(false);
                 setInsertionPoint(null);
@@ -174,6 +185,7 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
             },
             onDrop: () => {
                 if (!isWindows()) preventUnhandled.stop();
+                if (isWindows()) void getApi().restoreDragCursor?.();
                 setGlobalDragTabId(null);
                 setIsDragging(false);
                 // Belt-and-suspenders hook teardown. Ordinarily the hook

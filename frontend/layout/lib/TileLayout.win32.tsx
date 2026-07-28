@@ -5,6 +5,7 @@
 // dragHandle: undefined — whole-tile drag (pragmatic-dnd dragHandle breaks WebView2).
 
 import { notifyPaneReflow } from "@/app/platform/pane-anim";
+import { getApi } from "@/store/global";
 import { draggable } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import clsx from "clsx";
 import { toPng } from "html-to-image";
@@ -128,6 +129,10 @@ function TileLayoutComponent(props: TileLayoutProps) {
                 setTileDragInFlight(false);
                 dragState.layoutModel.activeDrag._set(false);
                 dragState.layoutModel = null;
+                // onDrop never ran (swallowed dragend) — its restoreDragCursor
+                // call didn't either, which would otherwise pin the
+                // cursor-override thread from onDragStart running forever.
+                void getApi()?.restoreDragCursor?.();
             }
         };
         window.addEventListener("dragend", resetDragState);
@@ -408,6 +413,16 @@ const DisplayNode = (props: DisplayNodeProps) => {
                         node: props.node,
                         sourceTabId: props.layoutModel.tabAtom()?.oid,
                     });
+                    // dropEffect="copy" (setTearOffCursor above) only reaches the
+                    // OS cursor while the pointer is still over this app's own
+                    // HTML content. The moment a tear-off drag crosses the
+                    // window's own boundary, no dragover event fires here at
+                    // all and the OS's OLE drag-feedback shows its default
+                    // no-drop circle-slash — a host-level cursor override is
+                    // the only thing that still works out there. See
+                    // set_drag_cursor's doc comment (agentmux-cef/src/commands/drag.rs)
+                    // for why this needs a polling thread, not a one-shot call.
+                    void getApi()?.setDragCursor?.();
                 },
                 onDrop: () => {
                     dragState.nodeId = null;
@@ -416,6 +431,7 @@ const DisplayNode = (props: DisplayNodeProps) => {
                     setTileDragInFlight(false);
                     props.layoutModel.activeDrag._set(false);
                     setIsDragging(false);
+                    void getApi()?.restoreDragCursor?.();
                     // Do NOT clear currentDragPayload here — fires for ALL drops including
                     // out-of-window. Cleared in dropTargetForElements.onDrop instead.
                 },

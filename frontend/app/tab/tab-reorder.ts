@@ -11,6 +11,7 @@
 import { onCleanup, onMount } from "solid-js";
 import { fireAndForget } from "@/util/util";
 import { isWindows } from "@/util/platformutil";
+import { getApi } from "@/store/global";
 import { monitorForElements, dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { clearCrossTabDrop, getLayoutModelForTabById, tileItemType } from "@/layout/index";
 import { setTileDragInFlight } from "@/layout/lib/dragInFlight";
@@ -131,6 +132,19 @@ export function useTabDragAndDrop(
             };
             window.addEventListener("dragover", onTearOffDragOver);
             onCleanup(() => window.removeEventListener("dragover", onTearOffDragOver));
+
+            // Safety net for droppable-tab.tsx's setDragCursor/restoreDragCursor
+            // pair: if that draggable's own onDrop is skipped (the same Win11
+            // swallowed-dragend class of failure this file already guards
+            // against elsewhere — see cleanupTileDragState's comment below),
+            // restoreDragCursor never runs and the host's cursor-override
+            // polling thread is left running. Mirrors TileLayout.win32.tsx's
+            // own resetDragState safety net.
+            const onTearOffDragEnd = () => {
+                if (globalDragTabId != null) void getApi().restoreDragCursor?.();
+            };
+            window.addEventListener("dragend", onTearOffDragEnd);
+            onCleanup(() => window.removeEventListener("dragend", onTearOffDragEnd));
         }
 
         // Escape-to-abort (cross-platform): pragmatic-drag-and-drop's HTML5
