@@ -61,6 +61,7 @@ import { useAgentDecisions } from "./hooks/useAgentDecisions";
 import { useAgentQuestions } from "./hooks/useAgentQuestions";
 import { BlockService } from "@/app/store/services";
 import { makeWindowFocusSignal } from "@/app/window/window-focus";
+import { SETTLE_GRACE_MS, nextDoneCompletedAt, shouldNotifyOnReopen } from "./settled-grace";
 import { useAgentCloseConfirm } from "./hooks/useAgentCloseConfirm";
 import { handleAgentIdChange } from "@/app/view/term/termagent";
 import { DragOverlay } from "@/app/element/dragoverlay";
@@ -766,37 +767,30 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         });
     };
 
-    // Settled-grace invariant: `StreamFlushObserved` (reducer.ts) deliberately
-    // re-promotes Done.completed -> Streaming on any live flush, because the
-    // CLI's session_end fires after every model round, not just true turn
-    // end — a genuine multi-round tool continuation needs this path, so it
-    // can't simply be removed. But once the UI has shown a SETTLED "Worked"
-    // for SETTLE_GRACE_MS with no further activity, that re-promotion must
-    // never silently un-happen the checkmark the user already saw settle —
-    // post a visible notification instead so a later round is disclosed, not
-    // hidden. Purely additive: no reducer/TurnPhase changes, doesn't affect
-    // session-digest correctness. See
-    // docs/reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md §1.
-    const SETTLE_GRACE_MS = 500;
-    let settled = false;
-    let settleTimer: ReturnType<typeof setTimeout> | undefined;
+    // Settled-grace invariant — see settled-grace.ts's module doc for the
+    // full rationale (StreamFlushObserved's intentional Done.completed ->
+    // Streaming re-promotion for multi-round continuations, and why a
+    // SETTLED "Worked" must never silently un-happen). Purely additive: no
+    // reducer/TurnPhase changes, doesn't affect session-digest correctness.
+    // Decision logic lives in settled-grace.ts as pure, directly-testable
+    // functions; this effect is just the reactive wiring.
+    let doneCompletedAt: number | null = null;
     createEffect(() => {
         const phase = agentAtoms().turnPhaseAtom[0]();
-        clearTimeout(settleTimer);
-        if (phase.kind === "Done" && phase.outcome === "completed") {
-            settleTimer = setTimeout(() => {
-                settled = true;
-            }, SETTLE_GRACE_MS);
-        } else if (phase.kind === "Streaming") {
-            if (settled) {
-                postSystemNotification("Picked up more work — starting another round…", "info");
-            }
-            settled = false;
-        } else {
-            settled = false;
+        const now = Date.now();
+        if (
+            phase.kind === "Streaming" &&
+            shouldNotifyOnReopen(doneCompletedAt, now, SETTLE_GRACE_MS)
+        ) {
+            postSystemNotification("Picked up more work — starting another round…", "info");
         }
+        doneCompletedAt = nextDoneCompletedAt(
+            phase.kind,
+            phase.kind === "Done" ? phase.outcome : undefined,
+            doneCompletedAt,
+            now,
+        );
     });
-    onCleanup(() => clearTimeout(settleTimer));
 
     const status = useAgentControllerStatus({
         blockId: model.blockId,

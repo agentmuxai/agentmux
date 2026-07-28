@@ -319,15 +319,34 @@ impl PersistentSubprocessController {
     /// `core::spawn_health_watchdog` ("duplicated verbatim... before this
     /// extraction"); worth factoring out if a second controller type needs
     /// the same heartbeat.
+    ///
+    /// Same latent duplicate-loop race as `spawn_health_watchdog`'s existing,
+    /// already-accepted contract (reagent P2 on the PR that introduced this
+    /// function): if a turn ends and a new one starts again within one
+    /// `HEARTBEAT_SECS` window, the old loop hasn't yet woken up to observe
+    /// `is_active_turn() == false` and break, so both the old and new loop
+    /// can run concurrently for that window. Harmless — `publish_status`
+    /// republishing the same (or a slightly stale) snapshot twice is
+    /// idempotent from the frontend's point of view — so this is accepted
+    /// rather than fixed, matching the pre-existing pattern.
     fn spawn_status_heartbeat(&self) {
         const HEARTBEAT_SECS: u64 = 20;
+        self.spawn_status_heartbeat_with_interval(tokio::time::Duration::from_secs(HEARTBEAT_SECS));
+    }
+
+    /// Interval parameterized out of `spawn_status_heartbeat` so a test can
+    /// drive it with a short, real (not virtual-clock) interval instead of
+    /// waiting out `HEARTBEAT_SECS` — this crate doesn't enable tokio's
+    /// `test-util` feature (needed for `start_paused`/`time::advance`), and
+    /// adding it crate-wide for one test wasn't judged worth it.
+    fn spawn_status_heartbeat_with_interval(&self, heartbeat_interval: tokio::time::Duration) {
         let inner = Arc::clone(&self.inner);
         let block_id = self.block_id.clone();
         let broker = self.broker.clone();
         let health_monitor = Arc::clone(&self.health_monitor);
         tokio::spawn(async move {
             let Some(broker) = broker else { return };
-            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(HEARTBEAT_SECS));
+            let mut interval = tokio::time::interval(heartbeat_interval);
             interval.tick().await; // first tick is immediate; publish_status() already ran at turn start
             loop {
                 interval.tick().await;
@@ -1395,6 +1414,41 @@ mod send_input_tests {
             !c.get_status_snapshot().turn_active,
             "turn_active must flip back false once the turn ends"
         );
+    }
+
+    /// Regression for reagent P2 (persist-controllerstatus PR): confirms
+    /// `spawn_status_heartbeat` actually republishes while a turn stays
+    /// active, using a short real interval (`spawn_status_heartbeat_with_interval`)
+    /// instead of waiting out the production 20s — this crate doesn't enable
+    /// tokio's `test-util` feature, so a real (short) interval is used
+    /// rather than a virtual/paused clock.
+    #[tokio::test]
+    async fn status_heartbeat_republishes_while_active() {
+        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let c = PersistentSubprocessController::new(
+            "tab".to_string(),
+            "block-heartbeat".to_string(),
+            Some(broker.clone()),
+            None,
+            None,
+            None,
+        );
+        c.health_monitor.set_active_turn(true);
+        c.spawn_status_heartbeat_with_interval(tokio::time::Duration::from_millis(5));
+
+        // Generous margin over several 5ms ticks — proves at least one
+        // heartbeat tick actually published, without asserting an exact count
+        // (real-time scheduling, not virtual-clock-deterministic).
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        let history = broker.read_event_history(
+            crate::backend::wps::EVENT_CONTROLLER_STATUS,
+            "block:block-heartbeat",
+            1,
+        );
+        assert_eq!(history.len(), 1, "heartbeat must have published at least once while active");
+        let status: BlockControllerRuntimeStatus =
+            serde_json::from_value(history[0].data.clone().unwrap()).unwrap();
+        assert!(status.turn_active, "published snapshot must reflect the active turn");
     }
 }
 
