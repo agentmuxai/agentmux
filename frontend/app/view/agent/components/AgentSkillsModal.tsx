@@ -110,6 +110,11 @@ export const AgentSkillsModal = (props: AgentSkillsModalProps): JSX.Element => {
                                 <Markdown text={skill().content} scrollable={false} />
                             </div>
                         </Show>
+                        <p class="agent-primitive-modal-caveat">
+                            Note: every global skill is currently applied to every agent
+                            regardless of bind state — unbinding here updates what shows as
+                            "in use" but does not yet remove it from this agent's live config.
+                        </p>
                         <div class="agent-primitive-modal-actions">
                             <Show
                                 when={skill().bound_to_agent}

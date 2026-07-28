@@ -121,6 +121,18 @@
     color: var(--secondary-text-color);
 }
 
+// Flags a known, tracked limitation (bind/unbind doesn't yet gate config
+// materialization — see docs/reports/REPORT_MCP_SKILLS_BIND_DOES_NOT_GATE_CONFIG_2026_07_28.md)
+// distinct enough from `-global-note`'s neutral info tone to read as a caveat.
+.agent-primitive-modal-caveat {
+    margin: 0 0 var(--space-2) 0;
+    padding: var(--space-1) var(--space-2);
+    border-radius: var(--radius-sm, 0);
+    background: color-mix(in srgb, var(--warning-color) 15%, transparent);
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+}
+
 .agent-primitive-modal-link-btn {
     padding: 0;
     border: none;

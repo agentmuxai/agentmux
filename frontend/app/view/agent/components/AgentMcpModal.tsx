@@ -93,6 +93,11 @@ export const AgentMcpModal = (props: AgentMcpModalProps): JSX.Element => {
                         <pre class="agent-primitive-modal-field-value">{server().transport}</pre>
                         <span class="agent-primitive-modal-field-label">Config</span>
                         <pre class="agent-primitive-modal-field-value">{server().config}</pre>
+                        <p class="agent-primitive-modal-caveat">
+                            Note: every global server is currently applied to every agent
+                            regardless of bind state — unbinding here updates what shows as
+                            "in use" but does not yet remove it from this agent's live config.
+                        </p>
                         <div class="agent-primitive-modal-actions">
                             <Show
                                 when={server().bound_to_agent}
