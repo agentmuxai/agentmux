@@ -15,6 +15,7 @@ import { createRoot } from "solid-js";
 
 const hub = vi.hoisted(() => ({
     registerSeededAccount: vi.fn(),
+    runProviderLogin: vi.fn(),
 }));
 
 vi.mock("@/app/store/global", () => ({
@@ -22,7 +23,7 @@ vi.mock("@/app/store/global", () => ({
         cancelCliLogin: () => Promise.resolve(),
         ensureAuthDir: () => Promise.resolve("/tmp/auth-dir"),
     }),
-    getBlockMetaKeyAtom: () => () => undefined,
+    getBlockMetaKeyAtom: (_blockId: string, key: string) => () => (key === "cmd" ? "claude-cli" : undefined),
     staticTabId: () => "tab-1",
 }));
 vi.mock("@/app/store/rpc-api", () => ({
@@ -41,7 +42,7 @@ vi.mock("@/app/store/wos", () => ({ makeORef: () => ({}) }));
 vi.mock("../flows/launch-flow", () => ({ runLaunchFlow: vi.fn() }));
 vi.mock("../flows/run-provider-login", () => ({
     persistAndLinkAccount: vi.fn(),
-    runProviderLogin: vi.fn(),
+    runProviderLogin: (...args: unknown[]) => hub.runProviderLogin(...args),
 }));
 vi.mock("../flows/register-seeded-account", () => ({
     registerSeededAccount: (...args: unknown[]) => hub.registerSeededAccount(...args),
@@ -130,6 +131,58 @@ describe("useAgentControllerStatus — loginWaiting clears BEFORE onRecovered fi
             await status.useGlobalLogin();
 
             expect(loginWaitingInsideCallback).toBe(false);
+            dispose();
+        });
+    });
+});
+
+describe("useAgentControllerStatus — overlapping recovery flows share one counter, not independent booleans (codex P2 on PR #2338, fourth re-review)", () => {
+    it("loginWaiting() stays true while loginViaTerminal is still in flight, even after a concurrent useGlobalLogin() finishes", async () => {
+        // Nothing disables the failure row's other recovery buttons while one
+        // is running (verified against failure-accessory.ts: only the
+        // generic "Retry now" action has a disabled binding), so a user can
+        // genuinely start both flows concurrently. useGlobalLogin() and
+        // loginViaTerminal() each manage their own in-flight guard
+        // (seedInFlight vs. reloginInFlight) — a bare shared boolean would
+        // let whichever finishes first clear loginWaiting for both.
+        hub.registerSeededAccount.mockResolvedValue({ ok: true, accountId: "acct-1", dir: "/tmp/acct-1" });
+        let resolveTerminalLogin!: (outcome: string) => void;
+        hub.runProviderLogin.mockImplementation(
+            (opts: any) =>
+                new Promise((resolve) => {
+                    resolveTerminalLogin = (outcome: string) => {
+                        opts.onAccountRegistered?.("acct-2", "/tmp/acct-2");
+                        resolve(outcome);
+                    };
+                }),
+        );
+
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({
+                blockId: "block-1",
+                provider: () => claude,
+                log: () => {},
+            });
+
+            const terminalPromise = status.loginViaTerminal();
+            await Promise.resolve();
+            await Promise.resolve();
+            expect(status.loginWaiting()).toBe(true);
+
+            // A second, independent recovery flow starts and fully completes
+            // WHILE the first is still unresolved.
+            await status.useGlobalLogin();
+
+            // The bug: useGlobalLogin() finishing first would clear the
+            // shared boolean even though loginViaTerminal is still polling
+            // for credentials — reopening the exact "send during an
+            // unconfirmed recovery" window this signal exists to close.
+            expect(status.loginWaiting()).toBe(true);
+
+            resolveTerminalLogin("seeded");
+            await terminalPromise;
+
+            expect(status.loginWaiting()).toBe(false);
             dispose();
         });
     });

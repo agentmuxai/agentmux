@@ -200,6 +200,30 @@ export function useAgentControllerStatus(
     // Derived spinner state — caller wires this into the AgentFooter loading prop
     const isLoading = createMemo(() => flowRunning() || !agentReady());
 
+    // Shared counter behind loginWaiting: relogin()/useGlobalLogin()/
+    // loginViaTerminal() are guarded by TWO independent in-flight flags
+    // (reloginInFlight covers relogin+loginViaTerminal; seedInFlight covers
+    // useGlobalLogin only) — nothing disables the failure-row's OTHER
+    // recovery buttons while one is running, so a user can genuinely start
+    // both concurrently. A plain boolean loginWaiting, set/cleared
+    // independently by each function, lets whichever one finishes first
+    // clear the flag while the other is still polling for credentials —
+    // reopening the exact "send during an unconfirmed recovery" window this
+    // signal exists to close. Codex P2 on PR #2338 (fourth re-review). Each
+    // caller must call endRecoveryFlow() EXACTLY once per beginRecoveryFlow()
+    // call — see relogin()'s recoveryEnded guard for how a function that
+    // clears early (before onRecovered, per the reagent P0 fix) avoids a
+    // double-decrement from its own trailing finally.
+    let activeRecoveryFlows = 0;
+    const beginRecoveryFlow = () => {
+        activeRecoveryFlows += 1;
+        setLoginWaiting(true);
+    };
+    const endRecoveryFlow = () => {
+        activeRecoveryFlows = Math.max(0, activeRecoveryFlows - 1);
+        if (activeRecoveryFlows === 0) setLoginWaiting(false);
+    };
+
     // Mutable cancellation flag. Flipped by cancelLogin() and by onCleanup.
     // Read inside startLaunchFlow's polling loop via the isCancelled callback.
     let loginCancelled = false;
@@ -406,7 +430,19 @@ export function useAgentControllerStatus(
         // launch flow.
         let cliPath = getBlockMetaKeyAtom(opts.blockId, "cmd")() as string | undefined;
         reloginInFlight = true;
-        setLoginWaiting(true);
+        beginRecoveryFlow();
+        // Guards against double-decrementing activeRecoveryFlows: the
+        // success branches below call this early (before onRecovered, so
+        // that callback doesn't see a stale loginWaiting — reagent P0), and
+        // the trailing finally also calls it unconditionally for the
+        // failure paths. Exactly one of those two call sites should ever
+        // actually decrement per invocation.
+        let recoveryEnded = false;
+        const endThisRecoveryFlow = () => {
+            if (recoveryEnded) return;
+            recoveryEnded = true;
+            endRecoveryFlow();
+        };
         setLaunchPhase({ kind: "checking-auth" });
         // Tracks whether this attempt actually reached a genuine success
         // branch below — declared outside the try so the `finally` block
@@ -567,7 +603,7 @@ export function useAgentControllerStatus(
                             // on PR #2338 (this is genuinely done at this
                             // point — forceControllerRefresh already
                             // completed above).
-                            setLoginWaiting(false);
+                            endThisRecoveryFlow();
                             if (retryAfterLogin) {
                                 opts.onRecovered?.();
                             } else {
@@ -625,7 +661,7 @@ export function useAgentControllerStatus(
                         // See the "opened" branch above — must clear before
                         // onRecovered, not in the trailing finally. reagent
                         // P0 on PR #2338.
-                        setLoginWaiting(false);
+                        endThisRecoveryFlow();
                         if (retryAfterLogin) {
                             opts.onRecovered?.();
                         } else {
@@ -662,7 +698,7 @@ export function useAgentControllerStatus(
             setAuthNotice(msg);
         } finally {
             reloginInFlight = false;
-            setLoginWaiting(false);
+            endThisRecoveryFlow();
             setLaunchPhase(null);
             // Restore the mount-time "Log in" button on any unsuccessful
             // outcome — timeout, terminal-unavailable, persistence failure,
@@ -701,7 +737,21 @@ export function useAgentControllerStatus(
         // still resolving bypassed that guard entirely and reached
         // AgentInputCommand on the same stale, already-known-bad credential
         // the failure banner is showing for. reagent P1 on PR #2338.
-        setLoginWaiting(true);
+        //
+        // beginRecoveryFlow/endRecoveryFlow (a shared counter, not a bare
+        // boolean): nothing disables the failure row's OTHER recovery
+        // buttons while this one is in flight, so a user can genuinely
+        // start relogin()/loginViaTerminal() concurrently with this — a
+        // bare setLoginWaiting(false) here would clear the flag out from
+        // under that still-running flow. Codex P2 on PR #2338 (fourth
+        // re-review).
+        let recoveryEnded = false;
+        const endThisRecoveryFlow = () => {
+            if (recoveryEnded) return;
+            recoveryEnded = true;
+            endRecoveryFlow();
+        };
+        beginRecoveryFlow();
         try {
             // Mint a REAL per-account isolated dir and persist an
             // IdentityAccount row — not just a seed into whatever dir was
@@ -757,7 +807,7 @@ export function useAgentControllerStatus(
                 // onRecovered, which can synchronously resend the failed
                 // turn straight into useAgentCommands.ts's loginWaiting()
                 // guard. reagent P0 on PR #2338.
-                setLoginWaiting(false);
+                endThisRecoveryFlow();
                 opts.onRecovered?.();
             } else {
                 const msg = "Couldn't use your global login — no valid global Claude credential was found. Try “Login via terminal”.";
@@ -770,7 +820,7 @@ export function useAgentControllerStatus(
             setAuthNotice(msg);
         } finally {
             seedInFlight = false;
-            setLoginWaiting(false);
+            endThisRecoveryFlow();
         }
     };
 
@@ -802,7 +852,17 @@ export function useAgentControllerStatus(
         // terminal windows with overlapping poll loops. Mirror relogin: flag
         // first, reset in finally.
         reloginInFlight = true;
-        setLoginWaiting(true);
+        // Shared counter, not a bare boolean — see beginRecoveryFlow's own
+        // doc comment: useGlobalLogin() is guarded by an independent
+        // in-flight flag and can genuinely run concurrently with this.
+        // Codex P2 on PR #2338 (fourth re-review).
+        let recoveryEnded = false;
+        const endThisRecoveryFlow = () => {
+            if (recoveryEnded) return;
+            recoveryEnded = true;
+            endRecoveryFlow();
+        };
+        beginRecoveryFlow();
         setLaunchPhase({ kind: "opening-login-terminal" });
         try {
             let cliPath = getBlockMetaKeyAtom(opts.blockId, "cmd")() as string | undefined;
@@ -868,7 +928,7 @@ export function useAgentControllerStatus(
                         opts.onLoginSuccess?.(null);
                         // See relogin()'s identical comment — reagent P0 on
                         // PR #2338.
-                        setLoginWaiting(false);
+                        endThisRecoveryFlow();
                         opts.onRecovered?.();
                     } else {
                         setAuthStatus("unauthenticated");
@@ -894,7 +954,7 @@ export function useAgentControllerStatus(
             setAuthNotice(msg);
         } finally {
             reloginInFlight = false;
-            setLoginWaiting(false);
+            endThisRecoveryFlow();
             setLaunchPhase(null);
         }
     };
