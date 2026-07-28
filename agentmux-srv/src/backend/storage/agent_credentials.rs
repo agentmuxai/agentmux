@@ -125,6 +125,23 @@ impl Store {
         )?;
         Ok(())
     }
+
+    /// Wipe every cached per-agent M2M credential. `db_agent_credentials`
+    /// carries no account/user_sub column of its own — each row is only
+    /// ever meaningful under the muxbus account that provisioned it — so a
+    /// genuine account switch (muxbus_save with a different user_sub) or a
+    /// logout (muxbus_clear) must wipe this cache wholesale; otherwise a
+    /// stale row keeps authenticating this agent_id's requests as the
+    /// PREVIOUS account after the human has switched to a different one.
+    /// Re-provisioning is cheap and idempotent server-side (see
+    /// agent-provisioning.ts), so clearing on every account transition —
+    /// not just the ones that turn out to matter — is the safe default.
+    /// reagentx P0 on PR #2342.
+    pub fn agent_credentials_clear_all(&self) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM db_agent_credentials", [])?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -218,6 +235,25 @@ mod tests {
     fn invalidate_token_is_a_noop_when_not_provisioned() {
         let store = shared_store();
         store.agent_credential_invalidate_token("agentx").unwrap();
+        assert!(store.agent_credential_load("agentx").unwrap().is_none());
+    }
+
+    #[test]
+    fn clear_all_wipes_every_agent_credential() {
+        let store = shared_store();
+        store.agent_credential_save("agentx", "client-1", "secret-1", "endpoint-1").unwrap();
+        store.agent_credential_save("agenty", "client-2", "secret-2", "endpoint-2").unwrap();
+
+        store.agent_credentials_clear_all().unwrap();
+
+        assert!(store.agent_credential_load("agentx").unwrap().is_none());
+        assert!(store.agent_credential_load("agenty").unwrap().is_none());
+    }
+
+    #[test]
+    fn clear_all_is_a_noop_on_an_empty_table() {
+        let store = shared_store();
+        store.agent_credentials_clear_all().unwrap();
         assert!(store.agent_credential_load("agentx").unwrap().is_none());
     }
 

@@ -29,26 +29,44 @@ use std::time::{Duration, Instant};
 use crate::backend::storage::store::Store;
 use crate::muxbus::cloud_subscriber::{load_valid_token, MUXBUS_REST_URL};
 
-/// How long to skip re-attempting provisioning for an agent after a
-/// failure, before trying again. InjectAvailable broadcasts for ANY
-/// injection to ANY agent, so without this an agent that can never
-/// provision (quota exceeded, malformed agent_id, provisioning endpoint
-/// down) gets a fresh provisioning attempt on every single broadcast —
-/// an unthrottled retry storm against the provisioning endpoint, unlike
-/// the broker's single-flight-guarded scheduler used for the shared
-/// token. reagentx P2 on PR #2342.
-const PROVISION_RETRY_COOLDOWN: Duration = Duration::from_secs(60);
+/// Per-request timeout for the two HTTP calls in this module. The shared
+/// `http` client (built via `reqwest::Client::new()` in
+/// `cloud_subscriber::run_loop`) carries no default timeout, and both
+/// calls here are awaited inline in the per-agent InjectAvailable loop —
+/// without an explicit override, a stalled provisioning or Cognito token
+/// endpoint would hang the whole loop indefinitely, blocking pings and
+/// delivery for every OTHER registered agent too. reagentx P1 on PR #2342.
+const CREDENTIAL_HTTP_TIMEOUT: Duration = Duration::from_secs(10);
 
-static PROVISION_COOLDOWN: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+/// How long to skip re-attempting this agent's credential pipeline
+/// (provisioning OR token fetch) after either step fails, before trying
+/// again. InjectAvailable broadcasts for ANY injection to ANY agent, so
+/// without this an agent whose pipeline can't currently succeed (quota
+/// exceeded, malformed agent_id, provisioning/token endpoint down) gets a
+/// fresh network round-trip on every single broadcast — an unthrottled
+/// retry storm, unlike the broker's single-flight-guarded scheduler used
+/// for the shared token. reagentx P2 on PR #2342 (round 1: provisioning
+/// only; round 2: also covers fetch_m2m_token, the gap round 1 left open
+/// for an already-provisioned agent whose token endpoint is failing).
+const CREDENTIAL_RETRY_COOLDOWN: Duration = Duration::from_secs(60);
 
-fn provision_cooldown() -> &'static Mutex<HashMap<String, Instant>> {
-    PROVISION_COOLDOWN.get_or_init(|| Mutex::new(HashMap::new()))
+static CREDENTIAL_COOLDOWN: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+
+fn credential_cooldown() -> &'static Mutex<HashMap<String, Instant>> {
+    CREDENTIAL_COOLDOWN.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn provision_recently_failed(agent_id: &str) -> bool {
-    let map = provision_cooldown().lock().unwrap();
+fn credential_recently_failed(agent_id: &str) -> bool {
+    let map = credential_cooldown().lock().unwrap();
     map.get(agent_id)
-        .is_some_and(|t| t.elapsed() < PROVISION_RETRY_COOLDOWN)
+        .is_some_and(|t| t.elapsed() < CREDENTIAL_RETRY_COOLDOWN)
+}
+
+fn record_credential_failure(agent_id: &str) {
+    credential_cooldown()
+        .lock()
+        .unwrap()
+        .insert(agent_id.to_string(), Instant::now());
 }
 
 /// Get a live per-agent access token, provisioning the Cognito client on
@@ -62,25 +80,26 @@ pub async fn ensure_agent_credential(
 ) -> Option<String> {
     let key = agent_id.to_lowercase();
 
+    // One guard covers both network steps below (provisioning and token
+    // fetch) — a recent failure in either means skip straight to the
+    // shared-token fallback until the cooldown lapses.
+    if credential_recently_failed(&key) {
+        return None;
+    }
+
     let creds = wstore.agent_credential_load(&key).ok().flatten();
 
     let creds = match creds {
         Some(c) if !c.client_id.is_empty() => c,
         _ => {
-            // Not provisioned yet. Skip if a recent attempt already failed
-            // (see PROVISION_RETRY_COOLDOWN) — this agent keeps using the
-            // shared token until the cooldown lapses or provisioning
-            // succeeds.
-            if provision_recently_failed(&key) {
-                return None;
-            }
+            // Not provisioned yet — do it now, once.
             if let Err(e) = provision_agent_client(&key, wstore, http).await {
                 tracing::warn!(
                     agent_id = %key, error = %e,
                     "muxbus: agent credential provisioning failed, backing off {}s",
-                    PROVISION_RETRY_COOLDOWN.as_secs(),
+                    CREDENTIAL_RETRY_COOLDOWN.as_secs(),
                 );
-                provision_cooldown().lock().unwrap().insert(key, Instant::now());
+                record_credential_failure(&key);
                 return None;
             }
             wstore.agent_credential_load(&key).ok().flatten()?
@@ -91,9 +110,18 @@ pub async fn ensure_agent_credential(
         return Some(creds.access_token);
     }
 
-    fetch_m2m_token(&key, &creds.client_id, &creds.client_secret, &creds.token_endpoint, wstore, http)
-        .await
-        .ok()
+    match fetch_m2m_token(&key, &creds.client_id, &creds.client_secret, &creds.token_endpoint, wstore, http).await {
+        Ok(access_token) => Some(access_token),
+        Err(e) => {
+            tracing::warn!(
+                agent_id = %key, error = %e,
+                "muxbus: agent m2m token fetch failed, backing off {}s",
+                CREDENTIAL_RETRY_COOLDOWN.as_secs(),
+            );
+            record_credential_failure(&key);
+            None
+        }
+    }
 }
 
 /// Clear a per-agent credential's cached access token — called by
@@ -136,10 +164,16 @@ async fn provision_agent_client(agent_id: &str, wstore: &Arc<Store>, http: &reqw
     }
 
     let url = format!("{}/agents/provision", MUXBUS_REST_URL);
+    // `http` (built via reqwest::Client::new() in cloud_subscriber::run_loop)
+    // carries no default timeout, and this call is awaited inline in the
+    // per-agent InjectAvailable loop — a stalled provisioning endpoint would
+    // otherwise block pings/delivery for every OTHER agent too, compounding
+    // across N agents per broadcast. reagentx P1 on PR #2342.
     let resp = http
         .post(&url)
         .header("Authorization", format!("Bearer {}", user_token))
         .json(&serde_json::json!({ "agent_id": agent_id }))
+        .timeout(CREDENTIAL_HTTP_TIMEOUT)
         .send()
         .await
         .map_err(|e| format!("provision request failed: {e}"))?;
@@ -185,6 +219,7 @@ async fn fetch_m2m_token(
     let resp = http
         .post(token_endpoint)
         .form(&params)
+        .timeout(CREDENTIAL_HTTP_TIMEOUT)
         .send()
         .await
         .map_err(|e| format!("m2m token request failed: {e}"))?;

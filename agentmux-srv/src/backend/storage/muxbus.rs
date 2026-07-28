@@ -237,6 +237,20 @@ impl Store {
         // already-committed credential.
         let _save_guard = self.muxbus_save_lock.lock().unwrap();
 
+        // Read the outgoing account's user_sub now, before it's overwritten
+        // below, so a genuine account switch (vs. a same-account token
+        // refresh) can be detected after the write succeeds and the stale
+        // per-agent credential cache cleared. reagentx P0 on PR #2342.
+        let previous_user_sub: Option<String> = {
+            let conn = self.conn.lock().unwrap();
+            conn.query_row(
+                "SELECT user_sub FROM db_muxbus_credentials WHERE id = 'global'",
+                [],
+                |row| row.get(0),
+            )
+            .ok()
+        };
+
         let tokens = MuxBusTokens {
             access_token: creds.access_token.clone(),
             refresh_token: creds.refresh_token.clone(),
@@ -329,6 +343,23 @@ impl Store {
             }
             return Err(e.into());
         }
+
+        // Account switch (not a same-account token refresh): the previous
+        // account's per-agent M2M credentials must not silently keep
+        // authenticating this different account's requests. A first-ever
+        // login (previous_user_sub is None/empty) has nothing to clear.
+        // reagentx P0 on PR #2342.
+        if let Some(prev) = previous_user_sub {
+            if !prev.is_empty() && prev != creds.user_sub {
+                if let Err(e) = self.agent_credentials_clear_all() {
+                    tracing::warn!(
+                        error = %e,
+                        "muxbus_save: failed to clear stale per-agent credentials after account switch",
+                    );
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -343,8 +374,15 @@ impl Store {
         // Best-effort — a missing/inaccessible keychain entry must not block
         // clearing the (still-useful) SQL row.
         let _ = secret_store::delete(MUXBUS_KEYCHAIN_ID);
-        let conn = self.conn.lock().unwrap();
-        conn.execute("DELETE FROM db_muxbus_credentials WHERE id = 'global'", [])?;
+        {
+            let conn = self.conn.lock().unwrap();
+            conn.execute("DELETE FROM db_muxbus_credentials WHERE id = 'global'", [])?;
+        }
+        // Logging out invalidates any per-agent credentials provisioned
+        // under this account too. reagentx P0 on PR #2342.
+        if let Err(e) = self.agent_credentials_clear_all() {
+            tracing::warn!(error = %e, "muxbus_clear: failed to clear per-agent credentials");
+        }
         Ok(())
     }
 }
