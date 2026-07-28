@@ -308,11 +308,19 @@ export const AgentApi = {
     // orphaned conversation (e.g. after a renderer crash) becomes
     // recoverable from normal UI. See docs/recovery/MAKS_CONVERSATION_2026_05_23.md
     // and PR #977 for the underlying continueOfId reattach plumbing.
+    // Response envelope (not a bare array) since the backend hardening in
+    // session.rs — every one of its data sources now degrades to empty on
+    // its own failure instead of aborting the whole RPC (retro
+    // docs/retro/retro-my-agents-fresh-channel-regression-2026-07-27.md).
+    // `degraded` lists which source(s), if any, fell back this call; the
+    // caller uses it to tell "genuinely zero agents" apart from "a source
+    // failed and we got nothing" — a distinction transport success/failure
+    // alone can no longer make once the RPC itself never throws for this.
     ListRecentSessionsCommand(
         client: RpcClient,
         data: { limit?: number; identity_id?: string },
         opts?: RpcOpts,
-    ): Promise<RecentSessionRow[]> {
+    ): Promise<{ rows: RecentSessionRow[]; degraded: string[] }> {
         return client.rpcCall("listrecentsessions", data, opts);
     },
 

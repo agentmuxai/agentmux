@@ -131,7 +131,7 @@ fn collapse_preview(s: &str) -> String {
 #[cfg(test)]
 mod recent_sessions_tests {
     use super::*;
-    use crate::backend::rpc_types::{RecentSessionRow, COMMAND_LIST_RECENT_SESSIONS};
+    use crate::backend::rpc_types::{ListRecentSessionsResult, COMMAND_LIST_RECENT_SESSIONS};
     use crate::backend::storage::filestore::FileStore;
 
     fn fresh_filestore() -> std::sync::Arc<FileStore> {
@@ -513,13 +513,15 @@ mod recent_sessions_tests {
     #[tokio::test]
     async fn handler_returns_sessions_with_previews_sorted_by_snapshot_first() {
         let (_state, engine, mut rx) = build_state_with_seed();
-        let rows: Vec<RecentSessionRow> = call_rpc(
+        let result: ListRecentSessionsResult = call_rpc(
             &engine,
             &mut rx,
             COMMAND_LIST_RECENT_SESSIONS,
             serde_json::json!({}),
         )
         .await;
+        let rows = result.rows;
+        assert!(result.degraded.is_empty(), "healthy seed must report no degraded sources");
         assert_eq!(rows.len(), 3, "all three sessions surfaced");
 
         // Sort: snapshot-bearing rows first (recent then older), then
@@ -554,49 +556,49 @@ mod recent_sessions_tests {
     async fn handler_identity_filter_restricts_rows() {
         let (_state, engine, mut rx) = build_state_with_seed();
         // Filter to a non-existent identity → empty list.
-        let rows: Vec<RecentSessionRow> = call_rpc(
+        let result: ListRecentSessionsResult = call_rpc(
             &engine,
             &mut rx,
             COMMAND_LIST_RECENT_SESSIONS,
             serde_json::json!({ "identity_id": "no-such-bundle" }),
         )
         .await;
-        assert_eq!(rows.len(), 0);
+        assert_eq!(result.rows.len(), 0);
 
         // Filter to the seeded one → all three.
-        let rows: Vec<RecentSessionRow> = call_rpc(
+        let result: ListRecentSessionsResult = call_rpc(
             &engine,
             &mut rx,
             COMMAND_LIST_RECENT_SESSIONS,
             serde_json::json!({ "identity_id": "id-work" }),
         )
         .await;
-        assert_eq!(rows.len(), 3);
+        assert_eq!(result.rows.len(), 3);
 
         // Empty-string identity_id is treated as "no filter" so the
         // frontend can pass `""` without special-casing.
-        let rows: Vec<RecentSessionRow> = call_rpc(
+        let result: ListRecentSessionsResult = call_rpc(
             &engine,
             &mut rx,
             COMMAND_LIST_RECENT_SESSIONS,
             serde_json::json!({ "identity_id": "" }),
         )
         .await;
-        assert_eq!(rows.len(), 3);
+        assert_eq!(result.rows.len(), 3);
     }
 
     #[tokio::test]
     async fn handler_respects_limit() {
         let (_state, engine, mut rx) = build_state_with_seed();
-        let rows: Vec<RecentSessionRow> = call_rpc(
+        let result: ListRecentSessionsResult = call_rpc(
             &engine,
             &mut rx,
             COMMAND_LIST_RECENT_SESSIONS,
             serde_json::json!({ "limit": 1 }),
         )
         .await;
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].instance_id, "inst-recent");
+        assert_eq!(result.rows.len(), 1);
+        assert_eq!(result.rows[0].instance_id, "inst-recent");
     }
 
     // ---- Two-tier picker Phase 1: create-from-template + listagents filter ----
