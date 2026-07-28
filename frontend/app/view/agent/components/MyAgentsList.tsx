@@ -288,12 +288,29 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     };
 
     // Surfacing rules:
-    // - rows undefined            → still loading (skeleton hint)
+    // - rows.loading              → still loading (skeleton hint) — uses the
+    //                                RESOURCE's own loading flag, not
+    //                                `rows() === undefined`: Solid's
+    //                                createResource keeps the previous
+    //                                value visible while a refetch is in
+    //                                flight (stale-while-revalidate), so
+    //                                after Retry on a failed fetch, `rows()`
+    //                                is still `[]` from the failed attempt
+    //                                even though a fresh request is
+    //                                pending. Checking `rows() === undefined`
+    //                                only catches the very first load — a
+    //                                retry would fall straight through to
+    //                                the empty branch below for its entire
+    //                                in-flight duration, flashing "No agents
+    //                                yet" and recreating the exact
+    //                                error/empty ambiguity this fix exists
+    //                                to remove (codex P2 on PR #2327's
+    //                                post-merge re-review).
     // - fetchError()              → error state (retry affordance), never
     //                                confused with a genuinely empty list
     // - rows [] (fetch succeeded) → empty state (filter-aware copy)
     // - rows non-empty            → list
-    const isLoading = () => rows() === undefined;
+    const isLoading = () => rows.loading;
     const isEmpty = () => !isLoading() && !fetchError() && (rows() ?? []).length === 0;
 
     return (
