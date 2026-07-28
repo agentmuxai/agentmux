@@ -45,7 +45,7 @@ use crate::broker::RefreshErrorKind;
 // the API's default stage. Full design/history in the agentmux-cloud repo's
 // muxbus/ directory (search for the WebSocket relay redesign writeup).
 const MUXBUS_WS_URL: &str = "wss://muxbus-ws.agentmux.ai";
-const MUXBUS_REST_URL: &str = "https://muxbus.agentmux.ai";
+pub(crate) const MUXBUS_REST_URL: &str = "https://muxbus.agentmux.ai";
 const RECONNECT_DELAY_SECS: u64 = 5;
 const MAX_RECONNECT_DELAY_SECS: u64 = 60;
 // AWS API Gateway WebSocket APIs enforce a 10-minute idle timeout with no
@@ -353,7 +353,7 @@ async fn run_loop(
         tracing::info!("cloud_subscriber: connecting to {}", MUXBUS_WS_URL);
         let session_start = std::time::Instant::now();
 
-        match connect_and_run(&token, agents.clone(), &mut ctrl_rx, &http).await {
+        match connect_and_run(&token, agents.clone(), &mut ctrl_rx, &wstore, &http).await {
             Ok(()) => {
                 // Apply the same >30s healthy-session guard as the error branch: a server
                 // that immediately closes after handshake must not suppress back-off.
@@ -398,6 +398,7 @@ async fn connect_and_run(
     token: &str,
     agents: Arc<Mutex<HashSet<String>>>,
     ctrl_rx: &mut mpsc::UnboundedReceiver<CtrlMsg>,
+    wstore: &Arc<Store>,
     http: &reqwest::Client,
 ) -> Result<(), String> {
     use tokio_tungstenite::tungstenite::ClientRequestBuilder;
@@ -470,7 +471,7 @@ async fn connect_and_run(
                     Some(Err(e)) => return Err(format!("ws recv: {e}")),
                     Some(Ok(Message::Text(text))) => {
                         if let Ok(server_msg) = serde_json::from_str::<ServerMsg>(&text) {
-                            match handle_server_msg(server_msg, token, http, &agents).await {
+                            match handle_server_msg(server_msg, token, http, &agents, wstore).await {
                                 Ok(()) => {}
                                 // Eviction or expired token — close stream to trigger reconnect.
                                 Err(ref e) if e.starts_with("reconnect:") => {
@@ -524,6 +525,7 @@ async fn handle_server_msg(
     token: &str,
     http: &reqwest::Client,
     agents: &Arc<Mutex<HashSet<String>>>,
+    wstore: &Arc<Store>,
 ) -> Result<(), String> {
     match msg {
         ServerMsg::InjectAvailable => {
@@ -547,10 +549,19 @@ async fn handle_server_msg(
 
             let handler = get_global_handler();
             for agent_id in &registered {
+                // Prefer a credential bound to exactly this agent_id over the
+                // shared account-level token — see agent_credentials.rs. Falls
+                // back to `token` (today's self-declared behavior) whenever
+                // this agent isn't provisioned yet or provisioning fails, so
+                // rollout never blocks delivery.
+                let agent_token = crate::muxbus::agent_credentials::ensure_agent_credential(agent_id, wstore, http)
+                    .await
+                    .unwrap_or_else(|| token.to_string());
+
                 let url = format!("{}/reactive/pending/{}", MUXBUS_REST_URL, agent_id);
                 let resp = match http
                     .get(&url)
-                    .header("Authorization", format!("Bearer {}", token))
+                    .header("Authorization", format!("Bearer {}", agent_token))
                     .header("X-Agent-ID", agent_id)
                     .send()
                     .await
@@ -602,7 +613,7 @@ async fn handle_server_msg(
                 let ack_url = format!("{}/reactive/ack", MUXBUS_REST_URL);
                 let claim_resp = match http
                     .post(&ack_url)
-                    .header("Authorization", format!("Bearer {}", token))
+                    .header("Authorization", format!("Bearer {}", agent_token))
                     .header("X-Agent-ID", agent_id)
                     .json(&serde_json::json!({ "injection_ids": all_ids }))
                     .send()
@@ -690,7 +701,7 @@ async fn handle_server_msg(
                         let release_url = format!("{}/reactive/release", MUXBUS_REST_URL);
                         match http
                             .post(&release_url)
-                            .header("Authorization", format!("Bearer {}", token))
+                            .header("Authorization", format!("Bearer {}", agent_token))
                             .header("X-Agent-ID", agent_id)
                             .json(&serde_json::json!({
                                 "injection_id": inj.id,
@@ -742,7 +753,11 @@ async fn handle_server_msg(
 /// is absent — `ensure_fresh`'s own single-flight guard means this can run
 /// concurrently with the broker's background sweep for the same credential
 /// without either one duplicating the other's refresh attempt.
-async fn load_valid_token(
+///
+/// pub(crate): also used by agent_credentials.rs to authenticate the
+/// POST /agents/provision call, which requires the human's own user-level
+/// (PKCE) token, not an agent-bound M2M one.
+pub(crate) async fn load_valid_token(
     wstore: &Arc<Store>,
     scheduler: &crate::broker::RefreshScheduler,
 ) -> Option<String> {

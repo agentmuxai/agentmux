@@ -1,0 +1,166 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+//! Per-agent M2M Cognito credential fetch/cache — the client-side half of
+//! agentmux-cloud's PLAN_PER_AGENT_CREDENTIAL_BINDING_2026_07_06.md.
+//!
+//! Historically every agent under one AgentMux login shared the same
+//! account-level MUXBUS_TOKEN for every /reactive/* call, self-declaring its
+//! identity via an unverified X-Agent-ID header — any credential could claim
+//! any agent_id. This module gets each agent its own bound Cognito
+//! client_credentials identity instead:
+//!   1. provision_agent_client(): calls POST /agents/provision using the
+//!      human's own PKCE token, receiving a Cognito client_id/client_secret
+//!      scoped to exactly this (account, agent_id) pair. One-time per agent
+//!      (idempotent server-side; cached locally in db_agent_credentials).
+//!   2. ensure_agent_credential(): returns a live access_token for that
+//!      agent, provisioning on first use and re-fetching via
+//!      client_credentials whenever the cached token has expired.
+//!
+//! Callers (cloud_subscriber.rs) fall back to the shared MUXBUS_TOKEN
+//! whenever this returns None — provisioning failure must never block
+//! message delivery, only degrade the binding guarantee back to today's
+//! self-declared behavior for that agent.
+
+use std::sync::Arc;
+
+use crate::backend::storage::store::Store;
+use crate::muxbus::cloud_subscriber::{load_valid_token, MUXBUS_REST_URL};
+
+/// Get a live per-agent access token, provisioning the Cognito client on
+/// first use. Returns None (never an error) on any failure — provisioning
+/// being down or an agent not yet migrated must degrade to the caller's
+/// shared-token fallback, not block delivery.
+pub async fn ensure_agent_credential(
+    agent_id: &str,
+    wstore: &Arc<Store>,
+    http: &reqwest::Client,
+) -> Option<String> {
+    let key = agent_id.to_lowercase();
+
+    let creds = wstore.agent_credential_load(&key).ok().flatten();
+
+    let creds = match creds {
+        Some(c) if !c.client_id.is_empty() => c,
+        _ => {
+            // Not provisioned yet — do it now, once. A failure here (e.g. no
+            // human login yet, network error) just means this agent keeps
+            // using the shared token until a later call succeeds.
+            provision_agent_client(&key, wstore, http).await.ok()?;
+            wstore.agent_credential_load(&key).ok().flatten()?
+        }
+    };
+
+    if creds.is_valid() {
+        return Some(creds.access_token);
+    }
+
+    fetch_m2m_token(&key, &creds.client_id, &creds.client_secret, &creds.token_endpoint, wstore, http)
+        .await
+        .ok()
+}
+
+/// Calls POST /agents/provision (authenticated with the human's own PKCE
+/// token — an M2M agent credential can never provision another one) and
+/// caches the returned client_id/client_secret.
+async fn provision_agent_client(agent_id: &str, wstore: &Arc<Store>, http: &reqwest::Client) -> Result<(), String> {
+    // The scheduler is a process-wide singleton, initialized by
+    // cloud_subscriber::run_loop before any WS session (and therefore any
+    // handle_server_msg call reaching this function) can start — see
+    // crate::broker's own doc comment. get_global() (not init_global) here:
+    // this code path has no sweep_interval opinion of its own, it just needs
+    // the already-running scheduler ensure_fresh uses for the shared token.
+    let scheduler = crate::broker::get_global()
+        .ok_or_else(|| "muxbus refresh scheduler not initialized yet".to_string())?;
+    let user_token = load_valid_token(wstore, &scheduler)
+        .await
+        .ok_or_else(|| "no valid user-level muxbus login to provision from".to_string())?;
+
+    #[derive(serde::Deserialize)]
+    struct ProvisionResp {
+        client_id: String,
+        client_secret: String,
+        token_endpoint: String,
+    }
+
+    let url = format!("{}/agents/provision", MUXBUS_REST_URL);
+    let resp = http
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", user_token))
+        .json(&serde_json::json!({ "agent_id": agent_id }))
+        .send()
+        .await
+        .map_err(|e| format!("provision request failed: {e}"))?;
+
+    if !resp.status().is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("provision failed: {body}"));
+    }
+
+    let parsed: ProvisionResp = resp
+        .json()
+        .await
+        .map_err(|e| format!("provision response parse failed: {e}"))?;
+
+    wstore
+        .agent_credential_save(agent_id, &parsed.client_id, &parsed.client_secret, &parsed.token_endpoint)
+        .map_err(|e| format!("failed to save agent credential: {e}"))?;
+
+    tracing::info!(agent_id = %agent_id, "muxbus: provisioned per-agent credential");
+    Ok(())
+}
+
+/// Fetches a fresh client_credentials access token and caches it.
+/// client_credentials tokens carry no refresh token — expiry just means
+/// re-fetching from scratch with the (already-provisioned) client secret.
+async fn fetch_m2m_token(
+    agent_id: &str,
+    client_id: &str,
+    client_secret: &str,
+    token_endpoint: &str,
+    wstore: &Arc<Store>,
+    http: &reqwest::Client,
+) -> Result<String, String> {
+    if client_id.is_empty() || token_endpoint.is_empty() {
+        return Err("agent credential missing client_id/token_endpoint".to_string());
+    }
+
+    let params = [
+        ("grant_type", "client_credentials"),
+        ("client_id", client_id),
+        ("client_secret", client_secret),
+    ];
+    let resp = http
+        .post(token_endpoint)
+        .form(&params)
+        .send()
+        .await
+        .map_err(|e| format!("m2m token request failed: {e}"))?;
+
+    if !resp.status().is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("m2m token request failed: {body}"));
+    }
+
+    let json: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("m2m token response parse failed: {e}"))?;
+
+    let access_token = json["access_token"].as_str().unwrap_or("").to_string();
+    if access_token.is_empty() {
+        return Err("m2m token response missing access_token".to_string());
+    }
+    let expires_in = json["expires_in"].as_i64().unwrap_or(3600);
+    let expires_at = (std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64)
+        + expires_in;
+
+    if let Err(e) = wstore.agent_credential_save_token(agent_id, &access_token, expires_at) {
+        tracing::warn!(agent_id = %agent_id, error = %e, "muxbus: failed to cache m2m token (will re-fetch next time)");
+    }
+
+    Ok(access_token)
+}
