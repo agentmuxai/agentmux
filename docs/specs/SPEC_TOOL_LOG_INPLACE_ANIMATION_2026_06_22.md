@@ -1,5 +1,14 @@
 # SPEC_TOOL_LOG_INPLACE_ANIMATION_2026_06_22
 
+> **Superseded (generalized) by
+> [`SPEC_TOOL_LOG_UNIVERSAL_ANIMATION_COLLAPSE_2026_07_27.md`](SPEC_TOOL_LOG_UNIVERSAL_ANIMATION_COLLAPSE_2026_07_27.md).**
+> This spec's fix only collapsed a chunk whose entire content, after trim,
+> was a single bare spinner glyph — a spinner glyph or progress text
+> trailing/leading other text on the same line (`Installing... ⠋`,
+> `Downloading (45%)`) was not covered. The follow-up spec closes that gap
+> at both the backend (`bash_wrap.rs`) and frontend (`output-cap.ts`)
+> layers. Kept here as the historical record of the initial, narrower fix.
+
 ## Problem
 
 When agents run CLI tools, many emit spinner animations as a sequence of

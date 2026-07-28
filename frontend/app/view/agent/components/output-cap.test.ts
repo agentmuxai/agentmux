@@ -6,10 +6,15 @@ import {
     capChars,
     capChunksByLines,
     capText,
+    collapseSpinnerChunks,
     createChunkCapper,
     MAX_TOOL_OUTPUT_CHARS,
     MAX_TOOL_OUTPUT_LINES,
 } from "./output-cap";
+
+function chunk(content: string, kind: string = "stdout") {
+    return { kind, content };
+}
 
 describe("capText", () => {
     it("returns unchanged when under budget", () => {
@@ -188,5 +193,90 @@ describe("createChunkCapper", () => {
         const r = cap(Array.from({ length: 1500 }, () => C("")));
         expect(r.chunks).toHaveLength(1000);
         expect(r.hiddenLines).toBe(500); // 1500 - 1000
+    });
+});
+
+describe("collapseSpinnerChunks", () => {
+    it("collapses a bare-glyph spinner run into a live slot (existing narrow case, regression guard)", () => {
+        const r = collapseSpinnerChunks([chunk("⠋"), chunk("⠙"), chunk("⠹")]);
+        expect(r.display).toEqual([]);
+        expect(r.spinnerSlot).toEqual({ content: "⠹", kind: "stdout" });
+    });
+
+    it("freezes a completed bare-glyph run followed by unrelated output", () => {
+        const r = collapseSpinnerChunks([chunk("⠋"), chunk("⠙"), chunk("Done!")]);
+        expect(r.display).toEqual([{ kind: "stdout", content: "⠙" }, chunk("Done!")]);
+        expect(r.spinnerSlot).toBeNull();
+    });
+
+    it("collapses a spinner glyph trailing static text on the same line (spec §B — the main gap this closes)", () => {
+        const r = collapseSpinnerChunks([
+            chunk("Installing deps... ⠋"),
+            chunk("Installing deps... ⠙"),
+            chunk("Installing deps... ⠹"),
+        ]);
+        expect(r.display).toEqual([]);
+        expect(r.spinnerSlot).toEqual({ content: "Installing deps... ⠹", kind: "stdout" });
+    });
+
+    it("collapses a spinner glyph leading static text on the same line", () => {
+        const r = collapseSpinnerChunks([chunk("⠋ Loading..."), chunk("⠙ Loading...")]);
+        expect(r.spinnerSlot).toEqual({ content: "⠙ Loading...", kind: "stdout" });
+    });
+
+    it("collapses changing percentage/progress text with no spinner glyph at all", () => {
+        const r = collapseSpinnerChunks([
+            chunk("Downloading (12%)"),
+            chunk("Downloading (45%)"),
+            chunk("Downloading (100%)"),
+        ]);
+        expect(r.display).toEqual([]);
+        expect(r.spinnerSlot).toEqual({ content: "Downloading (100%)", kind: "stdout" });
+    });
+
+    it("freezes a completed progress-text run followed by unrelated output", () => {
+        const r = collapseSpinnerChunks([
+            chunk("Downloading (12%)"),
+            chunk("Downloading (100%)"),
+            chunk("Extracting archive"),
+        ]);
+        expect(r.display).toEqual([
+            { kind: "stdout", content: "Downloading (100%)" },
+            chunk("Extracting archive"),
+        ]);
+        expect(r.spinnerSlot).toBeNull();
+    });
+
+    it("does NOT collapse two unrelated consecutive lines with only coincidental partial overlap", () => {
+        const r = collapseSpinnerChunks([chunk("Compiling src/main.rs"), chunk("Compiling src/lib.rs")]);
+        expect(r.display).toEqual([chunk("Compiling src/main.rs"), chunk("Compiling src/lib.rs")]);
+        expect(r.spinnerSlot).toBeNull();
+    });
+
+    it("does NOT collapse two genuinely different short lines", () => {
+        const r = collapseSpinnerChunks([chunk("npm WARN deprecated foo@1.0.0"), chunk("npm WARN deprecated bar@2.0.0")]);
+        expect(r.spinnerSlot).toBeNull();
+        expect(r.display.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it("no spinner/progress content in the output is a pure passthrough (no overhead behavior change)", () => {
+        const r = collapseSpinnerChunks([chunk("line one"), chunk("line two"), chunk("line three")]);
+        expect(r.display).toEqual([chunk("line one"), chunk("line two"), chunk("line three")]);
+        expect(r.spinnerSlot).toBeNull();
+    });
+
+    it("multiple disjoint redraw runs each collapse independently", () => {
+        const r = collapseSpinnerChunks([
+            chunk("Step 1... ⠋"),
+            chunk("Step 1... ⠙"),
+            chunk("Step 1 done"),
+            chunk("Step 2... ⠋"),
+            chunk("Step 2... ⠙"),
+        ]);
+        expect(r.display).toEqual([
+            { kind: "stdout", content: "Step 1... ⠙" },
+            chunk("Step 1 done"),
+        ]);
+        expect(r.spinnerSlot).toEqual({ content: "Step 2... ⠙", kind: "stdout" });
     });
 });

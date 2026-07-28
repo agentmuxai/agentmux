@@ -167,10 +167,82 @@ export interface SpinnerCollapseResult<T> {
     spinnerSlot: { content: string; kind: string } | null;
 }
 
+/** Matches any SPINNER_CHARS glyph, for stripping mid-line occurrences in
+ *  `normalizeForCompare` (SPINNER_CHARS.has() alone only matches a chunk
+ *  that IS a bare glyph, not one trailing/leading other text). */
+const SPINNER_CHAR_RE = new RegExp(`[${[...SPINNER_CHARS].join("")}]`, "g");
+
+/** Below this, two lines are considered a redraw of each other only if they
+ *  differ solely by digits/percent/fill-run/spinner-glyph content (spec
+ *  §B). The dominant real cases (spinner glyph or percentage trailing
+ *  static text) hit the exact-match fast path in `looksLikeRedraw` below
+ *  regardless of this threshold — normalizeForCompare already reduces
+ *  both frames to an identical string in those cases. This threshold only
+ *  governs the narrower fallback (e.g. a progress-bar fill run too short
+ *  to hit the {3,} collapse regex). 0.82 (the spec's initial estimate)
+ *  false-positived on same-shape-different-content lines seen in real
+ *  build output — "Compiling src/main.rs" vs "Compiling src/lib.rs"
+ *  scores ~0.86, well above 0.82, but these are NOT a redraw. Raised to
+ *  0.92 to keep that firmly below-threshold while still catching
+ *  near-total-match progress-bar variations. */
+const REDRAW_SIMILARITY_THRESHOLD = 0.92;
+
+/** Strip spinner glyphs, digits, and progress-bar fill runs so
+ *  "Installing... ⠋" / "Installing... ⠙" / "Downloading (45%)" / "(46%)"
+ *  normalize to the same or a near-identical string. */
+function normalizeForCompare(s: string): string {
+    return s
+        .replace(SPINNER_CHAR_RE, "")
+        .replace(/\d+%?/g, "#")
+        .replace(/[#=\-\s]{3,}/g, "#")
+        .trim();
+}
+
+/** Normalized Levenshtein similarity in [0, 1]; 1 = identical, 0 = totally
+ *  dissimilar. Classic O(a*b) DP with a rolling two-row buffer. */
+function levenshteinRatio(a: string, b: string): number {
+    if (a === b) return 1;
+    const maxLen = Math.max(a.length, b.length);
+    if (maxLen === 0) return 1;
+    let prev = new Array<number>(b.length + 1);
+    let curr = new Array<number>(b.length + 1);
+    for (let j = 0; j <= b.length; j++) prev[j] = j;
+    for (let i = 1; i <= a.length; i++) {
+        curr[0] = i;
+        for (let j = 1; j <= b.length; j++) {
+            const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+            curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+        }
+        [prev, curr] = [curr, prev];
+    }
+    return 1 - prev[b.length] / maxLen;
+}
+
 /**
- * Collapse consecutive spinner-char runs in a capped chunk array.
- * Trailing run → spinnerSlot (a single DOM node Solid updates in place).
- * Completed run (followed by non-spinner output) → last frame frozen in display.
+ * Does `next` look like an in-place terminal redraw of `prev` — a spinner
+ * glyph or progress text trailing/leading otherwise-static content, rather
+ * than the isolated-bare-glyph case `SPINNER_CHARS` already catches? Used
+ * as the fallback when neither line is a whole spinner-glyph chunk (spec
+ * §B) — the backend's `\r`/CSI normalization (bash_wrap.rs §A1/A2) handles
+ * the structural cases; this catches whatever still slips through as
+ * separate chunks.
+ */
+function looksLikeRedraw(prev: string, next: string): boolean {
+    if (prev === next) return false; // identical repeats aren't animation
+    const stripPrev = normalizeForCompare(prev);
+    const stripNext = normalizeForCompare(next);
+    if (!stripPrev && !stripNext) return false; // both fully stripped — no real content to compare
+    if (stripPrev === stripNext) return true; // differs only in glyph/%/count
+    return levenshteinRatio(stripPrev, stripNext) >= REDRAW_SIMILARITY_THRESHOLD;
+}
+
+/**
+ * Collapse consecutive redraw-of-each-other chunks in a capped chunk array:
+ * a bare spinner glyph (`SPINNER_CHARS`, the original narrow case) OR — per
+ * spec §B — a spinner glyph/progress text trailing or leading otherwise-
+ * static content (`looksLikeRedraw`). Trailing run → spinnerSlot (a single
+ * DOM node Solid updates in place). Completed run (followed by unrelated
+ * output) → last frame frozen in display.
  */
 export function collapseSpinnerChunks<T extends { kind: string; content: string }>(
     chunks: ReadonlyArray<T>,
@@ -179,18 +251,24 @@ export function collapseSpinnerChunks<T extends { kind: string; content: string 
     let spinnerSlot: { content: string; kind: string } | null = null;
     for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i];
-        const trimmed = capChars(chunk.content).trim();
-        if (SPINNER_CHARS.has(trimmed)) {
-            let last = chunk;
-            while (i + 1 < chunks.length && SPINNER_CHARS.has(capChars(chunks[i + 1].content).trim())) {
+        let lastTrimmed = capChars(chunk.content).trim();
+        let last = chunk;
+        const nextTrimmed = i + 1 < chunks.length ? capChars(chunks[i + 1].content).trim() : null;
+        const startsRun =
+            SPINNER_CHARS.has(lastTrimmed) ||
+            (nextTrimmed !== null && looksLikeRedraw(lastTrimmed, nextTrimmed));
+        if (startsRun) {
+            while (i + 1 < chunks.length) {
+                const candidate = capChars(chunks[i + 1].content).trim();
+                if (!(SPINNER_CHARS.has(candidate) || looksLikeRedraw(lastTrimmed, candidate))) break;
                 i++;
                 last = chunks[i];
+                lastTrimmed = candidate;
             }
-            const lastFrame = capChars(last.content).trim();
             if (i === chunks.length - 1) {
-                spinnerSlot = { content: lastFrame, kind: last.kind };
+                spinnerSlot = { content: lastTrimmed, kind: last.kind };
             } else {
-                display.push({ ...last, content: lastFrame });
+                display.push({ ...last, content: lastTrimmed });
                 spinnerSlot = null;
             }
         } else {
