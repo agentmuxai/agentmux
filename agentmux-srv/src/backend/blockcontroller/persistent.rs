@@ -300,6 +300,86 @@ impl PersistentSubprocessController {
         }
     }
 
+    /// Periodic (low-frequency) republish of the current controllerstatus
+    /// while a turn is active — a self-healing backstop independent of
+    /// `publish_controller_status`'s `persist: 1` (which only helps a
+    /// reconnecting subscriber) and the frontend's focus-triggered reconcile
+    /// (which only fires on a background→foreground transition). If a single
+    /// live push is missed for some other reason (e.g. a throttled/backgrounded
+    /// renderer coalescing WS messages) while the window stays foregrounded
+    /// and connected the whole time, nothing else corrects it until the turn
+    /// actually ends. This shrinks that window from "forever" to at most one
+    /// heartbeat interval. `HEARTBEAT_SECS` is well below the frontend's own
+    /// `STUCK_THRESHOLD_MS` (45s, diagnostic-only) and `LIVENESS_RECOVERY_MS`
+    /// (180s, force-recovery) so a missed push self-heals long before either
+    /// of those fire. See REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md
+    /// §4 item 5. Duplicates `get_status_snapshot`'s field construction
+    /// rather than calling it, since the spawned task only holds cloned
+    /// `Arc`s, not `&self` — matches the existing precedent noted on
+    /// `core::spawn_health_watchdog` ("duplicated verbatim... before this
+    /// extraction"); worth factoring out if a second controller type needs
+    /// the same heartbeat.
+    ///
+    /// Same latent duplicate-loop race as `spawn_health_watchdog`'s existing,
+    /// already-accepted contract (reagent P2 on the PR that introduced this
+    /// function): if a turn ends and a new one starts again within one
+    /// `HEARTBEAT_SECS` window, the old loop hasn't yet woken up to observe
+    /// `is_active_turn() == false` and break, so both the old and new loop
+    /// can run concurrently for that window. Harmless — `publish_status`
+    /// republishing the same (or a slightly stale) snapshot twice is
+    /// idempotent from the frontend's point of view — so this is accepted
+    /// rather than fixed, matching the pre-existing pattern.
+    fn spawn_status_heartbeat(&self) {
+        const HEARTBEAT_SECS: u64 = 20;
+        self.spawn_status_heartbeat_with_interval(tokio::time::Duration::from_secs(HEARTBEAT_SECS));
+    }
+
+    /// Interval parameterized out of `spawn_status_heartbeat` so a test can
+    /// drive it with a short, real (not virtual-clock) interval instead of
+    /// waiting out `HEARTBEAT_SECS` — this crate doesn't enable tokio's
+    /// `test-util` feature (needed for `start_paused`/`time::advance`), and
+    /// adding it crate-wide for one test wasn't judged worth it.
+    fn spawn_status_heartbeat_with_interval(&self, heartbeat_interval: tokio::time::Duration) {
+        let inner = Arc::clone(&self.inner);
+        let block_id = self.block_id.clone();
+        let broker = self.broker.clone();
+        let health_monitor = Arc::clone(&self.health_monitor);
+        tokio::spawn(async move {
+            let Some(broker) = broker else { return };
+            let mut interval = tokio::time::interval(heartbeat_interval);
+            interval.tick().await; // first tick is immediate; publish_status() already ran at turn start
+            loop {
+                interval.tick().await;
+                let still_active = health_monitor.is_active_turn();
+                let status = {
+                    let g = inner.lock().unwrap();
+                    BlockControllerRuntimeStatus {
+                        blockid: block_id.clone(),
+                        version: g.status_version,
+                        shellprocstatus: g.proc_status.clone(),
+                        shellprocconnname: "local".to_string(),
+                        shellprocexitcode: g.proc_exit_code,
+                        spawn_ts_ms: None,
+                        is_agent_pane: true,
+                        turn_active: still_active,
+                    }
+                };
+                super::publish_controller_status(&broker, &status);
+                // Publish the final `turn_active: false` snapshot BEFORE
+                // exiting, not just break silently — reagent P1: this
+                // heartbeat exists specifically to backstop a missed live
+                // turn-end push (the exact stuck-"Working"-forever bug this
+                // PR fixes). Breaking without this last publish meant the
+                // one case it's most needed for — the terminal push being
+                // the one that got dropped — was the one case it didn't
+                // help.
+                if !still_active {
+                    break;
+                }
+            }
+        });
+    }
+
     fn is_running(&self) -> bool {
         let inner = self.inner.lock().unwrap();
         inner.stdin_tx.is_some()
@@ -356,6 +436,7 @@ impl PersistentSubprocessController {
         let was_active = self.health_monitor.mark_turn_active_returning_was_active();
         if !was_active {
             core::spawn_health_watchdog(&self.health_monitor);
+            self.spawn_status_heartbeat();
         }
         // Publish the turn_active flip so the Swarm view's live
         // ControllerStatus subscription picks it up immediately instead of
@@ -412,6 +493,7 @@ impl PersistentSubprocessController {
         let was_active = self.health_monitor.mark_turn_active_returning_was_active();
         if !was_active {
             core::spawn_health_watchdog(&self.health_monitor);
+            self.spawn_status_heartbeat();
         }
         self.publish_status();
 
@@ -1031,6 +1113,7 @@ impl PersistentSubprocessController {
         // dies (120 s) without producing meaningful output, giving the
         // frontend enough signal to show a "not responding" warning.
         core::spawn_health_watchdog(&self.health_monitor);
+        self.spawn_status_heartbeat();
 
         // Spawn process waiter task
         let block_id_wait = self.block_id.clone();
@@ -1339,6 +1422,86 @@ mod send_input_tests {
         assert!(
             !c.get_status_snapshot().turn_active,
             "turn_active must flip back false once the turn ends"
+        );
+    }
+
+    /// Regression for reagent P2 (persist-controllerstatus PR): confirms
+    /// `spawn_status_heartbeat` actually republishes while a turn stays
+    /// active, using a short real interval (`spawn_status_heartbeat_with_interval`)
+    /// instead of waiting out the production 20s — this crate doesn't enable
+    /// tokio's `test-util` feature, so a real (short) interval is used
+    /// rather than a virtual/paused clock.
+    #[tokio::test]
+    async fn status_heartbeat_republishes_while_active() {
+        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let c = PersistentSubprocessController::new(
+            "tab".to_string(),
+            "block-heartbeat".to_string(),
+            Some(broker.clone()),
+            None,
+            None,
+            None,
+        );
+        c.health_monitor.set_active_turn(true);
+        c.spawn_status_heartbeat_with_interval(tokio::time::Duration::from_millis(5));
+
+        // Generous margin over several 5ms ticks — proves at least one
+        // heartbeat tick actually published, without asserting an exact count
+        // (real-time scheduling, not virtual-clock-deterministic).
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        let history = broker.read_event_history(
+            crate::backend::wps::EVENT_CONTROLLER_STATUS,
+            "block:block-heartbeat",
+            1,
+        );
+        assert_eq!(history.len(), 1, "heartbeat must have published at least once while active");
+        let status: BlockControllerRuntimeStatus =
+            serde_json::from_value(history[0].data.clone().unwrap()).unwrap();
+        assert!(status.turn_active, "published snapshot must reflect the active turn");
+    }
+
+    /// Regression for reagent P1 (round 2 on the persist-controllerstatus
+    /// PR): the heartbeat loop must publish one final `turn_active: false`
+    /// snapshot before exiting, not just break silently. This is the exact
+    /// case the heartbeat exists to backstop — a missed live turn-end
+    /// push — so a silent exit with no final publish would leave the
+    /// client stuck showing "Working" in precisely the scenario this whole
+    /// mechanism was built for.
+    #[tokio::test]
+    async fn status_heartbeat_publishes_final_inactive_status_before_stopping() {
+        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let c = PersistentSubprocessController::new(
+            "tab".to_string(),
+            "block-heartbeat-stop".to_string(),
+            Some(broker.clone()),
+            None,
+            None,
+            None,
+        );
+        c.health_monitor.set_active_turn(true);
+        c.spawn_status_heartbeat_with_interval(tokio::time::Duration::from_millis(5));
+
+        // Let at least one active-turn tick land, then mark the turn ended —
+        // simulating the exact scenario: the "real" turn-end publish (from
+        // wherever normally calls publish_controller_status on completion)
+        // is the one that got dropped, and the heartbeat is the only thing
+        // left that can correct the client's stale "Working" state.
+        tokio::time::sleep(tokio::time::Duration::from_millis(30)).await;
+        c.health_monitor.set_active_turn(false);
+        tokio::time::sleep(tokio::time::Duration::from_millis(30)).await;
+
+        let history = broker.read_event_history(
+            crate::backend::wps::EVENT_CONTROLLER_STATUS,
+            "block:block-heartbeat-stop",
+            1,
+        );
+        assert_eq!(history.len(), 1, "must have published at least the final status");
+        let status: BlockControllerRuntimeStatus =
+            serde_json::from_value(history[0].data.clone().unwrap()).unwrap();
+        assert!(
+            !status.turn_active,
+            "the heartbeat's last publish before stopping must reflect turn_active: false, \
+             not silently disappear leaving the client on a stale turn_active: true"
         );
     }
 }

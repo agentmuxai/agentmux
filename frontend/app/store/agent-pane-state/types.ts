@@ -589,12 +589,15 @@ export type AgentPaneEvent =
       }
     | { type: "turn-started"; at: number }
     /**
-     * `ReconcileTurnActive` promoted the mount-default `Idle` to
-     * `Streaming` because the backend reported a turn already in flight.
-     * Surfaced for diagnostics — distinguishes this from a normal
-     * user-initiated `turn-started`.
+     * `ReconcileTurnActive` promoted the phase to `Streaming` because the
+     * backend reported a turn already in flight — either the mount-default
+     * `Idle` (the original case) or a settled `Done.completed` episode (the
+     * focus-triggered reconcile's missed-live-turn-start case). Surfaced
+     * for diagnostics — distinguishes this from a normal user-initiated
+     * `turn-started`. Not "-at-mount" anymore since it can now fire well
+     * after mount.
      */
-    | { type: "turn-active-reconciled-at-mount" }
+    | { type: "turn-active-reconciled" }
     /**
      * `ReconcileTurnActive` demoted a stuck `Streaming` phase to `Idle`
      * because the backend's authoritative `turn_active` reported the turn
