@@ -350,9 +350,7 @@ impl PersistentSubprocessController {
             interval.tick().await; // first tick is immediate; publish_status() already ran at turn start
             loop {
                 interval.tick().await;
-                if !health_monitor.is_active_turn() {
-                    break;
-                }
+                let still_active = health_monitor.is_active_turn();
                 let status = {
                     let g = inner.lock().unwrap();
                     BlockControllerRuntimeStatus {
@@ -363,10 +361,21 @@ impl PersistentSubprocessController {
                         shellprocexitcode: g.proc_exit_code,
                         spawn_ts_ms: None,
                         is_agent_pane: true,
-                        turn_active: health_monitor.is_active_turn(),
+                        turn_active: still_active,
                     }
                 };
                 super::publish_controller_status(&broker, &status);
+                // Publish the final `turn_active: false` snapshot BEFORE
+                // exiting, not just break silently — reagent P1: this
+                // heartbeat exists specifically to backstop a missed live
+                // turn-end push (the exact stuck-"Working"-forever bug this
+                // PR fixes). Breaking without this last publish meant the
+                // one case it's most needed for — the terminal push being
+                // the one that got dropped — was the one case it didn't
+                // help.
+                if !still_active {
+                    break;
+                }
             }
         });
     }
@@ -1449,6 +1458,51 @@ mod send_input_tests {
         let status: BlockControllerRuntimeStatus =
             serde_json::from_value(history[0].data.clone().unwrap()).unwrap();
         assert!(status.turn_active, "published snapshot must reflect the active turn");
+    }
+
+    /// Regression for reagent P1 (round 2 on the persist-controllerstatus
+    /// PR): the heartbeat loop must publish one final `turn_active: false`
+    /// snapshot before exiting, not just break silently. This is the exact
+    /// case the heartbeat exists to backstop — a missed live turn-end
+    /// push — so a silent exit with no final publish would leave the
+    /// client stuck showing "Working" in precisely the scenario this whole
+    /// mechanism was built for.
+    #[tokio::test]
+    async fn status_heartbeat_publishes_final_inactive_status_before_stopping() {
+        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let c = PersistentSubprocessController::new(
+            "tab".to_string(),
+            "block-heartbeat-stop".to_string(),
+            Some(broker.clone()),
+            None,
+            None,
+            None,
+        );
+        c.health_monitor.set_active_turn(true);
+        c.spawn_status_heartbeat_with_interval(tokio::time::Duration::from_millis(5));
+
+        // Let at least one active-turn tick land, then mark the turn ended —
+        // simulating the exact scenario: the "real" turn-end publish (from
+        // wherever normally calls publish_controller_status on completion)
+        // is the one that got dropped, and the heartbeat is the only thing
+        // left that can correct the client's stale "Working" state.
+        tokio::time::sleep(tokio::time::Duration::from_millis(30)).await;
+        c.health_monitor.set_active_turn(false);
+        tokio::time::sleep(tokio::time::Duration::from_millis(30)).await;
+
+        let history = broker.read_event_history(
+            crate::backend::wps::EVENT_CONTROLLER_STATUS,
+            "block:block-heartbeat-stop",
+            1,
+        );
+        assert_eq!(history.len(), 1, "must have published at least the final status");
+        let status: BlockControllerRuntimeStatus =
+            serde_json::from_value(history[0].data.clone().unwrap()).unwrap();
+        assert!(
+            !status.turn_active,
+            "the heartbeat's last publish before stopping must reflect turn_active: false, \
+             not silently disappear leaving the client on a stale turn_active: true"
+        );
     }
 }
 
