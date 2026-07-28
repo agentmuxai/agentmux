@@ -107,35 +107,26 @@ struct ContextFileEntry {
 /// Flag names (case/dash/underscore-insensitive, `-`/`--` prefix optional)
 /// whose value is credential-shaped in common CLI/MCP server invocations —
 /// a curated allowlist rather than a broad substring match (e.g. `--keymap`
-/// must NOT trigger this), so `redact_mcp_entry` also scans `args` for
-/// these, not just the structured `env`/`headers` fields (Codex + reagent
-/// P1, PR #2333: `--api-key <secret>` or `--token=<secret>` in the runtime
-/// `args` array exported the secret verbatim).
-const SECRET_ARG_FLAG_NAMES: &[&str] = &[
-    "api-key", "apikey", "api_key",
+/// must NOT trigger this). Used for BOTH `args` flag names AND `url` query
+/// param names — a single shared list so the two can never drift apart
+/// again (reagent P1, PR #2333: the two lists started separate and the
+/// query-param one was missing several names the args one already had).
+const SECRET_NAMES: &[&str] = &[
+    "key", "api-key", "apikey", "api_key",
     "token", "access-token", "access_token", "auth-token", "auth_token",
     "bearer-token", "bearer_token",
     "secret", "secret-key", "secret_key", "client-secret", "client_secret",
     "password", "passwd",
 ];
 
-fn secret_arg_placeholder(flag: &str) -> String {
-    let normalized = flag.trim_start_matches('-').to_uppercase().replace('-', "_");
+fn secret_placeholder(name: &str) -> String {
+    let normalized = name.trim_start_matches('-').to_uppercase().replace('-', "_");
     format!("${{{normalized}}}")
 }
 
-fn is_secret_flag(flag: &str) -> bool {
-    let normalized = flag.trim_start_matches('-').to_lowercase();
-    SECRET_ARG_FLAG_NAMES.contains(&normalized.as_str())
-}
-
-/// Query-string parameter names commonly used to pass a credential in a
-/// URL (curated allowlist, same rationale as [`SECRET_ARG_FLAG_NAMES`]).
-fn is_secret_query_param(key: &str) -> bool {
-    matches!(
-        key.to_lowercase().as_str(),
-        "api_key" | "apikey" | "key" | "token" | "access_token" | "secret" | "password"
-    )
+fn is_secret_name(name: &str) -> bool {
+    let normalized = name.trim_start_matches('-').to_lowercase();
+    SECRET_NAMES.contains(&normalized.as_str())
 }
 
 /// Redact userinfo (`scheme://user:pass@host`) and known secret-bearing
@@ -144,9 +135,14 @@ fn is_secret_query_param(key: &str) -> bool {
 /// this module's existing style — see `sanitize_context_relative_path`) —
 /// deliberately conservative: only touches the exact shapes below, leaving
 /// anything it doesn't recognize unchanged rather than risking a malformed
-/// rewrite of a URL this scan doesn't fully understand.
-fn redact_url_credentials(url: &str) -> String {
+/// rewrite of a URL this scan doesn't fully understand. Returns the
+/// redacted URL plus the "landing" names for each thing redacted, so the
+/// caller can generate a matching `requirements.json` entry per name
+/// (reagent P2, PR #2333: redaction and the declared requirement must
+/// never disagree, the same invariant already enforced for headers).
+fn redact_url_credentials(url: &str) -> (String, Vec<String>) {
     let mut result = url.to_string();
+    let mut redacted_names = Vec::new();
 
     if let Some(scheme_end) = result.find("://") {
         let after_scheme = scheme_end + 3;
@@ -156,7 +152,8 @@ fn redact_url_credentials(url: &str) -> String {
             // before the `@` -- otherwise a bare `@` further into the URL
             // (rare, but possible in a path/fragment) would be misread.
             if !result[after_scheme..userinfo_end].contains('/') {
-                result.replace_range(after_scheme..userinfo_end, "${REDACTED}");
+                result.replace_range(after_scheme..userinfo_end, "${URL_CREDENTIALS}");
+                redacted_names.push("url_credentials".to_string());
             }
         }
     }
@@ -168,9 +165,10 @@ fn redact_url_credentials(url: &str) -> String {
         let new_pairs: Vec<String> = query
             .split('&')
             .map(|pair| match pair.split_once('=') {
-                Some((key, _)) if is_secret_query_param(key) => {
+                Some((key, _)) if is_secret_name(key) => {
                     changed = true;
-                    format!("{key}={}", secret_arg_placeholder(key))
+                    redacted_names.push(key.to_string());
+                    format!("{key}={}", secret_placeholder(key))
                 }
                 _ => pair.to_string(),
             })
@@ -180,7 +178,7 @@ fn redact_url_credentials(url: &str) -> String {
         }
     }
 
-    result
+    (result, redacted_names)
 }
 
 /// Redact secret-shaped values out of an MCP server config entry before it
@@ -197,34 +195,43 @@ fn redact_url_credentials(url: &str) -> String {
 /// `--api-key <secret>` or `https://user:pass@host` is just as real a leak
 /// as one in `env`/`headers` (Codex + reagent P1, PR #2333). Any other
 /// field passes through unchanged.
-fn redact_mcp_entry(entry: &Value) -> Value {
+///
+/// Returns the redacted entry PLUS every "landing" name that was actually
+/// redacted (env/header keys, arg flag names, url credential markers), so
+/// the caller derives `requirements.json` directly from what was redacted
+/// here instead of re-scanning separately — the two can never disagree by
+/// construction (reagent P2, PR #2333).
+fn redact_mcp_entry(entry: &Value) -> (Value, Vec<String>) {
     let mut redacted = entry.clone();
+    let mut redacted_names: Vec<String> = Vec::new();
     if let Some(obj) = redacted.as_object_mut() {
         for field in ["env", "headers"] {
             if let Some(Value::Object(map)) = obj.get_mut(field) {
                 for (key, value) in map.iter_mut() {
                     *value = json!(format!("${{{key}}}"));
+                    redacted_names.push(key.clone());
                 }
             }
         }
         if let Some(Value::Array(args)) = obj.get_mut("args") {
             let mut i = 0;
             while i < args.len() {
-                let Some(s) = args[i].as_str() else {
+                let Some(s) = args[i].as_str().map(|s| s.to_string()) else {
                     i += 1;
                     continue;
                 };
                 if let Some((flag, _value)) = s.split_once('=') {
                     // "--flag=value" form: redact just the value portion.
-                    if is_secret_flag(flag) {
-                        args[i] = json!(format!("{flag}={}", secret_arg_placeholder(flag)));
+                    if is_secret_name(flag) {
+                        args[i] = json!(format!("{flag}={}", secret_placeholder(flag)));
+                        redacted_names.push(flag.trim_start_matches('-').to_string());
                     }
                     i += 1;
-                } else if is_secret_flag(s) && i + 1 < args.len() {
+                } else if is_secret_name(&s) && i + 1 < args.len() {
                     // "--flag value" form: redact the NEXT element, leave
                     // the flag itself (it's not a secret) untouched.
-                    let placeholder = secret_arg_placeholder(s);
-                    args[i + 1] = json!(placeholder);
+                    args[i + 1] = json!(secret_placeholder(&s));
+                    redacted_names.push(s.trim_start_matches('-').to_string());
                     i += 2;
                 } else {
                     i += 1;
@@ -232,13 +239,14 @@ fn redact_mcp_entry(entry: &Value) -> Value {
             }
         }
         if let Some(url_str) = obj.get("url").and_then(|v| v.as_str()).map(|s| s.to_string()) {
-            let redacted_url = redact_url_credentials(&url_str);
+            let (redacted_url, url_names) = redact_url_credentials(&url_str);
             if redacted_url != url_str {
                 obj.insert("url".to_string(), json!(redacted_url));
+                redacted_names.extend(url_names);
             }
         }
     }
-    redacted
+    (redacted, redacted_names)
 }
 
 /// Validate a context-file's relative path is safe to place under
@@ -301,16 +309,22 @@ pub fn export_bundle(bundle: &Memory, skills: &[Skill]) -> BundleExport {
         "context_files",
         &mut warnings,
     );
+    // Compared case-INSENSITIVELY (stores the lowercased form) because the
+    // most common export/extract targets (Windows, macOS default) have
+    // case-insensitive filesystems -- "Docs/A.md" and "docs/a.md" collide
+    // on extraction there even though they're distinct paths byte-for-byte
+    // (reagent P2, PR #2333). The path actually written to `files` keeps
+    // its original case; only the collision check is case-folded.
     let mut used_context_paths: HashSet<String> = HashSet::new();
     for entry in context_files {
         if let Some(safe_path) = sanitize_context_relative_path(&entry.path) {
             let out_path = format!("instructions/context/{safe_path}");
             // Two distinct source paths can normalize to the same output
-            // (e.g. "docs/a.md" and "docs/./a.md") -- without this check the
-            // second silently overwrites the first's `files` entry, and the
-            // zip archive ends up with the same duplicate risk (reagent P2,
-            // PR #2333).
-            if !used_context_paths.insert(out_path.clone()) {
+            // (e.g. "docs/a.md" and "docs/./a.md", or a case-only
+            // difference) -- without this check the second silently
+            // overwrites the first's `files` entry, and the zip archive
+            // ends up with the same duplicate risk (reagent P2, PR #2333).
+            if !used_context_paths.insert(out_path.to_lowercase()) {
                 warnings.push(format!(
                     "context_files: \"{}\" normalizes to the same path as an \
                      earlier entry ({out_path}); skipped to avoid overwriting it",
@@ -379,7 +393,7 @@ pub fn export_bundle(bundle: &Memory, skills: &[Skill]) -> BundleExport {
             .unwrap_or_else(|| format!("mcp-server-{}", index + 1));
         let slug = unique_skill_slug(&display_name, &mut used_mcp_slugs);
         let path = format!("mcp/{slug}.server.json");
-        let redacted_entry = redact_mcp_entry(entry);
+        let (redacted_entry, redacted_names) = redact_mcp_entry(entry);
         let pretty = serde_json::to_string_pretty(&redacted_entry).unwrap_or_else(|_| "{}".to_string());
         files.push(BundleExportFile {
             path: path.clone(),
@@ -387,31 +401,32 @@ pub fn export_bundle(bundle: &Memory, skills: &[Skill]) -> BundleExport {
         });
         manifest_mcp.push(path);
 
-        // Both `env` and `headers` are credential-bearing per `redact_mcp_entry`
-        // (a header-only-authenticated server, e.g. `headers.Authorization`, is
-        // just as real a credential requirement as an env-var one) -- infer a
-        // requirement entry from each key of EITHER field, not just `env`, so
-        // the redaction in the exported .server.json and the declared
-        // requirement never disagree on whether a credential is needed here
-        // (reagent P2, PR #2325).
-        for field in ["env", "headers"] {
-            if let Some(field_obj) = entry.get(field).and_then(|v| v.as_object()) {
-                for key in field_obj.keys() {
-                    requirements.push(json!({
-                        "id": format!("{slug}-{key}"),
-                        "provider": slug,
-                        "kind": "api-key",
-                        // "Where it lands" per the requirements.json schema
-                        // (research report §5.3) -- an env var name for `env`
-                        // entries, or the header name for `headers` entries;
-                        // the resolver substitutes into whichever the exported
-                        // .server.json's redacted `${key}` placeholder sits
-                        // under.
-                        "env": key,
-                        "optional": false,
-                    }));
-                }
+        // Requirements are derived DIRECTLY from what redact_mcp_entry
+        // actually redacted (env/header keys, arg flag names, url
+        // credential markers) -- not re-scanned separately here -- so the
+        // exported placeholder and the declared requirement can never
+        // disagree by construction. This invariant was broken twice
+        // already by re-scanning only a subset of fields (reagent P2, PR
+        // #2325 for headers, PR #2333 for args/url); deriving from the
+        // single redaction pass closes it for good.
+        let mut seen_names: HashSet<&str> = HashSet::new();
+        for name in &redacted_names {
+            if !seen_names.insert(name.as_str()) {
+                continue; // e.g. the same flag name appearing twice in args
             }
+            requirements.push(json!({
+                "id": format!("{slug}-{name}"),
+                "provider": slug,
+                "kind": "api-key",
+                // "Where it lands" per the requirements.json schema
+                // (research report §5.3) -- an env var name, header name,
+                // arg flag name, or url_credentials for a userinfo/query
+                // redaction; the resolver substitutes into whichever the
+                // exported .server.json's redacted `${NAME}` placeholder
+                // sits under.
+                "env": name,
+                "optional": false,
+            }));
         }
     }
 
@@ -766,6 +781,30 @@ mod tests {
     }
 
     #[test]
+    fn colliding_context_file_paths_case_insensitive() {
+        // reagent P2, PR #2333: "Docs/A.md" and "docs/a.md" are distinct
+        // byte-for-byte but collide on extraction on the most common
+        // export targets (Windows, macOS default case-insensitive
+        // filesystems) -- must be caught the same way an exact-match
+        // collision is.
+        let context_files = r#"[
+            {"path":"Docs/A.md","content":"first"},
+            {"path":"docs/a.md","content":"second, would collide on a case-insensitive filesystem"}
+        ]"#;
+        let bundle = make_bundle("", context_files, "[]", "[]");
+        let export = export_bundle(&bundle, &[]);
+
+        let matches: Vec<_> = export
+            .files
+            .iter()
+            .filter(|f| f.path.to_lowercase() == "instructions/context/docs/a.md")
+            .collect();
+        assert_eq!(matches.len(), 1, "must not produce case-only-different duplicate entries");
+        assert_eq!(matches[0].content, "first");
+        assert!(export.warnings.iter().any(|w| w.contains("docs/a.md")));
+    }
+
+    #[test]
     fn infers_a_requirement_for_a_header_only_authenticated_server() {
         // reagent P2, PR #2325: a server authenticated ENTIRELY via headers
         // (no env at all) previously produced no requirements.json -- its
@@ -810,6 +849,11 @@ mod tests {
         assert!(!server_file.content.contains("lin_realSecretAbc123"));
         assert!(server_file.content.contains("${API_KEY}"));
         assert!(server_file.content.contains("--verbose"), "unrelated flags must survive untouched");
+
+        // reagent P2, PR #2333: an args-derived redaction must infer a
+        // matching requirement too, not just env/headers ones.
+        let req_file = export.files.iter().find(|f| f.path == "accounts/requirements.json").unwrap();
+        assert!(req_file.content.contains("api-key"));
     }
 
     #[test]
@@ -827,6 +871,9 @@ mod tests {
         assert!(server_file.content.contains("${TOKEN}"));
         // "--port 8080" is not a secret flag -- must survive untouched.
         assert!(server_file.content.contains("8080"));
+
+        let req_file = export.files.iter().find(|f| f.path == "accounts/requirements.json").unwrap();
+        assert!(req_file.content.contains("token"));
     }
 
     #[test]
@@ -861,10 +908,40 @@ mod tests {
         let server_file = export.files.iter().find(|f| f.path == "mcp/remote.server.json").unwrap();
         assert!(!server_file.content.contains("realPass456"));
         assert!(!server_file.content.contains("realKeyAbc"));
-        assert!(server_file.content.contains("${REDACTED}@mcp.example.com"));
+        assert!(server_file.content.contains("${URL_CREDENTIALS}@mcp.example.com"));
         assert!(server_file.content.contains("api_key=${API_KEY}"));
         // Non-secret query params must survive untouched.
         assert!(server_file.content.contains("region=us"));
+
+        // reagent P2, PR #2333: requirements.json must be derived from
+        // the SAME redaction pass, not a separate env/headers-only scan.
+        let req_file = export
+            .files
+            .iter()
+            .find(|f| f.path == "accounts/requirements.json")
+            .expect("url-embedded credentials must still infer requirements");
+        assert!(req_file.content.contains("url_credentials"));
+        assert!(req_file.content.contains("api_key"));
+    }
+
+    #[test]
+    fn query_param_redaction_uses_the_same_allowlist_as_args() {
+        // reagent P1, PR #2333: is_secret_query_param's list previously
+        // omitted names already recognized for args (client_secret,
+        // auth_token, bearer_token, secret_key) -- the two lists could
+        // silently drift apart. Now backed by one shared SECRET_NAMES list.
+        let mcp_servers = r#"[{
+            "name": "oauth-server",
+            "type": "http",
+            "url": "https://api.example.com/mcp?client_secret=realClientSecret123&auth_token=realAuthToken456"
+        }]"#;
+        let bundle = make_bundle("", "[]", mcp_servers, "[]");
+        let export = export_bundle(&bundle, &[]);
+        let server_file = export.files.iter().find(|f| f.path == "mcp/oauth-server.server.json").unwrap();
+        assert!(!server_file.content.contains("realClientSecret123"));
+        assert!(!server_file.content.contains("realAuthToken456"));
+        assert!(server_file.content.contains("client_secret=${CLIENT_SECRET}"));
+        assert!(server_file.content.contains("auth_token=${AUTH_TOKEN}"));
     }
 
     #[test]
