@@ -88,6 +88,24 @@ describe("uniqueSkillSlug", () => {
         const used = new Set<string>(["deploy-checklist", "deploy-checklist-2"]);
         expect(uniqueSkillSlug("Deploy!!Checklist", used)).toBe("deploy-checklist-3");
     });
+
+    it("replaces underscores with hyphens (Agent Skills name grammar has no underscores)", () => {
+        // Codex P1, PR #2322: deriveSlug (shared with agent role-slugs) keeps
+        // underscores, which is spec-invalid for an Agent Skills `name`.
+        const used = new Set<string>();
+        expect(uniqueSkillSlug("code_review", used)).toBe("code-review");
+    });
+
+    it("keeps the suffixed slug within the 64-character spec max", () => {
+        // Codex P2, PR #2322: a 64-char base plus "-2" was previously 66 chars.
+        const used = new Set<string>();
+        const long = "a".repeat(100);
+        const first = uniqueSkillSlug(long, used);
+        expect(first).toHaveLength(64);
+        const second = uniqueSkillSlug(long, used);
+        expect(second.length).toBeLessThanOrEqual(64);
+        expect(second.endsWith("-2")).toBe(true);
+    });
 });
 
 describe("buildConfigFiles — skill materialization", () => {

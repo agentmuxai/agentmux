@@ -484,6 +484,12 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 }
 
+/// Hidden manifest (relative to the agent working directory) tracking which
+/// skill-derived paths AgentMux itself wrote on the last `write_agent_config_files`
+/// call, so a subsequent call can delete ones that are no longer current without
+/// touching any user-authored `.claude/commands`/`.claude/skills` content.
+const MANAGED_SKILL_FILES_MANIFEST: &str = ".claude/.agentmux-managed-skill-files.json";
+
 /// Write agent config files (CLAUDE.md, .mcp.json, etc.) to the working directory.
 pub(super) fn write_agent_config_files(
     wstore: &Store,
@@ -612,6 +618,41 @@ pub(super) fn write_agent_config_files(
             .map_err(|e| format!("failed to create working dir: {e}"))?;
     }
 
+    // Remove skill-derived files (.claude/commands/*.md, .claude/skills/*/SKILL.md)
+    // that WE wrote on a previous launch but aren't part of this run's output --
+    // e.g. a skill's format switched between "prompt" and "agent-skill", or a
+    // skill was renamed/removed. Without this, the old file stays on disk and
+    // Claude keeps treating it as active alongside the newly selected format
+    // (reagent P1 + Codex P1/P2, PR #2322). Tracked via a small manifest of
+    // paths AgentMux itself wrote, rather than scanning .claude/commands or
+    // .claude/skills wholesale, so a user's own hand-authored commands/skills
+    // in the same working directory are never touched.
+    let new_managed_skill_paths: std::collections::BTreeSet<String> = config_files
+        .iter()
+        .filter(|f| {
+            f.filename.starts_with(".claude/commands/") || f.filename.starts_with(".claude/skills/")
+        })
+        .map(|f| f.filename.clone())
+        .collect();
+    let manifest_path = base_path.join(MANAGED_SKILL_FILES_MANIFEST);
+    if let Ok(raw) = std::fs::read_to_string(&manifest_path) {
+        if let Ok(old_paths) = serde_json::from_str::<Vec<String>>(&raw) {
+            for old in &old_paths {
+                if new_managed_skill_paths.contains(old) {
+                    continue;
+                }
+                let old_path = base_path.join(old);
+                let _ = std::fs::remove_file(&old_path);
+                // Agent Skills format nests under .claude/skills/<slug>/ -- clean
+                // up the now-empty slug directory too (no-op/fails silently if
+                // anything else still lives there, e.g. a future scripts/ dir).
+                if let Some(parent) = old_path.parent() {
+                    let _ = std::fs::remove_dir(parent);
+                }
+            }
+        }
+    }
+
     for file in &config_files {
         let file_path = base_path.join(&file.filename);
         if let Some(parent) = file_path.parent() {
@@ -623,6 +664,17 @@ pub(super) fn write_agent_config_files(
             .map_err(|e| format!("failed to write {}: {e}", file.filename))?;
     }
 
+    if let Ok(manifest_json) = serde_json::to_string(&new_managed_skill_paths) {
+        if let Err(e) = std::fs::write(&manifest_path, manifest_json) {
+            tracing::warn!(
+                work_dir = %expanded_dir,
+                error = %e,
+                "write_agent_config_files: failed to write managed-skill-files manifest; \
+                 stale file cleanup may be skipped on the next launch"
+            );
+        }
+    }
+
     tracing::info!(
         agent_id = %agent.id,
         work_dir = %expanded_dir,
@@ -631,4 +683,120 @@ pub(super) fn write_agent_config_files(
     );
 
     Ok(())
+}
+
+#[cfg(test)]
+mod write_agent_config_files_tests {
+    use super::*;
+    use crate::backend::storage::Skill;
+
+    fn make_store() -> Store {
+        Store::open_in_memory().unwrap()
+    }
+
+    fn make_agent(id: &str, working_directory: &str) -> AgentDefinition {
+        AgentDefinition {
+            id: id.to_string(),
+            slug: String::new(),
+            name: "Test Agent".to_string(),
+            icon: String::new(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: working_directory.to_string(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 1_700_000_000_000,
+            agent_type: "host".to_string(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 1_700_000_000_000,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+        }
+    }
+
+    fn make_skill(skill_type: &str) -> Skill {
+        Skill {
+            id: "skill-1".to_string(),
+            name: "Deploy".to_string(),
+            trigger: "deploy".to_string(),
+            skill_type: skill_type.to_string(),
+            description: "Deploy the app".to_string(),
+            content: "1. Test\n2. Deploy".to_string(),
+            is_global: false,
+            created_at: 1_700_000_000_000,
+            updated_at: 1_700_000_000_000,
+        }
+    }
+
+    /// reagent P1 + Codex P1/P2, PR #2322: switching a skill's `skill_type`
+    /// between "prompt" and "agent-skill" must remove the artifact from the
+    /// PREVIOUS format, not just write the new one -- otherwise the stale
+    /// file stays active alongside the newly selected format.
+    #[test]
+    fn switching_skill_format_removes_the_stale_artifact() {
+        let wstore = make_store();
+        let id_store = make_store();
+        let work_dir = tempfile::tempdir().unwrap();
+        let work_dir_str = work_dir.path().to_str().unwrap();
+
+        let mut agent = make_agent("agent-1", work_dir_str);
+        wstore.agent_def_insert(&mut agent).unwrap();
+        wstore.skill_upsert_unique("agent-1", &make_skill("agent-skill"), true).unwrap();
+
+        write_agent_config_files(&wstore, &id_store, &agent, "test-agent", work_dir_str).unwrap();
+        let skill_md = work_dir.path().join(".claude/skills/deploy/SKILL.md");
+        assert!(skill_md.exists(), "expected .claude/skills/deploy/SKILL.md to be written");
+
+        // Flip the same skill to "prompt" format and relaunch.
+        let mut prompt_skill = make_skill("prompt");
+        prompt_skill.updated_at = 1_700_000_000_001;
+        wstore.skill_upsert_unique("agent-1", &prompt_skill, true).unwrap();
+        write_agent_config_files(&wstore, &id_store, &agent, "test-agent", work_dir_str).unwrap();
+
+        let command_md = work_dir.path().join(".claude/commands/deploy.md");
+        assert!(command_md.exists(), "expected .claude/commands/deploy.md to be written");
+        assert!(
+            !skill_md.exists(),
+            "stale .claude/skills/deploy/SKILL.md must be removed when the skill switches to prompt format"
+        );
+        assert!(
+            !skill_md.parent().unwrap().exists(),
+            "the now-empty .claude/skills/deploy/ directory should be cleaned up too"
+        );
+    }
+
+    /// A file the user hand-authored under .claude/commands or .claude/skills
+    /// (never part of any AgentMux-written manifest) must never be deleted by
+    /// the stale-cleanup pass.
+    #[test]
+    fn user_authored_files_outside_the_manifest_are_never_touched() {
+        let wstore = make_store();
+        let id_store = make_store();
+        let work_dir = tempfile::tempdir().unwrap();
+        let work_dir_str = work_dir.path().to_str().unwrap();
+
+        let mut agent = make_agent("agent-1", work_dir_str);
+        wstore.agent_def_insert(&mut agent).unwrap();
+
+        let user_file = work_dir.path().join(".claude/commands/my-own-command.md");
+        std::fs::create_dir_all(user_file.parent().unwrap()).unwrap();
+        std::fs::write(&user_file, "# hand-authored, not from AgentMux").unwrap();
+
+        wstore.skill_upsert_unique("agent-1", &make_skill("agent-skill"), true).unwrap();
+        write_agent_config_files(&wstore, &id_store, &agent, "test-agent", work_dir_str).unwrap();
+        write_agent_config_files(&wstore, &id_store, &agent, "test-agent", work_dir_str).unwrap();
+
+        assert!(user_file.exists(), "hand-authored file outside AgentMux's manifest must survive");
+    }
 }

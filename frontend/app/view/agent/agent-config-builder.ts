@@ -184,24 +184,47 @@ export function renderSkillMd(slug: string, description: string, body: string): 
 }
 
 /**
- * Derive a filesystem-safe, COLLISION-FREE slug for a skill within one
- * `buildConfigFiles` call. `deriveSlug` alone can produce identical output
- * for distinct names that differ only in punctuation/whitespace (e.g.
- * "Deploy Checklist" and "Deploy!!!Checklist" both -> "deploy-checklist"),
- * which would otherwise silently overwrite one skill's SKILL.md with
- * another's (reagent P1, PR #2322). Appends "-2", "-3", ... until unique
- * within `used`. Mirrors `unique_skill_slug` in
+ * Derive a slug for an Agent Skill name that is valid per the Agent Skills
+ * `name` grammar: lowercase letters, digits, and hyphens ONLY (no
+ * underscores). `deriveSlug` is shared with agent role-slugs, which
+ * deliberately DO permit underscores, so it isn't spec-valid here as-is —
+ * hyphenate underscores (and re-collapse any resulting run of hyphens)
+ * rather than reusing it directly (Codex P1, PR #2322). Mirrors
+ * `skill_name_slug` in `agentmux-srv/src/backend/agent_config.rs`.
+ */
+function skillNameSlug(name: string): string {
+    const collapsed = deriveSlug(name)
+        .replace(/_/g, "-")
+        .split("-")
+        .filter((s) => s.length > 0)
+        .join("-");
+    return collapsed || "skill";
+}
+
+/**
+ * Derive a filesystem-safe, COLLISION-FREE, spec-valid slug for a skill
+ * within one `buildConfigFiles` call. `skillNameSlug` alone can produce
+ * identical output for distinct names that differ only in
+ * punctuation/whitespace (e.g. "Deploy Checklist" and "Deploy!!!Checklist"
+ * both -> "deploy-checklist"), which would otherwise silently overwrite one
+ * skill's SKILL.md with another's (reagent P1, PR #2322). Appends "-2",
+ * "-3", ... until unique within `used`, truncating the base first so the
+ * suffixed result never exceeds the spec's 64-character max (Codex P2, PR
+ * #2322). Mirrors `unique_skill_slug` in
  * `agentmux-srv/src/backend/agent_config.rs`.
  */
 export function uniqueSkillSlug(name: string, used: Set<string>): string {
-    const base = deriveSlug(name);
+    const MAX_LEN = 64;
+    const base = skillNameSlug(name);
     if (!used.has(base)) {
         used.add(base);
         return base;
     }
     let n = 2;
     for (;;) {
-        const candidate = `${base}-${n}`;
+        const suffix = `-${n}`;
+        const truncatedBase = base.slice(0, Math.max(0, MAX_LEN - suffix.length));
+        const candidate = `${truncatedBase}${suffix}`;
         if (!used.has(candidate)) {
             used.add(candidate);
             return candidate;

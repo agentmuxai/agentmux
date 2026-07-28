@@ -562,6 +562,21 @@ pub fn expand_template(content: &str, vars: &HashMap<String, String>) -> String 
 /// Agent Skills spec caps `description` at 1024 characters.
 const SKILL_DESCRIPTION_MAX_LEN: usize = 1024;
 
+/// Truncate `s` to at most `max_units` UTF-16 code units, on a UTF-8 char
+/// boundary. Mirrors JS `.slice(0, n)` semantics (JS strings are indexed in
+/// UTF-16 code units, so a Rust byte-length cap diverges from the TS mirror
+/// for any non-ASCII text — reagent P2, PR #2322).
+fn truncate_utf16_units(s: &str, max_units: usize) -> String {
+    let mut units = 0usize;
+    for (byte_idx, ch) in s.char_indices() {
+        units += ch.len_utf16();
+        if units > max_units {
+            return s[..byte_idx].to_string();
+        }
+    }
+    s.to_string()
+}
+
 /// Render an Agent Skills-format `SKILL.md`: YAML frontmatter with the two
 /// required fields (`name`, `description` — per the spec's six-field
 /// frontmatter; AgentMux doesn't populate the four optional ones today:
@@ -572,9 +587,12 @@ const SKILL_DESCRIPTION_MAX_LEN: usize = 1024;
 /// requires `name` be lowercase/hyphenated and match its parent directory;
 /// callers must pass the same value used to build the `.claude/skills/<slug>/`
 /// path (reagent P1, PR #2322). `description` is validated: the spec requires
-/// a non-empty value (falls back to a placeholder) capped at 1024 characters
-/// (truncated on a char boundary, since the UI permits arbitrary-length free
-/// text with no spec-awareness).
+/// a non-empty value (falls back to a placeholder) capped at 1024 **UTF-16
+/// code units** — matching the TS mirror's `.slice(0, 1024)` (JS string
+/// indexing is UTF-16-code-unit based), since the UI permits arbitrary-length
+/// free text with no spec-awareness and non-ASCII descriptions previously
+/// truncated to different byte vs. UTF-16 lengths between the two paths
+/// (reagent P2, PR #2322).
 ///
 /// YAML double-quoted scalars use JSON-compatible escaping (YAML 1.2
 /// §7.3.1), so `serde_json::to_string` on a plain string produces a valid,
@@ -582,16 +600,12 @@ const SKILL_DESCRIPTION_MAX_LEN: usize = 1024;
 /// adding a yaml crate dependency (this workspace has neither today) just
 /// for two scalar fields.
 fn render_skill_md(slug: &str, description: &str, body: &str) -> String {
+    let owned_description;
     let description = if description.trim().is_empty() {
         "No description provided."
-    } else if description.len() > SKILL_DESCRIPTION_MAX_LEN {
-        let mut end = SKILL_DESCRIPTION_MAX_LEN;
-        while !description.is_char_boundary(end) {
-            end -= 1;
-        }
-        &description[..end]
     } else {
-        description
+        owned_description = truncate_utf16_units(description, SKILL_DESCRIPTION_MAX_LEN);
+        owned_description.as_str()
     };
     let name_yaml =
         serde_json::to_string(slug).expect("string serialization is infallible");
@@ -600,21 +614,55 @@ fn render_skill_md(slug: &str, description: &str, body: &str) -> String {
     format!("---\nname: {name_yaml}\ndescription: {description_yaml}\n---\n\n{body}")
 }
 
-/// Derive a filesystem-safe, COLLISION-FREE slug for a skill within one
-/// `build_config_files` call. `derive_slug` alone can produce identical
-/// output for distinct names that differ only in punctuation/whitespace
-/// (e.g. "Deploy Checklist" and "Deploy!!!Checklist" both ->
-/// "deploy-checklist"), which would otherwise silently overwrite one
-/// skill's `SKILL.md` with another's on disk (reagent P1, PR #2322).
-/// Appends `-2`, `-3`, ... until the slug is unique within `used`.
+/// Derive a slug for an Agent Skill name that is valid per the Agent Skills
+/// `name` grammar: lowercase letters, digits, and hyphens ONLY (no
+/// underscores). `derive_slug` is shared with agent role-slugs, which
+/// deliberately DO permit underscores, so it isn't spec-valid here as-is —
+/// hyphenate underscores (and re-collapse any resulting run of hyphens)
+/// rather than reusing it directly (Codex P1, PR #2322).
+fn skill_name_slug(name: &str) -> String {
+    let base = derive_slug(name).replace('_', "-");
+    let collapsed: String = base
+        .split('-')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    if collapsed.is_empty() {
+        "skill".to_string()
+    } else {
+        collapsed
+    }
+}
+
+/// Derive a filesystem-safe, COLLISION-FREE, spec-valid slug for an Agent
+/// Skill name within one caller-scoped `used` set. `skill_name_slug` alone
+/// can produce identical output for distinct names that differ only in
+/// punctuation/whitespace (e.g. "Deploy Checklist" and "Deploy!!!Checklist"
+/// both -> "deploy-checklist"), which would otherwise silently overwrite one
+/// skill's `SKILL.md` with another's on disk (reagent P1, PR #2322). Appends
+/// `-2`, `-3`, ... until the slug is unique within `used`, truncating the
+/// base first so the suffixed result never exceeds the spec's 64-character
+/// max (Codex P2, PR #2322 — a 64-char base plus `-2` was previously 66
+/// chars).
 fn unique_skill_slug(name: &str, used: &mut HashSet<String>) -> String {
-    let base = derive_slug(name);
+    const MAX_LEN: usize = 64;
+    let base = skill_name_slug(name);
     if used.insert(base.clone()) {
         return base;
     }
     let mut n: u32 = 2;
     loop {
-        let candidate = format!("{base}-{n}");
+        let suffix = format!("-{n}");
+        let max_base_len = MAX_LEN.saturating_sub(suffix.len());
+        let mut truncated_base = base.clone();
+        if truncated_base.len() > max_base_len {
+            let mut end = max_base_len;
+            while end > 0 && !truncated_base.is_char_boundary(end) {
+                end -= 1;
+            }
+            truncated_base.truncate(end);
+        }
+        let candidate = format!("{truncated_base}{suffix}");
         if used.insert(candidate.clone()) {
             return candidate;
         }
@@ -878,6 +926,43 @@ mod tests {
         assert!(second.content.contains("body two"));
         let third = skill_files.iter().find(|f| f.filename.ends_with("deploy-checklist-3/SKILL.md")).unwrap();
         assert!(third.content.contains("body three"));
+    }
+
+    #[test]
+    fn test_unique_skill_slug_replaces_underscores_with_hyphens() {
+        // Codex P1, PR #2322: derive_slug (shared with agent role-slugs) keeps
+        // underscores, which is spec-invalid for an Agent Skills `name`.
+        let mut used = HashSet::new();
+        assert_eq!(unique_skill_slug("code_review", &mut used), "code-review");
+    }
+
+    #[test]
+    fn test_unique_skill_slug_suffixed_slug_stays_within_64_chars() {
+        // Codex P2, PR #2322: a 64-char base plus "-2" was previously 66 chars.
+        let mut used = HashSet::new();
+        let long = "a".repeat(100);
+        let first = unique_skill_slug(&long, &mut used);
+        assert_eq!(first.len(), 64);
+        let second = unique_skill_slug(&long, &mut used);
+        assert!(second.len() <= 64, "suffixed slug exceeds 64 chars: {second} ({})", second.len());
+        assert!(second.ends_with("-2"));
+    }
+
+    #[test]
+    fn test_render_skill_md_truncates_by_utf16_units_matching_ts_slice() {
+        // reagent P2, PR #2322: Rust previously capped by byte length while
+        // the TS mirror caps by UTF-16 code units (`.slice(0, 1024)`), so
+        // non-ASCII descriptions truncated to different lengths between the
+        // two paths. A 3-byte-per-char UTF-8 string (each char = 1 UTF-16
+        // unit) makes the byte-vs-unit divergence obvious: byte-based
+        // truncation would cut this off around char 341, not 1024.
+        let description: String = "\u{4e2d}".repeat(2000); // "中" x2000 (3 bytes each, 1 UTF-16 unit each)
+        let md = render_skill_md("slug", &description, "body");
+        let desc_line = md.lines().find(|l| l.starts_with("description: ")).unwrap();
+        let quoted = desc_line.trim_start_matches("description: ");
+        let inner = &quoted[1..quoted.len() - 1]; // strip surrounding quotes
+        let utf16_len: usize = inner.chars().map(|c| c.len_utf16()).sum();
+        assert_eq!(utf16_len, 1024, "expected exactly 1024 UTF-16 units, got {utf16_len}");
     }
 
     #[test]
