@@ -63,6 +63,22 @@ export interface UseAgentCommandsOptions {
     log: LogFn;
     setAuthUrl: (url: string | null) => void;
     /**
+     * True when the pane is ALREADY showing the mount-time "Log in" bar
+     * (`useAgentControllerStatus`'s `canRetry`) — no turn was ever
+     * attempted, or a recovery attempt just failed. `deliverToBackend`
+     * checks this immediately before `AgentInputCommand` so a message
+     * sent from a pane the UI already knows is logged out fails fast
+     * instead of spawning a doomed CLI process that only reports "Not
+     * logged in" after a real network round-trip. See
+     * docs/retro/retro-send-while-unauthenticated-2026-07-28.md.
+     */
+    canRetry: Accessor<boolean>;
+    /** Same surface `useAgentControllerStatus`'s own recovery-failure
+     *  notices use (the error box above the composer) — reused here so
+     *  the known-unauthenticated fast-fail above looks consistent with
+     *  every other auth-recovery message this pane can show. */
+    setAuthNotice: (notice: string | null) => void;
+    /**
      * The model-level backToPicker action. The hook delegates to this
      * rather than owning a duplicate implementation — the pane-frame
      * header button also calls it, so the logic needs to live in one
@@ -407,6 +423,34 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
          *  turn short. */
         initiatesTurn: boolean,
     ): Promise<void> => {
+        // The pane is ALREADY showing the mount-time "Log in" bar
+        // (opts.canRetry()) — sending anyway used to travel all the way
+        // down to a real CLI spawn: a controller gets registered
+        // unconditionally at agent-launch time (agent-model.ts's
+        // ControllerResyncCommand), independent of this pane's own auth
+        // check, and neither the identity-injection gate nor the backend
+        // input handler re-verify auth before spawning. That produced a
+        // doomed "Working…" round-trip that only reported "Not logged
+        // in" once the subprocess itself failed its own network auth
+        // handshake, seconds later. Fail exactly like a synchronous
+        // AgentInputCommand rejection (same PendingMessageRejected +
+        // TurnStartFailed cleanup as the catch block below) since
+        // that's effectively what this is — the pane already has proof
+        // this would fail. See
+        // docs/retro/retro-send-while-unauthenticated-2026-07-28.md.
+        if (opts.canRetry()) {
+            opts.log("auth", "message not sent — not logged in", "warn");
+            opts.setAuthNotice("Not logged in — click “Log in” below to continue.");
+            opts.model.dispatchPane({
+                type: "PendingMessageRejected",
+                id: messageId,
+            });
+            if (initiatesTurn) {
+                opts.model.dispatchPane({ type: "TurnStartFailed" }, "system");
+            }
+            return;
+        }
+
         // Apply runtime args (permission mode, model, effort) before this turn.
         const prov = opts.provider();
         if (prov) {

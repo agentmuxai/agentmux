@@ -1062,6 +1062,8 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         documentAtom: agentAtoms().documentAtom,
         log,
         setAuthUrl: status.setAuthUrl,
+        canRetry: status.canRetry,
+        setAuthNotice: status.setAuthNotice,
         backToPicker: () => model.backToPicker(),
         // Scroll the user's own message into view after Enter. The hook
         // defers this to the next animation frame so the mounted node is
