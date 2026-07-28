@@ -249,6 +249,26 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     format!("failed to canonicalize working dir {}: {e}", base_path.display())
                 })?;
 
+                // Remove skill-derived files (.claude/commands/*.md,
+                // .claude/skills/*/SKILL.md) that WE wrote on a previous
+                // materialization but aren't part of this run's output --
+                // e.g. a skill's format switched between "prompt" and
+                // "agent-skill", or a skill was renamed/removed. This is the
+                // actual "click Launch" path used on every normal agent
+                // launch (`launchAgentDefinition`/`WriteAgentConfigCommand`)
+                // -- shared with `agent.open`'s `write_agent_config_files`
+                // (agent_open.rs) via `agent_config.rs` so the two paths
+                // that materialize config files can't drift out of sync on
+                // this (reagent P1, PR #2322 — this handler initially had
+                // no cleanup at all).
+                let new_managed_skill_paths = crate::backend::agent_config::managed_skill_file_paths(
+                    cmd.files.iter().map(|f| f.path.as_str()),
+                );
+                crate::backend::agent_config::cleanup_stale_managed_skill_files(
+                    base_path,
+                    &new_managed_skill_paths,
+                );
+
                 for file in &cmd.files {
                     // Lexical join + traversal check — works on Windows where
                     // canonicalize() adds the `\\?\` UNC prefix and breaks
@@ -284,6 +304,11 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         .map_err(|e| format!("failed to write {}: {e}", file.path))?;
                     tracing::debug!(path = %file_path.display(), "wrote config file");
                 }
+
+                crate::backend::agent_config::write_managed_skill_file_manifest(
+                    base_path,
+                    &new_managed_skill_paths,
+                );
 
                 // Return the final path so the caller can patch
                 // `cmd:cwd` if collision resolution changed it.
@@ -923,4 +948,93 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
             })
         }),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::backend::rpc_types::AgentConfigFile;
+
+    /// reagent P1, PR #2322: `writeagentconfig` (this file) is the actual
+    /// "click Launch" path, distinct from `agent.open`'s
+    /// `write_agent_config_files` (agent_open.rs) which already had
+    /// stale-skill-file cleanup. This exercises the exact integration point
+    /// the handler uses -- `crate::backend::rpc_types::block::AgentConfigFile`
+    /// has a `path` field (not `filename`, unlike `agent_config::AgentConfigFile`)
+    /// -- to catch a field-name mismatch silently no-op'ing the cleanup, which
+    /// a test only calling `managed_skill_file_paths` with hand-built strings
+    /// would not catch.
+    #[test]
+    fn writeagentconfig_files_produce_the_expected_managed_skill_paths() {
+        let files = vec![
+            AgentConfigFile { path: "CLAUDE.md".to_string(), content: "soul".to_string() },
+            AgentConfigFile {
+                path: ".claude/commands/deploy.md".to_string(),
+                content: "deploy".to_string(),
+            },
+            AgentConfigFile {
+                path: ".claude/skills/review/SKILL.md".to_string(),
+                content: "review".to_string(),
+            },
+            AgentConfigFile { path: ".mcp.json".to_string(), content: "{}".to_string() },
+        ];
+        let managed = crate::backend::agent_config::managed_skill_file_paths(
+            files.iter().map(|f| f.path.as_str()),
+        );
+        assert_eq!(managed.len(), 2, "expected exactly the two skill-derived paths: {managed:?}");
+        assert!(managed.contains(".claude/commands/deploy.md"));
+        assert!(managed.contains(".claude/skills/review/SKILL.md"));
+        assert!(!managed.contains("CLAUDE.md"));
+        assert!(!managed.contains(".mcp.json"));
+    }
+
+    /// End-to-end proof (real filesystem, no RPC engine needed) that the
+    /// three shared calls this handler makes -- compute managed paths,
+    /// clean up stale ones from a prior manifest, write the new manifest --
+    /// actually remove a stale skill artifact between two materializations,
+    /// using this handler's own `AgentConfigFile{path, content}` shape.
+    #[test]
+    fn stale_skill_file_is_removed_across_two_materializations() {
+        let work_dir = tempfile::tempdir().unwrap();
+        let base_path = work_dir.path();
+
+        // "Launch 1": agent-skill format.
+        let launch1 = vec![AgentConfigFile {
+            path: ".claude/skills/deploy/SKILL.md".to_string(),
+            content: "body".to_string(),
+        }];
+        let managed1 = crate::backend::agent_config::managed_skill_file_paths(
+            launch1.iter().map(|f| f.path.as_str()),
+        );
+        crate::backend::agent_config::cleanup_stale_managed_skill_files(base_path, &managed1);
+        for f in &launch1 {
+            let p = base_path.join(&f.path);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, &f.content).unwrap();
+        }
+        crate::backend::agent_config::write_managed_skill_file_manifest(base_path, &managed1);
+        let skill_md = base_path.join(".claude/skills/deploy/SKILL.md");
+        assert!(skill_md.exists());
+
+        // "Launch 2": switched to prompt format -- same skill, different path.
+        let launch2 = vec![AgentConfigFile {
+            path: ".claude/commands/deploy.md".to_string(),
+            content: "body".to_string(),
+        }];
+        let managed2 = crate::backend::agent_config::managed_skill_file_paths(
+            launch2.iter().map(|f| f.path.as_str()),
+        );
+        crate::backend::agent_config::cleanup_stale_managed_skill_files(base_path, &managed2);
+        for f in &launch2 {
+            let p = base_path.join(&f.path);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, &f.content).unwrap();
+        }
+        crate::backend::agent_config::write_managed_skill_file_manifest(base_path, &managed2);
+
+        assert!(
+            !skill_md.exists(),
+            "stale .claude/skills/deploy/SKILL.md must be removed by the writeagentconfig path too"
+        );
+        assert!(base_path.join(".claude/commands/deploy.md").exists());
+    }
 }
