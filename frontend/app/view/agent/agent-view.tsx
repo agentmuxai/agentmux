@@ -30,8 +30,6 @@ import {
     type LayoutView,
 } from "@/app/store/agent-pane-layout-store";
 import { workingFromPhase } from "@/app/store/agent-pane-state/types";
-import type { SubagentLinkNode } from "./types";
-import { openSubagentPane, isSubagentPaneOpen } from "@/app/store/subagent-pane-manager";
 import { getRecentDispatches } from "@/app/store/command-source";
 import { getTrail } from "@/log/render-trail";
 import { useAgentStream } from "./useAgentStream";
@@ -43,7 +41,6 @@ import { useScrollToNode } from "./hooks/useScrollToNode";
 import { useAgentKeyboard } from "./hooks/useAgentKeyboard";
 import { useProcessCount } from "./hooks/useProcessCount";
 import { usePtyWidth, computeTermSizeFromEl } from "./hooks/usePtyWidth";
-import { useSubagentEvents } from "./hooks/useSubagentEvents";
 import { useControllerStatusEvents, didTurnJustEnd } from "./hooks/useControllerStatusEvents";
 import { useBlockActivity } from "./hooks/useBlockActivity";
 import { useAgentActivitySummary } from "./hooks/useAgentActivitySummary";
@@ -938,13 +935,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         isComposerEmpty: () => composerIsEmptyFn?.() ?? true,
     });
 
-    // Subagent event subscriptions. See hooks/useSubagentEvents.ts.
-    useSubagentEvents({
-        blockId: model.blockId,
-        documentAtom: agentAtoms().documentAtom,
-        log,
-    });
-
     // Count of OS processes currently tracked for this block — drives
     // the `⚙ N` badge on the status line. Silently returns 0 on
     // platforms without a real tracker. See `hooks/useProcessCount.ts`.
@@ -1344,25 +1334,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // stopPropagation pre-empting the zoom indicator), which broke
     // zoom in the agent pane. Deleted.
 
-    // Handle subagent link click — open a subagent pane
-    const handleSubagentClick = (node: SubagentLinkNode) => {
-        if (isSubagentPaneOpen(node.subagentId)) {
-            log("subagent", `pane already open for ${node.slug || node.subagentId}`);
-            return;
-        }
-        openSubagentPane({
-            subagentId: node.subagentId,
-            slug: node.slug,
-            parentAgent: node.parentAgent,
-            parentBlockId: model.blockId,
-            sessionId: node.sessionId,
-        }).then((blockId) => {
-            if (blockId) {
-                log("subagent", `opened pane for ${node.slug || node.subagentId}`);
-            }
-        });
-    };
-
     // Context menu for copy
     const handleContextMenu = (e: MouseEvent) => {
         const sel = window.getSelection()?.toString();
@@ -1475,7 +1446,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     onDismissAuthNotice={() => status.setAuthNotice(null)}
                     onCancelLogin={status.cancelLogin}
                     authProviderId={provider()?.id ?? providerKey()}
-                    onSubagentClick={handleSubagentClick}
                     onAgentErrorLogin={() => {
                         // Must match onLoginAgain above: the button is labeled "Login
                         // Again", so it has to force a fresh OAuth regardless of

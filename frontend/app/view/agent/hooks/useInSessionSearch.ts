@@ -66,7 +66,6 @@ function nodeSearchText(node: DocumentNode): string {
         case "agent_message": return node.message;
         case "tool":          return node.tool + " " + JSON.stringify(node.params ?? {});
         case "section":       return node.title;
-        case "subagent_link": return node.slug + " " + node.subagentId;
         case "shell":         return node.cmd + " " + node.title;
         case "jekt_message":  return node.from + " " + node.to + " " + node.message;
         default:              return "";
