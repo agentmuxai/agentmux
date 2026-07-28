@@ -93,6 +93,8 @@ describe("useAgentCommands — turnPhase recovery on a failed send", () => {
                 documentAtom: [() => [], () => {}] as any,
                 log: () => {},
                 setAuthUrl: () => {},
+                canRetry: () => false,
+                setAuthNotice: () => {},
                 backToPicker: async () => {},
             });
 
@@ -123,6 +125,8 @@ describe("useAgentCommands — turnPhase recovery on a failed send", () => {
                 documentAtom: [() => [], () => {}] as any,
                 log: () => {},
                 setAuthUrl: () => {},
+                canRetry: () => false,
+                setAuthNotice: () => {},
                 backToPicker: async () => {},
             });
 
@@ -140,6 +144,88 @@ describe("useAgentCommands — turnPhase recovery on a failed send", () => {
             // The flush's own delivery fails — the ALREADY-active turn above
             // must not be cut short by this unrelated failure.
             hub.agentInput.mockRejectedValueOnce(new Error("transient send failure"));
+            await commands.flushHeldMessages();
+
+            expect(paneSnapshot(BLOCK_ID)?.turnPhase.kind).toBe(busyPhase);
+            dispose();
+        });
+    });
+});
+
+describe("useAgentCommands — fast-fail when the pane is already known-unauthenticated (retro-send-while-unauthenticated-2026-07-28.md)", () => {
+    it("never calls AgentInputCommand when canRetry() is true, and reverts turnPhase immediately", async () => {
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+        const setAuthNotice = vi.fn();
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                // The pane is already showing the mount-time "Log in" bar —
+                // this is the exact known-bad state this fix targets.
+                canRetry: () => true,
+                setAuthNotice,
+                backToPicker: async () => {},
+            });
+
+            // Mirrors handleSendMessage's optimistic TurnStart before calling
+            // commands.sendMessage — see agent-view.tsx.
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            expect(paneSnapshot(BLOCK_ID)?.turnPhase.kind).not.toBe("Idle");
+
+            await commands.sendMessage("u there", false);
+
+            // The whole point: no CLI spawn was ever attempted for a pane the
+            // UI already knows is logged out.
+            expect(hub.agentInput).not.toHaveBeenCalled();
+            expect(paneSnapshot(BLOCK_ID)?.turnPhase.kind).toBe("Idle");
+            expect(paneSnapshot(BLOCK_ID)?.pending).toEqual([]);
+            expect(setAuthNotice).toHaveBeenCalledWith(expect.stringContaining("logged in"));
+            dispose();
+        });
+    });
+
+    it("does not fast-fail a held message flush when canRetry() only became true after the turn was already running", async () => {
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+        let retry = false;
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => retry,
+                setAuthNotice: () => {},
+                backToPicker: async () => {},
+            });
+
+            // A real turn starts while still authenticated.
+            hub.agentInput.mockResolvedValueOnce(undefined);
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("first message", false);
+            await commands.sendMessage("held message", true);
+            expect(commands.hasHeldMessages()).toBe(true);
+            const busyPhase = paneSnapshot(BLOCK_ID)?.turnPhase.kind;
+
+            // Auth expires mid-turn (e.g. a 401 flips canRetry — unrelated to
+            // this specific held flush, which is for the SAME already-running
+            // turn). initiatesTurn is false for a flush, so even if this path
+            // were hit it must not cut the active turn short.
+            retry = true;
+            hub.agentInput.mockResolvedValueOnce(undefined);
             await commands.flushHeldMessages();
 
             expect(paneSnapshot(BLOCK_ID)?.turnPhase.kind).toBe(busyPhase);
