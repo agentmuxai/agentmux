@@ -184,10 +184,12 @@ fn register_skill_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
 fn register_skill_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
+    let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_SKILL_BIND,
         Box::new(move |data, ctx| {
             let wstore = wstore.clone();
+            let broker = broker.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
                 struct Req { agent_id: String, skill_id: String }
@@ -211,6 +213,14 @@ fn register_skill_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 }
                 wstore.skill_bind(&req.agent_id, &req.skill_id)
                     .map_err(|e| format!("skill.bind: {e}"))?;
+                // An agent binding a skill to itself over its own authenticated
+                // connection should reach an already-open Stash Skills tab for
+                // that agent too — same reactivity as the catalog-tier bind.
+                // reagentx P2 on PR #2329.
+                broker.publish(crate::backend::wps::WaveEvent {
+                    event: "skills:changed".to_string(),
+                    scopes: vec![], sender: String::new(), persist: 0, data: None,
+                });
                 Ok(Some(json!({ "bound": true })))
             })
         }),
@@ -219,10 +229,12 @@ fn register_skill_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
 fn register_skill_unbind(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
+    let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_SKILL_UNBIND,
         Box::new(move |data, ctx| {
             let wstore = wstore.clone();
+            let broker = broker.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
                 struct Req { agent_id: String, skill_id: String }
@@ -231,6 +243,12 @@ fn register_skill_unbind(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 check_s1(&ctx, &req.agent_id)?;
                 let unbound = wstore.skill_unbind(&req.agent_id, &req.skill_id)
                     .map_err(|e| format!("skill.unbind: {e}"))?;
+                if unbound {
+                    broker.publish(crate::backend::wps::WaveEvent {
+                        event: "skills:changed".to_string(),
+                        scopes: vec![], sender: String::new(), persist: 0, data: None,
+                    });
+                }
                 Ok(Some(json!({ "unbound": unbound })))
             })
         }),

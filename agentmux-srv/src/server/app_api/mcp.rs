@@ -192,10 +192,12 @@ fn register_mcp_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
 fn register_mcp_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
+    let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_MCP_BIND,
         Box::new(move |data, ctx| {
             let wstore = wstore.clone();
+            let broker = broker.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
                 struct Req { agent_id: String, mcp_id: String }
@@ -219,6 +221,14 @@ fn register_mcp_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 }
                 wstore.mcp_server_bind(&req.agent_id, &req.mcp_id)
                     .map_err(|e| format!("mcp.bind: {e}"))?;
+                // An agent binding a server to itself over its own authenticated
+                // connection should reach an already-open Stash MCP Servers tab
+                // for that agent too — same reactivity as the catalog-tier bind.
+                // reagentx P2 on PR #2329.
+                broker.publish(crate::backend::wps::WaveEvent {
+                    event: "mcp:changed".to_string(),
+                    scopes: vec![], sender: String::new(), persist: 0, data: None,
+                });
                 Ok(Some(json!({ "bound": true })))
             })
         }),
@@ -227,10 +237,12 @@ fn register_mcp_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
 fn register_mcp_unbind(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
+    let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_MCP_UNBIND,
         Box::new(move |data, ctx| {
             let wstore = wstore.clone();
+            let broker = broker.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
                 struct Req { agent_id: String, mcp_id: String }
@@ -239,6 +251,12 @@ fn register_mcp_unbind(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 check_s1(&ctx, &req.agent_id)?;
                 let unbound = wstore.mcp_server_unbind(&req.agent_id, &req.mcp_id)
                     .map_err(|e| format!("mcp.unbind: {e}"))?;
+                if unbound {
+                    broker.publish(crate::backend::wps::WaveEvent {
+                        event: "mcp:changed".to_string(),
+                        scopes: vec![], sender: String::new(), persist: 0, data: None,
+                    });
+                }
                 Ok(Some(json!({ "unbound": unbound })))
             })
         }),
