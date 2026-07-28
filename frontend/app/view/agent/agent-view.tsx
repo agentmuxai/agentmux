@@ -1181,7 +1181,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         // docs/reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md §4.
         onRestart: () => {
             log("agent", "Restart — the agent process was unresponsive, respawning it");
-            void status.forceControllerRefresh();
+            void status.forceControllerRefresh("restart");
         },
     });
 

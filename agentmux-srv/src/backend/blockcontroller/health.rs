@@ -301,8 +301,24 @@ impl HealthMonitor {
                 detail,
                 last_error: inner.last_error.clone(),
             };
-            drop(inner);
 
+            // reagent P1: publishing/persisting AFTER dropping the lock let
+            // two concurrent invocations of this function (the 5s watchdog
+            // tick vs. record_output/record_error on the stdout-reader task
+            // — both call this) race their side effects out of order — e.g.
+            // a watchdog-observed Dead->failure publish landing on the wire
+            // AFTER a stdout-reader-observed Dead->healthy clear, leaving a
+            // stale "Restart" banner over a process that already recovered.
+            // Keeping `inner` held across every side effect below makes the
+            // whole transition (state mutation + every publish it causes)
+            // one atomic critical section, so concurrent invocations'
+            // publishes are strictly ordered the same way their state
+            // mutations are — whichever invocation's compute_health() call
+            // wins the lock race second sees (and publishes) whatever the
+            // first one actually left behind, never a stale earlier state
+            // published after a fresher one. Safe to hold across these
+            // calls: none of them are async (no await inside this fn at
+            // all) and none re-lock `self.inner`.
             tracing::info!(
                 block_id = %self.block_id,
                 old = ?old,
@@ -717,5 +733,71 @@ mod tests {
         );
         assert_eq!(history.len(), 1, "recovery must publish a clearing event");
         assert!(history[0].data.is_none(), "the clearing publish must carry no data");
+    }
+
+    /// Regression for reagent P1: `evaluate_and_transition` used to drop
+    /// `inner`'s lock BEFORE publishing/persisting, so two concurrent
+    /// invocations (the 5s watchdog vs. record_output/record_error on the
+    /// stdout-reader task — the exact shape this method is actually called
+    /// from in production) could race their side effects out of order,
+    /// leaving a stale failure/clear published after a fresher one. With
+    /// the fix (the whole transition, including every publish it causes, is
+    /// one atomic critical section under the same lock), the LAST published
+    /// `agentfailure` event must always agree with the FINAL `current_health`
+    /// — deterministically, regardless of scheduling, not just probably.
+    /// Hammers both directions from real OS threads to exercise the actual
+    /// race window.
+    #[test]
+    fn concurrent_transitions_never_leave_a_stale_publish() {
+        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let monitor = Arc::new(HealthMonitor::new(
+            "test-block-race".to_string(),
+            Some(broker.clone()),
+            None,
+            None,
+        ));
+        monitor.set_active_turn(true);
+
+        let mut handles = Vec::new();
+        for i in 0..8 {
+            let m = Arc::clone(&monitor);
+            handles.push(std::thread::spawn(move || {
+                for _ in 0..50 {
+                    if i % 2 == 0 {
+                        m.record_error(ErrorClass::Fatal, "boom".to_string());
+                    } else {
+                        m.set_exited(0);
+                        m.set_active_turn(true); // re-arm so the next Fatal can still reach Dead
+                    }
+                }
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        let final_health = monitor.inner.lock().unwrap().current_health.clone();
+        let history = broker.read_event_history(
+            crate::backend::wps::EVENT_AGENT_FAILURE,
+            "block:test-block-race",
+            1,
+        );
+        match final_health {
+            AgentHealth::Dead => {
+                assert_eq!(history.len(), 1, "final state is Dead — the last publish must be the failure, not a stale clear");
+                assert!(
+                    history[0].data.is_some(),
+                    "final state is Dead but the last published event was a clear — stale publish ordering regression"
+                );
+            }
+            _ => {
+                if let Some(last) = history.last() {
+                    assert!(
+                        last.data.is_none(),
+                        "final state is not Dead but the last published event still carries a failure — stale publish ordering regression"
+                    );
+                }
+            }
+        }
     }
 }
