@@ -438,7 +438,18 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // that's effectively what this is — the pane already has proof
         // this would fail. See
         // docs/retro/retro-send-while-unauthenticated-2026-07-28.md.
-        if (opts.canRetry()) {
+        //
+        // Gated on initiatesTurn: a held message was already accepted into
+        // an active, authenticated turn's queue before this flush runs. If
+        // canRetry() only flips true mid-turn, that's unrelated to whether
+        // THIS already-queued message should be attempted — dropping it
+        // here would silently lose it with no retry path, contrary to the
+        // held-queue's own "no expiry, wait until delivered" invariant
+        // above. Let it fall through to the normal AgentInputCommand
+        // attempt; a genuine failure there is already handled by the catch
+        // block below without cutting the active turn short (initiatesTurn
+        // is false there too). Codex P1 on PR #2338.
+        if (initiatesTurn && opts.canRetry()) {
             opts.log("auth", "message not sent — not logged in", "warn");
             opts.setAuthNotice("Not logged in — click “Log in” below to continue.");
             opts.model.dispatchPane({
