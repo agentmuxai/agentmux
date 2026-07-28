@@ -137,8 +137,20 @@ export interface UseAgentCommands {
      *  dispatching TurnStart. When present, the fast-fail guard rejects the
      *  send AND re-dispatches this same failure so the banner (and its
      *  "Login Again"/"Use existing login" actions) reappears instead of
-     *  vanishing with no path back. Codex P1 on PR #2338 (third re-review). */
-    sendMessage: (message: string, wasAlreadyWorking?: boolean, authFailureToPreserve?: AgentFailure | null) => Promise<void>;
+     *  vanishing with no path back. Codex P1 on PR #2338 (third re-review).
+     *  `trustedAfterRecovery` should be true ONLY for the auto-retry
+     *  `retryLastTurn` fires from a recovery flow's own `onRecovered`
+     *  callback — bypasses the loginWaiting() check specifically, since
+     *  loginWaiting is a shared counter across all three recovery flows and
+     *  can still read true from a DIFFERENT, unrelated flow overlapping
+     *  with the one that just confirmed success. Codex P2 on PR #2338
+     *  (fifth re-review). */
+    sendMessage: (
+        message: string,
+        wasAlreadyWorking?: boolean,
+        authFailureToPreserve?: AgentFailure | null,
+        trustedAfterRecovery?: boolean,
+    ) => Promise<void>;
     /**
      * Deliver any messages held while the agent was busy (the "send now"
      * queue). Called by the agent view at the next tool-call boundary (or
@@ -309,7 +321,12 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         return registry().list(buildCommandContext());
     };
 
-    const sendMessage = async (message: string, wasAlreadyWorking = false, authFailureToPreserve: AgentFailure | null = null): Promise<void> => {
+    const sendMessage = async (
+        message: string,
+        wasAlreadyWorking = false,
+        authFailureToPreserve: AgentFailure | null = null,
+        trustedAfterRecovery = false,
+    ): Promise<void> => {
         // Crash trace: this is the entry point for "user pressed send."
         // The boundary dumps this trail when a renderer fault catches —
         // see frontend/log/render-trail.ts + BlockErrorBoundary.
@@ -432,7 +449,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         }
 
         // Idle send: deliver immediately and arm the lost-delivery safety timer.
-        await deliverToBackend(message, messageId, /* armExpiry */ true, /* initiatesTurn */ true, authFailureToPreserve);
+        await deliverToBackend(message, messageId, /* armExpiry */ true, /* initiatesTurn */ true, authFailureToPreserve, trustedAfterRecovery);
     };
 
     /**
@@ -460,6 +477,23 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
          *  (mirrors initiatesTurn — a flush's guard question is about the
          *  ALREADY-active turn, not a fresh capture). */
         authFailureToPreserve: AgentFailure | null,
+        /** True only for the auto-retry `retryLastTurn` fires from a
+         *  recovery flow's own `onRecovered` callback. Bypasses the
+         *  loginWaiting() check specifically: loginWaiting is a shared
+         *  counter across all three recovery flows (relogin/useGlobalLogin/
+         *  loginViaTerminal), so it can still read true here if a
+         *  DIFFERENT, unrelated flow happens to be overlapping with the one
+         *  that just confirmed success — that flow's own uncertainty has no
+         *  bearing on whether THIS flow's confirmed credential is safe to
+         *  retry on. Does not bypass canRetry()/authFailureToPreserve —
+         *  both are already false/null by the time onRecovered fires (the
+         *  triggering flow clears canRetry on its own click, and the
+         *  onRecovered wiring dispatches FailureCleared before calling
+         *  retryLastTurn), so there is nothing left to bypass for them.
+         *  Codex P2 on PR #2338 (fifth re-review). Always false for a
+         *  held-message flush (mirrors initiatesTurn/authFailureToPreserve —
+         *  a flush is never the auto-retry path). */
+        trustedAfterRecovery: boolean,
     ): Promise<void> => {
         // The pane is ALREADY showing the mount-time "Log in" bar
         // (opts.canRetry()) — sending anyway used to travel all the way
@@ -506,11 +540,16 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // this call) unconditionally clears state.failure, so the caller
         // must capture it beforehand. Codex P1 on PR #2338 (second
         // re-review).
-        if (initiatesTurn && (opts.canRetry() || opts.loginWaiting() || authFailureToPreserve)) {
+        //
+        // loginWaiting() specifically (not canRetry()/authFailureToPreserve)
+        // is skipped when trustedAfterRecovery is set — see its own doc
+        // comment above. Codex P2 on PR #2338 (fifth re-review).
+        const loginStillWaiting = opts.loginWaiting() && !trustedAfterRecovery;
+        if (initiatesTurn && (opts.canRetry() || loginStillWaiting || authFailureToPreserve)) {
             opts.log("auth", "message not sent — not logged in", "warn");
             if (!authFailureToPreserve) {
                 opts.setAuthNotice(
-                    opts.loginWaiting()
+                    loginStillWaiting
                         ? "Not logged in yet — wait for the login attempt to finish, then try again."
                         : "Not logged in — click “Log in” below to continue.",
                 );
@@ -638,7 +677,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             // shift() (not a snapshot) so items queued mid-flush are included.
             while (heldQueue.length > 0) {
                 const item = heldQueue.shift()!;
-                await deliverToBackend(item.text, item.id, /* armExpiry */ false, /* initiatesTurn */ false, /* authFailureToPreserve */ null);
+                await deliverToBackend(item.text, item.id, /* armExpiry */ false, /* initiatesTurn */ false, /* authFailureToPreserve */ null, /* trustedAfterRecovery */ false);
             }
         } finally {
             flushing = false;
