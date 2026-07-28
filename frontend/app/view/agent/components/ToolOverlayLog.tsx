@@ -25,7 +25,7 @@ import { CompactResult } from "./CompactResult";
 import { DiffViewer } from "./DiffViewer";
 import { HighlightedCode } from "./HighlightedCode";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
-import { capChars, collapseSpinnerChunks, createChunkCapper, capText, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
+import { capChars, createChunkCapper, createSpinnerCollapser, capText, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 import { detectLanguage } from "./detectLanguage";
 import {
     registerToolRenderer,
@@ -368,11 +368,16 @@ interface ChunkListProps {
     chunks: ReadonlyArray<LogChunk>;
 }
 function ChunkList(props: ChunkListProps): JSX.Element {
+    // Collapse first (raw, incremental — see PersistentShellBlock.tsx for
+    // why this order matters both for correctness under a long stream and
+    // for createSpinnerCollapser's append-only identity tracking), then cap
+    // the deduplicated result to the line budget.
+    const spinnerCollapse = createSpinnerCollapser<LogChunk>();
     const cap = createChunkCapper();
 
     const view = createMemo(() => {
-        const { chunks, hiddenLines } = cap(props.chunks);
-        const { display, spinnerSlot } = collapseSpinnerChunks(chunks);
+        const { display: collapsed, spinnerSlot } = spinnerCollapse(props.chunks);
+        const { chunks: display, hiddenLines } = cap(collapsed);
         return { display, spinnerSlot, hiddenLines };
     });
 

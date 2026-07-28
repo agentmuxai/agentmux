@@ -440,12 +440,16 @@ where
     // new frame, collapsing throttled spinner frames (>50 ms apart) before
     // they become separate LineEvents.
     let mut pending_cr_override: Option<Vec<u8>> = None;
+    // A1: speculative one-tick hold for a pending line with no leading OR
+    // trailing `\r` yet. Mirrors the same slot in `pty_reader_loop`. See
+    // docs/specs/SPEC_TOOL_LOG_UNIVERSAL_ANIMATION_COLLAPSE_2026_07_27.md §A1.
+    let mut deferred_pending: Option<Vec<u8>> = None;
     loop {
         match tokio::time::timeout(FLUSH_QUIET_WINDOW, reader.read(&mut buf)).await {
             Ok(Ok(0)) => {
-                // EOF: flush any held CR override, then drain remainder,
-                // stripping a dangling lone \r (stream ended mid-spinner
-                // or mid-CRLF pair).
+                // EOF: flush any held CR override or A1 deferred line, then
+                // drain remainder, stripping a dangling lone \r (stream
+                // ended mid-spinner or mid-CRLF pair).
                 if let Some(mut held) = pending_cr_override.take() {
                     if held.last() == Some(&b'\r') {
                         held.pop();
@@ -453,6 +457,9 @@ where
                     if !held.is_empty() {
                         let _ = tx.send(LineEvent { kind, bytes: held }).await;
                     }
+                }
+                if let Some(deferred) = deferred_pending.take() {
+                    let _ = tx.send(LineEvent { kind, bytes: deferred }).await;
                 }
                 if !pending.is_empty() {
                     if pending.last() == Some(&b'\r') {
@@ -477,6 +484,21 @@ where
                     let mut combined = held;
                     combined.extend_from_slice(&buf[..n]);
                     pending.splice(0..0, combined);
+                } else if let Some(deferred) = deferred_pending.take() {
+                    // A1: resolve last tick's speculative hold. A leading
+                    // `\r` means this is the overwrite we were hoping for;
+                    // otherwise the deferred line was genuinely final and
+                    // unrelated — flush it on its own first.
+                    if buf[..n].first() == Some(&b'\r') {
+                        let mut combined = deferred;
+                        combined.extend_from_slice(&buf[..n]);
+                        pending.splice(0..0, combined);
+                    } else {
+                        if tx.send(LineEvent { kind, bytes: deferred }).await.is_err() {
+                            return;
+                        }
+                        pending.extend_from_slice(&buf[..n]);
+                    }
                 } else {
                     pending.extend_from_slice(&buf[..n]);
                 }
@@ -506,7 +528,14 @@ where
                 return;
             }
             Err(_elapsed) => {
-                // P1b: quiet-window expiry.
+                // P1b/A1: quiet-window expiry.
+                //
+                // If a line was already speculatively deferred last tick
+                // (A1) and nothing new arrived since — deferred_pending
+                // being Some implies pending is empty, since any new data
+                // would have resolved it in the Ok(Ok(n)) branch above —
+                // give up waiting for a `\r`-prefixed overwrite and flush
+                // it now.
                 //
                 // If `pending` starts with `\r`, it is a leading-\r spinner
                 // frame. Stash it in the CR override slot so the next read
@@ -516,23 +545,27 @@ where
                 // If `pending` ends with `\r` (but not starts), hold it —
                 // a following `\n` will form a complete CRLF.
                 //
-                // Non-`\r` partial output (printf 'Building...') flushes here.
+                // Otherwise (non-`\r` partial output, e.g. `printf
+                // 'Building...'`): first quiet window with this content —
+                // defer it one tick (A1) instead of flushing immediately,
+                // in case the very next read starts with `\r`. See
+                // docs/specs/SPEC_TOOL_LOG_UNIVERSAL_ANIMATION_COLLAPSE_2026_07_27.md §A1.
                 //
-                // Note: pending_cr_override is always None here. The override is
-                // set only by take(&mut pending), which empties pending. The only
-                // way to reach this branch with non-empty pending is after an
-                // Ok(Some) that already consumed and cleared the override.
+                // Note: pending_cr_override / deferred_pending are always
+                // None here at this point (after the take() above). Each is
+                // set only by take(&mut pending), which empties pending; the
+                // only way to reach this branch with non-empty pending is
+                // after an Ok(Ok(n)) that already consumed and cleared both.
+                if let Some(deferred) = deferred_pending.take() {
+                    if tx.send(LineEvent { kind, bytes: deferred }).await.is_err() {
+                        return;
+                    }
+                }
                 if !pending.is_empty() {
                     if pending.first() == Some(&b'\r') {
                         pending_cr_override = Some(std::mem::take(&mut pending));
                     } else if pending.last() != Some(&b'\r') {
-                        if tx
-                            .send(LineEvent { kind, bytes: std::mem::take(&mut pending) })
-                            .await
-                            .is_err()
-                        {
-                            return;
-                        }
+                        deferred_pending = Some(std::mem::take(&mut pending));
                     }
                     // else: trailing-\r hold — do nothing, next read resolves CRLF.
                 }
@@ -1106,6 +1139,23 @@ fn pty_reader_loop(
     // it here so throttled spinner frames collapse before becoming separate
     // LineEvents.
     let mut pending_cr_override: Option<Vec<u8>> = None;
+    // A1: speculative one-tick hold for a pending line that has NO leading
+    // OR trailing `\r` yet (the overwhelmingly common real pattern: print a
+    // static label once, then every subsequent update is `\r`-prefixed).
+    // Distinct from `pending_cr_override` above — that slot only ever holds
+    // content that already starts with `\r`. See
+    // docs/specs/SPEC_TOOL_LOG_UNIVERSAL_ANIMATION_COLLAPSE_2026_07_27.md §A1.
+    let mut deferred_pending: Option<Vec<u8>> = None;
+    // A2: tracks whether this tool call's output has scrolled past its
+    // first visual line yet — see `normalize_csi_overwrites`'s doc comment
+    // for why CUP-to-home (`\x1b[H`) is only a `\r`-equivalent while this
+    // is still true.
+    let mut still_on_first_line = true;
+    // A2: tracks whether the cursor is currently at column 0, across PTY
+    // reads — see `normalize_csi_overwrites`'s doc comment for why a
+    // standalone EL is only safe to treat as `\r` while this is true, and
+    // why it must persist across calls rather than reset per-chunk.
+    let mut at_col0 = true;
     // Idle-kill tracking: `last_activity` resets on every byte read from
     // the PTY (regardless of whether it becomes a published LineEvent —
     // even control-sequence-only output means the child is still doing
@@ -1122,6 +1172,13 @@ fn pty_reader_loop(
                 last_activity = std::time::Instant::now();
                 let raw_n = chunk.len();
                 strip_dsr(&mut chunk);
+                // Phase γ (partial): convert the CHA(col-1)/EL cursor-
+                // repositioning idioms into `\r` bytes BEFORE strip_ansi
+                // deletes them outright, so collapse_cr (below) can treat
+                // CSI-based progress-bar redraws as overwrites the same way
+                // it already does for bare `\r`. See
+                // docs/specs/SPEC_TOOL_LOG_UNIVERSAL_ANIMATION_COLLAPSE_2026_07_27.md §A2.
+                normalize_csi_overwrites(&mut chunk, &mut still_on_first_line, &mut at_col0);
                 // Phase β: strip remaining ANSI control sequences so
                 // the plain-text chunk list doesn't render them as
                 // garbled literal characters. Bash emits terminal-
@@ -1140,6 +1197,24 @@ fn pty_reader_loop(
                     let mut combined = held;
                     combined.extend_from_slice(&chunk);
                     pending.splice(0..0, combined);
+                } else if let Some(deferred) = deferred_pending.take() {
+                    // A1: the new chunk resolves last tick's speculative
+                    // hold. A leading `\r` means it's the overwrite we were
+                    // hoping for — merge and let collapse_cr do the rest,
+                    // same as the pending_cr_override case above. Anything
+                    // else means the deferred line was genuinely final and
+                    // unrelated to this new content — flush it as its own
+                    // line first so the two are never wrongly concatenated.
+                    if chunk.first() == Some(&b'\r') {
+                        let mut combined = deferred;
+                        combined.extend_from_slice(&chunk);
+                        pending.splice(0..0, combined);
+                    } else {
+                        if tx.blocking_send(LineEvent { kind, bytes: deferred }).is_err() {
+                            return;
+                        }
+                        pending.extend_from_slice(&chunk);
+                    }
                 } else {
                     pending.extend_from_slice(&chunk);
                 }
@@ -1170,8 +1245,8 @@ fn pty_reader_loop(
                 }
             }
             Ok(None) => {
-                // EOF: flush any held CR override first, then drain remainder,
-                // stripping a dangling lone \r.
+                // EOF: flush any held CR override or A1 deferred line first,
+                // then drain remainder, stripping a dangling lone \r.
                 if let Some(mut held) = pending_cr_override.take() {
                     if held.last() == Some(&b'\r') {
                         held.pop();
@@ -1179,6 +1254,9 @@ fn pty_reader_loop(
                     if !held.is_empty() {
                         let _ = tx.blocking_send(LineEvent { kind, bytes: held });
                     }
+                }
+                if let Some(deferred) = deferred_pending.take() {
+                    let _ = tx.blocking_send(LineEvent { kind, bytes: deferred });
                 }
                 if !pending.is_empty() {
                     if pending.last() == Some(&b'\r') {
@@ -1204,17 +1282,35 @@ fn pty_reader_loop(
                         let _ = sender.send(());
                     }
                 }
-                // P1b: quiet-window expiry.
+                // P1b/A1: quiet-window expiry.
+                //
+                // If a line was ALREADY speculatively deferred last tick
+                // (A1) and nothing new has arrived since — deferred_pending
+                // being Some implies pending is empty, since any new data
+                // would have resolved it in the Ok(Some) branch above — give
+                // up waiting for a `\r`-prefixed overwrite and flush it now.
                 //
                 // If `pending` starts with `\r`, it is a leading-\r spinner
                 // frame. Stash it in the CR override slot so the next read
                 // prepends it and collapse_cr overwrites it with the new frame.
-                // Flush any prior held frame first.
                 //
                 // If `pending` ends with `\r` (but not starts), hold it —
                 // a following `\n` can form a complete CRLF.
                 //
-                // Non-`\r` partial output (printf 'Building...') flushes here.
+                // Otherwise (non-`\r` partial output, e.g. `printf
+                // 'Building...'`): this is the FIRST quiet window with this
+                // content, so defer it one tick (A1) rather than flushing
+                // immediately — in case the very next read starts with `\r`
+                // and this was actually the first frame of an overwrite
+                // sequence (the overwhelmingly common real pattern: print a
+                // static label once, then every subsequent update is
+                // `\r`-prefixed). See
+                // docs/specs/SPEC_TOOL_LOG_UNIVERSAL_ANIMATION_COLLAPSE_2026_07_27.md §A1.
+                if let Some(deferred) = deferred_pending.take() {
+                    if tx.blocking_send(LineEvent { kind, bytes: deferred }).is_err() {
+                        return;
+                    }
+                }
                 if !pending.is_empty() {
                     if pending.first() == Some(&b'\r') {
                         // Leading-\r spinner frame: stash in the override slot so
@@ -1226,28 +1322,19 @@ fn pty_reader_loop(
                         // The only way to reach this branch with non-empty pending is
                         // after an Ok(Some) that already consumed and cleared the
                         // override. No flush-prior is needed or reachable.
-                        //
-                        // Non-\r-prefixed first frames (e.g. a tool that starts with
-                        // "frame1" then switches to "\rframe2" overwrites) are already
-                        // flushed as regular LineEvents by the time the \r-prefixed
-                        // frames arrive; they cannot be retroactively collapsed.
                         pending_cr_override = Some(std::mem::take(&mut pending));
                     } else if pending.last() != Some(&b'\r') {
-                        // Non-spinner partial output (e.g. "Building..."): flush now.
-                        // pending_cr_override is always None here for the same reason
-                        // as above — no flush-prior needed.
-                        if tx.blocking_send(LineEvent {
-                            kind,
-                            bytes: std::mem::take(&mut pending),
-                        }).is_err() {
-                            return;
-                        }
+                        // First quiet window with this non-\r content: defer
+                        // instead of flushing (A1). deferred_pending is
+                        // always None here for the same reason as above.
+                        deferred_pending = Some(std::mem::take(&mut pending));
                     }
                     // else: trailing-\r hold — do nothing, next read resolves CRLF.
                 }
             }
             Err(std_mpsc::RecvTimeoutError::Disconnected) => {
-                // Reader thread died without EOF — flush CR override then drain.
+                // Reader thread died without EOF — flush CR override / A1
+                // deferred line, then drain.
                 if let Some(mut held) = pending_cr_override.take() {
                     if held.last() == Some(&b'\r') {
                         held.pop();
@@ -1255,6 +1342,9 @@ fn pty_reader_loop(
                     if !held.is_empty() {
                         let _ = tx.blocking_send(LineEvent { kind, bytes: held });
                     }
+                }
+                if let Some(deferred) = deferred_pending.take() {
+                    let _ = tx.blocking_send(LineEvent { kind, bytes: deferred });
                 }
                 if !pending.is_empty() {
                     if pending.last() == Some(&b'\r') {
@@ -1269,6 +1359,130 @@ fn pty_reader_loop(
                 }
                 return;
             }
+        }
+    }
+}
+
+/// Normalize CSI cursor-repositioning idioms that map cleanly onto the
+/// existing `\r`-based overwrite model, converting them to a literal `\r`
+/// byte so `collapse_cr` (which already understands `\r`) collapses them
+/// too, with no new cases needed there. Runs on the raw `chunk` BEFORE
+/// `strip_ansi`, which otherwise deletes CSI sequences unconditionally with
+/// no overwrite-awareness — the "Phase γ" gap `strip_ansi`'s own doc
+/// comment flags ("Cursor positioning escapes within the same line").
+/// See docs/specs/SPEC_TOOL_LOG_UNIVERSAL_ANIMATION_COLLAPSE_2026_07_27.md §A2.
+///
+/// `still_on_first_line` and `at_col0` are both caller-owned state that
+/// persists across calls for the lifetime of one reader loop — this
+/// function is invoked once per PTY read, and a chunk boundary is not a
+/// terminal state boundary: a read ending mid-line (no trailing `\n`/`\r`)
+/// must carry "cursor is NOT at column 0" into the next call, otherwise a
+/// standalone EL split across two reads (`"prefix"` in one chunk,
+/// `"\x1b[2Ksuffix"` in the next) would see a freshly-reset `at_col0 ==
+/// true` and wrongly convert that EL to `\r`, reproducing the exact
+/// mid-line truncation bug this function exists to prevent, just moved
+/// from a mid-chunk split to a cross-chunk-read split (reagent P1, PR
+/// #2330, caught after the first, chunk-internal-only version of this fix).
+///
+/// `still_on_first_line`: `true` until the first `\n` is
+/// seen in this tool call's output, `false` forever after. Needed because
+/// **Windows ConPTY re-serializes a literal `\r` as CUP-to-home
+/// (`\x1b[H`)** rather than passing it through unchanged — verified
+/// empirically via `a1_e2e_static_label_then_delayed_cr_overwrite_collapses_to_one_line`
+/// capturing the raw PTY bytes: a child process writing `\rdone` produces
+/// `\x1b[?25l\x1b[Hdone...\x1b[?25h` on the wire, not a literal `\r`. CUP
+/// "home" (row 1, col 1) is unambiguous evidence of an overwrite ONLY when
+/// nothing has scrolled the visual line off row 1 yet; once real multi-line
+/// output exists, `\x1b[H` genuinely means "go back to the first of several
+/// lines" (a multi-line redraw, spec §A3, deliberately out of scope) and
+/// must NOT be treated as "restart the current line".
+///
+/// Cases handled, chosen because each means exactly "move to the start of
+/// the (only) line so far" without needing true per-column tracking:
+///   - CUP to row 1 col 1 (`\x1b[H`, `\x1b[1H`, `\x1b[1;1H`, and the
+///     omitted-field variants of each), gated on `still_on_first_line` per
+///     above — the ConPTY-observed idiom.
+///   - CHA to column 1 (`\x1b[1G` / `\x1b[G`, "cursor to column 1") is
+///     literally "move to start of line" — identical to `\r`. Unix PTYs
+///     (and any tool not going through ConPTY's re-serialization) may use
+///     this form directly.
+///   - EL (`\x1b[2K` erase whole line, `\x1b[K`/`\x1b[0K` erase to end of
+///     line) is treated as "reset to start of line" too, but ONLY when the
+///     cursor is already known to be at column 0 (`*at_col0`) — i.e. the
+///     dominant real-world `\r` + EL idiom (`\r\x1b[2K<text>`), where it's
+///     genuinely redundant with the `\r` already just emitted. A
+///     STANDALONE EL, mid-line (cursor NOT at column 0 — e.g.
+///     `prefix\x1b[Ksuffix`), is a real, different case: EL only erases
+///     from the cursor onward and never moves it, so collapsing it to `\r`
+///     there would make `collapse_cr` truncate `prefix` even though EL
+///     never asked for that. That standalone case is left unconverted
+///     (falls through to the "unrecognized" branch below, so `strip_ansi`
+///     removes the escape byte-for-byte without touching `prefix`) — a
+///     bug reagent caught on this exact line (PR #2330): the prior,
+///     unconditional version silently discarded `prefix` in
+///     `prefix\x1b[Ksuffix\n`.
+///
+/// CUB (`\x1b[<n>D`, "cursor back n columns") is intentionally NOT handled
+/// here — a faithful implementation needs true per-column tracking (a raw
+/// byte position isn't a faithful proxy once `n` varies per frame), which
+/// `collapse_cr`'s line-offset model doesn't have. Left as a documented
+/// follow-up alongside CUU/multi-line redraw (spec §A3) rather than
+/// guessed at with an approximation that could truncate the wrong amount.
+fn normalize_csi_overwrites(chunk: &mut Vec<u8>, still_on_first_line: &mut bool, at_col0: &mut bool) {
+    let mut out: Vec<u8> = Vec::with_capacity(chunk.len());
+    let mut i = 0;
+    while i < chunk.len() {
+        let b = chunk[i];
+        if b == b'\n' {
+            *still_on_first_line = false;
+        }
+        if b == 0x1b && i + 1 < chunk.len() && chunk[i + 1] == b'[' {
+            let mut j = i + 2;
+            while j < chunk.len() && (0x30..=0x3F).contains(&chunk[j]) {
+                j += 1;
+            }
+            if j < chunk.len() && (0x40..=0x7E).contains(&chunk[j]) {
+                let params = &chunk[i + 2..j];
+                let final_byte = chunk[j];
+                let is_cha_col1 = final_byte == b'G' && (params.is_empty() || params == b"1");
+                let is_el = final_byte == b'K' && *at_col0;
+                let is_cup_home = *still_on_first_line
+                    && final_byte == b'H'
+                    && is_cup_row1_col1(params);
+                if is_cha_col1 || is_el || is_cup_home {
+                    out.push(b'\r');
+                    *at_col0 = true;
+                    i = j + 1;
+                    continue;
+                }
+                // Unrecognized/CUB/mid-line-EL/out-of-scope CSI sequence:
+                // fall through untouched, byte by byte, so strip_ansi
+                // (which runs next) still recognizes and removes it as a
+                // whole — this function only ever substitutes the matched
+                // idioms above. Each of those bytes then runs through the
+                // ordinary `*at_col0 = b == b'\n' || b == b'\r'` update
+                // below like any other byte, which forces `at_col0` to
+                // `false` (none of an escape sequence's bytes are `\n`/
+                // `\r`) — conservative and safe (errs toward NOT
+                // collapsing a subsequent EL), not "left as-is".
+            }
+        }
+        out.push(b);
+        *at_col0 = b == b'\n' || b == b'\r';
+        i += 1;
+    }
+    *chunk = out;
+}
+
+/// Does a CUP (`\x1b[<params>H`) params string address row 1, column 1
+/// ("home")? Each field defaults to 1 when empty, per ECMA-48 — so `""`,
+/// `"1"`, `"1;1"`, `";1"`, `"1;"`, and `";"` are all row-1-col-1.
+fn is_cup_row1_col1(params: &[u8]) -> bool {
+    let field_is_one_or_empty = |f: &[u8]| f.is_empty() || f == b"1";
+    match params.iter().position(|&b| b == b';') {
+        None => field_is_one_or_empty(params),
+        Some(idx) => {
+            field_is_one_or_empty(&params[..idx]) && field_is_one_or_empty(&params[idx + 1..])
         }
     }
 }
@@ -1846,6 +2060,207 @@ mod tests {
         assert_eq!(cr(b"line1\npartial\rreplace\n"), b"line1\nreplace\n");
     }
 
+    // ── normalize_csi_overwrites tests (spec §A2) ──────────────────────────
+
+    fn csi(input: &[u8]) -> Vec<u8> {
+        let mut v = input.to_vec();
+        let mut still_on_first_line = true;
+        let mut at_col0 = true;
+        normalize_csi_overwrites(&mut v, &mut still_on_first_line, &mut at_col0);
+        v
+    }
+
+    #[test]
+    fn normalize_csi_cha_col1_becomes_cr() {
+        assert_eq!(csi(b"progress\x1b[1Gdone"), b"progress\rdone");
+        // Bare \x1b[G (no param) means column 1 too, per ECMA-48 default.
+        assert_eq!(csi(b"progress\x1b[Gdone"), b"progress\rdone");
+    }
+
+    #[test]
+    fn normalize_csi_cha_other_column_left_untouched() {
+        // Only column 1 maps cleanly onto "\r" (start of line); other
+        // columns are intentionally out of scope (need true column
+        // tracking) and must survive unmangled for strip_ansi to remove.
+        let out = csi(b"progress\x1b[10Gdone");
+        assert!(!out.contains(&b'\r'), "unrelated CHA column must not synthesize a \\r");
+        assert_eq!(out, b"progress\x1b[10Gdone");
+    }
+
+    #[test]
+    fn normalize_csi_el_at_line_start_becomes_cr() {
+        // EL at the very start of a chunk (nothing written on this line
+        // yet) is safe: there's nothing to lose by treating it as \r.
+        assert_eq!(csi(b"\x1b[2Kfresh"), b"\rfresh");
+        assert_eq!(csi(b"\x1b[Kfresh"), b"\rfresh");
+        assert_eq!(csi(b"\x1b[0Kfresh"), b"\rfresh");
+        // Same, after a real newline -- also column 0.
+        assert_eq!(csi(b"line1\n\x1b[2Kfresh"), b"line1\n\rfresh");
+    }
+
+    #[test]
+    fn normalize_csi_standalone_mid_line_el_is_left_untouched_not_synthesized_to_cr() {
+        // reagent P1, PR #2330: EL only erases from the cursor onward and
+        // never moves it -- it is NOT equivalent to \r when real content
+        // ("stale") already precedes it on the line. The previous,
+        // unconditional version turned this into "stale\rfresh", which
+        // collapse_cr then truncated to just "fresh", silently discarding
+        // "stale" even though EL never asked for that. Leaving it
+        // unconverted here means strip_ansi removes only the escape bytes
+        // afterward, preserving "stale" + "fresh" concatenated.
+        let out = csi(b"stale\x1b[2Kfresh");
+        assert!(!out.contains(&b'\r'), "mid-line EL must not synthesize a \\r: {out:?}");
+        assert_eq!(out, b"stale\x1b[2Kfresh");
+
+        let out_k = csi(b"stale\x1b[Kfresh");
+        assert!(!out_k.contains(&b'\r'));
+        assert_eq!(out_k, b"stale\x1b[Kfresh");
+    }
+
+    #[test]
+    fn normalize_csi_at_col0_persists_across_calls_mid_line_el_split_across_reads_stays_untouched() {
+        // reagent P1, PR #2330 (round 2): normalize_csi_overwrites is called
+        // once per PTY read in the real reader loop, with at_col0 threaded
+        // in by &mut reference across calls -- NOT reset per call. A prior
+        // version of this fix declared at_col0 as a local reset to `true`
+        // on every call, so a standalone EL split across two PTY reads
+        // ("prefix" in one read, "\x1b[2Ksuffix" in the next) would see a
+        // freshly-true at_col0 on the second call and wrongly convert the
+        // EL to \r, reproducing the exact mid-line truncation bug the first
+        // round of this fix addressed -- just moved from a mid-chunk split
+        // to a cross-chunk-read split.
+        let mut still_on_first_line = true;
+        let mut at_col0 = true;
+
+        let mut first_read = b"prefix".to_vec();
+        normalize_csi_overwrites(&mut first_read, &mut still_on_first_line, &mut at_col0);
+        assert_eq!(first_read, b"prefix");
+        assert!(!at_col0, "cursor is mid-line after a read with no trailing \\n/\\r");
+
+        let mut second_read = b"\x1b[2Ksuffix".to_vec();
+        normalize_csi_overwrites(&mut second_read, &mut still_on_first_line, &mut at_col0);
+        assert!(
+            !second_read.contains(&b'\r'),
+            "EL split across a PTY-read boundary, still mid-line, must not synthesize a \\r: {second_read:?}"
+        );
+        assert_eq!(second_read, b"\x1b[2Ksuffix");
+
+        // Simulate the reader loop's actual buffering: both reads accumulate
+        // into one pending buffer before collapse_cr/strip_ansi run on it.
+        let mut pending = first_read;
+        pending.extend_from_slice(&second_read);
+        assert_eq!(pending, b"prefix\x1b[2Ksuffix");
+    }
+
+    #[test]
+    fn normalize_csi_at_col0_persists_across_calls_leading_cr_read_then_bare_el_read_becomes_cr() {
+        // Complement of the above: a read ending in \r (cursor genuinely at
+        // column 0) followed by a read that STARTS with EL must still
+        // convert -- persisted state must correctly stay `true` too, not
+        // just correctly go false.
+        let mut still_on_first_line = true;
+        let mut at_col0 = true;
+
+        let mut first_read = b"frame1\r".to_vec();
+        normalize_csi_overwrites(&mut first_read, &mut still_on_first_line, &mut at_col0);
+        assert!(at_col0, "trailing \\r puts the cursor back at column 0");
+
+        let mut second_read = b"\x1b[2Kframe2".to_vec();
+        normalize_csi_overwrites(&mut second_read, &mut still_on_first_line, &mut at_col0);
+        assert_eq!(second_read, b"\rframe2");
+    }
+
+    #[test]
+    fn normalize_csi_el_immediately_after_real_cr_still_becomes_cr() {
+        // The dominant real-world idiom (\r\x1b[2K<text>): the \r already
+        // puts the cursor at column 0, so a following EL is genuinely
+        // redundant and safe to also represent as \r.
+        assert_eq!(csi(b"\r\x1b[2Kfresh"), b"\r\rfresh");
+    }
+
+    #[test]
+    fn normalize_csi_cup_home_becomes_cr_on_first_line() {
+        // Windows ConPTY re-serializes a literal \r as CUP-to-home rather
+        // than passing it through -- verified empirically via the e2e test
+        // below. All the omitted-field variants mean row 1, col 1.
+        assert_eq!(csi(b"progress\x1b[Hdone"), b"progress\rdone");
+        assert_eq!(csi(b"progress\x1b[1Hdone"), b"progress\rdone");
+        assert_eq!(csi(b"progress\x1b[1;1Hdone"), b"progress\rdone");
+        assert_eq!(csi(b"progress\x1b[;1Hdone"), b"progress\rdone");
+        assert_eq!(csi(b"progress\x1b[1;Hdone"), b"progress\rdone");
+    }
+
+    #[test]
+    fn normalize_csi_cup_other_position_left_untouched() {
+        // Row/col other than 1,1 isn't "start of line" and must survive
+        // unmangled.
+        let out = csi(b"progress\x1b[2;1Hdone");
+        assert!(!out.contains(&b'\r'));
+        assert_eq!(out, b"progress\x1b[2;1Hdone");
+    }
+
+    #[test]
+    fn normalize_csi_cup_home_ignored_once_output_has_scrolled_past_first_line() {
+        // Once real multi-line output exists, \x1b[H means "go back to the
+        // FIRST of several lines" (a multi-line redraw, spec §A3,
+        // deliberately out of scope) -- must NOT be treated as "restart
+        // the current line", which would corrupt the multi-line content.
+        let mut v = b"line1\nline2\n\x1b[Hline1-updated".to_vec();
+        let mut still_on_first_line = true;
+        let mut at_col0 = true;
+        normalize_csi_overwrites(&mut v, &mut still_on_first_line, &mut at_col0);
+        assert!(!still_on_first_line, "must flip false after the first \\n");
+        assert!(
+            !v.contains(&b'\r'),
+            "CUP-home after multi-line output must not synthesize a \\r: {:?}",
+            String::from_utf8_lossy(&v)
+        );
+        assert_eq!(v, b"line1\nline2\n\x1b[Hline1-updated");
+    }
+
+    #[test]
+    fn normalize_csi_cub_left_untouched() {
+        // CUB (cursor-back N) is documented out-of-scope for this pass
+        // (spec §A2) -- needs true per-column tracking. Must survive
+        // unmangled here so strip_ansi still strips it as a whole sequence
+        // afterward (not left as garbage).
+        let out = csi(b"progress\x1b[5Ddone");
+        assert!(!out.contains(&b'\r'));
+        assert_eq!(out, b"progress\x1b[5Ddone");
+    }
+
+    #[test]
+    fn normalize_csi_dominant_cr_plus_el_idiom_is_redundant_but_correct() {
+        // The overwhelmingly common real-world idiom: \r\x1b[2K<text>. The
+        // \r is already present; normalize_csi_overwrites additionally
+        // turning \x1b[2K into a second \r is harmless -- collapse_cr
+        // treats consecutive \r as idempotent resets to the same line
+        // start.
+        let normalized = csi(b"\r\x1b[2Knew frame");
+        let mut pending = normalized;
+        collapse_cr(&mut pending);
+        assert_eq!(pending, b"\rnew frame");
+    }
+
+    #[test]
+    fn normalize_csi_composes_with_collapse_cr_for_a_full_overwrite() {
+        // End-to-end of the two functions together, as the reader loop
+        // actually calls them: a progress line first written plainly, then
+        // rewritten via CHA(1) on the next PTY read, must collapse exactly
+        // like a \r-based rewrite would.
+        let mut pending = b"Downloading 10%".to_vec();
+        collapse_cr(&mut pending); // no-op, no \r yet
+
+        let mut next_chunk = b"\x1b[1GDownloading 45%".to_vec();
+        let mut still_on_first_line = true;
+        let mut at_col0 = true;
+        normalize_csi_overwrites(&mut next_chunk, &mut still_on_first_line, &mut at_col0);
+        pending.extend_from_slice(&next_chunk);
+        collapse_cr(&mut pending);
+
+        assert_eq!(pending, b"Downloading 45%");
+    }
+
     /// Verify that the quiet-window semantics are: hold when pending ends
     /// with \r; flush when it doesn't. These are unit tests of the policy
     /// (not of the reader loop directly) — they encode the contract so a
@@ -1867,13 +2282,57 @@ mod tests {
     }
 
     #[test]
-    fn quiet_window_flushes_when_no_trailing_cr() {
-        // "Building..." (no \r) should flush live on the quiet-window.
+    fn quiet_window_defers_once_when_no_leading_or_trailing_cr() {
+        // "Building..." (no \r at either end) is a candidate for A1's
+        // one-tick speculative defer, not an immediate flush — see
+        // docs/specs/SPEC_TOOL_LOG_UNIVERSAL_ANIMATION_COLLAPSE_2026_07_27.md §A1.
         let pending = b"Building...".to_vec();
         assert!(
-            pending.last() != Some(&b'\r'),
-            "quiet-window must flush pending NOT ending with \\r"
+            pending.first() != Some(&b'\r') && pending.last() != Some(&b'\r'),
+            "quiet-window must defer (not flush) pending with no leading/trailing \\r"
         );
+    }
+
+    /// A1: the exact real-world bug this closes — a static label is
+    /// printed once with no `\r`, THEN (after the label has already been
+    /// speculatively deferred) a `\r`-prefixed overwrite arrives. Before
+    /// A1, the label would already have been flushed as its own permanent
+    /// LineEvent by the time the overwrite showed up, producing two lines
+    /// instead of one settled line.
+    #[test]
+    fn a1_deferred_line_merges_with_a_following_cr_prefixed_overwrite() {
+        // What deferred_pending holds after tick 1 (no \r either end).
+        let deferred = b"Installing deps...".to_vec();
+        // What arrives on the next read: a \r-prefixed overwrite.
+        let next_chunk = b"\rInstalling deps... done\n".to_vec();
+        // Mirrors the reader's merge step: prepend deferred, let
+        // collapse_cr do the rest.
+        let mut combined = deferred;
+        combined.extend_from_slice(&next_chunk);
+        collapse_cr(&mut combined);
+        assert_eq!(
+            combined, b"Installing deps... done\n",
+            "deferred label + \\r-overwrite must collapse to ONE line, not two"
+        );
+    }
+
+    /// A1: the deferred line must NOT be merged with unrelated content
+    /// that arrives without a leading `\r` — that's two genuinely
+    /// different lines and must stay two LineEvents.
+    #[test]
+    fn a1_deferred_line_is_not_merged_with_unrelated_non_cr_content() {
+        let deferred = b"Installing deps...".to_vec();
+        let next_chunk = b"Running tests...\n".to_vec();
+        // Mirrors the reader's policy: no leading \r on the new chunk means
+        // flush `deferred` as its own event, then start fresh with the new
+        // chunk (never concatenate the two).
+        assert_ne!(next_chunk.first(), Some(&b'\r'));
+        let mut fresh = Vec::new();
+        fresh.extend_from_slice(&next_chunk);
+        collapse_cr(&mut fresh);
+        assert_eq!(fresh, b"Running tests...\n");
+        // The deferred line, flushed separately, is untouched by the above.
+        assert_eq!(deferred, b"Installing deps...");
     }
 
     #[test]
@@ -2198,5 +2657,84 @@ mod tests {
                 None => std::env::remove_var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS"),
             }
         }
+    }
+
+    /// End-to-end proof of A1 against a REAL PTY + bash, reproducing the
+    /// exact bug SPEC_TOOL_LOG_UNIVERSAL_ANIMATION_COLLAPSE_2026_07_27.md
+    /// closes: a static label printed with no `\r`, a pause past the
+    /// quiet-window, then a `\r`-prefixed overwrite. Before A1, the label
+    /// was already flushed as its own permanent LineEvent by the time the
+    /// overwrite arrived, so the model-visible blob contained the label
+    /// TWICE ("Installing deps..." followed by "Installing deps... done").
+    ///
+    /// The pause is deliberately tuned to land INSIDE A1's one-extra-tick
+    /// window: greater than one `FLUSH_QUIET_WINDOW` (50ms, so the label is
+    /// actually deferred rather than merged inline on the same read) but
+    /// less than two (100ms, the point at which A1 gives up waiting and
+    /// flushes the deferred line anyway per the spec's own "no added
+    /// latency beyond one extra tick" scope). 70ms centers comfortably
+    /// inside that ~50ms window in isolation, but real OS thread scheduling
+    /// still occasionally pushes either boundary under load (observed: this
+    /// test flaked ~1 run in 6 in the full-suite parallel run, though never
+    /// in isolation) — `FLUSH_QUIET_WINDOW` is a hardcoded const with no
+    /// test-only override, so retrying the wall-clock scenario a few times
+    /// (same "widen the chance" philosophy already used by
+    /// `run_via_pty_does_not_misclassify_fast_success_as_idle_timeout`
+    /// above, just applied to reliably demonstrate a real behavior instead
+    /// of reliably catching a rare regression) is more honest than either a
+    /// single flaky assertion or silently loosening what's being proven.
+    #[tokio::test]
+    async fn a1_e2e_static_label_then_delayed_cr_overwrite_collapses_to_one_line() {
+        let bash = locate_bash().expect("locate_bash for test — same dependency the whole binary needs");
+        let command = "printf 'Installing deps...'; sleep 0.07; printf '\\rInstalling deps... done\\n'";
+
+        const MAX_ATTEMPTS: u32 = 5;
+        let mut last_blob = String::new();
+        for attempt in 1..=MAX_ATTEMPTS {
+            let pty_system = native_pty_system();
+            let pair = match pty_system.openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            }) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("skipping: PTY unavailable in this environment: {e}");
+                    return;
+                }
+            };
+            let args = Args {
+                tool_id: format!("test-a1-e2e-{attempt}"),
+                b64_cmd: String::new(),
+                block_id: None,
+            };
+            let buffered = Arc::new(tokio::sync::Mutex::new(Vec::<u8>::new()));
+
+            let result = tokio::time::timeout(
+                Duration::from_secs(15),
+                run_via_pty(&args, command, None, buffered.clone(), &bash, pair),
+            )
+            .await
+            .expect("run_via_pty must not hang")
+            .expect("run_via_pty should return Ok");
+            assert_eq!(result, 0, "command should exit cleanly");
+
+            let blob = String::from_utf8_lossy(&buffered.lock().await).into_owned();
+            let occurrences = blob.matches("Installing deps").count();
+            if occurrences == 1 && blob.contains("Installing deps... done") {
+                return; // demonstrated: the collapse happened as designed
+            }
+            eprintln!(
+                "attempt {attempt}/{MAX_ATTEMPTS}: expected 1 occurrence + the settled frame, \
+                 got {occurrences} occurrence(s) — blob: {blob:?} (retrying: real OS scheduling \
+                 can occasionally push the 70ms pause outside A1's ~50-100ms defer window)"
+            );
+            last_blob = blob;
+        }
+        panic!(
+            "the static label + its delayed \\r-overwrite must collapse to ONE occurrence across \
+             {MAX_ATTEMPTS} attempts — last blob: {last_blob:?}"
+        );
     }
 }
