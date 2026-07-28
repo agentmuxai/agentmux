@@ -148,10 +148,16 @@ fn redact_url_credentials(url: &str) -> (String, Vec<String>) {
         let after_scheme = scheme_end + 3;
         if let Some(at_offset) = result[after_scheme..].find('@') {
             let userinfo_end = after_scheme + at_offset;
-            // Only treat this as userinfo if there's no path separator
-            // before the `@` -- otherwise a bare `@` further into the URL
-            // (rare, but possible in a path/fragment) would be misread.
-            if !result[after_scheme..userinfo_end].contains('/') {
+            // Only treat this as userinfo if there's no path separator OR
+            // query-string start before the `@` -- otherwise a bare `@`
+            // further into the URL (rare, but possible in a path/query/
+            // fragment, e.g. "?a=b@c") would be misread, and — critically —
+            // consuming a `?` into this replacement would blind the
+            // query-param pass below to a real secret sitting right after
+            // it (reagent P0, PR #2333: "?a=b@c&api_key=SECRET" lost its
+            // `?` here, so api_key never got redacted at all).
+            let candidate = &result[after_scheme..userinfo_end];
+            if !candidate.contains('/') && !candidate.contains('?') {
                 result.replace_range(after_scheme..userinfo_end, "${URL_CREDENTIALS}");
                 redacted_names.push("url_credentials".to_string());
             }
@@ -942,6 +948,32 @@ mod tests {
         assert!(!server_file.content.contains("realAuthToken456"));
         assert!(server_file.content.contains("client_secret=${CLIENT_SECRET}"));
         assert!(server_file.content.contains("auth_token=${AUTH_TOKEN}"));
+    }
+
+    #[test]
+    fn userinfo_detection_does_not_swallow_the_query_string_delimiter() {
+        // reagent P0, PR #2333: a bare "@" appearing INSIDE the query
+        // string (not real userinfo) was previously misdetected as
+        // userinfo, and the replacement consumed the "?" along with it --
+        // blinding the query-param redaction pass to a real secret sitting
+        // right after it. No path, no real userinfo, just an "@" in a
+        // param value.
+        let mcp_servers = r#"[{
+            "name": "svc",
+            "type": "http",
+            "url": "https://svc.example.com?a=b@c&api_key=realSecretShouldBeRedacted"
+        }]"#;
+        let bundle = make_bundle("", "[]", mcp_servers, "[]");
+        let export = export_bundle(&bundle, &[]);
+        let server_file = export.files.iter().find(|f| f.path == "mcp/svc.server.json").unwrap();
+        assert!(
+            !server_file.content.contains("realSecretShouldBeRedacted"),
+            "the real secret must still be redacted even with a bare '@' earlier in the query string: {}",
+            server_file.content
+        );
+        assert!(server_file.content.contains("api_key=${API_KEY}"));
+        // No genuine userinfo here -- must not fabricate a ${URL_CREDENTIALS}.
+        assert!(!server_file.content.contains("URL_CREDENTIALS"));
     }
 
     #[test]
