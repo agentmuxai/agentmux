@@ -225,9 +225,18 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
             // turn). initiatesTurn is false for a flush, so even if this path
             // were hit it must not cut the active turn short.
             retry = true;
+            hub.agentInput.mockClear();
             hub.agentInput.mockResolvedValueOnce(undefined);
             await commands.flushHeldMessages();
 
+            // The held message must actually be attempted, not silently
+            // dropped by the fast-fail guard — a prior version of this guard
+            // applied unconditionally and ejected the queued message here
+            // without ever calling AgentInputCommand (Codex P1 on PR #2338).
+            expect(hub.agentInput).toHaveBeenCalledWith(
+                expect.anything(),
+                expect.objectContaining({ message: "held message" }),
+            );
             expect(paneSnapshot(BLOCK_ID)?.turnPhase.kind).toBe(busyPhase);
             dispose();
         });
