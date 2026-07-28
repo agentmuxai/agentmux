@@ -108,6 +108,23 @@ impl Store {
         )?;
         Ok(())
     }
+
+    /// Clear a per-agent credential's cached access token (client_id/secret
+    /// are left intact — only the token is suspect). Used when the server
+    /// rejects a request with 401 despite our cached expires_at still
+    /// looking valid (revoked/rotated out-of-band): forces the next
+    /// ensure_agent_credential call to re-fetch via fetch_m2m_token instead
+    /// of retrying the exact same rejected token. No-op if the agent has no
+    /// row. reagentx P1 on PR #2342.
+    pub fn agent_credential_invalidate_token(&self, agent_id: &str) -> Result<(), StoreError> {
+        let key = agent_id.to_lowercase();
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE db_agent_credentials SET access_token = '', expires_at = 0 WHERE agent_id = ?1",
+            params![key],
+        )?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -175,6 +192,32 @@ mod tests {
         let store = shared_store();
         // No agent_credential_save call first -- row doesn't exist.
         store.agent_credential_save_token("agentx", "tok-abc", AgentCredential::now_secs() + 3600).unwrap();
+        assert!(store.agent_credential_load("agentx").unwrap().is_none());
+    }
+
+    #[test]
+    fn invalidate_token_clears_token_and_expiry_but_keeps_client() {
+        let store = shared_store();
+        store.agent_credential_save("agentx", "client-1", "secret-1", "endpoint-1").unwrap();
+        store
+            .agent_credential_save_token("agentx", "tok-abc", AgentCredential::now_secs() + 3600)
+            .unwrap();
+
+        store.agent_credential_invalidate_token("agentx").unwrap();
+
+        let loaded = store.agent_credential_load("agentx").unwrap().unwrap();
+        assert_eq!(loaded.access_token, "");
+        assert_eq!(loaded.expires_at, 0);
+        assert!(!loaded.is_valid());
+        // Provisioned client identity survives — only the token was suspect.
+        assert_eq!(loaded.client_id, "client-1");
+        assert_eq!(loaded.client_secret, "secret-1");
+    }
+
+    #[test]
+    fn invalidate_token_is_a_noop_when_not_provisioned() {
+        let store = shared_store();
+        store.agent_credential_invalidate_token("agentx").unwrap();
         assert!(store.agent_credential_load("agentx").unwrap().is_none());
     }
 

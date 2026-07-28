@@ -554,9 +554,8 @@ async fn handle_server_msg(
                 // back to `token` (today's self-declared behavior) whenever
                 // this agent isn't provisioned yet or provisioning fails, so
                 // rollout never blocks delivery.
-                let agent_token = crate::muxbus::agent_credentials::ensure_agent_credential(agent_id, wstore, http)
-                    .await
-                    .unwrap_or_else(|| token.to_string());
+                let per_agent_token = crate::muxbus::agent_credentials::ensure_agent_credential(agent_id, wstore, http).await;
+                let agent_token = per_agent_token.clone().unwrap_or_else(|| token.to_string());
 
                 let url = format!("{}/reactive/pending/{}", MUXBUS_REST_URL, agent_id);
                 let resp = match http
@@ -574,7 +573,22 @@ async fn handle_server_msg(
                 };
 
                 if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-                    // Token expired during session — reconnect to refresh.
+                    if per_agent_token.is_some() {
+                        // The per-agent credential's cached token is stale/
+                        // revoked server-side even though it looked locally
+                        // valid — invalidate it so the next round re-fetches
+                        // instead of retrying the same rejected token and
+                        // tearing down the whole shared session (which would
+                        // starve delivery for every OTHER agent too) on every
+                        // InjectAvailable broadcast. reagentx P1 on PR #2342.
+                        crate::muxbus::agent_credentials::invalidate_cached_token(agent_id, wstore);
+                        tracing::warn!(
+                            agent_id = %agent_id,
+                            "cloud_subscriber: per-agent credential rejected (401) — invalidated, will retry next round",
+                        );
+                        continue;
+                    }
+                    // Shared account-level token expired during session — reconnect to refresh.
                     return Err("reconnect:token_expired".to_string());
                 }
                 if !resp.status().is_success() {

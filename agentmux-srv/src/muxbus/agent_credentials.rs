@@ -22,10 +22,34 @@
 //! message delivery, only degrade the binding guarantee back to today's
 //! self-declared behavior for that agent.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use crate::backend::storage::store::Store;
 use crate::muxbus::cloud_subscriber::{load_valid_token, MUXBUS_REST_URL};
+
+/// How long to skip re-attempting provisioning for an agent after a
+/// failure, before trying again. InjectAvailable broadcasts for ANY
+/// injection to ANY agent, so without this an agent that can never
+/// provision (quota exceeded, malformed agent_id, provisioning endpoint
+/// down) gets a fresh provisioning attempt on every single broadcast —
+/// an unthrottled retry storm against the provisioning endpoint, unlike
+/// the broker's single-flight-guarded scheduler used for the shared
+/// token. reagentx P2 on PR #2342.
+const PROVISION_RETRY_COOLDOWN: Duration = Duration::from_secs(60);
+
+static PROVISION_COOLDOWN: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+
+fn provision_cooldown() -> &'static Mutex<HashMap<String, Instant>> {
+    PROVISION_COOLDOWN.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn provision_recently_failed(agent_id: &str) -> bool {
+    let map = provision_cooldown().lock().unwrap();
+    map.get(agent_id)
+        .is_some_and(|t| t.elapsed() < PROVISION_RETRY_COOLDOWN)
+}
 
 /// Get a live per-agent access token, provisioning the Cognito client on
 /// first use. Returns None (never an error) on any failure — provisioning
@@ -43,10 +67,22 @@ pub async fn ensure_agent_credential(
     let creds = match creds {
         Some(c) if !c.client_id.is_empty() => c,
         _ => {
-            // Not provisioned yet — do it now, once. A failure here (e.g. no
-            // human login yet, network error) just means this agent keeps
-            // using the shared token until a later call succeeds.
-            provision_agent_client(&key, wstore, http).await.ok()?;
+            // Not provisioned yet. Skip if a recent attempt already failed
+            // (see PROVISION_RETRY_COOLDOWN) — this agent keeps using the
+            // shared token until the cooldown lapses or provisioning
+            // succeeds.
+            if provision_recently_failed(&key) {
+                return None;
+            }
+            if let Err(e) = provision_agent_client(&key, wstore, http).await {
+                tracing::warn!(
+                    agent_id = %key, error = %e,
+                    "muxbus: agent credential provisioning failed, backing off {}s",
+                    PROVISION_RETRY_COOLDOWN.as_secs(),
+                );
+                provision_cooldown().lock().unwrap().insert(key, Instant::now());
+                return None;
+            }
             wstore.agent_credential_load(&key).ok().flatten()?
         }
     };
@@ -58,6 +94,22 @@ pub async fn ensure_agent_credential(
     fetch_m2m_token(&key, &creds.client_id, &creds.client_secret, &creds.token_endpoint, wstore, http)
         .await
         .ok()
+}
+
+/// Clear a per-agent credential's cached access token — called by
+/// cloud_subscriber when a request using it comes back 401 even though the
+/// credential looked locally valid (revoked/rotated server-side out-of-band).
+/// Without this, the next InjectAvailable round retries the exact same
+/// rejected token forever. Best-effort: a store error here just means the
+/// stale token survives until its local expiry, matching the pre-existing
+/// failure mode rather than introducing a new one. reagentx P1 on PR #2342.
+pub fn invalidate_cached_token(agent_id: &str, wstore: &Arc<Store>) {
+    if let Err(e) = wstore.agent_credential_invalidate_token(&agent_id.to_lowercase()) {
+        tracing::warn!(
+            agent_id = %agent_id, error = %e,
+            "muxbus: failed to invalidate stale per-agent credential",
+        );
+    }
 }
 
 /// Calls POST /agents/provision (authenticated with the human's own PKCE
