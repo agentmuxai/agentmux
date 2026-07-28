@@ -484,12 +484,6 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 }
 
-/// Hidden manifest (relative to the agent working directory) tracking which
-/// skill-derived paths AgentMux itself wrote on the last `write_agent_config_files`
-/// call, so a subsequent call can delete ones that are no longer current without
-/// touching any user-authored `.claude/commands`/`.claude/skills` content.
-const MANAGED_SKILL_FILES_MANIFEST: &str = ".claude/.agentmux-managed-skill-files.json";
-
 /// Write agent config files (CLAUDE.md, .mcp.json, etc.) to the working directory.
 pub(super) fn write_agent_config_files(
     wstore: &Store,
@@ -621,53 +615,13 @@ pub(super) fn write_agent_config_files(
     // Remove skill-derived files (.claude/commands/*.md, .claude/skills/*/SKILL.md)
     // that WE wrote on a previous launch but aren't part of this run's output --
     // e.g. a skill's format switched between "prompt" and "agent-skill", or a
-    // skill was renamed/removed. Without this, the old file stays on disk and
-    // Claude keeps treating it as active alongside the newly selected format
-    // (reagent P1 + Codex P1/P2, PR #2322). Tracked via a small manifest of
-    // paths AgentMux itself wrote, rather than scanning .claude/commands or
-    // .claude/skills wholesale, so a user's own hand-authored commands/skills
-    // in the same working directory are never touched.
-    let new_managed_skill_paths: std::collections::BTreeSet<String> = config_files
-        .iter()
-        .filter(|f| {
-            f.filename.starts_with(".claude/commands/") || f.filename.starts_with(".claude/skills/")
-        })
-        .map(|f| f.filename.clone())
-        .collect();
-    let manifest_path = base_path.join(MANAGED_SKILL_FILES_MANIFEST);
-    if let Ok(raw) = std::fs::read_to_string(&manifest_path) {
-        if let Ok(old_paths) = serde_json::from_str::<Vec<String>>(&raw) {
-            for old in &old_paths {
-                if new_managed_skill_paths.contains(old) {
-                    continue;
-                }
-                // Defense in depth: `old` is manifest-recorded, itself built
-                // from `config_files` filenames derived from user-controlled
-                // skill triggers/names (now sanitized at the source in
-                // agent_config.rs, but this second gate means a bad path can
-                // never reach `remove_file`/`remove_dir` even if that
-                // sanitization is ever bypassed or the manifest file is
-                // tampered with) -- reagent P1, PR #2322.
-                let Ok(old_path) = crate::backend::base::safe_join_within_base(base_path, old)
-                else {
-                    tracing::warn!(
-                        work_dir = %expanded_dir,
-                        path = %old,
-                        "write_agent_config_files: refusing to delete a manifest path that \
-                         escapes the working directory"
-                    );
-                    continue;
-                };
-                let _ = std::fs::remove_file(&old_path);
-                // Agent Skills format nests under .claude/skills/<slug>/ -- clean
-                // up the now-empty slug directory too (no-op/fails silently if
-                // anything else still lives there, e.g. a future scripts/ dir).
-                if let Some(parent) = old_path.parent() {
-                    let _ = std::fs::remove_dir(parent);
-                }
-            }
-        }
-    }
+    // skill was renamed/removed. Shared with `writeagentconfig` (editor_handlers.rs)
+    // so the two RPC paths that materialize config files never drift out of sync
+    // on this (reagent P1 + Codex P1/P2, PR #2322).
+    let new_managed_skill_paths = crate::backend::agent_config::managed_skill_file_paths(
+        config_files.iter().map(|f| f.filename.as_str()),
+    );
+    crate::backend::agent_config::cleanup_stale_managed_skill_files(base_path, &new_managed_skill_paths);
 
     for file in &config_files {
         // Same defense-in-depth join as the cleanup pass above.
@@ -690,16 +644,7 @@ pub(super) fn write_agent_config_files(
             .map_err(|e| format!("failed to write {}: {e}", file.filename))?;
     }
 
-    if let Ok(manifest_json) = serde_json::to_string(&new_managed_skill_paths) {
-        if let Err(e) = std::fs::write(&manifest_path, manifest_json) {
-            tracing::warn!(
-                work_dir = %expanded_dir,
-                error = %e,
-                "write_agent_config_files: failed to write managed-skill-files manifest; \
-                 stale file cleanup may be skipped on the next launch"
-            );
-        }
-    }
+    crate::backend::agent_config::write_managed_skill_file_manifest(base_path, &new_managed_skill_paths);
 
     tracing::info!(
         agent_id = %agent.id,
@@ -855,7 +800,7 @@ mod write_agent_config_files_tests {
         );
         let malicious_manifest = serde_json::to_string(&vec![traversal_rel]).unwrap();
         std::fs::write(
-            work_dir.path().join(MANAGED_SKILL_FILES_MANIFEST),
+            work_dir.path().join(crate::backend::agent_config::MANAGED_SKILL_FILES_MANIFEST),
             malicious_manifest,
         )
         .unwrap();

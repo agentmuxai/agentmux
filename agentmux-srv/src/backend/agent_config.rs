@@ -5,7 +5,16 @@
 //!
 //! Ports the `buildConfigFiles`, `buildMcpConfig`, and `expandTemplate`
 //! functions from `frontend/app/view/agent/agent-model.ts`.
-//! All functions are pure — no I/O, no async.
+//! Most functions here are pure — no I/O, no async. The exception is the
+//! `managed skill files manifest` section near the end: real filesystem
+//! I/O shared by the two independent RPC handlers that materialize config
+//! files to disk (`agent.open`'s `write_agent_config_files` in
+//! `server/app_api/agent_open.rs`, and `writeagentconfig` in
+//! `server/editor_handlers.rs` — the latter is the actual "click Launch"
+//! path used on every normal agent launch). Lives here rather than in
+//! either handler file so the two callers can't drift out of sync on the
+//! manifest format or the path-traversal defense (reagent P1, PR #2322 —
+//! `writeagentconfig` initially had no cleanup at all).
 
 use std::collections::{HashMap, HashSet};
 
@@ -688,6 +697,110 @@ fn unique_skill_slug(name: &str, used: &mut HashSet<String>) -> String {
             return candidate;
         }
         n += 1;
+    }
+}
+
+// ============================================================
+// Managed skill files manifest (I/O — see module doc comment)
+// ============================================================
+
+/// Hidden manifest (relative to the agent working directory) tracking which
+/// skill-derived paths (`.claude/commands/*.md`, `.claude/skills/*/SKILL.md`)
+/// AgentMux itself wrote on the last materialization, so a subsequent one
+/// can delete ones that are no longer current without touching any
+/// user-authored `.claude/commands`/`.claude/skills` content.
+pub const MANAGED_SKILL_FILES_MANIFEST: &str = ".claude/.agentmux-managed-skill-files.json";
+
+/// Compute the subset of `filenames` that are skill-derived managed paths
+/// (the ones tracked in [`MANAGED_SKILL_FILES_MANIFEST`]) — everything else
+/// (`CLAUDE.md`, `.mcp.json`, `.claude/settings.json`, ...) is always fully
+/// regenerated at a fixed path every launch, so it has no staleness problem
+/// to track.
+pub fn managed_skill_file_paths<'a>(
+    filenames: impl Iterator<Item = &'a str>,
+) -> std::collections::BTreeSet<String> {
+    filenames
+        .filter(|f| f.starts_with(".claude/commands/") || f.starts_with(".claude/skills/"))
+        .map(|f| f.to_string())
+        .collect()
+}
+
+/// Delete skill-derived files a PREVIOUS materialization wrote (per the
+/// on-disk manifest) but that are no longer part of `new_managed_paths` --
+/// e.g. a skill's format switched between `"prompt"`/`"agent-skill"`, or it
+/// was renamed/removed. Without this, the stale file stays on disk and
+/// Claude keeps treating it as active alongside the newly selected format
+/// (reagent P1 + Codex P1/P2, PR #2322).
+///
+/// MUST be called before writing the new files (so a deletion never races a
+/// write to the same path); callers must call
+/// [`write_managed_skill_file_manifest`] after writing to record the new
+/// set for the next materialization. Best-effort: any individual read/parse
+/// failure is treated as "no prior manifest" (nothing to clean up yet)
+/// rather than propagated, since a missing/corrupt manifest must never
+/// block the write that follows.
+///
+/// Every path is resolved through [`crate::backend::base::safe_join_within_base`]
+/// before deletion — defense in depth against a manifest path that somehow
+/// escapes the working directory (e.g. a future bypass of trigger
+/// sanitization upstream, or manual tampering with the manifest file
+/// itself); such a path is skipped with a warning, never followed.
+pub fn cleanup_stale_managed_skill_files(
+    base_path: &std::path::Path,
+    new_managed_paths: &std::collections::BTreeSet<String>,
+) {
+    let manifest_path = base_path.join(MANAGED_SKILL_FILES_MANIFEST);
+    let Ok(raw) = std::fs::read_to_string(&manifest_path) else {
+        return;
+    };
+    let Ok(old_paths) = serde_json::from_str::<Vec<String>>(&raw) else {
+        return;
+    };
+    for old in &old_paths {
+        if new_managed_paths.contains(old) {
+            continue;
+        }
+        let old_path = match crate::backend::base::safe_join_within_base(base_path, old) {
+            Ok(p) => p,
+            Err(_) => {
+                tracing::warn!(
+                    work_dir = %base_path.display(),
+                    path = %old,
+                    "cleanup_stale_managed_skill_files: refusing to delete a manifest path \
+                     that escapes the working directory"
+                );
+                continue;
+            }
+        };
+        let _ = std::fs::remove_file(&old_path);
+        // Agent Skills format nests under .claude/skills/<slug>/ -- clean up
+        // the now-empty slug directory too (no-op/fails silently if
+        // anything else still lives there, e.g. a future scripts/ dir).
+        if let Some(parent) = old_path.parent() {
+            let _ = std::fs::remove_dir(parent);
+        }
+    }
+}
+
+/// Record `new_managed_paths` as the manifest for the NEXT call to
+/// [`cleanup_stale_managed_skill_files`]. Best-effort: a write failure is
+/// logged, not propagated — losing this write only means the next
+/// materialization's stale-file cleanup is skipped once, not a correctness
+/// issue for the current one.
+pub fn write_managed_skill_file_manifest(
+    base_path: &std::path::Path,
+    new_managed_paths: &std::collections::BTreeSet<String>,
+) {
+    let manifest_path = base_path.join(MANAGED_SKILL_FILES_MANIFEST);
+    if let Ok(manifest_json) = serde_json::to_string(new_managed_paths) {
+        if let Err(e) = std::fs::write(&manifest_path, manifest_json) {
+            tracing::warn!(
+                work_dir = %base_path.display(),
+                error = %e,
+                "write_managed_skill_file_manifest: failed to write manifest; \
+                 stale file cleanup may be skipped on the next materialization"
+            );
+        }
     }
 }
 
