@@ -222,6 +222,14 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // fall back to the computed slug derived from the display name.
                 let routing_id = if !agent.slug.is_empty() { &agent.slug } else { &agent_slug };
                 env_vars.insert("AGENTMUX_AGENT_ID".to_string(), json!(routing_id));
+                // Mirror under MUXBUS_AGENT_ID too, matching the same
+                // additive fix in agent_handlers/input.rs (ARCH-002) --
+                // this App API path (agent.open -> agent.send, via
+                // agent_io.rs reading this back from persisted cmd:env)
+                // builds its own env_vars independently of input.rs's spawn
+                // path, so it needs the same mirror applied here rather than
+                // inheriting it (codex P2 on PR #2345).
+                env_vars.insert("MUXBUS_AGENT_ID".to_string(), json!(routing_id));
                 // Exit delay only for subprocess
                 if !is_persistent {
                     env_vars.insert("CLAUDE_CODE_EXIT_AFTER_STOP_DELAY".to_string(), json!("30000"));
