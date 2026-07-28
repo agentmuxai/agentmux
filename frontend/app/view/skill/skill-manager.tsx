@@ -77,7 +77,13 @@ export const SkillManager = (): JSX.Element => {
                                             <span class="agent-primitive-modal-field-label">Description</span>
                                             <pre class="agent-primitive-modal-field-value">{skill().description}</pre>
                                         </Show>
-                                        <Show when={skill().trigger}>
+                                        <span class="agent-primitive-modal-field-label">Format</span>
+                                        <pre class="agent-primitive-modal-field-value">
+                                            {skill().skill_type === "agent-skill"
+                                                ? "Agent Skill (SKILL.md)"
+                                                : "Slash command"}
+                                        </pre>
+                                        <Show when={skill().skill_type !== "agent-skill" && skill().trigger}>
                                             <span class="agent-primitive-modal-field-label">Trigger</span>
                                             <pre class="agent-primitive-modal-field-value">{skill().trigger}</pre>
                                         </Show>
@@ -143,14 +149,25 @@ export const SkillManager = (): JSX.Element => {
                                     placeholder="e.g. pdf-extraction"
                                     required
                                 />
-                                <span class="agent-primitive-modal-field-label">Trigger</span>
-                                <input
+                                <span class="agent-primitive-modal-field-label">Format</span>
+                                <select
                                     class="agent-primitive-modal-input"
-                                    type="text"
-                                    value={draft().trigger}
-                                    onInput={(e) => model.setDraft({ ...draft(), trigger: e.currentTarget.value })}
-                                    placeholder="When should this skill be invoked?"
-                                />
+                                    value={draft().skill_type || "prompt"}
+                                    onChange={(e) => model.setDraft({ ...draft(), skill_type: e.currentTarget.value })}
+                                >
+                                    <option value="prompt">Slash command (/trigger)</option>
+                                    <option value="agent-skill">Agent Skill (SKILL.md) — beta ABF format</option>
+                                </select>
+                                <Show when={(draft().skill_type || "prompt") !== "agent-skill"}>
+                                    <span class="agent-primitive-modal-field-label">Trigger</span>
+                                    <input
+                                        class="agent-primitive-modal-input"
+                                        type="text"
+                                        value={draft().trigger}
+                                        onInput={(e) => model.setDraft({ ...draft(), trigger: e.currentTarget.value })}
+                                        placeholder="When should this skill be invoked?"
+                                    />
+                                </Show>
                                 <span class="agent-primitive-modal-field-label">Description</span>
                                 <input
                                     class="agent-primitive-modal-input"

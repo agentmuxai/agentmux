@@ -97,7 +97,13 @@ export const AgentSkillsModal = (props: AgentSkillsModalProps): JSX.Element => {
                             <span class="agent-primitive-modal-field-label">Description</span>
                             <pre class="agent-primitive-modal-field-value">{skill().description}</pre>
                         </Show>
-                        <Show when={skill().trigger}>
+                        <span class="agent-primitive-modal-field-label">Format</span>
+                        <pre class="agent-primitive-modal-field-value">
+                            {skill().skill_type === "agent-skill"
+                                ? "Agent Skill (SKILL.md)"
+                                : "Slash command"}
+                        </pre>
+                        <Show when={skill().skill_type !== "agent-skill" && skill().trigger}>
                             <span class="agent-primitive-modal-field-label">Trigger</span>
                             <pre class="agent-primitive-modal-field-value">{skill().trigger}</pre>
                         </Show>
