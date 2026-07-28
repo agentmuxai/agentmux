@@ -74,13 +74,16 @@ export interface UseAgentCommandsOptions {
      */
     canRetry: Accessor<boolean>;
     /**
-     * True while `relogin()`/`loginViaTerminal()`'s own OAuth attempt is in
-     * flight — up to their 5-minute completion poll. `canRetry` is cleared
-     * the INSTANT the mount-time "Log in" button is clicked (relogin()'s own
-     * first line), well before that attempt actually succeeds or fails, so
-     * `canRetry` alone leaves this whole window unguarded: a message sent
-     * mid-attempt would reach `AgentInputCommand` and reproduce the exact
-     * doomed spawn this fast-fail exists to prevent. Codex P1 on PR #2338.
+     * True while `relogin()`/`loginViaTerminal()`/`useGlobalLogin()`'s own
+     * recovery attempt is in flight. `canRetry` is cleared the INSTANT the
+     * mount-time "Log in" button is clicked (relogin()'s own first line),
+     * well before that attempt actually succeeds or fails, so `canRetry`
+     * alone leaves this whole window unguarded: a message sent mid-attempt
+     * would reach `AgentInputCommand` on a credential the pane already has
+     * reason to distrust, reproducing the exact doomed spawn this fast-fail
+     * exists to prevent. Codex P1 on PR #2338; useGlobalLogin() was missing
+     * this entirely (never touched `loginWaiting` at all) until reagent P1
+     * caught it on re-review.
      */
     loginWaiting: Accessor<boolean>;
     /** Same surface `useAgentControllerStatus`'s own recovery-failure
