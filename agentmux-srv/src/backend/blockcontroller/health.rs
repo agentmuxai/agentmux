@@ -327,7 +327,7 @@ impl HealthMonitor {
             );
             self.publish_health(event.clone());
 
-            // Surface Dead as an AgentFailure with a "Restart" action —
+            // Surface Dead as an AgentFailure with a recovery action —
             // previously this transition was diagnostic-only (the WPS
             // agenthealth event above has no frontend subscriber), so a
             // pane whose process went unresponsive just sat there until a
@@ -339,21 +339,59 @@ impl HealthMonitor {
             // the process is genuinely fine again. See
             // docs/reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md §4.
             if new_health == AgentHealth::Dead {
-                self.publish_unresponsive_failure(&event.detail);
+                // reagent P1: Dead has two distinct root causes (see
+                // compute_health) — a genuinely silent process (the
+                // `Unresponsive`/"Restart" case this feature was built for)
+                // and a fatal IN-BAND error that was recognized but didn't
+                // make the process exit (e.g. an auth failure printed to
+                // stderr, process hangs afterward instead of exiting
+                // cleanly). Blindly labeling the second case "Unresponsive"
+                // would show "Restart" instead of "Login Again" — actively
+                // wrong (a restart wouldn't fix an auth problem, and for
+                // auth specifically no restart is even needed; the running
+                // process re-reads its credential per request). Classify
+                // the recorded error text through the same `classify()`
+                // used for exit-time classification so the right recovery
+                // action shows up instead.
+                if inner.errors.has_fatal() {
+                    if let Some(ref err_text) = inner.last_error {
+                        let classified = crate::agents::failure::classify(None, None, err_text, None);
+                        self.publish_failure(&classified);
+                    } else {
+                        self.publish_unresponsive_failure(&event.detail);
+                    }
+                } else {
+                    self.publish_unresponsive_failure(&event.detail);
+                }
             } else if old == AgentHealth::Dead {
                 self.clear_unresponsive_failure();
             }
         }
     }
 
-    /// Persist + live-publish an `Unresponsive` `AgentFailure` for this
-    /// block. Mirrors the exit-classification publish pattern in
-    /// `subprocess/host_spawn.rs` (persist meta first, durable; then the
-    /// ephemeral `persist: 1` WPS push) — see that file's own comment for
-    /// why the ordering matters. Best-effort: a `None` `wstore`/`event_bus`
-    /// (unit tests, or a controller type that never wired them in) silently
-    /// no-ops on the persist half; the WPS push still fires if a broker
-    /// exists.
+    /// Persist + live-publish an `AgentFailure` for this block. Mirrors the
+    /// exit-classification publish pattern in `subprocess/host_spawn.rs`
+    /// (persist meta first, durable; then the ephemeral `persist: 1` WPS
+    /// push) — see that file's own comment for why the ordering matters.
+    /// Best-effort: a `None` `wstore`/`event_bus` (unit tests, or a
+    /// controller type that never wired them in) silently no-ops on the
+    /// persist half; the WPS push still fires if a broker exists.
+    fn publish_failure(&self, failure: &crate::agents::failure::AgentFailure) {
+        super::core::persist_last_failure(&self.block_id, Some(failure), &self.wstore, &self.event_bus);
+        if let Some(ref broker) = self.broker {
+            broker.publish(wps::WaveEvent {
+                event: wps::EVENT_AGENT_FAILURE.to_string(),
+                scopes: vec![format!("block:{}", self.block_id)],
+                sender: String::new(),
+                persist: 1,
+                data: serde_json::to_value(failure).ok(),
+            });
+        }
+    }
+
+    /// The generic `Unresponsive` case — a genuinely silent process (no
+    /// recognized fatal error to classify more specifically). See the
+    /// Dead-entry handling in `evaluate_and_transition` for the other case.
     fn publish_unresponsive_failure(&self, detail: &str) {
         let failure = crate::agents::failure::AgentFailure {
             code: crate::agents::failure::FailureClass::Unresponsive,
@@ -364,16 +402,7 @@ impl HealthMonitor {
             stderr_tail: String::new(),
             retryable: false,
         };
-        super::core::persist_last_failure(&self.block_id, Some(&failure), &self.wstore, &self.event_bus);
-        if let Some(ref broker) = self.broker {
-            broker.publish(wps::WaveEvent {
-                event: wps::EVENT_AGENT_FAILURE.to_string(),
-                scopes: vec![format!("block:{}", self.block_id)],
-                sender: String::new(),
-                persist: 1,
-                data: serde_json::to_value(&failure).ok(),
-            });
-        }
+        self.publish_failure(&failure);
     }
 
     /// Clear a previously-published `Unresponsive` failure on a silent
@@ -688,22 +717,80 @@ mod tests {
     /// which isn't practical to wait out in a test.
     #[test]
     fn dead_transition_publishes_unresponsive_failure() {
+        // publish_unresponsive_failure's own construction, exercised
+        // directly — the ONLY path evaluate_and_transition actually takes
+        // to this specific class is the plain-silence branch (`!has_fatal()`),
+        // which isn't practical to wait out (120s) in a unit test. The
+        // has_fatal() branch is covered separately below — it classifies
+        // through `agents::failure::classify()` instead, per reagent P1 on
+        // PR #2336 (a fatal in-band error like an auth failure must not be
+        // mislabeled "Unresponsive"/"Restart").
         let broker = Arc::new(crate::backend::wps::Broker::new());
         let monitor = HealthMonitor::new("test-block-dead".to_string(), Some(broker.clone()), None, None);
-        monitor.set_active_turn(true);
 
-        monitor.record_error(ErrorClass::Fatal, "Unauthorized".to_string());
-        assert_eq!(monitor.inner.lock().unwrap().current_health, AgentHealth::Dead);
+        monitor.publish_unresponsive_failure("Unresponsive for 120s");
 
         let history = broker.read_event_history(
             crate::backend::wps::EVENT_AGENT_FAILURE,
             "block:test-block-dead",
             1,
         );
-        assert_eq!(history.len(), 1, "Dead transition must publish an AgentFailure");
+        assert_eq!(history.len(), 1, "must publish an AgentFailure");
         let data = history[0].data.clone().expect("failure payload must be present");
         assert_eq!(data.get("code").and_then(|v| v.as_str()), Some("unresponsive"));
         assert_eq!(data.get("retryable").and_then(|v| v.as_bool()), Some(false));
+    }
+
+    /// reagent P1 on PR #2336: Dead reached via a RECOGNIZED fatal in-band
+    /// error (e.g. an auth failure that got printed to stderr but didn't
+    /// make the process exit) must publish the correctly-classified
+    /// failure, not a blanket "Unresponsive" — showing "Restart" instead of
+    /// "Login Again" would actively mislead the user (a restart doesn't fix
+    /// an auth problem, and none is even needed — the running process
+    /// re-reads its credential per request).
+    #[test]
+    fn dead_via_recognized_fatal_error_publishes_the_correct_class_not_unresponsive() {
+        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let monitor = HealthMonitor::new("test-block-dead-auth".to_string(), Some(broker.clone()), None, None);
+        monitor.set_active_turn(true);
+
+        monitor.record_error(ErrorClass::Fatal, "Unauthorized: token expired".to_string());
+        assert_eq!(monitor.inner.lock().unwrap().current_health, AgentHealth::Dead);
+
+        let history = broker.read_event_history(
+            crate::backend::wps::EVENT_AGENT_FAILURE,
+            "block:test-block-dead-auth",
+            1,
+        );
+        assert_eq!(history.len(), 1, "Dead transition must publish an AgentFailure");
+        let data = history[0].data.clone().expect("failure payload must be present");
+        assert_eq!(
+            data.get("code").and_then(|v| v.as_str()),
+            Some("auth"),
+            "a recognized auth error reaching Dead must classify as auth, not unresponsive"
+        );
+    }
+
+    /// An UNRECOGNIZED fatal error still must not be mislabeled
+    /// "Unresponsive" (that class is reserved for the plain-silence case) —
+    /// `classify()`'s own generic fallback (`unknown_non_zero`) is the
+    /// honest answer when nothing matches.
+    #[test]
+    fn dead_via_unrecognized_fatal_error_falls_back_to_classifys_own_default() {
+        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let monitor = HealthMonitor::new("test-block-dead-unknown".to_string(), Some(broker.clone()), None, None);
+        monitor.set_active_turn(true);
+
+        monitor.record_error(ErrorClass::Fatal, "zzz_totally_unrecognized_internal_error_zzz".to_string());
+        assert_eq!(monitor.inner.lock().unwrap().current_health, AgentHealth::Dead);
+
+        let history = broker.read_event_history(
+            crate::backend::wps::EVENT_AGENT_FAILURE,
+            "block:test-block-dead-unknown",
+            1,
+        );
+        let data = history[0].data.clone().expect("failure payload must be present");
+        assert_eq!(data.get("code").and_then(|v| v.as_str()), Some("unknown_non_zero"));
     }
 
     /// A silent self-heal (Dead -> anything else, e.g. late output arriving
