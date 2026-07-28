@@ -556,6 +556,18 @@ export function useAgentControllerStatus(
                             // acknowledgement that the login actually succeeded.
                             opts.onLoginSuccess?.(authedEmail);
                             succeeded = true;
+                            // Clear BEFORE onRecovered — that callback can
+                            // synchronously resend the failed turn, and
+                            // useAgentCommands.ts's fast-fail guard checks
+                            // loginWaiting() before every send. Clearing only
+                            // in this function's trailing `finally` (which
+                            // runs AFTER onRecovered returns) let that resend
+                            // get spuriously rejected as "not logged in yet"
+                            // even though recovery just succeeded. reagent P0
+                            // on PR #2338 (this is genuinely done at this
+                            // point — forceControllerRefresh already
+                            // completed above).
+                            setLoginWaiting(false);
                             if (retryAfterLogin) {
                                 opts.onRecovered?.();
                             } else {
@@ -610,6 +622,10 @@ export function useAgentControllerStatus(
                         await forceControllerRefresh();
                         opts.onLoginSuccess?.(null);
                         succeeded = true;
+                        // See the "opened" branch above — must clear before
+                        // onRecovered, not in the trailing finally. reagent
+                        // P0 on PR #2338.
+                        setLoginWaiting(false);
                         if (retryAfterLogin) {
                             opts.onRecovered?.();
                         } else {
@@ -737,6 +753,11 @@ export function useAgentControllerStatus(
                 setAuthStatus("authenticated");
                 await forceControllerRefresh();
                 opts.onLoginSuccess?.(null);
+                // See relogin()'s identical comment — must clear before
+                // onRecovered, which can synchronously resend the failed
+                // turn straight into useAgentCommands.ts's loginWaiting()
+                // guard. reagent P0 on PR #2338.
+                setLoginWaiting(false);
                 opts.onRecovered?.();
             } else {
                 const msg = "Couldn't use your global login — no valid global Claude credential was found. Try “Login via terminal”.";
@@ -845,6 +866,9 @@ export function useAgentControllerStatus(
                         setAuthStatus("authenticated");
                         await forceControllerRefresh();
                         opts.onLoginSuccess?.(null);
+                        // See relogin()'s identical comment — reagent P0 on
+                        // PR #2338.
+                        setLoginWaiting(false);
                         opts.onRecovered?.();
                     } else {
                         setAuthStatus("unauthenticated");
