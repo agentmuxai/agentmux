@@ -114,24 +114,36 @@ export function useAgentQuestions(opts: UseAgentQuestionsOptions): UseAgentQuest
             answers: outcome.answers_map,
         }).catch((err: unknown) => {
             const msg = String(err);
-            // Phase 2 path: one-shot / container agents have no live stdin, and
-            // the CLI abandons the AskUserQuestion tool_use when the turn ends —
-            // a tool_result can no longer reach it (validated empirically:
-            // SPEC §10.1). Deliver the answer as a normal follow-up turn
-            // instead; the agent resumes the session and continues from the
-            // question with the answer as context. Keep the optimistic success.
-            if (msg.includes("UNSUPPORTED_CONTROLLER")) {
-                opts.log("agent", "Delivering AskUserQuestion answer as a follow-up message (non-persistent agent)");
-                void opts.sendMessage(outcome.answer_text).catch((e: unknown) => {
-                    opts.log("error", `answer follow-up failed: ${String(e)}`);
-                    applyDoc(originals);
-                });
-                return;
-            }
-            // Any other failure: roll the node back so the panel re-surfaces
-            // rather than falsely showing "answered" while the agent is blocked.
-            opts.log("error", `agent.answer failed: ${msg}`);
-            applyDoc(originals);
+            // Phase 2 fallback: always deliver as a normal follow-up turn
+            // instead of just rolling back — the agent resumes the session
+            // and continues from the question with the answer as context.
+            // Originally gated on UNSUPPORTED_CONTROLLER only (one-shot /
+            // container agents, which have no live stdin at all), but a
+            // PERSISTENT agent hits the identical "control protocol can't
+            // deliver this" shape whenever its `pending_questions` map
+            // doesn't have this tool_use_id — which is ALWAYS true after a
+            // pane close/reopen (or any process respawn): a fresh
+            // PersistentSubprocessController starts with an empty map, even
+            // though the persisted transcript still shows the question as
+            // the tail node (scrubOrphanedInProgress deliberately preserves
+            // it as "may still be answerable"). That backend error
+            // ("no pending AskUserQuestion for tool_use_id …") doesn't match
+            // UNSUPPORTED_CONTROLLER, so it used to fall straight to
+            // rollback — reproducing the exact "flicker and revert" bug
+            // whenever a question survives a reopen. Falling back
+            // unconditionally closes this: whatever the specific reason the
+            // control-protocol path failed, retrying via the ordinary
+            // message-send path is strictly safer than giving up — and that
+            // path auto-spawns/resumes a dead process if needed (send_message's
+            // existing contract), so this also self-heals a genuinely dead
+            // process without requiring a manual reopen at all. Only rolls
+            // back if the fallback ITSELF fails. See
+            // docs/reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md §2.7/§2.8.
+            opts.log("agent", `Delivering AskUserQuestion answer as a follow-up message (${msg})`);
+            void opts.sendMessage(outcome.answer_text).catch((e: unknown) => {
+                opts.log("error", `answer follow-up failed: ${String(e)}`);
+                applyDoc(originals);
+            });
         });
     };
 
