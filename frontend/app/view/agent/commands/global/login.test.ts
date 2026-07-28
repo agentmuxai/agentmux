@@ -48,6 +48,7 @@ function makeCtx(): SlashCommandContext {
         documentAtom: [() => [], vi.fn()] as any,
         log: vi.fn(),
         setAuthUrl: vi.fn(),
+        notifyControllerHealthy: vi.fn(),
         openPicker: vi.fn(),
         openHelp: vi.fn(),
     };
@@ -81,6 +82,11 @@ describe("/login — tier-1 'opened' branch persist-failure gating", () => {
 
         expect(result).toEqual({ kind: "ok" });
         expect(ctx.log).toHaveBeenCalledWith("auth", "login complete — run /cost to verify");
+        // Codex P1 on PR #2338: a pane already showing the mount-time
+        // "Log in" bar before the user typed /login directly must not have
+        // every subsequent message fast-failed forever just because /login
+        // bypassed relogin() (the only other path that manages canRetry).
+        expect(ctx.notifyControllerHealthy).toHaveBeenCalledOnce();
     });
 
     it("reagent P1 (re-review of PR #2318): returns an error, not ok, when persistAndLinkAccount fails to save the account", async () => {
@@ -97,5 +103,8 @@ describe("/login — tier-1 'opened' branch persist-failure gating", () => {
             message: "/login: the login succeeded, but AgentMux couldn't save the account record. Try again in a moment.",
         });
         expect(ctx.log).not.toHaveBeenCalledWith("auth", "login complete — run /cost to verify");
+        // A persist failure is not a confirmed-healthy credential — the
+        // mount-time "Log in" bar (if showing) must stay up.
+        expect(ctx.notifyControllerHealthy).not.toHaveBeenCalled();
     });
 });

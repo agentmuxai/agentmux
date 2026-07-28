@@ -124,6 +124,13 @@ export const loginCommand: SlashCommand = {
                             };
                         }
                         ctx.log("auth", "login complete — run /cost to verify");
+                        // A pane that already showed the mount-time "Log in"
+                        // bar (canRetry() true) before the user typed /login
+                        // directly, bypassing that button, would otherwise
+                        // have every subsequent message fast-failed forever —
+                        // /login never went through relogin(), the only other
+                        // place that manages canRetry. Codex P1 on PR #2338.
+                        ctx.notifyControllerHealthy();
                         return { kind: "ok" };
                     }
                     return {
@@ -145,6 +152,8 @@ export const loginCommand: SlashCommand = {
                         if (outcome === "terminal-success") {
                             ctx.log("auth", "login complete — run /cost to verify");
                         }
+                        // See the "opened" branch's identical call above.
+                        ctx.notifyControllerHealthy();
                         return { kind: "ok" };
                     }
                     return {
