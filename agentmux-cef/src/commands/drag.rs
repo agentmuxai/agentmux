@@ -249,34 +249,80 @@ pub fn get_mouse_button_state() -> Result<serde_json::Value, String> {
     Ok(serde_json::json!(false))
 }
 
-/// Replace the system no-drop cursor with a crosshair during drag.
+/// Whether the cursor-override thread should keep running.
+#[cfg(target_os = "windows")]
+static DRAG_CURSOR_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Start a cursor-override thread that calls `SetCursor(IDC_CROSS)` every 2ms,
+/// so the cursor reads as "creates something new" instead of the OS's default
+/// no-drop circle-slash while a tab/pane tear-off drag is outside the window.
+///
+/// # Why a thread instead of SetSystemCursor
+///
+/// A prior attempt (unmerged, `agenta/fix-tab-drag-cursor`, 2026-03) used
+/// `SetSystemCursor(cross, OCR_NO)` — replacing the shared `OCR_NO` system
+/// cursor resource once at drag start. That doesn't work: OLE's
+/// `IDropSource::GiveFeedback` caches its own `LoadCursor(NULL, IDC_NO)`
+/// handle on the *first* `GiveFeedback` call of a drag session, so a
+/// `SetSystemCursor` call afterwards never reaches that cached handle.
+/// Windows Explorer also draws `WM_SETCURSOR` from its own cursor resources,
+/// not the system cursor table. There is no static replacement that reaches
+/// every code path that might paint the cursor during an active OLE drag.
+///
+/// A 2ms polling thread instead repaints the cursor out from under whatever
+/// just set it. It wins every race when the mouse is stationary (the common
+/// "am I over a valid target" case) and, at 500Hz vs. a typical 125-250Hz
+/// mouse-report rate, dominates during movement too — occasional flicker is
+/// possible but not disruptive. This is also why the JS-only fix
+/// (`dropEffect = "copy"` in `TileLayout.win32.tsx`/`tab-reorder.ts`) isn't
+/// sufficient on its own: it only ever reaches the OS cursor while the
+/// pointer is still over *this app's* HTML content. The moment a tear-off
+/// drag crosses the window's own boundary onto the desktop or another
+/// window, no dragover event fires here at all, and only host-level cursor
+/// control (this function) can still influence what's drawn.
 pub fn set_drag_cursor() -> Result<serde_json::Value, String> {
     #[cfg(target_os = "windows")]
     {
-        use windows_sys::Win32::UI::WindowsAndMessaging::{
-            CopyIcon, LoadCursorW, SetSystemCursor, IDC_CROSS, OCR_NO,
-        };
-        unsafe {
-            let cross = LoadCursorW(std::ptr::null_mut(), IDC_CROSS);
-            if !cross.is_null() {
-                let copy = CopyIcon(cross);
-                if !copy.is_null() {
-                    SetSystemCursor(copy, OCR_NO);
-                }
-            }
+        use std::sync::atomic::Ordering;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{LoadCursorW, SetCursor, IDC_CROSS};
+
+        // Idempotent — a second start_cross_drag while the thread is already
+        // running (e.g. a stale-session self-heal) must not spawn a duplicate.
+        if DRAG_CURSOR_ACTIVE.swap(true, Ordering::Relaxed) {
+            return Ok(serde_json::Value::Null);
         }
+
+        let hcursor = unsafe { LoadCursorW(std::ptr::null_mut(), IDC_CROSS) };
+        if hcursor.is_null() {
+            DRAG_CURSOR_ACTIVE.store(false, Ordering::Relaxed);
+            return Err("LoadCursorW(IDC_CROSS) failed".to_string());
+        }
+        // HCURSOR is not Send; move it across the thread boundary as a plain
+        // integer. The handle is a shared system resource (IDC_CROSS is a
+        // predefined cursor, never freed) valid for the process's lifetime.
+        let hcursor_usize = hcursor as usize;
+
+        std::thread::spawn(move || {
+            while DRAG_CURSOR_ACTIVE.load(Ordering::Relaxed) {
+                unsafe { SetCursor(hcursor_usize as _) };
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+        });
+
+        tracing::debug!(target: "dnd:cursor", "set_drag_cursor: override thread started");
     }
     Ok(serde_json::Value::Null)
 }
 
-/// Restore all system cursors to defaults.
+/// Stop the cursor-override thread started by [`set_drag_cursor`]. Must be
+/// called on every drag end (drop, tear-off, or cancel) — leaving the thread
+/// running would pin the crosshair cursor after the drag session ends.
 pub fn restore_drag_cursor() -> Result<serde_json::Value, String> {
     #[cfg(target_os = "windows")]
     {
-        use windows_sys::Win32::UI::WindowsAndMessaging::{SystemParametersInfoW, SPI_SETCURSORS};
-        unsafe {
-            SystemParametersInfoW(SPI_SETCURSORS, 0, std::ptr::null_mut(), 0);
-        }
+        use std::sync::atomic::Ordering;
+        DRAG_CURSOR_ACTIVE.store(false, Ordering::Relaxed);
+        tracing::debug!(target: "dnd:cursor", "restore_drag_cursor: override thread stopped");
     }
     Ok(serde_json::Value::Null)
 }
