@@ -21,8 +21,7 @@ export const AgentMessageBlock = (props: AgentMessageBlockProps): JSX.Element =>
     // across token deltas; useAgentStream replaces props.node ref on
     // each chunk. Destructured `node` would freeze at first ref.
     // Access props.X reactively at each site. (codex P1 on PR #786 +
-    // family of issues on virt redesign — also fixed in MarkdownBlock,
-    // SubagentLinkBlock.)
+    // family of issues on virt redesign — also fixed in MarkdownBlock.)
     return (
         <div
             class={clsx("agent-message-block", {

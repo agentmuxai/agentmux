@@ -69,11 +69,11 @@ describe("agentPerfStore", () => {
         });
 
         it("rejects measurements with estimated=0 (avoid divide-by-zero)", () => {
-            agentPerfStore.recordEstimatorMeasurement("subagent_link", 0, 100);
+            agentPerfStore.recordEstimatorMeasurement("shell", 0, 100);
             // errorPct should be 0 (defensive), not Infinity
             const snap = agentPerfStore.snapshot();
             // The measurement still counted toward total, just not flagged.
-            expect(snap.estimatorMissRateByKind.get("subagent_link")).toBe(0);
+            expect(snap.estimatorMissRateByKind.get("shell")).toBe(0);
         });
 
         it("uses the documented threshold constant", () => {
