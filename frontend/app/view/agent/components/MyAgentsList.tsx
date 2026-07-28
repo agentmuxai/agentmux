@@ -317,8 +317,20 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
         <div class="agent-recent-sessions" data-testid="agent-my-agents-list">
             <div class="agent-recent-sessions-header">
                 <span class="agent-recent-sessions-title">My Agents</span>
-                <Show when={!isLoading() && (rows() ?? []).length > 0}>
-                    <span class="agent-recent-sessions-count">
+                {/* No `!isLoading()` guard here (reagent P2 on PR #2328):
+                    that check was already redundant even before isLoading
+                    switched to rows.loading — if rows() were undefined,
+                    `.length > 0` is already false — but now that isLoading
+                    also covers BACKGROUND refetches (visibility regain,
+                    agents:changed events), keeping the guard would hide
+                    the count on every one of those instead of just the
+                    very first load, which is a real, visible flicker
+                    regression this component never had before. Solid's
+                    stale-while-revalidate means `rows()` keeps showing the
+                    last real count during a background refetch anyway —
+                    exactly what should render. */}
+                <Show when={(rows() ?? []).length > 0}>
+                    <span class="agent-recent-sessions-count" data-testid="agent-my-agents-count">
                         {(rows() ?? []).length}
                     </span>
                 </Show>
