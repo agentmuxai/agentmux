@@ -287,6 +287,46 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
         });
     });
 
+    it("trustedAfterRecovery bypasses loginWaiting() specifically, for the auto-retry after a recovery flow's own confirmed success", async () => {
+        // loginWaiting is a shared counter across relogin()/useGlobalLogin()/
+        // loginViaTerminal() (useAgentControllerStatus.ts) — it can still
+        // read true here because a DIFFERENT, unrelated recovery flow is
+        // overlapping with the one whose onRecovered callback triggered
+        // this exact resend. That other flow's own uncertainty has no
+        // bearing on whether THIS confirmed-good credential is safe to
+        // retry on. Codex P2 on PR #2338 (fifth re-review).
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => true,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                backToPicker: async () => {},
+            });
+
+            hub.agentInput.mockResolvedValueOnce(undefined);
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("u there", false, null, /* trustedAfterRecovery */ true);
+
+            expect(hub.agentInput).toHaveBeenCalledWith(
+                expect.anything(),
+                expect.objectContaining({ message: "u there" }),
+            );
+            dispose();
+        });
+    });
+
     it("fast-fails a turn-initiating send when the caller captured a live auth failure, and restores the failure banner instead of a generic notice", async () => {
         // Neither canRetry nor loginWaiting reflects a mid-turn 401/403 —
         // that's the separate failure-banner mechanism (state.failure with

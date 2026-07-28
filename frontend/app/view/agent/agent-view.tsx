@@ -817,7 +817,14 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             // failure on THIS auto-retry too and wrongly reject the very
             // resend recovery just enabled. Codex P1 on PR #2338.
             dispatchPane(model.blockId, { type: "FailureCleared" }, "system");
-            retryLastTurn();
+            // trustedAfterRecovery: THIS flow's own credential is confirmed
+            // good (that's why onRecovered fired at all) — loginWaiting()
+            // is now a shared counter across all three recovery flows, so
+            // it can still read true here if a DIFFERENT, unrelated flow
+            // happens to be overlapping. That flow's own unconfirmed state
+            // has no bearing on whether this specific resend is safe.
+            // Codex P2 on PR #2338 (fifth re-review).
+            retryLastTurn({ trustedAfterRecovery: true });
         },
         getInitialTermSize: () => computeTermSizeFromEl(rootRef),
         // Mount-time TurnPhase reconciliation — see
@@ -1088,7 +1095,23 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
 
     // Mark turn as active when the user sends a message — TurnStart
     // also clears stale sessionStats from the prior turn.
-    const handleSendMessage = (message: string): Promise<void> => {
+    const handleSendMessage = (
+        message: string,
+        /** True only for the auto-retry `retryLastTurn` fires from
+         *  `onRecovered` — a resend triggered by THIS agent's own
+         *  just-confirmed credential, as opposed to a fresh user keystroke.
+         *  Bypasses deliverToBackend's loginWaiting() check specifically:
+         *  loginWaiting is now a shared counter across all three recovery
+         *  flows (relogin/useGlobalLogin/loginViaTerminal — see
+         *  useAgentControllerStatus.ts), so it can still read true here if
+         *  a DIFFERENT, unrelated flow happens to be overlapping — that
+         *  flow's own uncertainty has nothing to do with whether THIS
+         *  flow's confirmed success is safe to retry on. Codex P2 on
+         *  PR #2338 (fifth re-review). Never set true for the generic
+         *  failure-banner "Retry now" button (`onRetry: retryLastTurn`,
+         *  passed as a bare reference below — calls with no argument). */
+        trustedAfterRecovery?: boolean,
+    ): Promise<void> => {
         // Bang commands (`!cmd`) output writes into the shell terminal (see
         // `log`/`handleShellTermReady` above). Auto-open the details drawer so
         // the shell — and thus the output — is immediately visible; without
@@ -1128,7 +1151,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         if (!wasAlreadyWorking) {
             dispatchPane(model.blockId, { type: "TurnStart", at: Date.now() }, "user");
         }
-        return commands.sendMessage(message, wasAlreadyWorking, authFailureToPreserve);
+        return commands.sendMessage(message, wasAlreadyWorking, authFailureToPreserve, trustedAfterRecovery);
     };
 
     // Esc on an empty composer. Mirrors Claude Code CLI: if a message is
@@ -1150,11 +1173,11 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
 
     // Failure-recovery accessory row (per-error-class actions + 5s auto-retry
     // for transient throttling). SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.
-    const retryLastTurn = () => {
+    const retryLastTurn = (retryOpts?: { trustedAfterRecovery?: boolean }) => {
         const last = [...getDocument()].reverse().find((n) => n.type === "user_message");
         const msg = last && "message" in last ? (last as { message?: string }).message : undefined;
         if (msg) {
-            void handleSendMessage(msg);
+            void handleSendMessage(msg, retryOpts?.trustedAfterRecovery);
         } else {
             // No prior user message (e.g. the agent failed on its first
             // launch/spawn) — fall back to respawning the agent rather than
