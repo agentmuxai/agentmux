@@ -178,6 +178,26 @@ pub struct RecentSessionRow {
     pub agent_type: String,
 }
 
+/// Response envelope for `listrecentsessions`. Introduced alongside the
+/// per-source degradation hardening in `session.rs` (reagent P1 on
+/// PR #2327, re-reviewing
+/// docs/retro/retro-my-agents-fresh-channel-regression-2026-07-27.md's
+/// fix): once every one of that handler's six data sources degrades to
+/// empty on its OWN failure instead of aborting the whole RPC, the
+/// response can no longer distinguish "genuinely zero agents" from "a
+/// data source failed and we got nothing" by transport success/failure
+/// alone — the exact ambiguity this whole fix exists to close, just
+/// pushed one layer deeper. `degraded` lists which source(s) fell back
+/// this call (empty = fully healthy); the frontend treats an empty
+/// `rows` alongside a non-empty `degraded` as an error state, not a
+/// trustworthy zero.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ListRecentSessionsResult {
+    pub rows: Vec<RecentSessionRow>,
+    #[serde(default)]
+    pub degraded: Vec<String>,
+}
+
 /// Mutable subset of AgentInstance for PATCH-style updates. Every field is
 /// optional — absent fields preserve their current value.
 #[derive(Debug, Clone, Serialize, Deserialize)]

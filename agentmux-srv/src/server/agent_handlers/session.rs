@@ -8,7 +8,7 @@ use std::sync::Arc;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
     COMMAND_LIST_RECENT_SESSIONS, CommandListRecentSessionsData,
-    RecentSessionRow,
+    ListRecentSessionsResult, RecentSessionRow,
     // Option E (PR 1 of 2) — agent-anchored session zones.
     COMMAND_AGENT_SESSION_READ, COMMAND_AGENT_SESSION_WRITE_STATE,
     COMMAND_AGENT_SESSION_APPEND_OUTPUT, COMMAND_AGENT_SESSION_ARCHIVE,
@@ -49,6 +49,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let id_store = id_store_lrs.clone();
             let filestore = filestore.clone();
             Box::pin(async move {
+                let t0 = std::time::Instant::now();
                 let cmd: CommandListRecentSessionsData =
                     serde_json::from_value(data).unwrap_or_default();
                 let limit = if cmd.limit == 0 {
@@ -56,6 +57,19 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 } else {
                     cmd.limit.min(100)
                 };
+                // Tracks which of this handler's data sources degraded to
+                // empty this call. Every source below used to `.map_err(..)?`
+                // — one bad row anywhere aborted the ENTIRE "My Agents" list,
+                // and that exact failure mode has already broken it to an
+                // empty list at least twice in production (PR #2296's oauth
+                // serde-tag mismatch; see
+                // docs/retro/retro-my-agents-fresh-channel-regression-2026_07_27.md
+                // §4/§9 rec 1). A single malformed row must degrade THAT
+                // source only, not the whole response — logged here so the
+                // next incident's log can actually show what happened
+                // (§9 rec 3), unlike this retro's investigation, which had
+                // no way to tell whether this handler ran at all.
+                let mut degraded: Vec<&'static str> = Vec::new();
                 // Pull up to ~10x the requested cap so we can post-
                 // filter by snapshot presence + identity_id without
                 // running out of candidates. 10x is a safety margin
@@ -87,9 +101,18 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let instances: Vec<AgentInstance> = match wstore.shared_agent_registry() {
                     Some(reg) => {
                         let agents_root = wstore.registry_agents_base();
-                        let mut records = reg
-                            .list_active()
-                            .map_err(|e| format!("listrecentsessions: registry: {e}"))?;
+                        let mut records = match reg.list_active() {
+                            Ok(v) => v,
+                            Err(e) => {
+                                tracing::warn!(
+                                    error = %e,
+                                    "listrecentsessions: registry list_active failed — \
+                                     degrading to local-only instances for this call"
+                                );
+                                degraded.push("registry");
+                                Vec::new()
+                            }
+                        };
                         if let Some(idf) = identity_filter {
                             records.retain(|r| r.data.identity_id.as_deref() == Some(idf));
                         }
@@ -124,7 +147,15 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         // local-only append agree on identity (reagent P1).
                         let local = wstore
                             .instance_list_named(raw_limit, None, identity_filter, true)
-                            .unwrap_or_default();
+                            .unwrap_or_else(|e| {
+                                tracing::warn!(
+                                    error = %e,
+                                    "listrecentsessions: local instance_list_named failed — \
+                                     degrading to registry-only instances for this call"
+                                );
+                                degraded.push("local_instances");
+                                Vec::new()
+                            });
                         let mut local_by_key: std::collections::HashMap<
                             (String, String),
                             AgentInstance,
@@ -220,24 +251,53 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                     None => wstore
                         .instance_list_named(raw_limit, None, identity_filter, true)
-                        .map_err(|e| format!("listrecentsessions: {e}"))?,
+                        .unwrap_or_else(|e| {
+                            tracing::warn!(
+                                error = %e,
+                                "listrecentsessions: local instance_list_named failed \
+                                 (no shared registry attached) — degrading to empty list"
+                            );
+                            degraded.push("local_instances");
+                            Vec::new()
+                        }),
                 };
 
-                let defs = wstore
-                    .agent_def_list()
-                    .map_err(|e| format!("listrecentsessions: defs: {e}"))?;
+                let defs = wstore.agent_def_list().unwrap_or_else(|e| {
+                    tracing::warn!(
+                        error = %e,
+                        "listrecentsessions: agent_def_list failed — degrading to empty \
+                         (rows will show \"(missing definition)\")"
+                    );
+                    degraded.push("agent_defs");
+                    Vec::new()
+                });
                 // Identity display names resolve off the direct
                 // agent<->account links now (db_agent_identity_links /
                 // db_accounts), not the retired bundle tables — see
                 // SPEC_ARMORY_PHASE4_STORAGE_RENAME_COMPLETION_2026_07_12.md
                 // §4 item 1. Bulk-fetched once and grouped by definition_id
                 // rather than queried per-row.
-                let agent_identity_links = id_store
-                    .agent_identity_list_all()
-                    .map_err(|e| format!("listrecentsessions: agent_identity_links: {e}"))?;
-                let accounts = id_store
-                    .identity_list(None)
-                    .map_err(|e| format!("listrecentsessions: accounts: {e}"))?;
+                let agent_identity_links = id_store.agent_identity_list_all().unwrap_or_else(|e| {
+                    tracing::warn!(
+                        error = %e,
+                        "listrecentsessions: agent_identity_list_all failed — degrading to \
+                         empty (rows will show \"(ambient creds)\")"
+                    );
+                    degraded.push("identity_links");
+                    Vec::new()
+                });
+                let accounts = id_store.identity_list(None).unwrap_or_else(|e| {
+                    // The exact call PR #2296 broke (an oauth secret_ref serde-tag
+                    // mismatch aborted this and, before this hardening, the whole
+                    // handler with it) — now degrades in isolation instead.
+                    tracing::warn!(
+                        error = %e,
+                        "listrecentsessions: identity_list failed — degrading to empty \
+                         (rows will show \"(missing account)\")"
+                    );
+                    degraded.push("accounts");
+                    Vec::new()
+                });
                 let accounts_by_id: std::collections::HashMap<&str, &IdentityAccount> =
                     accounts.iter().map(|a| (a.id.as_str(), a)).collect();
                 let mut links_by_agent: std::collections::HashMap<&str, Vec<&AgentIdentityLink>> =
@@ -248,9 +308,15 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         .or_default()
                         .push(link);
                 }
-                let memories = id_store
-                    .bundle_memory_list()
-                    .map_err(|e| format!("listrecentsessions: memories: {e}"))?;
+                let memories = id_store.bundle_memory_list().unwrap_or_else(|e| {
+                    tracing::warn!(
+                        error = %e,
+                        "listrecentsessions: bundle_memory_list failed — degrading to empty \
+                         (rows will show \"(missing memory)\")"
+                    );
+                    degraded.push("memories");
+                    Vec::new()
+                });
 
                 // Build rows. Hits filestore once per instance; with
                 // raw_limit ≤ 500 and stat() being a single indexed
@@ -353,7 +419,32 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 });
                 rows.truncate(limit);
 
-                Ok(Some(serde_json::to_value(&rows).unwrap_or_default()))
+                // Command-level completion trace (retro §9 rec 3) — the
+                // prior incident's own log had no way to show whether this
+                // RPC ran, succeeded, or returned degraded data; this line
+                // answers all three going forward. `degraded` is non-empty
+                // only when at least one source above fell back to empty —
+                // an all-clear call logs an empty list here.
+                tracing::info!(
+                    rows = rows.len(),
+                    degraded = ?degraded,
+                    elapsed_ms = t0.elapsed().as_millis() as u64,
+                    "listrecentsessions: completed"
+                );
+
+                // `degraded` must also reach the CALLER, not just the log
+                // (reagent P1 on PR #2327): once every source degrades to
+                // empty instead of erroring the whole RPC, a transport-level
+                // success/failure check can no longer tell "genuinely zero
+                // agents" apart from "a source failed and we got nothing" —
+                // the exact ambiguity this hardening exists to close, just
+                // pushed from the RPC layer down into the response body.
+                // See ListRecentSessionsResult's own doc comment.
+                let result = ListRecentSessionsResult {
+                    rows,
+                    degraded: degraded.iter().map(|s| s.to_string()).collect(),
+                };
+                Ok(Some(serde_json::to_value(&result).unwrap_or_default()))
             })
         }),
     );
@@ -481,4 +572,188 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             })
         }),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::rpc_types::RpcMessage;
+    use crate::registry::{
+        DefinitionRecord, DefinitionRecordV1, DefinitionStore, NamedAgentRecord,
+        NamedAgentRecordV1, Registry,
+    };
+    use crate::server::tests::test_state;
+
+    fn named_record(instance_id: &str, definition_id: &str) -> NamedAgentRecord {
+        NamedAgentRecord {
+            schema_version: 1,
+            data: NamedAgentRecordV1 {
+                instance_id: instance_id.to_string(),
+                instance_name: format!("session-{instance_id}"),
+                definition_id: definition_id.to_string(),
+                identity_id: None,
+                memory_id: None,
+                session_id: None,
+                working_dir: format!("{definition_id}-workdir"),
+                source_agents_base: None,
+                created_at_ms: 1,
+                last_launched_at_ms: 1,
+                created_by_version: "test".to_string(),
+                last_launched_by_version: "test".to_string(),
+            },
+        }
+    }
+
+    fn definition_record(id: &str) -> DefinitionRecord {
+        DefinitionRecord {
+            schema_version: 1,
+            data: DefinitionRecordV1 {
+                id: id.to_string(),
+                name: format!("Agent {id}"),
+                provider: "claude".to_string(),
+                is_seeded: 0,
+                ..Default::default()
+            },
+        }
+    }
+
+    /// Seeds `state.wstore` with N cross-channel registry + definition
+    /// records (as they'd exist on a REAL machine before a fresh channel
+    /// ever boots) and returns the dispatch machinery ready to call
+    /// `listrecentsessions`.
+    fn setup_with_n_cross_channel_agents(
+        n: usize,
+    ) -> (
+        AppState,
+        std::sync::Arc<WshRpcEngine>,
+        tokio::sync::mpsc::UnboundedReceiver<RpcMessage>,
+        tempfile::TempDir,
+        tempfile::TempDir,
+    ) {
+        let state = test_state();
+        let registry_dir = tempfile::tempdir().unwrap();
+        let def_dir = tempfile::tempdir().unwrap();
+        let registry = Registry::open(registry_dir.path().to_path_buf()).unwrap();
+        let def_store = DefinitionStore::open(def_dir.path().to_path_buf()).unwrap();
+        for i in 0..n {
+            let id = format!("inst-{i}");
+            let def_id = format!("def-{i}");
+            registry.upsert(&named_record(&id, &def_id)).unwrap();
+            def_store.upsert(&definition_record(&def_id)).unwrap();
+        }
+        state.wstore.set_registry(std::sync::Arc::new(registry));
+        state.wstore.set_def_registry(std::sync::Arc::new(def_store));
+
+        let (engine, output_rx) = WshRpcEngine::new();
+        register(&engine, &state);
+        (state, engine, output_rx, registry_dir, def_dir)
+    }
+
+    async fn dispatch_list_recent_sessions(
+        engine: &std::sync::Arc<WshRpcEngine>,
+        output_rx: &mut tokio::sync::mpsc::UnboundedReceiver<RpcMessage>,
+    ) -> RpcMessage {
+        engine.handle_message(RpcMessage {
+            command: COMMAND_LIST_RECENT_SESSIONS.to_string(),
+            reqid: "req-1".to_string(),
+            data: Some(serde_json::json!({ "limit": 20 })),
+            ..Default::default()
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(2), output_rx.recv())
+            .await
+            .unwrap()
+            .unwrap()
+    }
+
+    /// Retro
+    /// `docs/retro/retro-my-agents-fresh-channel-regression-2026-07-27.md`
+    /// §9 rec 5: this exact path (fresh channel + pre-populated global
+    /// registry) had broken three separate times with no regression test
+    /// covering it. Directly exercises the RPC end-to-end against a real
+    /// `Registry`/`DefinitionStore` on disk — the same code path a fresh
+    /// `task package` channel hits on its very first "My Agents" fetch.
+    #[tokio::test]
+    async fn cross_channel_registry_agents_populate_a_fresh_channels_my_agents_list() {
+        let (_state, engine, mut output_rx, _reg_dir, _def_dir) =
+            setup_with_n_cross_channel_agents(3);
+
+        let resp = dispatch_list_recent_sessions(&engine, &mut output_rx).await;
+
+        assert!(resp.error.is_empty(), "unexpected error: {}", resp.error);
+        let result: ListRecentSessionsResult =
+            serde_json::from_value(resp.data.expect("expected result data")).unwrap();
+        assert_eq!(
+            result.rows.len(),
+            3,
+            "all 3 cross-channel registry agents must appear on a channel that never created any of them locally"
+        );
+        assert!(
+            result.degraded.is_empty(),
+            "a fully healthy call must report no degraded sources, got: {:?}",
+            result.degraded
+        );
+    }
+
+    /// Retro §4/§9 rec 1 — the core hardening this test locks in. Before
+    /// this fix, `identity_list()` failing on one unparseable `db_accounts`
+    /// row (PR #2296's exact incident: an oauth secret_ref serde-tag
+    /// mismatch) `?`-aborted the ENTIRE `listrecentsessions` response,
+    /// zeroing "My Agents" even though the registry/definitions themselves
+    /// were completely healthy. Reproduces that exact malformed-row shape
+    /// directly via raw SQL (bypassing `identity_upsert`, which would
+    /// never produce an invalid `secret_ref`) and asserts the response
+    /// still contains every agent — only the identity-name enrichment
+    /// degrades, not the whole list.
+    #[tokio::test]
+    async fn a_malformed_identity_account_row_degrades_that_source_without_zeroing_the_whole_list() {
+        let (state, engine, mut output_rx, _reg_dir, _def_dir) =
+            setup_with_n_cross_channel_agents(2);
+
+        // Same malformed shape as the real PR #2296 incident: a
+        // `secret_ref.backend` tag no `SecretRef` variant matches.
+        {
+            let conn = state.wstore.conn().lock().unwrap();
+            conn.execute(
+                "INSERT INTO db_accounts
+                    (id, name, provider, kind, display_name, secret_ref, context, status, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                rusqlite::params![
+                    "acct-broken",
+                    "broken-account",
+                    "claude",
+                    "oauth",
+                    "",
+                    r#"{"backend":"totally_bogus_backend"}"#,
+                    "{}",
+                    "unknown",
+                    0i64,
+                    0i64,
+                ],
+            )
+            .unwrap();
+        }
+
+        let resp = dispatch_list_recent_sessions(&engine, &mut output_rx).await;
+
+        assert!(resp.error.is_empty(), "unexpected error: {}", resp.error);
+        let result: ListRecentSessionsResult =
+            serde_json::from_value(resp.data.expect("expected result data")).unwrap();
+        assert_eq!(
+            result.rows.len(),
+            2,
+            "a single malformed db_accounts row must not zero out the whole \
+             My Agents list — it must only degrade identity-name display for \
+             affected rows"
+        );
+        // reagent P1 on PR #2327: the degradation must reach the CALLER, not
+        // just a server-side log line — otherwise the frontend has no way to
+        // ever distinguish "a source failed" from "genuinely zero agents"
+        // when a failure DOES happen to zero out the row count (e.g. both
+        // instance sources failing at once, unlike this identity-only case).
+        assert!(
+            result.degraded.contains(&"accounts".to_string()),
+            "the accounts source's failure must be reported in the response, got: {:?}",
+            result.degraded
+        );
+    }
 }
