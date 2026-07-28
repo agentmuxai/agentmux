@@ -82,7 +82,7 @@ doc exists to prevent).
 - During drag, throttled `update_floating_redock_hover` (~50ms) drives the drop-target highlight.
 
 ### 2.3 Edge-resize (floater only)
-`floating-pane-workspace.tsx:130-260` — a 12px (`FLOATER_EDGE_RESIZE_BORDER`) invisible **pointer** grab-band → `get_window_rect`/`set_window_rect`. Browser floaters inset their web-content child by the band depth (`browser-view.tsx:114`) so the frontend owns the band. **Note:** the band overlaps the top of the 33px header → grabbing the top edge resizes instead of moving (a known UX sharp-edge; reagent flagged it on #1177).
+`floating-pane-workspace.tsx:130-260` — an 8px (`FLOATER_EDGE_RESIZE_BORDER`) invisible **pointer** grab-band → `get_window_rect`/`set_window_rect`. Browser floaters inset their web-content child by the band depth (`use-pane-rect-sync.ts:70`) so the frontend owns the band. **Note:** the band overlaps the top of the 33px header → grabbing the top edge resizes instead of moving (a known UX sharp-edge; reagent flagged it on #1177). Shipped at 12px, regressed to 4px as a side effect of PR #1829's browser-pane matte fix, restored to 8px — see `docs/retro/retro-floating-pane-resize-hit-target-2026-07-27.md`.
 
 ### 2.4 Redock (floater → drop on a window)
 `onMouseUp` → `clear_floating_redock_hover` → `tryRedockAtCursor()` (`floating-pane-workspace.tsx:409`):
