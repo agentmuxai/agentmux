@@ -35,14 +35,19 @@ The patches live in the same fork/branch as Linux:
 
 ## What the verified artifact looks like
 
-The framework currently referenced by the release pipeline (verified 2026-06-29):
+The framework currently referenced by the release pipeline (verified
+2026-07-28 — this table had drifted out of date even before today's codec
+work; the actual latest published tag by 2026-07-02 was already `148.23.21`,
+not the `148.0.9` this table previously claimed):
 
 | Property | Value |
 |----------|-------|
 | Path | `~/cef-build/chromium/chromium/src/out/Release_GN_arm64/Chromium Embedded Framework.framework` |
 | Arch | Mach-O 64-bit arm64 |
-| Size (unstripped) | 545 MB |
-| Version (`Info.plist` `CFBundleShortVersionString`) | 148.0.9 |
+| Size (unstripped) | 547 MB |
+| Version (`Info.plist` `CFBundleShortVersionString`) | 148.23.23.0 |
+| `CEF_VERSION` (`cef_version.h`) | `148.23.23-rebuild-7778-codecs.3533+g6c570e2+chromium-148.0.7778.180` |
+| Released tag | `cef-macos-arm64-148.23.23-codecs` (adds `proprietary_codecs` etc. — see `docs/specs/SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md`) |
 | Patch symbol | `__ZN13CefWindowImpl15BeginWindowDragEv` (local symbol, `nm` type `t`) |
 
 > ⚠️ The patch symbol is **local**, not exported. Verify with full `nm` —
@@ -92,7 +97,7 @@ cd ~/cef-build/chromium/chromium/src
 # macOS doesn't need the systemd-run cgroup isolation Linux uses; ninja directly.
 # Build the framework target (NOT the phony `cef` meta-target, which won't relink
 # after a source-only change).
-third_party/ninja/ninja -j 12 -l 16 -C out/Release_GN_arm64 cef
+third_party/ninja/ninja -j 12 -l 16 -C out/Release_GN_arm64 cef_framework
 ```
 
 Output: `out/Release_GN_arm64/Chromium Embedded Framework.framework` (~545 MB
