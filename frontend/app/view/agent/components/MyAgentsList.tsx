@@ -130,11 +130,22 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     // start of every fetch so a stale error doesn't survive into a fresh
     // attempt's loading state.
     const [fetchError, setFetchError] = createSignal(false);
+    // Guards the two `setFetchError(true)` calls below against a stale
+    // (superseded) fetch's late resolution overwriting a NEWER fetch's
+    // already-settled state — e.g. rapid identity-filter switching, or
+    // clicking Retry again before the first attempt has finished, could
+    // otherwise let an old failure paint the error panel over valid,
+    // already-loaded data from the fetch that actually matters now
+    // (reagent P1 on PR #2327's re-review). Incremented synchronously at
+    // the start of each fetcher call, so invocation order is always
+    // correct even though resolution order isn't.
+    let fetchGeneration = 0;
 
     const [rows, { refetch }] = createResource<RecentSessionRow[], string>(
         // Key the resource on the filter so changes refetch.
         filterId,
         async (id) => {
+            const myGeneration = ++fetchGeneration;
             setFetchError(false);
             try {
                 const result = await RpcApi.ListRecentSessionsCommand(TabRpcClient, {
@@ -158,7 +169,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                         "MyAgentsList: listrecentsessions reported degraded sources with zero rows",
                         { degraded: result.degraded, identityId: id },
                     );
-                    setFetchError(true);
+                    if (myGeneration === fetchGeneration) setFetchError(true);
                     return [];
                 }
                 return result.rows;
@@ -173,7 +184,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                     ? { name: e.name, message: e.message, stack: e.stack }
                     : { value: String(e) };
                 Logger.error("agent", "MyAgentsList: ListRecentSessionsCommand failed", { error: errInfo, identityId: id });
-                setFetchError(true);
+                if (myGeneration === fetchGeneration) setFetchError(true);
                 return [];
             }
         },

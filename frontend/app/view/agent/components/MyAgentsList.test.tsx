@@ -265,6 +265,42 @@ describe("MyAgentsList — fetch error (retro-my-agents-fresh-channel-regression
         expect(entries).toHaveLength(1);
         expect(screen.queryByTestId("agent-my-agents-error")).toBeNull();
     });
+
+    // reagent P1 on PR #2327's re-review: `fetchError` was a single shared
+    // signal with no per-request guard — a stale (superseded) fetch's late
+    // rejection could overwrite the state a NEWER, already-succeeded fetch
+    // just set, painting the error panel over valid loaded data.
+    it("does not let a stale fetch's late rejection overwrite a newer fetch's successful data", async () => {
+        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+        let rejectStale!: (err: unknown) => void;
+        const stalePromise = new Promise<never>((_, reject) => { rejectStale = reject; });
+        vi.mocked(RpcApi.ListRecentSessionsCommand)
+            .mockImplementationOnce(() => stalePromise)
+            .mockResolvedValueOnce(okResult([makeRow({ instance_id: "fresh" })]));
+
+        const [identityId, setIdentityId] = createSignal<string>("id-1");
+        render(() => (
+            <MyAgentsList identityId={identityId} onReattach={() => {}} />
+        ));
+
+        // Supersede the still-pending first fetch before it ever resolves.
+        setIdentityId("id-2");
+        const entries = await screen.findAllByTestId("agent-my-agents-entry");
+        expect(entries).toHaveLength(1);
+
+        // Now let the stale first fetch fail, late.
+        rejectStale(new Error("stale failure"));
+        await Promise.resolve();
+        await Promise.resolve();
+
+        // The already-loaded, correct data must still be showing — not the
+        // error panel from a fetch that no longer matters.
+        expect(screen.queryByTestId("agent-my-agents-error")).toBeNull();
+        expect(screen.getAllByTestId("agent-my-agents-entry")).toHaveLength(1);
+
+        consoleErrorSpy.mockRestore();
+    });
 });
 
 describe("formatRelative", () => {
