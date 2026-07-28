@@ -640,7 +640,22 @@ async fn handle_server_msg(
                     }
                 };
                 if claim_resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-                    // Token expired during session — reconnect to refresh.
+                    if per_agent_token.is_some() {
+                        // Same reasoning as the /reactive/pending 401 branch
+                        // above: a revoked/rotated per-agent credential must
+                        // only invalidate itself, not tear down the shared
+                        // session and starve every other agent. reagentx P1
+                        // + codex P2 on PR #2342 (round 3) — this second 401
+                        // site was missed when the pending-request branch
+                        // was fixed last round.
+                        crate::muxbus::agent_credentials::invalidate_cached_token(agent_id, wstore);
+                        tracing::warn!(
+                            agent_id = %agent_id,
+                            "cloud_subscriber: per-agent credential rejected (401) on claim — invalidated, will retry next round",
+                        );
+                        continue; // nothing claimed — retried on the next wake/poll
+                    }
+                    // Shared account-level token expired during session — reconnect to refresh.
                     return Err("reconnect:token_expired".to_string());
                 }
                 if !claim_resp.status().is_success() {
