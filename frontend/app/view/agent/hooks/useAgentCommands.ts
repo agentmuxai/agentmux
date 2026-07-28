@@ -239,7 +239,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
     // at the next tool-call boundary, or recalled un-sent via `recallLatestHeld`
     // (ArrowUp). Holding — rather than sending immediately — is what makes the
     // recall a true un-send and lets the message land at a clean boundary.
-    const heldQueue: Array<{ id: string; text: string }> = [];
+    const heldQueue: Array<{ id: string; text: string; authWasKnownBadAtQueueTime: boolean }> = [];
     // Re-entrancy guard: only ONE flush drains the queue at a time. The flush
     // effect fires fire-and-forget on every tool/phase change, so without this
     // a second boundary could start a concurrent flush whose AgentInputCommand
@@ -444,7 +444,24 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             // and ArrowUp can recall it un-sent before then. No expiry timer —
             // the message must persist until it is actually delivered, not drop
             // off after 30s (the bug this fixes).
-            heldQueue.push({ id: messageId, text: message });
+            //
+            // authWasKnownBadAtQueueTime: captured HERE, not re-checked live
+            // at flush time. This pane's own "wasAlreadyWorking" turnPhase and
+            // canRetry()/loginWaiting() are tracked independently — nothing
+            // enforces "if a turn is active, auth must be fine" — so a
+            // controller reporting an active turn while the mount-time auth
+            // check has ALSO shown "Log in" (or a recovery attempt is still
+            // resolving) is a real, reachable combination, not a contradiction.
+            // deliverToBackend's guard is deliberately gated on initiatesTurn
+            // (false for every flushed item) so a message that becomes
+            // enqueued-while-legitimately-busy doesn't get retroactively
+            // dropped just because canRetry()/loginWaiting() flip true AFTER
+            // it was queued (Codex P1, earlier re-review) — but that reasoning
+            // only holds when auth was GOOD at queue time. Capture the
+            // opposite case here so flushHeldMessages can reject exactly
+            // those items instead of blindly trusting initiatesTurn=false
+            // for all of them. Codex P2 on PR #2338 (sixth re-review).
+            heldQueue.push({ id: messageId, text: message, authWasKnownBadAtQueueTime: opts.canRetry() || opts.loginWaiting() });
             return;
         }
 
@@ -677,6 +694,23 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             // shift() (not a snapshot) so items queued mid-flush are included.
             while (heldQueue.length > 0) {
                 const item = heldQueue.shift()!;
+                if (item.authWasKnownBadAtQueueTime) {
+                    // This item was queued while the pane already knew it was
+                    // logged out (or a recovery attempt was still unconfirmed)
+                    // — deliverToBackend's guard never sees it, since it's
+                    // deliberately skipped for every flushed item (see the
+                    // push-site comment). Reject it directly instead of
+                    // trusting the same "already-active turn" reasoning that
+                    // correctly applies to the OTHER items in this queue.
+                    // Does not touch turnPhase (mirrors deliverToBackend's own
+                    // initiatesTurn=false handling) — a real turn is still
+                    // genuinely active for whatever put this pane in the
+                    // "busy" branch to begin with. Codex P2 on PR #2338
+                    // (sixth re-review).
+                    opts.log("auth", "held message not sent — not logged in", "warn");
+                    opts.model.dispatchPane({ type: "PendingMessageRejected", id: item.id });
+                    continue;
+                }
                 await deliverToBackend(item.text, item.id, /* armExpiry */ false, /* initiatesTurn */ false, /* authFailureToPreserve */ null, /* trustedAfterRecovery */ false);
             }
         } finally {
