@@ -119,6 +119,49 @@ impl Store {
         Ok(out)
     }
 
+    /// Catalog-tier sibling of `mcp_server_list` (above) — same
+    /// `bound_to_agent` shape, but deliberately GLOBAL ROWS ONLY, unlike
+    /// `mcp_server_list`'s UNION with `agent_id`'s own private servers.
+    /// Backs `mcp.catalog.list_for_agent`, which — like every other
+    /// `mcp.catalog.*` command — has no `check_s1`, so `agent_id` here is
+    /// caller-supplied and unverified. Returning private server rows (whose
+    /// `config` can carry secrets: API keys, auth headers, env vars) for an
+    /// arbitrary caller-chosen `agent_id` would let any window connection
+    /// read any agent's private server config. Global rows carry no
+    /// per-agent secret — they're already fully visible via
+    /// `mcp_server_list_global` (the Armory catalog) — so exposing them
+    /// alongside a caller-chosen agent's bind status is safe.
+    /// reagentx P0 on PR #2329.
+    pub fn mcp_server_list_global_for_agent(&self, agent_id: &str) -> Result<Vec<McpServerListItem>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT s.id, s.name, s.transport, s.config, s.is_global, s.created_at, s.updated_at,
+                    EXISTS(SELECT 1 FROM db_agent_mcp_ref r WHERE r.mcp_id = s.id AND r.agent_id = ?1) AS bound_to_agent
+             FROM db_mcp_servers s
+             WHERE s.is_global = 1
+             ORDER BY s.updated_at DESC",
+        )?;
+        let rows = stmt.query_map(params![agent_id], |row| {
+            Ok(McpServerListItem {
+                server: McpServer {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    transport: row.get(2)?,
+                    config: row.get(3)?,
+                    is_global: row.get::<_, i64>(4)? != 0,
+                    created_at: row.get(5)?,
+                    updated_at: row.get(6)?,
+                },
+                bound_to_agent: row.get::<_, i64>(7)? != 0,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
     /// Get a standalone MCP server by id.
     pub fn mcp_server_get(&self, id: &str) -> Result<Option<McpServer>, StoreError> {
         let conn = self.conn.lock().unwrap();
