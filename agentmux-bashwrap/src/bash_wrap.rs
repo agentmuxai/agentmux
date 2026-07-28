@@ -1151,6 +1151,11 @@ fn pty_reader_loop(
     // for why CUP-to-home (`\x1b[H`) is only a `\r`-equivalent while this
     // is still true.
     let mut still_on_first_line = true;
+    // A2: tracks whether the cursor is currently at column 0, across PTY
+    // reads — see `normalize_csi_overwrites`'s doc comment for why a
+    // standalone EL is only safe to treat as `\r` while this is true, and
+    // why it must persist across calls rather than reset per-chunk.
+    let mut at_col0 = true;
     // Idle-kill tracking: `last_activity` resets on every byte read from
     // the PTY (regardless of whether it becomes a published LineEvent —
     // even control-sequence-only output means the child is still doing
@@ -1173,7 +1178,7 @@ fn pty_reader_loop(
                 // CSI-based progress-bar redraws as overwrites the same way
                 // it already does for bare `\r`. See
                 // docs/specs/SPEC_TOOL_LOG_UNIVERSAL_ANIMATION_COLLAPSE_2026_07_27.md §A2.
-                normalize_csi_overwrites(&mut chunk, &mut still_on_first_line);
+                normalize_csi_overwrites(&mut chunk, &mut still_on_first_line, &mut at_col0);
                 // Phase β: strip remaining ANSI control sequences so
                 // the plain-text chunk list doesn't render them as
                 // garbled literal characters. Bash emits terminal-
@@ -1367,8 +1372,19 @@ fn pty_reader_loop(
 /// comment flags ("Cursor positioning escapes within the same line").
 /// See docs/specs/SPEC_TOOL_LOG_UNIVERSAL_ANIMATION_COLLAPSE_2026_07_27.md §A2.
 ///
-/// `still_on_first_line` is caller-owned state that persists across calls
-/// for the lifetime of one reader loop: `true` until the first `\n` is
+/// `still_on_first_line` and `at_col0` are both caller-owned state that
+/// persists across calls for the lifetime of one reader loop — this
+/// function is invoked once per PTY read, and a chunk boundary is not a
+/// terminal state boundary: a read ending mid-line (no trailing `\n`/`\r`)
+/// must carry "cursor is NOT at column 0" into the next call, otherwise a
+/// standalone EL split across two reads (`"prefix"` in one chunk,
+/// `"\x1b[2Ksuffix"` in the next) would see a freshly-reset `at_col0 ==
+/// true` and wrongly convert that EL to `\r`, reproducing the exact
+/// mid-line truncation bug this function exists to prevent, just moved
+/// from a mid-chunk split to a cross-chunk-read split (reagent P1, PR
+/// #2330, caught after the first, chunk-internal-only version of this fix).
+///
+/// `still_on_first_line`: `true` until the first `\n` is
 /// seen in this tool call's output, `false` forever after. Needed because
 /// **Windows ConPTY re-serializes a literal `\r` as CUP-to-home
 /// (`\x1b[H`)** rather than passing it through unchanged — verified
@@ -1392,11 +1408,10 @@ fn pty_reader_loop(
 ///     this form directly.
 ///   - EL (`\x1b[2K` erase whole line, `\x1b[K`/`\x1b[0K` erase to end of
 ///     line) is treated as "reset to start of line" too, but ONLY when the
-///     cursor is already known to be at column 0 at this point in `out`
-///     (`out.len() == line_start`, tracked the same way `collapse_cr` does)
-///     — i.e. the dominant real-world `\r` + EL idiom (`\r\x1b[2K<text>`),
-///     where it's genuinely redundant with the `\r` already just emitted.
-///     A STANDALONE EL, mid-line (cursor NOT at column 0 — e.g.
+///     cursor is already known to be at column 0 (`*at_col0`) — i.e. the
+///     dominant real-world `\r` + EL idiom (`\r\x1b[2K<text>`), where it's
+///     genuinely redundant with the `\r` already just emitted. A
+///     STANDALONE EL, mid-line (cursor NOT at column 0 — e.g.
 ///     `prefix\x1b[Ksuffix`), is a real, different case: EL only erases
 ///     from the cursor onward and never moves it, so collapsing it to `\r`
 ///     there would make `collapse_cr` truncate `prefix` even though EL
@@ -1413,15 +1428,9 @@ fn pty_reader_loop(
 /// `collapse_cr`'s line-offset model doesn't have. Left as a documented
 /// follow-up alongside CUU/multi-line redraw (spec §A3) rather than
 /// guessed at with an approximation that could truncate the wrong amount.
-fn normalize_csi_overwrites(chunk: &mut Vec<u8>, still_on_first_line: &mut bool) {
+fn normalize_csi_overwrites(chunk: &mut Vec<u8>, still_on_first_line: &mut bool, at_col0: &mut bool) {
     let mut out: Vec<u8> = Vec::with_capacity(chunk.len());
     let mut i = 0;
-    // Is the cursor known to be at column 0 right now? True at chunk start
-    // and immediately after any byte that moves it there (`\n`, real or
-    // substituted `\r`); false after any other byte. Used to gate EL — see
-    // the doc comment above for why a mid-line standalone EL must not be
-    // treated as \r.
-    let mut at_col0 = true;
     while i < chunk.len() {
         let b = chunk[i];
         if b == b'\n' {
@@ -1436,13 +1445,13 @@ fn normalize_csi_overwrites(chunk: &mut Vec<u8>, still_on_first_line: &mut bool)
                 let params = &chunk[i + 2..j];
                 let final_byte = chunk[j];
                 let is_cha_col1 = final_byte == b'G' && (params.is_empty() || params == b"1");
-                let is_el = final_byte == b'K' && at_col0;
+                let is_el = final_byte == b'K' && *at_col0;
                 let is_cup_home = *still_on_first_line
                     && final_byte == b'H'
                     && is_cup_row1_col1(params);
                 if is_cha_col1 || is_el || is_cup_home {
                     out.push(b'\r');
-                    at_col0 = true;
+                    *at_col0 = true;
                     i = j + 1;
                     continue;
                 }
@@ -1455,7 +1464,7 @@ fn normalize_csi_overwrites(chunk: &mut Vec<u8>, still_on_first_line: &mut bool)
             }
         }
         out.push(b);
-        at_col0 = b == b'\n' || b == b'\r';
+        *at_col0 = b == b'\n' || b == b'\r';
         i += 1;
     }
     *chunk = out;
@@ -2052,7 +2061,8 @@ mod tests {
     fn csi(input: &[u8]) -> Vec<u8> {
         let mut v = input.to_vec();
         let mut still_on_first_line = true;
-        normalize_csi_overwrites(&mut v, &mut still_on_first_line);
+        let mut at_col0 = true;
+        normalize_csi_overwrites(&mut v, &mut still_on_first_line, &mut at_col0);
         v
     }
 
@@ -2104,6 +2114,59 @@ mod tests {
     }
 
     #[test]
+    fn normalize_csi_at_col0_persists_across_calls_mid_line_el_split_across_reads_stays_untouched() {
+        // reagent P1, PR #2330 (round 2): normalize_csi_overwrites is called
+        // once per PTY read in the real reader loop, with at_col0 threaded
+        // in by &mut reference across calls -- NOT reset per call. A prior
+        // version of this fix declared at_col0 as a local reset to `true`
+        // on every call, so a standalone EL split across two PTY reads
+        // ("prefix" in one read, "\x1b[2Ksuffix" in the next) would see a
+        // freshly-true at_col0 on the second call and wrongly convert the
+        // EL to \r, reproducing the exact mid-line truncation bug the first
+        // round of this fix addressed -- just moved from a mid-chunk split
+        // to a cross-chunk-read split.
+        let mut still_on_first_line = true;
+        let mut at_col0 = true;
+
+        let mut first_read = b"prefix".to_vec();
+        normalize_csi_overwrites(&mut first_read, &mut still_on_first_line, &mut at_col0);
+        assert_eq!(first_read, b"prefix");
+        assert!(!at_col0, "cursor is mid-line after a read with no trailing \\n/\\r");
+
+        let mut second_read = b"\x1b[2Ksuffix".to_vec();
+        normalize_csi_overwrites(&mut second_read, &mut still_on_first_line, &mut at_col0);
+        assert!(
+            !second_read.contains(&b'\r'),
+            "EL split across a PTY-read boundary, still mid-line, must not synthesize a \\r: {second_read:?}"
+        );
+        assert_eq!(second_read, b"\x1b[2Ksuffix");
+
+        // Simulate the reader loop's actual buffering: both reads accumulate
+        // into one pending buffer before collapse_cr/strip_ansi run on it.
+        let mut pending = first_read;
+        pending.extend_from_slice(&second_read);
+        assert_eq!(pending, b"prefix\x1b[2Ksuffix");
+    }
+
+    #[test]
+    fn normalize_csi_at_col0_persists_across_calls_leading_cr_read_then_bare_el_read_becomes_cr() {
+        // Complement of the above: a read ending in \r (cursor genuinely at
+        // column 0) followed by a read that STARTS with EL must still
+        // convert -- persisted state must correctly stay `true` too, not
+        // just correctly go false.
+        let mut still_on_first_line = true;
+        let mut at_col0 = true;
+
+        let mut first_read = b"frame1\r".to_vec();
+        normalize_csi_overwrites(&mut first_read, &mut still_on_first_line, &mut at_col0);
+        assert!(at_col0, "trailing \\r puts the cursor back at column 0");
+
+        let mut second_read = b"\x1b[2Kframe2".to_vec();
+        normalize_csi_overwrites(&mut second_read, &mut still_on_first_line, &mut at_col0);
+        assert_eq!(second_read, b"\rframe2");
+    }
+
+    #[test]
     fn normalize_csi_el_immediately_after_real_cr_still_becomes_cr() {
         // The dominant real-world idiom (\r\x1b[2K<text>): the \r already
         // puts the cursor at column 0, so a following EL is genuinely
@@ -2140,7 +2203,8 @@ mod tests {
         // the current line", which would corrupt the multi-line content.
         let mut v = b"line1\nline2\n\x1b[Hline1-updated".to_vec();
         let mut still_on_first_line = true;
-        normalize_csi_overwrites(&mut v, &mut still_on_first_line);
+        let mut at_col0 = true;
+        normalize_csi_overwrites(&mut v, &mut still_on_first_line, &mut at_col0);
         assert!(!still_on_first_line, "must flip false after the first \\n");
         assert!(
             !v.contains(&b'\r'),
@@ -2185,7 +2249,8 @@ mod tests {
 
         let mut next_chunk = b"\x1b[1GDownloading 45%".to_vec();
         let mut still_on_first_line = true;
-        normalize_csi_overwrites(&mut next_chunk, &mut still_on_first_line);
+        let mut at_col0 = true;
+        normalize_csi_overwrites(&mut next_chunk, &mut still_on_first_line, &mut at_col0);
         pending.extend_from_slice(&next_chunk);
         collapse_cr(&mut pending);
 
