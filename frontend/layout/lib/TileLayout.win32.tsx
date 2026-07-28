@@ -17,7 +17,7 @@ import { useNodeModel, useTileLayout } from "./layoutModelHooks";
 import "./tilelayout.scss";
 import { FlexDirection, LayoutNode, LayoutTreeActionType, ResizeHandleProps, TileLayoutContents } from "./types";
 import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
-import { setTileDragInFlight } from "./dragInFlight";
+import { isTileDragInFlight, setTileDragInFlight } from "./dragInFlight";
 import { clearCrossTabDrop } from "./crossTabDrag";
 import { dragState } from "./tilelayout-drag-state";
 import {
@@ -162,8 +162,35 @@ function TileLayoutComponent(props: TileLayoutProps) {
         }
     });
 
+    // Tear-off cursor. During a pane drag, the tear-off zone (cursor dragged
+    // outside the tile layout) has no pragmatic drop target, and
+    // preventUnhandled is gated off on Windows (tear-off relies on the
+    // native window-move handshake, not the HTML5 snapback) -- so out in the
+    // tear-off zone Chromium falls back to the no-drop circle-slash cursor,
+    // which reads as "you can't drop this", the opposite of the truth:
+    // releasing there spawns a NEW floating window. Same root cause and fix
+    // shape as tab-reorder.ts's onTearOffDragOver (PR #2175) -- ported here
+    // since panes never got the equivalent fix (see
+    // docs/retro/retro-pane-tearoff-cursor-never-fixed-2026-07-27.md).
+    //
+    // Not folded into the debounced checkForCursorBounds above: that 100ms
+    // debounce is fine for its own purpose (clearing a pending drop-target
+    // action) but would read as laggy for cursor feedback, which should
+    // track the pointer every event.
+    const setTearOffCursor = (e: DragEvent) => {
+        if (!isTileDragInFlight()) return; // not a pane drag
+        if (!layoutModel.displayContainerRef?.current) return;
+        const rect = layoutModel.displayContainerRef.current.getBoundingClientRect();
+        const overLayout =
+            e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom;
+        if (overLayout) return; // the layout's own drop target owns the cursor here
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+    };
+
     // Global dragover handler to detect when cursor leaves tile layout
     const onWindowDragOver = (e: DragEvent) => {
+        setTearOffCursor(e);
         checkForCursorBounds(e.clientX, e.clientY);
     };
 
