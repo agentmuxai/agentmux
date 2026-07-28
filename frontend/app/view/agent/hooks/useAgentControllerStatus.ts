@@ -160,6 +160,15 @@ export interface UseAgentControllerStatus {
      * auth_failed launch had left the button stuck showing.
      */
     notifyControllerHealthy: () => void;
+    /**
+     * Kill (if running) and respawn this pane's controller process, then
+     * refresh its runtime status. Originally internal-only (used by the
+     * login-recovery flows to refresh a stale-but-alive process); exposed
+     * here so the `unresponsive` failure row's "Restart" action can reuse
+     * the exact same mechanism for a wedged/`Dead` process. See
+     * `forceControllerRefresh`'s own doc comment for the full rationale.
+     */
+    forceControllerRefresh: () => Promise<void>;
 }
 
 /**
@@ -918,5 +927,6 @@ export function useAgentControllerStatus(
         loginViaTerminal,
         notifyControllerHealthy,
         cancelLogin,
+        forceControllerRefresh,
     };
 }

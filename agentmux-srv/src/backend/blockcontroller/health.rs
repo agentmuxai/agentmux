@@ -14,6 +14,8 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
+use crate::backend::eventbus::EventBus;
+use crate::backend::storage::store::Store;
 use crate::backend::wps;
 
 // ---- Health states ----
@@ -137,6 +139,13 @@ pub struct HealthMonitor {
     block_id: String,
     inner: Mutex<HealthMonitorInner>,
     broker: Option<Arc<wps::Broker>>,
+    /// Needed only to surface a `Dead` transition as an `AgentFailure` (see
+    /// `evaluate_and_transition`'s Dead-entry/exit handling) — every other
+    /// method on this type is store/event-bus-free by design. `None` in
+    /// unit tests that don't wire up a store (matches the existing
+    /// `broker: None` test convention).
+    wstore: Option<Arc<Store>>,
+    event_bus: Option<Arc<EventBus>>,
 }
 
 impl HealthMonitor {
@@ -149,7 +158,12 @@ impl HealthMonitor {
     /// Transient error count threshold for degraded.
     const DEGRADED_TRANSIENT_THRESHOLD: usize = 5;
 
-    pub fn new(block_id: String, broker: Option<Arc<wps::Broker>>) -> Self {
+    pub fn new(
+        block_id: String,
+        broker: Option<Arc<wps::Broker>>,
+        wstore: Option<Arc<Store>>,
+        event_bus: Option<Arc<EventBus>>,
+    ) -> Self {
         let now = Instant::now();
         Self {
             block_id,
@@ -163,6 +177,8 @@ impl HealthMonitor {
                 last_error: None,
             }),
             broker,
+            wstore,
+            event_bus,
         }
     }
 
@@ -293,7 +309,73 @@ impl HealthMonitor {
                 new = ?new_health,
                 "agent health transition"
             );
-            self.publish_health(event);
+            self.publish_health(event.clone());
+
+            // Surface Dead as an AgentFailure with a "Restart" action —
+            // previously this transition was diagnostic-only (the WPS
+            // agenthealth event above has no frontend subscriber), so a
+            // pane whose process went unresponsive just sat there until a
+            // human happened to notice and manually reopened it. And clear
+            // it again on a silent self-heal (Dead -> anything else,
+            // reachable when late output arrives after the 120s threshold
+            // already tripped — compute_health's silence check has no
+            // hysteresis) so a stale "Restart" button doesn't linger once
+            // the process is genuinely fine again. See
+            // docs/reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md §4.
+            if new_health == AgentHealth::Dead {
+                self.publish_unresponsive_failure(&event.detail);
+            } else if old == AgentHealth::Dead {
+                self.clear_unresponsive_failure();
+            }
+        }
+    }
+
+    /// Persist + live-publish an `Unresponsive` `AgentFailure` for this
+    /// block. Mirrors the exit-classification publish pattern in
+    /// `subprocess/host_spawn.rs` (persist meta first, durable; then the
+    /// ephemeral `persist: 1` WPS push) — see that file's own comment for
+    /// why the ordering matters. Best-effort: a `None` `wstore`/`event_bus`
+    /// (unit tests, or a controller type that never wired them in) silently
+    /// no-ops on the persist half; the WPS push still fires if a broker
+    /// exists.
+    fn publish_unresponsive_failure(&self, detail: &str) {
+        let failure = crate::agents::failure::AgentFailure {
+            code: crate::agents::failure::FailureClass::Unresponsive,
+            title: "Agent unresponsive".to_string(),
+            detail: detail.to_string(),
+            exit_code: None,
+            signal: None,
+            stderr_tail: String::new(),
+            retryable: false,
+        };
+        super::core::persist_last_failure(&self.block_id, Some(&failure), &self.wstore, &self.event_bus);
+        if let Some(ref broker) = self.broker {
+            broker.publish(wps::WaveEvent {
+                event: wps::EVENT_AGENT_FAILURE.to_string(),
+                scopes: vec![format!("block:{}", self.block_id)],
+                sender: String::new(),
+                persist: 1,
+                data: serde_json::to_value(&failure).ok(),
+            });
+        }
+    }
+
+    /// Clear a previously-published `Unresponsive` failure on a silent
+    /// self-heal. `data: None` on the WPS push is the live-clear signal —
+    /// `useAgentFailure.ts`'s WPS handler treats an event with no `data` as
+    /// "clear the failure, but only if it's currently classed
+    /// `unresponsive`" (never clobbers an unrelated concurrent failure,
+    /// e.g. auth, that happened to be showing).
+    fn clear_unresponsive_failure(&self) {
+        super::core::persist_last_failure(&self.block_id, None, &self.wstore, &self.event_bus);
+        if let Some(ref broker) = self.broker {
+            broker.publish(wps::WaveEvent {
+                event: wps::EVENT_AGENT_FAILURE.to_string(),
+                scopes: vec![format!("block:{}", self.block_id)],
+                sender: String::new(),
+                persist: 1,
+                data: None,
+            });
         }
     }
 
@@ -502,7 +584,7 @@ mod tests {
 
     #[test]
     fn test_health_monitor_lifecycle() {
-        let monitor = HealthMonitor::new("test-block".to_string(), None);
+        let monitor = HealthMonitor::new("test-block".to_string(), None, None, None);
 
         // Initial state is idle
         {
@@ -534,7 +616,7 @@ mod tests {
 
     #[test]
     fn test_health_monitor_fatal_error() {
-        let monitor = HealthMonitor::new("test-block".to_string(), None);
+        let monitor = HealthMonitor::new("test-block".to_string(), None, None, None);
         monitor.set_active_turn(true);
 
         monitor.record_error(ErrorClass::Fatal, "Unauthorized".to_string());
@@ -546,7 +628,7 @@ mod tests {
 
     #[test]
     fn mark_turn_active_returning_was_active_reports_the_pre_call_value() {
-        let monitor = HealthMonitor::new("test-block".to_string(), None);
+        let monitor = HealthMonitor::new("test-block".to_string(), None, None, None);
         assert!(!monitor.is_active_turn());
 
         // First call: was idle before this call.
@@ -572,12 +654,68 @@ mod tests {
     /// idle").
     #[test]
     fn mark_turn_active_is_atomic_across_repeated_calls() {
-        let monitor = HealthMonitor::new("test-block".to_string(), None);
+        let monitor = HealthMonitor::new("test-block".to_string(), None, None, None);
         let results: Vec<bool> = (0..5).map(|_| monitor.mark_turn_active_returning_was_active()).collect();
         // Exactly the first call observes "was idle" (false); every
         // subsequent call — however tightly interleaved a real concurrent
         // caller might be — observes "already active" (true), because each
         // read-and-write pair is indivisible under the lock.
         assert_eq!(results, vec![false, true, true, true, true]);
+    }
+
+    /// Regression for docs/reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md
+    /// §4: reaching `Dead` must surface an `Unresponsive` `AgentFailure`, not
+    /// just the diagnostic-only `agenthealth` WPS event — otherwise a pane
+    /// whose process went unresponsive just sits there until a human happens
+    /// to notice and manually reopens it. Drives Dead via `record_error`
+    /// (the fatal-error branch) rather than the 120s silence-timeout branch,
+    /// which isn't practical to wait out in a test.
+    #[test]
+    fn dead_transition_publishes_unresponsive_failure() {
+        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let monitor = HealthMonitor::new("test-block-dead".to_string(), Some(broker.clone()), None, None);
+        monitor.set_active_turn(true);
+
+        monitor.record_error(ErrorClass::Fatal, "Unauthorized".to_string());
+        assert_eq!(monitor.inner.lock().unwrap().current_health, AgentHealth::Dead);
+
+        let history = broker.read_event_history(
+            crate::backend::wps::EVENT_AGENT_FAILURE,
+            "block:test-block-dead",
+            1,
+        );
+        assert_eq!(history.len(), 1, "Dead transition must publish an AgentFailure");
+        let data = history[0].data.clone().expect("failure payload must be present");
+        assert_eq!(data.get("code").and_then(|v| v.as_str()), Some("unresponsive"));
+        assert_eq!(data.get("retryable").and_then(|v| v.as_bool()), Some(false));
+    }
+
+    /// A silent self-heal (Dead -> anything else, e.g. late output arriving
+    /// just after the threshold tripped) must clear the failure it
+    /// published, or a stale "Restart" button lingers over a process that's
+    /// actually fine again. The clear is a `data: None` publish on the same
+    /// event — this test only confirms the health-side publish surface (the
+    /// frontend's interpretation of a null-data event is covered by
+    /// useAgentFailure.test.ts).
+    #[test]
+    fn dead_recovery_clears_the_unresponsive_failure() {
+        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let monitor = HealthMonitor::new("test-block-recover".to_string(), Some(broker.clone()), None, None);
+        monitor.set_active_turn(true);
+        monitor.record_error(ErrorClass::Fatal, "Unauthorized".to_string());
+        assert_eq!(monitor.inner.lock().unwrap().current_health, AgentHealth::Dead);
+
+        // Exit-code takes priority over the fatal-error branch in
+        // compute_health, so this reliably drives Dead -> Idle/Exited.
+        monitor.set_exited(0);
+        assert_ne!(monitor.inner.lock().unwrap().current_health, AgentHealth::Dead);
+
+        let history = broker.read_event_history(
+            crate::backend::wps::EVENT_AGENT_FAILURE,
+            "block:test-block-recover",
+            1,
+        );
+        assert_eq!(history.len(), 1, "recovery must publish a clearing event");
+        assert!(history[0].data.is_none(), "the clearing publish must carry no data");
     }
 }
