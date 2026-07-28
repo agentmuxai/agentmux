@@ -234,15 +234,30 @@ pub fn export_bundle(bundle: &Memory, skills: &[Skill]) -> BundleExport {
         });
         manifest_mcp.push(path);
 
-        if let Some(env_obj) = entry.get("env").and_then(|v| v.as_object()) {
-            for key in env_obj.keys() {
-                requirements.push(json!({
-                    "id": format!("{slug}-{key}"),
-                    "provider": slug,
-                    "kind": "api-key",
-                    "env": key,
-                    "optional": false,
-                }));
+        // Both `env` and `headers` are credential-bearing per `redact_mcp_entry`
+        // (a header-only-authenticated server, e.g. `headers.Authorization`, is
+        // just as real a credential requirement as an env-var one) -- infer a
+        // requirement entry from each key of EITHER field, not just `env`, so
+        // the redaction in the exported .server.json and the declared
+        // requirement never disagree on whether a credential is needed here
+        // (reagent P2, PR #2325).
+        for field in ["env", "headers"] {
+            if let Some(field_obj) = entry.get(field).and_then(|v| v.as_object()) {
+                for key in field_obj.keys() {
+                    requirements.push(json!({
+                        "id": format!("{slug}-{key}"),
+                        "provider": slug,
+                        "kind": "api-key",
+                        // "Where it lands" per the requirements.json schema
+                        // (research report §5.3) -- an env var name for `env`
+                        // entries, or the header name for `headers` entries;
+                        // the resolver substitutes into whichever the exported
+                        // .server.json's redacted `${key}` placeholder sits
+                        // under.
+                        "env": key,
+                        "optional": false,
+                    }));
+                }
             }
         }
     }
@@ -461,13 +476,17 @@ mod tests {
         assert!(server_file.content.contains("${GITHUB_TOKEN}"));
         assert!(server_file.content.contains("${Authorization}"));
 
-        // requirements.json inference is unaffected (it only ever read keys).
+        // reagent P2, PR #2325: requirements.json must be inferred from BOTH
+        // env and headers keys -- a header-only-authenticated server's
+        // redacted `${Authorization}` placeholder must have a matching
+        // requirement entry telling an importer a credential is needed there.
         let req_file = export
             .files
             .iter()
             .find(|f| f.path == "accounts/requirements.json")
             .unwrap();
         assert!(req_file.content.contains("GITHUB_TOKEN"));
+        assert!(req_file.content.contains("Authorization"));
     }
 
     #[test]
@@ -476,6 +495,34 @@ mod tests {
         let bundle = make_bundle("", "[]", mcp_servers, "[]");
         let export = export_bundle(&bundle, &[]);
         assert!(!export.files.iter().any(|f| f.path == "accounts/requirements.json"));
+    }
+
+    #[test]
+    fn infers_a_requirement_for_a_header_only_authenticated_server() {
+        // reagent P2, PR #2325: a server authenticated ENTIRELY via headers
+        // (no env at all) previously produced no requirements.json -- its
+        // redacted `${Authorization}` placeholder in the exported
+        // .server.json had nothing telling an importer a credential is
+        // needed there.
+        let mcp_servers = r#"[{
+            "name": "notion",
+            "type": "http",
+            "url": "https://mcp.notion.com",
+            "headers": {"Authorization": "Bearer realToken789"}
+        }]"#;
+        let bundle = make_bundle("", "[]", mcp_servers, "[]");
+        let export = export_bundle(&bundle, &[]);
+
+        let req_file = export
+            .files
+            .iter()
+            .find(|f| f.path == "accounts/requirements.json")
+            .expect("a header-only-authenticated server must still infer a requirement");
+        assert!(req_file.content.contains("Authorization"));
+        assert!(
+            !req_file.content.to_lowercase().contains("realtoken789"),
+            "must never contain a real secret value"
+        );
     }
 
     #[test]
