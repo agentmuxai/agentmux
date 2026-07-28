@@ -453,23 +453,16 @@ fn register_mcp_catalog_list_for_agent(engine: &Arc<WshRpcEngine>, state: &AppSt
     );
 }
 
-/// Catalog-tier sibling of `mcp.unbind` (above) — same DB write
-/// (`mcp_server_unbind` deletes one `db_agent_mcp_ref` row, unconditional on
-/// `is_global`), no `check_s1`. Unlike `register_mcp_catalog_list_for_agent`,
-/// this has no *secret*-exposure concern — unbind can't read a server's
-/// `config`, only remove a ref row — but it does let any window connection
-/// sever any `(agent_id, mcp_id)` pair by id, global or private. For a
-/// global row this is an intentional, pre-existing trust boundary already
-/// established by `register_mcp_catalog_bind` (any window can BIND any
-/// agent_id to any global server) and `register_mcp_catalog_delete` (any
-/// window can delete a global server outright, unbinding every agent from
-/// it at once — a strictly larger blast radius). For a private row, this
-/// command could in principle sever an agent's own reference to its own
-/// private server — but `mcp_id` is an unguessable UUID never exposed by
-/// any no-`check_s1` command (`register_mcp_catalog_list_for_agent` returns
-/// global rows only, precisely to avoid leaking a private server's `config`
-/// OR its id), so exploiting this requires already knowing that UUID
-/// through some other channel. reagentx P1 on PR #2329.
+/// Catalog-tier sibling of `mcp.unbind` (above) — same DB write, no
+/// `check_s1`. Restricted to global rows only, matching the guard
+/// `register_mcp_catalog_bind`/`register_mcp_catalog_delete` already apply
+/// in this file: any window connection can sever any agent's binding to a
+/// *global* server (an intentional, pre-existing trust boundary — bind and
+/// delete already have the same or larger blast radius), but a private
+/// row's own binding must not be touchable via this no-`check_s1` surface,
+/// even though `mcp_id` is never exposed by any no-`check_s1` command
+/// today — defense in depth over relying solely on UUID secrecy.
+/// reagentx P1 on PR #2329 (round 2).
 fn register_mcp_catalog_unbind(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
     let broker = state.broker.clone();
@@ -483,6 +476,15 @@ fn register_mcp_catalog_unbind(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 struct Req { agent_id: String, mcp_id: String }
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("mcp.catalog.unbind: {e}"))?;
+                match wstore.mcp_server_get(&req.mcp_id)
+                    .map_err(|e| format!("mcp.catalog.unbind: {e}"))?
+                {
+                    None => return Err("mcp.catalog.unbind: MCP server not found".to_string()),
+                    Some(s) if !s.is_global => {
+                        return Err("FORBIDDEN: can only unbind global MCP servers".to_string());
+                    }
+                    Some(_) => {}
+                }
                 let unbound = wstore.mcp_server_unbind(&req.agent_id, &req.mcp_id)
                     .map_err(|e| format!("mcp.catalog.unbind: {e}"))?;
                 if unbound {

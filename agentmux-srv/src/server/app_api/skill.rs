@@ -405,23 +405,16 @@ fn register_skill_catalog_list_for_agent(engine: &Arc<WshRpcEngine>, state: &App
     );
 }
 
-/// Catalog-tier sibling of `skill.unbind` (above) — same DB write
-/// (`skill_unbind` deletes one `db_agent_skills_ref` row, unconditional on
-/// `is_global`), no `check_s1`. Unlike `register_skill_catalog_list_for_agent`,
-/// this has no *secret*-exposure concern — unbind can't read a skill's
-/// `content`, only remove a ref row — but it does let any window connection
-/// sever any `(agent_id, skill_id)` pair by id, global or private. For a
-/// global row this is an intentional, pre-existing trust boundary already
-/// established by `register_skill_catalog_bind` (any window can BIND any
-/// agent_id to any global skill) and `register_skill_catalog_delete` (any
-/// window can delete a global skill outright, unbinding every agent from it
-/// at once — a strictly larger blast radius). For a private row, this
-/// command could in principle sever an agent's own reference to its own
-/// private skill — but `skill_id` is an unguessable UUID never exposed by
-/// any no-`check_s1` command (`register_skill_catalog_list_for_agent`
-/// returns global rows only, precisely to avoid leaking a private skill's
-/// content OR its id), so exploiting this requires already knowing that
-/// UUID through some other channel. reagentx P1 on PR #2329.
+/// Catalog-tier sibling of `skill.unbind` (above) — same DB write, no
+/// `check_s1`. Restricted to global rows only, matching the guard
+/// `register_skill_catalog_bind`/`register_skill_catalog_delete` already
+/// apply in this file: any window connection can sever any agent's binding
+/// to a *global* skill (an intentional, pre-existing trust boundary — bind
+/// and delete already have the same or larger blast radius), but a private
+/// row's own binding must not be touchable via this no-`check_s1` surface,
+/// even though `skill_id` is never exposed by any no-`check_s1` command
+/// today — defense in depth over relying solely on UUID secrecy.
+/// reagentx P1 on PR #2329 (round 2).
 fn register_skill_catalog_unbind(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
     let broker = state.broker.clone();
@@ -435,6 +428,15 @@ fn register_skill_catalog_unbind(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 struct Req { agent_id: String, skill_id: String }
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("skill.catalog.unbind: {e}"))?;
+                match wstore.skill_get(&req.skill_id)
+                    .map_err(|e| format!("skill.catalog.unbind: {e}"))?
+                {
+                    None => return Err("skill.catalog.unbind: skill not found".to_string()),
+                    Some(s) if !s.is_global => {
+                        return Err("FORBIDDEN: can only unbind global skills".to_string());
+                    }
+                    Some(_) => {}
+                }
                 let unbound = wstore.skill_unbind(&req.agent_id, &req.skill_id)
                     .map_err(|e| format!("skill.catalog.unbind: {e}"))?;
                 if unbound {
