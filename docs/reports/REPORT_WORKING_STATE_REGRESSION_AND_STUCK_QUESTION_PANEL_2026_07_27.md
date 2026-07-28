@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-27
 **Author:** Agent1
-**Status:** Audit only — root causes identified/hypothesized from code, one live-confirmed via direct observation (Agent2's pane), fixes proposed, nothing implemented yet.
+**Status:** §1 audit-only, fix proposed, not implemented. §2 (Agent2's stuck pane) — live-confirmed post-merge (§2.7): the CLI subprocess itself had gone unresponsive (`Dead` per the backend health monitor), not a frontend-only race; recovered by closing/reopening the pane. §2.8 — a second, distinct, code-confirmed bug (answering a question can never succeed after any process respawn) is **fixed and merged**. §4 (surface/auto-recover a `Dead` persistent agent before the user has to notice) remains scoped, not yet implemented.
 **Triggered by:** two live incidents observed in the same session — (1) Agent2's pane (block `210a0e08-1740-4bf0-8f26-93c82a107e4c`), running concurrently in an adjacent pane, visibly stuck on an AskUserQuestion prompt with no way to resolve it; (2) a separate, repeated observation that a pane shows "Worked" and then reverts to "Working…" with no user message sent in between.
 
 This report is a companion to two same-day documents already in the repo — `docs/reports/REPORT_WORKING_STATE_TELEMETRY_AUDIT_2026_07_27.md` (catalogs 9 other false-"Working" paths, mostly about a turn never *ending*) and `docs/specs/REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md` (the fire-once `controllerstatus` event gap). Neither covers the two issues below: this report is about a turn that legitimately *did* end, then un-ends itself, and about a specific stuck-forever panel shape distinct from a stuck turn.
@@ -88,9 +88,54 @@ Direct inspection of Agent2's live document/transcript state is the fastest way 
 
 Unknown until §2.4's live confirmation step is done — could range from a small durability/ordering fix (if §2.3 is right) to a rendering bug (if it's in `AgentQuestionPanel.tsx` itself, not yet audited in this pass). Recommend confirming live before sizing implementation work.
 
+### 2.7 Live confirmation (post-merge, same day) — §2.3 was the wrong leading theory; the process itself had died
+
+Direct evidence gathered after the fixes above merged, from `agentmuxsrv-v0.54.5.log.2026-07-28` (grep on the block id):
+
+```
+00:30:32.037  agent health transition   old=Dead  new=Healthy
+00:30:32.044  inject: structured delivery to non-PTY controller (mid-turn steer)   target_agent=Agent2
+00:31:03.204  agent health transition   old=Healthy  new=Stalled     (30s no output)
+00:32:33.205  agent health transition   old=Stalled  new=Dead        (120s no output)
+00:46:34.076  (last log line — 14 more minutes of total silence)
+```
+
+Two things this establishes, neither of which was in §2.1-2.6's hypothesis set:
+
+1. **The backend's own health monitor already considered the process `Dead` at `00:30:32`**, immediately before an external message injection nudged it back to `Healthy` (optimistic — the injection path doesn't verify the CLI actually resumed producing output, it just marks recent activity). The process then genuinely never produced another byte of output, re-confirmed `Dead` 121s later. This means the CLI subprocess itself was hung/unresponsive — not a frontend-only document-resync race (§2.3's leading theory). §2.3 assumed a live, responsive backend racing a stale frontend snapshot; that's not what was happening here. §2.3 may still be a real, independent bug (the mechanism it describes is still plausible in principle), but it was not the cause of THIS incident.
+2. **User-observed symptom, matching exactly:** attempting to answer the stuck question "flickers and comes back to the same state." This is `useAgentQuestions.ts`'s `handleAnswer()` working *correctly*: it optimistically flips the node to `success` (the flicker), sends `AgentAnswerCommand`, the RPC fails because there is no live process to deliver it to, and the failure-path rollback (`applyDoc(originals)`) correctly reverts the optimistic change rather than falsely claiming "answered." The rollback isn't the bug — it's the process being dead underneath it that made the rollback the only honest outcome.
+
+**Root cause, revised:** something caused Agent2's CLI subprocess to stop producing output entirely while parked on the `AskUserQuestion` tool call — genuinely hung or crashed at the process level, not a state-sync artifact. *Why* the process hung is still unconfirmed — no CLI-side stderr/crash signal was captured before it was closed and reopened, so this remains open. Candidates worth checking first in a future recurrence, before it's closed: the CLI's own stderr for that block (if still on disk), and whether `agentmux-bashwrap`'s idle-kill (`docs/specs/REPORT_BASHWRAP_LONGRUNNING_PROCESS_DETERMINISM_2026_07_26.md`) or a resource exhaustion event coincides with the death.
+
+**Recovery, confirmed working:** closing and reopening the pane recovered it. This is expected — a fresh pane mount forces a controller resync/respawn — and note that **this specific recovery path is now materially better than it was before today's earlier PR** (`SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27.md`): the reopened pane now correctly attempts to resume the actual prior session (§4.1's session-id write-through fix) rather than silently starting fresh, and would have disclosed it via the `session:resume_failed` banner (§4.2) had the resume itself failed. Before today, a reopen after a dead persistent-agent process had a real chance of silently landing on a brand-new, unrelated session.
+
+**What is NOT yet built — no automatic detection/recovery for a `Dead`-classified persistent agent.** Confirmed by reading `health.rs`: reaching `AgentHealth::Dead` only logs and publishes a diagnostic `agenthealth` WPS event (`publish_health`) — nothing kills, respawns, or even surfaces a "this agent is unresponsive, click to restart" affordance in the pane. The user has to notice the pane looks stuck and manually close/reopen it, exactly as happened here. This is the concrete gap between "this specific incident is now recoverable" and "this class of incident is now handled" — closing it is scoped as its own follow-up (§4).
+
+### 2.8 The real gap in "reopen supports this" — fixed, same day
+
+The user's direct follow-up question ("when an agent is at a question state and I close the pane, when I reopen, we need it to support the situation") pointed at a second, distinct, code-confirmed bug — separate from §2.7's process-death diagnosis, and this one **was** implemented:
+
+`PersistentSubprocessController::answer_question` (`persistent.rs`) tracks pending questions in `pending_questions: HashMap<tool_use_id, (request_id, questions)>` — **in-memory only, scoped to one controller instance.** A fresh instance (created on every pane reopen, or any process respawn for any reason) starts with an empty map, even though the persisted transcript still correctly shows the question as the tail `awaiting_answer` node (`scrubOrphanedInProgress` deliberately preserves it as "may still be answerable" — see §2.2). Answering it after any respawn therefore ALWAYS fails at the backend with `"no pending AskUserQuestion for tool_use_id …"` — a different error shape than `UNSUPPORTED_CONTROLLER`, the only string `useAgentQuestions.ts`'s `handleAnswer()` checked for before falling back to redelivering the answer as a follow-up message. Every other failure just rolled the optimistic "answered" UI back to `awaiting_answer` — **this is the precise mechanism behind "it flickers and comes back to the same state," and it means a question surviving ANY pane reopen was permanently unanswerable through the UI, not just this one incident.**
+
+**Fix (implemented, refined twice post-review):**
+- `frontend/app/view/agent/hooks/useAgentQuestions.ts` — `handleAnswer`'s fallback is widened from the single `UNSUPPORTED_CONTROLLER` string to a `SAFE_TO_RETRY_VIA_FOLLOWUP` **allowlist** of backend error shapes that structurally guarantee the control_response was never sent (`"no pending AskUserQuestion"`, `"UNSUPPORTED_CONTROLLER"`, `"no controller for block"`, `"persistent process not running"`, `"control_response send failed"` — every one returned strictly before/instead of `tx.try_send`). Originally shipped as "fall back on ANY failure," but reagent P2 (round 1) correctly flagged that an RPC-engine-level timeout (`agentmux-srv`'s `EC-TIME:` — `tokio::time::timeout` under executor saturation) does NOT carry that guarantee: the handler could complete `tx.try_send` successfully server-side even though the client sees an error, so blindly retrying could deliver the answer twice. An unrecognized error now falls through to the original conservative rollback instead of guessing.
+- **Round 2 (reagent P1):** the fallback's own `.catch()` — meant to roll back if the follow-up delivery *itself* also failed — was dead code: `opts.sendMessage` (→ `handleSendMessage` → `useAgentCommands.ts`'s `deliverToBackend`) swallows an `AgentInputCommand` RPC failure in its own catch (dispatches `PendingMessageRejected`/`TurnStartFailed` for its own UI signal) and returns *without rethrowing*, by design — most callers fire it and forget. A `.catch()` on that promise therefore never runs, so a genuinely failed follow-up would have silently left the optimistic "success" state in place with the answer never delivered. Removed the false claim; the fix now honestly keeps the optimistic state once a fallback is attempted (matching the pre-existing Phase 2/`UNSUPPORTED_CONTROLLER` contract, which had this exact limitation already — not a regression). The follow-up path (`send_message` on the backend) still auto-spawns/resumes a dead process if one isn't running, so it self-heals a genuinely dead process too, not just the reopened-but-stale-in-memory-record case, for every error shape where retrying is structurally safe.
+- `agentmux-srv/src/backend/blockcontroller/persistent.rs` — `answer_question`'s "not found" error message explicitly names the likely cause (process respawn) for `muxlog` diagnosability; its doc comment now correctly states the frontend matches on this error's text rather than claiming string-independence.
+- Tests: `useAgentQuestions.test.ts` (4 cases — success path has no fallback; a known-safe backend error falls back and keeps the optimistic state; the optimistic state is kept even if the follow-up delivery itself fails, since that failure is undetectable through this API; an unrecognized/EC-TIME-shaped error rolls back immediately without attempting the fallback) and `answer_question_on_untracked_tool_use_id_is_descriptive` (backend, asserts the error message names the tool_use_id and the likely cause).
+
+This directly answers "will future agents support it": **yes, for the answer-delivery half of the problem** — a question that survives a pane reopen (or any process respawn) can now actually be answered through the UI. It does **not** cover §4's separate gap (no automatic surfacing/recovery when a process goes fully `Dead` before the user notices) — that remains open, scoped below.
+
+## 4. Follow-up scoped, not yet built: surface + (optionally) auto-recover a `Dead` persistent agent
+
+Not implemented in this pass — sized here for a future decision, not started.
+
+- **Minimum viable fix:** when `HealthMonitor` transitions to `Dead` for a block that `is_agent_pane`, in addition to the existing diagnostic WPS publish, also surface a recovery affordance in the pane — most naturally as an `AgentFailure` row (existing UI/UX from `SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md`) with a class like `unresponsive`/`dead`, offering "Restart" (a `ControllerResync{forcerestart: true}`, the same mechanism `forceControllerRefresh` already uses for the login-recovery case). This turns "silently sits there until a human happens to notice and manually reopens" into "the pane visibly tells you it's dead and offers a one-click fix" — closing exactly the gap this incident exposed.
+- **Stretch (needs a product decision, not just an engineering one):** auto-restart without waiting for a click, for the specific case of a pane parked on an unanswerable `AskUserQuestion` with a `Dead` process — since in that state there's no in-flight work to lose (the CLI already stopped producing anything), an automatic respawn is arguably safe by construction. Riskier for a `Dead` classification reached mid-generation, where a tool might genuinely still be slow rather than truly hung — recommend scoping the auto-restart to the parked-on-a-question case specifically rather than all `Dead` transitions, at least initially.
+- Sizing: small-to-medium for the minimum viable fix (new `AgentFailure` class + one new backend call site publishing it on the `Dead` transition, reusing existing recovery-row UI); the auto-restart stretch needs the "is there anything to lose" determination made carefully before it's safe to automate.
+
 ---
 
-## 3. Key files
+## 5. Key files
 
 | Concern | File | Line(s) |
 |---|---|---|
@@ -100,12 +145,14 @@ Unknown until §2.4's live confirmation step is done — could range from a smal
 | Question panel render | `frontend/app/view/agent/components/AgentQuestionPanel.tsx` | full |
 | Tail-`awaiting_answer` preservation heuristic (§2.2) | `frontend/app/store/agent-document/reducer.ts` | 38-137 |
 | Stream-parser: where `awaiting_answer` is first set | `frontend/app/view/agent/stream-parser.ts` | ~424-438 |
+| `Dead` health classification, no auto-recovery (§2.7, §4) | `agentmux-srv/src/backend/blockcontroller/health.rs` | ~340-379 |
 | Original AskUserQuestion spec | `docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md` | full |
 | Sibling stuck-Working audit (9 other false-positive paths) | `docs/reports/REPORT_WORKING_STATE_TELEMETRY_AUDIT_2026_07_27.md` | full |
 | Sibling fire-once-event report (structurally same race shape as §2.3) | `docs/specs/REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md` | §5a |
+| Pane close/reopen continuity guarantee — the mechanism that actually recovered this incident | `docs/specs/SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27.md` | full |
 
-## 4. What this report does not do
+## 6. What this report does not do
 
-- Does not implement either fix — both need a design decision confirmed with the user first (§1.3's grace window + "new episode" presentation; §2.5 pending live confirmation of the actual root cause).
+- Does not implement §1's settled-grace fix or §4's `Dead`-recovery follow-up — both need a design decision confirmed with the user first.
 - Does not re-litigate the 9 paths already cataloged in `REPORT_WORKING_STATE_TELEMETRY_AUDIT_2026_07_27.md` — this report's §1 is a *tenth*, distinct path (a turn re-opening after reaching a real terminal state, not a turn that never terminates).
-- Does not confirm §2's root cause live — flagged explicitly as the next required step before sizing that fix.
+- Does not determine why Agent2's CLI subprocess actually hung (§2.7) — the process was closed and reopened before any CLI-side stderr/crash evidence could be captured, so the proximate trigger remains unknown. If it recurs, capture that evidence before recovering, if it's safe to wait.
