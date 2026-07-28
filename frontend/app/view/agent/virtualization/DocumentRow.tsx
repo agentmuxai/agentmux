@@ -18,11 +18,10 @@ import { onMount, Show, type Accessor, type JSX } from "solid-js";
 import { AgentMessageBlock } from "../components/AgentMessageBlock";
 import { JektBubble } from "../components/JektBubble";
 import { MarkdownBlock } from "../components/MarkdownBlock";
-import { SubagentLinkBlock } from "../components/SubagentLinkBlock";
 import { PersistentShellBlock } from "../components/PersistentShellBlock";
 import { ToolBlock } from "../components/ToolBlock";
 import { UserMessageBlock } from "../components/UserMessageBlock";
-import type { DocumentNode, DocumentState, ShellNode, SubagentLinkNode, UserMessageNode } from "../types";
+import type { DocumentNode, DocumentState, ShellNode, UserMessageNode } from "../types";
 import { markRowMount } from "./perf-probe";
 
 export interface DocumentRowProps {
@@ -33,7 +32,6 @@ export interface DocumentRowProps {
      */
     node: Accessor<DocumentNode>;
     documentState: Accessor<DocumentState>;
-    onSubagentClick?: (node: SubagentLinkNode) => void;
     highlightNodeId?: Accessor<string | null>;
     onToggleCollapse: (id: string) => void;
     onTogglePin: (id: string) => void;
@@ -121,7 +119,6 @@ export function DocumentRow(props: DocumentRowProps): JSX.Element {
                 onToggleCollapse={props.onToggleCollapse}
                 onTogglePin={props.onTogglePin}
                 onHoldToolOpen={props.onHoldToolOpen}
-                onSubagentClick={props.onSubagentClick}
                 onAgentErrorLogin={props.onAgentErrorLogin}
             />
         </div>
@@ -134,7 +131,6 @@ interface DocumentNodeBodyProps {
     onToggleCollapse: (id: string) => void;
     onTogglePin: (id: string) => void;
     onHoldToolOpen?: (id: string) => void;
-    onSubagentClick?: (node: SubagentLinkNode) => void;
     /** Re-run the provider login flow — drives the inline auth-error CTA. */
     onAgentErrorLogin?: () => void;
 }
@@ -201,12 +197,6 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     node={props.node() as UserMessageNode}
                     pinned={props.documentState().pinnedNodes.has(props.node().id)}
                     onTogglePin={() => props.onTogglePin(props.node().id)}
-                />
-            </Show>
-            <Show when={props.node() && props.node().type === "subagent_link"}>
-                <SubagentLinkBlock
-                    node={props.node() as Extract<DocumentNode, { type: "subagent_link" }>}
-                    onClick={props.onSubagentClick ?? (() => { })}
                 />
             </Show>
             <Show when={props.node() && props.node().type === "shell"}>

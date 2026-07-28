@@ -443,7 +443,7 @@ export function useAgentStream({
                     if (!node) continue;
 
                     // Stamp a receive time on nodes that don't carry their own
-                    // timestamp (markdown, tool, section, subagent_link).
+                    // timestamp (markdown, tool, section).
                     // user_message and agent_message already have timestamps.
                     if (!("timestamp" in node) || (node as any).timestamp == null) {
                         (node as any).timestamp = Date.now();

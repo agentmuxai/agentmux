@@ -37,7 +37,6 @@ export {
     estimateMarkdown,
     estimateNode,
     estimateSection,
-    estimateSubagentLink,
     estimateTextHeight,
     estimateTool,
     estimateUserMessage,
