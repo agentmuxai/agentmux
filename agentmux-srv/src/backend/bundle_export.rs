@@ -323,6 +323,18 @@ pub fn export_bundle(bundle: &Memory, skills: &[Skill]) -> BundleExport {
                 path: out_path,
                 content: entry.content,
             });
+        } else {
+            // Rejected by sanitization (absolute path, ".." traversal, a
+            // drive-letter colon, or an empty path) -- must warn the same
+            // way the collision case right above does, or a backup export
+            // can silently lose a context file with no signal anywhere in
+            // the returned `warnings` (Codex + reagent P2, PR #2333 --
+            // flagged twice, unaddressed in the prior push).
+            warnings.push(format!(
+                "context_files: \"{}\" is not a safe relative path (absolute, \
+                 contains \"..\", a drive letter, or empty); skipped",
+                entry.path
+            ));
         }
     }
 
@@ -568,6 +580,14 @@ mod tests {
         let export = export_bundle(&bundle, &[]);
         assert!(export.files.iter().all(|f| !f.content.contains("evil")));
         assert!(!export.files.iter().any(|f| f.path.contains("..")));
+        // Codex + reagent P2, PR #2333: a rejected entry must not just
+        // vanish -- an export used as a backup can silently lose a context
+        // file with no signal anywhere in `warnings` otherwise.
+        assert!(
+            export.warnings.iter().any(|w| w.contains("../../etc/passwd")),
+            "expected a warning naming the rejected path, got: {:?}",
+            export.warnings
+        );
     }
 
     #[test]
