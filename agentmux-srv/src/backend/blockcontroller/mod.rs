@@ -489,7 +489,19 @@ pub fn resync_controller(
     }
 }
 
-/// Publish a controller status event via WPS broker.
+/// Publish a controller status event via WPS broker. The sole publish point
+/// for `controllerstatus`, used by every controller type (persistent CLI,
+/// subprocess CLI, ACP agents, plain shell/PTY panes — 13 call sites).
+///
+/// `persist: 1` so a reconnecting subscriber (WS reconnect, srv restart)
+/// replays the last known status instead of seeing nothing until the next
+/// live event — mirrors `EVENT_AGENT_FAILURE`'s identical `persist: 1` in
+/// `subprocess/host_spawn.rs`. Closes the "missed the one turn-end push,
+/// stuck showing Working forever" gap for the reconnect case; see
+/// REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md §3/§4 item 5.
+/// (A same-connection pane remount, which doesn't clear the broker's
+/// per-route replay tracking, isn't covered by persist alone — see the
+/// focus-triggered reconcile in `agent-view.tsx` for that case.)
 pub fn publish_controller_status(
     broker: &super::wps::Broker,
     status: &BlockControllerRuntimeStatus,
@@ -500,7 +512,7 @@ pub fn publish_controller_status(
         event: EVENT_CONTROLLER_STATUS.to_string(),
         scopes: vec![format!("block:{}", status.blockid)],
         sender: String::new(),
-        persist: 0,
+        persist: 1,
         data: serde_json::to_value(status).ok(),
     };
     broker.publish(event);
@@ -639,5 +651,32 @@ mod tests {
         let result = resync_controller(&block, "tab-1", None, false, None, None, None, None);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("unknown controller type"));
+    }
+
+    /// Regression: `publish_controller_status` must persist (not fire-once),
+    /// so a reconnecting subscriber picks up the last known `turn_active`
+    /// state instead of nothing — see this function's doc comment and
+    /// REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md §3/§4
+    /// item 5.
+    #[test]
+    fn test_publish_controller_status_persists_for_replay() {
+        let broker = super::super::wps::Broker::new();
+        let status = BlockControllerRuntimeStatus {
+            blockid: "block-persist-test".to_string(),
+            turn_active: true,
+            ..Default::default()
+        };
+        publish_controller_status(&broker, &status);
+
+        let history = broker.read_event_history(
+            super::super::wps::EVENT_CONTROLLER_STATUS,
+            "block:block-persist-test",
+            1,
+        );
+        assert_eq!(history.len(), 1, "publish must persist at least the latest event");
+        let replayed: BlockControllerRuntimeStatus =
+            serde_json::from_value(history[0].data.clone().unwrap()).unwrap();
+        assert_eq!(replayed.blockid, "block-persist-test");
+        assert!(replayed.turn_active);
     }
 }

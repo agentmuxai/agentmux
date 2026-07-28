@@ -127,6 +127,13 @@ interface UseAgentStreamOpts {
      * pre-echo behavior. SPEC_JEKT_SECURITY_AND_VISIBILITY §3.2.
      */
     agentName?: string;
+    /**
+     * Forwarded verbatim to `usePendingMessageAcceptance` — see that hook's
+     * `onTurnStartFromQueue` doc comment. Re-engages message-list auto-scroll
+     * for a turn that starts from the queue-drain path (a queued message the
+     * backend picked up), not just from this pane's own composer send.
+     */
+    onTurnStartFromQueue?: () => void;
 }
 
 /**
@@ -142,6 +149,7 @@ export function useAgentStream({
     enabled,
     provider,
     agentName,
+    onTurnStartFromQueue,
 }: UseAgentStreamOpts): void {
     // Mutable state that doesn't trigger re-renders. Kept here (not
     // extracted) because it's tightly coupled to the NDJSON parse loop
@@ -205,6 +213,7 @@ export function useAgentStream({
             queue,
             hasNodeId,
             addNodeId,
+            onTurnStartFromQueue,
         });
 
         // Seed the in-batch dedup cache from the reducer-maintained

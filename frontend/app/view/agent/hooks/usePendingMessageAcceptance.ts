@@ -34,6 +34,21 @@ export interface UsePendingMessageAcceptanceOptions {
     queue: StreamFlushQueue;
     hasNodeId: (id: string) => boolean;
     addNodeId: (id: string) => void;
+    /**
+     * Called whenever this hook starts a new turn from the queue-drain path
+     * (below). Wired to the message-list's `jumpToBottom` (re-engages
+     * `stickToBottom` + scrolls to true bottom) so a turn that begins here —
+     * a queued message the backend just picked up, not something typed into
+     * THIS pane's own composer — still auto-follows. Without this, a user
+     * who scrolled away earlier (even during a prior, unrelated turn) sees a
+     * stale `stickToBottom=false` carry into a brand-new turn whose start
+     * had nothing to do with their scroll action. `handleSendMessage`'s own
+     * `onSent` callback already covers the composer-driven case; this covers
+     * the one TurnStart site that didn't. See
+     * REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md's
+     * scroll-follow-drift investigation, root cause #3.
+     */
+    onTurnStartFromQueue?: () => void;
 }
 
 export function usePendingMessageAcceptance(opts: UsePendingMessageAcceptanceOptions): void {
@@ -85,6 +100,7 @@ export function usePendingMessageAcceptance(opts: UsePendingMessageAcceptanceOpt
                 trail("agent:dispatch:TurnStart", { messageId });
                 opts.model.dispatchPane({ type: "TurnStart", at: Date.now() });
                 trail("agent:dispatch:TurnStart:done", { messageId });
+                opts.onTurnStartFromQueue?.();
             }
             // Append as a normal user_message so it joins the
             // conversation stream. Keeps the same id so the new

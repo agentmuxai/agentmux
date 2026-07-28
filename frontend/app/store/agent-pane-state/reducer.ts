@@ -344,14 +344,34 @@ export function update(
 
         case "ReconcileTurnActive": {
             if (command.active) {
-                // Promote the mount-default Idle — never overrides a phase a
-                // real stream/user event already produced. Deliberately does
-                // NOT gate on `state.lastEventMs` the way TurnStart /
-                // StreamFlushObserved do — this seed is meant to cover exactly
-                // the window before the live stream has necessarily subscribed
-                // yet, which is the gap this command exists to close. See the
-                // type's doc comment in types.ts.
-                if (state.turnPhase.kind !== "Idle") {
+                // Promote from the mount-default Idle (this seed's original
+                // purpose — covers the window before the live stream has
+                // necessarily subscribed yet, see the type's doc comment in
+                // types.ts) OR from a settled Done.completed episode. The
+                // Done.completed case matters for the focus-triggered
+                // reconcile (agent-view.tsx): a pane can be showing "Worked"
+                // while backgrounded, a genuinely new turn starts, AND the
+                // live turn-start signal is also missed — without this, the
+                // authoritative "yes, a turn really is active" RPC response
+                // this command carries would silently no-op, leaving the
+                // pane stuck on "Worked" despite real work in progress
+                // (reagent P1 on the PR that added the focus reconcile).
+                // Applies the SAME standard StreamFlushObserved already uses
+                // for live stream content proving a continuation — this
+                // authoritative snapshot is an equally strong (arguably
+                // stronger) signal of truth. Other Done outcomes (stopped/
+                // errored/interrupted) stay excluded, matching
+                // StreamFlushObserved: a failed/stopped turn must not be
+                // silently re-activated. Never overrides Streaming/
+                // Submitting/Interrupting/Disconnected — those already
+                // reflect a real stream/user event this snapshot must not
+                // clobber. Deliberately does NOT gate on `state.lastEventMs`
+                // the way TurnStart / StreamFlushObserved do, for the same
+                // reason the original Idle case didn't.
+                const canPromote =
+                    state.turnPhase.kind === "Idle" ||
+                    (state.turnPhase.kind === "Done" && state.turnPhase.outcome === "completed");
+                if (!canPromote) {
                     return { state, events: [] };
                 }
                 return {
@@ -364,7 +384,7 @@ export function update(
                             lastEventMs: command.at,
                         },
                     },
-                    events: [{ type: "turn-active-reconciled-at-mount" }],
+                    events: [{ type: "turn-active-reconciled" }],
                 };
             }
             // active === false: the backend's authoritative turn_active (flipped
