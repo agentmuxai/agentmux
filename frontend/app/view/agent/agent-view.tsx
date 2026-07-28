@@ -890,7 +890,16 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         if (!focused) return;
         void BlockService.GetControllerStatus(model.blockId)
             .then((rts) => {
-                if (rts) reconcileTurnActive(!!rts.turn_active);
+                if (!rts) return;
+                const active = !!rts.turn_active;
+                reconcileTurnActive(active);
+                // Mirror the live useControllerStatusEvents handler below —
+                // reagent P2: a turn-end detected ONLY via this focus poll
+                // (the missed-live-push case this mechanism exists for)
+                // must still bump turnJustEndedAtom, or
+                // useAgentActivitySummary/useNextPromptSuggestion silently
+                // never fire for that turn's completion.
+                trackTurnJustEnded(active);
             })
             .catch(() => {
                 // Best-effort — the live subscription and next mount remain

@@ -76,7 +76,7 @@ describe("agent-pane-state reducer", () => {
             expect(start.turnPhase.kind).toBe("Idle");
             const r = update(start, { type: "ReconcileTurnActive", at: 100, active: true });
             expect(r.state.turnPhase.kind).toBe("Streaming");
-            expect(r.events[0]).toMatchObject({ type: "turn-active-reconciled-at-mount" });
+            expect(r.events[0]).toMatchObject({ type: "turn-active-reconciled" });
         });
 
         it("active: false is a no-op — Idle is already correct", () => {
@@ -92,6 +92,32 @@ describe("agent-pane-state reducer", () => {
             expect(s1.turnPhase.kind).toBe("Submitting");
             const r = update(s1, { type: "ReconcileTurnActive", at: 120, active: true });
             expect(r.state).toBe(s1);
+            expect(r.events).toEqual([]);
+        });
+
+        // reagent P1 on the PR that added the focus-triggered reconcile
+        // (SPEC_WORKING_STATE_AND_SCROLL_FOLLOW_HARDENING_2026_07_27.md):
+        // without this, a pane showing "Worked" while backgrounded, whose
+        // genuinely-new turn's live start signal was ALSO missed, would
+        // silently no-op forever on this authoritative RPC response.
+        it("promotes a settled Done.completed episode to Streaming — the missed-live-turn-start case", () => {
+            const s0 = streaming(100);
+            const s1 = update(s0, { type: "TurnEnd", stats: null }).state;
+            expect(s1.turnPhase).toMatchObject({ kind: "Done", outcome: "completed" });
+            const r = update(s1, { type: "ReconcileTurnActive", at: 200, active: true });
+            expect(r.state.turnPhase.kind).toBe("Streaming");
+            expect(r.events[0]).toMatchObject({ type: "turn-active-reconciled" });
+        });
+
+        it("does NOT promote Done.stopped/errored — same standard as StreamFlushObserved", () => {
+            const s0 = streaming(100);
+            // Interrupting -> TurnEnd yields Done.stopped.
+            const interrupting = update(s0, { type: "RequestStop", at: 150 }).state;
+            expect(interrupting.turnPhase.kind).toBe("Interrupting");
+            const stopped = update(interrupting, { type: "TurnEnd", stats: null }).state;
+            expect(stopped.turnPhase).toMatchObject({ kind: "Done", outcome: "stopped" });
+            const r = update(stopped, { type: "ReconcileTurnActive", at: 200, active: true });
+            expect(r.state).toBe(stopped);
             expect(r.events).toEqual([]);
         });
 
