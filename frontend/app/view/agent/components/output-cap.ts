@@ -236,6 +236,28 @@ function looksLikeRedraw(prev: string, next: string): boolean {
     return levenshteinRatio(stripPrev, stripNext) >= REDRAW_SIMILARITY_THRESHOLD;
 }
 
+/** Does `anchorTrimmed` (a chunk with no accepted run yet) start a run, given
+ *  the very next chunk's trimmed content? Note the asymmetry with
+ *  `continuesRun` below: this checks SPINNER_CHARS against the ANCHOR itself
+ *  (a lone bare glyph starts a run even if what follows doesn't look like a
+ *  redraw of it — the run then absorbs purely by each subsequent candidate's
+ *  own merits), not against the candidate. `nextTrimmed === null` (anchor is
+ *  the current last-known chunk) means there is nothing yet to compare
+ *  against, so only the bare-glyph half of the check applies. */
+function startsRun(anchorTrimmed: string, nextTrimmed: string | null): boolean {
+    return SPINNER_CHARS.has(anchorTrimmed) || (nextTrimmed !== null && looksLikeRedraw(anchorTrimmed, nextTrimmed));
+}
+
+/** Does a new candidate frame continue a run whose most-recently-accepted
+ *  frame's trimmed content is `lastTrimmed`? Shared by the batch algorithm
+ *  (`collapseSpinnerChunks`) and the incremental one (`createSpinnerCollapser`)
+ *  so the two can never diverge on what counts as "still redrawing." Checks
+ *  SPINNER_CHARS against the CANDIDATE (not the anchor) — see `startsRun`'s
+ *  doc for why these two checks are asymmetric. */
+function continuesRun(lastTrimmed: string, candidateTrimmed: string): boolean {
+    return SPINNER_CHARS.has(candidateTrimmed) || looksLikeRedraw(lastTrimmed, candidateTrimmed);
+}
+
 /**
  * Collapse consecutive redraw-of-each-other chunks in a capped chunk array:
  * a bare spinner glyph (`SPINNER_CHARS`, the original narrow case) OR — per
@@ -243,6 +265,15 @@ function looksLikeRedraw(prev: string, next: string): boolean {
  * static content (`looksLikeRedraw`). Trailing run → spinnerSlot (a single
  * DOM node Solid updates in place). Completed run (followed by unrelated
  * output) → last frame frozen in display.
+ *
+ * Full rescan of `chunks` every call — fine for one-off use (tests, a
+ * completed/static chunk array) but each new streamed chunk arriving during
+ * a live run means re-walking and re-comparing (Levenshtein) the ENTIRE
+ * capped window again. For a long-running stream (npm/cargo install output
+ * is exactly this shape), that is an O(n·L²) rescan on every single chunk
+ * (reagent P1, PR #2330) — use `createSpinnerCollapser()` instead for a live
+ * stream; it does the same comparisons but only against chunks appended
+ * since its last call.
  */
 export function collapseSpinnerChunks<T extends { kind: string; content: string }>(
     chunks: ReadonlyArray<T>,
@@ -254,13 +285,10 @@ export function collapseSpinnerChunks<T extends { kind: string; content: string 
         let lastTrimmed = capChars(chunk.content).trim();
         let last = chunk;
         const nextTrimmed = i + 1 < chunks.length ? capChars(chunks[i + 1].content).trim() : null;
-        const startsRun =
-            SPINNER_CHARS.has(lastTrimmed) ||
-            (nextTrimmed !== null && looksLikeRedraw(lastTrimmed, nextTrimmed));
-        if (startsRun) {
+        if (startsRun(lastTrimmed, nextTrimmed)) {
             while (i + 1 < chunks.length) {
                 const candidate = capChars(chunks[i + 1].content).trim();
-                if (!(SPINNER_CHARS.has(candidate) || looksLikeRedraw(lastTrimmed, candidate))) break;
+                if (!continuesRun(lastTrimmed, candidate)) break;
                 i++;
                 last = chunks[i];
                 lastTrimmed = candidate;
@@ -277,6 +305,98 @@ export function collapseSpinnerChunks<T extends { kind: string; content: string 
         }
     }
     return { display, spinnerSlot };
+}
+
+/**
+ * Stateful, incremental version of `collapseSpinnerChunks` for a live,
+ * append-only chunk stream — mirrors `createChunkCapper`'s pattern (one
+ * instance per stream; each call only does work proportional to chunks
+ * appended since the previous call, not the whole capped window).
+ *
+ * Why this is safe to make incremental: a chunk's "does it start/continue a
+ * run" decision only ever depends on chunks at or before it, EXCEPT for the
+ * single most-recent chunk, whose decision needs the chunk that comes after
+ * it — which doesn't exist yet in a live stream. So at most one chunk (or
+ * one in-progress run, if it's still growing) is ever "pending" — safe to
+ * reconsider on the next call — while everything before that is already
+ * fully decided and can be committed to `finalized` for good. This exactly
+ * mirrors why `collapseSpinnerChunks`, when rerun from scratch as more
+ * chunks arrive, sometimes retroactively groups a previously-standalone
+ * trailing chunk into a new run: the pending chunk here is that same
+ * retroactively-reconsiderable one, just tracked directly instead of
+ * rediscovered by rescanning.
+ */
+export function createSpinnerCollapser<T extends { kind: string; content: string }>() {
+    let finalized: T[] = [];
+    // The tail run not yet committed — length 0 (nothing seen yet), 1 (one
+    // chunk whose run-membership isn't decided until the next chunk arrives),
+    // or >1 (a confirmed run, still possibly growing).
+    let pending: T[] = [];
+    let pendingLastTrimmed = "";
+    let processedCount = 0;
+    let anchor: T | undefined;
+
+    return function collapse(chunks: ReadonlyArray<T>): SpinnerCollapseResult<T> {
+        // Reset on non-append (new stream / shrink) — same contract as
+        // createChunkCapper: anchor on the first chunk's identity, not just
+        // length, since a recycled stream could otherwise be same-length.
+        if (chunks.length < processedCount || chunks[0] !== anchor) {
+            finalized = [];
+            pending = [];
+            pendingLastTrimmed = "";
+            processedCount = 0;
+            anchor = chunks[0];
+        }
+
+        for (; processedCount < chunks.length; processedCount++) {
+            const next = chunks[processedCount];
+            const nextTrimmed = capChars(next.content).trim();
+            if (pending.length === 0) {
+                pending = [next];
+                pendingLastTrimmed = nextTrimmed;
+                continue;
+            }
+            // pending.length === 1: this is the "startsRun" decision for
+            // pending[0], now that its next chunk (this one) is finally
+            // known — checks SPINNER_CHARS against pending[0] itself.
+            // pending.length > 1: an already-confirmed run's continuation
+            // check — checks SPINNER_CHARS against the new candidate
+            // instead. NOT interchangeable (see startsRun/continuesRun's
+            // docs) — mixing them up absorbs an unrelated chunk into a run
+            // just because it's a bare spinner glyph, regardless of whether
+            // the run's own last frame looked anything like it.
+            const matches = pending.length === 1
+                ? startsRun(pendingLastTrimmed, nextTrimmed)
+                : continuesRun(pendingLastTrimmed, nextTrimmed);
+            if (matches) {
+                pending.push(next);
+                pendingLastTrimmed = nextTrimmed;
+            } else {
+                const last = pending[pending.length - 1];
+                finalized.push(pending.length > 1 ? ({ ...last, content: pendingLastTrimmed } as T) : last);
+                pending = [next];
+                pendingLastTrimmed = nextTrimmed;
+            }
+        }
+
+        const display = finalized.slice();
+        let spinnerSlot: { content: string; kind: string } | null = null;
+        if (pending.length > 1) {
+            spinnerSlot = { content: pendingLastTrimmed, kind: pending[pending.length - 1].kind };
+        } else if (pending.length === 1) {
+            if (SPINNER_CHARS.has(pendingLastTrimmed)) {
+                spinnerSlot = { content: pendingLastTrimmed, kind: pending[0].kind };
+            } else {
+                // Not (yet) confirmed as a run — collapseSpinnerChunks would
+                // show it in `display` for THIS snapshot too (its startsRun
+                // check only rules out SPINNER_CHARS without a next chunk to
+                // compare against). Kept in `pending`, not `finalized`, so a
+                // future chunk can still retroactively absorb it into a run.
+                display.push(pending[0]);
+            }
+        }
+        return { display, spinnerSlot };
+    };
 }
 
 /** Visual line count of a string (newline-delimited), allocation-free. */

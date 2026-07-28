@@ -8,6 +8,7 @@ import {
     capText,
     collapseSpinnerChunks,
     createChunkCapper,
+    createSpinnerCollapser,
     MAX_TOOL_OUTPUT_CHARS,
     MAX_TOOL_OUTPUT_LINES,
 } from "./output-cap";
@@ -278,5 +279,118 @@ describe("collapseSpinnerChunks", () => {
             chunk("Step 1 done"),
         ]);
         expect(r.spinnerSlot).toEqual({ content: "Step 2... ⠙", kind: "stdout" });
+    });
+});
+
+describe("createSpinnerCollapser (incremental sibling of collapseSpinnerChunks)", () => {
+    // Cross-check helper: for every prefix length of `chunks`, the
+    // incremental collapser fed one chunk at a time must match the batch
+    // function run fresh on that same prefix. This is the real correctness
+    // guarantee — reagent P1 (PR #2330) is about complexity, not behavior,
+    // so every existing collapseSpinnerChunks scenario above is replayed
+    // here incrementally and must produce identical results at every step.
+    function assertMatchesBatchAtEveryStep(chunks: ReturnType<typeof chunk>[]) {
+        const collapse = createSpinnerCollapser<ReturnType<typeof chunk>>();
+        for (let n = 1; n <= chunks.length; n++) {
+            const prefix = chunks.slice(0, n);
+            const incremental = collapse(prefix);
+            const batch = collapseSpinnerChunks(prefix);
+            expect(incremental).toEqual(batch);
+        }
+    }
+
+    it("matches the batch function at every prefix — bare-glyph run", () => {
+        assertMatchesBatchAtEveryStep([chunk("⠋"), chunk("⠙"), chunk("⠹")]);
+    });
+
+    it("matches the batch function at every prefix — completed bare-glyph run", () => {
+        assertMatchesBatchAtEveryStep([chunk("⠋"), chunk("⠙"), chunk("Done!")]);
+    });
+
+    it("matches the batch function at every prefix — glyph trailing static text", () => {
+        assertMatchesBatchAtEveryStep([
+            chunk("Installing deps... ⠋"),
+            chunk("Installing deps... ⠙"),
+            chunk("Installing deps... ⠹"),
+        ]);
+    });
+
+    it("matches the batch function at every prefix — percentage progress, no glyph", () => {
+        assertMatchesBatchAtEveryStep([
+            chunk("Downloading (12%)"),
+            chunk("Downloading (45%)"),
+            chunk("Downloading (100%)"),
+        ]);
+    });
+
+    it("matches the batch function at every prefix — completed progress run + unrelated output", () => {
+        assertMatchesBatchAtEveryStep([
+            chunk("Downloading (12%)"),
+            chunk("Downloading (100%)"),
+            chunk("Extracting archive"),
+        ]);
+    });
+
+    it("matches the batch function at every prefix — no false-positive collapse", () => {
+        assertMatchesBatchAtEveryStep([chunk("Compiling src/main.rs"), chunk("Compiling src/lib.rs")]);
+    });
+
+    it("matches the batch function at every prefix — multiple disjoint runs", () => {
+        assertMatchesBatchAtEveryStep([
+            chunk("Step 1... ⠋"),
+            chunk("Step 1... ⠙"),
+            chunk("Step 1 done"),
+            chunk("Step 2... ⠋"),
+            chunk("Step 2... ⠙"),
+        ]);
+    });
+
+    it("retroactively absorbs a standalone-looking chunk once a later chunk turns it into a run (the case incrementality risks getting wrong)", () => {
+        // At the point "text" arrives, it doesn't yet know whether it starts
+        // a run (no next chunk exists) — collapseSpinnerChunks would show it
+        // in `display` for that snapshot. Once "text redraw" arrives and
+        // matches it, the ORIGINAL algorithm (rerun from scratch) would
+        // retroactively group them instead of showing "text" standalone.
+        // The incremental version must reproduce that, not freeze its
+        // earlier "shown standalone" guess.
+        assertMatchesBatchAtEveryStep([
+            chunk("⠋"), chunk("⠙"),        // a bare-glyph run
+            chunk("text"),                  // ambiguous while it's the last chunk
+            chunk("text redraw"),           // retroactively joins "text" into a run
+            chunk("unrelated"),             // breaks the run, freezes it
+        ]);
+    });
+
+    it("produces the exact same result as the batch function on the full array in one shot", () => {
+        const chunks = [
+            chunk("⠋"), chunk("⠙"), chunk("Step 1 done"),
+            chunk("Downloading (1%)"), chunk("Downloading (99%)"),
+        ];
+        const collapse = createSpinnerCollapser<ReturnType<typeof chunk>>();
+        expect(collapse(chunks)).toEqual(collapseSpinnerChunks(chunks));
+    });
+
+    it("recounts when the stream resets to a shorter array (mirrors createChunkCapper)", () => {
+        const collapse = createSpinnerCollapser<ReturnType<typeof chunk>>();
+        collapse([chunk("⠋"), chunk("⠙"), chunk("Done!")]);
+        const shorter = [chunk("Compiling")];
+        expect(collapse(shorter)).toEqual(collapseSpinnerChunks(shorter));
+    });
+
+    it("resets when handed a different stream of the same length", () => {
+        const collapse = createSpinnerCollapser<ReturnType<typeof chunk>>();
+        collapse([chunk("⠋"), chunk("⠙")]);
+        const different = [chunk("a"), chunk("b")];
+        expect(collapse(different)).toEqual(collapseSpinnerChunks(different));
+    });
+
+    it("only re-examines newly appended chunks, not the whole prior window (in-place append)", () => {
+        const collapse = createSpinnerCollapser<ReturnType<typeof chunk>>();
+        const chunks = [chunk("Compiling a"), chunk("Compiling b")];
+        const first = collapse(chunks);
+        expect(first).toEqual(collapseSpinnerChunks(chunks));
+        chunks.push(chunk("⠋"), chunk("⠙"));
+        const second = collapse(chunks);
+        expect(second).toEqual(collapseSpinnerChunks(chunks));
     });
 });
