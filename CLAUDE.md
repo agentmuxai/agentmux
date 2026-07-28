@@ -423,7 +423,7 @@ The cloud messaging layer has gone through several names (`agentbus`, `agentmux`
 
 | Layer | Canonical prefix | Examples |
 |-------|-----------------|---------|
-| Cloud auth env vars | `MUXBUS_` | `MUXBUS_TOKEN`, `MUXBUS_COGNITO_DOMAIN` |
+| Cloud auth env vars | `MUXBUS_` | `MUXBUS_TOKEN`, `MUXBUS_COGNITO_DOMAIN`, `MUXBUS_AGENT_ID` (mirrors the canonical app-wide `AGENTMUX_AGENT_ID`, set alongside it at spawn time — see `agentmux-srv/src/server/agent_handlers/input.rs`) |
 | Frontend build vars | `VITE_MUXBUS_` | `VITE_MUXBUS_CLIENT_ID` |
 | Rust types/modules | `MuxBus` / `muxbus` | `MuxBusCredentials`, `crate::muxbus::` |
 | RPC commands | `muxbus.` | `muxbus.login`, `muxbus.status` |
