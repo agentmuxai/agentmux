@@ -250,6 +250,8 @@ impl PersistentSubprocessController {
         let health_monitor = Arc::new(HealthMonitor::new(
             block_id.clone(),
             broker.clone(),
+            wstore.clone(),
+            event_bus.clone(),
         ));
         Self {
             tab_id,

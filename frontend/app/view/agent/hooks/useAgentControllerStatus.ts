@@ -160,6 +160,15 @@ export interface UseAgentControllerStatus {
      * auth_failed launch had left the button stuck showing.
      */
     notifyControllerHealthy: () => void;
+    /**
+     * Kill (if running) and respawn this pane's controller process, then
+     * refresh its runtime status. Originally internal-only (used by the
+     * login-recovery flows to refresh a stale-but-alive process); exposed
+     * here so the `unresponsive` failure row's "Restart" action can reuse
+     * the exact same mechanism for a wedged/`Dead` process. See
+     * `forceControllerRefresh`'s own doc comment for the full rationale.
+     */
+    forceControllerRefresh: (context?: "login" | "restart") => Promise<void>;
 }
 
 /**
@@ -324,8 +333,17 @@ export function useAgentControllerStatus(
      *  first-ever-login path this IS that pane's only registration, so
      *  omitting either left a freshly spawned CLI's PTY at the default width
      *  until the next manual resize, and callers relying on
-     *  `onControllerStatus` never heard about it (reagent P2 on PR #2318). */
-    const forceControllerRefresh = async (): Promise<void> => {
+     *  `onControllerStatus` never heard about it (reagent P2 on PR #2318).
+     *
+     *  `context` picks the catch-block's log message — originally hardcoded
+     *  for the login-recovery case (the only caller until this point), but
+     *  the `unresponsive` failure row's "Restart" action now reuses this
+     *  same function for a completely unrelated reason (a wedged process,
+     *  nothing to do with signing in), so a restart-triggered RPC failure
+     *  must not log a misleading "signed in, but..." message (reagent P2 on
+     *  PR #2336). Defaults to "login" — every pre-existing call site stays
+     *  unchanged. */
+    const forceControllerRefresh = async (context: "login" | "restart" = "login"): Promise<void> => {
         try {
             const initialTermSize = opts.getInitialTermSize?.();
             await RpcApi.ControllerResyncCommand(TabRpcClient, {
@@ -337,11 +355,16 @@ export function useAgentControllerStatus(
             const rts = await BlockService.GetControllerStatus(opts.blockId);
             if (rts) opts.onControllerStatus?.(rts);
         } catch (e: any) {
-            opts.log(
-                "auth",
-                `signed in, but couldn't refresh the running agent with the new login — reopen this pane if it still shows as logged out: ${e?.message ?? String(e)}`,
-                "warn",
-            );
+            const detail = e?.message ?? String(e);
+            if (context === "restart") {
+                opts.log("agent", `couldn't restart the unresponsive agent process: ${detail}`, "warn");
+            } else {
+                opts.log(
+                    "auth",
+                    `signed in, but couldn't refresh the running agent with the new login — reopen this pane if it still shows as logged out: ${detail}`,
+                    "warn",
+                );
+            }
         }
     };
 
@@ -918,5 +941,6 @@ export function useAgentControllerStatus(
         loginViaTerminal,
         notifyControllerHealthy,
         cancelLogin,
+        forceControllerRefresh,
     };
 }

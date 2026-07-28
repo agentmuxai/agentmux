@@ -45,6 +45,14 @@ pub enum FailureClass {
     SpawnFailure,
     /// Non-zero exit with no recognized cause.
     UnknownNonZero,
+    /// The process is still alive but has produced no meaningful output for
+    /// `HealthMonitor::DEAD_SECS` during an active turn — not exit-based
+    /// (unlike every other variant here), so it has no exit code/signal to
+    /// report. Not retryable via the normal "re-send the last message" path
+    /// (the process must be killed and respawned first, since it's the
+    /// process itself that's wedged) — surfaced with a "Restart" action
+    /// instead. See docs/reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md §4.
+    Unresponsive,
 }
 
 /// A classified agent failure: the class, a user-facing title + detail,
