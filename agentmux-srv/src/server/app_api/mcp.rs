@@ -422,14 +422,18 @@ fn register_mcp_catalog_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 }
 
-/// Catalog-tier sibling of `mcp.list` (above) — same computation
-/// (`wstore.mcp_server_list`, every global server plus this agent's own
-/// private ones, each annotated with `bound_to_agent`), but no `check_s1`:
-/// AgentStashModal's MCP Servers tab (the per-agent Stash view) runs over
-/// the dashboard's connection, which is never agent-authenticated, so
-/// `mcp.list`'s gate can never be satisfied from that caller — the exact
-/// same reasoning as `mcp.catalog.bind` above.
-/// See docs/reports/REPORT_ARMORY_ARCHITECTURE_AND_NAMING_REVIEW_2026_07_23.md §2.2.
+/// Catalog-tier sibling of `mcp.list` (above) — GLOBAL SERVERS ONLY, each
+/// annotated with `bound_to_agent` for the caller-supplied `agent_id`, no
+/// `check_s1`. AgentStashModal's MCP Servers tab (the per-agent Stash view)
+/// runs over the dashboard's connection, which is never agent-authenticated,
+/// so `mcp.list`'s gate can never be satisfied from that caller — the exact
+/// same reasoning as `mcp.catalog.bind` above. Deliberately does NOT reuse
+/// `mcp.list`'s full computation (global + this agent's own private
+/// servers): with no `check_s1`, `agent_id` is unverified, and a private
+/// server's `config` can carry secrets — returning it for an arbitrary
+/// caller-chosen `agent_id` would be an IDOR into every agent's private MCP
+/// config. See `Store::mcp_server_list_global_for_agent`'s doc comment and
+/// docs/reports/REPORT_ARMORY_ARCHITECTURE_AND_NAMING_REVIEW_2026_07_23.md §2.2.
 fn register_mcp_catalog_list_for_agent(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
     engine.register_handler(
@@ -441,7 +445,7 @@ fn register_mcp_catalog_list_for_agent(engine: &Arc<WshRpcEngine>, state: &AppSt
                 struct Req { agent_id: String }
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("mcp.catalog.list_for_agent: {e}"))?;
-                let servers = wstore.mcp_server_list(&req.agent_id)
+                let servers = wstore.mcp_server_list_global_for_agent(&req.agent_id)
                     .map_err(|e| format!("mcp.catalog.list_for_agent: {e}"))?;
                 Ok(Some(serde_json::to_value(&servers).map_err(|e| e.to_string())?))
             })
@@ -449,8 +453,23 @@ fn register_mcp_catalog_list_for_agent(engine: &Arc<WshRpcEngine>, state: &AppSt
     );
 }
 
-/// Catalog-tier sibling of `mcp.unbind` (above) — same DB write, no
-/// `check_s1`, same rationale as `register_mcp_catalog_list_for_agent`.
+/// Catalog-tier sibling of `mcp.unbind` (above) — same DB write
+/// (`mcp_server_unbind` deletes one `db_agent_mcp_ref` row, unconditional on
+/// `is_global`), no `check_s1`. Unlike `register_mcp_catalog_list_for_agent`,
+/// this has no *secret*-exposure concern — unbind can't read a server's
+/// `config`, only remove a ref row — but it does let any window connection
+/// sever any `(agent_id, mcp_id)` pair by id, global or private. For a
+/// global row this is an intentional, pre-existing trust boundary already
+/// established by `register_mcp_catalog_bind` (any window can BIND any
+/// agent_id to any global server) and `register_mcp_catalog_delete` (any
+/// window can delete a global server outright, unbinding every agent from
+/// it at once — a strictly larger blast radius). For a private row, this
+/// command could in principle sever an agent's own reference to its own
+/// private server — but `mcp_id` is an unguessable UUID never exposed by
+/// any no-`check_s1` command (`register_mcp_catalog_list_for_agent` returns
+/// global rows only, precisely to avoid leaking a private server's `config`
+/// OR its id), so exploiting this requires already knowing that UUID
+/// through some other channel. reagentx P1 on PR #2329.
 fn register_mcp_catalog_unbind(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
     let broker = state.broker.clone();

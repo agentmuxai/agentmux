@@ -53,15 +53,12 @@ export const AgentSkillsModal = (props: AgentSkillsModalProps): JSX.Element => {
                             onClick={() => model.handleSelect(skill)}
                         >
                             <span class="agent-primitive-modal-list-item-name">{skill.name}</span>
-                            <Show when={skill.is_global}>
-                                <span class="agent-primitive-modal-list-item-badge">global</span>
-                                <span
-                                    class="agent-primitive-modal-list-item-badge"
-                                    classList={{ "is-bound": skill.bound_to_agent }}
-                                >
-                                    {skill.bound_to_agent ? "bound" : "not bound"}
-                                </span>
-                            </Show>
+                            <span
+                                class="agent-primitive-modal-list-item-badge"
+                                classList={{ "is-bound": skill.bound_to_agent }}
+                            >
+                                {skill.bound_to_agent ? "bound" : "not bound"}
+                            </span>
                         </button>
                     )}
                 </For>
@@ -85,26 +82,17 @@ export const AgentSkillsModal = (props: AgentSkillsModalProps): JSX.Element => {
                 {(skill) => (
                     <div class="agent-primitive-modal-readonly">
                         <h3 class="agent-primitive-modal-name">{skill().name}</h3>
-                        <Show
-                            when={skill().is_global}
-                            fallback={
-                                <p class="agent-primitive-modal-global-note">
-                                    Created by this agent's own tools — not editable here.
-                                </p>
-                            }
-                        >
-                            <p class="agent-primitive-modal-global-note">
-                                Global — managed in the Armory. You can bind/unbind it here, or{" "}
-                                <button
-                                    type="button"
-                                    class="agent-primitive-modal-link-btn"
-                                    onClick={() => void openOrFocusPaneByView("armory")}
-                                >
-                                    edit it there
-                                </button>
-                                .
-                            </p>
-                        </Show>
+                        <p class="agent-primitive-modal-global-note">
+                            Global — managed in the Armory. You can bind/unbind it here, or{" "}
+                            <button
+                                type="button"
+                                class="agent-primitive-modal-link-btn"
+                                onClick={() => void openOrFocusPaneByView("armory")}
+                            >
+                                edit it there
+                            </button>
+                            .
+                        </p>
                         <Show when={skill().description}>
                             <span class="agent-primitive-modal-field-label">Description</span>
                             <pre class="agent-primitive-modal-field-value">{skill().description}</pre>
@@ -122,28 +110,26 @@ export const AgentSkillsModal = (props: AgentSkillsModalProps): JSX.Element => {
                                 <Markdown text={skill().content} scrollable={false} />
                             </div>
                         </Show>
-                        <Show when={skill().is_global}>
-                            <div class="agent-primitive-modal-actions">
-                                <Show
-                                    when={skill().bound_to_agent}
-                                    fallback={
-                                        <button
-                                            class="agent-primitive-modal-btn agent-primitive-modal-btn-primary"
-                                            onClick={() => void model.bind(skill().id)}
-                                        >
-                                            Bind
-                                        </button>
-                                    }
-                                >
+                        <div class="agent-primitive-modal-actions">
+                            <Show
+                                when={skill().bound_to_agent}
+                                fallback={
                                     <button
-                                        class="agent-primitive-modal-btn"
-                                        onClick={() => void model.unbind(skill().id)}
+                                        class="agent-primitive-modal-btn agent-primitive-modal-btn-primary"
+                                        onClick={() => void model.bind(skill().id)}
                                     >
-                                        Unbind
+                                        Bind
                                     </button>
-                                </Show>
-                            </div>
-                        </Show>
+                                }
+                            >
+                                <button
+                                    class="agent-primitive-modal-btn"
+                                    onClick={() => void model.unbind(skill().id)}
+                                >
+                                    Unbind
+                                </button>
+                            </Show>
+                        </div>
                     </div>
                 )}
             </Show>

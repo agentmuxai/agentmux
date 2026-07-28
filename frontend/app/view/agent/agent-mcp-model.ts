@@ -6,18 +6,21 @@
  * AgentStashModal). A reactive, read-only view of the standalone MCP
  * Server primitive (`mcp.*` App API, agentmux-srv/src/server/app_api/mcp.rs)
  * plus a Bind/Unbind toggle — NOT a create/edit/delete surface. Global
- * servers are authored in the Armory; this tab shows every server visible
- * to this agent (global + this agent's own, if any were created via its
- * own tool calls) and lets you choose which global ones apply here.
+ * servers are authored in the Armory; this tab lets you choose which of
+ * them apply to this agent.
  *
- * `mcp.catalog.list_for_agent` returns both this agent's own (non-global)
- * servers AND every global server, each annotated with `bound_to_agent` —
- * whether *this* agent specifically holds the bind ref (own rows are
- * always true; a global row may or may not be). Unlike `mcp.list`, this
- * and the bind/unbind commands below carry no `check_s1` gate: they were
- * originally check_s1-gated (agent-self-service only), which meant every
- * action in this tab failed "unauthorized" when opened from the dashboard
- * — this tab's connection is never agent-authenticated. See
+ * `mcp.catalog.list_for_agent` returns every GLOBAL server (never this
+ * agent's own private ones, if any exist), each annotated with
+ * `bound_to_agent` — whether *this* agent specifically holds the bind ref.
+ * Unlike `mcp.list`, this and the bind/unbind commands below carry no
+ * `check_s1` gate: they were originally check_s1-gated (agent-self-service
+ * only), which meant every action in this tab failed "unauthorized" when
+ * opened from the dashboard — this tab's connection is never
+ * agent-authenticated. Deliberately global-only, not a reuse of `mcp.list`'s
+ * full computation: with no `check_s1`, `agent_id` is caller-supplied and
+ * unverified, so returning a private server's `config` (which can carry
+ * secrets) for an arbitrary agent_id would be an IDOR. See
+ * `Store::mcp_server_list_global_for_agent`'s doc comment and
  * docs/reports/REPORT_ARMORY_ARCHITECTURE_AND_NAMING_REVIEW_2026_07_23.md §2.2.
  */
 

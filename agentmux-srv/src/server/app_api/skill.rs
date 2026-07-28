@@ -373,14 +373,19 @@ fn register_skill_catalog_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 }
 
-/// Catalog-tier sibling of `skill.list` (above) — same computation
-/// (`wstore.skill_list`, every global skill plus this agent's own private
-/// ones, each annotated with `bound_to_agent`), but no `check_s1`:
-/// AgentStashModal's Skills tab (the per-agent Stash view) runs over the
-/// dashboard's connection, which is never agent-authenticated, so
+/// Catalog-tier sibling of `skill.list` (above) — GLOBAL SKILLS ONLY, each
+/// annotated with `bound_to_agent` for the caller-supplied `agent_id`, no
+/// `check_s1`. AgentStashModal's Skills tab (the per-agent Stash view) runs
+/// over the dashboard's connection, which is never agent-authenticated, so
 /// `skill.list`'s gate can never be satisfied from that caller — the exact
-/// same reasoning as `skill.catalog.bind` above.
-/// See docs/reports/REPORT_ARMORY_ARCHITECTURE_AND_NAMING_REVIEW_2026_07_23.md §2.2.
+/// same reasoning as `skill.catalog.bind` above. Deliberately does NOT
+/// reuse `skill.list`'s full computation (global + this agent's own
+/// private skills): with no `check_s1`, `agent_id` is unverified, and a
+/// private skill's `content`/`description`/`trigger` can carry sensitive
+/// agent-authored material — returning it for an arbitrary caller-chosen
+/// `agent_id` would be an IDOR into every agent's private skills. See
+/// `Store::skill_list_global_for_agent`'s doc comment and
+/// docs/reports/REPORT_ARMORY_ARCHITECTURE_AND_NAMING_REVIEW_2026_07_23.md §2.2.
 fn register_skill_catalog_list_for_agent(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
     engine.register_handler(
@@ -392,7 +397,7 @@ fn register_skill_catalog_list_for_agent(engine: &Arc<WshRpcEngine>, state: &App
                 struct Req { agent_id: String }
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("skill.catalog.list_for_agent: {e}"))?;
-                let skills = wstore.skill_list(&req.agent_id)
+                let skills = wstore.skill_list_global_for_agent(&req.agent_id)
                     .map_err(|e| format!("skill.catalog.list_for_agent: {e}"))?;
                 Ok(Some(serde_json::to_value(&skills).map_err(|e| e.to_string())?))
             })
@@ -400,8 +405,23 @@ fn register_skill_catalog_list_for_agent(engine: &Arc<WshRpcEngine>, state: &App
     );
 }
 
-/// Catalog-tier sibling of `skill.unbind` (above) — same DB write, no
-/// `check_s1`, same rationale as `register_skill_catalog_list_for_agent`.
+/// Catalog-tier sibling of `skill.unbind` (above) — same DB write
+/// (`skill_unbind` deletes one `db_agent_skills_ref` row, unconditional on
+/// `is_global`), no `check_s1`. Unlike `register_skill_catalog_list_for_agent`,
+/// this has no *secret*-exposure concern — unbind can't read a skill's
+/// `content`, only remove a ref row — but it does let any window connection
+/// sever any `(agent_id, skill_id)` pair by id, global or private. For a
+/// global row this is an intentional, pre-existing trust boundary already
+/// established by `register_skill_catalog_bind` (any window can BIND any
+/// agent_id to any global skill) and `register_skill_catalog_delete` (any
+/// window can delete a global skill outright, unbinding every agent from it
+/// at once — a strictly larger blast radius). For a private row, this
+/// command could in principle sever an agent's own reference to its own
+/// private skill — but `skill_id` is an unguessable UUID never exposed by
+/// any no-`check_s1` command (`register_skill_catalog_list_for_agent`
+/// returns global rows only, precisely to avoid leaking a private skill's
+/// content OR its id), so exploiting this requires already knowing that
+/// UUID through some other channel. reagentx P1 on PR #2329.
 fn register_skill_catalog_unbind(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
     let broker = state.broker.clone();
