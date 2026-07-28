@@ -1459,8 +1459,12 @@ fn normalize_csi_overwrites(chunk: &mut Vec<u8>, still_on_first_line: &mut bool,
                 // fall through untouched, byte by byte, so strip_ansi
                 // (which runs next) still recognizes and removes it as a
                 // whole — this function only ever substitutes the matched
-                // idioms above. Doesn't move the cursor in our model, so
-                // at_col0 is left as-is.
+                // idioms above. Each of those bytes then runs through the
+                // ordinary `*at_col0 = b == b'\n' || b == b'\r'` update
+                // below like any other byte, which forces `at_col0` to
+                // `false` (none of an escape sequence's bytes are `\n`/
+                // `\r`) — conservative and safe (errs toward NOT
+                // collapsing a subsequent EL), not "left as-is".
             }
         }
         out.push(b);
