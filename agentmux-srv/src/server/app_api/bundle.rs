@@ -225,8 +225,18 @@ fn register_bundle_export(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .map_err(|e| format!("bundle.export: {e}"))?
                     .ok_or_else(|| format!("bundle.export: no bundle with id {}", req.id))?;
 
-                let skill_ids: Vec<String> =
-                    serde_json::from_str(&bundle.skills).unwrap_or_default();
+                // Same silent-data-loss pattern already fixed for
+                // context_files/mcp_servers in bundle_export.rs -- a
+                // malformed bundle.skills value must warn, not just
+                // vanish, but a genuinely blank one is not an error
+                // (reagent P1, PR #2333). Shares the same helper so all
+                // three fields behave identically.
+                let mut handler_warnings: Vec<String> = Vec::new();
+                let skill_ids: Vec<String> = crate::backend::bundle_export::parse_json_field_or_warn(
+                    &bundle.skills,
+                    "skills",
+                    &mut handler_warnings,
+                );
                 // Distinguish a genuine DB error from a legitimately deleted
                 // skill id: `.ok().flatten()` previously collapsed both to
                 // "absent", so a locked/damaged store silently reported a
@@ -249,6 +259,9 @@ fn register_bundle_export(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
                 let export = crate::backend::bundle_export::export_bundle(&bundle, &skills);
 
+                let mut all_warnings = export.warnings.clone();
+                all_warnings.append(&mut handler_warnings);
+
                 if req.format == "zip" {
                     let zip_bytes = crate::backend::bundle_export::zip_bundle_export(&export)
                         .map_err(|e| format!("bundle.export: {e}"))?;
@@ -257,7 +270,7 @@ fn register_bundle_export(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     return Ok(Some(json!({
                         "root_slug": export.root_slug,
                         "skipped_skills": export.skipped_skills,
-                        "warnings": export.warnings,
+                        "warnings": all_warnings,
                         "missing_skill_ids": missing_skill_ids,
                         "zip_base64": encoded,
                     })));
@@ -266,6 +279,7 @@ fn register_bundle_export(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let mut result = serde_json::to_value(&export).map_err(|e| e.to_string())?;
                 if let Some(obj) = result.as_object_mut() {
                     obj.insert("missing_skill_ids".to_string(), json!(missing_skill_ids));
+                    obj.insert("warnings".to_string(), json!(all_warnings));
                 }
                 Ok(Some(result))
             })

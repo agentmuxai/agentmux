@@ -104,16 +104,99 @@ struct ContextFileEntry {
     content: String,
 }
 
+/// Flag names (case/dash/underscore-insensitive, `-`/`--` prefix optional)
+/// whose value is credential-shaped in common CLI/MCP server invocations —
+/// a curated allowlist rather than a broad substring match (e.g. `--keymap`
+/// must NOT trigger this), so `redact_mcp_entry` also scans `args` for
+/// these, not just the structured `env`/`headers` fields (Codex + reagent
+/// P1, PR #2333: `--api-key <secret>` or `--token=<secret>` in the runtime
+/// `args` array exported the secret verbatim).
+const SECRET_ARG_FLAG_NAMES: &[&str] = &[
+    "api-key", "apikey", "api_key",
+    "token", "access-token", "access_token", "auth-token", "auth_token",
+    "bearer-token", "bearer_token",
+    "secret", "secret-key", "secret_key", "client-secret", "client_secret",
+    "password", "passwd",
+];
+
+fn secret_arg_placeholder(flag: &str) -> String {
+    let normalized = flag.trim_start_matches('-').to_uppercase().replace('-', "_");
+    format!("${{{normalized}}}")
+}
+
+fn is_secret_flag(flag: &str) -> bool {
+    let normalized = flag.trim_start_matches('-').to_lowercase();
+    SECRET_ARG_FLAG_NAMES.contains(&normalized.as_str())
+}
+
+/// Query-string parameter names commonly used to pass a credential in a
+/// URL (curated allowlist, same rationale as [`SECRET_ARG_FLAG_NAMES`]).
+fn is_secret_query_param(key: &str) -> bool {
+    matches!(
+        key.to_lowercase().as_str(),
+        "api_key" | "apikey" | "key" | "token" | "access_token" | "secret" | "password"
+    )
+}
+
+/// Redact userinfo (`scheme://user:pass@host`) and known secret-bearing
+/// query params from a URL string. Hand-rolled string scanning rather than
+/// a `url`-crate parse (no such dependency in this workspace, matching
+/// this module's existing style — see `sanitize_context_relative_path`) —
+/// deliberately conservative: only touches the exact shapes below, leaving
+/// anything it doesn't recognize unchanged rather than risking a malformed
+/// rewrite of a URL this scan doesn't fully understand.
+fn redact_url_credentials(url: &str) -> String {
+    let mut result = url.to_string();
+
+    if let Some(scheme_end) = result.find("://") {
+        let after_scheme = scheme_end + 3;
+        if let Some(at_offset) = result[after_scheme..].find('@') {
+            let userinfo_end = after_scheme + at_offset;
+            // Only treat this as userinfo if there's no path separator
+            // before the `@` -- otherwise a bare `@` further into the URL
+            // (rare, but possible in a path/fragment) would be misread.
+            if !result[after_scheme..userinfo_end].contains('/') {
+                result.replace_range(after_scheme..userinfo_end, "${REDACTED}");
+            }
+        }
+    }
+
+    if let Some(query_start) = result.find('?') {
+        let (base, query_with_qmark) = result.split_at(query_start);
+        let query = &query_with_qmark[1..];
+        let mut changed = false;
+        let new_pairs: Vec<String> = query
+            .split('&')
+            .map(|pair| match pair.split_once('=') {
+                Some((key, _)) if is_secret_query_param(key) => {
+                    changed = true;
+                    format!("{key}={}", secret_arg_placeholder(key))
+                }
+                _ => pair.to_string(),
+            })
+            .collect();
+        if changed {
+            result = format!("{base}?{}", new_pairs.join("&"));
+        }
+    }
+
+    result
+}
+
 /// Redact secret-shaped values out of an MCP server config entry before it
 /// is written into a shareable bundle export. `env` and `headers` are the
-/// two fields AgentMux's own MCP config editors accept literal secret
-/// values into (e.g. `env.GITHUB_TOKEN`, `headers.Authorization` on an
-/// HTTP/SSE-transport server) — every value under either key is replaced
-/// with a `${VAR_NAME}`-style placeholder so the exported `.server.json`
-/// never contains a real credential, matching ABF's "declare, don't bundle
-/// secrets" principle that `accounts/requirements.json` already follows
-/// (security finding, Codex P1 x2, PR #2325). Any other field passes
-/// through unchanged.
+/// two structured fields AgentMux's own MCP config editors accept literal
+/// secret values into (e.g. `env.GITHUB_TOKEN`, `headers.Authorization` on
+/// an HTTP/SSE-transport server) — every value under either key is
+/// replaced with a `${VAR_NAME}`-style placeholder so the exported
+/// `.server.json` never contains a real credential, matching ABF's
+/// "declare, don't bundle secrets" principle that `accounts/requirements.json`
+/// already follows (security finding, Codex P1 x2, PR #2325). `args` (CLI
+/// flag/value pairs) and `url` (userinfo/query-param credentials) are
+/// ALSO scanned for the same reason — a credential passed as
+/// `--api-key <secret>` or `https://user:pass@host` is just as real a leak
+/// as one in `env`/`headers` (Codex + reagent P1, PR #2333). Any other
+/// field passes through unchanged.
 fn redact_mcp_entry(entry: &Value) -> Value {
     let mut redacted = entry.clone();
     if let Some(obj) = redacted.as_object_mut() {
@@ -122,6 +205,36 @@ fn redact_mcp_entry(entry: &Value) -> Value {
                 for (key, value) in map.iter_mut() {
                     *value = json!(format!("${{{key}}}"));
                 }
+            }
+        }
+        if let Some(Value::Array(args)) = obj.get_mut("args") {
+            let mut i = 0;
+            while i < args.len() {
+                let Some(s) = args[i].as_str() else {
+                    i += 1;
+                    continue;
+                };
+                if let Some((flag, _value)) = s.split_once('=') {
+                    // "--flag=value" form: redact just the value portion.
+                    if is_secret_flag(flag) {
+                        args[i] = json!(format!("{flag}={}", secret_arg_placeholder(flag)));
+                    }
+                    i += 1;
+                } else if is_secret_flag(s) && i + 1 < args.len() {
+                    // "--flag value" form: redact the NEXT element, leave
+                    // the flag itself (it's not a secret) untouched.
+                    let placeholder = secret_arg_placeholder(s);
+                    args[i + 1] = json!(placeholder);
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+            }
+        }
+        if let Some(url_str) = obj.get("url").and_then(|v| v.as_str()).map(|s| s.to_string()) {
+            let redacted_url = redact_url_credentials(&url_str);
+            if redacted_url != url_str {
+                obj.insert("url".to_string(), json!(redacted_url));
             }
         }
     }
@@ -337,13 +450,14 @@ pub fn export_bundle(bundle: &Memory, skills: &[Skill]) -> BundleExport {
     }
 }
 
-/// Parse a `db_bundles` JSON-array column (`context_files`/`mcp_servers`),
-/// treating a blank/whitespace-only value as "genuinely no data" (not an
-/// error) but pushing a warning to `warnings` for anything non-blank that
-/// fails to parse, rather than silently discarding it via
+/// Parse a `db_bundles` JSON-array column (`context_files`/`mcp_servers`,
+/// and — via the `bundle.export` RPC handler in `app_api/bundle.rs` —
+/// `skills`), treating a blank/whitespace-only value as "genuinely no
+/// data" (not an error) but pushing a warning to `warnings` for anything
+/// non-blank that fails to parse, rather than silently discarding it via
 /// `unwrap_or_default()` — an export that quietly loses data defeats its
 /// own backup/portability purpose (reagent P1, PR #2333).
-fn parse_json_field_or_warn<T: serde::de::DeserializeOwned + Default>(
+pub(crate) fn parse_json_field_or_warn<T: serde::de::DeserializeOwned + Default>(
     raw: &str,
     field_name: &str,
     warnings: &mut Vec<String>,
@@ -584,6 +698,28 @@ mod tests {
     }
 
     #[test]
+    fn parse_json_field_or_warn_direct_unit_test() {
+        // reagent P1, PR #2333: `bundle.export`'s RPC handler
+        // (app_api/bundle.rs) reuses this exact helper for `bundle.skills`,
+        // which previously had the same unwrap_or_default() silent-loss bug
+        // already fixed here for context_files/mcp_servers.
+        let mut warnings = Vec::new();
+        let blank: Vec<String> = parse_json_field_or_warn("", "skills", &mut warnings);
+        assert!(blank.is_empty());
+        assert!(warnings.is_empty(), "blank must not warn");
+
+        let malformed: Vec<String> = parse_json_field_or_warn("not json", "skills", &mut warnings);
+        assert!(malformed.is_empty());
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("skills") && warnings[0].contains("malformed"));
+
+        let mut warnings2 = Vec::new();
+        let valid: Vec<String> = parse_json_field_or_warn(r#"["a","b"]"#, "skills", &mut warnings2);
+        assert_eq!(valid, vec!["a".to_string(), "b".to_string()]);
+        assert!(warnings2.is_empty());
+    }
+
+    #[test]
     fn colliding_context_file_paths_are_deduped_with_a_warning() {
         // reagent P2, PR #2333: two distinct source paths that normalize to
         // the same output (e.g. a redundant "./" component) previously
@@ -635,6 +771,80 @@ mod tests {
             !req_file.content.to_lowercase().contains("realtoken789"),
             "must never contain a real secret value"
         );
+    }
+
+    #[test]
+    fn redacts_credentials_from_args_flag_equals_value_form() {
+        // Codex + reagent P1, PR #2333: a real credential passed as
+        // "--api-key=<secret>" in the runtime args array previously
+        // exported verbatim.
+        let mcp_servers = r#"[{
+            "name": "linear",
+            "type": "stdio",
+            "command": "linear-mcp",
+            "args": ["--api-key=lin_realSecretAbc123", "--verbose"]
+        }]"#;
+        let bundle = make_bundle("", "[]", mcp_servers, "[]");
+        let export = export_bundle(&bundle, &[]);
+        let server_file = export.files.iter().find(|f| f.path == "mcp/linear.server.json").unwrap();
+        assert!(!server_file.content.contains("lin_realSecretAbc123"));
+        assert!(server_file.content.contains("${API_KEY}"));
+        assert!(server_file.content.contains("--verbose"), "unrelated flags must survive untouched");
+    }
+
+    #[test]
+    fn redacts_credentials_from_args_flag_space_value_form() {
+        let mcp_servers = r#"[{
+            "name": "custom",
+            "type": "stdio",
+            "command": "custom-mcp",
+            "args": ["--token", "realSecretXyz789", "--port", "8080"]
+        }]"#;
+        let bundle = make_bundle("", "[]", mcp_servers, "[]");
+        let export = export_bundle(&bundle, &[]);
+        let server_file = export.files.iter().find(|f| f.path == "mcp/custom.server.json").unwrap();
+        assert!(!server_file.content.contains("realSecretXyz789"));
+        assert!(server_file.content.contains("${TOKEN}"));
+        // "--port 8080" is not a secret flag -- must survive untouched.
+        assert!(server_file.content.contains("8080"));
+    }
+
+    #[test]
+    fn unrelated_args_flags_are_never_redacted() {
+        // "--keymap" contains neither "key" as a whole segment nor any
+        // other curated secret-flag name -- must not false-positive.
+        let mcp_servers = r#"[{
+            "name": "editor",
+            "type": "stdio",
+            "command": "editor-mcp",
+            "args": ["--keymap=vim", "--theme", "dark"]
+        }]"#;
+        let bundle = make_bundle("", "[]", mcp_servers, "[]");
+        let export = export_bundle(&bundle, &[]);
+        let server_file = export.files.iter().find(|f| f.path == "mcp/editor.server.json").unwrap();
+        assert!(server_file.content.contains("--keymap=vim"));
+        assert!(server_file.content.contains("dark"));
+    }
+
+    #[test]
+    fn redacts_userinfo_and_secret_query_params_from_url() {
+        // Codex + reagent P1, PR #2333: a credential embedded in the `url`
+        // field (userinfo or a secret-bearing query param) previously
+        // exported verbatim.
+        let mcp_servers = r#"[{
+            "name": "remote",
+            "type": "http",
+            "url": "https://admin:realPass456@mcp.example.com/api?api_key=realKeyAbc&region=us"
+        }]"#;
+        let bundle = make_bundle("", "[]", mcp_servers, "[]");
+        let export = export_bundle(&bundle, &[]);
+        let server_file = export.files.iter().find(|f| f.path == "mcp/remote.server.json").unwrap();
+        assert!(!server_file.content.contains("realPass456"));
+        assert!(!server_file.content.contains("realKeyAbc"));
+        assert!(server_file.content.contains("${REDACTED}@mcp.example.com"));
+        assert!(server_file.content.contains("api_key=${API_KEY}"));
+        // Non-secret query params must survive untouched.
+        assert!(server_file.content.contains("region=us"));
     }
 
     #[test]
