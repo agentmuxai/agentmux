@@ -280,6 +280,21 @@ describe("collapseSpinnerChunks", () => {
         ]);
         expect(r.spinnerSlot).toEqual({ content: "Step 2... ⠙", kind: "stdout" });
     });
+
+    it("does NOT collapse ordinary sequential lines that happen to differ only by a bare number (reagent P1, PR #2330 — bare digit runs must not be stripped like percentages)", () => {
+        const r = collapseSpinnerChunks([chunk("case 1 passed"), chunk("case 2 passed"), chunk("case 3 passed")]);
+        expect(r.display).toEqual([chunk("case 1 passed"), chunk("case 2 passed"), chunk("case 3 passed")]);
+        expect(r.spinnerSlot).toBeNull();
+    });
+
+    it("does NOT hang or throw on a very long non-progress line (reagent P1, PR #2330 — unbounded Levenshtein on an ~8KiB bashwrap chunk)", () => {
+        const huge = "x".repeat(9000);
+        const start = performance.now();
+        const r = collapseSpinnerChunks([chunk(huge), chunk(huge + "y")]);
+        expect(performance.now() - start).toBeLessThan(200);
+        expect(r.display).toEqual([chunk(huge), chunk(huge + "y")]);
+        expect(r.spinnerSlot).toBeNull();
+    });
 });
 
 describe("createSpinnerCollapser (incremental sibling of collapseSpinnerChunks)", () => {

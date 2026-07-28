@@ -187,13 +187,20 @@ const SPINNER_CHAR_RE = new RegExp(`[${[...SPINNER_CHARS].join("")}]`, "g");
  *  near-total-match progress-bar variations. */
 const REDRAW_SIMILARITY_THRESHOLD = 0.92;
 
-/** Strip spinner glyphs, digits, and progress-bar fill runs so
+/** Strip spinner glyphs, percentages, and progress-bar fill runs so
  *  "Installing... ⠋" / "Installing... ⠙" / "Downloading (45%)" / "(46%)"
- *  normalize to the same or a near-identical string. */
+ *  normalize to the same or a near-identical string.
+ *
+ *  The `%` in `\d+%` is NOT optional — a bare digit run with no percent
+ *  sign is left alone. `\d+%?` (optional `%`) would strip every plain
+ *  number anywhere in the line, so "case 1 passed" / "case 2 passed" (two
+ *  genuinely different lines, nothing to do with an animation) would
+ *  normalize to the same string and get collapsed into one, silently
+ *  discarding real output (reagent P1, PR #2330). */
 function normalizeForCompare(s: string): string {
     return s
         .replace(SPINNER_CHAR_RE, "")
-        .replace(/\d+%?/g, "#")
+        .replace(/\d+%/g, "#")
         .replace(/[#=\-\s]{3,}/g, "#")
         .trim();
 }
@@ -218,6 +225,30 @@ function levenshteinRatio(a: string, b: string): number {
     return 1 - prev[b.length] / maxLen;
 }
 
+/** Above this length, skip the Levenshtein fallback entirely rather than pay
+ *  its O(a·b) cost — real spinner/progress lines are short human-readable
+ *  text; a single bashwrap chunk can be up to ~8KiB (one large non-progress
+ *  chunk, e.g. minified JSON or base64, would otherwise run tens of millions
+ *  of DP cells synchronously on the UI thread). The two fast paths above
+ *  (exact match, post-strip equality) already catch every real redraw
+ *  shape regardless of length; only the fuzzy fallback needs bounding. */
+const REDRAW_COMPARE_MAX_LEN = 300;
+
+/** Below this length, skip the Levenshtein fallback too — for the opposite
+ *  reason: ratio = 1 - editDistance/maxLen means a fixed similarity
+ *  threshold is only meaningful for strings long enough that a genuine
+ *  one-character difference doesn't itself exceed it. At
+ *  `REDRAW_SIMILARITY_THRESHOLD` (0.92), any two SHORT strings differing by
+ *  exactly one character will score >= threshold regardless of what that
+ *  character is — "case 1 passed" vs "case 2 passed" (13 chars, real,
+ *  unrelated lines that just happen to share a template) scores ~0.923,
+ *  same shape as a genuine redraw. reagent's own example, PR #2330. No
+ *  currently-legitimate redraw case in this codebase needs the fuzzy path
+ *  below this length — every collapsing test in output-cap.test.ts reaches
+ *  the exact-match fast path above instead (spinner glyphs and %-progress
+ *  both strip to identical strings, not merely similar ones). */
+const REDRAW_COMPARE_MIN_LEN = 16;
+
 /**
  * Does `next` look like an in-place terminal redraw of `prev` — a spinner
  * glyph or progress text trailing/leading otherwise-static content, rather
@@ -233,6 +264,8 @@ function looksLikeRedraw(prev: string, next: string): boolean {
     const stripNext = normalizeForCompare(next);
     if (!stripPrev && !stripNext) return false; // both fully stripped — no real content to compare
     if (stripPrev === stripNext) return true; // differs only in glyph/%/count
+    const maxLen = Math.max(stripPrev.length, stripNext.length);
+    if (maxLen > REDRAW_COMPARE_MAX_LEN || maxLen < REDRAW_COMPARE_MIN_LEN) return false;
     return levenshteinRatio(stripPrev, stripNext) >= REDRAW_SIMILARITY_THRESHOLD;
 }
 

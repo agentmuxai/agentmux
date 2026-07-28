@@ -1391,12 +1391,21 @@ fn pty_reader_loop(
 ///     (and any tool not going through ConPTY's re-serialization) may use
 ///     this form directly.
 ///   - EL (`\x1b[2K` erase whole line, `\x1b[K`/`\x1b[0K` erase to end of
-///     line) is treated as "reset to start of line" too: in the dominant
-///     real-world `\r` + EL idiom (`\r\x1b[2K<text>`) this is redundant
-///     with the `\r` that's already present and byte-for-byte identical
-///     either way; standalone (rarer), collapsing to `\r` is a documented
-///     over-approximation that can only cause MORE aggressive truncation
-///     of stale content on that line, never loss of newly-written content.
+///     line) is treated as "reset to start of line" too, but ONLY when the
+///     cursor is already known to be at column 0 at this point in `out`
+///     (`out.len() == line_start`, tracked the same way `collapse_cr` does)
+///     — i.e. the dominant real-world `\r` + EL idiom (`\r\x1b[2K<text>`),
+///     where it's genuinely redundant with the `\r` already just emitted.
+///     A STANDALONE EL, mid-line (cursor NOT at column 0 — e.g.
+///     `prefix\x1b[Ksuffix`), is a real, different case: EL only erases
+///     from the cursor onward and never moves it, so collapsing it to `\r`
+///     there would make `collapse_cr` truncate `prefix` even though EL
+///     never asked for that. That standalone case is left unconverted
+///     (falls through to the "unrecognized" branch below, so `strip_ansi`
+///     removes the escape byte-for-byte without touching `prefix`) — a
+///     bug reagent caught on this exact line (PR #2330): the prior,
+///     unconditional version silently discarded `prefix` in
+///     `prefix\x1b[Ksuffix\n`.
 ///
 /// CUB (`\x1b[<n>D`, "cursor back n columns") is intentionally NOT handled
 /// here — a faithful implementation needs true per-column tracking (a raw
@@ -1407,6 +1416,12 @@ fn pty_reader_loop(
 fn normalize_csi_overwrites(chunk: &mut Vec<u8>, still_on_first_line: &mut bool) {
     let mut out: Vec<u8> = Vec::with_capacity(chunk.len());
     let mut i = 0;
+    // Is the cursor known to be at column 0 right now? True at chunk start
+    // and immediately after any byte that moves it there (`\n`, real or
+    // substituted `\r`); false after any other byte. Used to gate EL — see
+    // the doc comment above for why a mid-line standalone EL must not be
+    // treated as \r.
+    let mut at_col0 = true;
     while i < chunk.len() {
         let b = chunk[i];
         if b == b'\n' {
@@ -1421,22 +1436,26 @@ fn normalize_csi_overwrites(chunk: &mut Vec<u8>, still_on_first_line: &mut bool)
                 let params = &chunk[i + 2..j];
                 let final_byte = chunk[j];
                 let is_cha_col1 = final_byte == b'G' && (params.is_empty() || params == b"1");
-                let is_el = final_byte == b'K'; // \x1b[K, \x1b[0K, \x1b[2K all covered
+                let is_el = final_byte == b'K' && at_col0;
                 let is_cup_home = *still_on_first_line
                     && final_byte == b'H'
                     && is_cup_row1_col1(params);
                 if is_cha_col1 || is_el || is_cup_home {
                     out.push(b'\r');
+                    at_col0 = true;
                     i = j + 1;
                     continue;
                 }
-                // Unrecognized/CUB/out-of-scope CSI sequence: fall through
-                // untouched, byte by byte, so strip_ansi (which runs next)
-                // still recognizes and removes it as a whole — this
-                // function only ever substitutes the matched idioms above.
+                // Unrecognized/CUB/mid-line-EL/out-of-scope CSI sequence:
+                // fall through untouched, byte by byte, so strip_ansi
+                // (which runs next) still recognizes and removes it as a
+                // whole — this function only ever substitutes the matched
+                // idioms above. Doesn't move the cursor in our model, so
+                // at_col0 is left as-is.
             }
         }
         out.push(b);
+        at_col0 = b == b'\n' || b == b'\r';
         i += 1;
     }
     *chunk = out;
@@ -2055,10 +2074,41 @@ mod tests {
     }
 
     #[test]
-    fn normalize_csi_el_variants_become_cr() {
-        assert_eq!(csi(b"stale\x1b[2Kfresh"), b"stale\rfresh");
-        assert_eq!(csi(b"stale\x1b[Kfresh"), b"stale\rfresh");
-        assert_eq!(csi(b"stale\x1b[0Kfresh"), b"stale\rfresh");
+    fn normalize_csi_el_at_line_start_becomes_cr() {
+        // EL at the very start of a chunk (nothing written on this line
+        // yet) is safe: there's nothing to lose by treating it as \r.
+        assert_eq!(csi(b"\x1b[2Kfresh"), b"\rfresh");
+        assert_eq!(csi(b"\x1b[Kfresh"), b"\rfresh");
+        assert_eq!(csi(b"\x1b[0Kfresh"), b"\rfresh");
+        // Same, after a real newline -- also column 0.
+        assert_eq!(csi(b"line1\n\x1b[2Kfresh"), b"line1\n\rfresh");
+    }
+
+    #[test]
+    fn normalize_csi_standalone_mid_line_el_is_left_untouched_not_synthesized_to_cr() {
+        // reagent P1, PR #2330: EL only erases from the cursor onward and
+        // never moves it -- it is NOT equivalent to \r when real content
+        // ("stale") already precedes it on the line. The previous,
+        // unconditional version turned this into "stale\rfresh", which
+        // collapse_cr then truncated to just "fresh", silently discarding
+        // "stale" even though EL never asked for that. Leaving it
+        // unconverted here means strip_ansi removes only the escape bytes
+        // afterward, preserving "stale" + "fresh" concatenated.
+        let out = csi(b"stale\x1b[2Kfresh");
+        assert!(!out.contains(&b'\r'), "mid-line EL must not synthesize a \\r: {out:?}");
+        assert_eq!(out, b"stale\x1b[2Kfresh");
+
+        let out_k = csi(b"stale\x1b[Kfresh");
+        assert!(!out_k.contains(&b'\r'));
+        assert_eq!(out_k, b"stale\x1b[Kfresh");
+    }
+
+    #[test]
+    fn normalize_csi_el_immediately_after_real_cr_still_becomes_cr() {
+        // The dominant real-world idiom (\r\x1b[2K<text>): the \r already
+        // puts the cursor at column 0, so a following EL is genuinely
+        // redundant and safe to also represent as \r.
+        assert_eq!(csi(b"\r\x1b[2Kfresh"), b"\r\rfresh");
     }
 
     #[test]
