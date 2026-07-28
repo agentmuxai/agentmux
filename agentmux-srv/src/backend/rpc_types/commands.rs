@@ -308,6 +308,11 @@ pub const COMMAND_BUNDLE_GET: &str = "bundle.get";
 pub const COMMAND_BUNDLE_UPSERT: &str = "bundle.upsert";
 pub const COMMAND_BUNDLE_DELETE: &str = "bundle.delete";
 pub const COMMAND_BUNDLE_SELF_GET: &str = "bundle.self.get";
+// Armory Bundle Format (ABF) exporter — Phase 1 of
+// docs/specs/REPORT_ARMORY_BUNDLE_STANDARD_RESEARCH_2026_07_16.md /
+// https://docs.agentmux.ai/abf/. Serializes a bundle + its referenced
+// skills/MCP servers into the ABF on-disk layout.
+pub const COMMAND_BUNDLE_EXPORT: &str = "bundle.export";
 // Deprecated `preset.*` aliases — kept wired for one release (remove in Phase 4).
 pub const COMMAND_PRESET_LIST: &str = "preset.list";
 pub const COMMAND_PRESET_GET: &str = "preset.get";
