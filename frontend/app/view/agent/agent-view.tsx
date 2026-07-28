@@ -806,7 +806,19 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         // the credential — retry the failed turn so the agent recovers in one
         // click. Lazy arrow: retryLastTurn is defined below but only invoked at
         // runtime (post-click), by which point it's initialized.
-        onRecovered: () => retryLastTurn(),
+        onRecovered: () => {
+            // Recovery just succeeded — explicitly resolve the failure this
+            // banner was showing rather than waiting for retryLastTurn's own
+            // TurnStart to clear it as a side effect. handleSendMessage
+            // captures the live "auth"-classified failure state BEFORE
+            // dispatching TurnStart (so a user's own fresh keystroke send
+            // gets fast-failed against a still-showing auth failure); without
+            // clearing here first, that same capture would see the stale
+            // failure on THIS auto-retry too and wrongly reject the very
+            // resend recovery just enabled. Codex P1 on PR #2338.
+            dispatchPane(model.blockId, { type: "FailureCleared" }, "system");
+            retryLastTurn();
+        },
         getInitialTermSize: () => computeTermSizeFromEl(rootRef),
         // Mount-time TurnPhase reconciliation — see
         // docs/specs/REPORT_AGENT_PANE_STATE_RECONCILIATION_2026_07_07.md
@@ -1091,6 +1103,18 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         // where the message flashed in the amber zone between Streaming
         // promotion and agent-message-accepted. See ANALYSIS_IDLE_SEND_RACE_2026_06_11.md.
         const wasAlreadyWorking = workingFromPhase(paneSnapshot(model.blockId)?.turnPhase ?? { kind: "Idle" });
+        // Captured BEFORE TurnStart for the same reason wasAlreadyWorking is:
+        // TurnStart unconditionally clears state.failure (reducer.ts), so a
+        // read taken any later (e.g. inside deliverToBackend's guard) would
+        // always see it already gone, whether this send is a user's own
+        // fresh keystroke while a live "auth"-classified failure is still
+        // showing, or a legitimate auto-retry after successful recovery.
+        // onRecovered (above) explicitly dispatches FailureCleared before
+        // calling retryLastTurn precisely so this capture reads false for
+        // that case — for a real live auth failure the user hasn't
+        // acknowledged, nothing has cleared it yet, so this reads true.
+        // Codex P1 on PR #2338.
+        const hadLiveAuthFailure = agentAtoms().failureAtom[0]()?.data.code === "auth";
         // Only start a NEW turn when the agent is idle. Dispatching TurnStart
         // while a turn is already running regresses Streaming → Submitting,
         // which would flicker the busy indicator back to its "Submitting"
@@ -1100,7 +1124,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         if (!wasAlreadyWorking) {
             dispatchPane(model.blockId, { type: "TurnStart", at: Date.now() }, "user");
         }
-        return commands.sendMessage(message, wasAlreadyWorking);
+        return commands.sendMessage(message, wasAlreadyWorking, hadLiveAuthFailure);
     };
 
     // Esc on an empty composer. Mirrors Claude Code CLI: if a message is

@@ -104,3 +104,33 @@ describe("useAgentControllerStatus — useGlobalLogin sets loginWaiting while in
         });
     });
 });
+
+describe("useAgentControllerStatus — loginWaiting clears BEFORE onRecovered fires (reagent P0 on PR #2338)", () => {
+    it("useGlobalLogin: loginWaiting() is already false inside the onRecovered callback", async () => {
+        // onRecovered (agent-view.tsx's retryLastTurn) synchronously resends
+        // the failed turn straight into useAgentCommands.ts's
+        // canRetry() || loginWaiting() guard. Clearing loginWaiting only in
+        // this function's trailing `finally` (which runs AFTER onRecovered
+        // returns) let that resend get spuriously rejected as "not logged in
+        // yet" even though recovery just succeeded — breaking the
+        // auto-retry-after-relogin flow entirely.
+        hub.registerSeededAccount.mockResolvedValue({ ok: true, accountId: "acct-1", dir: "/tmp/acct-1" });
+        let loginWaitingInsideCallback: boolean | undefined;
+
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({
+                blockId: "block-1",
+                provider: () => claude,
+                log: () => {},
+                onRecovered: () => {
+                    loginWaitingInsideCallback = status.loginWaiting();
+                },
+            });
+
+            await status.useGlobalLogin();
+
+            expect(loginWaitingInsideCallback).toBe(false);
+            dispose();
+        });
+    });
+});

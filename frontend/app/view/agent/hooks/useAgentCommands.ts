@@ -129,8 +129,14 @@ export interface UseAgentCommandsOptions {
 export interface UseAgentCommands {
     /** Send a user message. Slash commands are intercepted via the registry.
      *  `wasAlreadyWorking` should be true when a turn was in-flight before
-     *  the caller dispatched TurnStart — drives PendingMessage.enqueuedWhileBusy. */
-    sendMessage: (message: string, wasAlreadyWorking?: boolean) => Promise<void>;
+     *  the caller dispatched TurnStart — drives PendingMessage.enqueuedWhileBusy.
+     *  `hadLiveAuthFailure` should be the caller's own pre-TurnStart read of
+     *  whether the pane was showing an "auth"-classified failure row at the
+     *  moment this send was initiated — TurnStart unconditionally clears
+     *  that failure, so `deliverToBackend` can't re-derive it live; the
+     *  caller must capture it before dispatching TurnStart. Codex P1 on
+     *  PR #2338. */
+    sendMessage: (message: string, wasAlreadyWorking?: boolean, hadLiveAuthFailure?: boolean) => Promise<void>;
     /**
      * Deliver any messages held while the agent was busy (the "send now"
      * queue). Called by the agent view at the next tool-call boundary (or
@@ -300,7 +306,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         return registry().list(buildCommandContext());
     };
 
-    const sendMessage = async (message: string, wasAlreadyWorking = false): Promise<void> => {
+    const sendMessage = async (message: string, wasAlreadyWorking = false, hadLiveAuthFailure = false): Promise<void> => {
         // Crash trace: this is the entry point for "user pressed send."
         // The boundary dumps this trail when a renderer fault catches —
         // see frontend/log/render-trail.ts + BlockErrorBoundary.
@@ -423,7 +429,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         }
 
         // Idle send: deliver immediately and arm the lost-delivery safety timer.
-        await deliverToBackend(message, messageId, /* armExpiry */ true, /* initiatesTurn */ true);
+        await deliverToBackend(message, messageId, /* armExpiry */ true, /* initiatesTurn */ true, hadLiveAuthFailure);
     };
 
     /**
@@ -445,6 +451,12 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
          *  message's delivery succeeds, so its failure must not cut that
          *  turn short. */
         initiatesTurn: boolean,
+        /** Caller's own pre-TurnStart capture of whether an "auth"-classified
+         *  failure row was showing at send-time — see sendMessage's doc
+         *  comment. Always false for a held-message flush (mirrors
+         *  initiatesTurn — a flush's guard question is about the ALREADY-
+         *  active turn, not a fresh capture). */
+        hadLiveAuthFailure: boolean,
     ): Promise<void> => {
         // The pane is ALREADY showing the mount-time "Log in" bar
         // (opts.canRetry()) — sending anyway used to travel all the way
@@ -479,7 +491,19 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // OAuth poll (up to 5 minutes) confirms anything. A message sent in
         // that window is just as unconfirmed as one sent before the click.
         // Codex P1 on PR #2338 (re-review).
-        if (initiatesTurn && (opts.canRetry() || opts.loginWaiting())) {
+        //
+        // Also checks the caller-captured hadLiveAuthFailure: neither
+        // canRetry nor loginWaiting reflects a mid-turn 401/403 — that's a
+        // completely separate mechanism (the failure-banner's `state.failure`
+        // with `data.code === "auth"`), never touched by either signal. A
+        // fresh message typed right after such a failure, before clicking
+        // any recovery button, would otherwise still reach AgentInputCommand
+        // on the same credential that just failed. This can't be re-derived
+        // live in here — TurnStart (dispatched by the caller just before
+        // this call) unconditionally clears state.failure, so the caller
+        // must capture it beforehand. Codex P1 on PR #2338 (second
+        // re-review).
+        if (initiatesTurn && (opts.canRetry() || opts.loginWaiting() || hadLiveAuthFailure)) {
             opts.log("auth", "message not sent — not logged in", "warn");
             opts.setAuthNotice(
                 opts.loginWaiting()
@@ -592,7 +616,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             // shift() (not a snapshot) so items queued mid-flush are included.
             while (heldQueue.length > 0) {
                 const item = heldQueue.shift()!;
-                await deliverToBackend(item.text, item.id, /* armExpiry */ false, /* initiatesTurn */ false);
+                await deliverToBackend(item.text, item.id, /* armExpiry */ false, /* initiatesTurn */ false, /* hadLiveAuthFailure */ false);
             }
         } finally {
             flushing = false;

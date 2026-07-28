@@ -286,4 +286,43 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
             dispose();
         });
     });
+
+    it("fast-fails a turn-initiating send when the caller captured a live auth failure, even though canRetry() and loginWaiting() are both false", async () => {
+        // Neither canRetry nor loginWaiting reflects a mid-turn 401/403 —
+        // that's the separate failure-banner mechanism (state.failure with
+        // data.code === "auth"). agent-view.tsx's handleSendMessage captures
+        // this BEFORE dispatching TurnStart (which unconditionally clears
+        // state.failure) and passes it through as sendMessage's third arg.
+        // Codex P1 on PR #2338 (second re-review).
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+        const setAuthNotice = vi.fn();
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice,
+                notifyControllerHealthy: () => {},
+                backToPicker: async () => {},
+            });
+
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("u there", false, /* hadLiveAuthFailure */ true);
+
+            expect(hub.agentInput).not.toHaveBeenCalled();
+            expect(paneSnapshot(BLOCK_ID)?.turnPhase.kind).toBe("Idle");
+            expect(setAuthNotice).toHaveBeenCalledWith(expect.stringContaining("Not logged in"));
+            dispose();
+        });
+    });
+
 });
