@@ -131,6 +131,13 @@ export const loginCommand: SlashCommand = {
                         // /login never went through relogin(), the only other
                         // place that manages canRetry. Codex P1 on PR #2338.
                         ctx.notifyControllerHealthy();
+                        // A stale pre-existing "auth" failure row must also
+                        // be cleared — otherwise the caller's NEXT normal
+                        // send re-captures it as authFailureToPreserve and
+                        // both fast-fails the message and re-shows this now-
+                        // stale banner, even though the credential is fine.
+                        // reagent P1 on PR #2338 (re-review).
+                        ctx.clearAuthFailure();
                         return { kind: "ok" };
                     }
                     return {
@@ -152,8 +159,9 @@ export const loginCommand: SlashCommand = {
                         if (outcome === "terminal-success") {
                             ctx.log("auth", "login complete — run /cost to verify");
                         }
-                        // See the "opened" branch's identical call above.
+                        // See the "opened" branch's identical calls above.
                         ctx.notifyControllerHealthy();
+                        ctx.clearAuthFailure();
                         return { kind: "ok" };
                     }
                     return {
