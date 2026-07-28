@@ -8,7 +8,7 @@ use std::sync::Arc;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
     COMMAND_LIST_RECENT_SESSIONS, CommandListRecentSessionsData,
-    RecentSessionRow,
+    ListRecentSessionsResult, RecentSessionRow,
     // Option E (PR 1 of 2) — agent-anchored session zones.
     COMMAND_AGENT_SESSION_READ, COMMAND_AGENT_SESSION_WRITE_STATE,
     COMMAND_AGENT_SESSION_APPEND_OUTPUT, COMMAND_AGENT_SESSION_ARCHIVE,
@@ -432,7 +432,19 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     "listrecentsessions: completed"
                 );
 
-                Ok(Some(serde_json::to_value(&rows).unwrap_or_default()))
+                // `degraded` must also reach the CALLER, not just the log
+                // (reagent P1 on PR #2327): once every source degrades to
+                // empty instead of erroring the whole RPC, a transport-level
+                // success/failure check can no longer tell "genuinely zero
+                // agents" apart from "a source failed and we got nothing" —
+                // the exact ambiguity this hardening exists to close, just
+                // pushed from the RPC layer down into the response body.
+                // See ListRecentSessionsResult's own doc comment.
+                let result = ListRecentSessionsResult {
+                    rows,
+                    degraded: degraded.iter().map(|s| s.to_string()).collect(),
+                };
+                Ok(Some(serde_json::to_value(&result).unwrap_or_default()))
             })
         }),
     );
@@ -668,12 +680,17 @@ mod tests {
         let resp = dispatch_list_recent_sessions(&engine, &mut output_rx).await;
 
         assert!(resp.error.is_empty(), "unexpected error: {}", resp.error);
-        let rows: Vec<RecentSessionRow> =
-            serde_json::from_value(resp.data.expect("expected row data")).unwrap();
+        let result: ListRecentSessionsResult =
+            serde_json::from_value(resp.data.expect("expected result data")).unwrap();
         assert_eq!(
-            rows.len(),
+            result.rows.len(),
             3,
             "all 3 cross-channel registry agents must appear on a channel that never created any of them locally"
+        );
+        assert!(
+            result.degraded.is_empty(),
+            "a fully healthy call must report no degraded sources, got: {:?}",
+            result.degraded
         );
     }
 
@@ -719,14 +736,24 @@ mod tests {
         let resp = dispatch_list_recent_sessions(&engine, &mut output_rx).await;
 
         assert!(resp.error.is_empty(), "unexpected error: {}", resp.error);
-        let rows: Vec<RecentSessionRow> =
-            serde_json::from_value(resp.data.expect("expected row data")).unwrap();
+        let result: ListRecentSessionsResult =
+            serde_json::from_value(resp.data.expect("expected result data")).unwrap();
         assert_eq!(
-            rows.len(),
+            result.rows.len(),
             2,
             "a single malformed db_accounts row must not zero out the whole \
              My Agents list — it must only degrade identity-name display for \
              affected rows"
+        );
+        // reagent P1 on PR #2327: the degradation must reach the CALLER, not
+        // just a server-side log line — otherwise the frontend has no way to
+        // ever distinguish "a source failed" from "genuinely zero agents"
+        // when a failure DOES happen to zero out the row count (e.g. both
+        // instance sources failing at once, unlike this identity-only case).
+        assert!(
+            result.degraded.contains(&"accounts".to_string()),
+            "the accounts source's failure must be reported in the response, got: {:?}",
+            result.degraded
         );
     }
 }

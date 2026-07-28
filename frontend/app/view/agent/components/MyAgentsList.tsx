@@ -137,12 +137,31 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
         async (id) => {
             setFetchError(false);
             try {
-                return await RpcApi.ListRecentSessionsCommand(TabRpcClient, {
+                const result = await RpcApi.ListRecentSessionsCommand(TabRpcClient, {
                     limit: props.limit ?? 20,
                     // Backend treats "" as "no filter" — see
                     // CommandListRecentSessionsData docs.
                     identity_id: id,
                 });
+                // Zero rows AND a reported degradation means a backend data
+                // source failed and we got nothing back — NOT a trustworthy
+                // "you have no agents." A healthy call with genuinely zero
+                // agents never populates `degraded` (session.rs's six
+                // sources only degrade on their own error, never on "found
+                // nothing"). Partial degradation alongside real rows (e.g.
+                // identity lookups failing but the registry/defs succeeding)
+                // is left alone here — those rows still render, just with
+                // the existing "(missing account)"-style fallback text.
+                if (result.rows.length === 0 && result.degraded.length > 0) {
+                    Logger.error(
+                        "agent",
+                        "MyAgentsList: listrecentsessions reported degraded sources with zero rows",
+                        { degraded: result.degraded, identityId: id },
+                    );
+                    setFetchError(true);
+                    return [];
+                }
+                return result.rows;
             } catch (e) {
                 // Was a silent `catch { return []; }` — indistinguishable from
                 // "genuinely no sessions" in the UI and left zero trace
