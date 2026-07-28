@@ -354,6 +354,50 @@ impl Store {
         Ok(out)
     }
 
+    /// Catalog-tier sibling of `skill_list` (above) — same `bound_to_agent`
+    /// shape, but deliberately GLOBAL ROWS ONLY, unlike `skill_list`'s UNION
+    /// with `agent_id`'s own private skills. Backs `skill.catalog.list_for_agent`,
+    /// which — like every other `skill.catalog.*` command — has no
+    /// `check_s1`, so `agent_id` here is caller-supplied and unverified.
+    /// Returning private skill rows (whose `content`/`description`/`trigger`
+    /// can carry sensitive agent-authored material) for an arbitrary
+    /// caller-chosen `agent_id` would let any window connection read any
+    /// agent's private skills. Global rows carry nothing per-agent-secret —
+    /// they're already fully visible via `skill_list_global` (the Armory
+    /// catalog) — so exposing them alongside a caller-chosen agent's bind
+    /// status is safe. reagentx P0 on PR #2329.
+    pub fn skill_list_global_for_agent(&self, agent_id: &str) -> Result<Vec<SkillListItem>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT s.id, s.name, s.trigger, s.skill_type, s.description, s.content, s.is_global, s.created_at, s.updated_at,
+                    EXISTS(SELECT 1 FROM db_agent_skills_ref r WHERE r.skill_id = s.id AND r.agent_id = ?1) AS bound_to_agent
+             FROM db_skills s
+             WHERE s.is_global = 1
+             ORDER BY s.updated_at DESC",
+        )?;
+        let rows = stmt.query_map(params![agent_id], |row| {
+            Ok(SkillListItem {
+                skill: Skill {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    trigger: row.get(2)?,
+                    skill_type: row.get(3)?,
+                    description: row.get(4)?,
+                    content: row.get(5)?,
+                    is_global: row.get::<_, i64>(6)? != 0,
+                    created_at: row.get(7)?,
+                    updated_at: row.get(8)?,
+                },
+                bound_to_agent: row.get::<_, i64>(9)? != 0,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
     /// Get a standalone skill by id.
     pub fn skill_get(&self, id: &str) -> Result<Option<Skill>, StoreError> {
         let conn = self.conn.lock().unwrap();
