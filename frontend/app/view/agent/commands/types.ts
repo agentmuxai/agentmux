@@ -123,6 +123,20 @@ export interface SlashCommandContext {
     /** Set the OAuth URL for /login. */
     setAuthUrl: (url: string | null) => void;
     /**
+     * Clear stale auth-recovery UI (the mount-time "Log in" bar, any
+     * lingering `authNotice`) once a command has independently confirmed
+     * the credential is good — `useAgentControllerStatus`'s
+     * `notifyControllerHealthy`. /login succeeding is exactly the "agent
+     * became healthy through a different path" case that function's own
+     * doc comment describes: unlike `relogin()` (wired to the mount-time
+     * button), /login never otherwise touches `canRetry`, so without this
+     * call a pane that already showed "Log in" before the user typed
+     * /login directly would have every subsequent normal message
+     * fast-failed by `deliverToBackend`'s guard forever — the credential
+     * is fixed, but nothing told the pane. Codex P1 on PR #2338.
+     */
+    notifyControllerHealthy: () => void;
+    /**
      * Open the inline picker. Returns a promise that resolves with the
      * selected value, or rejects if the user dismisses (Esc / click-outside).
      * Set by useAgentCommands; the dispatcher only sees the function.

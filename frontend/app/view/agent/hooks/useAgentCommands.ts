@@ -73,11 +73,30 @@ export interface UseAgentCommandsOptions {
      * docs/retro/retro-send-while-unauthenticated-2026-07-28.md.
      */
     canRetry: Accessor<boolean>;
+    /**
+     * True while `relogin()`/`loginViaTerminal()`'s own OAuth attempt is in
+     * flight — up to their 5-minute completion poll. `canRetry` is cleared
+     * the INSTANT the mount-time "Log in" button is clicked (relogin()'s own
+     * first line), well before that attempt actually succeeds or fails, so
+     * `canRetry` alone leaves this whole window unguarded: a message sent
+     * mid-attempt would reach `AgentInputCommand` and reproduce the exact
+     * doomed spawn this fast-fail exists to prevent. Codex P1 on PR #2338.
+     */
+    loginWaiting: Accessor<boolean>;
     /** Same surface `useAgentControllerStatus`'s own recovery-failure
      *  notices use (the error box above the composer) — reused here so
      *  the known-unauthenticated fast-fail above looks consistent with
      *  every other auth-recovery message this pane can show. */
     setAuthNotice: (notice: string | null) => void;
+    /**
+     * `useAgentControllerStatus.notifyControllerHealthy` — threaded into
+     * the slash-command context so /login's handler can clear a stale
+     * `canRetry` on success. /login never goes through `relogin()` (the
+     * only other place that manages `canRetry`), so without this a pane
+     * that typed /login directly instead of clicking "Log in" would have
+     * every later message fast-failed forever. Codex P1 on PR #2338.
+     */
+    notifyControllerHealthy: () => void;
     /**
      * The model-level backToPicker action. The hook delegates to this
      * rather than owning a duplicate implementation — the pane-frame
@@ -265,6 +284,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         documentAtom: opts.documentAtom,
         log: opts.log,
         setAuthUrl: opts.setAuthUrl,
+        notifyControllerHealthy: opts.notifyControllerHealthy,
         openPicker,
         openHelp,
     });
@@ -449,9 +469,20 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // attempt; a genuine failure there is already handled by the catch
         // block below without cutting the active turn short (initiatesTurn
         // is false there too). Codex P1 on PR #2338.
-        if (initiatesTurn && opts.canRetry()) {
+        //
+        // Also checks loginWaiting(): canRetry() alone misses the window
+        // between clicking "Log in" and that attempt actually resolving —
+        // relogin() clears canRetry synchronously on click, before its own
+        // OAuth poll (up to 5 minutes) confirms anything. A message sent in
+        // that window is just as unconfirmed as one sent before the click.
+        // Codex P1 on PR #2338 (re-review).
+        if (initiatesTurn && (opts.canRetry() || opts.loginWaiting())) {
             opts.log("auth", "message not sent — not logged in", "warn");
-            opts.setAuthNotice("Not logged in — click “Log in” below to continue.");
+            opts.setAuthNotice(
+                opts.loginWaiting()
+                    ? "Not logged in yet — wait for the login attempt to finish, then try again."
+                    : "Not logged in — click “Log in” below to continue.",
+            );
             opts.model.dispatchPane({
                 type: "PendingMessageRejected",
                 id: messageId,

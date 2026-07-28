@@ -94,7 +94,9 @@ describe("useAgentCommands — turnPhase recovery on a failed send", () => {
                 log: () => {},
                 setAuthUrl: () => {},
                 canRetry: () => false,
+                loginWaiting: () => false,
                 setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
                 backToPicker: async () => {},
             });
 
@@ -126,7 +128,9 @@ describe("useAgentCommands — turnPhase recovery on a failed send", () => {
                 log: () => {},
                 setAuthUrl: () => {},
                 canRetry: () => false,
+                loginWaiting: () => false,
                 setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
                 backToPicker: async () => {},
             });
 
@@ -171,7 +175,9 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 // The pane is already showing the mount-time "Log in" bar —
                 // this is the exact known-bad state this fix targets.
                 canRetry: () => true,
+                loginWaiting: () => false,
                 setAuthNotice,
+                notifyControllerHealthy: () => {},
                 backToPicker: async () => {},
             });
 
@@ -208,7 +214,9 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 log: () => {},
                 setAuthUrl: () => {},
                 canRetry: () => retry,
+                loginWaiting: () => false,
                 setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
                 backToPicker: async () => {},
             });
 
@@ -238,6 +246,43 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 expect.objectContaining({ message: "held message" }),
             );
             expect(paneSnapshot(BLOCK_ID)?.turnPhase.kind).toBe(busyPhase);
+            dispose();
+        });
+    });
+
+    it("still fast-fails a turn-initiating send while loginWaiting() is true, even though canRetry() already flipped false", async () => {
+        // Mirrors relogin()'s own sequencing: canRetry is cleared the
+        // INSTANT the mount-time "Log in" button is clicked — well before
+        // the OAuth attempt (up to 5 minutes) actually resolves. Codex P1
+        // (re-review of PR #2338): canRetry() alone left that whole window
+        // unguarded.
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+        const setAuthNotice = vi.fn();
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => true,
+                setAuthNotice,
+                notifyControllerHealthy: () => {},
+                backToPicker: async () => {},
+            });
+
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("u there", false);
+
+            expect(hub.agentInput).not.toHaveBeenCalled();
+            expect(paneSnapshot(BLOCK_ID)?.turnPhase.kind).toBe("Idle");
+            expect(setAuthNotice).toHaveBeenCalledWith(expect.stringContaining("Not logged in"));
             dispose();
         });
     });
