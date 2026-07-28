@@ -72,6 +72,14 @@ export function formatRelative(now: number, ms: number): string {
 export const EMPTY_GLOBAL =
     "No agents yet — pick a template below to create your first one.";
 export const EMPTY_FILTERED = "No agents for this identity yet.";
+/** Shown when ListRecentSessionsCommand itself failed — distinct from
+ * EMPTY_GLOBAL/EMPTY_FILTERED so a backend error never looks identical
+ * to "you genuinely have zero agents" (retro
+ * docs/retro/retro-my-agents-fresh-channel-regression-2026-07-27.md §4/§9
+ * rec 2 — this exact ambiguity is what let a real regression, PR #2296,
+ * go unnoticed as "expected empty state" the first time it happened). */
+export const FETCH_ERROR =
+    "Couldn't load your agents — check the connection and try again.";
 
 export interface MyAgentsListProps {
     /** Optional reactive accessor for the identity filter. `null` /
@@ -114,17 +122,57 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
         return String(raw).trim();
     });
 
+    // Separate from the resource's own value: `rows()` still resolves to
+    // `[]` on a failed fetch (see the catch below) so nothing here needs
+    // to special-case Solid's throw-on-read error-state accessor — this
+    // signal is the ONLY thing that distinguishes "backend call failed"
+    // from "genuinely zero agents" for the render below. Cleared at the
+    // start of every fetch so a stale error doesn't survive into a fresh
+    // attempt's loading state.
+    const [fetchError, setFetchError] = createSignal(false);
+    // Guards the two `setFetchError(true)` calls below against a stale
+    // (superseded) fetch's late resolution overwriting a NEWER fetch's
+    // already-settled state — e.g. rapid identity-filter switching, or
+    // clicking Retry again before the first attempt has finished, could
+    // otherwise let an old failure paint the error panel over valid,
+    // already-loaded data from the fetch that actually matters now
+    // (reagent P1 on PR #2327's re-review). Incremented synchronously at
+    // the start of each fetcher call, so invocation order is always
+    // correct even though resolution order isn't.
+    let fetchGeneration = 0;
+
     const [rows, { refetch }] = createResource<RecentSessionRow[], string>(
         // Key the resource on the filter so changes refetch.
         filterId,
         async (id) => {
+            const myGeneration = ++fetchGeneration;
+            setFetchError(false);
             try {
-                return await RpcApi.ListRecentSessionsCommand(TabRpcClient, {
+                const result = await RpcApi.ListRecentSessionsCommand(TabRpcClient, {
                     limit: props.limit ?? 20,
                     // Backend treats "" as "no filter" — see
                     // CommandListRecentSessionsData docs.
                     identity_id: id,
                 });
+                // Zero rows AND a reported degradation means a backend data
+                // source failed and we got nothing back — NOT a trustworthy
+                // "you have no agents." A healthy call with genuinely zero
+                // agents never populates `degraded` (session.rs's six
+                // sources only degrade on their own error, never on "found
+                // nothing"). Partial degradation alongside real rows (e.g.
+                // identity lookups failing but the registry/defs succeeding)
+                // is left alone here — those rows still render, just with
+                // the existing "(missing account)"-style fallback text.
+                if (result.rows.length === 0 && result.degraded.length > 0) {
+                    Logger.error(
+                        "agent",
+                        "MyAgentsList: listrecentsessions reported degraded sources with zero rows",
+                        { degraded: result.degraded, identityId: id },
+                    );
+                    if (myGeneration === fetchGeneration) setFetchError(true);
+                    return [];
+                }
+                return result.rows;
             } catch (e) {
                 // Was a silent `catch { return []; }` — indistinguishable from
                 // "genuinely no sessions" in the UI and left zero trace
@@ -136,6 +184,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                     ? { name: e.name, message: e.message, stack: e.stack }
                     : { value: String(e) };
                 Logger.error("agent", "MyAgentsList: ListRecentSessionsCommand failed", { error: errInfo, identityId: id });
+                if (myGeneration === fetchGeneration) setFetchError(true);
                 return [];
             }
         },
@@ -239,11 +288,13 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     };
 
     // Surfacing rules:
-    // - rows undefined → still loading (skeleton hint)
-    // - rows []        → empty state (filter-aware copy)
-    // - rows non-empty → list
+    // - rows undefined            → still loading (skeleton hint)
+    // - fetchError()              → error state (retry affordance), never
+    //                                confused with a genuinely empty list
+    // - rows [] (fetch succeeded) → empty state (filter-aware copy)
+    // - rows non-empty            → list
     const isLoading = () => rows() === undefined;
-    const isEmpty = () => !isLoading() && (rows() ?? []).length === 0;
+    const isEmpty = () => !isLoading() && !fetchError() && (rows() ?? []).length === 0;
 
     return (
         <div class="agent-recent-sessions" data-testid="agent-my-agents-list">
@@ -256,14 +307,34 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                 </Show>
             </div>
             <Show
-                when={!isEmpty()}
+                when={!isEmpty() && !fetchError()}
                 fallback={
-                    <div
-                        class="agent-recent-sessions-empty"
-                        data-testid="agent-my-agents-empty"
+                    <Show
+                        when={fetchError()}
+                        fallback={
+                            <div
+                                class="agent-recent-sessions-empty"
+                                data-testid="agent-my-agents-empty"
+                            >
+                                {filterId() ? EMPTY_FILTERED : EMPTY_GLOBAL}
+                            </div>
+                        }
                     >
-                        {filterId() ? EMPTY_FILTERED : EMPTY_GLOBAL}
-                    </div>
+                        <div
+                            class="agent-recent-sessions-error"
+                            data-testid="agent-my-agents-error"
+                        >
+                            <span class="agent-recent-sessions-error-msg">{FETCH_ERROR}</span>
+                            <button
+                                type="button"
+                                class="agent-recent-sessions-retry"
+                                onClick={() => void refetch()}
+                                data-testid="agent-my-agents-retry"
+                            >
+                                Retry
+                            </button>
+                        </div>
+                    </Show>
                 }
             >
                 <ul class="agent-recent-sessions-list">

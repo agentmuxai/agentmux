@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
     EMPTY_FILTERED,
     EMPTY_GLOBAL,
+    FETCH_ERROR,
     formatRelative,
     MyAgentsList,
 } from "./MyAgentsList";
@@ -46,6 +47,12 @@ afterEach(() => {
     cleanup();
 });
 
+/** Wraps rows in the `listrecentsessions` response envelope
+ * (`{ rows, degraded }`) introduced alongside the per-source
+ * degradation hardening — see `ListRecentSessionsCommand`'s return
+ * type and `session.rs`'s `ListRecentSessionsResult`. */
+const okResult = (rows: RecentSessionRow[] = []) => ({ rows, degraded: [] as string[] });
+
 const makeRow = (overrides: Partial<RecentSessionRow> = {}): RecentSessionRow => ({
     instance_id: "inst-1",
     instance_name: "Maks",
@@ -69,7 +76,7 @@ const makeRow = (overrides: Partial<RecentSessionRow> = {}): RecentSessionRow =>
 
 describe("MyAgentsList — empty state", () => {
     it("renders the generic empty copy when no filter is applied", async () => {
-        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue([]);
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult());
         render(() => <MyAgentsList onReattach={() => {}} />);
         const empty = await screen.findByTestId("agent-my-agents-empty");
         expect(empty).toHaveTextContent(EMPTY_GLOBAL);
@@ -78,7 +85,7 @@ describe("MyAgentsList — empty state", () => {
     });
 
     it("renders the identity-specific empty copy when filtered", async () => {
-        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue([]);
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult());
         const [identityId] = createSignal<string>("id-work");
         render(() => (
             <MyAgentsList
@@ -93,7 +100,7 @@ describe("MyAgentsList — empty state", () => {
 
 describe("MyAgentsList — populated", () => {
     it("renders one row per agent with preview + node count", async () => {
-        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue([
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
             makeRow({ instance_id: "a", instance_name: "Maks", preview: "fix the live-feed" }),
             makeRow({
                 instance_id: "b",
@@ -101,7 +108,7 @@ describe("MyAgentsList — populated", () => {
                 preview: "earlier conversation",
                 node_count: 1,
             }),
-        ]);
+        ]));
         render(() => <MyAgentsList onReattach={() => {}} />);
         // Wait for resource to settle.
         const entries = await screen.findAllByTestId("agent-my-agents-entry");
@@ -117,9 +124,9 @@ describe("MyAgentsList — populated", () => {
     });
 
     it("renders an italic empty-preview hint when has_snapshot but no user message", async () => {
-        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue([
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
             makeRow({ preview: "", has_snapshot: true, node_count: 0 }),
-        ]);
+        ]));
         render(() => <MyAgentsList onReattach={() => {}} />);
         await screen.findByTestId("agent-my-agents-entry");
         expect(
@@ -128,9 +135,9 @@ describe("MyAgentsList — populated", () => {
     });
 
     it("renders a 'no snapshot' hint when the block has no snapshot file", async () => {
-        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue([
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
             makeRow({ preview: "", has_snapshot: false, node_count: 0 }),
-        ]);
+        ]));
         render(() => <MyAgentsList onReattach={() => {}} />);
         await screen.findByTestId("agent-my-agents-entry");
         expect(
@@ -141,7 +148,7 @@ describe("MyAgentsList — populated", () => {
     it("fires onReattach with the row when an entry is clicked", async () => {
         const onReattach = vi.fn();
         const row = makeRow({ instance_id: "click-me" });
-        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue([row]);
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([row]));
         render(() => <MyAgentsList onReattach={onReattach} />);
         const entry = await screen.findByTestId("agent-my-agents-entry");
         await userEvent.click(entry);
@@ -150,7 +157,7 @@ describe("MyAgentsList — populated", () => {
     });
 
     it("passes identity_id to the RPC when filter is set", async () => {
-        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue([]);
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult());
         const [identityId] = createSignal<string>("id-work");
         render(() => (
             <MyAgentsList
@@ -166,7 +173,7 @@ describe("MyAgentsList — populated", () => {
     });
 
     it("treats null / undefined identityId as no-filter (empty string sent)", async () => {
-        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue([]);
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult());
         render(() => <MyAgentsList onReattach={() => {}} />);
         await screen.findByTestId("agent-my-agents-empty");
         expect(RpcApi.ListRecentSessionsCommand).toHaveBeenCalledWith(
@@ -176,10 +183,123 @@ describe("MyAgentsList — populated", () => {
     });
 
     it("renders the 'My Agents' section title", async () => {
-        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue([makeRow()]);
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([makeRow()]));
         render(() => <MyAgentsList onReattach={() => {}} />);
         await screen.findByTestId("agent-my-agents-entry");
         expect(screen.getByText("My Agents")).toBeInTheDocument();
+    });
+});
+
+describe("MyAgentsList — fetch error (retro-my-agents-fresh-channel-regression-2026-07-27.md)", () => {
+    it("renders a distinct error state, not the empty-agents copy, when the RPC rejects", async () => {
+        // Suppress the expected console.error from Logger.error inside the
+        // component's own catch block — this test is asserting that catch
+        // path fires correctly, not treating its logging as a test failure.
+        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockRejectedValue(new Error("backend unreachable"));
+        render(() => <MyAgentsList onReattach={() => {}} />);
+
+        const error = await screen.findByTestId("agent-my-agents-error");
+        expect(error).toHaveTextContent(FETCH_ERROR);
+        // Must NOT also render (or ever have rendered) the "genuinely empty"
+        // copy — that ambiguity is the exact bug this hardening fixes.
+        expect(screen.queryByTestId("agent-my-agents-empty")).toBeNull();
+        expect(screen.queryByText(EMPTY_GLOBAL)).toBeNull();
+
+        consoleErrorSpy.mockRestore();
+    });
+
+    it("retries the RPC when the Retry button is clicked, and shows the list on success", async () => {
+        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        vi.mocked(RpcApi.ListRecentSessionsCommand)
+            .mockRejectedValueOnce(new Error("backend unreachable"))
+            .mockResolvedValueOnce(okResult([makeRow({ instance_id: "recovered" })]));
+        render(() => <MyAgentsList onReattach={() => {}} />);
+
+        const retryBtn = await screen.findByTestId("agent-my-agents-retry");
+        await userEvent.click(retryBtn);
+
+        const entries = await screen.findAllByTestId("agent-my-agents-entry");
+        expect(entries).toHaveLength(1);
+        expect(screen.queryByTestId("agent-my-agents-error")).toBeNull();
+        expect(RpcApi.ListRecentSessionsCommand).toHaveBeenCalledTimes(2);
+
+        consoleErrorSpy.mockRestore();
+    });
+
+    // reagent P1 on PR #2327: session.rs's hardening (each of 6 data
+    // sources degrades to empty on its own failure instead of aborting
+    // the whole RPC) means the RPC itself basically never throws anymore
+    // — so a resolved call with zero rows AND a non-empty `degraded` is
+    // now the ONLY signal that something failed rather than "you
+    // genuinely have no agents." Without checking `degraded`, this exact
+    // scenario would silently render EMPTY_GLOBAL — the very ambiguity
+    // this whole fix exists to close, just one layer deeper than the
+    // reject-based path the two tests above cover.
+    it("renders the error state (not empty) when the RPC resolves with zero rows but reports a degraded source", async () => {
+        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue({
+            rows: [],
+            degraded: ["registry", "local_instances"],
+        });
+        render(() => <MyAgentsList onReattach={() => {}} />);
+
+        const error = await screen.findByTestId("agent-my-agents-error");
+        expect(error).toHaveTextContent(FETCH_ERROR);
+        expect(screen.queryByTestId("agent-my-agents-empty")).toBeNull();
+        expect(screen.queryByText(EMPTY_GLOBAL)).toBeNull();
+
+        consoleErrorSpy.mockRestore();
+    });
+
+    it("still renders real rows when a source degrades but rows are non-empty — partial degradation is not an error state", async () => {
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue({
+            rows: [makeRow({ instance_id: "still-here" })],
+            // e.g. identity_list failed — rows still come back with
+            // fallback display text, per session.rs's own design intent.
+            degraded: ["accounts"],
+        });
+        render(() => <MyAgentsList onReattach={() => {}} />);
+
+        const entries = await screen.findAllByTestId("agent-my-agents-entry");
+        expect(entries).toHaveLength(1);
+        expect(screen.queryByTestId("agent-my-agents-error")).toBeNull();
+    });
+
+    // reagent P1 on PR #2327's re-review: `fetchError` was a single shared
+    // signal with no per-request guard — a stale (superseded) fetch's late
+    // rejection could overwrite the state a NEWER, already-succeeded fetch
+    // just set, painting the error panel over valid loaded data.
+    it("does not let a stale fetch's late rejection overwrite a newer fetch's successful data", async () => {
+        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+        let rejectStale!: (err: unknown) => void;
+        const stalePromise = new Promise<never>((_, reject) => { rejectStale = reject; });
+        vi.mocked(RpcApi.ListRecentSessionsCommand)
+            .mockImplementationOnce(() => stalePromise)
+            .mockResolvedValueOnce(okResult([makeRow({ instance_id: "fresh" })]));
+
+        const [identityId, setIdentityId] = createSignal<string>("id-1");
+        render(() => (
+            <MyAgentsList identityId={identityId} onReattach={() => {}} />
+        ));
+
+        // Supersede the still-pending first fetch before it ever resolves.
+        setIdentityId("id-2");
+        const entries = await screen.findAllByTestId("agent-my-agents-entry");
+        expect(entries).toHaveLength(1);
+
+        // Now let the stale first fetch fail, late.
+        rejectStale(new Error("stale failure"));
+        await Promise.resolve();
+        await Promise.resolve();
+
+        // The already-loaded, correct data must still be showing — not the
+        // error panel from a fetch that no longer matters.
+        expect(screen.queryByTestId("agent-my-agents-error")).toBeNull();
+        expect(screen.getAllByTestId("agent-my-agents-entry")).toHaveLength(1);
+
+        consoleErrorSpy.mockRestore();
     });
 });
 
