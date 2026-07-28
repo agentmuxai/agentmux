@@ -129,6 +129,50 @@ fn is_secret_name(name: &str) -> bool {
     SECRET_NAMES.contains(&normalized.as_str())
 }
 
+/// HTTP header names whose value is credential-shaped when embedded in a
+/// `"HeaderName: value"` string passed as a CLI flag's argument (see
+/// [`redact_header_value`]) — a separate curated list from `SECRET_NAMES`
+/// because header names (`authorization`, `cookie`) and CLI flag names
+/// (`api-key`, `token`) are different vocabularies that happen to overlap
+/// only partially.
+const SECRET_HEADER_NAMES: &[&str] = &[
+    "authorization", "x-api-key", "x-auth-token", "proxy-authorization", "cookie",
+];
+
+fn is_secret_header_name(name: &str) -> bool {
+    SECRET_HEADER_NAMES.contains(&name.trim().to_lowercase().as_str())
+}
+
+fn is_header_flag(flag: &str) -> bool {
+    matches!(
+        flag.trim_start_matches('-').to_lowercase().as_str(),
+        "header" | "headers" | "h"
+    )
+}
+
+/// Redact a `"HeaderName: value"` string -- the shape a `--header`/`-H`
+/// flag's argument takes in common CLI/MCP server invocations -- when the
+/// header name is secret-shaped, e.g. turning
+/// `"Authorization: Bearer <token>"` into `"Authorization: ${AUTHORIZATION}"`.
+/// The flag name itself (`--header`) is never secret-shaped, so the
+/// `is_secret_name` flag check above can never catch this: the secret is
+/// smuggled inside the *value*, not signaled by the flag (Codex + reagent
+/// P0, PR #2333, flagged across multiple review rounds). Returns the
+/// rebuilt string plus the header name to record in `requirements.json`,
+/// or `None` if `value` isn't `name: value`-shaped or the name isn't a
+/// recognized secret-bearing header.
+fn redact_header_value(value: &str) -> Option<(String, String)> {
+    let (header_name, _header_value) = value.split_once(':')?;
+    let header_name = header_name.trim();
+    if header_name.is_empty() || !is_secret_header_name(header_name) {
+        return None;
+    }
+    Some((
+        format!("{header_name}: {}", secret_placeholder(header_name)),
+        header_name.to_string(),
+    ))
+}
+
 /// Redact userinfo (`scheme://user:pass@host`) and known secret-bearing
 /// query params from a URL string. Hand-rolled string scanning rather than
 /// a `url`-crate parse (no such dependency in this workspace, matching
@@ -146,21 +190,26 @@ fn redact_url_credentials(url: &str) -> (String, Vec<String>) {
 
     if let Some(scheme_end) = result.find("://") {
         let after_scheme = scheme_end + 3;
-        if let Some(at_offset) = result[after_scheme..].find('@') {
+        // The authority section (the only place userinfo can legally
+        // appear) ends at the first '/', '?', or '#' -- the complete set
+        // of authority-terminating delimiters per RFC 3986 §3.2. An `@`
+        // at or after that boundary is inside the path/query/fragment,
+        // not userinfo. Finding the boundary once up front (rather than
+        // excluding one delimiter at a time as edge cases surface) is the
+        // robust fix: this handles '/', '?', AND '#' — and any future
+        // reader can see the fix's completeness at a glance instead of
+        // wondering "what about the next delimiter" (reagent P0 + P2, PR
+        // #2333: a bare '@' after either '?' or '#' was each independently
+        // misread as userinfo, and the '?' case additionally blinded the
+        // query-param redaction pass by consuming the delimiter itself).
+        let authority_end = result[after_scheme..]
+            .find(['/', '?', '#'])
+            .map(|p| after_scheme + p)
+            .unwrap_or(result.len());
+        if let Some(at_offset) = result[after_scheme..authority_end].find('@') {
             let userinfo_end = after_scheme + at_offset;
-            // Only treat this as userinfo if there's no path separator OR
-            // query-string start before the `@` -- otherwise a bare `@`
-            // further into the URL (rare, but possible in a path/query/
-            // fragment, e.g. "?a=b@c") would be misread, and — critically —
-            // consuming a `?` into this replacement would blind the
-            // query-param pass below to a real secret sitting right after
-            // it (reagent P0, PR #2333: "?a=b@c&api_key=SECRET" lost its
-            // `?` here, so api_key never got redacted at all).
-            let candidate = &result[after_scheme..userinfo_end];
-            if !candidate.contains('/') && !candidate.contains('?') {
-                result.replace_range(after_scheme..userinfo_end, "${URL_CREDENTIALS}");
-                redacted_names.push("url_credentials".to_string());
-            }
+            result.replace_range(after_scheme..userinfo_end, "${URL_CREDENTIALS}");
+            redacted_names.push("url_credentials".to_string());
         }
     }
 
@@ -226,11 +275,16 @@ fn redact_mcp_entry(entry: &Value) -> (Value, Vec<String>) {
                     i += 1;
                     continue;
                 };
-                if let Some((flag, _value)) = s.split_once('=') {
+                if let Some((flag, value)) = s.split_once('=') {
                     // "--flag=value" form: redact just the value portion.
                     if is_secret_name(flag) {
                         args[i] = json!(format!("{flag}={}", secret_placeholder(flag)));
                         redacted_names.push(flag.trim_start_matches('-').to_string());
+                    } else if is_header_flag(flag) {
+                        if let Some((redacted_value, header_name)) = redact_header_value(value) {
+                            args[i] = json!(format!("{flag}={redacted_value}"));
+                            redacted_names.push(header_name);
+                        }
                     }
                     i += 1;
                 } else if is_secret_name(&s) && i + 1 < args.len() {
@@ -238,6 +292,20 @@ fn redact_mcp_entry(entry: &Value) -> (Value, Vec<String>) {
                     // the flag itself (it's not a secret) untouched.
                     args[i + 1] = json!(secret_placeholder(&s));
                     redacted_names.push(s.trim_start_matches('-').to_string());
+                    i += 2;
+                } else if is_header_flag(&s) && i + 1 < args.len() {
+                    // "--header value" form, where the secret is embedded
+                    // in the value as "HeaderName: <secret>", not signaled
+                    // by the flag name -- e.g.
+                    // args: ["--header", "Authorization: Bearer <tok>"].
+                    if let Some(value_str) = args[i + 1].as_str() {
+                        if let Some((redacted_value, header_name)) =
+                            redact_header_value(value_str)
+                        {
+                            args[i + 1] = json!(redacted_value);
+                            redacted_names.push(header_name);
+                        }
+                    }
                     i += 2;
                 } else {
                     i += 1;
@@ -974,6 +1042,82 @@ mod tests {
         assert!(server_file.content.contains("api_key=${API_KEY}"));
         // No genuine userinfo here -- must not fabricate a ${URL_CREDENTIALS}.
         assert!(!server_file.content.contains("URL_CREDENTIALS"));
+    }
+
+    #[test]
+    fn userinfo_detection_excludes_the_fragment_delimiter() {
+        // reagent P2, PR #2333: a bare "@" appearing after "#" (inside the
+        // URL fragment, no path/query present) was previously misdetected
+        // as userinfo -- the authority section ends at the FIRST of '/',
+        // '?', OR '#', and the old check only excluded the first two.
+        let mcp_servers = r#"[{
+            "name": "svc",
+            "type": "http",
+            "url": "https://mcp.example.com#note@example.com"
+        }]"#;
+        let bundle = make_bundle("", "[]", mcp_servers, "[]");
+        let export = export_bundle(&bundle, &[]);
+        let server_file = export.files.iter().find(|f| f.path == "mcp/svc.server.json").unwrap();
+        assert!(
+            server_file.content.contains("mcp.example.com#note@example.com"),
+            "no genuine userinfo present (the '@' is inside the fragment) -- host must not be mangled: {}",
+            server_file.content
+        );
+        assert!(!server_file.content.contains("URL_CREDENTIALS"));
+    }
+
+    #[test]
+    fn redacts_secret_header_value_embedded_in_args_flag_space_value_form() {
+        // Codex + reagent P0, PR #2333: a credential smuggled inside a
+        // "--header"/"-H" flag's value as "HeaderName: <secret>" -- the
+        // flag name itself is not secret-shaped, so is_secret_name never
+        // catches it; the secret only becomes visible once the value is
+        // itself parsed as a header.
+        let mcp_servers = r#"[{
+            "name": "remote",
+            "type": "stdio",
+            "command": "remote-mcp",
+            "args": ["--header", "Authorization: Bearer realSecretToken789", "--verbose"]
+        }]"#;
+        let bundle = make_bundle("", "[]", mcp_servers, "[]");
+        let export = export_bundle(&bundle, &[]);
+        let server_file = export.files.iter().find(|f| f.path == "mcp/remote.server.json").unwrap();
+        assert!(!server_file.content.contains("realSecretToken789"));
+        assert!(server_file.content.contains("Authorization: ${AUTHORIZATION}"));
+        assert!(server_file.content.contains("--verbose"), "unrelated flags must survive untouched");
+
+        let req_file = export.files.iter().find(|f| f.path == "accounts/requirements.json").unwrap();
+        assert!(req_file.content.contains("Authorization"));
+    }
+
+    #[test]
+    fn redacts_secret_header_value_embedded_in_args_flag_equals_value_form() {
+        let mcp_servers = r#"[{
+            "name": "remote2",
+            "type": "stdio",
+            "command": "remote-mcp",
+            "args": ["--header=Authorization: Bearer realSecretToken456"]
+        }]"#;
+        let bundle = make_bundle("", "[]", mcp_servers, "[]");
+        let export = export_bundle(&bundle, &[]);
+        let server_file = export.files.iter().find(|f| f.path == "mcp/remote2.server.json").unwrap();
+        assert!(!server_file.content.contains("realSecretToken456"));
+        assert!(server_file.content.contains("--header=Authorization: ${AUTHORIZATION}"));
+    }
+
+    #[test]
+    fn non_secret_header_values_in_args_are_never_redacted() {
+        let mcp_servers = r#"[{
+            "name": "remote3",
+            "type": "stdio",
+            "command": "remote-mcp",
+            "args": ["--header", "X-Request-Id: abc123", "-H", "Content-Type: application/json"]
+        }]"#;
+        let bundle = make_bundle("", "[]", mcp_servers, "[]");
+        let export = export_bundle(&bundle, &[]);
+        let server_file = export.files.iter().find(|f| f.path == "mcp/remote3.server.json").unwrap();
+        assert!(server_file.content.contains("X-Request-Id: abc123"));
+        assert!(server_file.content.contains("Content-Type: application/json"));
     }
 
     #[test]
