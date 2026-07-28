@@ -130,13 +130,15 @@ export interface UseAgentCommands {
     /** Send a user message. Slash commands are intercepted via the registry.
      *  `wasAlreadyWorking` should be true when a turn was in-flight before
      *  the caller dispatched TurnStart — drives PendingMessage.enqueuedWhileBusy.
-     *  `hadLiveAuthFailure` should be the caller's own pre-TurnStart read of
-     *  whether the pane was showing an "auth"-classified failure row at the
-     *  moment this send was initiated — TurnStart unconditionally clears
-     *  that failure, so `deliverToBackend` can't re-derive it live; the
-     *  caller must capture it before dispatching TurnStart. Codex P1 on
-     *  PR #2338. */
-    sendMessage: (message: string, wasAlreadyWorking?: boolean, hadLiveAuthFailure?: boolean) => Promise<void>;
+     *  `authFailureToPreserve` should be the caller's own pre-TurnStart read
+     *  of `state.failure` when it was "auth"-classified (null otherwise) —
+     *  TurnStart unconditionally clears that failure, so `deliverToBackend`
+     *  can't re-derive it live; the caller must capture it before
+     *  dispatching TurnStart. When present, the fast-fail guard rejects the
+     *  send AND re-dispatches this same failure so the banner (and its
+     *  "Login Again"/"Use existing login" actions) reappears instead of
+     *  vanishing with no path back. Codex P1 on PR #2338 (third re-review). */
+    sendMessage: (message: string, wasAlreadyWorking?: boolean, authFailureToPreserve?: AgentFailure | null) => Promise<void>;
     /**
      * Deliver any messages held while the agent was busy (the "send now"
      * queue). Called by the agent view at the next tool-call boundary (or
@@ -306,7 +308,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         return registry().list(buildCommandContext());
     };
 
-    const sendMessage = async (message: string, wasAlreadyWorking = false, hadLiveAuthFailure = false): Promise<void> => {
+    const sendMessage = async (message: string, wasAlreadyWorking = false, authFailureToPreserve: AgentFailure | null = null): Promise<void> => {
         // Crash trace: this is the entry point for "user pressed send."
         // The boundary dumps this trail when a renderer fault catches —
         // see frontend/log/render-trail.ts + BlockErrorBoundary.
@@ -429,7 +431,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         }
 
         // Idle send: deliver immediately and arm the lost-delivery safety timer.
-        await deliverToBackend(message, messageId, /* armExpiry */ true, /* initiatesTurn */ true, hadLiveAuthFailure);
+        await deliverToBackend(message, messageId, /* armExpiry */ true, /* initiatesTurn */ true, authFailureToPreserve);
     };
 
     /**
@@ -451,12 +453,12 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
          *  message's delivery succeeds, so its failure must not cut that
          *  turn short. */
         initiatesTurn: boolean,
-        /** Caller's own pre-TurnStart capture of whether an "auth"-classified
-         *  failure row was showing at send-time — see sendMessage's doc
-         *  comment. Always false for a held-message flush (mirrors
-         *  initiatesTurn — a flush's guard question is about the ALREADY-
-         *  active turn, not a fresh capture). */
-        hadLiveAuthFailure: boolean,
+        /** Caller's own pre-TurnStart capture of an "auth"-classified
+         *  failure row showing at send-time (null otherwise) — see
+         *  sendMessage's doc comment. Always null for a held-message flush
+         *  (mirrors initiatesTurn — a flush's guard question is about the
+         *  ALREADY-active turn, not a fresh capture). */
+        authFailureToPreserve: AgentFailure | null,
     ): Promise<void> => {
         // The pane is ALREADY showing the mount-time "Log in" bar
         // (opts.canRetry()) — sending anyway used to travel all the way
@@ -492,7 +494,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // that window is just as unconfirmed as one sent before the click.
         // Codex P1 on PR #2338 (re-review).
         //
-        // Also checks the caller-captured hadLiveAuthFailure: neither
+        // Also checks the caller-captured authFailureToPreserve: neither
         // canRetry nor loginWaiting reflects a mid-turn 401/403 — that's a
         // completely separate mechanism (the failure-banner's `state.failure`
         // with `data.code === "auth"`), never touched by either signal. A
@@ -503,19 +505,38 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // this call) unconditionally clears state.failure, so the caller
         // must capture it beforehand. Codex P1 on PR #2338 (second
         // re-review).
-        if (initiatesTurn && (opts.canRetry() || opts.loginWaiting() || hadLiveAuthFailure)) {
+        if (initiatesTurn && (opts.canRetry() || opts.loginWaiting() || authFailureToPreserve)) {
             opts.log("auth", "message not sent — not logged in", "warn");
-            opts.setAuthNotice(
-                opts.loginWaiting()
-                    ? "Not logged in yet — wait for the login attempt to finish, then try again."
-                    : "Not logged in — click “Log in” below to continue.",
-            );
+            if (!authFailureToPreserve) {
+                opts.setAuthNotice(
+                    opts.loginWaiting()
+                        ? "Not logged in yet — wait for the login attempt to finish, then try again."
+                        : "Not logged in — click “Log in” below to continue.",
+                );
+            }
             opts.model.dispatchPane({
                 type: "PendingMessageRejected",
                 id: messageId,
             });
             if (initiatesTurn) {
                 opts.model.dispatchPane({ type: "TurnStartFailed" }, "system");
+            }
+            if (authFailureToPreserve) {
+                // Re-dispatch the SAME failure TurnStart just cleared — the
+                // failure banner (and its "Login Again"/"Use existing login"
+                // actions) is this pane's actual recovery path; a generic
+                // authNotice that mentions a "Log in" button not even shown
+                // here (canRetry() is false in this scenario) would leave
+                // the user with no working recovery affordance at all. Codex
+                // P1 on PR #2338 (third re-review). Dispatched AFTER
+                // TurnStartFailed so turnPhase is already Idle when this
+                // reducer case runs — otherwise it reads the still-Submitting
+                // phase as "a turn just ended" and hops through a transient
+                // Done state before TurnStartFailed settles it back to Idle.
+                opts.model.dispatchPane(
+                    { type: "FailureObserved", failure: authFailureToPreserve, at: Date.now() },
+                    "system",
+                );
             }
             return;
         }
@@ -616,7 +637,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             // shift() (not a snapshot) so items queued mid-flush are included.
             while (heldQueue.length > 0) {
                 const item = heldQueue.shift()!;
-                await deliverToBackend(item.text, item.id, /* armExpiry */ false, /* initiatesTurn */ false, /* hadLiveAuthFailure */ false);
+                await deliverToBackend(item.text, item.id, /* armExpiry */ false, /* initiatesTurn */ false, /* authFailureToPreserve */ null);
             }
         } finally {
             flushing = false;

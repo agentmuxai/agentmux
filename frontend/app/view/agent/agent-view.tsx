@@ -1110,11 +1110,15 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         // fresh keystroke while a live "auth"-classified failure is still
         // showing, or a legitimate auto-retry after successful recovery.
         // onRecovered (above) explicitly dispatches FailureCleared before
-        // calling retryLastTurn precisely so this capture reads false for
+        // calling retryLastTurn precisely so this capture reads null for
         // that case — for a real live auth failure the user hasn't
-        // acknowledged, nothing has cleared it yet, so this reads true.
-        // Codex P1 on PR #2338.
-        const hadLiveAuthFailure = agentAtoms().failureAtom[0]()?.data.code === "auth";
+        // acknowledged, nothing has cleared it yet, so this reads the actual
+        // failure. Codex P1 on PR #2338; captures the failure DATA (not just
+        // a boolean) so a rejected send can re-dispatch it and restore the
+        // banner instead of leaving it cleared with no recovery affordance
+        // (Codex P1, third re-review).
+        const liveFailure = agentAtoms().failureAtom[0]();
+        const authFailureToPreserve = liveFailure?.data.code === "auth" ? liveFailure.data : null;
         // Only start a NEW turn when the agent is idle. Dispatching TurnStart
         // while a turn is already running regresses Streaming → Submitting,
         // which would flicker the busy indicator back to its "Submitting"
@@ -1124,7 +1128,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         if (!wasAlreadyWorking) {
             dispatchPane(model.blockId, { type: "TurnStart", at: Date.now() }, "user");
         }
-        return commands.sendMessage(message, wasAlreadyWorking, hadLiveAuthFailure);
+        return commands.sendMessage(message, wasAlreadyWorking, authFailureToPreserve);
     };
 
     // Esc on an empty composer. Mirrors Claude Code CLI: if a message is

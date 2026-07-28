@@ -287,17 +287,22 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
         });
     });
 
-    it("fast-fails a turn-initiating send when the caller captured a live auth failure, even though canRetry() and loginWaiting() are both false", async () => {
+    it("fast-fails a turn-initiating send when the caller captured a live auth failure, and restores the failure banner instead of a generic notice", async () => {
         // Neither canRetry nor loginWaiting reflects a mid-turn 401/403 —
         // that's the separate failure-banner mechanism (state.failure with
         // data.code === "auth"). agent-view.tsx's handleSendMessage captures
         // this BEFORE dispatching TurnStart (which unconditionally clears
         // state.failure) and passes it through as sendMessage's third arg.
-        // Codex P1 on PR #2338 (second re-review).
+        // Codex P1 on PR #2338 (second re-review). Re-dispatching the SAME
+        // failure (rather than a generic authNotice referencing a "Log in"
+        // button that isn't shown here) preserves the "Login Again"/"Use
+        // existing login" actions the banner already offers (Codex P1,
+        // third re-review).
         const model = registerPane(BLOCK_ID, fullRegistration());
         model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
         model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
         const setAuthNotice = vi.fn();
+        const authFailure: AgentFailure = { code: "auth", title: "Not logged in", detail: "401 from provider", retryable: true };
 
         await createRoot(async (dispose) => {
             const commands = useAgentCommands({
@@ -316,11 +321,12 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
             });
 
             model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
-            await commands.sendMessage("u there", false, /* hadLiveAuthFailure */ true);
+            await commands.sendMessage("u there", false, authFailure);
 
             expect(hub.agentInput).not.toHaveBeenCalled();
             expect(paneSnapshot(BLOCK_ID)?.turnPhase.kind).toBe("Idle");
-            expect(setAuthNotice).toHaveBeenCalledWith(expect.stringContaining("Not logged in"));
+            expect(setAuthNotice).not.toHaveBeenCalled();
+            expect(paneSnapshot(BLOCK_ID)?.failure?.data).toEqual(authFailure);
             dispose();
         });
     });
