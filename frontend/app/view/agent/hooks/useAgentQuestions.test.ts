@@ -10,8 +10,11 @@
  * error that does NOT match the old, narrowly-gated `UNSUPPORTED_CONTROLLER`
  * check, so `handleAnswer` used to roll the optimistic "answered" state
  * straight back — the exact flicker a user reported live. Now falls back to
- * delivering the answer as a follow-up message on ANY `AgentAnswerCommand`
- * failure, not just that one string. See
+ * delivering the answer as a follow-up message for the `SAFE_TO_RETRY_VIA_FOLLOWUP`
+ * allowlist of backend error shapes that structurally guarantee no send
+ * happened — NOT for any failure (an RPC-engine-level timeout could mean the
+ * control_response actually landed server-side, so that case still rolls
+ * back rather than risking a duplicate delivery — reagent P2). See
  * docs/reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md §2.7/§2.8.
  */
 
@@ -103,7 +106,7 @@ describe("useAgentQuestions — handleAnswer fallback", () => {
         dispose();
     });
 
-    it("falls back to a follow-up message on ANY AgentAnswerCommand failure — not just UNSUPPORTED_CONTROLLER", async () => {
+    it("falls back to a follow-up message for a known-safe backend error — not just UNSUPPORTED_CONTROLLER", async () => {
         // The exact shape a fresh persistent controller instance returns
         // after a pane reopen — does NOT contain "UNSUPPORTED_CONTROLLER".
         hub.agentAnswer.mockRejectedValue(
@@ -155,6 +158,32 @@ describe("useAgentQuestions — handleAnswer fallback", () => {
         const lastFlush = hub.dispatched[hub.dispatched.length - 1] as any;
         expect(lastFlush.updatedNodes[0].status).toBe("awaiting_answer");
         expect(logs.some((m) => m.includes("answer follow-up failed"))).toBe(true);
+        dispose();
+    });
+
+    // reagent P2: an RPC-engine-level timeout (EC-TIME) does NOT guarantee
+    // the control_response was never sent — the handler could have
+    // succeeded server-side even though the client sees a failure. Falling
+    // back unconditionally would risk delivering the answer twice. Must
+    // roll back instead of guessing, same as the pre-widening behavior.
+    it("rolls back (does NOT fall back) on an unrecognized error like an RPC-engine timeout", async () => {
+        hub.agentAnswer.mockRejectedValue(new Error("EC-TIME: timeout (5000ms)"));
+        const sendMessage = vi.fn().mockResolvedValue(undefined);
+        const { handleAnswer, dispose } = setup(sendMessage);
+
+        handleAnswer({
+            tool_use_id: TOOL_USE_ID,
+            answers: [],
+            answers_map: { "Pick one": "a" },
+            answer_text: "Pick one: a",
+        });
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(sendMessage).not.toHaveBeenCalled();
+        const lastFlush = hub.dispatched[hub.dispatched.length - 1] as any;
+        expect(lastFlush.updatedNodes[0].status).toBe("awaiting_answer");
         dispose();
     });
 });
