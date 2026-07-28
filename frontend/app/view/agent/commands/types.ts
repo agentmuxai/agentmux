@@ -137,6 +137,17 @@ export interface SlashCommandContext {
      */
     notifyControllerHealthy: () => void;
     /**
+     * Clear a live "auth"-classified failure row (state.failure), if any.
+     * relogin()/useGlobalLogin()/loginViaTerminal() all clear this via their
+     * onRecovered callback before auto-retrying, but /login is a fully
+     * separate path with no equivalent — without this, a stale pre-existing
+     * failure survives a successful /login, and the caller's NEXT normal
+     * send re-captures that stale failure as `authFailureToPreserve`,
+     * fast-failing the message and re-showing the stale banner even though
+     * the credential is now fine. reagent P1 on PR #2338.
+     */
+    clearAuthFailure: () => void;
+    /**
      * Open the inline picker. Returns a promise that resolves with the
      * selected value, or rejects if the user dismisses (Esc / click-outside).
      * Set by useAgentCommands; the dispatcher only sees the function.

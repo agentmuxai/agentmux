@@ -296,6 +296,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         log: opts.log,
         setAuthUrl: opts.setAuthUrl,
         notifyControllerHealthy: opts.notifyControllerHealthy,
+        clearAuthFailure: () => opts.model.dispatchPane({ type: "FailureCleared" }),
         openPicker,
         openHelp,
     });
