@@ -94,9 +94,12 @@ export function buildConfigFiles(
                 path: `.claude/skills/${slug}/SKILL.md`,
                 content: renderSkillMd(slug, skill.description, content),
             });
-        } else if (skill.trigger) {
-            const content = expandTemplate(skill.content, templateVars);
-            files.push({ path: `.claude/commands/${skill.trigger}.md`, content });
+        } else {
+            const safeTrigger = sanitizeTrigger(skill.trigger);
+            if (safeTrigger) {
+                const content = expandTemplate(skill.content, templateVars);
+                files.push({ path: `.claude/commands/${safeTrigger}.md`, content });
+            }
         }
     }
 
@@ -181,6 +184,26 @@ export function renderSkillMd(slug: string, description: string, body: string): 
         ? description.slice(0, SKILL_DESCRIPTION_MAX_LEN)
         : "No description provided.";
     return `---\nname: ${JSON.stringify(slug)}\ndescription: ${JSON.stringify(desc)}\n---\n\n${body}`;
+}
+
+/**
+ * Validate a skill's `trigger` is safe to use as a single path segment in
+ * `.claude/commands/<trigger>.md`. `trigger` is free-form user input with no
+ * format validation anywhere upstream, so a trigger containing a path
+ * separator or a `..` segment previously let the resulting filename resolve
+ * OUTSIDE the agent's working directory (reagent P1, PR #2322). Returns
+ * `null` for anything containing "/" or "\\", or that is exactly "."/"..";
+ * callers skip writing that skill's command file entirely. Mirrors
+ * `sanitize_trigger` in `agentmux-srv/src/backend/agent_config.rs`.
+ */
+export function sanitizeTrigger(trigger: string): string | null {
+    if (!trigger || trigger === "." || trigger === "..") {
+        return null;
+    }
+    if (trigger.includes("/") || trigger.includes("\\")) {
+        return null;
+    }
+    return trigger;
 }
 
 /**

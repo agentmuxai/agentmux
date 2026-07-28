@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { buildConfigFiles, deriveSlug, renderSkillMd, uniqueSkillSlug } from "./agent-config-builder";
+import { buildConfigFiles, deriveSlug, renderSkillMd, sanitizeTrigger, uniqueSkillSlug } from "./agent-config-builder";
 
 function makeSkill(over: Partial<AgentSkill> = {}): AgentSkill {
     return {
@@ -37,6 +37,36 @@ describe("deriveSlug", () => {
     it("trims to 64 characters", () => {
         const long = "a".repeat(100);
         expect(deriveSlug(long)).toHaveLength(64);
+    });
+});
+
+describe("sanitizeTrigger", () => {
+    it("rejects path traversal and separators", () => {
+        // reagent P1, PR #2322
+        expect(sanitizeTrigger("../../../../.ssh/authorized_keys")).toBeNull();
+        expect(sanitizeTrigger("../evil")).toBeNull();
+        expect(sanitizeTrigger("sub/evil")).toBeNull();
+        expect(sanitizeTrigger("sub\\evil")).toBeNull();
+        expect(sanitizeTrigger("..")).toBeNull();
+        expect(sanitizeTrigger(".")).toBeNull();
+        expect(sanitizeTrigger("")).toBeNull();
+    });
+
+    it("allows an ordinary trigger", () => {
+        expect(sanitizeTrigger("deploy")).toBe("deploy");
+    });
+});
+
+describe("buildConfigFiles — trigger sanitization", () => {
+    it("skips a prompt-format skill with a path-traversal trigger", () => {
+        // reagent P1, PR #2322: must not materialize a command file outside
+        // .claude/commands/, not even under a mangled name -- skip outright.
+        const files = buildConfigFiles(
+            {},
+            [makeSkill({ trigger: "../../../../.ssh/authorized_keys", content: "evil" })],
+        );
+        expect(files.every((f) => !f.path.includes(".."))).toBe(true);
+        expect(files.some((f) => f.path.startsWith(".claude/commands/"))).toBe(false);
     });
 });
 

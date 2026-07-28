@@ -125,10 +125,10 @@ pub fn build_config_files(
                 filename: format!(".claude/skills/{slug}/SKILL.md"),
                 content: render_skill_md(&slug, &skill.description, &content),
             });
-        } else if !skill.trigger.is_empty() {
+        } else if let Some(safe_trigger) = sanitize_trigger(&skill.trigger) {
             let content = expand_template(&skill.content, &template_vars);
             files.push(AgentConfigFile {
-                filename: format!(".claude/commands/{}.md", skill.trigger),
+                filename: format!(".claude/commands/{safe_trigger}.md"),
                 content,
             });
         }
@@ -614,6 +614,27 @@ fn render_skill_md(slug: &str, description: &str, body: &str) -> String {
     format!("---\nname: {name_yaml}\ndescription: {description_yaml}\n---\n\n{body}")
 }
 
+/// Validate a skill's `trigger` is safe to use as a single path segment in
+/// `.claude/commands/<trigger>.md`. `trigger` is free-form user input with
+/// no format validation anywhere upstream (the skill create/update RPCs and
+/// the frontend form all accept it as-is), so a trigger containing a path
+/// separator or a `..` segment previously let the resulting filename
+/// resolve OUTSIDE the agent's working directory -- both for this write and,
+/// once stale-file cleanup existed, for the corresponding delete (reagent
+/// P1, PR #2322). Rejects (returns `None`) anything containing `/` or `\`,
+/// or that is exactly `.`/`..`; callers skip writing that skill's command
+/// file entirely rather than silently rewriting the trigger into something
+/// the user didn't ask for.
+fn sanitize_trigger(trigger: &str) -> Option<&str> {
+    if trigger.is_empty() || trigger == "." || trigger == ".." {
+        return None;
+    }
+    if trigger.contains('/') || trigger.contains('\\') {
+        return None;
+    }
+    Some(trigger)
+}
+
 /// Derive a slug for an Agent Skill name that is valid per the Agent Skills
 /// `name` grammar: lowercase letters, digits, and hyphens ONLY (no
 /// underscores). `derive_slug` is shared with agent role-slugs, which
@@ -702,6 +723,42 @@ mod tests {
             content: content.to_string(),
             created_at: 0,
         }
+    }
+
+    #[test]
+    fn test_sanitize_trigger_rejects_path_traversal() {
+        // reagent P1, PR #2322: a trigger with a path separator or ".."
+        // must never be allowed to steer .claude/commands/<trigger>.md
+        // outside the working directory.
+        assert_eq!(sanitize_trigger("../../../../.ssh/authorized_keys"), None);
+        assert_eq!(sanitize_trigger("../evil"), None);
+        assert_eq!(sanitize_trigger("sub/evil"), None);
+        assert_eq!(sanitize_trigger("sub\\evil"), None);
+        assert_eq!(sanitize_trigger(".."), None);
+        assert_eq!(sanitize_trigger("."), None);
+        assert_eq!(sanitize_trigger(""), None);
+        assert_eq!(sanitize_trigger("deploy"), Some("deploy"));
+    }
+
+    #[test]
+    fn test_build_config_files_skips_prompt_skill_with_traversal_trigger() {
+        // reagent P1, PR #2322: build_config_files must not materialize a
+        // command file for a malicious trigger, not even under a sanitized
+        // name -- skip it outright.
+        let content_map = HashMap::new();
+        let skills = vec![make_skill(
+            "Evil",
+            "../../../../.ssh/authorized_keys",
+            "desc",
+            "malicious content",
+        )];
+        let files = build_config_files(&content_map, &skills, "Aria", "agent-1", "aria", "/tmp/aria");
+        assert!(
+            files.iter().all(|f| !f.filename.contains("..")),
+            "no config file path may contain '..': {:?}",
+            files.iter().map(|f| &f.filename).collect::<Vec<_>>()
+        );
+        assert!(!files.iter().any(|f| f.filename.starts_with(".claude/commands/")));
     }
 
     #[test]

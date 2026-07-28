@@ -641,7 +641,23 @@ pub(super) fn write_agent_config_files(
                 if new_managed_skill_paths.contains(old) {
                     continue;
                 }
-                let old_path = base_path.join(old);
+                // Defense in depth: `old` is manifest-recorded, itself built
+                // from `config_files` filenames derived from user-controlled
+                // skill triggers/names (now sanitized at the source in
+                // agent_config.rs, but this second gate means a bad path can
+                // never reach `remove_file`/`remove_dir` even if that
+                // sanitization is ever bypassed or the manifest file is
+                // tampered with) -- reagent P1, PR #2322.
+                let Ok(old_path) = crate::backend::base::safe_join_within_base(base_path, old)
+                else {
+                    tracing::warn!(
+                        work_dir = %expanded_dir,
+                        path = %old,
+                        "write_agent_config_files: refusing to delete a manifest path that \
+                         escapes the working directory"
+                    );
+                    continue;
+                };
                 let _ = std::fs::remove_file(&old_path);
                 // Agent Skills format nests under .claude/skills/<slug>/ -- clean
                 // up the now-empty slug directory too (no-op/fails silently if
@@ -654,7 +670,17 @@ pub(super) fn write_agent_config_files(
     }
 
     for file in &config_files {
-        let file_path = base_path.join(&file.filename);
+        // Same defense-in-depth join as the cleanup pass above.
+        let Ok(file_path) = crate::backend::base::safe_join_within_base(base_path, &file.filename)
+        else {
+            tracing::warn!(
+                work_dir = %expanded_dir,
+                path = %file.filename,
+                "write_agent_config_files: refusing to write a config path that \
+                 escapes the working directory"
+            );
+            continue;
+        };
         if let Some(parent) = file_path.parent() {
             if !parent.exists() {
                 let _ = std::fs::create_dir_all(parent);
@@ -798,5 +824,46 @@ mod write_agent_config_files_tests {
         write_agent_config_files(&wstore, &id_store, &agent, "test-agent", work_dir_str).unwrap();
 
         assert!(user_file.exists(), "hand-authored file outside AgentMux's manifest must survive");
+    }
+
+    /// Defense-in-depth: even if a manifest somehow contains a path-traversal
+    /// entry (e.g. from a bypass of the trigger sanitization added upstream
+    /// in agent_config.rs, or manual tampering with the manifest file
+    /// itself), the cleanup pass must never delete anything outside the
+    /// agent's working directory (reagent P1, PR #2322).
+    #[test]
+    fn cleanup_refuses_to_delete_a_manifest_path_that_escapes_the_working_dir() {
+        let wstore = make_store();
+        let id_store = make_store();
+        let work_dir = tempfile::tempdir().unwrap();
+        let work_dir_str = work_dir.path().to_str().unwrap();
+
+        let mut agent = make_agent("agent-1", work_dir_str);
+        wstore.agent_def_insert(&mut agent).unwrap();
+
+        // A sentinel file OUTSIDE the working directory that a traversal
+        // attempt would target.
+        let sentinel_dir = tempfile::tempdir().unwrap();
+        let sentinel = sentinel_dir.path().join("outside-file.txt");
+        std::fs::write(&sentinel, "must survive").unwrap();
+
+        // Simulate a manifest that (however it got there) records an escape.
+        std::fs::create_dir_all(work_dir.path().join(".claude")).unwrap();
+        let traversal_rel = format!(
+            "../{}/outside-file.txt",
+            sentinel_dir.path().file_name().unwrap().to_str().unwrap()
+        );
+        let malicious_manifest = serde_json::to_string(&vec![traversal_rel]).unwrap();
+        std::fs::write(
+            work_dir.path().join(MANAGED_SKILL_FILES_MANIFEST),
+            malicious_manifest,
+        )
+        .unwrap();
+
+        // No skills at all this run, so the manifest's one entry is "stale"
+        // and would normally be deleted.
+        write_agent_config_files(&wstore, &id_store, &agent, "test-agent", work_dir_str).unwrap();
+
+        assert!(sentinel.exists(), "file outside the working directory must never be deleted");
     }
 }
