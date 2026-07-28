@@ -293,6 +293,7 @@ const KNOWN_REGISTERED_UNDECLARED = [
     "agent.status",
     "agent.stop",
     "bundle.delete",
+    "bundle.export",
     "bundle.get",
     "bundle.list",
     "bundle.self.get",
