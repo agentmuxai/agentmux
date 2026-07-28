@@ -250,6 +250,56 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
         });
     });
 
+    it("rejects a held message that was already known-bad at queue time, without touching the active turn", async () => {
+        // deliverToBackend's guard is deliberately gated on initiatesTurn
+        // (always false for a flush), so it never sees a flushed item at
+        // all — nothing else checks whether THIS specific message was
+        // queued while the pane already knew it was logged out. A
+        // controller reporting an active turn (wasAlreadyWorking=true)
+        // while canRetry()/loginWaiting() is ALSO true is a real, reachable
+        // combination (these are tracked by independent signals with no
+        // invariant enforcing "active turn implies good auth") — e.g. a
+        // reopened pane whose backend turn is genuinely still streaming
+        // while its OWN mount-time auth check independently reports
+        // auth_failed. Codex P2 on PR #2338 (sixth re-review).
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => true,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                backToPicker: async () => {},
+            });
+
+            // A turn is already active (independent of canRetry — see the
+            // comment above), so this send takes the held/queued path.
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("held while known-bad", true);
+            expect(commands.hasHeldMessages()).toBe(true);
+            const busyPhase = paneSnapshot(BLOCK_ID)?.turnPhase.kind;
+
+            await commands.flushHeldMessages();
+
+            expect(hub.agentInput).not.toHaveBeenCalled();
+            expect(paneSnapshot(BLOCK_ID)?.pending).toEqual([]);
+            // The already-active turn must not be cut short by this
+            // unrelated-to-it rejection.
+            expect(paneSnapshot(BLOCK_ID)?.turnPhase.kind).toBe(busyPhase);
+            dispose();
+        });
+    });
+
     it("still fast-fails a turn-initiating send while loginWaiting() is true, even though canRetry() already flipped false", async () => {
         // Mirrors relogin()'s own sequencing: canRetry is cleared the
         // INSTANT the mount-time "Log in" button is clicked — well before
