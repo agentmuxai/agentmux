@@ -1174,6 +1174,15 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             log("auth", "Login via terminal — opening a console window for browser login");
             void status.loginViaTerminal();
         },
+        // unresponsive recovery — the process is alive but wedged (backend
+        // health monitor's Dead classification), so there's nothing a plain
+        // retry could reach. Kill + respawn via the same mechanism already
+        // trusted for the post-login stale-process case. See
+        // docs/reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md §4.
+        onRestart: () => {
+            log("agent", "Restart — the agent process was unresponsive, respawning it");
+            void status.forceControllerRefresh("restart");
+        },
     });
 
     // Deliver queued-while-busy ("send now") messages at the next tool-call
