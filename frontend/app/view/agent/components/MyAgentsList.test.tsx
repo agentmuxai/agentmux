@@ -227,6 +227,78 @@ describe("MyAgentsList — fetch error (retro-my-agents-fresh-channel-regression
         consoleErrorSpy.mockRestore();
     });
 
+    // codex P2 on PR #2327's post-merge re-review: Solid's createResource
+    // keeps the previous resolved value ([]) visible while a refetch is in
+    // flight (stale-while-revalidate) — `fetchError` is cleared synchronously
+    // when Retry starts, so checking `rows() === undefined` for "loading"
+    // only catches the very first fetch. A retry would fall straight
+    // through to the empty-state branch for its ENTIRE in-flight duration,
+    // flashing "No agents yet" and recreating the exact error/empty
+    // ambiguity this whole fix exists to remove.
+    it("does not flash the empty-agents message while a retry is in flight", async () => {
+        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+        let resolveRetry!: (result: { rows: RecentSessionRow[]; degraded: string[] }) => void;
+        const retryPromise = new Promise<{ rows: RecentSessionRow[]; degraded: string[] }>((resolve) => {
+            resolveRetry = resolve;
+        });
+        vi.mocked(RpcApi.ListRecentSessionsCommand)
+            .mockRejectedValueOnce(new Error("backend unreachable"))
+            .mockImplementationOnce(() => retryPromise);
+
+        render(() => <MyAgentsList onReattach={() => {}} />);
+
+        const retryBtn = await screen.findByTestId("agent-my-agents-retry");
+        await userEvent.click(retryBtn);
+
+        // The retry is now in flight (retryPromise hasn't resolved yet) —
+        // neither the error banner nor the "genuinely empty" message must
+        // show during this window.
+        expect(screen.queryByTestId("agent-my-agents-empty")).toBeNull();
+        expect(screen.queryByTestId("agent-my-agents-error")).toBeNull();
+
+        resolveRetry(okResult([makeRow({ instance_id: "recovered" })]));
+        const entries = await screen.findAllByTestId("agent-my-agents-entry");
+        expect(entries).toHaveLength(1);
+
+        consoleErrorSpy.mockRestore();
+    });
+
+    // reagent P2 on PR #2328's re-review: switching `isLoading` to
+    // `rows.loading` (to fix the retry-flash bug above) is true for ANY
+    // in-flight fetch, including background refetches the old
+    // `rows() === undefined` check never touched (visibility regain,
+    // agents:changed events). The count badge's guard must not use the
+    // same `isLoading`, or it flickers away on every background refetch
+    // instead of just the very first load.
+    it("keeps the count badge visible during a background refetch, not just the initial load", async () => {
+        vi.mocked(RpcApi.ListRecentSessionsCommand)
+            .mockResolvedValueOnce(okResult([makeRow({ instance_id: "a", node_count: 3 })]))
+            // Never resolves — simulates a still-in-flight background
+            // refetch (e.g. an identity switch, or an agents:changed
+            // re-poll) so the count badge's behavior DURING that window
+            // is directly observable.
+            .mockImplementationOnce(() => new Promise(() => {}));
+
+        const [identityId, setIdentityId] = createSignal<string>("id-1");
+        render(() => (
+            <MyAgentsList identityId={identityId} onReattach={() => {}} />
+        ));
+
+        await screen.findAllByTestId("agent-my-agents-entry");
+        expect(screen.getByTestId("agent-my-agents-count")).toHaveTextContent("1");
+
+        // Trigger a refetch while the previous row is still showing.
+        setIdentityId("id-2");
+        await Promise.resolve();
+
+        // The stale row + its count badge must still be visible while the
+        // new (deliberately never-resolving, for this test) fetch is
+        // in flight — this is exactly what flickered away under the bug.
+        expect(screen.getByTestId("agent-my-agents-entry")).toBeInTheDocument();
+        expect(screen.getByTestId("agent-my-agents-count")).toHaveTextContent("1");
+    });
+
     // reagent P1 on PR #2327: session.rs's hardening (each of 6 data
     // sources degrades to empty on its own failure instead of aborting
     // the whole RPC) means the RPC itself basically never throws anymore
