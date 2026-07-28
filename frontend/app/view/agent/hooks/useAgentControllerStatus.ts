@@ -678,6 +678,14 @@ export function useAgentControllerStatus(
         }
         setAuthNotice(null);
         seedInFlight = true;
+        // Unlike relogin()/loginViaTerminal(), this credential-seed work was
+        // never reflected in loginWaiting — useAgentCommands.ts's fast-fail
+        // guard checks canRetry() || loginWaiting() before letting a send
+        // through, so without this a message typed while this async work is
+        // still resolving bypassed that guard entirely and reached
+        // AgentInputCommand on the same stale, already-known-bad credential
+        // the failure banner is showing for. reagent P1 on PR #2338.
+        setLoginWaiting(true);
         try {
             // Mint a REAL per-account isolated dir and persist an
             // IdentityAccount row — not just a seed into whatever dir was
@@ -741,6 +749,7 @@ export function useAgentControllerStatus(
             setAuthNotice(msg);
         } finally {
             seedInFlight = false;
+            setLoginWaiting(false);
         }
     };
 
