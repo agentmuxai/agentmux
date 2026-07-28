@@ -227,10 +227,25 @@ fn register_bundle_export(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
                 let skill_ids: Vec<String> =
                     serde_json::from_str(&bundle.skills).unwrap_or_default();
-                let skills: Vec<crate::backend::storage::Skill> = skill_ids
-                    .iter()
-                    .filter_map(|id| wstore.skill_get(id).ok().flatten())
-                    .collect();
+                // Distinguish a genuine DB error from a legitimately deleted
+                // skill id: `.ok().flatten()` previously collapsed both to
+                // "absent", so a locked/damaged store silently reported a
+                // successful export missing content instead of failing loudly
+                // -- unsafe for the advertised backup use case (Codex P2, PR
+                // #2325). A lookup error now fails the whole export; a
+                // missing row (Ok(None), i.e. actually deleted) is skipped
+                // and reported back in `missing_skill_ids`.
+                let mut skills: Vec<crate::backend::storage::Skill> = Vec::new();
+                let mut missing_skill_ids: Vec<String> = Vec::new();
+                for id in &skill_ids {
+                    match wstore.skill_get(id) {
+                        Ok(Some(skill)) => skills.push(skill),
+                        Ok(None) => missing_skill_ids.push(id.clone()),
+                        Err(e) => {
+                            return Err(format!("bundle.export: failed to look up skill {id}: {e}"));
+                        }
+                    }
+                }
 
                 let export = crate::backend::bundle_export::export_bundle(&bundle, &skills);
 
@@ -242,11 +257,16 @@ fn register_bundle_export(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     return Ok(Some(json!({
                         "root_slug": export.root_slug,
                         "skipped_skills": export.skipped_skills,
+                        "missing_skill_ids": missing_skill_ids,
                         "zip_base64": encoded,
                     })));
                 }
 
-                Ok(Some(serde_json::to_value(&export).map_err(|e| e.to_string())?))
+                let mut result = serde_json::to_value(&export).map_err(|e| e.to_string())?;
+                if let Some(obj) = result.as_object_mut() {
+                    obj.insert("missing_skill_ids".to_string(), json!(missing_skill_ids));
+                }
+                Ok(Some(result))
             })
         }),
     );

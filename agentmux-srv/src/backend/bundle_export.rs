@@ -38,6 +38,20 @@
 //! requirement declaration (name/provider guess, no values, ever) — this
 //! matches ABF's own "declare, don't bundle secrets" design and MCP's own
 //! `isSecret`/env-placeholder convention (see the research report §3b/§3d).
+//!
+//! **`mcp/<slug>.server.json` content note:** this writes AgentMux's own
+//! runtime MCP config shape (`{type, command, args, env}` — the same object
+//! `.mcp.json` uses), NOT the official MCP registry `server.json` schema
+//! (`packages[].registry_type`/`identifier`/`environment_variables`, etc.).
+//! Real conversion would require fabricating fields this data doesn't
+//! contain (registry type/package identifier aren't derivable from a bare
+//! stdio command) — worse than an honest runtime-shape export. Deferred to
+//! Phase 2 (schema validation), tracked alongside the importer rather than
+//! guessed at here (Codex P1, PR #2325 — flagged as a real gap, not
+//! disputed; this comment documents the deliberate scope decision).
+//! `env` values ARE redacted before being written (see [`redact_mcp_entry`])
+//! regardless of this open question — the credential-leak fix does not wait
+//! on the schema question.
 
 use std::collections::HashSet;
 
@@ -79,6 +93,30 @@ struct ContextFileEntry {
     path: String,
     #[serde(default)]
     content: String,
+}
+
+/// Redact secret-shaped values out of an MCP server config entry before it
+/// is written into a shareable bundle export. `env` and `headers` are the
+/// two fields AgentMux's own MCP config editors accept literal secret
+/// values into (e.g. `env.GITHUB_TOKEN`, `headers.Authorization` on an
+/// HTTP/SSE-transport server) — every value under either key is replaced
+/// with a `${VAR_NAME}`-style placeholder so the exported `.server.json`
+/// never contains a real credential, matching ABF's "declare, don't bundle
+/// secrets" principle that `accounts/requirements.json` already follows
+/// (security finding, Codex P1 x2, PR #2325). Any other field passes
+/// through unchanged.
+fn redact_mcp_entry(entry: &Value) -> Value {
+    let mut redacted = entry.clone();
+    if let Some(obj) = redacted.as_object_mut() {
+        for field in ["env", "headers"] {
+            if let Some(Value::Object(map)) = obj.get_mut(field) {
+                for (key, value) in map.iter_mut() {
+                    *value = json!(format!("${{{key}}}"));
+                }
+            }
+        }
+    }
+    redacted
 }
 
 /// Validate a context-file's relative path is safe to place under
@@ -162,12 +200,16 @@ pub fn export_bundle(bundle: &Memory, skills: &[Skill]) -> BundleExport {
             continue;
         }
         let slug = unique_skill_slug(&skill.name, &mut used_skill_slugs);
-        let path = format!("skills/{slug}/SKILL.md");
         files.push(BundleExportFile {
-            path: path.clone(),
+            path: format!("skills/{slug}/SKILL.md"),
             content: render_skill_md(&slug, &skill.description, &skill.content),
         });
-        manifest_skills.push(path);
+        // Manifest references the skill's DIRECTORY, not the SKILL.md file
+        // inside it -- per the ABF spec's own on-disk layout example
+        // (`"skills": ["skills/deploy-checklist"]`), which lets an importer
+        // locate SKILL.md plus any optional scripts/references/assets
+        // alongside it (Codex P1, PR #2325).
+        manifest_skills.push(format!("skills/{slug}"));
     }
 
     // ------------------------------------------------------------------
@@ -184,7 +226,8 @@ pub fn export_bundle(bundle: &Memory, skills: &[Skill]) -> BundleExport {
             .unwrap_or_else(|| format!("mcp-server-{}", index + 1));
         let slug = unique_skill_slug(&display_name, &mut used_mcp_slugs);
         let path = format!("mcp/{slug}.server.json");
-        let pretty = serde_json::to_string_pretty(entry).unwrap_or_else(|_| "{}".to_string());
+        let redacted_entry = redact_mcp_entry(entry);
+        let pretty = serde_json::to_string_pretty(&redacted_entry).unwrap_or_else(|_| "{}".to_string());
         files.push(BundleExportFile {
             path: path.clone(),
             content: pretty,
@@ -385,6 +428,49 @@ mod tests {
     }
 
     #[test]
+    fn redacts_real_secret_values_from_the_exported_server_json() {
+        // Security finding, Codex P1 x2, PR #2325: the exported .server.json
+        // must never contain the literal secret value stored in env/headers,
+        // even though requirements.json was already value-free.
+        let mcp_servers = r#"[{
+            "name": "github",
+            "type": "stdio",
+            "command": "gh-mcp",
+            "env": {"GITHUB_TOKEN": "ghp_realSecretValue123"},
+            "headers": {"Authorization": "Bearer realBearerToken456"}
+        }]"#;
+        let bundle = make_bundle("", "[]", mcp_servers, "[]");
+        let export = export_bundle(&bundle, &[]);
+
+        let server_file = export
+            .files
+            .iter()
+            .find(|f| f.path == "mcp/github.server.json")
+            .expect("expected mcp/github.server.json");
+        assert!(
+            !server_file.content.contains("ghp_realSecretValue123"),
+            "exported .server.json must never contain the real env secret value: {}",
+            server_file.content
+        );
+        assert!(
+            !server_file.content.contains("realBearerToken456"),
+            "exported .server.json must never contain the real header secret value: {}",
+            server_file.content
+        );
+        // Redacted to a placeholder, not silently dropped -- the key/shape survives.
+        assert!(server_file.content.contains("${GITHUB_TOKEN}"));
+        assert!(server_file.content.contains("${Authorization}"));
+
+        // requirements.json inference is unaffected (it only ever read keys).
+        let req_file = export
+            .files
+            .iter()
+            .find(|f| f.path == "accounts/requirements.json")
+            .unwrap();
+        assert!(req_file.content.contains("GITHUB_TOKEN"));
+    }
+
+    #[test]
     fn no_requirements_file_when_no_env_vars_present() {
         let mcp_servers = r#"[{"name":"local-tool","type":"stdio","command":"local-tool"}]"#;
         let bundle = make_bundle("", "[]", mcp_servers, "[]");
@@ -418,6 +504,20 @@ mod tests {
         assert!(manifest["components"]["skills"].as_array().unwrap().len() == 1);
         assert!(manifest["components"]["mcpServers"].as_array().unwrap().len() == 1);
         assert_eq!(manifest["components"]["accounts"], "accounts/requirements.json");
+    }
+
+    #[test]
+    fn manifest_references_the_skill_directory_not_the_skill_md_file() {
+        // Codex P1, PR #2325: the ABF spec's manifest example references
+        // "skills/<slug>" (the directory), not "skills/<slug>/SKILL.md".
+        let bundle = make_bundle("", "[]", "[]", r#"["skill-a"]"#);
+        let export = export_bundle(&bundle, &[make_agent_skill("Deploy Checklist")]);
+        let manifest_file = export.files.iter().find(|f| f.path == "armory.json").unwrap();
+        let manifest: Value = serde_json::from_str(&manifest_file.content).unwrap();
+        let skills = manifest["components"]["skills"].as_array().unwrap();
+        assert_eq!(skills, &vec![json!("skills/deploy-checklist")]);
+        // The actual file on disk still lives at the nested SKILL.md path.
+        assert!(export.files.iter().any(|f| f.path == "skills/deploy-checklist/SKILL.md"));
     }
 
     #[test]
