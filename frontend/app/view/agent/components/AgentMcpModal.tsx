@@ -2,10 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AgentMcpModal — the "MCP Servers" tab body inside AgentStashModal.
- * List/create/edit/delete for this agent's own MCP servers, plus a
- * bound-state-aware Bind/Unbind toggle for global ones (driven by
- * `bound_to_agent` — see AgentMcpModel's doc comment).
+ * AgentMcpModal — the "MCP Servers" tab body inside AgentStashModal. A
+ * reactive, read-only list of every MCP server visible to this agent
+ * (global + this agent's own, if any exist), plus a bound-state-aware
+ * Bind/Unbind toggle for global ones (driven by `bound_to_agent` — see
+ * AgentMcpModel's doc comment). Servers are authored in the Armory, not
+ * here — see AgentMcpModel's doc comment for why this is no longer a
+ * create/edit/delete surface.
  */
 
 import { onCleanup, For, Show, type JSX } from "solid-js";
@@ -23,11 +26,10 @@ export const AgentMcpModal = (props: AgentMcpModalProps): JSX.Element => {
     onCleanup(() => model.dispose());
 
     // Single-pane — see docs/specs/SPEC_ARMORY_RESPONSIVE_SINGLE_PANE_LAYOUT_2026_07_15.md §5.
-    const inDetail = () => model.selectedIdAtom() !== null || model.draftAtom() !== null;
+    const inDetail = () => model.selectedIdAtom() !== null;
     const handleBack = () => {
         model.setError(null);
         model.setSelectedId(null);
-        model.setDraft(null);
     };
 
     const listView = (
@@ -61,9 +63,6 @@ export const AgentMcpModal = (props: AgentMcpModalProps): JSX.Element => {
                 </For>
             </Show>
 
-            <button class="agent-primitive-modal-new-btn" onClick={() => model.startNew()}>
-                + New MCP server
-            </button>
             <button
                 class="agent-primitive-modal-new-btn"
                 onClick={() => void openOrFocusPaneByView("armory")}
@@ -78,123 +77,58 @@ export const AgentMcpModal = (props: AgentMcpModalProps): JSX.Element => {
             <Show when={model.errorAtom()}>
                 <div class="agent-primitive-modal-error">{model.errorAtom()}</div>
             </Show>
-            <Show
-                when={model.draftAtom()}
-                fallback={
-                    <Show when={model.selectedAtom()}>
-                        {(server) => (
-                                    <div class="agent-primitive-modal-readonly">
-                                        <h3 class="agent-primitive-modal-name">{server().name}</h3>
-                                        <Show when={server().is_global}>
-                                            <p class="agent-primitive-modal-global-note">
-                                                Global — managed in the Armory. You can bind/unbind it
-                                                here, or{" "}
-                                                <button
-                                                    type="button"
-                                                    class="agent-primitive-modal-link-btn"
-                                                    onClick={() => void openOrFocusPaneByView("armory")}
-                                                >
-                                                    edit it there
-                                                </button>
-                                                .
-                                            </p>
-                                        </Show>
-                                        <span class="agent-primitive-modal-field-label">Transport</span>
-                                        <pre class="agent-primitive-modal-field-value">{server().transport}</pre>
-                                        <span class="agent-primitive-modal-field-label">Config</span>
-                                        <pre class="agent-primitive-modal-field-value">{server().config}</pre>
-                                        <div class="agent-primitive-modal-actions">
-                                            <Show
-                                                when={!server().is_global}
-                                                fallback={
-                                                    <Show
-                                                        when={server().bound_to_agent}
-                                                        fallback={
-                                                            <button
-                                                                class="agent-primitive-modal-btn agent-primitive-modal-btn-primary"
-                                                                onClick={() => void model.bind(server().id)}
-                                                            >
-                                                                Bind
-                                                            </button>
-                                                        }
-                                                    >
-                                                        <button
-                                                            class="agent-primitive-modal-btn"
-                                                            onClick={() => void model.unbind(server().id)}
-                                                        >
-                                                            Unbind
-                                                        </button>
-                                                    </Show>
-                                                }
-                                            >
-                                                <button
-                                                    class="agent-primitive-modal-btn agent-primitive-modal-btn-danger"
-                                                    onClick={() => void model.deleteServer(server().id)}
-                                                >
-                                                    Delete
-                                                </button>
-                                                <button
-                                                    class="agent-primitive-modal-btn"
-                                                    onClick={() => model.startEdit(server())}
-                                                >
-                                                    Edit
-                                                </button>
-                                            </Show>
-                                        </div>
-                                    </div>
-                                )}
-                            </Show>
-                        }
-                    >
-                        {(draft) => (
-                            <form
-                                class="agent-primitive-modal-form"
-                                onSubmit={(e) => { e.preventDefault(); void model.saveDraft(); }}
-                            >
-                                <span class="agent-primitive-modal-field-label">Name *</span>
-                                <input
-                                    class="agent-primitive-modal-input"
-                                    type="text"
-                                    value={draft().name}
-                                    onInput={(e) => model.setDraft({ ...draft(), name: e.currentTarget.value })}
-                                    placeholder="e.g. filesystem"
-                                    required
-                                />
-                                <span class="agent-primitive-modal-field-label">Transport</span>
-                                <input
-                                    class="agent-primitive-modal-input"
-                                    type="text"
-                                    value={draft().transport}
-                                    onInput={(e) => model.setDraft({ ...draft(), transport: e.currentTarget.value })}
-                                    placeholder="stdio"
-                                />
-                                <span class="agent-primitive-modal-field-label">Config (JSON)</span>
-                                <textarea
-                                    class="agent-primitive-modal-textarea"
-                                    rows={6}
-                                    value={draft().config}
-                                    onInput={(e) => model.setDraft({ ...draft(), config: e.currentTarget.value })}
-                                    spellcheck={false}
-                                />
-                                <div class="agent-primitive-modal-actions">
+            <Show when={model.selectedAtom()}>
+                {(server) => (
+                    <div class="agent-primitive-modal-readonly">
+                        <h3 class="agent-primitive-modal-name">{server().name}</h3>
+                        <Show
+                            when={server().is_global}
+                            fallback={
+                                <p class="agent-primitive-modal-global-note">
+                                    Created by this agent's own tools — not editable here.
+                                </p>
+                            }
+                        >
+                            <p class="agent-primitive-modal-global-note">
+                                Global — managed in the Armory. You can bind/unbind it here, or{" "}
+                                <button
+                                    type="button"
+                                    class="agent-primitive-modal-link-btn"
+                                    onClick={() => void openOrFocusPaneByView("armory")}
+                                >
+                                    edit it there
+                                </button>
+                                .
+                            </p>
+                        </Show>
+                        <span class="agent-primitive-modal-field-label">Transport</span>
+                        <pre class="agent-primitive-modal-field-value">{server().transport}</pre>
+                        <span class="agent-primitive-modal-field-label">Config</span>
+                        <pre class="agent-primitive-modal-field-value">{server().config}</pre>
+                        <Show when={server().is_global}>
+                            <div class="agent-primitive-modal-actions">
+                                <Show
+                                    when={server().bound_to_agent}
+                                    fallback={
+                                        <button
+                                            class="agent-primitive-modal-btn agent-primitive-modal-btn-primary"
+                                            onClick={() => void model.bind(server().id)}
+                                        >
+                                            Bind
+                                        </button>
+                                    }
+                                >
                                     <button
-                                        type="button"
                                         class="agent-primitive-modal-btn"
-                                        onClick={() => model.cancelDraft()}
-                                        disabled={model.savingAtom()}
+                                        onClick={() => void model.unbind(server().id)}
                                     >
-                                        Cancel
+                                        Unbind
                                     </button>
-                                    <button
-                                        type="submit"
-                                        class="agent-primitive-modal-btn agent-primitive-modal-btn-primary"
-                                        disabled={model.savingAtom() || !draft().name.trim()}
-                                    >
-                                        {model.savingAtom() ? "Saving…" : "Save"}
-                                    </button>
-                                </div>
-                            </form>
-                        )}
+                                </Show>
+                            </div>
+                        </Show>
+                    </div>
+                )}
             </Show>
         </div>
     );

@@ -21,6 +21,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_skill_catalog_upsert(engine, state);
     register_skill_catalog_delete(engine, state);
     register_skill_catalog_bind(engine, state);
+    register_skill_catalog_list_for_agent(engine, state);
+    register_skill_catalog_unbind(engine, state);
 }
 
 fn register_skill_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -329,10 +331,12 @@ fn register_skill_catalog_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
 // See docs/reports/REPORT_ARMORY_SKILLS_MARKDOWN_AND_BIND_BUG_2026_07_27.md §2.4.
 fn register_skill_catalog_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
+    let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_SKILL_CATALOG_BIND,
         Box::new(move |data, _ctx| {
             let wstore = wstore.clone();
+            let broker = broker.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
                 struct Req { agent_id: String, skill_id: String }
@@ -356,7 +360,70 @@ fn register_skill_catalog_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 }
                 wstore.skill_bind(&req.agent_id, &req.skill_id)
                     .map_err(|e| format!("skill.catalog.bind: {e}"))?;
+                // Lets any other open Stash/Armory view for this agent pick up
+                // the new binding without a manual refresh — skill.bind (the
+                // check_s1 agent-self-service path) intentionally left alone.
+                broker.publish(crate::backend::wps::WaveEvent {
+                    event: "skills:changed".to_string(),
+                    scopes: vec![], sender: String::new(), persist: 0, data: None,
+                });
                 Ok(Some(json!({ "bound": true })))
+            })
+        }),
+    );
+}
+
+/// Catalog-tier sibling of `skill.list` (above) — same computation
+/// (`wstore.skill_list`, every global skill plus this agent's own private
+/// ones, each annotated with `bound_to_agent`), but no `check_s1`:
+/// AgentStashModal's Skills tab (the per-agent Stash view) runs over the
+/// dashboard's connection, which is never agent-authenticated, so
+/// `skill.list`'s gate can never be satisfied from that caller — the exact
+/// same reasoning as `skill.catalog.bind` above.
+/// See docs/reports/REPORT_ARMORY_ARCHITECTURE_AND_NAMING_REVIEW_2026_07_23.md §2.2.
+fn register_skill_catalog_list_for_agent(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let wstore = state.wstore.clone();
+    engine.register_handler(
+        COMMAND_SKILL_CATALOG_LIST_FOR_AGENT,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            Box::pin(async move {
+                #[derive(serde::Deserialize)]
+                struct Req { agent_id: String }
+                let req: Req = serde_json::from_value(data)
+                    .map_err(|e| format!("skill.catalog.list_for_agent: {e}"))?;
+                let skills = wstore.skill_list(&req.agent_id)
+                    .map_err(|e| format!("skill.catalog.list_for_agent: {e}"))?;
+                Ok(Some(serde_json::to_value(&skills).map_err(|e| e.to_string())?))
+            })
+        }),
+    );
+}
+
+/// Catalog-tier sibling of `skill.unbind` (above) — same DB write, no
+/// `check_s1`, same rationale as `register_skill_catalog_list_for_agent`.
+fn register_skill_catalog_unbind(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let wstore = state.wstore.clone();
+    let broker = state.broker.clone();
+    engine.register_handler(
+        COMMAND_SKILL_CATALOG_UNBIND,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            let broker = broker.clone();
+            Box::pin(async move {
+                #[derive(serde::Deserialize)]
+                struct Req { agent_id: String, skill_id: String }
+                let req: Req = serde_json::from_value(data)
+                    .map_err(|e| format!("skill.catalog.unbind: {e}"))?;
+                let unbound = wstore.skill_unbind(&req.agent_id, &req.skill_id)
+                    .map_err(|e| format!("skill.catalog.unbind: {e}"))?;
+                if unbound {
+                    broker.publish(crate::backend::wps::WaveEvent {
+                        event: "skills:changed".to_string(),
+                        scopes: vec![], sender: String::new(), persist: 0, data: None,
+                    });
+                }
+                Ok(Some(json!({ "unbound": unbound })))
             })
         }),
     );
