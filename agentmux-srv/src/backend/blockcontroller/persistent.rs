@@ -553,10 +553,10 @@ impl PersistentSubprocessController {
     /// starts with an empty map even though the persisted transcript can
     /// still show the question as the tail node (deliberately preserved by
     /// `scrubOrphanedInProgress` as "may still be answerable"). The frontend
-    /// (`useAgentQuestions.ts`'s `handleAnswer`) treats ANY failure here as
-    /// "redeliver as a follow-up message instead" — it does not depend on
-    /// this specific error string — but keep it descriptive for `muxlog`
-    /// diagnosis. See
+    /// (`useAgentQuestions.ts`'s `SAFE_TO_RETRY_VIA_FOLLOWUP` allowlist)
+    /// matches on this error's text (the "no pending AskUserQuestion" prefix)
+    /// to redeliver as a follow-up message instead of rolling back — keep
+    /// that exact prefix stable if this message ever changes. See
     /// docs/reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md §2.7/§2.8.
     pub fn answer_question(&self, tool_use_id: String, answers: serde_json::Value) -> Result<(), String> {
         let (request_id, questions, tx) = {

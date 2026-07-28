@@ -171,10 +171,26 @@ export function useAgentQuestions(opts: UseAgentQuestionsOptions): UseAgentQuest
             // docs/reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md §2.7/§2.8.
             if (SAFE_TO_RETRY_VIA_FOLLOWUP.some((marker) => msg.includes(marker))) {
                 opts.log("agent", `Delivering AskUserQuestion answer as a follow-up message (${msg})`);
-                void opts.sendMessage(outcome.answer_text).catch((e: unknown) => {
-                    opts.log("error", `answer follow-up failed: ${String(e)}`);
-                    applyDoc(originals);
-                });
+                // No rollback-on-failure here: `opts.sendMessage` (bound to
+                // handleSendMessage → useAgentCommands.ts's `sendMessage` →
+                // `deliverToBackend`) never rejects — `deliverToBackend`'s own
+                // catch swallows an `AgentInputCommand` RPC failure, dispatches
+                // PendingMessageRejected/TurnStartFailed for ITS OWN UI
+                // signal, and returns normally (by design: most callers fire
+                // this and forget). A `.catch()` here would therefore never
+                // run — reagent P1 caught this: the original version of this
+                // fix claimed to roll back on a failed fallback, but that
+                // branch was unreachable dead code, so a genuinely failed
+                // follow-up would have silently left the optimistic "success"
+                // state in place with the answer never delivered. Matches the
+                // pre-existing Phase 2 (UNSUPPORTED_CONTROLLER) contract,
+                // which had the exact same limitation already — not a
+                // regression introduced by widening the allowlist, just newly
+                // examined. A genuinely undeliverable pane (e.g. no live
+                // controller at all) still gets its own signal elsewhere via
+                // TurnStartFailed/the failure-recovery row; it's just not
+                // tied back to reverting this specific question node.
+                void opts.sendMessage(outcome.answer_text);
                 return;
             }
             // Unrecognized failure (e.g. an RPC-engine timeout) — the

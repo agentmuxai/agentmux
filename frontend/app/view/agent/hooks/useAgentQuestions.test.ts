@@ -135,11 +135,25 @@ describe("useAgentQuestions — handleAnswer fallback", () => {
         dispose();
     });
 
-    it("still rolls back to awaiting_answer if the follow-up fallback ALSO fails", async () => {
+    // reagent P1: `opts.sendMessage` (handleSendMessage → useAgentCommands.ts's
+    // deliverToBackend) swallows an AgentInputCommand RPC failure — its own
+    // catch dispatches PendingMessageRejected/TurnStartFailed and returns
+    // WITHOUT rethrowing, by design (most callers fire-and-forget it). A
+    // `.catch()` on `sendMessage(...)` therefore never runs, even if the
+    // mock here is a directly-rejecting function (which does NOT reflect the
+    // real contract — the original version of this test made exactly that
+    // mistake). Pin the honest behavior instead: once a known-safe error
+    // triggers the fallback, the optimistic "success" state is kept
+    // regardless of whether the follow-up delivery itself later fails —
+    // there is no reliable signal to roll back on. Matches the pre-existing
+    // Phase 2 (UNSUPPORTED_CONTROLLER) contract, which had this same
+    // limitation before this PR touched anything.
+    it("keeps the optimistic state even if the follow-up delivery itself fails — sendMessage never rejects in production", async () => {
         hub.agentAnswer.mockRejectedValue(new Error("no pending AskUserQuestion for tool_use_id tu-1"));
-        const sendMessage = vi.fn().mockRejectedValue(new Error("network down"));
-        const logs: string[] = [];
-        const { handleAnswer, dispose } = setup(sendMessage, (_ch, msg) => logs.push(msg));
+        // Mirrors the real contract: deliverToBackend's catch swallows the
+        // RPC failure and resolves normally instead of rejecting.
+        const sendMessage = vi.fn().mockResolvedValue(undefined);
+        const { handleAnswer, dispose } = setup(sendMessage);
 
         handleAnswer({
             tool_use_id: TOOL_USE_ID,
@@ -150,14 +164,9 @@ describe("useAgentQuestions — handleAnswer fallback", () => {
         await Promise.resolve();
         await Promise.resolve();
         await Promise.resolve();
-        await Promise.resolve();
 
-        expect(sendMessage).toHaveBeenCalled();
-        // Last dispatched StreamFlush must restore the ORIGINAL awaiting_answer
-        // node (rollback), not leave it stuck on the optimistic "success".
-        const lastFlush = hub.dispatched[hub.dispatched.length - 1] as any;
-        expect(lastFlush.updatedNodes[0].status).toBe("awaiting_answer");
-        expect(logs.some((m) => m.includes("answer follow-up failed"))).toBe(true);
+        expect(sendMessage).toHaveBeenCalledWith("Pick one: a");
+        expect(updatedNodeFromDispatch()?.status).toBe("success");
         dispose();
     });
 
