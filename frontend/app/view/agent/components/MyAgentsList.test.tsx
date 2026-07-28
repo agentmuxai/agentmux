@@ -264,6 +264,41 @@ describe("MyAgentsList — fetch error (retro-my-agents-fresh-channel-regression
         consoleErrorSpy.mockRestore();
     });
 
+    // reagent P2 on PR #2328's re-review: switching `isLoading` to
+    // `rows.loading` (to fix the retry-flash bug above) is true for ANY
+    // in-flight fetch, including background refetches the old
+    // `rows() === undefined` check never touched (visibility regain,
+    // agents:changed events). The count badge's guard must not use the
+    // same `isLoading`, or it flickers away on every background refetch
+    // instead of just the very first load.
+    it("keeps the count badge visible during a background refetch, not just the initial load", async () => {
+        vi.mocked(RpcApi.ListRecentSessionsCommand)
+            .mockResolvedValueOnce(okResult([makeRow({ instance_id: "a", node_count: 3 })]))
+            // Never resolves — simulates a still-in-flight background
+            // refetch (e.g. an identity switch, or an agents:changed
+            // re-poll) so the count badge's behavior DURING that window
+            // is directly observable.
+            .mockImplementationOnce(() => new Promise(() => {}));
+
+        const [identityId, setIdentityId] = createSignal<string>("id-1");
+        render(() => (
+            <MyAgentsList identityId={identityId} onReattach={() => {}} />
+        ));
+
+        await screen.findAllByTestId("agent-my-agents-entry");
+        expect(screen.getByTestId("agent-my-agents-count")).toHaveTextContent("1");
+
+        // Trigger a refetch while the previous row is still showing.
+        setIdentityId("id-2");
+        await Promise.resolve();
+
+        // The stale row + its count badge must still be visible while the
+        // new (deliberately never-resolving, for this test) fetch is
+        // in flight — this is exactly what flickered away under the bug.
+        expect(screen.getByTestId("agent-my-agents-entry")).toBeInTheDocument();
+        expect(screen.getByTestId("agent-my-agents-count")).toHaveTextContent("1");
+    });
+
     // reagent P1 on PR #2327: session.rs's hardening (each of 6 data
     // sources degrades to empty on its own failure instead of aborting
     // the whole RPC) means the RPC itself basically never throws anymore
