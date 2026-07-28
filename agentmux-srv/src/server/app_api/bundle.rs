@@ -257,6 +257,7 @@ fn register_bundle_export(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     return Ok(Some(json!({
                         "root_slug": export.root_slug,
                         "skipped_skills": export.skipped_skills,
+                        "warnings": export.warnings,
                         "missing_skill_ids": missing_skill_ids,
                         "zip_base64": encoded,
                     })));

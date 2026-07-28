@@ -85,6 +85,15 @@ pub struct BundleExport {
     /// slash-command skills have no ABF representation, see Phase 0 /
     /// `SKILL_TYPE_AGENT_SKILL`).
     pub skipped_skills: Vec<String>,
+    /// Non-fatal problems encountered while exporting: malformed source
+    /// JSON (`context_files`/`mcp_servers`) that had to be treated as
+    /// empty, or a context-file path that collided with an earlier one
+    /// after normalization and was skipped rather than silently
+    /// overwriting it. Never blocks the export — surfaced to the
+    /// caller/UI instead of being silently swallowed, since a backup tool
+    /// losing data without saying so defeats its own purpose (reagent P1,
+    /// PR #2333).
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, serde::Deserialize, Default)]
@@ -157,6 +166,7 @@ pub fn export_bundle(bundle: &Memory, skills: &[Skill]) -> BundleExport {
     let root_slug = derive_slug(&bundle.name);
     let mut files = Vec::new();
     let mut skipped_skills = Vec::new();
+    let mut warnings = Vec::new();
 
     let mut manifest_instructions: Vec<String> = Vec::new();
     let mut manifest_skills: Vec<String> = Vec::new();
@@ -173,11 +183,28 @@ pub fn export_bundle(bundle: &Memory, skills: &[Skill]) -> BundleExport {
         manifest_instructions.push("instructions/AGENTS.md".to_string());
     }
 
-    let context_files: Vec<ContextFileEntry> =
-        serde_json::from_str(&bundle.context_files).unwrap_or_default();
+    let context_files: Vec<ContextFileEntry> = parse_json_field_or_warn(
+        &bundle.context_files,
+        "context_files",
+        &mut warnings,
+    );
+    let mut used_context_paths: HashSet<String> = HashSet::new();
     for entry in context_files {
         if let Some(safe_path) = sanitize_context_relative_path(&entry.path) {
             let out_path = format!("instructions/context/{safe_path}");
+            // Two distinct source paths can normalize to the same output
+            // (e.g. "docs/a.md" and "docs/./a.md") -- without this check the
+            // second silently overwrites the first's `files` entry, and the
+            // zip archive ends up with the same duplicate risk (reagent P2,
+            // PR #2333).
+            if !used_context_paths.insert(out_path.clone()) {
+                warnings.push(format!(
+                    "context_files: \"{}\" normalizes to the same path as an \
+                     earlier entry ({out_path}); skipped to avoid overwriting it",
+                    entry.path
+                ));
+                continue;
+            }
             manifest_instructions.push(out_path.clone());
             files.push(BundleExportFile {
                 path: out_path,
@@ -215,7 +242,8 @@ pub fn export_bundle(bundle: &Memory, skills: &[Skill]) -> BundleExport {
     // ------------------------------------------------------------------
     // mcp/<slug>.server.json + inferred accounts/requirements.json
     // ------------------------------------------------------------------
-    let mcp_entries: Vec<Value> = serde_json::from_str(&bundle.mcp_servers).unwrap_or_default();
+    let mcp_entries: Vec<Value> =
+        parse_json_field_or_warn(&bundle.mcp_servers, "mcp_servers", &mut warnings);
     let mut used_mcp_slugs: HashSet<String> = HashSet::new();
     let mut requirements: Vec<Value> = Vec::new();
     for (index, entry) in mcp_entries.iter().enumerate() {
@@ -305,6 +333,30 @@ pub fn export_bundle(bundle: &Memory, skills: &[Skill]) -> BundleExport {
         root_slug,
         files,
         skipped_skills,
+        warnings,
+    }
+}
+
+/// Parse a `db_bundles` JSON-array column (`context_files`/`mcp_servers`),
+/// treating a blank/whitespace-only value as "genuinely no data" (not an
+/// error) but pushing a warning to `warnings` for anything non-blank that
+/// fails to parse, rather than silently discarding it via
+/// `unwrap_or_default()` — an export that quietly loses data defeats its
+/// own backup/portability purpose (reagent P1, PR #2333).
+fn parse_json_field_or_warn<T: serde::de::DeserializeOwned + Default>(
+    raw: &str,
+    field_name: &str,
+    warnings: &mut Vec<String>,
+) -> T {
+    if raw.trim().is_empty() {
+        return T::default();
+    }
+    match serde_json::from_str(raw) {
+        Ok(v) => v,
+        Err(e) => {
+            warnings.push(format!("{field_name}: malformed JSON, treated as empty ({e})"));
+            T::default()
+        }
     }
 }
 
@@ -495,6 +547,66 @@ mod tests {
         let bundle = make_bundle("", "[]", mcp_servers, "[]");
         let export = export_bundle(&bundle, &[]);
         assert!(!export.files.iter().any(|f| f.path == "accounts/requirements.json"));
+    }
+
+    #[test]
+    fn malformed_context_files_json_warns_instead_of_silently_dropping_data() {
+        // reagent P1, PR #2333: previously unwrap_or_default() silently
+        // treated malformed context_files as empty, with no signal to the
+        // caller that data was lost -- defeats the exporter's stated
+        // backup/portability guarantee.
+        let bundle = make_bundle("", "{not valid json", "[]", "[]");
+        let export = export_bundle(&bundle, &[]);
+        assert!(
+            export.warnings.iter().any(|w| w.contains("context_files") && w.contains("malformed")),
+            "expected a warning about malformed context_files, got: {:?}",
+            export.warnings
+        );
+    }
+
+    #[test]
+    fn malformed_mcp_servers_json_warns_instead_of_silently_dropping_data() {
+        let bundle = make_bundle("", "[]", "not an array at all", "[]");
+        let export = export_bundle(&bundle, &[]);
+        assert!(
+            export.warnings.iter().any(|w| w.contains("mcp_servers") && w.contains("malformed")),
+            "expected a warning about malformed mcp_servers, got: {:?}",
+            export.warnings
+        );
+    }
+
+    #[test]
+    fn blank_context_files_and_mcp_servers_produce_no_warning() {
+        // A genuinely empty/unset field is not an error -- must not warn.
+        let bundle = make_bundle("", "", "", "[]");
+        let export = export_bundle(&bundle, &[]);
+        assert!(export.warnings.is_empty(), "blank fields must not warn: {:?}", export.warnings);
+    }
+
+    #[test]
+    fn colliding_context_file_paths_are_deduped_with_a_warning() {
+        // reagent P2, PR #2333: two distinct source paths that normalize to
+        // the same output (e.g. a redundant "./" component) previously
+        // silently overwrote one `files` entry with the other.
+        let context_files = r#"[
+            {"path":"docs/a.md","content":"first"},
+            {"path":"docs/./a.md","content":"second, would silently clobber the first"}
+        ]"#;
+        let bundle = make_bundle("", context_files, "[]", "[]");
+        let export = export_bundle(&bundle, &[]);
+
+        let matches: Vec<_> = export
+            .files
+            .iter()
+            .filter(|f| f.path == "instructions/context/docs/a.md")
+            .collect();
+        assert_eq!(matches.len(), 1, "must not produce duplicate file entries for the same path");
+        assert_eq!(matches[0].content, "first", "the first entry must win, not be silently overwritten");
+        assert!(
+            export.warnings.iter().any(|w| w.contains("docs/./a.md")),
+            "expected a warning naming the skipped duplicate, got: {:?}",
+            export.warnings
+        );
     }
 
     #[test]
