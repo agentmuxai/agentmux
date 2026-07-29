@@ -2212,6 +2212,69 @@ describe("useAgentCommands — idle sendMessage runs the deferred controller ref
             dispose();
         });
     });
+
+    // reagentx P1 on PR #2338 (thirty-seventh re-review): recallLatestHeld
+    // never rolled back the OPTIMISTIC TurnStart handleSendMessage already
+    // dispatched for an idle-send hold, unlike flushHeldMessages's own
+    // rejection path (fixed in this PR's prior commit) — recalling such an
+    // item left the pane stuck in Submitting/"Working…" forever, since
+    // PendingMessageRejected only ever touches the pending list, not
+    // turnPhase.
+    it("rolls back the optimistic TurnStart when recalling (ArrowUp) an idle-held message, so the pane returns to Idle", async () => {
+        hub.dispatchSlashCommand.mockImplementation(async (_msg: string, _registry: unknown, ctx: { deferControllerRefreshUntilIdle: () => void }) => {
+            ctx.deferControllerRefreshUntilIdle();
+            return { kind: "handled" };
+        });
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh: async () => false,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => false,
+                backToPicker: async () => {},
+            });
+
+            // /login succeeds mid-turn (defers instead of refreshing now).
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("/login", /* wasAlreadyWorking */ true);
+
+            // A fresh idle send captures a live auth failure right before
+            // TurnStart clears it — this is the idle-send push site, the
+            // ONLY one that sets initiatedTurnOptimistically: true. The
+            // refresh is still blocked, so this gets held.
+            const capturedFailure: AgentFailure = { code: "auth", title: "Not logged in", detail: "401", retryable: true };
+            await commands.sendMessage("held message", /* wasAlreadyWorking */ false, capturedFailure);
+            expect(commands.hasHeldMessages()).toBe(true);
+            expect(paneSnapshot(BLOCK_ID)?.turnPhase.kind).not.toBe("Idle");
+
+            // The user presses ArrowUp to recall the message un-sent —
+            // BEFORE any flush ever runs.
+            const recalled = commands.recallLatestHeld();
+
+            expect(recalled?.text).toBe("held message");
+            expect(commands.hasHeldMessages()).toBe(false);
+            // The pane must not be stuck in Submitting/"Working…" forever —
+            // no message ever reached the backend for this optimistic turn.
+            expect(paneSnapshot(BLOCK_ID)?.turnPhase.kind).toBe("Idle");
+            dispose();
+        });
+    });
 });
 
 // Codex P1 on PR #2338 (nineteenth re-review): a premature per-round

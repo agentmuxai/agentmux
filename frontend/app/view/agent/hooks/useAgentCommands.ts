@@ -1454,6 +1454,16 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
     const recallLatestHeld = (): { text: string } | null => {
         const item = heldQueue.pop();
         if (!item) return null;
+        // Roll back the OPTIMISTIC TurnStart handleSendMessage already
+        // dispatched for this item's idle-send hold — mirrors
+        // flushHeldMessages's own rejection path fix. Without this,
+        // recalling such an item via ArrowUp leaves the pane stuck in
+        // Submitting/"Working…" forever: PendingMessageRejected below only
+        // ever touches the pending list, never turnPhase. reagentx P1 on
+        // PR #2338 (thirty-seventh re-review).
+        if (item.initiatedTurnOptimistically) {
+            opts.model.dispatchPane({ type: "TurnStartFailed" }, "system");
+        }
         // Restore the recovery UI ("Login Again"/"Use existing login") when
         // this item carries a live auth failure the caller captured before
         // its own TurnStart cleared it (the idle-send blocked-refresh
