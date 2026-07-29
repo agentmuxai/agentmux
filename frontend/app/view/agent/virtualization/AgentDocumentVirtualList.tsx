@@ -142,6 +142,26 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // scroll position is current when the frame runs is the one applied.
     let scrollRafId: number | null = null;
 
+    // Set immediately before every programmatic scrollTo() call below
+    // (pin-to-bottom effect, ResizeObserver re-pin, jumpToBottom), consumed
+    // by the very next handleScrollNow() call. A `scrollTo()` call itself
+    // fires a native `scroll` event, coalesced by scrollRafId into the same
+    // handleScrollNow() batch as any other scroll activity in that frame —
+    // this flag lets that call distinguish "this scroll event resulted from
+    // OUR OWN auto-scroll" from a genuine user scroll landing in the same
+    // batch, so the disengage branch below doesn't misattribute it. Third
+    // documented attempt at the "scroll-follow silently stops" class of bug
+    // (docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md,
+    // docs/specs/SPEC_WORKING_STATE_AND_SCROLL_FOLLOW_HARDENING_2026_07_27.md §3/§5)
+    // — this is the "input-gating race" both prior passes deferred pending
+    // live reports continuing, which they did.
+    let pendingProgrammaticScroll = false;
+    function scrollToTrueBottom(): void {
+        if (!scrollRef) return;
+        pendingProgrammaticScroll = true;
+        scrollRef.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: "auto" });
+    }
+
     // Sticky frontier id — set once when the document first crosses
     // STREAMING_BUFFER_SIZE; advanced whenever the buffer exceeds the
     // cap (see below) to keep streamingNodes.length ≤ STREAMING_BUFFER_SIZE.
@@ -420,7 +440,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                 // Re-check: user may have disengaged stickToBottom between
                 // when this microtask was queued and when it fires.
                 if (!props.viewState.stickToBottom()) return;
-                scrollRef.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: "auto" });
+                scrollToTrueBottom();
                 // New content may have pushed a held-open tool above the top
                 // without a user scroll event — collapse it now (pinned to
                 // bottom, so no visible jump).
@@ -453,7 +473,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         const ro = new ResizeObserver(() => {
             const h = scrollRef.clientHeight;
             if (h > 0 && props.viewState.stickToBottom()) {
-                scrollRef.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: "auto" });
+                scrollToTrueBottom();
             }
             // Phase 3: the scroll container resizing changes the viewport the
             // slice windows against — feed it (covers hidden→visible 0→N and
@@ -476,7 +496,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     const jumpToBottom = (): void => {
         if (!scrollRef) return;
         props.viewState.engageStickToBottom();
-        scrollRef.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: "auto" });
+        scrollToTrueBottom();
     };
     if (props.scrollToBottomRef) props.scrollToBottomRef(jumpToBottom);
 
@@ -551,6 +571,14 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         if (!scrollRef) return;
         const { scrollTop, scrollHeight, clientHeight } = scrollRef;
 
+        // Consume the programmatic-scroll flag for THIS batch — see
+        // scrollToTrueBottom's own comment. Read once, up front: every
+        // branch below that might disengage needs to know whether this
+        // scroll event batch was (at least partly) caused by our own
+        // auto-scroll, not just the disengage branch specifically.
+        const wasProgrammatic = pendingProgrammaticScroll;
+        pendingProgrammaticScroll = false;
+
         // Phase 4: scrollTop / clientHeight are already unzoomed CSS px under the
         // ancestor CSS `zoom` (CDP-confirmed: ratio 1.0 at zoom 0.5/2 — only
         // getBoundingClientRect is zoomed), so push them raw. The lone ÷zoom is
@@ -581,7 +609,29 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             }
         } else {
             if (props.viewState.stickToBottom()) {
-                props.viewState.disengageStickToBottom();
+                const gapPx = scrollHeight - clientHeight - scrollTop;
+                if (wasProgrammatic) {
+                    // This scroll event batch included our own scrollTo()
+                    // call — isNearBottom() reading "not near bottom" here
+                    // means either new content landed in the same tick
+                    // (the pin effect's own reactive deps will re-fire and
+                    // re-scroll) or a user scroll got coalesced into the
+                    // same frame. Either way, disengaging on THIS event
+                    // would be misattributing our own auto-scroll (or a
+                    // same-frame race) as the user scrolling away.
+                    console.info(
+                        "[wave-scroll]",
+                        `pane=${props.blockId?.slice(0, 7) ?? "?"}`,
+                        `suppressed disengage — programmatic scroll in this batch, gap=${gapPx}px`,
+                    );
+                } else {
+                    console.info(
+                        "[wave-scroll]",
+                        `pane=${props.blockId?.slice(0, 7) ?? "?"}`,
+                        `disengage — scrollTop=${scrollTop} scrollHeight=${scrollHeight} clientHeight=${clientHeight} gap=${gapPx}px`,
+                    );
+                    props.viewState.disengageStickToBottom();
+                }
             }
         }
 
