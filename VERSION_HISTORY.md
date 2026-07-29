@@ -1,5 +1,30 @@
 # AgentMux Version History
 
+## 0.54.7 — 2026-07-29
+
+- feat(telemetry): [wave-turn] diagnostic logging for the turn-phase state machine + watchdog reasoning
+- feat(armory): add Agent Skills (SKILL.md) format for skills, ABF Phase 0
+- feat(agent): guarantee pane close/reopen resumes the real conversation, or discloses it couldn't
+- fix(armory): align ArmorySection ids with their labels (memory/bundles, not brain/memories)
+- feat(armory): add bundle.export RPC — ABF Phase 1 exporter
+- feat(agent): harden Working-state and scroll-follow against 4 recurring desync bugs
+- fix(agent): harden My Agents against single-source failures, distinguish error from empty
+- fix(stash): MCP Servers and Skills tabs no longer fail unauthorized; reactive read+bind view over the Armory catalog
+- fix(agent): keep My Agents loading state visible during a retry, don't flash empty
+- feat(agent): collapse mid-line spinner/progress redraws in tool preview + bashwrap
+- fix(agent): let an AskUserQuestion answer survive a pane reopen or process respawn
+- fix(floating-pane): restore resize hit-target from 4px to 8px
+- feat(agent): surface a Restart action when an agent process goes unresponsive
+- fix(auth): fast-fail sends from a pane already known-unauthenticated
+- fix(deps): pin brace-expansion to patch the DoS advisory (SEC-005)
+- fix(agent): remove legacy standalone subagent pane, never show raw slugs in the agent pane
+- feat(muxbus): per-agent M2M credential fetch/cache, wired into cloud_subscriber's reactive requests
+- fix(build): wire up Windows codec-enabled CEF default-location auto-pickup + advisory warning
+- fix(muxbus): set MUXBUS_AGENT_ID directly at spawn time (ARCH-002)
+- fix(agent-pane): keep scrollbar visible above working-row/dock overlays and harden scroll-follow against programmatic-scroll races
+- feat(srv): cross-process session-ownership lease foundation (registry::LeaseStore)
+
+
 ## 0.54.6 — 2026-07-27
 
 - feat(macos): tab redock via CGEventTap — cross-window tab drag now merges directly with a live insertion indicator, matching Windows
