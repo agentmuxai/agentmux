@@ -358,6 +358,35 @@ impl AcpController {
                                 if let Some(prompt) = inner.pending_prompt.take() {
                                     let id = rpc_id_clone.fetch_add(1, Ordering::Relaxed);
                                     outstanding_prompt_ids_clone.lock().unwrap().insert(id);
+                                    // Mark the turn active + publish, mirroring
+                                    // send_input's identical pattern — without
+                                    // this, a prompt flushed here (queued before
+                                    // the controller finished starting) is
+                                    // invisible to is_active_turn()/wasTurnActive:
+                                    // a concurrently-deferred /login controller
+                                    // refresh could then read
+                                    // isBackendTurnConfirmedIdle() as true and
+                                    // force-restart the controller while this
+                                    // flushed prompt is genuinely in flight.
+                                    // reagentx P2 on PR #2338 (thirty-first
+                                    // re-review).
+                                    let was_active = health_clone.mark_turn_active_returning_was_active();
+                                    if !was_active {
+                                        core::spawn_health_watchdog(&health_clone);
+                                    }
+                                    if let Some(ref broker) = broker_clone {
+                                        let status = BlockControllerRuntimeStatus {
+                                            blockid: block_id_stdout.clone(),
+                                            version: inner.status_version,
+                                            shellprocstatus: inner.proc_status.clone(),
+                                            shellprocconnname: "local".to_string(),
+                                            shellprocexitcode: inner.proc_exit_code,
+                                            spawn_ts_ms: None,
+                                            is_agent_pane: true,
+                                            turn_active: true,
+                                        };
+                                        super::publish_controller_status(broker, &status);
+                                    }
                                     let req = serde_json::json!({
                                         "jsonrpc": "2.0",
                                         "id": id,
@@ -370,6 +399,34 @@ impl AcpController {
                                     if let Some(ref tx) = inner.stdin_tx {
                                         if tx.try_send(req).is_err() {
                                             tracing::warn!(block_id = %block_id_stdout, "[acp] session/prompt send failed — channel full or closed");
+                                            // Mirror send_input's enqueue-failure
+                                            // rollback: this prompt was never
+                                            // really sent, so it must not be
+                                            // left occupying the outstanding set
+                                            // or leave the turn marked active
+                                            // when nothing else is genuinely
+                                            // outstanding.
+                                            let now_empty = {
+                                                let mut outstanding = outstanding_prompt_ids_clone.lock().unwrap();
+                                                outstanding.remove(&id);
+                                                outstanding.is_empty()
+                                            };
+                                            if now_empty {
+                                                health_clone.set_active_turn(false);
+                                                if let Some(ref broker) = broker_clone {
+                                                    let status = BlockControllerRuntimeStatus {
+                                                        blockid: block_id_stdout.clone(),
+                                                        version: inner.status_version,
+                                                        shellprocstatus: inner.proc_status.clone(),
+                                                        shellprocconnname: "local".to_string(),
+                                                        shellprocexitcode: inner.proc_exit_code,
+                                                        spawn_ts_ms: None,
+                                                        is_agent_pane: true,
+                                                        turn_active: false,
+                                                    };
+                                                    super::publish_controller_status(broker, &status);
+                                                }
+                                            }
                                         }
                                     }
                                 }
