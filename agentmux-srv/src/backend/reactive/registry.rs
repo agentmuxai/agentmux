@@ -172,11 +172,41 @@ pub fn cleanup_stale(data_dir: &Path, max_age_ms: u64) {
 // delivery). Sibling API to the per-channel functions above, rooted at a
 // DIFFERENT directory (`registry::resolve_shared_reactive_dir()`, passed
 // in by the caller rather than resolved here to keep this module free of
-// a dependency on the `registry` crate module). One file per agent name,
-// holding a JSON array of entries — one per channel currently running
-// that name — so two channels registering the same agent name don't
-// clobber each other (§4.2 of the cross-channel delivery spec).
+// a dependency on the `registry` crate module).
+//
+// Layout: `<shared_dir>/agents/<agent_name>/<channel>.json`, one file per
+// (agent, channel) pair — NOT a single JSON array shared across channels.
+// Each channel only ever reads/writes its OWN file, so two channels
+// registering the same agent name concurrently never contend on the same
+// file: no read-modify-write race is possible by construction, and no
+// locking is needed (reagent P1 on PR #2350 — the earlier one-array-per-
+// name design let a concurrent register/unregister from a different
+// channel silently clobber this channel's entry, since two writers could
+// each read the pre-write array before either wrote back, with no
+// periodic repair since a channel only ever writes once at agent spawn).
+// §4.2 of the cross-channel delivery spec.
 // ---------------------------------------------------------------------
+
+/// Lowercase + sanitize a single path component (agent name or channel
+/// id) to alphanumeric/dash/underscore only, preventing path traversal
+/// and matching `ReactiveHandler`'s lowercase key convention.
+fn sanitize_path_component(raw: &str) -> String {
+    raw.to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .collect()
+}
+
+/// Directory holding one file per channel currently registering
+/// `agent_id` in the host-global shared registry.
+fn shared_agent_dir(shared_dir: &Path, agent_id: &str) -> PathBuf {
+    agents_dir(shared_dir).join(sanitize_path_component(agent_id))
+}
+
+/// Path to one (agent, channel) pair's entry file.
+fn shared_channel_path(shared_dir: &Path, agent_id: &str, channel: &str) -> PathBuf {
+    shared_agent_dir(shared_dir, agent_id).join(format!("{}.json", sanitize_path_component(channel)))
+}
 
 /// True if a process with this PID is currently running on this host.
 /// Meaningful here specifically because the shared registry is always
@@ -198,24 +228,15 @@ fn pid_alive(pid: u32) -> bool {
 }
 
 /// Write (create or update) this channel's entry for `agent_id` in the
-/// host-global shared registry. Preserves other channels' entries for the
-/// same name (read-modify-write over the array, replacing only the entry
-/// whose `channel` matches this call's).
-///
-/// Concurrency note: two channels writing the *same* channel's entry at
-/// literally the same instant could race (read-modify-write, no file
-/// lock) — same relaxed consistency the existing per-channel registry
-/// already has (no locking there either). Worst case is a lost update
-/// until the next write/cleanup, not a correctness or security issue;
-/// registration is not a hot path.
+/// host-global shared registry. Writes only this channel's own file
+/// (`shared_channel_path`) — never touches another channel's file, so
+/// concurrent writers for different channels of the same agent name
+/// cannot race or clobber each other.
 pub fn write_shared(shared_dir: &Path, agent_id: &str, local_url: &str, block_id: &str, channel: &str) {
-    let dir = agents_dir(shared_dir);
+    let dir = shared_agent_dir(shared_dir, agent_id);
     let _ = std::fs::create_dir_all(&dir);
-    let path = agent_path(shared_dir, agent_id);
-
-    let mut list = read_shared_entries(&path);
-    list.retain(|e| e.channel != channel);
-    list.push(AgentEntry {
+    let path = shared_channel_path(shared_dir, agent_id, channel);
+    let entry = AgentEntry {
         agent_id: agent_id.to_string(),
         local_url: local_url.to_string(),
         block_id: block_id.to_string(),
@@ -223,22 +244,18 @@ pub fn write_shared(shared_dir: &Path, agent_id: &str, local_url: &str, block_id
         updated_at: now_unix_millis(),
         auth_key: local_auth_key().to_string(),
         channel: channel.to_string(),
-    });
-
-    write_shared_entries(&path, &list);
+    };
+    write_entry_file(&path, &entry);
 }
 
 /// Remove this channel's entry for `agent_id` from the shared registry.
-/// Removes the whole file once no channel's entry remains.
+/// Best-effort removes the now-possibly-empty agent directory too (a
+/// concurrent writer recreating it a moment later is harmless — the next
+/// write just re-creates the directory via `create_dir_all`).
 pub fn remove_shared(shared_dir: &Path, agent_id: &str, channel: &str) {
-    let path = agent_path(shared_dir, agent_id);
-    let mut list = read_shared_entries(&path);
-    list.retain(|e| e.channel != channel);
-    if list.is_empty() {
-        let _ = std::fs::remove_file(&path);
-    } else {
-        write_shared_entries(&path, &list);
-    }
+    let path = shared_channel_path(shared_dir, agent_id, channel);
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_dir(shared_agent_dir(shared_dir, agent_id));
 }
 
 /// Convenience wrapper over [`write_shared`]: resolves the shared dir and
@@ -271,8 +288,8 @@ pub fn remove_shared_from_env(agent_id: &str) {
 /// `server/reactive.rs`, matching how this codebase already handles
 /// registry staleness elsewhere rather than re-validating on every read.
 pub fn lookup_all_shared(shared_dir: &Path, agent_id: &str) -> Vec<AgentEntry> {
-    let path = agent_path(shared_dir, agent_id);
-    let mut list = read_shared_entries(&path);
+    let dir = shared_agent_dir(shared_dir, agent_id);
+    let mut list = read_entry_files_in_dir(&dir);
     list.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
     list
 }
@@ -290,10 +307,10 @@ pub fn list_all_shared(shared_dir: &Path) -> Vec<AgentEntry> {
     let mut out = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+        if !path.is_dir() {
             continue;
         }
-        out.extend(read_shared_entries(&path));
+        out.extend(read_entry_files_in_dir(&path));
     }
     out
 }
@@ -305,43 +322,62 @@ pub fn list_all_shared(shared_dir: &Path) -> Vec<AgentEntry> {
 /// belonging to a channel that hadn't restarted.
 pub fn cleanup_stale_shared(shared_dir: &Path, max_age_ms: u64) {
     let dir = agents_dir(shared_dir);
-    let Ok(entries) = std::fs::read_dir(&dir) else { return };
+    let Ok(agent_dirs) = std::fs::read_dir(&dir) else { return };
     let cutoff = now_unix_millis().saturating_sub(max_age_ms);
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+    for agent_dir_entry in agent_dirs.flatten() {
+        let agent_dir_path = agent_dir_entry.path();
+        if !agent_dir_path.is_dir() {
             continue;
         }
-        let list = read_shared_entries(&path);
-        let live: Vec<AgentEntry> = list
-            .into_iter()
-            .filter(|e| e.updated_at >= cutoff && pid_alive(e.pid))
-            .collect();
-        if live.is_empty() {
-            let _ = std::fs::remove_file(&path);
-        } else {
-            write_shared_entries(&path, &live);
+        let Ok(channel_files) = std::fs::read_dir(&agent_dir_path) else { continue };
+        for channel_entry in channel_files.flatten() {
+            let channel_path = channel_entry.path();
+            if channel_path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            let keep = read_entry_file(&channel_path)
+                .map(|e| e.updated_at >= cutoff && pid_alive(e.pid))
+                .unwrap_or(false);
+            if !keep {
+                let _ = std::fs::remove_file(&channel_path);
+            }
         }
+        // Best-effort: only actually removes the directory if it's now
+        // empty (every channel file was stale) — a concurrent writer
+        // recreating it right after is harmless, same as `remove_shared`.
+        let _ = std::fs::remove_dir(&agent_dir_path);
     }
 }
 
-/// Best-effort read of a shared-registry file as a JSON array. Missing,
-/// unreadable, or malformed files are treated as "no entries" — same
+/// Best-effort read of one (agent, channel) entry file. Missing,
+/// unreadable, or malformed files are treated as absent — same
 /// graceful-degradation posture as the per-channel `lookup`.
-fn read_shared_entries(path: &Path) -> Vec<AgentEntry> {
-    let Ok(content) = std::fs::read_to_string(path) else {
-        return Vec::new();
-    };
-    serde_json::from_str(&content).unwrap_or_default()
+fn read_entry_file(path: &Path) -> Option<AgentEntry> {
+    let content = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&content).ok()
 }
 
-/// Write a shared-registry file's full entry list, atomically (temp file
-/// + rename) so a concurrent reader never observes a partially-written
-/// array. Mode 0600 on Unix at open time — same auth_key exposure
-/// boundary as the per-channel registry (§5 of the cross-channel spec:
-/// same-user trust boundary, not cross-user).
-fn write_shared_entries(path: &Path, list: &[AgentEntry]) {
-    let Ok(json) = serde_json::to_string(list) else { return };
+/// Read every valid `.json` entry file directly inside `dir` (one level,
+/// not recursive) — used for both `lookup_all_shared` (one agent's
+/// per-channel dir) and `list_all_shared` (one agent-name dir at a time).
+fn read_entry_files_in_dir(dir: &Path) -> Vec<AgentEntry> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("json"))
+        .filter_map(|e| read_entry_file(&e.path()))
+        .collect()
+}
+
+/// Write one (agent, channel) entry file, atomically (temp file + rename)
+/// so a concurrent reader never observes a partially-written file. Mode
+/// 0600 on Unix at open time — same auth_key exposure boundary as the
+/// per-channel registry (§5 of the cross-channel spec: same-user trust
+/// boundary, not cross-user).
+fn write_entry_file(path: &Path, entry: &AgentEntry) {
+    let Ok(json) = serde_json::to_string(entry) else { return };
     let tmp_path = path.with_extension("json.tmp");
 
     let mut opts = std::fs::OpenOptions::new();
@@ -425,16 +461,14 @@ mod shared_tests {
         let dir = tempfile::tempdir().unwrap();
         write_shared(dir.path(), "agentx", "http://127.0.0.1:9001", "block1", "dev-a");
         write_shared(dir.path(), "agentx", "http://127.0.0.1:9002", "block2", "dev-b");
-        // Directly bump dev-b's updated_at so it's unambiguously freshest,
-        // independent of how fast the two writes above happened to run.
-        let path = agent_path(dir.path(), "agentx");
-        let mut list = read_shared_entries(&path);
-        for e in list.iter_mut() {
-            if e.channel == "dev-b" {
-                e.updated_at += 10_000;
-            }
-        }
-        write_shared_entries(&path, &list);
+        // Directly bump dev-b's own file's updated_at so it's unambiguously
+        // freshest, independent of how fast the two writes above happened
+        // to run. Only touches dev-b's own file -- exactly the point of
+        // the one-file-per-channel layout.
+        let path = shared_channel_path(dir.path(), "agentx", "dev-b");
+        let mut entry = read_entry_file(&path).unwrap();
+        entry.updated_at += 10_000;
+        write_entry_file(&path, &entry);
 
         let found = lookup_all_shared(dir.path(), "agentx");
         assert_eq!(found[0].channel, "dev-b");
@@ -453,12 +487,13 @@ mod shared_tests {
     }
 
     #[test]
-    fn remove_shared_last_channel_deletes_file() {
+    fn remove_shared_last_channel_deletes_file_and_dir() {
         let dir = tempfile::tempdir().unwrap();
         write_shared(dir.path(), "agentx", "http://127.0.0.1:9001", "block1", "dev-a");
         remove_shared(dir.path(), "agentx", "dev-a");
         assert!(lookup_all_shared(dir.path(), "agentx").is_empty());
-        assert!(!agent_path(dir.path(), "agentx").exists());
+        assert!(!shared_channel_path(dir.path(), "agentx", "dev-a").exists());
+        assert!(!shared_agent_dir(dir.path(), "agentx").exists());
     }
 
     #[test]
@@ -482,11 +517,11 @@ mod shared_tests {
         write_shared(dir.path(), "agentx", "http://127.0.0.1:9001", "block1", "dev-a");
         // Backdate updated_at well past the TTL, but keep pid as our own
         // (alive) so only the TTL check can be responsible for eviction.
-        let path = agent_path(dir.path(), "agentx");
-        let mut list = read_shared_entries(&path);
-        list[0].updated_at = 0;
-        list[0].pid = std::process::id();
-        write_shared_entries(&path, &list);
+        let path = shared_channel_path(dir.path(), "agentx", "dev-a");
+        let mut entry = read_entry_file(&path).unwrap();
+        entry.updated_at = 0;
+        entry.pid = std::process::id();
+        write_entry_file(&path, &entry);
 
         cleanup_stale_shared(dir.path(), 4 * 60 * 60 * 1000);
         assert!(lookup_all_shared(dir.path(), "agentx").is_empty());
@@ -500,10 +535,10 @@ mod shared_tests {
         // exercises the dead-channel-that-never-restarted case from the
         // spec's problem statement, which TTL alone wouldn't catch for
         // another 4 hours.
-        let path = agent_path(dir.path(), "agentx");
-        let mut list = read_shared_entries(&path);
-        list[0].pid = u32::MAX;
-        write_shared_entries(&path, &list);
+        let path = shared_channel_path(dir.path(), "agentx", "dev-a");
+        let mut entry = read_entry_file(&path).unwrap();
+        entry.pid = u32::MAX;
+        write_entry_file(&path, &entry);
 
         cleanup_stale_shared(dir.path(), 4 * 60 * 60 * 1000);
         assert!(lookup_all_shared(dir.path(), "agentx").is_empty());
@@ -513,27 +548,100 @@ mod shared_tests {
     fn cleanup_stale_shared_keeps_fresh_live_entries() {
         let dir = tempfile::tempdir().unwrap();
         write_shared(dir.path(), "agentx", "http://127.0.0.1:9001", "block1", "dev-a");
-        let path = agent_path(dir.path(), "agentx");
-        let mut list = read_shared_entries(&path);
-        list[0].pid = std::process::id();
-        write_shared_entries(&path, &list);
+        let path = shared_channel_path(dir.path(), "agentx", "dev-a");
+        let mut entry = read_entry_file(&path).unwrap();
+        entry.pid = std::process::id();
+        write_entry_file(&path, &entry);
 
         cleanup_stale_shared(dir.path(), 4 * 60 * 60 * 1000);
         assert_eq!(lookup_all_shared(dir.path(), "agentx").len(), 1);
     }
 
     #[test]
+    fn cleanup_stale_shared_evicts_one_channel_keeps_sibling() {
+        // The whole point of the redesign: cleanup for one channel's
+        // stale/dead entry must not disturb a sibling channel's live one,
+        // since they're now genuinely separate files, not shared array
+        // elements.
+        let dir = tempfile::tempdir().unwrap();
+        write_shared(dir.path(), "agentx", "http://127.0.0.1:9001", "block1", "dev-a");
+        write_shared(dir.path(), "agentx", "http://127.0.0.1:9002", "block2", "dev-b");
+        let stale_path = shared_channel_path(dir.path(), "agentx", "dev-a");
+        let mut stale = read_entry_file(&stale_path).unwrap();
+        stale.pid = u32::MAX;
+        write_entry_file(&stale_path, &stale);
+
+        cleanup_stale_shared(dir.path(), 4 * 60 * 60 * 1000);
+        let found = lookup_all_shared(dir.path(), "agentx");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].channel, "dev-b");
+    }
+
+    #[test]
     fn agent_id_path_traversal_is_sanitized() {
         let dir = tempfile::tempdir().unwrap();
         write_shared(dir.path(), "../../evil", "http://127.0.0.1:9001", "block1", "dev-a");
-        // Sanitization (agent_path) must keep the write confined to the
-        // shared registry's own agents/ dir — no file with `.` path
-        // segments should escape it.
+        // Sanitization (shared_agent_dir) must keep the write confined to
+        // the shared registry's own agents/ dir — no directory with `.`
+        // path segments should escape it.
         let agents = agents_dir(dir.path());
         for entry in std::fs::read_dir(&agents).unwrap() {
             let name = entry.unwrap().file_name();
             assert!(!name.to_string_lossy().contains(".."));
         }
+    }
+
+    #[test]
+    fn channel_path_traversal_is_sanitized() {
+        let dir = tempfile::tempdir().unwrap();
+        write_shared(dir.path(), "agentx", "http://127.0.0.1:9001", "block1", "../../evil");
+        // Sanitization must apply to the CHANNEL component too, not just
+        // the agent name — a channel string is caller-controlled the same
+        // way an agent_id is.
+        let agent_dir = shared_agent_dir(dir.path(), "agentx");
+        for entry in std::fs::read_dir(&agent_dir).unwrap() {
+            let name = entry.unwrap().file_name();
+            assert!(!name.to_string_lossy().contains(".."));
+        }
+    }
+
+    #[test]
+    fn concurrent_writes_from_different_channels_never_clobber() {
+        // Direct regression test for reagent's P1 on PR #2350: the old
+        // one-array-per-agent-name design let two channels' concurrent
+        // writes race (each reads the pre-write array, second writer's
+        // save clobbers the first). Spawns real OS threads hammering
+        // write_shared for N distinct channels of the same agent name
+        // concurrently and asserts every single one survives.
+        let dir = tempfile::tempdir().unwrap();
+        let shared_dir = dir.path().to_path_buf();
+        const N: usize = 16;
+
+        let handles: Vec<_> = (0..N)
+            .map(|i| {
+                let shared_dir = shared_dir.clone();
+                std::thread::spawn(move || {
+                    let channel = format!("dev-{i}");
+                    for _ in 0..5 {
+                        write_shared(
+                            &shared_dir,
+                            "agentx",
+                            &format!("http://127.0.0.1:{}", 9000 + i),
+                            "block1",
+                            &channel,
+                        );
+                    }
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        let found = lookup_all_shared(&shared_dir, "agentx");
+        assert_eq!(found.len(), N, "every channel's entry must survive concurrent writes");
+        let channels: std::collections::HashSet<_> = found.iter().map(|e| e.channel.clone()).collect();
+        assert_eq!(channels.len(), N);
     }
 
     #[test]
