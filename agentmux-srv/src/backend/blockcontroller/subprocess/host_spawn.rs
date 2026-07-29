@@ -12,7 +12,7 @@
 //! `spawn_turn` is one continuous, non-trivially-ordered state machine and
 //! is moved here WHOLE rather than decomposed further.
 
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -45,26 +45,82 @@ impl SubprocessController {
             return Ok(());
         }
 
+        // Hydrate inner.session_id from the config-supplied id if the
+        // controller hasn't captured one yet — MUST run before the
+        // session_id_hint read just below. See
+        // `hydrate_session_id_from_config` for the full rationale
+        // (picker reattach: a fresh controller's inner.session_id is
+        // None, but config.session_id carries the persisted id).
+        // Reordering this after the read (reagent P0 on #2359, an
+        // earlier revision of this same PR) silently dropped --resume
+        // on every reattach's first turn — hydration ran too late for
+        // the read below to see it.
+        self.hydrate_session_id_from_config(config.session_id.as_deref());
+
+        // Read the (now-hydrated) session id once, up front — used
+        // both by the lease claim below and by the resume-flag args
+        // built after it.
+        let session_id_hint = self.inner.lock().unwrap().session_id.clone();
+
+        // Claim the cross-process session-ownership lease BEFORE
+        // `emit_message_accepted` / flipping status to running — a
+        // refusal here must look like the turn never started at all,
+        // not "frontend was told this message was accepted, then it
+        // silently never ran" (reagent P1 on #2359: emitting accepted
+        // before the claim meant a HeldByOther refusal left the
+        // frontend believing the message was in flight). Empty
+        // `instance_id` (container-mode branch in this PR) or no
+        // `lease_store` (registry unavailable) both mean leasing is a
+        // no-op for this spawn. See `registry::LeaseStore` and
+        // `docs/retros/RETRO_DEV_BUILD_SHARED_AGENT_SESSION_COLLISION_2026_07_29.md`.
+        let claimed_lease: Option<crate::registry::Lease> = if config.instance_id.is_empty() {
+            None
+        } else {
+            match &self.lease_store {
+                None => None,
+                Some(store) => match store.claim(
+                    &config.instance_id,
+                    &self.boot_id,
+                    &self.block_id,
+                    session_id_hint.as_deref(),
+                ) {
+                    Ok(lease) => Some(lease),
+                    Err(crate::registry::LeaseError::HeldByOther { owner_boot_id, age_ms, .. }) => {
+                        self.unlock_run();
+                        return Err(format!(
+                            "session '{}' is already owned by another AgentMux process \
+                             (boot {owner_boot_id}, renewed {age_ms}ms ago) — refusing to \
+                             start a turn against the same session from two processes at once",
+                            config.instance_id
+                        ));
+                    }
+                    Err(crate::registry::LeaseError::Io(e)) => {
+                        tracing::warn!(
+                            block_id = %self.block_id,
+                            instance_id = %config.instance_id,
+                            error = %e,
+                            "lease claim failed (io) — proceeding without a lease for this turn"
+                        );
+                        None
+                    }
+                },
+            }
+        };
+
         // Direct-spawn path (queue was empty): emit the accepted event
         // now so the frontend can promote its pending entry. The
         // drain-from-queue path (in process_waiter) emits the same
-        // event just before calling spawn_turn recursively.
+        // event just before calling spawn_turn recursively. Only
+        // reached once the lease claim above has succeeded (or was a
+        // no-op) — see that block's comment.
         self.emit_message_accepted(&config);
-
-        // Hydrate inner.session_id from the config-supplied id if the
-        // controller hasn't captured one yet. See
-        // `hydrate_session_id_from_config` for the full rationale.
-        self.hydrate_session_id_from_config(config.session_id.as_deref());
 
         // Build CLI args, appending resume flag + session_id if we have one and the provider supports it
         let mut args = config.cli_args.clone();
-        {
-            let inner = self.inner.lock().unwrap();
-            if let Some(ref sid) = inner.session_id {
-                if !config.resume_flag.is_empty() {
-                    args.push(config.resume_flag.clone());
-                    args.push(sid.clone());
-                }
+        if let Some(ref sid) = session_id_hint {
+            if !config.resume_flag.is_empty() {
+                args.push(config.resume_flag.clone());
+                args.push(sid.clone());
             }
         }
 
@@ -99,6 +155,15 @@ impl SubprocessController {
             let mut inner = self.inner.lock().unwrap();
             Self::set_status(&mut inner, STATUS_DONE);
             inner.proc_exit_code = -1;
+            if let (Some(store), Some(lease)) = (&self.lease_store, &claimed_lease) {
+                if let Err(release_err) = store.release(lease) {
+                    tracing::warn!(
+                        block_id = %self.block_id,
+                        error = %release_err,
+                        "lease release failed after spawn failure (self-heals via TTL expiry)"
+                    );
+                }
+            }
             self.unlock_run();
             format!("failed to spawn subprocess: {e}")
         })?;
@@ -372,18 +437,73 @@ impl SubprocessController {
 
         core::spawn_health_watchdog(&self.health_monitor);
 
+        // Renew the lease (if any) on the same cadence as the health
+        // watchdog above, for as long as THIS turn is active. A
+        // dedicated task rather than widening `spawn_health_watchdog`'s
+        // signature — that helper has 7 call sites across every
+        // controller type (ACP, persistent, container, host); only
+        // host-mode claims a lease in this PR (see module + struct doc
+        // comments), so touching the other 6 for an always-`None`
+        // param isn't warranted.
+        //
+        // Exit condition is a fresh per-turn flag (`turn_done`), NOT
+        // `health_monitor.is_active_turn()` — that flag is shared by
+        // the whole controller, not scoped to this specific spawn.
+        // Queued messages drain synchronously in process_waiter: the
+        // next turn's `set_active_turn(true)` can land in the same
+        // tick this turn's process_waiter releases its lease, with no
+        // async gap. A stale renewal task watching the shared flag
+        // would see it flip back to `true` before its next 5s tick and
+        // loop forever, leaking one never-terminating renewal task
+        // (blocking flock + file write every tick) per turn in a busy,
+        // back-to-back conversation — reagent P1 on #2359.
+        let turn_done = Arc::new(AtomicBool::new(false));
+        if let (Some(store), Some(lease)) = (self.lease_store.clone(), claimed_lease.clone()) {
+            let turn_done_renew = Arc::clone(&turn_done);
+            let block_id_renew = self.block_id.clone();
+            tokio::spawn(async move {
+                let mut interval =
+                    tokio::time::interval(std::time::Duration::from_millis(
+                        crate::registry::RENEW_INTERVAL_MS,
+                    ));
+                loop {
+                    interval.tick().await;
+                    if turn_done_renew.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    if let Err(e) = store.renew(&lease) {
+                        // Lost the lease to a TTL reclaim mid-turn — log and
+                        // let the turn finish naturally rather than killing
+                        // it. Force-killing on lost renewal is deliberately
+                        // deferred (see the analysis doc's follow-ups); this
+                        // is a real residual gap, not an oversight.
+                        tracing::warn!(
+                            block_id = %block_id_renew,
+                            instance_id = %lease.instance_id(),
+                            error = %e,
+                            "lease renew failed — lease may have been reclaimed by another process"
+                        );
+                        break;
+                    }
+                }
+            });
+        }
+
         // Spawn process_waiter task
         let inner_wait = Arc::clone(&self.inner);
         let block_id_wait = self.block_id.clone();
         let broker_wait = self.broker.clone();
         let run_lock = Arc::clone(&self.run_lock);
         let health_wait = Arc::clone(&self.health_monitor);
+        let turn_done_wait = Arc::clone(&turn_done);
         let self_ref_wait = self.self_ref.lock().unwrap().clone().unwrap_or_default();
         let stderr_tail_wait = Arc::clone(&stderr_tail);
         let last_result_frame_wait = Arc::clone(&last_result_frame);
         let last_inband_error_wait = Arc::clone(&last_inband_error);
         let wstore_wait = self.wstore.clone();
         let event_bus_wait = self.event_bus.clone();
+        let lease_store_wait = self.lease_store.clone();
+        let claimed_lease_wait = claimed_lease;
         tokio::spawn(async move {
             // Classified failure cause, surfaced to the pane after the readers drain.
             let mut run_failure: Option<crate::agents::failure::AgentFailure> = None;
@@ -559,7 +679,25 @@ impl SubprocessController {
                 });
             }
 
-            // Release run lock
+            // Signal the renewal task to stop BEFORE releasing the
+            // lease/run_lock — a queued next turn (dequeued a few
+            // lines below) may spawn immediately and claim its own
+            // lease; this turn's renewal task must not still be
+            // ticking when that happens (reagent P1 on #2359).
+            turn_done_wait.store(true, Ordering::SeqCst);
+
+            // Release the lease (if any), then the run lock — mirrors
+            // the ordering in the spawn-failure closure above.
+            if let (Some(store), Some(lease)) = (&lease_store_wait, &claimed_lease_wait) {
+                if let Err(e) = store.release(lease) {
+                    tracing::warn!(
+                        block_id = %block_id_wait,
+                        instance_id = %lease.instance_id(),
+                        error = %e,
+                        "lease release failed (self-heals via TTL expiry)"
+                    );
+                }
+            }
             run_lock.store(false, Ordering::SeqCst);
 
             // Drain message queue: if messages were queued while this turn
@@ -581,6 +719,32 @@ impl SubprocessController {
                             error = %e,
                             "failed to spawn queued turn"
                         );
+                        // The message was already popped from the queue —
+                        // a bare warn-log here means it vanishes with no
+                        // trace the user can see (reagent P1 on #2359,
+                        // most likely to fire on a lease refusal: another
+                        // process claimed this session in the gap between
+                        // this turn's release and the drain). Surface it
+                        // the same way other pre-spawn failures in this
+                        // module do (e.g. input.rs's container
+                        // ensure_running failure): a visible error frame
+                        // in the block, not just a log line.
+                        let error_frame = serde_json::json!({
+                            "type": "result",
+                            "is_error": true,
+                            "subtype": "error_during_execution",
+                            "error": {"message": format!("[AgentMux] queued message could not be sent: {e}")}
+                        }).to_string();
+                        if let Some(ref broker) = broker_wait {
+                            crate::backend::blockcontroller::shell::handle_append_block_file(
+                                broker,
+                                &block_id_wait,
+                                SUBPROCESS_OUTPUT_SUBJECT,
+                                format!("{error_frame}\n").as_bytes(),
+                                None,
+                                None,
+                            );
+                        }
                     }
                 }
             }

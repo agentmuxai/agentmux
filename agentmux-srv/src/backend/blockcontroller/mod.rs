@@ -359,6 +359,8 @@ pub fn resync_controller(
     event_bus: Option<Arc<EventBus>>,
     wstore: Option<Arc<Store>>,
     filestore: Option<Arc<FileStore>>,
+    registry: Option<Arc<crate::registry::Registry>>,
+    boot_id: Arc<str>,
 ) -> Result<(), String> {
     let block_id = &block.oid;
     let block_meta = &block.meta;
@@ -449,6 +451,8 @@ pub fn resync_controller(
                 event_bus,
                 wstore,
                 filestore,
+                registry,
+                boot_id,
             );
             let ctrl = Arc::new(ctrl);
             ctrl.set_self_ref();
@@ -631,7 +635,7 @@ mod tests {
             ..Default::default()
         };
         // No "controller" key in meta = no-op
-        let result = resync_controller(&block, "tab-1", None, false, None, None, None, None);
+        let result = resync_controller(&block, "tab-1", None, false, None, None, None, None, None, std::sync::Arc::from("test-boot"));
         assert!(result.is_ok());
     }
 
@@ -648,7 +652,7 @@ mod tests {
             meta,
             ..Default::default()
         };
-        let result = resync_controller(&block, "tab-1", None, false, None, None, None, None);
+        let result = resync_controller(&block, "tab-1", None, false, None, None, None, None, None, std::sync::Arc::from("test-boot"));
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("unknown controller type"));
     }
