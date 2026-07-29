@@ -1,6 +1,20 @@
 # Spec: replace HTML5/OLE drag with a native pointer-capture drag loop for tab + pane tear-off (Windows)
 
-**Status:** proposed
+**Status:** attempted 2026-07-29, shelved — see
+`docs/retro/retro-native-pointer-drag-tearoff-shelved-2026-07-29.md` for the
+full outcome. Summary: the core mechanism (§ Architecture below) does work —
+tab and pane tear-off both function, and the circle-slash cursor is
+structurally eliminated (no OLE session at all). But implementing it
+required rebuilding pragmatic-dnd's in-window drop-zone hit-testing and drag-
+preview-image behavior from scratch (pragmatic-dnd's `dropTargetForElements`
+cannot fire without a native drag session, which this spec deliberately
+removes), and that rebuild introduced real regressions (drop-zone precision,
+ghost image fidelity) plus surfaced a pre-existing, unrelated floating-pane
+redock latency issue more easily. User (2026-07-29): "too broken with not
+much benefit... lets shelve this into a fresh discussion focused on the
+circle/slash tear off on windows, since that is essentially the entire point
+of this req." Kept here as the validated design reference for that fresh,
+narrower attempt — read the retro before re-implementing.
 **Scope:** Windows only. macOS/Linux unaffected (see "Why Windows only").
 **Priority directive:** performance-first — engineering cost is explicitly not a constraint on this work (user directive, 2026-07-28).
 
