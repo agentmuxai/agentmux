@@ -36,6 +36,18 @@ export const loginCommand: SlashCommand = {
             return { kind: "error", message: "/login: provider or CLI path not available" };
         }
         ctx.log("auth", "running /login via GUI flow...");
+        // Registers this attempt (including the up-to-5-minute poll below)
+        // as an in-flight recovery on the SAME shared counter behind
+        // loginWaiting() that relogin()/useGlobalLogin()/loginViaTerminal()
+        // already use — without this, a second message sent while /login is
+        // still polling gets held with authWasKnownBadAtQueueTime: false
+        // (mid-turn "auth" failures never set canRetry either), so a /login
+        // that ultimately fails flushes that held message straight to the
+        // still-known-bad controller. Codex P1 on PR #2338 (ninth
+        // re-review). Paired with the endRecoveryFlow() in this function's
+        // own finally below — every return path (success, error, and the
+        // catch) goes through it exactly once.
+        ctx.beginRecoveryFlow();
         try {
             const authEnv: Record<string, string> = {};
             const envMeta = ctx.block()?.meta?.["cmd:env"];
@@ -196,6 +208,8 @@ export const loginCommand: SlashCommand = {
             }
         } catch (err: any) {
             return { kind: "error", message: `/login failed: ${err?.message ?? String(err)}` };
+        } finally {
+            ctx.endRecoveryFlow();
         }
     },
 };
