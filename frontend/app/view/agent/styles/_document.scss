@@ -4,6 +4,13 @@
 // Document container + status log (terminal-style). Wrapped in .agent-view so the cascade chain matches
 // the pre-split file (SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24).
 .agent-view {
+    // Matches .agent-document::-webkit-scrollbar's width (app.scss) — shared
+    // here so .agent-working-row-anchor (_control-bar.scss) can inset itself
+    // by exactly this much and never paint over the scrollbar gutter, instead
+    // of fighting it with z-index. See that selector's own comment for the
+    // z-index-obscures-scrollbar bug this closes.
+    --agent-document-scrollbar-width: 14px;
+
     // Wraps AgentDocumentView + the AgentWorkingRow anchor — takes over the
     // flex-1 slot .agent-document used to occupy directly. .agent-document
     // fills this box via position:absolute so AgentWorkingRow can float
