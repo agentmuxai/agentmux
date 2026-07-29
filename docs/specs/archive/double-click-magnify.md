@@ -2,7 +2,7 @@
 
 **Goal:** Double-clicking a pane's header bar toggles magnify (maximize/restore).
 
-**Status:** Ready for implementation.
+**Status:** Implemented (confirmed 2026-07-29, DOC-008 documentation analyst — `blockframe.tsx`'s `onDblClick={() => props.nodeModel.toggleMagnify()}` on the pane header, plus deliberate dblclick-swallowing guards on the view icon and `ViewNameEditor` that only make sense with this handler in place). Moved to `specs/archive` per this repo's spec-lifecycle convention.
 
 ---
 
