@@ -1085,6 +1085,8 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         setAuthNotice: status.setAuthNotice,
         notifyControllerHealthy: status.notifyControllerHealthy,
         forceControllerRefresh: status.forceControllerRefresh,
+        beginRecoveryFlow: status.beginRecoveryFlow,
+        endRecoveryFlow: status.endRecoveryFlow,
         backToPicker: () => model.backToPicker(),
         // Scroll the user's own message into view after Enter. The hook
         // defers this to the next animation frame so the mounted node is

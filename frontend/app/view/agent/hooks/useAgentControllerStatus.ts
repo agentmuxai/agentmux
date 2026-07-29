@@ -182,6 +182,27 @@ export interface UseAgentControllerStatus {
      * throwing, matching every other call site.
      */
     forceControllerRefresh: (context?: "login" | "restart") => Promise<void>;
+    /**
+     * Mark a recovery attempt as in flight / resolved, feeding the same
+     * shared counter behind `loginWaiting()` that `relogin()`/
+     * `useGlobalLogin()`/`loginViaTerminal()` already use internally.
+     * Exposed so /login's slash-command handler (a fully separate code
+     * path — see `forceControllerRefresh`'s doc comment) can register its
+     * own up-to-5-minute poll as an in-flight recovery too. Without this,
+     * `loginWaiting()` reads `false` for the entire duration of a /login
+     * attempt: a second message the user sends while it's still polling
+     * gets held with `authWasKnownBadAtQueueTime: false` (neither
+     * `canRetry()` nor `loginWaiting()` is true — mid-turn "auth" failures
+     * don't set `canRetry`, and /login never touched `loginWaiting` at
+     * all), so if /login then fails, that held message flushes straight to
+     * the still-known-bad controller once the phase resets to Idle. Codex
+     * P1 on PR #2338 (ninth re-review). Caller MUST call `endRecoveryFlow`
+     * exactly once per `beginRecoveryFlow` call (a `finally` block), same
+     * contract as the counter's other three callers.
+     */
+    beginRecoveryFlow: () => void;
+    /** Pairs with `beginRecoveryFlow` — see its doc comment. */
+    endRecoveryFlow: () => void;
 }
 
 /**
@@ -1048,5 +1069,7 @@ export function useAgentControllerStatus(
         notifyControllerHealthy,
         forceControllerRefresh,
         cancelLogin,
+        beginRecoveryFlow,
+        endRecoveryFlow,
     };
 }

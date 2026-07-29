@@ -161,6 +161,22 @@ export interface SlashCommandContext {
      */
     forceControllerRefresh: () => Promise<void>;
     /**
+     * Register /login's own up-to-5-minute poll as an in-flight recovery
+     * attempt, feeding the same shared counter behind
+     * `useAgentControllerStatus`'s `loginWaiting()` that
+     * relogin()/useGlobalLogin()/loginViaTerminal() already use. Without
+     * this, `loginWaiting()` reads `false` for the whole duration of a
+     * /login attempt — a second message sent while it's still polling gets
+     * held with `authWasKnownBadAtQueueTime: false` (mid-turn "auth"
+     * failures don't set `canRetry` either), so a /login that ultimately
+     * fails flushes that held message straight to the still-known-bad
+     * controller. Codex P1 on PR #2338 (ninth re-review). Must be paired
+     * with exactly one `endRecoveryFlow()` call (a `finally` block).
+     */
+    beginRecoveryFlow: () => void;
+    /** Pairs with `beginRecoveryFlow` — see its doc comment. */
+    endRecoveryFlow: () => void;
+    /**
      * Open the inline picker. Returns a promise that resolves with the
      * selected value, or rejects if the user dismisses (Esc / click-outside).
      * Set by useAgentCommands; the dispatcher only sees the function.

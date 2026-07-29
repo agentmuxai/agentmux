@@ -113,6 +113,17 @@ export interface UseAgentCommandsOptions {
      */
     forceControllerRefresh: () => Promise<void>;
     /**
+     * `useAgentControllerStatus.beginRecoveryFlow`/`endRecoveryFlow` —
+     * threaded into the slash-command context so /login's handler can
+     * register its own poll as an in-flight recovery, feeding the same
+     * shared counter behind `loginWaiting`. Codex P1 on PR #2338 (ninth
+     * re-review) — see `SlashCommandContext.beginRecoveryFlow`'s doc
+     * comment for the failure mode this closes.
+     */
+    beginRecoveryFlow: () => void;
+    /** Pairs with `beginRecoveryFlow` — see its doc comment. */
+    endRecoveryFlow: () => void;
+    /**
      * The model-level backToPicker action. The hook delegates to this
      * rather than owning a duplicate implementation — the pane-frame
      * header button also calls it, so the logic needs to live in one
@@ -322,6 +333,8 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         notifyControllerHealthy: opts.notifyControllerHealthy,
         clearAuthFailure: () => opts.model.dispatchPane({ type: "FailureCleared" }),
         forceControllerRefresh: opts.forceControllerRefresh,
+        beginRecoveryFlow: opts.beginRecoveryFlow,
+        endRecoveryFlow: opts.endRecoveryFlow,
         openPicker,
         openHelp,
     });
@@ -359,6 +372,24 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // before this function was called. Reset it immediately so the pane does
         // not stay in Submitting state for the full 30s watchdog window — no
         // agent turn was initiated, only a sidecar shell exec.
+        // A live "auth"-classified failure that TurnStart is about to clear
+        // (or already cleared, by the time we get here) so a purely LOCAL
+        // command — one that never reaches deliverToBackend at all — can
+        // run. Neither dispatchBangCommand nor an unrelated slash command
+        // (/help, /clear, ...) does anything to resolve that failure, so
+        // without restoring it below, it just vanishes: the next NORMAL
+        // send captures a null authFailureToPreserve, canRetry/loginWaiting
+        // are both still false (mid-turn auth failures never touch either),
+        // and the guard lets it through to the still-known-bad credential.
+        // Codex P1 on PR #2338 (ninth re-review). Only /login can
+        // legitimately resolve it — restoreAuthFailureIfUnresolved skips
+        // the restore when the command itself called ctx.clearAuthFailure().
+        const restoreAuthFailureIfUnresolved = (clearedByCommand: boolean) => {
+            if (authFailureToPreserve && !clearedByCommand) {
+                opts.model.dispatchPane({ type: "FailureObserved", failure: authFailureToPreserve, at: Date.now() }, "system");
+            }
+        };
+
         if (trimmed.startsWith("!")) {
             try {
                 await dispatchBangCommand(trimmed.slice(1).trim(), opts.blockId, buildCommandContext());
@@ -372,20 +403,37 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 if (!wasAlreadyWorking) {
                     opts.model.dispatchPane({ type: "TurnReset" }, "system");
                 }
+                // Bang commands are shell execs — they never resolve auth.
+                restoreAuthFailureIfUnresolved(false);
             }
             return;
         }
 
         if (trimmed.startsWith("/")) {
             let outcome;
+            // Tracks whether THIS command's own handler resolved the
+            // captured failure (only /login does, via ctx.clearAuthFailure()
+            // on success) — restoring an already-resolved failure below
+            // would resurrect a stale banner over a credential /login just
+            // fixed.
+            let authFailureClearedByCommand = false;
+            const baseCtx = buildCommandContext();
+            const ctx: SlashCommandContext = {
+                ...baseCtx,
+                clearAuthFailure: () => {
+                    authFailureClearedByCommand = true;
+                    baseCtx.clearAuthFailure();
+                },
+            };
             try {
-                outcome = await dispatchSlashCommand(trimmed, registry(), buildCommandContext());
+                outcome = await dispatchSlashCommand(trimmed, registry(), ctx);
             } catch {
                 // dispatchSlashCommand threw — reset TurnStart so the pane
                 // doesn't stay locked for the 30s watchdog window.
                 if (!wasAlreadyWorking) {
                     opts.model.dispatchPane({ type: "TurnReset" }, "system");
                 }
+                restoreAuthFailureIfUnresolved(authFailureClearedByCommand);
                 return;
             }
             if (outcome.kind === "handled") {
@@ -396,6 +444,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 if (!wasAlreadyWorking) {
                     opts.model.dispatchPane({ type: "TurnReset" }, "system");
                 }
+                restoreAuthFailureIfUnresolved(authFailureClearedByCommand);
                 return;
             }
             // outcome.kind === "passthrough" — fall through to the real turn;

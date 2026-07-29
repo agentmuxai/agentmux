@@ -21,6 +21,7 @@ import { createRoot } from "solid-js";
 
 const hub = vi.hoisted(() => ({
     agentInput: vi.fn(),
+    dispatchSlashCommand: vi.fn(),
 }));
 
 vi.mock("@/app/store/rpc-api", () => ({
@@ -30,6 +31,14 @@ vi.mock("@/app/store/rpc-api", () => ({
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
+// Only mocked where a test needs to control the slash-command outcome
+// (or simulate a command calling ctx.clearAuthFailure()) — falls through to
+// the real dispatcher (a "passthrough" outcome) whenever no test has set an
+// implementation, so every other test's non-slash-command sends are
+// unaffected.
+vi.mock("../commands/dispatch", () => ({
+    dispatchSlashCommand: (...args: unknown[]) => hub.dispatchSlashCommand(...args),
+}));
 
 import { useAgentCommands } from "./useAgentCommands";
 import {
@@ -66,6 +75,7 @@ const BLOCK_ID = "block-send-fail";
 
 beforeEach(() => {
     hub.agentInput.mockReset();
+    hub.dispatchSlashCommand.mockReset().mockResolvedValue({ kind: "passthrough" });
 });
 afterEach(() => {
     unregisterPane(BLOCK_ID);
@@ -98,6 +108,8 @@ describe("useAgentCommands — turnPhase recovery on a failed send", () => {
                 setAuthNotice: () => {},
                 notifyControllerHealthy: () => {},
                 forceControllerRefresh: async () => {},
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
                 backToPicker: async () => {},
             });
 
@@ -133,6 +145,8 @@ describe("useAgentCommands — turnPhase recovery on a failed send", () => {
                 setAuthNotice: () => {},
                 notifyControllerHealthy: () => {},
                 forceControllerRefresh: async () => {},
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
                 backToPicker: async () => {},
             });
 
@@ -181,6 +195,8 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 setAuthNotice,
                 notifyControllerHealthy: () => {},
                 forceControllerRefresh: async () => {},
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
                 backToPicker: async () => {},
             });
 
@@ -221,6 +237,8 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 setAuthNotice: () => {},
                 notifyControllerHealthy: () => {},
                 forceControllerRefresh: async () => {},
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
                 backToPicker: async () => {},
             });
 
@@ -284,6 +302,8 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 setAuthNotice: () => {},
                 notifyControllerHealthy: () => {},
                 forceControllerRefresh: async () => {},
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
                 backToPicker: async () => {},
             });
 
@@ -330,6 +350,8 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 setAuthNotice,
                 notifyControllerHealthy: () => {},
                 forceControllerRefresh: async () => {},
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
                 backToPicker: async () => {},
             });
 
@@ -369,6 +391,8 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 setAuthNotice: () => {},
                 notifyControllerHealthy: () => {},
                 forceControllerRefresh: async () => {},
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
                 backToPicker: async () => {},
             });
 
@@ -415,6 +439,8 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 setAuthNotice,
                 notifyControllerHealthy: () => {},
                 forceControllerRefresh: async () => {},
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
                 backToPicker: async () => {},
             });
 
@@ -429,4 +455,101 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
         });
     });
 
+});
+
+// Codex P1 on PR #2338 (ninth re-review): a live "auth" failure captured
+// as authFailureToPreserve must survive a purely LOCAL command (bang or a
+// slash command the dispatcher marks "handled") that never reaches
+// deliverToBackend at all — otherwise it just vanishes (TurnStart already
+// cleared state.failure to let the local command run), and the caller's
+// NEXT normal send captures a null authFailureToPreserve with
+// canRetry/loginWaiting both still false (mid-turn auth failures never
+// touch either), so the guard lets it through to the still-known-bad
+// credential.
+describe("useAgentCommands — authFailureToPreserve survives a local command", () => {
+    const authFailure: AgentFailure = { code: "auth", title: "Not logged in", detail: "401 from provider", retryable: true };
+
+    const setup = () => {
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+        return model;
+    };
+
+    const makeOpts = (model: ReturnType<typeof registerPane>) => ({
+        blockId: BLOCK_ID,
+        model,
+        block: () => undefined,
+        provider: () => undefined,
+        documentAtom: [() => [], () => {}] as any,
+        log: () => {},
+        setAuthUrl: () => {},
+        canRetry: () => false,
+        loginWaiting: () => false,
+        setAuthNotice: () => {},
+        notifyControllerHealthy: () => {},
+        forceControllerRefresh: async () => {},
+        beginRecoveryFlow: () => {},
+        endRecoveryFlow: () => {},
+        backToPicker: async () => {},
+    });
+
+    it("restores the failure banner after a bang command (!pwd) — bang commands never resolve auth", async () => {
+        const model = setup();
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands(makeOpts(model));
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("!pwd", false, authFailure);
+
+            expect(hub.agentInput).not.toHaveBeenCalled();
+            expect(paneSnapshot(BLOCK_ID)?.failure?.data).toEqual(authFailure);
+            dispose();
+        });
+    });
+
+    it("restores the failure banner after an unrelated handled slash command (e.g. /help)", async () => {
+        hub.dispatchSlashCommand.mockResolvedValue({ kind: "handled" });
+        const model = setup();
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands(makeOpts(model));
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("/help", false, authFailure);
+
+            expect(hub.agentInput).not.toHaveBeenCalled();
+            expect(paneSnapshot(BLOCK_ID)?.failure?.data).toEqual(authFailure);
+            dispose();
+        });
+    });
+
+    it("does NOT restore the failure banner when the command itself resolves it (ctx.clearAuthFailure(), as /login's success path does)", async () => {
+        hub.dispatchSlashCommand.mockImplementation(async (_msg: string, _registry: unknown, ctx: { clearAuthFailure: () => void }) => {
+            ctx.clearAuthFailure();
+            return { kind: "handled" };
+        });
+        const model = setup();
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands(makeOpts(model));
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("/login", false, authFailure);
+
+            expect(hub.agentInput).not.toHaveBeenCalled();
+            // Restoring the stale pre-command failure here would resurrect a
+            // banner over a credential /login just fixed.
+            expect(paneSnapshot(BLOCK_ID)?.failure).toBeNull();
+            dispose();
+        });
+    });
+
+    it("restores the failure banner when the slash-command dispatcher itself throws", async () => {
+        hub.dispatchSlashCommand.mockRejectedValue(new Error("boom"));
+        const model = setup();
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands(makeOpts(model));
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("/whatever", false, authFailure);
+
+            expect(paneSnapshot(BLOCK_ID)?.failure?.data).toEqual(authFailure);
+            dispose();
+        });
+    });
 });
