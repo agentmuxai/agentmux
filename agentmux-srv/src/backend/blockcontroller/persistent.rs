@@ -548,12 +548,28 @@ impl PersistentSubprocessController {
     ///   `json_str` alongside that claim, and returns `BecomeSpawner` —
     ///   the caller must then call `spawn_process` and, regardless of
     ///   outcome, call `release_spawn_claim_and_drain_queue`.
-    fn decide_send_action(&self, json_str: &str) -> SendAction {
+    ///
+    /// `skip_if_already_queued` — always `false` for a genuine new message
+    /// (`send_message`): a user legitimately re-sending the exact same
+    /// text while an unrelated spawn is in flight must still queue both,
+    /// so this must never dedup by content there. `true` only for
+    /// `retry_after_resume_failure`, whose `json_str` is a KNOWN re-
+    /// delivery of content that may ALREADY be sitting in
+    /// `pending_send_messages` — pushed by the very spawn attempt whose
+    /// failure triggered this retry, if that spawn's own drain hasn't
+    /// reached it yet. codex P1 on PR #2360 (sixth review pass, round 4):
+    /// blindly queueing another copy there let a fallback spawn eventually
+    /// deliver the same prompt twice.
+    fn decide_send_action(&self, json_str: &str, skip_if_already_queued: bool) -> SendAction {
         let mut inner = self.inner.lock().unwrap();
         if inner.stdin_tx.is_some() && !inner.spawning_in_progress {
             SendAction::DeliverDirect
         } else if inner.spawning_in_progress {
-            inner.pending_send_messages.push_back(json_str.to_string());
+            let already_queued =
+                skip_if_already_queued && inner.pending_send_messages.iter().any(|m| m == json_str);
+            if !already_queued {
+                inner.pending_send_messages.push_back(json_str.to_string());
+            }
             SendAction::Queued
         } else {
             inner.spawning_in_progress = true;
@@ -762,6 +778,23 @@ impl PersistentSubprocessController {
         );
     }
 
+    /// Persists a formatted stdin JSON line to the blockfile + global zone
+    /// so `parseHistoryLines` can reconstruct the `user_message` node on
+    /// the next pane open. No WPS event is published here — the
+    /// live-display is handled by the `agent-message-accepted` path (UUID
+    /// node), avoiding a duplicate.
+    fn persist_message_to_blockfile(&self, json_str: &str) {
+        let global_zone = super::shell::resolve_global_output_zone(&self.wstore, &self.block_id);
+        let line_with_newline = format!("{json_str}\n");
+        super::shell::persist_to_blockfile_silent(
+            &self.block_id,
+            crate::backend::agent_session::OUTPUT_FILE,
+            line_with_newline.as_bytes(),
+            self.filestore.as_ref(),
+            global_zone.as_deref(),
+        );
+    }
+
     pub fn send_message(&self, message: String, config: PersistentSpawnConfig) -> Result<(), String> {
         // Format as stream-json user message.
         let json_msg = serde_json::json!({
@@ -773,25 +806,14 @@ impl PersistentSubprocessController {
         });
         let json_str = json_msg.to_string();
 
-        // Silently persist the user message to the blockfile + global zone so
-        // `parseHistoryLines` can reconstruct `user_message` nodes on the next
-        // open. No WPS event is published here — the live-display is handled by
-        // the `agent-message-accepted` path (UUID node), avoiding a duplicate.
-        // Done unconditionally, before deciding delivery below, so a message
-        // that ends up queued (see `decide_send_action`) is still durably
-        // persisted immediately rather than only once eventually delivered.
-        let global_zone = super::shell::resolve_global_output_zone(&self.wstore, &self.block_id);
-        let line_with_newline = format!("{json_str}\n");
-        super::shell::persist_to_blockfile_silent(
-            &self.block_id,
-            crate::backend::agent_session::OUTPUT_FILE,
-            line_with_newline.as_bytes(),
-            self.filestore.as_ref(),
-            global_zone.as_deref(),
-        );
-
-        match self.decide_send_action(&json_str) {
+        match self.decide_send_action(&json_str, false) {
             SendAction::Queued => {
+                // Persisted unconditionally: this caller was already told
+                // "accepted" (below) and a spawn/drain genuinely IS
+                // working through the queue this just joined, so — unlike
+                // the BecomeSpawner case — there is no "rejected before
+                // ever really being attempted" outcome to guard against.
+                self.persist_message_to_blockfile(&json_str);
                 self.emit_message_accepted(config.message_id.as_deref());
                 Ok(())
             }
@@ -803,6 +825,7 @@ impl PersistentSubprocessController {
                 // since the persistent process never exits between turns.
                 // Without this, `turn_active` would go stale after turn 1.
                 self.mark_turn_active_and_publish();
+                self.persist_message_to_blockfile(&json_str);
                 let inner = self.inner.lock().unwrap();
                 let tx = inner.stdin_tx.as_ref()
                     .ok_or("persistent process not running after spawn")?;
@@ -828,15 +851,20 @@ impl PersistentSubprocessController {
                 // `--resume`, which is what the retry payload is for.
                 let message_id = config.message_id.clone();
                 let retry_config = config.clone();
-                let spawn_result = self.spawn_process(config, Some(json_str));
-                // Only emit "accepted" on success — matches this
-                // function's prior (pre-queue) behavior, which propagated
-                // a spawn failure via `?` before ever reaching the
-                // "accepted" emission. A failed spawn's message is
-                // discarded by `release_spawn_claim_and_drain_queue` below
-                // (see its own doc comment), so telling the frontend
-                // "accepted" for it here would be a lie.
+                let spawn_result = self.spawn_process(config, Some(json_str.clone()));
+                // Only persist/emit "accepted" on success — codex P2 on PR
+                // #2360 (sixth review pass, round 4): persisting
+                // unconditionally (an earlier cut of this fix did) let a
+                // rejected spawn (missing executable, bad launch config)
+                // leave a "user_message" line in the blockfile for a
+                // prompt that was NEVER actually delivered — reopening the
+                // pane would reconstruct it as if it had been sent, and a
+                // manual retry then produced a misleading duplicate.
+                // Matches this function's pre-queue behavior, which
+                // propagated a spawn failure via `?` before ever reaching
+                // either the persist or the "accepted" emission.
                 if spawn_result.is_ok() {
+                    self.persist_message_to_blockfile(&json_str);
                     self.mark_turn_active_and_publish();
                     self.emit_message_accepted(message_id.as_deref());
                 }
@@ -878,8 +906,11 @@ impl PersistentSubprocessController {
         // has long since returned (its own spawn-claim-and-deliver
         // sequence completed synchronously, well before this process even
         // exited), so this can safely go through the SAME decision
-        // function `send_message` uses.
-        match self.decide_send_action(&json_str) {
+        // function `send_message` uses — with dedup-by-content enabled
+        // (see `decide_send_action`'s doc comment), since `json_str` here
+        // is a known re-delivery of the ORIGINAL spawn's own payload, not
+        // an independent new message.
+        match self.decide_send_action(&json_str, true) {
             SendAction::DeliverDirect => {
                 // Another caller's own spawn already installed a running
                 // process by the time this retry got scheduled — no need
@@ -2238,7 +2269,7 @@ mod send_input_tests {
     #[test]
     fn decide_send_action_becomes_spawner_when_nothing_is_in_flight() {
         let c = controller();
-        let action = c.decide_send_action("msg-a");
+        let action = c.decide_send_action("msg-a", false);
         assert!(matches!(action, SendAction::BecomeSpawner));
         let inner = c.inner.lock().unwrap();
         assert!(inner.spawning_in_progress, "must claim the exclusive spawn right");
@@ -2254,7 +2285,7 @@ mod send_input_tests {
         let c = controller();
         c.inner.lock().unwrap().spawning_in_progress = true;
 
-        let action = c.decide_send_action("msg-b");
+        let action = c.decide_send_action("msg-b", false);
         assert!(
             matches!(action, SendAction::Queued),
             "a second caller must queue instead of independently deciding to spawn"
@@ -2264,13 +2295,83 @@ mod send_input_tests {
         assert_eq!(inner.pending_send_messages[0], "msg-b");
     }
 
+    /// codex P1 on PR #2360 (sixth review pass, round 4): a genuine second
+    /// user message queuing behind an in-flight spawn must NOT be deduped
+    /// by content — a user legitimately re-sending the exact same text
+    /// must still see both delivered. `skip_if_already_queued=false`
+    /// (what `send_message` always passes) must therefore always enqueue.
+    #[test]
+    fn decide_send_action_never_dedups_a_genuine_new_message() {
+        let c = controller();
+        c.inner.lock().unwrap().spawning_in_progress = true;
+
+        c.decide_send_action("hello", false);
+        let action = c.decide_send_action("hello", false);
+
+        assert!(matches!(action, SendAction::Queued));
+        let inner = c.inner.lock().unwrap();
+        assert_eq!(
+            inner.pending_send_messages.len(),
+            2,
+            "two genuinely separate sends of identical text must both be queued, not deduped"
+        );
+    }
+
+    /// codex P1 on PR #2360 (sixth review pass, round 4): unlike a genuine
+    /// new message, `retry_after_resume_failure`'s payload is a KNOWN
+    /// re-delivery of content that may ALREADY be sitting in the queue —
+    /// pushed by the very spawn attempt whose failure triggered this
+    /// retry, if that spawn's own drain hasn't reached it yet. Blindly
+    /// queueing another copy (as the `false`/`send_message` path
+    /// correctly does for a genuine new message) would let a fallback
+    /// spawn eventually deliver the same prompt twice. `skip_if_already_
+    /// queued=true` (what `retry_after_resume_failure` always passes)
+    /// must therefore skip re-enqueueing an identical, already-present
+    /// entry.
+    #[test]
+    fn decide_send_action_dedups_a_known_retry_of_an_already_queued_message() {
+        let c = controller();
+        {
+            let mut inner = c.inner.lock().unwrap();
+            inner.spawning_in_progress = true;
+            inner.pending_send_messages.push_back("original-payload".to_string());
+        }
+
+        let action = c.decide_send_action("original-payload", true);
+
+        assert!(matches!(action, SendAction::Queued));
+        let inner = c.inner.lock().unwrap();
+        assert_eq!(
+            inner.pending_send_messages.len(),
+            1,
+            "a retry of content already queued must not add a duplicate copy"
+        );
+    }
+
+    /// The dedup check must not accidentally skip a retry whose payload
+    /// genuinely isn't in the queue yet (the drain already popped it, in
+    /// the narrow window where the retry races in after that but before
+    /// the drain releases the claim) — it must still queue normally.
+    #[test]
+    fn decide_send_action_still_queues_a_retry_when_its_payload_is_not_already_present() {
+        let c = controller();
+        c.inner.lock().unwrap().spawning_in_progress = true;
+
+        let action = c.decide_send_action("not-yet-queued", true);
+
+        assert!(matches!(action, SendAction::Queued));
+        let inner = c.inner.lock().unwrap();
+        assert_eq!(inner.pending_send_messages.len(), 1);
+        assert_eq!(inner.pending_send_messages[0], "not-yet-queued");
+    }
+
     #[test]
     fn decide_send_action_delivers_directly_when_already_running() {
         let c = controller();
         let (tx, _rx) = mpsc::channel::<String>(4);
         c.inner.lock().unwrap().stdin_tx = Some(tx);
 
-        let action = c.decide_send_action("msg-c");
+        let action = c.decide_send_action("msg-c", false);
         assert!(matches!(action, SendAction::DeliverDirect));
         let inner = c.inner.lock().unwrap();
         assert!(
@@ -2300,7 +2401,7 @@ mod send_input_tests {
             inner.spawning_in_progress = true;
         }
 
-        let action = c.decide_send_action("msg-late-arrival");
+        let action = c.decide_send_action("msg-late-arrival", false);
         assert!(
             matches!(action, SendAction::Queued),
             "must queue, not deliver direct, while a drain for an earlier message is still active"
@@ -2331,7 +2432,7 @@ mod send_input_tests {
                 let c = StdArc::clone(&c);
                 let spawner_count = StdArc::clone(&spawner_count);
                 let queued_count = StdArc::clone(&queued_count);
-                std::thread::spawn(move || match c.decide_send_action(&format!("msg-{i}")) {
+                std::thread::spawn(move || match c.decide_send_action(&format!("msg-{i}"), false) {
                     SendAction::BecomeSpawner => {
                         spawner_count.fetch_add(1, AtomicOrdering::SeqCst);
                     }
