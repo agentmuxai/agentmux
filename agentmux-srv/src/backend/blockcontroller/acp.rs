@@ -592,22 +592,6 @@ impl Controller for AcpController {
                     "text": message,
                 }
             }));
-            // Enqueue onto the stdin channel FIRST, before touching any
-            // turn-active state — try_send can fail (channel full, or the
-            // stdin writer task already exited because the process died),
-            // in which case no turn actually starts. Marking active and
-            // publishing turn_active: true before this succeeds would let a
-            // rejected prompt still re-promote the frontend to a working
-            // state and clear auth-recovery UI via notifyControllerHealthy,
-            // and would arm the health watchdog for work that never
-            // happened. codex P2 on PR #2338 (twenty-fifth re-review).
-            {
-                let inner = self.inner.lock().unwrap();
-                if let Some(ref tx) = inner.stdin_tx {
-                    tx.try_send(req)
-                        .map_err(|e| format!("ACP stdin send failed: {e}"))?;
-                }
-            }
             // reagent P1 (PR #2336): this controller wired wstore/event_bus
             // into HealthMonitor for the Unresponsive-failure/Restart
             // feature but never spawned the periodic watchdog — Dead (the
@@ -621,6 +605,18 @@ impl Controller for AcpController {
             // watchdog on top of an already-running one — see
             // `core::spawn_health_watchdog`'s own doc comment and
             // persistent.rs's identical guard.
+            //
+            // Established BEFORE the stdin enqueue below (not after) — a
+            // fast-responding ACP agent can have the stdout reader task
+            // observe and publish the resulting `stopReason` (turn_active:
+            // false) on a DIFFERENT tokio worker before this thread would
+            // otherwise reach this point, if the enqueue ran first. Only
+            // ordering it this way guarantees this mark happens-before the
+            // request can possibly be enqueued, sent, and answered. codex
+            // P2 on PR #2338 (twenty-sixth re-review) — superseded the
+            // prior (twenty-fifth re-review) ordering, which fixed a
+            // different bug (see the rollback below) by moving this after
+            // the enqueue, reintroducing this race.
             let was_active = self.health_monitor.mark_turn_active_returning_was_active();
             if !was_active {
                 core::spawn_health_watchdog(&self.health_monitor);
@@ -639,6 +635,34 @@ impl Controller for AcpController {
             // actually-active turn. codex P1 on PR #2338 (twenty-third
             // re-review).
             self.publish_status();
+
+            let send_result = {
+                let inner = self.inner.lock().unwrap();
+                if let Some(ref tx) = inner.stdin_tx {
+                    tx.try_send(req)
+                        .map_err(|e| format!("ACP stdin send failed: {e}"))
+                } else {
+                    Ok(())
+                }
+            };
+            if let Err(e) = send_result {
+                // try_send can fail (channel full, or the stdin writer task
+                // already exited because the process died) — no turn
+                // actually starts. Roll back the state just established
+                // above, but ONLY if THIS call is what transitioned
+                // idle->active (!was_active): if a turn was ALREADY active
+                // (mid-turn steering), a genuinely active turn from an
+                // EARLIER successful send must not be clobbered by this
+                // failed one. The freshly-spawned watchdog (if any) exits
+                // on its own next tick once is_active_turn() reads false
+                // again — see spawn_health_watchdog's doc comment. codex P2
+                // on PR #2338 (twenty-fifth re-review).
+                if !was_active {
+                    self.health_monitor.set_active_turn(false);
+                    self.publish_status();
+                }
+                return Err(e);
+            }
         }
 
         if let Some(sig) = input.sig_name {
@@ -756,18 +780,20 @@ mod tests {
         assert!(c.health_monitor.is_active_turn());
     }
 
-    /// Regression for codex P2 on PR #2338 (twenty-fifth re-review):
-    /// `send_input` used to mark the turn active and publish
-    /// `turn_active: true` BEFORE attempting `tx.try_send(req)` — if the
-    /// enqueue itself fails (channel full, or the stdin writer task already
-    /// exited because the process died), no turn actually starts, but the
-    /// health/status state claimed one did anyway. A rejected prompt could
-    /// then re-promote the frontend to a working state and clear
-    /// auth-recovery UI via notifyControllerHealthy, and the health
-    /// watchdog would be armed for work that never happened. Fixed by
-    /// enqueueing first and only marking/publishing on success.
+    /// Regression for codex P2 on PR #2338 (twenty-fifth re-review), as
+    /// refined by codex P2 on PR #2338 (twenty-sixth re-review):
+    /// `send_input` marks the turn active and publishes BEFORE attempting
+    /// `tx.try_send(req)` (established ordering, not after — see the
+    /// twenty-sixth re-review's race fix below) — if the enqueue itself
+    /// fails (channel full, or the stdin writer task already exited
+    /// because the process died), no turn actually started, so the mark
+    /// and publish must be ROLLED BACK rather than left standing. A
+    /// rejected prompt left standing as "active" could re-promote the
+    /// frontend to a working state and clear auth-recovery UI via
+    /// notifyControllerHealthy, and the health watchdog would be armed for
+    /// work that never happened.
     #[tokio::test]
-    async fn send_input_does_not_mark_or_publish_turn_active_when_enqueue_fails() {
+    async fn send_input_rolls_back_turn_active_when_enqueue_fails() {
         let broker = Arc::new(wps::Broker::new());
         let c = AcpController::new(
             "tab".to_string(),
@@ -783,13 +809,47 @@ mod tests {
 
         let res = c.send_input(BlockInputUnion::data(b"hello".to_vec()), None);
         assert!(res.is_err(), "send_input should surface the enqueue failure, got {res:?}");
-        assert!(!c.health_monitor.is_active_turn(), "must not mark the turn active when the enqueue itself failed");
+        assert!(!c.health_monitor.is_active_turn(), "must not leave the turn marked active when the enqueue itself failed");
 
+        // The state is briefly marked active (established BEFORE the
+        // enqueue attempt to close the twenty-sixth re-review's race), then
+        // rolled back once the enqueue failure is discovered — so the
+        // LATEST published status must reflect the rollback, not the
+        // transient true a live subscriber may have also observed.
         let history = broker.read_event_history(
             wps::EVENT_CONTROLLER_STATUS,
             "block:block-acp-enqueue-fail",
             1,
         );
-        assert!(history.is_empty(), "must not publish a controllerstatus event when the enqueue itself failed");
+        assert_eq!(history.len(), 1, "send_input must publish the rollback so live subscribers see the corrected state");
+        let published: BlockControllerRuntimeStatus =
+            serde_json::from_value(history[0].data.clone().unwrap()).unwrap();
+        assert!(!published.turn_active, "the latest published status must reflect the rollback (turn_active: false)");
+    }
+
+    /// Regression for codex P2 on PR #2338 (twenty-sixth re-review): the
+    /// rollback on enqueue failure must be conditioned on `!was_active` —
+    /// a mid-turn steering send (turn already genuinely active from an
+    /// EARLIER successful send) whose OWN enqueue then fails must not roll
+    /// back and clobber that still-active turn.
+    #[tokio::test]
+    async fn send_input_does_not_roll_back_an_already_active_turn_on_a_failed_steering_send() {
+        let c = controller();
+        let (tx, _rx) = mpsc::channel::<String>(8);
+        c.inner.lock().unwrap().stdin_tx = Some(tx);
+
+        // First send succeeds — turn is now genuinely active.
+        assert!(c.send_input(BlockInputUnion::data(b"first".to_vec()), None).is_ok());
+        assert!(c.health_monitor.is_active_turn());
+
+        // Swap in a closed channel so the SECOND (steering) send's own
+        // enqueue fails.
+        let (tx2, rx2) = mpsc::channel::<String>(8);
+        drop(rx2);
+        c.inner.lock().unwrap().stdin_tx = Some(tx2);
+
+        let res = c.send_input(BlockInputUnion::data(b"second".to_vec()), None);
+        assert!(res.is_err(), "the steering send's own enqueue should fail, got {res:?}");
+        assert!(c.health_monitor.is_active_turn(), "the turn genuinely active from the FIRST send must not be rolled back by the second send's own failure");
     }
 }
