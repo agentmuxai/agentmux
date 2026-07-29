@@ -37,6 +37,7 @@ pub(crate) fn test_state() -> AppState {
 
     AppState {
         auth_key: "test-secret-key".to_string(),
+        boot_id: std::sync::Arc::from("test-boot"),
         version: "0.28.20".to_string(),
         app_path: String::new(),
         wstore: wstore.clone(),

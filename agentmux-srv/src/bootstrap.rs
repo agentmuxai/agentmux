@@ -1382,6 +1382,7 @@ pub fn build_app_state(
 
     AppState {
         auth_key: config.auth_key.clone(),
+        boot_id: Arc::from(uuid::Uuid::new_v4().to_string()),
         version,
         app_path: config.app_path.clone(),
         wstore: stores.wstore,
