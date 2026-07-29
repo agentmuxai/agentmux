@@ -992,8 +992,16 @@ impl PersistentSubprocessController {
             .ok_or_else(|| format!("[persistent] stdout not captured for block {}", self.block_id))?;
         let stderr = child.stderr.take();
 
-        // Drain stderr in background — log lines for debugging
-        if let Some(stderr_pipe) = stderr {
+        // Drain stderr in background — log lines for debugging. The
+        // JoinHandle is kept (not discarded) so the process-waiter task
+        // can await this task's full completion before deciding whether a
+        // stale-resume retry was confirmed — codex P1/P2 on PR #2360
+        // (second review pass): `child.wait()` resolving is NOT proof this
+        // task has already seen and reacted to a "No conversation found"
+        // line, or finished its OWN subsequent `persist_session_id("")`
+        // call below. See the process-waiter's own comment for the two
+        // failure modes this closes.
+        let stderr_reader_handle: Option<tokio::task::JoinHandle<()>> = stderr.map(|stderr_pipe| {
             let block_id_stderr = self.block_id.clone();
             let inner_stderr = Arc::clone(&self.inner);
             let wstore_stderr = self.wstore.clone();
@@ -1046,8 +1054,8 @@ impl PersistentSubprocessController {
                         }
                     }
                 }
-            });
-        }
+            })
+        });
 
         // Create stdin writer channel
         let (msg_tx, mut msg_rx) = mpsc::channel::<String>(32);
@@ -1314,6 +1322,37 @@ impl PersistentSubprocessController {
                         "persistent process exited"
                     );
 
+                    // Give the stderr reader a bounded chance to fully
+                    // drain and react to whatever it saw right before this
+                    // process exited — codex P1/P2 on PR #2360 (second
+                    // review pass): `child.wait()` resolving does NOT mean
+                    // the stderr reader (an independently-scheduled task)
+                    // has already called `poison_resume` for a "No
+                    // conversation found" line, or finished ITS OWN
+                    // subsequent `persist_session_id("")` call. Without
+                    // this, two failure modes were possible: (1) this task
+                    // could clear `pending_resume_retry` below before the
+                    // stderr reader ever promotes it, permanently losing
+                    // the retry for the exact case it exists to catch, and
+                    // (2) a confirmed retry's fresh session id (persisted
+                    // by the NEW process's own stdout reader once
+                    // respawned) could be silently overwritten by this
+                    // exiting process's stderr task finally getting around
+                    // to persisting an empty one, corrupting continuity
+                    // despite the retry having succeeded. 500ms is
+                    // generous — the stderr pipe closes and drains almost
+                    // immediately once the process has genuinely exited —
+                    // and only ever delays shutdown handling, never blocks
+                    // it indefinitely.
+                    if let Some(handle) = stderr_reader_handle {
+                        if tokio::time::timeout(std::time::Duration::from_millis(500), handle).await.is_err() {
+                            tracing::warn!(
+                                block_id = %block_id_wait,
+                                "stderr reader did not finish within 500ms of process exit"
+                            );
+                        }
+                    }
+
                     // Notify health monitor so Stalled/Dead watchdog stops.
                     health_wait.set_exited(exit_code);
 
@@ -1328,9 +1367,11 @@ impl PersistentSubprocessController {
                     // see its doc comment and reagentx P1 on PR #2360. Taken
                     // (not just read) so it can only ever fire once. Any
                     // still-tentative `pending_resume_retry` is also
-                    // dropped here — this process (successful or not) is
-                    // done, so it can never be confirmed either way, and a
-                    // reused controller instance must not carry it into an
+                    // dropped here — by now the stderr reader has already
+                    // had its bounded chance to promote it above, so this
+                    // process (successful or not) is genuinely done: it
+                    // can never be confirmed either way, and a reused
+                    // controller instance must not carry it into an
                     // unrelated later lifetime.
                     let retry_after_resume = inner.confirmed_stale_resume_retry.take();
                     inner.pending_resume_retry = None;
@@ -1339,7 +1380,11 @@ impl PersistentSubprocessController {
 
                     // Deregister from muxbus so later sends fall through to the
                     // lower tiers instead of resolving to a dead block. Mirrors
-                    // the shell controller's exit path.
+                    // the shell controller's exit path. Done regardless of
+                    // whether a retry follows — this exact process's
+                    // resources are gone either way, and spawn_process's own
+                    // fresh registration (if a retry follows) doesn't clean
+                    // up state belonging to THIS dying process.
                     crate::backend::reactive::get_global_handler()
                         .unregister_block(&block_id_wait);
                     if let Some(ref agent_id) = agent_id_wait {
@@ -1355,8 +1400,29 @@ impl PersistentSubprocessController {
                         super::session_recovery::clear_active_pid(wstore, &block_id_wait);
                     }
 
-                    // Publish status
-                    if let Some(ref broker) = broker_wait {
+                    // A stale `--resume <sid>` is exactly what killed this
+                    // process (`retry_after_resume_failure`'s doc comment) —
+                    // retry the same message once, fresh, WITHOUT publishing
+                    // this transient failure as a completed turn first.
+                    // codex P2 on PR #2360 (second review pass): publishing
+                    // "done"/turn_active:false here would let the mounted
+                    // UI (trackTurnJustEnded, a deferred controller refresh)
+                    // treat this failed attempt as the real end of the
+                    // user's turn before the retry's own fresh "running"
+                    // status ever lands. reagentx/codex never reviewed this
+                    // controller type in PR #2338 (see docs/retros/
+                    // RETRO_STALE_RESUME_SESSION_ID_ACROSS_CHANNELS_2026_07_29.md).
+                    if let Some((_attempted_sid, retry_config, retry_json)) = retry_after_resume {
+                        if let Some(ctrl) = self_ref_wait.upgrade() {
+                            tracing::warn!(
+                                block_id = %block_id_wait,
+                                "stale --resume session id caused this exit — retrying fresh, without --resume"
+                            );
+                            ctrl.retry_after_resume_failure(retry_config, retry_json);
+                        }
+                    } else if let Some(ref broker) = broker_wait {
+                        // Genuinely done, not retrying — publish the
+                        // terminal status.
                         let status = BlockControllerRuntimeStatus {
                             blockid: block_id_wait.clone(),
                             version: 0,
@@ -1368,25 +1434,6 @@ impl PersistentSubprocessController {
                             turn_active: false,
                         };
                         super::publish_controller_status(broker, &status);
-                    }
-
-                    // A stale `--resume <sid>` is exactly what killed this
-                    // process (`retry_after_resume_failure`'s doc comment) —
-                    // retry the same message once, fresh, before this exit
-                    // is ever treated as a completed/failed turn from the
-                    // frontend's point of view. reagentx/codex never
-                    // reviewed this path (see docs/retros/
-                    // RETRO_STALE_RESUME_SESSION_ID_ACROSS_CHANNELS_2026_07_29.md) —
-                    // it's a different controller type than PR #2338's own
-                    // ACP-controller review surface.
-                    if let Some((_attempted_sid, retry_config, retry_json)) = retry_after_resume {
-                        if let Some(ctrl) = self_ref_wait.upgrade() {
-                            tracing::warn!(
-                                block_id = %block_id_wait,
-                                "stale --resume session id caused this exit — retrying fresh, without --resume"
-                            );
-                            ctrl.retry_after_resume_failure(retry_config, retry_json);
-                        }
                     }
                 }
                 Ok(force) = kill_rx => {
@@ -1774,6 +1821,39 @@ mod send_input_tests {
             c.inner.lock().unwrap().session_id,
             None,
             "must clear inner.session_id directly, not rely on poison_resume having already done so"
+        );
+    }
+
+    /// codex P1/P2 on PR #2360 (second review pass): the process-waiter
+    /// task now awaits the stderr reader's `JoinHandle` (bounded by a
+    /// timeout) before deciding whether a stale-resume retry was
+    /// confirmed, and before publishing a terminal status — otherwise
+    /// `child.wait()` resolving first could (1) wipe the tentative retry
+    /// before the stderr reader ever promotes it, and (2) let a
+    /// confirmed retry's fresh session id get overwritten by the stderr
+    /// task's own delayed `persist_session_id("")` call. This isn't a
+    /// full subprocess integration test (this module's established
+    /// precedent — see its own doc comment — avoids spawning a real CLI
+    /// process for this exact subsystem); it confirms the underlying
+    /// synchronization primitive itself: a task that completes well
+    /// within the bound is FULLY awaited — its side effect is guaranteed
+    /// observable — before the timeout could possibly race it.
+    #[tokio::test]
+    async fn a_join_handle_completing_within_the_bound_is_fully_awaited_first() {
+        let flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag_clone = Arc::clone(&flag);
+        let handle = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            flag_clone.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+
+        let result = tokio::time::timeout(std::time::Duration::from_millis(500), handle).await;
+
+        assert!(result.is_ok(), "a task well within the bound must not be treated as timed out");
+        assert!(
+            flag.load(std::sync::atomic::Ordering::SeqCst),
+            "awaiting the handle must observe the task's side effect having already happened, \
+             not race ahead of it"
         );
     }
 }
