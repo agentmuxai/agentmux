@@ -1048,6 +1048,5 @@ export function useAgentControllerStatus(
         notifyControllerHealthy,
         forceControllerRefresh,
         cancelLogin,
-        forceControllerRefresh,
     };
 }
