@@ -181,7 +181,7 @@ export interface UseAgentControllerStatus {
      * rationale. Best-effort — logs a warning on failure rather than
      * throwing, matching every other call site.
      */
-    forceControllerRefresh: (context?: "login" | "restart") => Promise<void>;
+    forceControllerRefresh: (context?: "login" | "restart") => Promise<boolean>;
     /**
      * Mark a recovery attempt as in flight / resolved, feeding the same
      * shared counter behind `loginWaiting()` that `relogin()`/
@@ -400,8 +400,17 @@ export function useAgentControllerStatus(
      *  nothing to do with signing in), so a restart-triggered RPC failure
      *  must not log a misleading "signed in, but..." message (reagent P2 on
      *  PR #2336). Defaults to "login" — every pre-existing call site stays
-     *  unchanged. */
-    const forceControllerRefresh = async (context: "login" | "restart" = "login"): Promise<void> => {
+     *  unchanged.
+     *
+     *  Returns whether the resync RPC actually succeeded. /login's
+     *  slash-command handler consumes this — it must NOT declare the
+     *  controller healthy (notifyControllerHealthy/clearAuthFailure) when
+     *  the refresh itself failed, or every fast-fail guard this PR added
+     *  gets cleared while the controller is still on the stale credential.
+     *  Codex P1 on PR #2338 (tenth re-review). The three original callers
+     *  (relogin/useGlobalLogin/loginViaTerminal) still ignore the return
+     *  value, unchanged — same best-effort contract they've always had. */
+    const forceControllerRefresh = async (context: "login" | "restart" = "login"): Promise<boolean> => {
         try {
             const initialTermSize = opts.getInitialTermSize?.();
             await RpcApi.ControllerResyncCommand(TabRpcClient, {
@@ -412,6 +421,7 @@ export function useAgentControllerStatus(
             });
             const rts = await BlockService.GetControllerStatus(opts.blockId);
             if (rts) opts.onControllerStatus?.(rts);
+            return true;
         } catch (e: any) {
             const detail = e?.message ?? String(e);
             if (context === "restart") {
@@ -423,6 +433,7 @@ export function useAgentControllerStatus(
                     "warn",
                 );
             }
+            return false;
         }
     };
 

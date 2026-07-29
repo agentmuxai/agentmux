@@ -22,12 +22,13 @@ import { createRoot } from "solid-js";
 const hub = vi.hoisted(() => ({
     agentInput: vi.fn(),
     dispatchSlashCommand: vi.fn(),
+    setMeta: vi.fn(),
 }));
 
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         AgentInputCommand: (...args: unknown[]) => hub.agentInput(...args),
-        SetMetaCommand: vi.fn().mockResolvedValue(undefined),
+        SetMetaCommand: (...args: unknown[]) => hub.setMeta(...args),
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -76,6 +77,7 @@ const BLOCK_ID = "block-send-fail";
 beforeEach(() => {
     hub.agentInput.mockReset();
     hub.dispatchSlashCommand.mockReset().mockResolvedValue({ kind: "passthrough" });
+    hub.setMeta.mockReset().mockResolvedValue(undefined);
 });
 afterEach(() => {
     unregisterPane(BLOCK_ID);
@@ -107,7 +109,7 @@ describe("useAgentCommands — turnPhase recovery on a failed send", () => {
                 loginWaiting: () => false,
                 setAuthNotice: () => {},
                 notifyControllerHealthy: () => {},
-                forceControllerRefresh: async () => {},
+                forceControllerRefresh: async () => true,
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
                 backToPicker: async () => {},
@@ -144,7 +146,7 @@ describe("useAgentCommands — turnPhase recovery on a failed send", () => {
                 loginWaiting: () => false,
                 setAuthNotice: () => {},
                 notifyControllerHealthy: () => {},
-                forceControllerRefresh: async () => {},
+                forceControllerRefresh: async () => true,
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
                 backToPicker: async () => {},
@@ -194,7 +196,7 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 loginWaiting: () => false,
                 setAuthNotice,
                 notifyControllerHealthy: () => {},
-                forceControllerRefresh: async () => {},
+                forceControllerRefresh: async () => true,
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
                 backToPicker: async () => {},
@@ -236,7 +238,7 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 loginWaiting: () => false,
                 setAuthNotice: () => {},
                 notifyControllerHealthy: () => {},
-                forceControllerRefresh: async () => {},
+                forceControllerRefresh: async () => true,
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
                 backToPicker: async () => {},
@@ -301,7 +303,7 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 loginWaiting: () => false,
                 setAuthNotice: () => {},
                 notifyControllerHealthy: () => {},
-                forceControllerRefresh: async () => {},
+                forceControllerRefresh: async () => true,
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
                 backToPicker: async () => {},
@@ -349,7 +351,7 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 loginWaiting: () => true,
                 setAuthNotice,
                 notifyControllerHealthy: () => {},
-                forceControllerRefresh: async () => {},
+                forceControllerRefresh: async () => true,
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
                 backToPicker: async () => {},
@@ -390,7 +392,7 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 loginWaiting: () => true,
                 setAuthNotice: () => {},
                 notifyControllerHealthy: () => {},
-                forceControllerRefresh: async () => {},
+                forceControllerRefresh: async () => true,
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
                 backToPicker: async () => {},
@@ -438,7 +440,7 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 loginWaiting: () => false,
                 setAuthNotice,
                 notifyControllerHealthy: () => {},
-                forceControllerRefresh: async () => {},
+                forceControllerRefresh: async () => true,
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
                 backToPicker: async () => {},
@@ -488,7 +490,7 @@ describe("useAgentCommands — authFailureToPreserve survives a local command", 
         loginWaiting: () => false,
         setAuthNotice: () => {},
         notifyControllerHealthy: () => {},
-        forceControllerRefresh: async () => {},
+        forceControllerRefresh: async () => true,
         beginRecoveryFlow: () => {},
         endRecoveryFlow: () => {},
         backToPicker: async () => {},
@@ -549,6 +551,94 @@ describe("useAgentCommands — authFailureToPreserve survives a local command", 
             await commands.sendMessage("/whatever", false, authFailure);
 
             expect(paneSnapshot(BLOCK_ID)?.failure?.data).toEqual(authFailure);
+            dispose();
+        });
+    });
+});
+
+// Codex P2 on PR #2338 (tenth re-review): the auth guard originally ran
+// ONLY once, before the runtime-args SetMetaCommand round-trip — a real
+// async gap another recovery flow (or a mid-turn auth failure) can land in
+// between that check and the actual AgentInputCommand send. canRetry()
+// flipping true during that window must still block the send, not just be
+// caught by the (already-passed) earlier check.
+describe("useAgentCommands — re-checks the live auth guard immediately before the send", () => {
+    const PROVIDER = { id: "claude", controllerType: "subprocess", launchArgs: [] } as any;
+
+    it("blocks the send when canRetry() flips true during the SetMetaCommand round-trip", async () => {
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+
+        let canRetryNow = false;
+        // Simulates a DIFFERENT recovery flow (or a mount-time auth_failed
+        // classification) landing while this send's own SetMetaCommand RPC
+        // is still in flight.
+        hub.setMeta.mockImplementation(async () => {
+            canRetryNow = true;
+        });
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => PROVIDER,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => canRetryNow,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh: async () => true,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                backToPicker: async () => {},
+            });
+
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("u there", false);
+
+            expect(hub.setMeta).toHaveBeenCalledOnce();
+            // The stale (canRetry() was false) first check must not be the
+            // last word — the second, live re-check right before the send
+            // must catch it.
+            expect(hub.agentInput).not.toHaveBeenCalled();
+            expect(paneSnapshot(BLOCK_ID)?.turnPhase.kind).toBe("Idle");
+            dispose();
+        });
+    });
+
+    it("still sends normally when auth stays good across the round-trip", async () => {
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+        hub.agentInput.mockResolvedValueOnce(undefined);
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => PROVIDER,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh: async () => true,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                backToPicker: async () => {},
+            });
+
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("u there", false);
+
+            expect(hub.agentInput).toHaveBeenCalledOnce();
             dispose();
         });
     });

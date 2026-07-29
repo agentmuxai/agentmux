@@ -159,7 +159,16 @@ export interface SlashCommandContext {
      * while still reaching that stale process. Codex P1 on PR #2338
      * (seventh re-review). Best-effort — never throws.
      */
-    forceControllerRefresh: () => Promise<void>;
+    forceControllerRefresh: () => Promise<boolean>;
+    /**
+     * True while a turn is actively streaming on this pane. `/login`'s
+     * handler checks this before calling `forceControllerRefresh` —
+     * `agentmux-srv`'s `resync_controller` with `force: true` unconditionally
+     * stops the existing controller process before respawning it, which
+     * would kill an in-progress turn and discard its work. Codex P1 on
+     * PR #2338 (tenth re-review).
+     */
+    isTurnActive: () => boolean;
     /**
      * Register /login's own up-to-5-minute poll as an in-flight recovery
      * attempt, feeding the same shared counter behind
