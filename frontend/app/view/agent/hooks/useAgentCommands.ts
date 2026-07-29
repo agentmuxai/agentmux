@@ -140,6 +140,21 @@ export interface UseAgentCommandsOptions {
      */
     isBackendTurnActive: () => boolean;
     /**
+     * True ONLY when the backend has POSITIVELY confirmed the turn ended
+     * (`wasTurnActive === false`, not `undefined`) — deliberately NOT the
+     * negation of `isBackendTurnActive()`, which would treat "never
+     * confirmed either way" the same as "confirmed idle." Used to gate
+     * `flushPendingControllerRefresh`'s actual force-restart: since that
+     * proceeding is destructive, "we don't know yet" must lean toward "not
+     * safe to flush," not "safe to flush." A pane that mounts onto an
+     * already-active turn and never receives a live event before a
+     * premature per-round `session_end` demotes `turnPhase` would
+     * otherwise have a deferred refresh flushed prematurely, killing a
+     * turn that was never locally confirmed but was never confirmed IDLE
+     * either. reagent P1 on PR #2338 (twenty-first re-review).
+     */
+    isBackendTurnConfirmedIdle: () => boolean;
+    /**
      * The model-level backToPicker action. The hook delegates to this
      * rather than owning a duplicate implementation — the pane-frame
      * header button also calls it, so the logic needs to live in one
@@ -392,18 +407,29 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
     const flushPendingControllerRefresh = (): Promise<boolean> => {
         if (inFlightControllerRefresh) return inFlightControllerRefresh;
         if (!controllerRefreshPendingUntilIdle) return Promise.resolve(false);
-        // Leave the flag pending (don't claim it) while the backend still
-        // authoritatively confirms an active turn — regardless of WHY this
-        // was called. A premature per-round session_end can transiently
-        // move the frontend's turnPhase to Done/Idle while the backend
-        // controller genuinely still reports turn_active: true; every
-        // caller of this function (flushHeldMessages, the idle-send path,
-        // the turn-just-ended edge detector, the reactive turnIdle effect)
-        // can fire based on that falsely-idle turnPhase. Checking the
+        // Leave the flag pending (don't claim it) UNLESS the backend has
+        // POSITIVELY confirmed idle — regardless of WHY this was called. A
+        // premature per-round session_end can transiently move the
+        // frontend's turnPhase to Done/Idle while the backend controller
+        // genuinely still reports turn_active: true; every caller of this
+        // function (flushHeldMessages, the idle-send path, the
+        // turn-just-ended edge detector, the reactive turnIdle effect) can
+        // fire based on that falsely-idle turnPhase. Checking the
         // authoritative signal HERE, once, centrally, closes the gap for
         // all of them at once rather than requiring each call site to
         // re-derive it. Codex P1 on PR #2338 (twentieth re-review).
-        if (opts.isBackendTurnActive()) return Promise.resolve(false);
+        //
+        // Deliberately `!isBackendTurnConfirmedIdle()`, NOT
+        // `isBackendTurnActive()`: the latter is false both when the
+        // backend confirms idle AND when it's simply never been confirmed
+        // either way (e.g. a pane that mounts mid-turn before its first
+        // live controllerstatus event arrives) — treating "never
+        // confirmed" as "safe to flush" let a deferred refresh for a
+        // still-genuinely-active reopened-pane turn through. This
+        // destructive action requires POSITIVE proof of idle, not just
+        // absence of proof of activity. reagent P1 on PR #2338
+        // (twenty-first re-review).
+        if (!opts.isBackendTurnConfirmedIdle()) return Promise.resolve(false);
         controllerRefreshPendingUntilIdle = false;
         inFlightControllerRefresh = (async () => {
             const refreshed = await opts.forceControllerRefresh();
