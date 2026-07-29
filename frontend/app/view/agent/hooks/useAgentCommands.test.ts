@@ -327,6 +327,56 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
         });
     });
 
+    it("delivers a held message that was known-bad at queue time if auth has since recovered by flush time (codex P2 on PR #2338, fifteenth re-review)", async () => {
+        // The frozen authWasKnownBadAtQueueTime flag alone is too
+        // conservative: a recovery attempt can succeed in the gap between
+        // queueing (auth known-bad) and flushing (next tool-boundary/turn-
+        // end — or /login's own up-to-5-minute poll). Permanently trusting
+        // the frozen flag would discard a message that would now succeed,
+        // with no path back since the composer already cleared it. Must
+        // re-check the LIVE signals at flush time before rejecting.
+        let canRetryNow = true;
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => canRetryNow,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh: async () => true,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                backToPicker: async () => {},
+            });
+
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("held while known-bad, recovers later", true);
+            expect(commands.hasHeldMessages()).toBe(true);
+
+            // Recovery succeeds before the flush runs.
+            canRetryNow = false;
+            hub.agentInput.mockResolvedValueOnce(undefined);
+
+            await commands.flushHeldMessages();
+
+            expect(hub.agentInput).toHaveBeenCalledWith(
+                expect.anything(),
+                expect.objectContaining({ message: "held while known-bad, recovers later" }),
+            );
+            dispose();
+        });
+    });
+
     it("still fast-fails a turn-initiating send while loginWaiting() is true, even though canRetry() already flipped false", async () => {
         // Mirrors relogin()'s own sequencing: canRetry is cleared the
         // INSTANT the mount-time "Log in" button is clicked — well before
@@ -915,6 +965,85 @@ describe("useAgentCommands — flushPendingControllerRefresh", () => {
 
             expect(forceControllerRefresh).toHaveBeenCalledOnce();
             expect(notifyControllerHealthy).not.toHaveBeenCalled();
+            dispose();
+        });
+    });
+});
+
+// Codex P1 on PR #2338 (fifteenth re-review): /login succeeding mid-turn
+// (deferring its controller restart) and flushHeldMessages draining the
+// "send now" queue are triggered by the SAME turn-just-ended moment via
+// TWO independent signals (a live controllerstatus event calling
+// flushPendingControllerRefresh vs. a reactive turnPhaseAtom effect calling
+// flushHeldMessages) — either can fire first, and neither originally
+// awaited the other. A held message could reach AgentInputCommand while
+// ControllerResyncCommand was still stopping/replacing the controller.
+describe("useAgentCommands — flushHeldMessages serializes behind a pending/in-flight controller refresh", () => {
+    it("does not send a held message until the deferred controller refresh (triggered by a DIFFERENT, concurrent caller) actually completes", async () => {
+        hub.dispatchSlashCommand.mockImplementation(async (_msg: string, _registry: unknown, ctx: { deferControllerRefreshUntilIdle: () => void }) => {
+            ctx.deferControllerRefreshUntilIdle();
+            return { kind: "handled" };
+        });
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+
+        let resolveRefresh: (() => void) | undefined;
+        const forceControllerRefresh = vi.fn(
+            () => new Promise<boolean>((resolve) => { resolveRefresh = () => resolve(true); }),
+        );
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                backToPicker: async () => {},
+            });
+
+            // /login succeeds mid-turn (defers instead of refreshing now).
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("/login", /* wasAlreadyWorking */ true);
+
+            // A second message got held behind the same active turn — its
+            // authWasKnownBadAtQueueTime is false (auth was fine when it
+            // was queued), so deliverToBackend's guard is bypassed for it
+            // (initiatesTurn=false) once flushed.
+            await commands.sendMessage("hi", /* wasAlreadyWorking */ true);
+            expect(commands.hasHeldMessages()).toBe(true);
+
+            // Simulates the turn ending: the live controllerstatus path
+            // fires flushPendingControllerRefresh WITHOUT awaiting it
+            // (mirrors agent-view.tsx's trackTurnJustEnded), and the
+            // reactive turnPhaseAtom effect independently calls
+            // flushHeldMessages around the same moment.
+            const refreshPromise = commands.flushPendingControllerRefresh();
+            const flushPromise = commands.flushHeldMessages();
+
+            // The refresh RPC hasn't resolved yet — the held message must
+            // not have been sent.
+            expect(forceControllerRefresh).toHaveBeenCalledOnce();
+            expect(hub.agentInput).not.toHaveBeenCalled();
+
+            resolveRefresh?.();
+            await refreshPromise;
+            await flushPromise;
+
+            expect(hub.agentInput).toHaveBeenCalledWith(
+                expect.anything(),
+                expect.objectContaining({ message: "hi" }),
+            );
             dispose();
         });
     });

@@ -337,25 +337,44 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
     // stale credential indefinitely (until the pane is manually reopened),
     // guards and all. Codex P1 on PR #2338 (thirteenth re-review). Consumed
     // by flushPendingControllerRefresh, which agent-view.tsx calls from its
-    // existing turn-just-ended edge detector (trackTurnJustEnded).
+    // existing turn-just-ended edge detector (trackTurnJustEnded), AND by
+    // flushHeldMessages (see its own call site) — both fire off the SAME
+    // turn-just-ended moment via independent signals (a live controllerstatus
+    // event vs. a reactive turnPhaseAtom effect), so either can run first.
     let controllerRefreshPendingUntilIdle = false;
+    // Tracks the actual in-flight refresh (not just "one is due") so a
+    // caller that arrives AFTER the flag was already claimed by the other
+    // trigger still awaits the real completion instead of seeing
+    // controllerRefreshPendingUntilIdle already false and treating that as
+    // "nothing to wait for." Without this, flushHeldMessages could start
+    // draining the queue — issuing AgentInputCommand — concurrently with
+    // ControllerResyncCommand still stopping/replacing the controller,
+    // hitting the stale (or mid-restart) process. Codex P1 on PR #2338
+    // (fifteenth re-review).
+    let inFlightControllerRefresh: Promise<void> | null = null;
     const deferControllerRefreshUntilIdle = (): void => {
         controllerRefreshPendingUntilIdle = true;
     };
-    const flushPendingControllerRefresh = async (): Promise<void> => {
-        if (!controllerRefreshPendingUntilIdle) return;
+    const flushPendingControllerRefresh = (): Promise<void> => {
+        if (inFlightControllerRefresh) return inFlightControllerRefresh;
+        if (!controllerRefreshPendingUntilIdle) return Promise.resolve();
         controllerRefreshPendingUntilIdle = false;
-        const refreshed = await opts.forceControllerRefresh();
-        if (refreshed) {
-            opts.notifyControllerHealthy();
-            opts.model.dispatchPane({ type: "FailureCleared" });
-        }
-        // Best-effort, matching forceControllerRefresh's own contract — on
-        // failure it already logged a warning. Leaving the fast-fail guards
-        // untouched here (not clearing them) is the safe choice, not a
-        // regression: the controller is still on the stale credential, so a
-        // message should still be blocked until the user retries /login or
-        // reopens the pane.
+        inFlightControllerRefresh = (async () => {
+            const refreshed = await opts.forceControllerRefresh();
+            // Best-effort, matching forceControllerRefresh's own contract —
+            // on failure it already logged a warning. Leaving the fast-fail
+            // guards untouched here (not clearing them) is the safe choice,
+            // not a regression: the controller is still on the stale
+            // credential, so a message should still be blocked until the
+            // user retries /login or reopens the pane.
+            if (refreshed) {
+                opts.notifyControllerHealthy();
+                opts.model.dispatchPane({ type: "FailureCleared" });
+            }
+        })().finally(() => {
+            inFlightControllerRefresh = null;
+        });
+        return inFlightControllerRefresh;
     };
 
     // Build the SlashCommandContext bundle. Used by sendMessage's
@@ -833,12 +852,26 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         if (flushing) return;
         flushing = true;
         try {
+            // /login succeeding mid-turn and this flush are both triggered
+            // by the SAME turn-just-ended moment, via independent signals
+            // (a live controllerstatus event vs. this pane's reactive
+            // turnPhaseAtom effect) — either can fire first. Awaiting here
+            // ensures a deferred controller restart (if any is pending OR
+            // already in flight, started by the other trigger) fully
+            // completes before this loop issues a single AgentInputCommand
+            // — otherwise a held message could race ControllerResyncCommand
+            // while it's still stopping/replacing the controller, hitting
+            // the stale (or mid-restart) process. No-ops instantly when
+            // nothing is pending. Codex P1 on PR #2338 (fifteenth
+            // re-review).
+            await flushPendingControllerRefresh();
+
             // Drain one at a time, awaiting each delivery (incl. its cmd:args
             // round-trip) so messages reach the CLI's stdin in submission order.
             // shift() (not a snapshot) so items queued mid-flush are included.
             while (heldQueue.length > 0) {
                 const item = heldQueue.shift()!;
-                if (item.authWasKnownBadAtQueueTime) {
+                if (item.authWasKnownBadAtQueueTime && (opts.canRetry() || opts.loginWaiting())) {
                     // This item was queued while the pane already knew it was
                     // logged out (or a recovery attempt was still unconfirmed)
                     // — deliverToBackend's guard never sees it, since it's
@@ -851,6 +884,20 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                     // genuinely active for whatever put this pane in the
                     // "busy" branch to begin with. Codex P2 on PR #2338
                     // (sixth re-review).
+                    //
+                    // Re-checks the LIVE signals here, not just the frozen
+                    // queue-time flag: a recovery attempt can succeed
+                    // between this item being queued and this flush running
+                    // (flush waits for the next tool-boundary/turn-end, and
+                    // /login's own poll can take up to 5 minutes) — trusting
+                    // the frozen flag alone would permanently discard a
+                    // message that would now succeed, with no path back
+                    // (the composer already cleared it). The frozen flag is
+                    // still the right gate for whether to even consider
+                    // rejecting (an item that was GOOD at queue time must
+                    // never be retroactively dropped just because auth flips
+                    // bad later — a DIFFERENT, already-settled rule). Codex
+                    // P2 on PR #2338 (fifteenth re-review).
                     opts.log("auth", "held message not sent — not logged in", "warn");
                     opts.model.dispatchPane({ type: "PendingMessageRejected", id: item.id });
                     continue;
