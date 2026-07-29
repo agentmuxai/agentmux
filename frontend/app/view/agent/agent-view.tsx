@@ -932,6 +932,20 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             // own canRetry=true, letting the next message bypass the
             // fast-fail guard and reach the still-known-bad process.
             status.notifyControllerHealthy();
+            // Also clear a stale live "auth"-classified state.failure —
+            // unlike the OTHER two places in this PR that declare a
+            // controller healthy (login.ts's finalizeLoginSuccess,
+            // useAgentCommands.ts's flushPendingControllerRefresh success
+            // path), this call site only ever cleared canRetry via
+            // notifyControllerHealthy, never the separate state.failure
+            // checkAuthGuard's liveAuthFailure check reads
+            // (paneSnapshot(...).failure?.data.code === "auth"). Without
+            // this, a stale failure row survives even this independent,
+            // stronger proof of health (a live controllerstatus event
+            // showing a turn genuinely streaming), permanently
+            // fast-failing every subsequent send. reagentx P1 on PR #2338
+            // (thirty-second re-review).
+            dispatchPane(model.blockId, { type: "FailureCleared" }, "system");
         },
     });
 
