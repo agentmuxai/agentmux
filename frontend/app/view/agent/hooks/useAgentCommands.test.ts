@@ -1259,6 +1259,83 @@ describe("useAgentCommands — flushHeldMessages serializes behind a pending/in-
             dispose();
         });
     });
+
+    // Codex P1 on PR #2338 (twenty-second re-review): flushHeldMessages's own
+    // internal flushPendingControllerRefresh() call no-ops (without clearing
+    // the flag) when the backend hasn't positively confirmed idle yet —
+    // exactly the premature-session_end divergence that gate exists for. The
+    // OLD behavior proceeded to drain the queue regardless, delivering
+    // straight to a controller that might still hold the stale pre-refresh
+    // credential.
+    it("does NOT drain the held queue while local turnPhase reads idle but the backend hasn't confirmed idle yet — drains later once the refresh actually completes", async () => {
+        hub.dispatchSlashCommand.mockImplementation(async (_msg: string, _registry: unknown, ctx: { deferControllerRefreshUntilIdle: () => void }) => {
+            ctx.deferControllerRefreshUntilIdle();
+            return { kind: "handled" };
+        });
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+        const forceControllerRefresh = vi.fn(async () => true);
+        let backendConfirmedIdle = false;
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => backendConfirmedIdle,
+                backToPicker: async () => {},
+            });
+
+            // /login succeeds mid-turn (defers instead of refreshing now).
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("/login", /* wasAlreadyWorking */ true);
+
+            // A second message is held behind the same active turn.
+            await commands.sendMessage("hi", /* wasAlreadyWorking */ true);
+            expect(commands.hasHeldMessages()).toBe(true);
+
+            // Local turnPhase reaches idle, but the backend has NOT
+            // positively confirmed idle (the premature session_end
+            // divergence) — flushHeldMessages must not drain yet.
+            model.dispatchPane({ type: "StreamFlushObserved", addedCount: 1, at: Date.now() }, "system");
+            model.dispatchPane({ type: "ReconcileTurnActive", at: Date.now(), active: false }, "system");
+            await commands.flushHeldMessages();
+
+            expect(forceControllerRefresh).not.toHaveBeenCalled();
+            expect(hub.agentInput).not.toHaveBeenCalled();
+            expect(commands.hasHeldMessages()).toBe(true);
+
+            // The backend now positively confirms idle — a later trigger
+            // completes the refresh, which must itself drain the queue it
+            // left stranded. The drain it triggers is fire-and-forget
+            // (flushPendingControllerRefresh's callers must not block on a
+            // full queue drain), so give its internal chain a tick to run.
+            backendConfirmedIdle = true;
+            await commands.flushPendingControllerRefresh();
+            await new Promise((resolve) => setTimeout(resolve, 0));
+
+            expect(forceControllerRefresh).toHaveBeenCalledOnce();
+            expect(hub.agentInput).toHaveBeenCalledWith(
+                expect.anything(),
+                expect.objectContaining({ message: "hi" }),
+            );
+            expect(commands.hasHeldMessages()).toBe(false);
+            dispose();
+        });
+    });
 });
 
 // reagent P1 on PR #2338 (seventeenth re-review): a turn can end via the
@@ -1385,6 +1462,73 @@ describe("useAgentCommands — idle sendMessage runs the deferred controller ref
                 expect.objectContaining({ message: "fresh message" }),
             );
             expect(paneSnapshot(BLOCK_ID)?.failure).toBeNull();
+            dispose();
+        });
+    });
+
+    // Codex P1 on PR #2338 (twenty-second re-review): flushPendingControllerRefresh
+    // returns `false` for two different reasons — "nothing was ever deferred"
+    // (safe to send) and "a refresh IS deferred but isBackendTurnConfirmedIdle()
+    // isn't true yet, so it deliberately left the flag pending" (NOT safe —
+    // the controller may still hold the stale pre-refresh credential). The
+    // idle-send path must distinguish these and hold the message in the
+    // latter case instead of delivering straight through.
+    it("holds (does not deliver) a fresh idle send while a deferred refresh is still blocked on backend idle confirmation, then delivers it once the refresh completes", async () => {
+        hub.dispatchSlashCommand.mockImplementation(async (_msg: string, _registry: unknown, ctx: { deferControllerRefreshUntilIdle: () => void }) => {
+            ctx.deferControllerRefreshUntilIdle();
+            return { kind: "handled" };
+        });
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+        const forceControllerRefresh = vi.fn(async () => true);
+        let backendConfirmedIdle = false;
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => backendConfirmedIdle,
+                backToPicker: async () => {},
+            });
+
+            // /login succeeds mid-turn (defers instead of refreshing now).
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("/login", /* wasAlreadyWorking */ true);
+
+            // A fresh idle send arrives — local turnPhase reads idle (the
+            // premature session_end scenario), but the backend hasn't
+            // positively confirmed idle yet. Must NOT reach AgentInputCommand.
+            await commands.sendMessage("fresh message", /* wasAlreadyWorking */ false);
+            expect(forceControllerRefresh).not.toHaveBeenCalled();
+            expect(hub.agentInput).not.toHaveBeenCalled();
+            expect(commands.hasHeldMessages()).toBe(true);
+
+            // The backend now positively confirms idle — a later trigger
+            // (mirroring trackTurnJustEnded's edge) flushes the refresh,
+            // which must itself drain the message it stranded.
+            backendConfirmedIdle = true;
+            await commands.flushPendingControllerRefresh();
+
+            expect(forceControllerRefresh).toHaveBeenCalledOnce();
+            expect(hub.agentInput).toHaveBeenCalledWith(
+                expect.anything(),
+                expect.objectContaining({ message: "fresh message" }),
+            );
+            expect(commands.hasHeldMessages()).toBe(false);
             dispose();
         });
     });
