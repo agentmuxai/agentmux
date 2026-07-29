@@ -2,11 +2,27 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createSignal } from "solid-js";
+import { atoms } from "@/app/store/global";
+// Direct submodule imports (NOT the @/layout/index barrel — that barrel
+// re-exports TileLayout, and TileLayout.win32.tsx imports cleanupTileDragState
+// below, which would create an import cycle).
+import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
+import { pruneDanglingLeaves } from "@/layout/lib/layoutPersistence";
+import { setTileDragInFlight } from "@/layout/lib/dragInFlight";
+import { clearCrossTabDrop } from "@/layout/lib/crossTabDrag";
 
 export const tabItemType = "TAB_ITEM";
 
 /** Half the gap opened on each side of an insertion point (px). Total visual gap = 2 × GAP_PX. */
 export const GAP_PX = 12;
+
+// Pixels past the tab bar's bottom edge before tear-off triggers. Chrome-
+// style "perceived-instant" tear-off — just enough to filter trembles.
+// Shared between tab-reorder.ts (non-Windows pragmatic-dnd path) and
+// droppable-tab.tsx (Windows native-pointer-drag path, SPEC_NATIVE_POINTER_
+// DRAG_TEAROFF_2026_07_28.md) so both platforms tear off at the same threshold.
+// See SPEC_TAB_TEAROFF_POSITION_AND_PAINT_2026-05-07.md §4.2.
+export const TEAR_PAST_PX = 5;
 
 // ── Shared drag state ──────────────────────────────────────────────────────
 
@@ -195,4 +211,40 @@ export function wasTabRecentlyMerged(tabId: string, now: number = Date.now()): b
         return false;
     }
     return true;
+}
+
+// ── Pane (tile) drag end-of-gesture cleanup ─────────────────────────────────
+// End-of-drag cleanup for a pane (tile) drag, wherever the release happens:
+// stop any pending spring switch, kill the hover flash, drop any
+// un-consumed cross-tab record, and deactivate the overlay of every tab the
+// drag spring-switched through (their activeDrag was force-set by the
+// spring-switch hit-test; TileLayout's own cleanup only covers the SOURCE
+// tab's model). Shared by tab-reorder.ts's pragmatic-dnd tile monitor
+// (macOS/Linux, and any in-window Windows drop that still round-trips
+// through it) and TileLayout.win32.tsx's native pointer-drag tracker
+// (Windows pane drag source — SPEC_NATIVE_POINTER_DRAG_TEAROFF_2026_07_28
+// §3.5), which has no pragmatic-dnd monitor to dispatch this anymore.
+//
+// A stuck activeDrag is a DEAD TAB — the overlay-container sits over the
+// entire tile area with pointer-events:auto and eats every click.
+export function cleanupTileDragState(): void {
+    setHoveredDropTabId(null);
+    clearCrossTabDrop();
+    setTileDragInFlight(false);
+    const ws = atoms.workspace();
+    const allTabIds = [...(ws?.pinnedtabids ?? []), ...(ws?.tabids ?? [])];
+    for (const tabId of allTabIds) {
+        getLayoutModelForTabById(tabId)?.activeDrag._set(false);
+    }
+    dragActivatedTabIds.clear();
+    // Deferred dangling-leaf prune: mid-drag pruning is gated off (see
+    // pruneDanglingLeaves), so the source tab's disowned leaf is removed
+    // HERE, after the gesture and the move RPC's Tab updates have settled.
+    // 250ms comfortably covers the observed 20-40ms RPC round-trip.
+    setTimeout(() => {
+        for (const tabId of allTabIds) {
+            const model = getLayoutModelForTabById(tabId);
+            if (model) pruneDanglingLeaves(model);
+        }
+    }, 250);
 }

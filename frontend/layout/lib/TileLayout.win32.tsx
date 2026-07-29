@@ -8,17 +8,19 @@ import { notifyPaneReflow } from "@/app/platform/pane-anim";
 import { draggable } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import clsx from "clsx";
 import { toPng } from "html-to-image";
-import { createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, Show } from "solid-js";
+import { Portal } from "solid-js/web";
 import type { JSX } from "solid-js";
 import { Key } from "@solid-primitives/keyed";
 import { debounce, throttle } from "throttle-debounce";
 import { LayoutModel } from "./layoutModel";
-import { useNodeModel, useTileLayout } from "./layoutModelHooks";
+import { getLayoutModelForTabById, useNodeModel, useTileLayout } from "./layoutModelHooks";
 import "./tilelayout.scss";
 import { FlexDirection, LayoutNode, LayoutTreeActionType, ResizeHandleProps, TileLayoutContents } from "./types";
 import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
+import { handleCrossWindowDragEnd } from "@/app/drag/CrossWindowDragMonitor.win32";
 import { setTileDragInFlight } from "./dragInFlight";
-import { clearCrossTabDrop } from "./crossTabDrag";
+import { clearCrossTabDrop, redockDraggedPane, takeCrossTabDropFor } from "./crossTabDrag";
 import { dragState } from "./tilelayout-drag-state";
 import {
     DisplayNodesWrapper,
@@ -26,8 +28,22 @@ import {
     NodeBackdrops,
     OverlayNodeWrapper,
     Placeholder,
+    computePaneHoverAndDispatch,
     tileItemType,
 } from "./tilelayout-shared";
+import { isWindows } from "@/util/platformutil";
+import { attachNativePointerDragTracker } from "@/app/drag/native-pointer-drag-tracker";
+import { getApi, setActiveTab } from "@/store/global";
+import { fireAndForget } from "@/util/util";
+import { Logger } from "@/util/logger";
+import {
+    tabWrapperRefs,
+    hoveredDropTabId,
+    setHoveredDropTabId,
+    dragActivatedTabIds,
+    SPRING_SWITCH_MS,
+    cleanupTileDragState,
+} from "@/app/tab/tabbar-dnd";
 
 export { tileItemType };
 
@@ -275,6 +291,193 @@ const DisplayNode = (props: DisplayNodeProps) => {
         }
     };
 
+    // SPEC_NATIVE_POINTER_DRAG_TEAROFF_2026_07_28 §3.5 — Windows-only native
+    // pointer-drag state, mirroring droppable-tab.tsx's tab wiring. Decision
+    // between in-window move / cross-tab redock / cross-window drop / tear-off
+    // is still made entirely AT RELEASE (unchanged from today's pragmatic-dnd
+    // behavior) — only the EVENT SOURCE driving that decision changes,
+    // exactly as tabs' Phase 1 did for reorder/tear-off there. No live
+    // window-follow for panes (unlike tabs): the floating pane window is
+    // still created only on release; a lightweight DOM ghost (reusing the
+    // already-generated previewImage) substitutes for the native OS drag
+    // image pragmatic-dnd used to show.
+    const windowLabel = new URLSearchParams(window.location.search).get("windowLabel") || "main";
+    const [ghostPos, setGhostPos] = createSignal<{ x: number; y: number } | null>(null);
+
+    let hoveredSpringTabId: string | null = null;
+    let springTimer: ReturnType<typeof setTimeout> | null = null;
+    const clearPaneSpring = () => {
+        if (springTimer != null) { clearTimeout(springTimer); springTimer = null; }
+        if (hoveredDropTabId() != null) setHoveredDropTabId(null);
+        hoveredSpringTabId = null;
+    };
+    // Cross-tab spring-switch (SPEC_PANE_DRAG_TO_TAB_2026_07_10.md): dragging
+    // a pane over ANOTHER tab's button spring-switches the UI to it. Normally
+    // driven by droppable-tab.tsx's own dropTargetForElements — inert on
+    // Windows now (no native drag session for it to receive dragenter/
+    // dragover from), so this hit-tests the same tabWrapperRefs registry
+    // manually and reuses the same hoveredDropTabId flash + SPRING_SWITCH_MS
+    // timing droppable-tab.tsx's (dead-on-Windows) target used.
+    const hitTestTabBarSpringSwitch = (clientX: number, clientY: number) => {
+        let foundTabId: string | null = null;
+        for (const [tabId, el] of tabWrapperRefs) {
+            const rect = el.getBoundingClientRect();
+            if (clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom) {
+                foundTabId = tabId;
+                break;
+            }
+        }
+        if (foundTabId === hoveredSpringTabId) return;
+        clearPaneSpring();
+        hoveredSpringTabId = foundTabId;
+        if (!foundTabId || foundTabId === props.layoutModel.tabAtom()?.oid) return;
+        setHoveredDropTabId(foundTabId);
+        springTimer = setTimeout(() => {
+            springTimer = null;
+            setHoveredDropTabId(null);
+            const model = getLayoutModelForTabById(foundTabId);
+            model?.activeDrag._set(true);
+            dragActivatedTabIds.add(foundTabId);
+            fireAndForget(async () => { await setActiveTab(foundTabId); });
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    fireAndForget(async () => model?.onTreeStateAtomUpdated(true));
+                });
+            });
+        }, SPRING_SWITCH_MS);
+    };
+
+    // `local` is false after a successful tear-off/redock: handleCrossWindowDragEnd
+    // (pane branch) has already run LayoutTreeActionType.DeleteNode on THIS
+    // exact node by the time this runs, which unmounts this DisplayNode
+    // instance via the <Key> wrapper in DisplayNodesWrapper. Touching this
+    // component's OWN local signals (setIsDragging/setGhostPos) after that
+    // is touching a disposed owner — skip them; the global/layoutModel-level
+    // cleanup below is what still matters (and is safe: layoutModel itself
+    // isn't disposed, only this one node's DisplayNode was).
+    const endPaneDragState = (local: boolean = true) => {
+        dragState.nodeId = null;
+        dragState.layoutModel = null;
+        dragState.node = null;
+        setTileDragInFlight(false);
+        props.layoutModel.activeDrag._set(false);
+        if (local) {
+            setIsDragging(false);
+            setGhostPos(null);
+        }
+        clearPaneSpring();
+        cleanupTileDragState();
+    };
+
+    const canDragNative = (cursorX: number, cursorY: number) => {
+        if (isEphemeral() || isMagnified()) return false;
+        // Reject drags that originate inside a resize-handle zone — see the
+        // pragmatic-dnd canDrag below (kept byte-identical logic; only the
+        // event source differs).
+        const containerEl = props.layoutModel.displayContainerRef?.current;
+        if (containerEl) {
+            const containerRect = containerEl.getBoundingClientRect();
+            const localX = cursorX - containerRect.left;
+            const localY = cursorY - containerRect.top;
+            const halfSize = props.layoutModel.resizeHandleSizePx() / 2;
+            for (const rh of props.layoutModel.resizeHandles()) {
+                if (rh.flexDirection === FlexDirection.Row &&
+                    Math.abs(localX - rh.centerPx) <= halfSize &&
+                    localY >= rh.perpMinPx && localY <= rh.perpMaxPx) return false;
+                if (rh.flexDirection === FlexDirection.Column &&
+                    Math.abs(localY - rh.centerPx) <= halfSize &&
+                    localX >= rh.perpMinPx && localX <= rh.perpMaxPx) return false;
+            }
+        }
+        return true;
+    };
+
+    const nativePaneDragHandlers = {
+        onDragStart: (cursorX: number, cursorY: number) => {
+            dragState.nodeId = props.node.id;
+            dragState.layoutModel = props.layoutModel;
+            dragState.node = props.node;
+            setTileDragInFlight(true);
+            clearCrossTabDrop();
+            props.layoutModel.activeDrag._set(true);
+            setIsDragging(true);
+            generatePreviewImage();
+            setGhostPos({ x: cursorX, y: cursorY });
+        },
+        onClick: () => {
+            // No-op — a plain click never touches preventDefault/capture, so
+            // the native click still fires and the block's own click/focus
+            // handling runs normally.
+        },
+        onReorderUpdate: (cursorX: number, cursorY: number) => {
+            setGhostPos({ x: cursorX, y: cursorY });
+            computePaneHoverAndDispatch(props.layoutModel, props.node.id, cursorX, cursorY);
+        },
+        onReorderCommit: () => {
+            const crossTabDrop = takeCrossTabDropFor(props.layoutModel.tabAtom()?.oid);
+            if (crossTabDrop) {
+                props.layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+                redockDraggedPane(crossTabDrop);
+            } else {
+                props.layoutModel.onDrop();
+            }
+            endPaneDragState();
+        },
+        onReorderCancel: () => {
+            props.layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+            endPaneDragState();
+        },
+        isTearOffZone: (cursorX: number, cursorY: number) => {
+            const container = props.layoutModel.displayContainerRef?.current;
+            if (!container) return false;
+            const rect = container.getBoundingClientRect();
+            return cursorX < rect.left || cursorX > rect.right || cursorY < rect.top || cursorY > rect.bottom;
+        },
+        onTearOffStart: async (screenX: number, screenY: number) => {
+            props.layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+            setGhostPos({ x: screenX - window.screenX, y: screenY - window.screenY });
+            // Same Win32-capture-freezes-the-cursor fix as tabs — see
+            // droppable-tab.tsx's onTearOffStart for the full mechanism.
+            fireAndForget(() => getApi().setDragCursor());
+            return "pane-drag-active";
+        },
+        onTearOffMove: (screenX: number, screenY: number) => {
+            const clientX = screenX - window.screenX;
+            const clientY = screenY - window.screenY;
+            setGhostPos({ x: clientX, y: clientY });
+            hitTestTabBarSpringSwitch(clientX, clientY);
+        },
+        onTearOffEnd: (committed: boolean) => {
+            fireAndForget(() => getApi().restoreDragCursor());
+            if (!committed) {
+                props.layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+                endPaneDragState();
+                return;
+            }
+            // Released outside the tile layout — decide cross-window drop
+            // vs. tear-off exactly as the old dragend/fallback path did
+            // (GetWindowRect hit-test via startCrossDrag/updateCrossDrag),
+            // just called directly instead of waiting for a dragend event
+            // that no longer fires. See CrossWindowDragMonitor.win32.tsx.
+            fireAndForget(async () => {
+                try {
+                    await handleCrossWindowDragEnd(
+                        { kind: "tile", node: props.node, sourceTabId: props.layoutModel.tabAtom()?.oid },
+                        windowLabel,
+                    );
+                } catch (e) {
+                    Logger.error("dnd", "native pane drag release-outside failed", { error: String(e) });
+                }
+                // A successful tear-off deletes THIS exact node (see
+                // performTearOff's pane branch), unmounting this DisplayNode
+                // out from under itself — check it's still actually in the
+                // tree before touching this component's own local signals.
+                const stillPresent = props.layoutModel.leafs().some((l) => l.id === props.node.id);
+                endPaneDragState(stillPresent);
+            });
+        },
+    };
+
     // Register pragmatic-dnd draggable on the HEADER element directly.
     // pragmatic-dnd wraps HTML5 DnD and fires onDragStart AFTER the browser
     // commits the drag, so SolidJS reactive state updates won't cause
@@ -330,9 +533,14 @@ const DisplayNode = (props: DisplayNodeProps) => {
 
             if (!handle) return;
 
-            // New live handle — register draggable on it
+            // New live handle — register the drag source on it. Windows uses
+            // the native pointer-capture tracker (no OLE session, no circle-
+            // slash — SPEC_NATIVE_POINTER_DRAG_TEAROFF_2026_07_28 §3.5);
+            // macOS/Linux keep pragmatic-dnd's draggable() unchanged.
             registeredHandle = handle;
-            cleanupFn = draggable({
+            cleanupFn = isWindows()
+                ? attachNativePointerDragTracker(handle, nativePaneDragHandlers, canDragNative)
+                : draggable({
                 element: handle,
                 canDrag: ({ input }) => {
                     if (isEphemeral() || isMagnified()) return false;
@@ -461,6 +669,37 @@ const DisplayNode = (props: DisplayNodeProps) => {
         >
             {leafContent()}
             {previewElement()}
+            {/* SPEC_NATIVE_POINTER_DRAG_TEAROFF_2026_07_28 §3.5 — Windows-only
+                drag ghost. Replaces the native OS drag image pragmatic-dnd's
+                onGenerateDragPreview used to show (no native drag session to
+                hand an image to anymore); reuses the same previewImage this
+                component already generates. Portal'd to document.body: while
+                dragging this tile has .dragging → filter:blur(8px), and CSS
+                filter establishes a new containing block for position:fixed
+                descendants, so a non-portal'd fixed child would be positioned
+                (and overflow:hidden-clipped) relative to the BLURRED tile
+                instead of the viewport — invisible in practice. Fixed-
+                position from body, so it naturally stops rendering once the
+                cursor leaves this window's viewport — nothing else to show
+                out there anyway. */}
+            <Show when={isWindows() && ghostPos() && previewImage()}>
+                <Portal mount={document.body}>
+                    <img
+                        src={previewImage()!.src}
+                        class="native-pane-drag-ghost"
+                        style={{
+                            position: "fixed",
+                            left: `${ghostPos()!.x + 12}px`,
+                            top: `${ghostPos()!.y + 12}px`,
+                            width: `${DragPreviewWidth}px`,
+                            height: `${DragPreviewHeight}px`,
+                            "pointer-events": "none",
+                            "z-index": 10000,
+                            opacity: 0.85,
+                        }}
+                    />
+                </Portal>
+            </Show>
         </div>
     );
 };

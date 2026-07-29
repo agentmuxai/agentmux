@@ -348,6 +348,14 @@ async fn route_command(
         "open_window_at_position" => commands::drag::open_window_at_position(state, args),
         "tear_off_pool_promote" => commands::drag::tear_off_pool_promote(state, args),
         "pool_window_ready" => commands::drag::pool_window_ready(state, args),
+
+        // SPEC_NATIVE_POINTER_DRAG_TEAROFF_2026_07_28 — native pointer-capture
+        // drag. Direct dispatch (no spawn_blocking): a strict-cache HWND lookup
+        // and a single SetWindowPos are both fast, non-blocking Win32 calls,
+        // matching set_drag_cursor/restore_drag_cursor above.
+        "engage_native_window_drag" => commands::drag::engage_native_window_drag(state, args),
+        "update_native_window_drag" => commands::drag::update_native_window_drag(state, args),
+        "end_native_window_drag" => commands::drag::end_native_window_drag(state),
         "start_tab_drag_tracking" => {
             // spawn_blocking — blocks briefly (~ms) on the hook thread's
             // install-ready channel, same rationale as

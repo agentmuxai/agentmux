@@ -18,7 +18,7 @@ import { registerTabCloseRequestHandler } from "./tab-close-request";
 import { deleteLayoutModelForTab } from "@/layout/index";
 import { DroppableTab } from "./droppable-tab";
 import { TabCloseConfirmModal } from "./tab-close-confirm-modal";
-import { createTearOffTabAtRelease } from "./tab-tearoff-rpc";
+import { createTearOffTabAtRelease, createNativeTearOffHandler } from "./tab-tearoff-rpc";
 import { useTabTearOffEvents } from "./tab-tearoff-events";
 import { useTabDragAndDrop } from "./tab-reorder";
 import { useActiveTabColorLine } from "./tab-color-line";
@@ -137,6 +137,16 @@ function TabBar(props: TabBarProps): JSX.Element {
         () => tabBarScrollRef,
     );
 
+    // SPEC_NATIVE_POINTER_DRAG_TEAROFF_2026_07_28 — Windows-only native
+    // pointer-drag tear-off (droppable-tab.tsx's onTearOffStart handler).
+    // Fires at threshold-cross instead of release, and returns the new
+    // window's label so the caller can hand off to engageNativeWindowDrag
+    // for live cursor-follow. No-op cost on macOS/Linux — just unused.
+    const requestNativeTearOff = createNativeTearOffHandler(
+        () => props.workspace,
+        () => tabBarScrollRef,
+    );
+
     // In-strip reorder DnD + pane-drag-over-strip cleanup + Windows
     // tear-off-cursor workaround + wheel-scroll.
     useTabDragAndDrop(
@@ -206,6 +216,8 @@ function TabBar(props: TabBarProps): JSX.Element {
                                 tabIds={tabIds()}
                                 onSelect={() => handleSelect(tabId)}
                                 onClose={() => requestClose(tabId)}
+                                tabBarScrollRef={() => tabBarScrollRef}
+                                requestNativeTearOff={requestNativeTearOff}
                             />
                         </>
                     )}

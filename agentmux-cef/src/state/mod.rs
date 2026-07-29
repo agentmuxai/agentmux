@@ -19,6 +19,8 @@ mod pending_reproject;
 mod ui_thread_gate;
 
 pub use drag::{DragType, DragPayload, DragSession};
+#[cfg(target_os = "windows")]
+pub use drag::NativeDragTarget;
 pub use window_meta::{WindowKind, WindowMeta, PendingWindowCreation};
 pub use browser_pane::{
     BrowserPaneLifecycle, BrowserPaneEntry, PaneRect, WindowPlacement, PaneWindowState,
@@ -475,6 +477,12 @@ pub struct AppState {
     #[cfg(target_os = "windows")]
     pub window_hwnds: Mutex<HashMap<String, isize>>,
 
+    /// SPEC_NATIVE_POINTER_DRAG_TEAROFF_2026_07_28 — the torn-off window
+    /// currently being live-dragged by the frontend's pointer-capture
+    /// tracker, if any. See `NativeDragTarget`'s own doc comment.
+    #[cfg(target_os = "windows")]
+    pub native_drag_target: Mutex<Option<NativeDragTarget>>,
+
     /// Phase 4b — per-window ghost state for floating-pane redock.
     /// Keyed by window label. The target renderer pushes its last-computed
     /// `{ block_id, dir }` here on each hover update; the floater queries
@@ -600,6 +608,8 @@ impl Default for AppState {
             cef_cache_dir: Mutex::new(None),
             #[cfg(target_os = "windows")]
             window_hwnds: Mutex::new(HashMap::new()),
+            #[cfg(target_os = "windows")]
+            native_drag_target: Mutex::new(None),
             floating_redock_ghost: Mutex::new(HashMap::new()),
             window_transparent: std::sync::atomic::AtomicBool::new(false),
             ui_thread_gate: Mutex::new(UiThreadGate::default()),
