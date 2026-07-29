@@ -12,7 +12,7 @@
 //! `spawn_turn` is one continuous, non-trivially-ordered state machine and
 //! is moved here WHOLE rather than decomposed further.
 
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -424,15 +424,28 @@ impl SubprocessController {
         core::spawn_health_watchdog(&self.health_monitor);
 
         // Renew the lease (if any) on the same cadence as the health
-        // watchdog above, for as long as this turn is active. A
+        // watchdog above, for as long as THIS turn is active. A
         // dedicated task rather than widening `spawn_health_watchdog`'s
         // signature — that helper has 7 call sites across every
         // controller type (ACP, persistent, container, host); only
         // host-mode claims a lease in this PR (see module + struct doc
         // comments), so touching the other 6 for an always-`None`
         // param isn't warranted.
+        //
+        // Exit condition is a fresh per-turn flag (`turn_done`), NOT
+        // `health_monitor.is_active_turn()` — that flag is shared by
+        // the whole controller, not scoped to this specific spawn.
+        // Queued messages drain synchronously in process_waiter: the
+        // next turn's `set_active_turn(true)` can land in the same
+        // tick this turn's process_waiter releases its lease, with no
+        // async gap. A stale renewal task watching the shared flag
+        // would see it flip back to `true` before its next 5s tick and
+        // loop forever, leaking one never-terminating renewal task
+        // (blocking flock + file write every tick) per turn in a busy,
+        // back-to-back conversation — reagent P1 on #2359.
+        let turn_done = Arc::new(AtomicBool::new(false));
         if let (Some(store), Some(lease)) = (self.lease_store.clone(), claimed_lease.clone()) {
-            let health_renew = Arc::clone(&self.health_monitor);
+            let turn_done_renew = Arc::clone(&turn_done);
             let block_id_renew = self.block_id.clone();
             tokio::spawn(async move {
                 let mut interval =
@@ -441,7 +454,7 @@ impl SubprocessController {
                     ));
                 loop {
                     interval.tick().await;
-                    if !health_renew.is_active_turn() {
+                    if turn_done_renew.load(Ordering::SeqCst) {
                         break;
                     }
                     if let Err(e) = store.renew(&lease) {
@@ -468,6 +481,7 @@ impl SubprocessController {
         let broker_wait = self.broker.clone();
         let run_lock = Arc::clone(&self.run_lock);
         let health_wait = Arc::clone(&self.health_monitor);
+        let turn_done_wait = Arc::clone(&turn_done);
         let self_ref_wait = self.self_ref.lock().unwrap().clone().unwrap_or_default();
         let stderr_tail_wait = Arc::clone(&stderr_tail);
         let last_result_frame_wait = Arc::clone(&last_result_frame);
@@ -650,6 +664,13 @@ impl SubprocessController {
                     data: serde_json::to_value(failure).ok(),
                 });
             }
+
+            // Signal the renewal task to stop BEFORE releasing the
+            // lease/run_lock — a queued next turn (dequeued a few
+            // lines below) may spawn immediately and claim its own
+            // lease; this turn's renewal task must not still be
+            // ticking when that happens (reagent P1 on #2359).
+            turn_done_wait.store(true, Ordering::SeqCst);
 
             // Release the lease (if any), then the run lock — mirrors
             // the ordering in the spawn-failure closure above.
