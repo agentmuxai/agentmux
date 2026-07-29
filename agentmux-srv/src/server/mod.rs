@@ -67,6 +67,14 @@ use agentmux_common::api_types::{
 #[derive(Clone)]
 pub struct AppState {
     pub auth_key: String,
+    /// Random identifier generated once per process boot — NOT the
+    /// `--instance` channel name (`config.instance_id`), which is
+    /// stable across restarts and shared by every process on the same
+    /// channel. Used as the owner id for cross-process session leases
+    /// (`registry::LeaseStore`) so two live processes can be told
+    /// apart even when they're the same channel/version.
+    /// See `docs/retros/RETRO_DEV_BUILD_SHARED_AGENT_SESSION_COLLISION_2026_07_29.md`.
+    pub boot_id: Arc<str>,
     pub version: String,
     pub app_path: String,
     pub wstore: Arc<Store>,
