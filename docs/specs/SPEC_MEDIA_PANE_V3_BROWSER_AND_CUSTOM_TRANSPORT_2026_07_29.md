@@ -6,8 +6,9 @@
 **Related:** `docs/specs/SPEC_MEDIA_PANE_2026_07_26.md` (v1 — implemented,
 PR #2299, commit `bd7c20609`),
 `docs/specs/SPEC_MEDIA_PANE_V2_AGENT_WORKFLOW_GAPS_2026_07_28.md` (v2 —
-merged, PR #2344; this spec supersedes v2 §3's interaction model
-specifically, see below), `agentmux-srv/src/config/widgets.json`,
+merged, PR #2344; this spec supersedes v2 §3's interaction model, **and
+also v2 §4's "keep the native `<audio>` element, no custom playback UI"
+decision** — see "Custom transport bar" below for why), `agentmux-srv/src/config/widgets.json`,
 `frontend/app/view/media/`.
 
 ## Motivation
@@ -128,7 +129,20 @@ that's real new scope for its own spec, not an extension of this one.
   existing modes, not a replacement that forces browsing UI onto every use
   case.
 
-### Custom transport bar (video/audio, replaces native `<video controls>`)
+### Custom transport bar (video/audio, replaces native `<video controls>` and `<audio controls>`)
+
+**Supersedes v2 §4's decision to keep the native `<audio>` element.** v2
+rejected a custom playback UI for audio specifically to avoid scope creep —
+a reasonable call when custom playback UI didn't exist anywhere in the pane
+yet. That premise no longer holds once this spec commits to building
+`PlaybackTransport` for video regardless: extending the same already-built
+component to audio is incremental (share one component, one set of
+keyboard/scrub/loop/rate behaviors), whereas keeping audio on the native
+`<audio>` element would mean maintaining two divergent playback UIs with
+inconsistent controls for what's otherwise the same "preview a media file"
+interaction. The waveform-image addition from v2 §4 is unaffected — it
+still renders above the transport, just above `PlaybackTransport` now
+instead of above `<audio controls>`.
 
 A single shared component (`PlaybackTransport`, used under both the image/
 video preview area and directly for audio-only files), built per the
@@ -144,6 +158,14 @@ research recipe:
   directly) rather than only showing a tooltip — matches what the research
   calls out as the more useful feedback mode for actual seeking, not just
   a time readout.
+  - **Accessibility** (reagent P2): replacing `<input type="range">` drops
+    its built-in keyboard/AT semantics for free, so the custom element
+    must re-implement them explicitly — `role="slider"`,
+    `aria-valuemin="0"`, `aria-valuemax="<duration>"`,
+    `aria-valuenow="<currentTime>"`, `aria-valuetext="<mm:ss> / <mm:ss>"`
+    (matches the visible timecode display), and keyboard handling:
+    Left/Right arrow seek ±5s, Home/End jump to start/end, focusable via
+    Tab. Same requirement applies to the volume slider.
 - **Timecode display**: `current / duration`, monospace, updates with the
   scrub position.
 - **Loop toggle** — directly useful for exactly the kind of short-clip
@@ -160,6 +182,29 @@ research recipe:
 - Explicitly not included: in/out point markers, trim handles, speed ramp
   curves, or anything that implies building an edit — those are editing
   tools, out of scope per this spec's Non-goals.
+
+**EDL playback integration** (reagent P2 — this was unspecified). When the
+selected item is a v2 §5 EDL (segment sequence) rather than a single media
+file, `PlaybackTransport` operates on **cumulative EDL time**, not the
+underlying `<video>` element's raw `currentTime`:
+
+- **Duration** shown/used for the scrub range is the sum of every segment's
+  `t_end - t_start`, not any single source file's duration.
+- **Position** (timecode display, scrub handle position, `aria-valuenow`)
+  is elapsed time since EDL playback start — i.e. the sum of completed
+  segments' durations plus the current segment's elapsed time within its
+  `[t_start, t_end]` window — not the raw element `currentTime`, which
+  resets at each segment cut (v2 §5's `t_start`-seek-then-`t_end`-cut
+  model).
+- **Scrubbing** to a cumulative position walks the segment list to find
+  which segment that position falls in and the offset within it, switches
+  the underlying element's source if that segment's `source` differs from
+  the currently loaded one, and seeks to `segment.t_start + offset`. A
+  scrub that lands past the last segment clamps to the final segment's
+  `t_end`.
+- Play/pause, loop, and rate controls apply to the whole EDL sequence
+  (loop restarts at segment 1's `t_start`, not just the current segment) —
+  matching how a single-file loop restarts at 0, not mid-clip.
 
 ### Hover-scrub on grid thumbnails
 
