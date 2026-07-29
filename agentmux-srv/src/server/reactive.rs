@@ -143,8 +143,21 @@ pub(super) async fn handle_reactive_inject(
                                     "host",
                                     req.priority.as_deref().unwrap_or("normal"),
                                 );
+                                return Json(body);
                             }
-                            return Json(body);
+                            // success:false — this entry is stale (e.g. agent
+                            // unregistered without a clean shutdown); evict
+                            // and fall through to Tier 2b/3 instead of
+                            // returning the failure (reagent P1 on #2350 —
+                            // this previously returned unconditionally
+                            // whenever the body parsed, regardless of
+                            // success, so a stale same-channel entry never
+                            // fell through to any later tier).
+                            tracing::warn!(
+                                target = %req.target_agent,
+                                "cross-instance forward: success=false — evicting and falling through"
+                            );
+                            agent_registry::remove(&data_dir, &req.target_agent);
                         }
                     }
                     Ok(r) => {
