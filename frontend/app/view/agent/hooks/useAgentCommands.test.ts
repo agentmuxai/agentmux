@@ -643,3 +643,94 @@ describe("useAgentCommands — re-checks the live auth guard immediately before 
         });
     });
 });
+
+// Codex P1 on PR #2338 (eleventh re-review): a live paneSnapshot(...).turnPhase
+// read inside buildCommandContext's isTurnActive would see the OPTIMISTIC
+// TurnStart that handleSendMessage (agent-view.tsx) dispatches before ever
+// calling sendMessage — even for the ordinary case of typing /login on a
+// genuinely idle pane. That reports isTurnActive() === true unconditionally,
+// permanently defeating login.ts's active-turn check for the most common
+// path (an idle pane) and reproducing the exact stale-controller bug
+// forceControllerRefresh was added to /login to fix.
+describe("useAgentCommands — ctx.isTurnActive() reflects the pre-TurnStart snapshot", () => {
+    it("reads false for a slash command sent while the pane was genuinely idle, even though the caller already dispatched an optimistic TurnStart", async () => {
+        let observedIsTurnActive: boolean | undefined;
+        hub.dispatchSlashCommand.mockImplementation(async (_msg: string, _registry: unknown, ctx: { isTurnActive: () => boolean }) => {
+            observedIsTurnActive = ctx.isTurnActive();
+            return { kind: "handled" };
+        });
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh: async () => true,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                backToPicker: async () => {},
+            });
+
+            // Mirrors handleSendMessage exactly: capture wasAlreadyWorking
+            // BEFORE dispatching the optimistic TurnStart (pane was idle),
+            // then dispatch it, then call sendMessage — same order as
+            // agent-view.tsx's real call site.
+            const wasAlreadyWorking = false;
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("/login", wasAlreadyWorking);
+
+            expect(observedIsTurnActive).toBe(false);
+            dispose();
+        });
+    });
+
+    it("reads true for a slash command sent while a real turn was already streaming", async () => {
+        let observedIsTurnActive: boolean | undefined;
+        hub.dispatchSlashCommand.mockImplementation(async (_msg: string, _registry: unknown, ctx: { isTurnActive: () => boolean }) => {
+            observedIsTurnActive = ctx.isTurnActive();
+            return { kind: "handled" };
+        });
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh: async () => true,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                backToPicker: async () => {},
+            });
+
+            // A turn is already genuinely in flight (wasAlreadyWorking=true) —
+            // handleSendMessage does NOT re-dispatch TurnStart in this case.
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("/login", /* wasAlreadyWorking */ true);
+
+            expect(observedIsTurnActive).toBe(true);
+            dispose();
+        });
+    });
+});

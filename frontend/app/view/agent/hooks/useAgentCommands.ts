@@ -323,7 +323,22 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
     // Build the SlashCommandContext bundle. Used by sendMessage's
     // dispatch and by completions(); both need the same view of the
     // pane's reactive state.
-    const buildCommandContext = (): SlashCommandContext => ({
+    //
+    // `wasAlreadyWorking`, when passed, backs `isTurnActive` — it MUST be
+    // the PRE-`TurnStart` snapshot (handleSendMessage/agent-view.tsx
+    // captures it, then dispatches TurnStart optimistically before ever
+    // calling sendMessage). A live `paneSnapshot(...).turnPhase` read here
+    // would see that optimistic TurnStart's "Submitting" phase and report
+    // isTurnActive() === true even for the ordinary case of typing /login
+    // on a genuinely idle pane — permanently defeating the check
+    // finalizeLoginSuccess (login.ts) uses to decide whether it's safe to
+    // force-restart the controller: it would ALWAYS skip the restart, so
+    // the refreshed credential would never reach an already-running IDLE
+    // stale controller, reproducing the very bug forceControllerRefresh
+    // was added to /login to fix. Codex P1 on PR #2338 (eleventh
+    // re-review). Omitted (completions()/availableCommands(), which never
+    // execute a command handler) falls back to a live read.
+    const buildCommandContext = (wasAlreadyWorking?: boolean): SlashCommandContext => ({
         blockId: opts.blockId,
         provider: opts.provider,
         block: opts.block,
@@ -333,7 +348,8 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         notifyControllerHealthy: opts.notifyControllerHealthy,
         clearAuthFailure: () => opts.model.dispatchPane({ type: "FailureCleared" }),
         forceControllerRefresh: opts.forceControllerRefresh,
-        isTurnActive: () => workingFromPhase(paneSnapshot(opts.blockId)?.turnPhase ?? { kind: "Idle" }),
+        isTurnActive: () =>
+            wasAlreadyWorking ?? workingFromPhase(paneSnapshot(opts.blockId)?.turnPhase ?? { kind: "Idle" }),
         beginRecoveryFlow: opts.beginRecoveryFlow,
         endRecoveryFlow: opts.endRecoveryFlow,
         openPicker,
@@ -393,7 +409,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
 
         if (trimmed.startsWith("!")) {
             try {
-                await dispatchBangCommand(trimmed.slice(1).trim(), opts.blockId, buildCommandContext());
+                await dispatchBangCommand(trimmed.slice(1).trim(), opts.blockId, buildCommandContext(wasAlreadyWorking));
             } finally {
                 // TurnStart was dispatched by handleSendMessage before sendMessage
                 // was called. Reset it so the pane returns to Idle instead of waiting
@@ -418,7 +434,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             // would resurrect a stale banner over a credential /login just
             // fixed.
             let authFailureClearedByCommand = false;
-            const baseCtx = buildCommandContext();
+            const baseCtx = buildCommandContext(wasAlreadyWorking);
             const ctx: SlashCommandContext = {
                 ...baseCtx,
                 clearAuthFailure: () => {
