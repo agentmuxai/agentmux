@@ -20,7 +20,7 @@
 //! 2. stdout_reader: process stdout → .jsonl persistence + WPS blockfile events
 //! 3. process_waiter: wait for exit, update status
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -165,19 +165,37 @@ struct PersistentInner {
     /// Cleared on kill and on a normal exit for the same
     /// reused-instance reason as `pending_resume_retry`.
     confirmed_stale_resume_retry: Option<(String, PersistentSpawnConfig, String)>,
-    /// Bumped by `spawn_process` every time it successfully spawns a child
-    /// (the original send_message-triggered spawn, or a retry's own
-    /// respawn). `send_message` captures this right after its own spawn
-    /// attempt (if any) and re-checks it just before writing to
-    /// `stdin_tx` — codex P1 on PR #2360 (third review pass): a
-    /// fast-failing stale-resume spawn can let the process-waiter task
-    /// confirm and install a retry's brand-new process (with its own
-    /// fresh `stdin_tx`) BEFORE `send_message`'s own later write runs.
-    /// If the epoch has moved on, that write is skipped — the retry
-    /// already delivers this exact message on the new process, so
-    /// writing here too would duplicate it, and erroring on a
-    /// mid-swap `stdin_tx` would falsely report a failed send.
-    spawn_epoch: u64,
+    /// True from the moment a caller commits to calling `spawn_process`
+    /// (in `send_message` or `retry_after_resume_failure`) until it has
+    /// delivered every message enqueued for that spawn — see
+    /// `pending_send_messages`. Checked and set together with
+    /// `stdin_tx.is_some()` under this same lock, in one acquisition —
+    /// reagentx P1 on PR #2360 (sixth review pass): `send_message`'s
+    /// `is_running()` check and its `spawn_process()` call used to be two
+    /// separate operations; a second concurrent `send_message` call (a
+    /// genuine second RPC, or a muxbus delivery) landing in the gap
+    /// between them could ALSO observe "not running" and independently
+    /// spawn a second child process, orphaning one (leaked, unkillable via
+    /// `stop_process`, unregistered from muxbus). Whichever caller sees
+    /// `stdin_tx.is_none() && !spawning_in_progress` first becomes the
+    /// sole spawner for this round; every other caller queues instead of
+    /// racing its own spawn.
+    ///
+    /// This also fully subsumes the earlier `spawn_epoch`/
+    /// `should_skip_own_delivery` mechanism (rounds 3-5 of this same PR):
+    /// that check existed only to catch a delivery landing in the window
+    /// between a caller's own `spawn_process` returning and its own
+    /// tail-end stdin write — a window that no longer exists, since
+    /// delivery now happens as part of the same atomic spawn-claim, before
+    /// the lock is released (see `release_spawn_claim_and_drain_queue`).
+    spawning_in_progress: bool,
+    /// Messages queued while `spawning_in_progress` was `true` — includes
+    /// the enqueuing caller's own message when it became the spawner (see
+    /// `SendAction::BecomeSpawner`), so the post-spawn drain uses one
+    /// uniform delivery path regardless of whether a message triggered the
+    /// spawn or arrived while someone else's spawn was already in flight.
+    /// Drained by `release_spawn_claim_and_drain_queue`.
+    pending_send_messages: VecDeque<String>,
     current_pid: Option<u32>,
     /// Channel to send messages to the stdin writer task.
     stdin_tx: Option<mpsc::Sender<String>>,
@@ -239,6 +257,21 @@ impl PersistentInner {
         self.confirmed_stale_resume_retry = None;
         true
     }
+}
+
+/// What `decide_send_action` determined a message's fate should be —
+/// see its own doc comment and `PersistentInner::spawning_in_progress`.
+enum SendAction {
+    /// The process is already running — deliver directly, no spawn
+    /// decision involved at all.
+    DeliverDirect,
+    /// Nobody else is currently spawning — this caller claimed the
+    /// exclusive right to do so and its message has already been enqueued
+    /// for the post-spawn drain.
+    BecomeSpawner,
+    /// Another caller is already spawning — this message has been
+    /// enqueued for that caller's own post-spawn drain to deliver.
+    Queued,
 }
 
 /// PersistentSubprocessController keeps a long-running CLI process alive,
@@ -334,7 +367,8 @@ impl PersistentSubprocessController {
                 resume_poisoned: None,
                 pending_resume_retry: None,
                 confirmed_stale_resume_retry: None,
-                spawn_epoch: 0,
+                spawning_in_progress: false,
+                pending_send_messages: VecDeque::new(),
                 current_pid: None,
                 stdin_tx: None,
                 kill_tx: None,
@@ -468,36 +502,94 @@ impl PersistentSubprocessController {
         });
     }
 
-    fn is_running(&self) -> bool {
-        let inner = self.inner.lock().unwrap();
-        inner.stdin_tx.is_some()
+    /// Marks a turn active (re-arming the health watchdog and heartbeat
+    /// only if it was previously idle) and publishes the resulting status
+    /// flip. Shared by `send_message` and `retry_after_resume_failure` —
+    /// both represent "a user message is about to be delivered," just via
+    /// different spawn paths. See `send_message`'s original inline
+    /// comment (now here) for why the watchdog is re-armed conditionally:
+    /// a mid-turn steering send already has one running, so re-spawning on
+    /// every call would leak duplicate watchdog tasks.
+    fn mark_turn_active_and_publish(&self) {
+        let was_active = self.health_monitor.mark_turn_active_returning_was_active();
+        if !was_active {
+            core::spawn_health_watchdog(&self.health_monitor);
+            self.spawn_status_heartbeat();
+        }
+        self.publish_status();
     }
 
-    /// Whether `send_message`'s own stdin write should be skipped in favor
-    /// of a retry that has already taken over delivery for this exact
-    /// attempt — see the call site's own doc comment for the full
-    /// reasoning behind the epoch mechanism itself.
+    /// Atomically decides what to do with `json_str`, given the caller
+    /// wants it delivered to the persistent process — see
+    /// `PersistentInner::spawning_in_progress`'s doc comment for the race
+    /// this closes. All three outcomes are decided under ONE lock
+    /// acquisition so nothing can slip through the gaps between them:
+    /// - the process is already running → `DeliverDirect`, no spawn
+    ///   decision at all.
+    /// - nobody is currently spawning → this caller claims the exclusive
+    ///   right to (`spawning_in_progress = true`), enqueues `json_str`
+    ///   alongside that claim, and returns `BecomeSpawner` — the caller
+    ///   must then call `spawn_process` and, regardless of outcome, call
+    ///   `release_spawn_claim_and_drain_queue`.
+    /// - someone else is already spawning → `json_str` is enqueued for
+    ///   THAT caller's own drain to deliver, and this call returns
+    ///   `Queued` with nothing further to do.
+    fn decide_send_action(&self, json_str: &str) -> SendAction {
+        let mut inner = self.inner.lock().unwrap();
+        if inner.stdin_tx.is_some() {
+            SendAction::DeliverDirect
+        } else if inner.spawning_in_progress {
+            inner.pending_send_messages.push_back(json_str.to_string());
+            SendAction::Queued
+        } else {
+            inner.spawning_in_progress = true;
+            inner.pending_send_messages.push_back(json_str.to_string());
+            SendAction::BecomeSpawner
+        }
+    }
+
+    /// Releases the exclusive spawn claim taken by `decide_send_action`
+    /// returning `BecomeSpawner`, delivering everything enqueued while
+    /// this caller was busy spawning (including its own message — see
+    /// `SendAction::BecomeSpawner`'s doc comment). Draining happens under
+    /// the SAME lock used to decide "queue vs. spawn," one message at a
+    /// time, so a message pushed onto the queue by a losing caller can
+    /// never be missed by a drain that already believed the queue was
+    /// empty.
     ///
-    /// Gated on `is_fresh_spawn` — codex P1 on PR #2360 (fifth review
-    /// pass): only a message that triggered ITS OWN fresh spawn ever has
-    /// its payload captured into `pending_resume_retry` (see
-    /// `spawn_process`), so only THAT message can correctly hand off
-    /// delivery to a retry. A DIFFERENT message arriving while that same
-    /// doomed process is still nominally "running" (`is_fresh_spawn ==
-    /// false` for IT) has no such hand-off — its own content was never
-    /// captured anywhere else. If it happened to observe an epoch
-    /// mismatch too (the SAME retry racing ahead of its own tail-end
-    /// check), skipping would silently drop that message entirely while
-    /// `send_message` still reports success and emits
-    /// `agent-message-accepted` — worse than a duplicate, since the
-    /// content vanishes with no signal at all. Such a message must always
-    /// attempt delivery via whatever `stdin_tx` is CURRENT. Pulled out as
-    /// a pure function (an earlier cut of this fix omitted the
-    /// `is_fresh_spawn` guard inline) so the exact condition is directly,
-    /// deterministically testable without needing to reproduce the actual
-    /// multi-threaded race.
-    fn should_skip_own_delivery(is_fresh_spawn: bool, my_spawn_epoch: u64, current_spawn_epoch: u64) -> bool {
-        is_fresh_spawn && current_spawn_epoch != my_spawn_epoch
+    /// Safe to call even when the just-attempted spawn failed:
+    /// `inner.stdin_tx` will be `None` in that case, so this leaves
+    /// whatever is still queued in place (for the next successful spawn to
+    /// pick up) rather than silently discarding it, while still releasing
+    /// `spawning_in_progress` so a future caller isn't blocked forever.
+    fn release_spawn_claim_and_drain_queue(&self) {
+        loop {
+            let mut inner = self.inner.lock().unwrap();
+            if inner.stdin_tx.is_none() {
+                // Nothing to deliver to right now (the spawn attempt
+                // failed, or the process has already exited again) —
+                // release the claim but leave whatever's still queued for
+                // the next successful spawn to pick up, rather than
+                // silently discarding it.
+                inner.spawning_in_progress = false;
+                break;
+            }
+            let Some(json_str) = inner.pending_send_messages.pop_front() else {
+                inner.spawning_in_progress = false;
+                break;
+            };
+            let tx = inner.stdin_tx.clone();
+            drop(inner);
+            if let Some(tx) = tx {
+                if let Err(e) = tx.try_send(json_str) {
+                    tracing::warn!(
+                        block_id = %self.block_id,
+                        error = %e,
+                        "failed to deliver a queued message after a spawn"
+                    );
+                }
+            }
+        }
     }
 
     /// Send a user message to the running CLI process.
@@ -527,16 +619,7 @@ impl PersistentSubprocessController {
     }
 
     pub fn send_message(&self, message: String, config: PersistentSpawnConfig) -> Result<(), String> {
-        // Format as stream-json user message. Computed BEFORE spawning so a
-        // fresh spawn can hand it straight to spawn_process, which stashes
-        // it as the resume-retry payload SYNCHRONOUSLY — before any
-        // background task (including the process-waiter that later reads
-        // it back) even exists. reagentx P1 on PR #2360: stashing it here
-        // instead, after spawn_process returned, left a window where a
-        // process that dies fast enough (the exact case this exists to
-        // catch) lets the already-scheduled, concurrently-running waiter
-        // task observe the exit and take() this payload as still `None`,
-        // silently losing the retry for the very case it's meant to catch.
+        // Format as stream-json user message.
         let json_msg = serde_json::json!({
             "type": "user",
             "message": {
@@ -546,68 +629,13 @@ impl PersistentSubprocessController {
         });
         let json_str = json_msg.to_string();
 
-        // Spawn process if not running. Binds directly to spawn_process's
-        // OWN return value for the epoch, rather than re-reading
-        // `inner.spawn_epoch` in a separate lock acquisition afterward —
-        // codex P1 on PR #2360 (fourth review pass): re-reading left a gap
-        // between spawn_process returning and that later read where a
-        // fast-failing stale-resume child's own retry could ALREADY have
-        // bumped the epoch again, making this capture the RETRY's epoch
-        // instead of THIS attempt's — silently defeating the whole check
-        // (the tail-end comparison would then always "match" the retry's
-        // epoch, letting this function duplicate the message on the
-        // retry's process). See spawn_process's doc comment for the full
-        // reasoning; see the tail-end check below and `spawn_epoch`'s own
-        // doc comment for what this value protects (codex P1, third review
-        // pass): a fast-failing stale-resume spawn's retry can install a
-        // BRAND NEW process — with its own fresh `stdin_tx` — before this
-        // function's own later stdin write below ever runs, which would
-        // otherwise either duplicate the message on the new process or
-        // spuriously report a failed send, even though the retry already
-        // delivers this exact message on its own.
-        //
-        // For an already-running process (no fresh spawn this call), there
-        // is no NEW spawn attempt of this call's own to bind atomically —
-        // reading the live value is correct here because `pending_resume_retry`
-        // is only ever set on a fresh, resume-attempting spawn, so nothing
-        // tied to THIS message's own delivery could race ahead of it.
-        let is_fresh_spawn = !self.is_running();
-        let my_spawn_epoch = if is_fresh_spawn {
-            self.spawn_process(config.clone(), Some(json_str.clone()))?
-        } else {
-            self.inner.lock().unwrap().spawn_epoch
-        };
-        // spawn_process already marks a fresh process's first turn active
-        // (and starts its watchdog); for an already-running process (the
-        // common case — every turn after the first) this is the only place
-        // that re-marks the turn active, since the persistent process never
-        // exits between turns. Without this, `turn_active` would go stale
-        // after turn 1 and never distinguish "generating" from "idle between
-        // turns" again. The watchdog spawned per-turn (`spawn_health_watchdog`
-        // exits as soon as `is_active_turn()` goes false — see
-        // `core::spawn_health_watchdog`'s doc comment) also needs
-        // re-arming here, but only when actually resuming from idle: a
-        // mid-turn steering send (`send_user_message`) already has one
-        // running, so re-spawning on every call would leak duplicate
-        // watchdog tasks. `mark_turn_active_returning_was_active` reads and
-        // flips the flag under one lock — a separate is_active_turn() +
-        // set_active_turn(true) would race a concurrent send_user_message
-        // (muxbus delivery) on the same block, letting both observe `false`
-        // and both spawn a watchdog.
-        let was_active = self.health_monitor.mark_turn_active_returning_was_active();
-        if !was_active {
-            core::spawn_health_watchdog(&self.health_monitor);
-            self.spawn_status_heartbeat();
-        }
-        // Publish the turn_active flip so the Swarm view's live
-        // ControllerStatus subscription picks it up immediately instead of
-        // waiting for the next unrelated status change (or process exit).
-        self.publish_status();
-
         // Silently persist the user message to the blockfile + global zone so
         // `parseHistoryLines` can reconstruct `user_message` nodes on the next
         // open. No WPS event is published here — the live-display is handled by
         // the `agent-message-accepted` path (UUID node), avoiding a duplicate.
+        // Done unconditionally, before deciding delivery below, so a message
+        // that ends up queued (see `decide_send_action`) is still durably
+        // persisted immediately rather than only once eventually delivered.
         let global_zone = super::shell::resolve_global_output_zone(&self.wstore, &self.block_id);
         let line_with_newline = format!("{json_str}\n");
         super::shell::persist_to_blockfile_silent(
@@ -618,19 +646,58 @@ impl PersistentSubprocessController {
             global_zone.as_deref(),
         );
 
-        let inner = self.inner.lock().unwrap();
-        if Self::should_skip_own_delivery(is_fresh_spawn, my_spawn_epoch, inner.spawn_epoch) {
-            drop(inner);
-            self.emit_message_accepted(config.message_id.as_deref());
-            return Ok(());
+        match self.decide_send_action(&json_str) {
+            SendAction::Queued => {
+                self.emit_message_accepted(config.message_id.as_deref());
+                Ok(())
+            }
+            SendAction::DeliverDirect => {
+                // spawn_process already marks a fresh process's first turn
+                // active (and starts its watchdog); for an already-running
+                // process (the common case — every turn after the first)
+                // this is the only place that re-marks the turn active,
+                // since the persistent process never exits between turns.
+                // Without this, `turn_active` would go stale after turn 1.
+                self.mark_turn_active_and_publish();
+                let inner = self.inner.lock().unwrap();
+                let tx = inner.stdin_tx.as_ref()
+                    .ok_or("persistent process not running after spawn")?;
+                tx.try_send(json_str)
+                    .map_err(|e| format!("stdin send failed: {e}"))?;
+                drop(inner);
+                self.emit_message_accepted(config.message_id.as_deref());
+                Ok(())
+            }
+            SendAction::BecomeSpawner => {
+                // `resume_retry_payload` is stashed SYNCHRONOUSLY inside
+                // spawn_process, before any background task exists —
+                // reagentx P1 on PR #2360: stashing it after spawn_process
+                // returned left a window where a process that dies fast
+                // enough lets the already-scheduled process-waiter task
+                // observe the exit and take() this payload as still
+                // `None`, silently losing the retry for the exact case it
+                // exists to catch. This is independent of, and still
+                // needed alongside, the spawn-claim/queue mechanism below:
+                // that mechanism only prevents a SECOND process from being
+                // spawned concurrently — it does nothing once THIS
+                // process is running and later dies from a stale
+                // `--resume`, which is what the retry payload is for.
+                let message_id = config.message_id.clone();
+                let spawn_result = self.spawn_process(config, Some(json_str));
+                if spawn_result.is_ok() {
+                    self.mark_turn_active_and_publish();
+                }
+                // Emit "accepted" for this caller's own message regardless
+                // of the spawn outcome — matches this function's prior
+                // behavior of always emitting it once the message was
+                // durably persisted above. `release_spawn_claim_and_drain_queue`
+                // (below) is what actually delivers it (or leaves it
+                // queued for a future spawn, on failure).
+                self.emit_message_accepted(message_id.as_deref());
+                self.release_spawn_claim_and_drain_queue();
+                spawn_result.map(|_| ())
+            }
         }
-        let tx = inner.stdin_tx.as_ref()
-            .ok_or("persistent process not running after spawn")?;
-        tx.try_send(json_str)
-            .map_err(|e| format!("stdin send failed: {e}"))?;
-        drop(inner);
-        self.emit_message_accepted(config.message_id.as_deref());
-        Ok(())
     }
 
     /// Retries the message that triggered a `--resume <sid>` attempt this
@@ -657,52 +724,67 @@ impl PersistentSubprocessController {
     fn retry_after_resume_failure(&self, mut config: PersistentSpawnConfig, json_str: String) {
         config.session_id = String::new();
         self.inner.lock().unwrap().session_id = None;
-        if let Err(e) = self.spawn_process(config, None) {
-            tracing::error!(
-                block_id = %self.block_id,
-                error = %e,
-                "failed to respawn after a stale --resume session id"
-            );
-            // Surface this, or the pane hangs forever with NO signal at
-            // all — codex P2 on PR #2360 (fifth review pass): the outer
-            // process-waiter already suppressed its own terminal-status
-            // publish for the ORIGINAL exit specifically because a retry
-            // was in flight, and send_message already returned success
-            // (possibly emitting agent-message-accepted) for the message
-            // this retry was supposed to deliver. If this respawn attempt
-            // ALSO fails, nothing else will ever tell the frontend this
-            // turn is over. `inner.proc_status`/`turn_active` are already
-            // `STATUS_DONE`/`false` (set by the original exit's own
-            // cleanup before this function was ever called) — this just
-            // actually broadcasts that state, which the original exit
-            // deliberately withheld pending this retry's outcome.
-            self.publish_status();
-            return;
-        }
-        // Mirrors send_message's own post-spawn turn-active bookkeeping —
-        // this retry IS the turn's real first (and only user-visible) send,
-        // just deferred past one doomed process.
-        let was_active = self.health_monitor.mark_turn_active_returning_was_active();
-        if !was_active {
-            core::spawn_health_watchdog(&self.health_monitor);
-            self.spawn_status_heartbeat();
-        }
-        self.publish_status();
 
-        let inner = self.inner.lock().unwrap();
-        let Some(tx) = inner.stdin_tx.as_ref() else {
-            tracing::error!(
-                block_id = %self.block_id,
-                "stale-resume retry spawn reported success but stdin_tx is unset"
-            );
-            return;
-        };
-        if let Err(e) = tx.try_send(json_str) {
-            tracing::warn!(
-                block_id = %self.block_id,
-                error = %e,
-                "failed to redeliver message after stale-resume retry spawn"
-            );
+        // This retry is itself a spawn attempt, and must not race a
+        // genuinely concurrent `send_message` call the same way the
+        // ORIGINAL doomed spawn could — see `PersistentInner::
+        // spawning_in_progress`'s doc comment. By the time this runs, the
+        // original `send_message` call that triggered the doomed process
+        // has long since returned (its own spawn-claim-and-deliver
+        // sequence completed synchronously, well before this process even
+        // exited), so this can safely go through the SAME decision
+        // function `send_message` uses.
+        match self.decide_send_action(&json_str) {
+            SendAction::DeliverDirect => {
+                // Another caller's own spawn already installed a running
+                // process by the time this retry got scheduled — no need
+                // for a dedicated respawn; deliver straight to it.
+                self.mark_turn_active_and_publish();
+                let inner = self.inner.lock().unwrap();
+                if let Some(tx) = inner.stdin_tx.as_ref() {
+                    if let Err(e) = tx.try_send(json_str) {
+                        tracing::warn!(
+                            block_id = %self.block_id,
+                            error = %e,
+                            "failed to redeliver message after stale-resume retry (already-running path)"
+                        );
+                    }
+                }
+            }
+            SendAction::Queued => {
+                // Someone else is already spawning — their own
+                // `release_spawn_claim_and_drain_queue` will deliver this.
+            }
+            SendAction::BecomeSpawner => {
+                let spawn_result = self.spawn_process(config, None);
+                match &spawn_result {
+                    Ok(_) => self.mark_turn_active_and_publish(),
+                    Err(e) => tracing::error!(
+                        block_id = %self.block_id,
+                        error = %e,
+                        "failed to respawn after a stale --resume session id"
+                    ),
+                }
+                self.release_spawn_claim_and_drain_queue();
+                if spawn_result.is_err() {
+                    // Surface this, or the pane hangs forever with NO
+                    // signal at all — codex P2 on PR #2360 (fifth review
+                    // pass): the outer process-waiter already suppressed
+                    // its own terminal-status publish for the ORIGINAL
+                    // exit specifically because a retry was in flight, and
+                    // send_message already returned success (possibly
+                    // emitting agent-message-accepted) for the message
+                    // this retry was supposed to deliver. If this respawn
+                    // attempt ALSO fails, nothing else will ever tell the
+                    // frontend this turn is over. `inner.proc_status`/
+                    // `turn_active` are already `STATUS_DONE`/`false` (set
+                    // by the original exit's own cleanup before this
+                    // function was ever called) — this just actually
+                    // broadcasts that state, which the original exit
+                    // deliberately withheld pending this retry's outcome.
+                    self.publish_status();
+                }
+            }
         }
     }
 
@@ -952,22 +1034,10 @@ impl PersistentSubprocessController {
         }
     }
 
-    /// Spawn the persistent CLI process.
-    /// Returns the `spawn_epoch` value THIS spawn assigned (see the field's
-    /// doc comment), captured atomically as part of this same call.
-    /// `send_message` binds to this return value directly for its own
-    /// fresh-spawn case, rather than re-reading `inner.spawn_epoch` in a
-    /// separate lock acquisition afterward — codex P1 on PR #2360 (fourth
-    /// review pass): re-reading left a window between this function
-    /// returning and that later read where a fast-failing stale-resume
-    /// child's own retry could ALREADY have bumped the epoch again,
-    /// making `send_message` capture the RETRY's epoch instead of this
-    /// original attempt's — silently defeating the epoch check entirely
-    /// (the later comparison would then always "match" the retry's own
-    /// epoch, letting `send_message` duplicate the message on the
-    /// retry's process). Returning it directly here closes that gap by
-    /// construction: there is no intervening read to race.
-    fn spawn_process(&self, config: PersistentSpawnConfig, resume_retry_payload: Option<String>) -> Result<u64, String> {
+    /// Spawn the persistent CLI process. Called only while the caller
+    /// holds the exclusive spawn claim (`spawning_in_progress`, see
+    /// `decide_send_action`) — never directly.
+    fn spawn_process(&self, config: PersistentSpawnConfig, resume_retry_payload: Option<String>) -> Result<(), String> {
         // Build command — use make_cli_cmd to resolve .cmd wrappers to node on Windows
         let mut cmd = crate::server::cli_handlers::make_cli_cmd(&config.cli_command);
 
@@ -1033,37 +1103,26 @@ impl PersistentSubprocessController {
             format!("failed to spawn persistent process: {e}")
         })?;
 
-        // Bump spawn_epoch and stash the TENTATIVE resume-retry payload
-        // synchronously, right here — before any background task (stdin
-        // writer, stdout/stderr readers, process-waiter) is created below.
-        //
-        // The epoch bump (see its own doc comment) marks THIS as the
-        // newest spawn attempt for this controller — codex P1 on PR #2360
-        // (third review pass): without it, send_message's own later stdin
-        // write (after this function returns) has no way to notice that a
-        // stale-resume retry already installed a NEWER process (and
-        // `stdin_tx`) in the meantime, and would either duplicate the
-        // message on it or spuriously report a failed send.
-        //
-        // The retry-payload stash (reagentx P1 on PR #2360): doing this
-        // later, back in send_message after this function returned, left a
-        // window where a process that dies fast enough (the exact case
-        // this exists to catch) lets the process-waiter task — already
-        // racing on another thread once it's spawned — observe the exit
-        // and take() this payload while it's still `None`, silently losing
-        // the retry for the very case it's meant to catch. Keyed on the
-        // EXACT sid this spawn attempted (not `config.session_id`, which
-        // can differ from what's actually held in `inner.session_id` once
-        // an earlier call has already hydrated it) so `poison_resume`'s
-        // later confirmation check is unambiguous.
-        let my_epoch = {
+        // Stash the TENTATIVE resume-retry payload synchronously, right
+        // here — before any background task (stdin writer, stdout/stderr
+        // readers, process-waiter) is created below — reagentx P1 on PR
+        // #2360: doing this later, back in send_message after this
+        // function returned, left a window where a process that dies fast
+        // enough (the exact case this exists to catch) lets the
+        // process-waiter task — already racing on another thread once
+        // it's spawned — observe the exit and take() this payload while
+        // it's still `None`, silently losing the retry for the very case
+        // it's meant to catch. Keyed on the EXACT sid this spawn attempted
+        // (not `config.session_id`, which can differ from what's actually
+        // held in `inner.session_id` once an earlier call has already
+        // hydrated it) so `poison_resume`'s later confirmation check is
+        // unambiguous.
+        {
             let mut inner = self.inner.lock().unwrap();
-            inner.spawn_epoch += 1;
             if let (Some(sid), Some(retry_json)) = (attempted_resume_sid.clone(), resume_retry_payload) {
                 inner.pending_resume_retry = Some((sid, config.clone(), retry_json));
             }
-            inner.spawn_epoch
-        };
+        }
 
         let pid = child.id().unwrap_or(0);
 
@@ -1622,7 +1681,7 @@ impl PersistentSubprocessController {
             }
         });
 
-        Ok(my_epoch)
+        Ok(())
     }
 
     pub fn stop_process(&self, force: bool) -> Result<(), String> {
@@ -1984,21 +2043,10 @@ mod send_input_tests {
         );
     }
 
-    /// codex P1 on PR #2360 (third review pass) added a `spawn_epoch` check
-    /// to `send_message`'s own stdin write, to detect a stale-resume retry
-    /// having already installed a newer process in the meantime. This
-    /// confirms that check is a pure no-op in the overwhelmingly common
-    /// case — no concurrent retry raced ahead — so an already-running
-    /// process still receives its message exactly as before. The actual
-    /// race this check exists to close (a genuine multi-threaded
-    /// interleaving between this function's own two lock acquisitions) is
-    /// not practical to inject deterministically without a test-only hook
-    /// in production code; verified via direct code inspection instead —
-    /// the check reads the SAME `inner.spawn_epoch` both times, so any
-    /// intervening bump (which only `spawn_process` performs, and only
-    /// while holding the same lock) is unconditionally visible.
+    /// Baseline: a message sent while the process is already running is
+    /// delivered directly, with no spawn decision involved at all.
     #[tokio::test]
-    async fn send_message_still_delivers_normally_when_the_epoch_has_not_moved() {
+    async fn send_message_delivers_directly_to_an_already_running_process() {
         let c = controller();
         let (tx, mut rx) = mpsc::channel::<String>(4);
         {
@@ -2024,31 +2072,154 @@ mod send_input_tests {
         assert!(received.contains("hello"));
     }
 
-    /// codex P1 on PR #2360 (fifth review pass): an earlier cut of
-    /// `should_skip_own_delivery` (inlined at the call site at the time)
-    /// omitted the `is_fresh_spawn` guard — a SECOND message arriving on
-    /// an already-running process (its own content never captured into
-    /// any retry payload) could observe an UNRELATED epoch bump (from a
-    /// DIFFERENT message's own stale-resume retry) and silently skip its
-    /// own delivery, losing its content entirely while `send_message`
-    /// still reported success. This directly exercises the corrected
-    /// boolean condition with fabricated inputs — deterministic, no need
-    /// to reproduce the actual multi-threaded race.
+    /// reagentx P1 on PR #2360 (sixth review pass): `decide_send_action` is
+    /// the primitive that closes the concurrent-spawn TOCTOU race — these
+    /// three cases cover its full decision space deterministically,
+    /// without needing to reproduce an actual multi-threaded race.
     #[test]
-    fn should_skip_own_delivery_only_when_this_calls_own_fresh_spawn_was_superseded() {
-        assert!(
-            !PersistentSubprocessController::should_skip_own_delivery(false, 1, 2),
-            "an already-running message must always deliver, regardless of an unrelated epoch bump"
+    fn decide_send_action_becomes_spawner_when_nothing_is_in_flight() {
+        let c = controller();
+        let action = c.decide_send_action("msg-a");
+        assert!(matches!(action, SendAction::BecomeSpawner));
+        let inner = c.inner.lock().unwrap();
+        assert!(inner.spawning_in_progress, "must claim the exclusive spawn right");
+        assert_eq!(
+            inner.pending_send_messages.len(),
+            1,
+            "the caller's own message must be enqueued too, for the uniform post-spawn drain"
         );
+    }
+
+    #[test]
+    fn decide_send_action_queues_when_a_spawn_is_already_in_flight() {
+        let c = controller();
+        c.inner.lock().unwrap().spawning_in_progress = true;
+
+        let action = c.decide_send_action("msg-b");
         assert!(
-            PersistentSubprocessController::should_skip_own_delivery(true, 1, 2),
-            "a fresh-spawn message superseded by a newer spawn must skip its own delivery"
+            matches!(action, SendAction::Queued),
+            "a second caller must queue instead of independently deciding to spawn"
         );
+        let inner = c.inner.lock().unwrap();
+        assert_eq!(inner.pending_send_messages.len(), 1);
+        assert_eq!(inner.pending_send_messages[0], "msg-b");
+    }
+
+    #[test]
+    fn decide_send_action_delivers_directly_when_already_running() {
+        let c = controller();
+        let (tx, _rx) = mpsc::channel::<String>(4);
+        c.inner.lock().unwrap().stdin_tx = Some(tx);
+
+        let action = c.decide_send_action("msg-c");
+        assert!(matches!(action, SendAction::DeliverDirect));
+        let inner = c.inner.lock().unwrap();
         assert!(
-            !PersistentSubprocessController::should_skip_own_delivery(true, 1, 1),
-            "the common, non-racing case (epoch unchanged) must always deliver"
+            inner.pending_send_messages.is_empty(),
+            "must not queue when delivering directly to an already-running process"
         );
-        assert!(!PersistentSubprocessController::should_skip_own_delivery(false, 1, 1));
+    }
+
+    /// Exercises the actual race with real OS threads, not just sequential
+    /// state assertions — reagentx P1 on PR #2360 (sixth review pass): many
+    /// concurrent callers landing on a controller with no process running
+    /// (the exact shape of a genuine second `send_message` RPC, or a
+    /// muxbus delivery, racing this controller's own stale-resume retry)
+    /// must produce EXACTLY one spawner; everyone else must queue instead
+    /// of each independently deciding to spawn their own child process.
+    #[test]
+    fn decide_send_action_produces_exactly_one_spawner_under_real_concurrency() {
+        use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+        use std::sync::Arc as StdArc;
+
+        let c = StdArc::new(controller());
+        let spawner_count = StdArc::new(AtomicUsize::new(0));
+        let queued_count = StdArc::new(AtomicUsize::new(0));
+
+        let handles: Vec<_> = (0..16)
+            .map(|i| {
+                let c = StdArc::clone(&c);
+                let spawner_count = StdArc::clone(&spawner_count);
+                let queued_count = StdArc::clone(&queued_count);
+                std::thread::spawn(move || match c.decide_send_action(&format!("msg-{i}")) {
+                    SendAction::BecomeSpawner => {
+                        spawner_count.fetch_add(1, AtomicOrdering::SeqCst);
+                    }
+                    SendAction::Queued => {
+                        queued_count.fetch_add(1, AtomicOrdering::SeqCst);
+                    }
+                    SendAction::DeliverDirect => panic!("process was never running in this test"),
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        assert_eq!(
+            spawner_count.load(AtomicOrdering::SeqCst),
+            1,
+            "exactly one caller must claim the exclusive right to spawn"
+        );
+        assert_eq!(queued_count.load(AtomicOrdering::SeqCst), 15, "everyone else must queue");
+        assert_eq!(
+            c.inner.lock().unwrap().pending_send_messages.len(),
+            16,
+            "every message — the spawner's own plus all queued — must be present, none dropped"
+        );
+    }
+
+    /// The drain must deliver everything queued (including a caller's own
+    /// message, enqueued alongside the claim by `decide_send_action`) in
+    /// order, then release the claim so a future caller can spawn again.
+    #[test]
+    fn release_spawn_claim_and_drain_queue_delivers_everything_and_releases_claim() {
+        let c = controller();
+        let (tx, mut rx) = mpsc::channel::<String>(8);
+        {
+            let mut inner = c.inner.lock().unwrap();
+            inner.stdin_tx = Some(tx);
+            inner.spawning_in_progress = true;
+            inner.pending_send_messages.push_back("first".to_string());
+            inner.pending_send_messages.push_back("second".to_string());
+        }
+
+        c.release_spawn_claim_and_drain_queue();
+
+        assert_eq!(rx.try_recv().unwrap(), "first");
+        assert_eq!(rx.try_recv().unwrap(), "second");
+        assert!(rx.try_recv().is_err(), "no extra deliveries");
+        let inner = c.inner.lock().unwrap();
+        assert!(!inner.spawning_in_progress, "claim must be released once fully drained");
+        assert!(inner.pending_send_messages.is_empty());
+    }
+
+    /// Edge case: if the spawn this drain follows actually failed,
+    /// `stdin_tx` stays `None` — the drain must still release the claim
+    /// (or no future caller could ever spawn again) WITHOUT discarding
+    /// whatever is still queued, so a future successful spawn can deliver
+    /// it instead of the message being silently lost.
+    #[test]
+    fn release_spawn_claim_and_drain_queue_preserves_queue_when_spawn_failed() {
+        let c = controller();
+        {
+            let mut inner = c.inner.lock().unwrap();
+            inner.spawning_in_progress = true;
+            inner.pending_send_messages.push_back("stuck".to_string());
+        }
+
+        c.release_spawn_claim_and_drain_queue();
+
+        let inner = c.inner.lock().unwrap();
+        assert!(
+            !inner.spawning_in_progress,
+            "claim must still be released even when there was nothing to deliver to"
+        );
+        assert_eq!(
+            inner.pending_send_messages.len(),
+            1,
+            "message must be left queued, not silently discarded, when there was no process to deliver to"
+        );
     }
 }
 
@@ -2068,7 +2239,8 @@ mod resume_poison_tests {
             resume_poisoned: None,
             pending_resume_retry: None,
             confirmed_stale_resume_retry: None,
-            spawn_epoch: 0,
+            spawning_in_progress: false,
+            pending_send_messages: VecDeque::new(),
             current_pid: None,
             stdin_tx: None,
             kill_tx: None,
