@@ -1775,7 +1775,18 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                         commands={commands.availableCommands()}
                         onInvoke={(cmd) => {
                             commands.closeHelp();
-                            void commands.sendMessage(`/${cmd.name}`);
+                            // Route through handleSendMessage — NOT
+                            // commands.sendMessage directly — so this gets
+                            // the same pre-TurnStart wasAlreadyWorking
+                            // snapshot the composer path computes. Codex P1
+                            // on PR #2338 (twelfth re-review): calling
+                            // sendMessage() bare defaults wasAlreadyWorking
+                            // to false regardless of whether a turn is
+                            // actually active, so invoking /login from this
+                            // panel during an active turn made
+                            // isTurnActive() lie and finalizeLoginSuccess()
+                            // force-restart (killing) that turn.
+                            void handleSendMessage(`/${cmd.name}`);
                         }}
                         onClose={commands.closeHelp}
                     />
