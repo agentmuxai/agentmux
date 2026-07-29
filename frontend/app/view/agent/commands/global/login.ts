@@ -21,7 +21,51 @@
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { persistAndLinkAccount, runProviderLogin } from "../../flows/run-provider-login";
-import type { SlashCommand, SlashResult } from "../types";
+import type { SlashCommand, SlashCommandContext, SlashResult } from "../types";
+
+/**
+ * Shared by both success branches below (tier-1 "opened" and tier-2/3
+ * "seeded"/"terminal-success"): restart an already-running controller onto
+ * the refreshed credential — unless a turn is actively streaming on it.
+ * `agentmux-srv`'s `resync_controller` with `force: true` unconditionally
+ * stops the existing controller process before respawning it (see
+ * `blockcontroller/mod.rs`'s `needs_replace` check), so forcing a restart
+ * mid-turn would kill in-progress agent work. If a turn IS active, the
+ * refresh is skipped — the new credential takes effect on this pane's next
+ * natural respawn instead, narrower than the original bug this call exists
+ * to fix (a fully-idle stale controller) and strictly safer than
+ * discarding live output. Codex P1 on PR #2338 (tenth re-review).
+ *
+ * If the refresh RPC itself fails (and wasn't skipped), the controller may
+ * still be on the stale credential — declaring the pane healthy anyway
+ * would clear every fast-fail guard this PR added and let the next message
+ * reach that stale process regardless. Codex P1 on PR #2338 (tenth
+ * re-review).
+ */
+async function finalizeLoginSuccess(ctx: SlashCommandContext): Promise<SlashResult> {
+    const refreshed = ctx.isTurnActive() ? true : await ctx.forceControllerRefresh();
+    if (!refreshed) {
+        return {
+            kind: "error",
+            message:
+                "/login: signed in, but couldn't refresh the running agent with the new login. " +
+                "Reopen this pane if it still shows as logged out.",
+        };
+    }
+    // A pane that already showed the mount-time "Log in" bar (canRetry()
+    // true) before the user typed /login directly, bypassing that button,
+    // would otherwise have every subsequent message fast-failed forever —
+    // /login never went through relogin(), the only other place that
+    // manages canRetry. Codex P1 on PR #2338.
+    ctx.notifyControllerHealthy();
+    // A stale pre-existing "auth" failure row must also be cleared —
+    // otherwise the caller's NEXT normal send re-captures it as
+    // authFailureToPreserve and both fast-fails the message and re-shows
+    // this now-stale banner, even though the credential is fine. reagent
+    // P1 on PR #2338 (re-review).
+    ctx.clearAuthFailure();
+    return { kind: "ok" };
+}
 
 export const loginCommand: SlashCommand = {
     name: "login",
@@ -135,30 +179,10 @@ export const loginCommand: SlashCommand = {
                                     "/login: the login succeeded, but AgentMux couldn't save the account record. Try again in a moment.",
                             };
                         }
-                        // Restart an already-running persistent controller so
-                        // this refreshed credential actually takes effect —
-                        // send_message only spawns a fresh process when one
-                        // isn't already running. Must happen BEFORE declaring
-                        // success below, matching relogin()/useGlobalLogin()/
-                        // loginViaTerminal()'s own ordering. Codex P1 on
-                        // PR #2338 (seventh re-review).
-                        await ctx.forceControllerRefresh();
                         ctx.log("auth", "login complete — run /cost to verify");
-                        // A pane that already showed the mount-time "Log in"
-                        // bar (canRetry() true) before the user typed /login
-                        // directly, bypassing that button, would otherwise
-                        // have every subsequent message fast-failed forever —
-                        // /login never went through relogin(), the only other
-                        // place that manages canRetry. Codex P1 on PR #2338.
-                        ctx.notifyControllerHealthy();
-                        // A stale pre-existing "auth" failure row must also
-                        // be cleared — otherwise the caller's NEXT normal
-                        // send re-captures it as authFailureToPreserve and
-                        // both fast-fails the message and re-shows this now-
-                        // stale banner, even though the credential is fine.
-                        // reagent P1 on PR #2338 (re-review).
-                        ctx.clearAuthFailure();
-                        return { kind: "ok" };
+                        // See finalizeLoginSuccess's doc comment for the
+                        // active-turn / refresh-failure gating.
+                        return await finalizeLoginSuccess(ctx);
                     }
                     return {
                         kind: "error",
@@ -176,15 +200,12 @@ export const loginCommand: SlashCommand = {
                     // typed in successfully but the DB write itself failed.
                     // See REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md.
                     if (openedAccountId && openedAccountDir) {
-                        // See the "opened" branch's identical call above.
-                        await ctx.forceControllerRefresh();
                         if (outcome === "terminal-success") {
                             ctx.log("auth", "login complete — run /cost to verify");
                         }
-                        // See the "opened" branch's identical calls above.
-                        ctx.notifyControllerHealthy();
-                        ctx.clearAuthFailure();
-                        return { kind: "ok" };
+                        // See finalizeLoginSuccess's doc comment for the
+                        // active-turn / refresh-failure gating.
+                        return await finalizeLoginSuccess(ctx);
                     }
                     return {
                         kind: "error",

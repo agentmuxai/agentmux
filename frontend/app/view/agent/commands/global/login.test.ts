@@ -50,7 +50,8 @@ function makeCtx(): SlashCommandContext {
         setAuthUrl: vi.fn(),
         notifyControllerHealthy: vi.fn(),
         clearAuthFailure: vi.fn(),
-        forceControllerRefresh: vi.fn().mockResolvedValue(undefined),
+        forceControllerRefresh: vi.fn().mockResolvedValue(true),
+        isTurnActive: () => false,
         beginRecoveryFlow: vi.fn(),
         endRecoveryFlow: vi.fn(),
         openPicker: vi.fn(),
@@ -163,5 +164,66 @@ describe("/login registers as an in-flight recovery (codex P1 on PR #2338, ninth
         // success — a leaked true here would wedge every future send behind
         // "wait for the login attempt to finish" forever.
         expect(ctx.endRecoveryFlow).toHaveBeenCalledOnce();
+    });
+});
+
+// Codex P1 on PR #2338 (tenth re-review): agentmux-srv's resync_controller
+// with force:true unconditionally stops the existing controller process —
+// calling forceControllerRefresh while a turn is actively streaming on that
+// controller would kill it and discard in-progress work.
+describe("/login does not restart an actively-streaming controller (codex P1 on PR #2338, tenth re-review)", () => {
+    it("skips forceControllerRefresh, but still reports success, when a turn is active", async () => {
+        vi.useFakeTimers();
+        hub.persistAndLinkAccount.mockResolvedValue(true);
+        const ctx = makeCtx();
+        ctx.isTurnActive = () => true;
+
+        const promise = loginCommand.handler(ctx, "");
+        await vi.advanceTimersByTimeAsync(2_000);
+        const result = await promise;
+
+        expect(result).toEqual({ kind: "ok" });
+        expect(ctx.forceControllerRefresh).not.toHaveBeenCalled();
+        // The login itself genuinely succeeded — only the forced restart
+        // was skipped to protect the active turn, so the pane should still
+        // report healthy.
+        expect(ctx.notifyControllerHealthy).toHaveBeenCalledOnce();
+        expect(ctx.clearAuthFailure).toHaveBeenCalledOnce();
+    });
+
+    it("calls forceControllerRefresh normally when no turn is active", async () => {
+        vi.useFakeTimers();
+        hub.persistAndLinkAccount.mockResolvedValue(true);
+        const ctx = makeCtx();
+        ctx.isTurnActive = () => false;
+
+        const promise = loginCommand.handler(ctx, "");
+        await vi.advanceTimersByTimeAsync(2_000);
+        await promise;
+
+        expect(ctx.forceControllerRefresh).toHaveBeenCalledOnce();
+    });
+});
+
+// Codex P1 on PR #2338 (tenth re-review): forceControllerRefresh swallows
+// its own RPC failures internally (logs a warning, resolves normally) — the
+// caller must consume its boolean return, or a failed refresh still gets
+// declared "healthy" while the controller stays on the stale credential,
+// clearing every fast-fail guard this PR added for nothing.
+describe("/login retains auth gating when the controller refresh itself fails (codex P1 on PR #2338, tenth re-review)", () => {
+    it("returns an error and does NOT call notifyControllerHealthy/clearAuthFailure when forceControllerRefresh resolves false", async () => {
+        vi.useFakeTimers();
+        hub.persistAndLinkAccount.mockResolvedValue(true);
+        const ctx = makeCtx();
+        ctx.isTurnActive = () => false;
+        (ctx.forceControllerRefresh as any).mockResolvedValue(false);
+
+        const promise = loginCommand.handler(ctx, "");
+        await vi.advanceTimersByTimeAsync(2_000);
+        const result = await promise;
+
+        expect(result.kind).toBe("error");
+        expect(ctx.notifyControllerHealthy).not.toHaveBeenCalled();
+        expect(ctx.clearAuthFailure).not.toHaveBeenCalled();
     });
 });

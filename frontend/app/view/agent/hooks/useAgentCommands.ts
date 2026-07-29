@@ -111,7 +111,7 @@ export interface UseAgentCommandsOptions {
      * all correctly cleared by then) and still reaches the stale process.
      * Codex P1 on PR #2338 (seventh re-review).
      */
-    forceControllerRefresh: () => Promise<void>;
+    forceControllerRefresh: () => Promise<boolean>;
     /**
      * `useAgentControllerStatus.beginRecoveryFlow`/`endRecoveryFlow` —
      * threaded into the slash-command context so /login's handler can
@@ -333,6 +333,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         notifyControllerHealthy: opts.notifyControllerHealthy,
         clearAuthFailure: () => opts.model.dispatchPane({ type: "FailureCleared" }),
         forceControllerRefresh: opts.forceControllerRefresh,
+        isTurnActive: () => workingFromPhase(paneSnapshot(opts.blockId)?.turnPhase ?? { kind: "Idle" }),
         beginRecoveryFlow: opts.beginRecoveryFlow,
         endRecoveryFlow: opts.endRecoveryFlow,
         openPicker,
@@ -623,8 +624,20 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // loginWaiting() specifically (not canRetry()/authFailureToPreserve)
         // is skipped when trustedAfterRecovery is set — see its own doc
         // comment above. Codex P2 on PR #2338 (fifth re-review).
-        const loginStillWaiting = opts.loginWaiting() && !trustedAfterRecovery;
-        if (initiatesTurn && (opts.canRetry() || loginStillWaiting || authFailureToPreserve)) {
+        // Returns true when it's safe to proceed. False means it already
+        // dispatched every rejection side-effect (PendingMessageRejected /
+        // TurnStartFailed / FailureObserved / setAuthNotice) — callers just
+        // return immediately. Extracted so it can be re-checked immediately
+        // before the actual send below, not only once at the top of this
+        // function — canRetry()/loginWaiting() are LIVE accessor reads, and
+        // the runtime-args SetMetaCommand round-trip between the two checks
+        // is a real async gap another recovery flow or a mid-turn failure
+        // can land in. Codex P2 on PR #2338 (tenth re-review).
+        const checkAuthGuard = (): boolean => {
+            const loginStillWaiting = opts.loginWaiting() && !trustedAfterRecovery;
+            if (!(initiatesTurn && (opts.canRetry() || loginStillWaiting || authFailureToPreserve))) {
+                return true;
+            }
             opts.log("auth", "message not sent — not logged in", "warn");
             if (!authFailureToPreserve) {
                 opts.setAuthNotice(
@@ -657,8 +670,9 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                     "system",
                 );
             }
-            return;
-        }
+            return false;
+        };
+        if (!checkAuthGuard()) return;
 
         // Apply runtime args (permission mode, model, effort) before this turn.
         const prov = opts.provider();
@@ -677,6 +691,12 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 opts.log("error", `Failed to update runtime args: ${err}`, "error");
             }
         }
+
+        // Re-check immediately before the actual send — see checkAuthGuard's
+        // doc comment above. The SetMetaCommand round-trip just above is a
+        // real async gap another recovery flow or a mid-turn auth failure
+        // can land in between the first check and here.
+        if (!checkAuthGuard()) return;
 
         // Await the send so callers can sequence multiple deliveries (the flush
         // loop relies on this to preserve submission order — ReAgent P2 on
