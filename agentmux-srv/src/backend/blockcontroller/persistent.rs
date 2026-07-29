@@ -138,10 +138,24 @@ struct PersistentInner {
     resume_poisoned: Option<String>,
     /// TENTATIVE: set synchronously inside `spawn_process`, before any
     /// background task exists, right after a FRESH spawn attaches
-    /// `--resume <sid>` — captures the exact spawn config + already-
-    /// formatted stdin line for the message that triggered it. This alone
-    /// does NOT mean a retry will happen: it only means "IF the CLI goes on
-    /// to confirm this exact sid unreachable, here is what to retry."
+    /// `--resume <sid>` — captures the exact spawn config + the already-
+    /// formatted stdin line for the message that triggered it, as the
+    /// first entry of a growing list. This alone does NOT mean a retry
+    /// will happen: it only means "IF the CLI goes on to confirm this
+    /// exact sid unreachable, here is what to retry."
+    ///
+    /// The list, not a single line: codex P1 on PR #2360 (sixth review
+    /// pass, round 5): once other callers can queue additional messages
+    /// behind this same spawn attempt (see `spawning_in_progress`), the
+    /// background drain (`drain_queue_after_successful_spawn`) can
+    /// successfully hand SEVERAL of them to this process's stdin channel
+    /// before it turns out to be doomed — the channel accepting a message
+    /// is not proof the CLI ever read it. Tracking only the first would
+    /// silently lose every later-accepted input the moment this process
+    /// dies; the drain appends each one it delivers here (while this is
+    /// still `Some`) so a confirmed retry can redeliver ALL of them, in
+    /// order, on the fresh respawn.
+    ///
     /// `poison_resume` is what promotes this to `confirmed_stale_resume_retry`
     /// (the only thing the process-waiter task actually acts on) — see its
     /// doc comment for why the two are kept separate. Cleared by
@@ -151,7 +165,7 @@ struct PersistentInner {
     /// anymore; also cleared on kill and on a normal exit so a reused
     /// controller instance never carries a tentative retry into an
     /// unrelated later lifetime.
-    pending_resume_retry: Option<(String, PersistentSpawnConfig, String)>,
+    pending_resume_retry: Option<(String, PersistentSpawnConfig, Vec<String>)>,
     /// CONFIRMED: only `poison_resume` ever sets this, and only when the
     /// sid it just confirmed unreachable is the exact one
     /// `pending_resume_retry` was captured for. This is the ONLY field the
@@ -164,7 +178,7 @@ struct PersistentInner {
     /// have seen instead of the confirmed case this mechanism exists for.
     /// Cleared on kill and on a normal exit for the same
     /// reused-instance reason as `pending_resume_retry`.
-    confirmed_stale_resume_retry: Option<(String, PersistentSpawnConfig, String)>,
+    confirmed_stale_resume_retry: Option<(String, PersistentSpawnConfig, Vec<String>)>,
     /// True from the moment a caller commits to calling `spawn_process`
     /// (in `send_message` or `retry_after_resume_failure`) until it has
     /// delivered every message enqueued for that spawn — see
@@ -654,6 +668,15 @@ impl PersistentSubprocessController {
         let block_id = self.block_id.clone();
         let self_ref = self.self_ref.lock().unwrap().clone().unwrap_or_default();
         tokio::spawn(async move {
+            // The very FIRST message this drain delivers is always the
+            // one that triggered the spawn — `spawn_process` already
+            // stashed it into `pending_resume_retry` synchronously,
+            // before this task even existed (necessary so a process that
+            // dies before this task's first poll can't lose it — see
+            // `pending_resume_retry`'s own doc comment). Appending it
+            // again below would duplicate that exact entry; only messages
+            // delivered AFTER it are genuinely new to the retry list.
+            let mut is_first_delivery = true;
             let stalled_with_leftovers = loop {
                 let next = {
                     let mut inner = inner_arc.lock().unwrap();
@@ -684,6 +707,9 @@ impl PersistentSubprocessController {
                     }
                     break stalled;
                 };
+                let delivered_copy = json_str.clone();
+                let was_first_delivery = is_first_delivery;
+                is_first_delivery = false;
                 if let Err(e) = tx.send(json_str).await {
                     tracing::warn!(
                         block_id = %block_id,
@@ -700,6 +726,29 @@ impl PersistentSubprocessController {
                         inner.spawning_in_progress = false;
                     }
                     break stalled;
+                }
+                // codex P1 on PR #2360 (sixth review pass, round 5): track
+                // every message actually handed to this process's stdin
+                // channel beyond the first — not just the one that
+                // triggered the spawn — so a confirmed stale-resume retry
+                // redelivers all of them (see `pending_resume_retry`'s own
+                // doc comment), since channel acceptance is not proof the
+                // CLI ever read it.
+                if !was_first_delivery {
+                    let mut inner = inner_arc.lock().unwrap();
+                    if let Some((_, _, ref mut delivered)) = inner.pending_resume_retry {
+                        delivered.push(delivered_copy.clone());
+                    }
+                }
+                // Persist in actual delivery order — codex P2 on PR #2360
+                // (sixth review pass, round 5): persisting at the
+                // `decide_send_action` call site instead let two callers'
+                // own synchronous code run (and thus persist) in a
+                // different order than their messages are actually
+                // delivered, producing a blockfile transcript that
+                // doesn't match what the agent received.
+                if let Some(ctrl) = self_ref.upgrade() {
+                    ctrl.persist_message_to_blockfile(&delivered_copy);
                 }
             };
             if stalled_with_leftovers {
@@ -808,12 +857,17 @@ impl PersistentSubprocessController {
 
         match self.decide_send_action(&json_str, false) {
             SendAction::Queued => {
-                // Persisted unconditionally: this caller was already told
-                // "accepted" (below) and a spawn/drain genuinely IS
-                // working through the queue this just joined, so — unlike
-                // the BecomeSpawner case — there is no "rejected before
-                // ever really being attempted" outcome to guard against.
-                self.persist_message_to_blockfile(&json_str);
+                // Persistence happens later, inside the drain, at the
+                // exact moment this message is actually delivered — see
+                // `drain_queue_after_successful_spawn`. codex P2 on PR
+                // #2360 (sixth review pass, round 5): persisting
+                // immediately here instead let whichever caller's
+                // synchronous code happened to run first persist first,
+                // even when queue position said a DIFFERENT message
+                // (already sitting there, from a caller further along in
+                // its own `BecomeSpawner` spawn_process call) is actually
+                // delivered first — producing a blockfile transcript that
+                // doesn't match delivery order.
                 self.emit_message_accepted(config.message_id.as_deref());
                 Ok(())
             }
@@ -860,20 +914,19 @@ impl PersistentSubprocessController {
                 // `--resume`, which is what the retry payload is for.
                 let message_id = config.message_id.clone();
                 let retry_config = config.clone();
-                let spawn_result = self.spawn_process(config, Some(json_str.clone()));
-                // Only persist/emit "accepted" on success — codex P2 on PR
-                // #2360 (sixth review pass, round 4): persisting
-                // unconditionally (an earlier cut of this fix did) let a
-                // rejected spawn (missing executable, bad launch config)
-                // leave a "user_message" line in the blockfile for a
-                // prompt that was NEVER actually delivered — reopening the
-                // pane would reconstruct it as if it had been sent, and a
-                // manual retry then produced a misleading duplicate.
-                // Matches this function's pre-queue behavior, which
-                // propagated a spawn failure via `?` before ever reaching
-                // either the persist or the "accepted" emission.
+                let spawn_result = self.spawn_process(config, Some(json_str));
+                // Only emit "accepted" on success — codex P2 on PR #2360
+                // (sixth review pass, round 4): an earlier cut of this fix
+                // persisted unconditionally here, letting a rejected spawn
+                // (missing executable, bad launch config) leave a
+                // "user_message" line in the blockfile for a prompt that
+                // was NEVER actually delivered. Persistence itself now
+                // happens later, inside the drain, at the exact moment
+                // this message is actually delivered (round 5 — see
+                // `drain_queue_after_successful_spawn`) — which already
+                // only runs on a successful spawn, so the same guarantee
+                // holds without needing a persist call here at all.
                 if spawn_result.is_ok() {
-                    self.persist_message_to_blockfile(&json_str);
                     self.mark_turn_active_and_publish();
                     self.emit_message_accepted(message_id.as_deref());
                 }
@@ -893,95 +946,104 @@ impl PersistentSubprocessController {
     /// unrelated exit.
     ///
     /// Spawns fresh with `session_id` cleared, so no `--resume` is attempted
-    /// again. Explicitly clears `inner.session_id` itself rather than
-    /// relying on `poison_resume` having already done so — reagentx P0 on PR
-    /// #2360: `poison_resume` runs on the stderr-reader task, this runs on
-    /// the process-waiter task; the two are independently scheduled with no
-    /// ordering guarantee, so this function cannot assume the former has
-    /// already completed by the time it runs. Redelivers the EXACT
-    /// already-formatted stdin line directly on the new process — does NOT
-    /// re-persist to the blockfile or re-emit `agent-message-accepted`,
-    /// since both already happened correctly on the original (failed)
-    /// attempt; only the underlying CLI process needed a fresh, resume-less
-    /// start.
-    fn retry_after_resume_failure(&self, mut config: PersistentSpawnConfig, json_str: String) {
+    /// again. Redelivers EVERY message the doomed process's stdin channel
+    /// had accepted (see `pending_resume_retry`'s own doc comment for why
+    /// this is a batch, not just the one that triggered the spawn) — does
+    /// NOT re-persist to the blockfile or re-emit `agent-message-accepted`
+    /// for any of them, since both already happened correctly on each
+    /// message's original (failed) attempt; only the underlying CLI
+    /// process needed a fresh, resume-less start.
+    ///
+    /// This is itself a spawn attempt, and must not race a genuinely
+    /// concurrent `send_message` call the same way the ORIGINAL doomed
+    /// spawn could — see `PersistentInner::spawning_in_progress`'s doc
+    /// comment. By the time this runs, the original `send_message` call
+    /// that triggered the doomed process has long since returned (its own
+    /// spawn-claim-and-deliver sequence completed synchronously, well
+    /// before this process even exited), so each message here can safely
+    /// go through the SAME decision function `send_message` uses — with
+    /// dedup-by-content enabled (see `decide_send_action`'s doc comment),
+    /// since every entry in `json_strs` is a known re-delivery of content
+    /// already accepted for the ORIGINAL spawn, not an independent new
+    /// message. Only the FIRST message in the batch can ever resolve to
+    /// `BecomeSpawner` (it's the only one that can see
+    /// `spawning_in_progress == false`); everything after it necessarily
+    /// resolves to `Queued` (behind that same claim) or `DeliverDirect`
+    /// (if some OTHER caller's process happened to come up in the
+    /// meantime) — looping the exact same per-message decision naturally
+    /// preserves delivery order without needing special-case handling for
+    /// "the rest of the batch."
+    fn retry_after_resume_failure(&self, mut config: PersistentSpawnConfig, json_strs: Vec<String>) {
         config.session_id = String::new();
 
-        // This retry is itself a spawn attempt, and must not race a
-        // genuinely concurrent `send_message` call the same way the
-        // ORIGINAL doomed spawn could — see `PersistentInner::
-        // spawning_in_progress`'s doc comment. By the time this runs, the
-        // original `send_message` call that triggered the doomed process
-        // has long since returned (its own spawn-claim-and-deliver
-        // sequence completed synchronously, well before this process even
-        // exited), so this can safely go through the SAME decision
-        // function `send_message` uses — with dedup-by-content enabled
-        // (see `decide_send_action`'s doc comment), since `json_str` here
-        // is a known re-delivery of the ORIGINAL spawn's own payload, not
-        // an independent new message.
-        match self.decide_send_action(&json_str, true) {
-            SendAction::DeliverDirect => {
-                // Another caller's own spawn already installed a running
-                // process by the time this retry got scheduled — no need
-                // for a dedicated respawn; deliver straight to it.
-                self.mark_turn_active_and_publish();
-                let inner = self.inner.lock().unwrap();
-                if let Some(tx) = inner.stdin_tx.as_ref() {
-                    if let Err(e) = tx.try_send(json_str) {
-                        tracing::warn!(
-                            block_id = %self.block_id,
-                            error = %e,
-                            "failed to redeliver message after stale-resume retry (already-running path)"
-                        );
+        for json_str in json_strs {
+            match self.decide_send_action(&json_str, true) {
+                SendAction::DeliverDirect => {
+                    // Another caller's own spawn already installed a
+                    // running process by the time this retry got
+                    // scheduled — no need for a dedicated respawn; deliver
+                    // straight to it.
+                    self.mark_turn_active_and_publish();
+                    let inner = self.inner.lock().unwrap();
+                    if let Some(tx) = inner.stdin_tx.as_ref() {
+                        if let Err(e) = tx.try_send(json_str) {
+                            tracing::warn!(
+                                block_id = %self.block_id,
+                                error = %e,
+                                "failed to redeliver message after stale-resume retry (already-running path)"
+                            );
+                        }
                     }
                 }
-            }
-            SendAction::Queued => {
-                // Someone else is already spawning — their own
-                // `release_spawn_claim_and_drain_queue` will deliver this
-                // (or, if their process turns out to already be dead, its
-                // own bounded fallback respawn will).
-            }
-            SendAction::BecomeSpawner => {
-                // Only clear inner.session_id now that THIS retry is
-                // actually about to spawn — codex P2 on PR #2360 (sixth
-                // review pass, round 3): clearing it unconditionally at
-                // the top of this function (the previous cut) could erase
-                // a session id a DIFFERENT, concurrently-installed process
-                // had already legitimately captured, if this retry
-                // instead resolved via `DeliverDirect` or `Queued` above —
-                // breaking in-memory session tracking and turn-end
-                // subagent reconciliation for that process's remaining
-                // lifetime.
-                self.inner.lock().unwrap().session_id = None;
-                let retry_config = config.clone();
-                let spawn_result = self.spawn_process(config, None);
-                match &spawn_result {
-                    Ok(_) => self.mark_turn_active_and_publish(),
-                    Err(e) => tracing::error!(
-                        block_id = %self.block_id,
-                        error = %e,
-                        "failed to respawn after a stale --resume session id"
-                    ),
+                SendAction::Queued => {
+                    // Someone else is already spawning — their own
+                    // `release_spawn_claim_and_drain_queue` will deliver
+                    // this (or, if their process turns out to already be
+                    // dead, its own bounded fallback respawn will).
                 }
-                self.release_spawn_claim_and_drain_queue(spawn_result.is_ok(), retry_config);
-                if spawn_result.is_err() {
-                    // Surface this, or the pane hangs forever with NO
-                    // signal at all — codex P2 on PR #2360 (fifth review
-                    // pass): the outer process-waiter already suppressed
-                    // its own terminal-status publish for the ORIGINAL
-                    // exit specifically because a retry was in flight, and
-                    // send_message already returned success (possibly
-                    // emitting agent-message-accepted) for the message
-                    // this retry was supposed to deliver. If this respawn
-                    // attempt ALSO fails, nothing else will ever tell the
-                    // frontend this turn is over. `inner.proc_status`/
-                    // `turn_active` are already `STATUS_DONE`/`false` (set
-                    // by the original exit's own cleanup before this
-                    // function was ever called) — this just actually
-                    // broadcasts that state, which the original exit
-                    // deliberately withheld pending this retry's outcome.
-                    self.publish_status();
+                SendAction::BecomeSpawner => {
+                    // Only clear inner.session_id now that THIS retry is
+                    // actually about to spawn — codex P2 on PR #2360
+                    // (sixth review pass, round 3): clearing it
+                    // unconditionally up front could erase a session id a
+                    // DIFFERENT, concurrently-installed process had
+                    // already legitimately captured, if this retry
+                    // instead resolved via `DeliverDirect` or `Queued`
+                    // above — breaking in-memory session tracking and
+                    // turn-end subagent reconciliation for that process's
+                    // remaining lifetime.
+                    self.inner.lock().unwrap().session_id = None;
+                    let retry_config = config.clone();
+                    let spawn_result = self.spawn_process(config.clone(), None);
+                    match &spawn_result {
+                        Ok(_) => self.mark_turn_active_and_publish(),
+                        Err(e) => tracing::error!(
+                            block_id = %self.block_id,
+                            error = %e,
+                            "failed to respawn after a stale --resume session id"
+                        ),
+                    }
+                    self.release_spawn_claim_and_drain_queue(spawn_result.is_ok(), retry_config);
+                    if spawn_result.is_err() {
+                        // Surface this, or the pane hangs forever with NO
+                        // signal at all — codex P2 on PR #2360 (fifth
+                        // review pass): the outer process-waiter already
+                        // suppressed its own terminal-status publish for
+                        // the ORIGINAL exit specifically because a retry
+                        // was in flight, and send_message already
+                        // returned success (possibly emitting
+                        // agent-message-accepted) for the message this
+                        // retry was supposed to deliver. If this respawn
+                        // attempt ALSO fails, nothing else will ever tell
+                        // the frontend this turn is over.
+                        // `inner.proc_status`/`turn_active` are already
+                        // `STATUS_DONE`/`false` (set by the original
+                        // exit's own cleanup before this function was
+                        // ever called) — this just actually broadcasts
+                        // that state, which the original exit deliberately
+                        // withheld pending this retry's outcome.
+                        self.publish_status();
+                    }
                 }
             }
         }
@@ -1319,7 +1381,7 @@ impl PersistentSubprocessController {
         {
             let mut inner = self.inner.lock().unwrap();
             if let (Some(sid), Some(retry_json)) = (attempted_resume_sid.clone(), resume_retry_payload) {
-                inner.pending_resume_retry = Some((sid, config.clone(), retry_json));
+                inner.pending_resume_retry = Some((sid, config.clone(), vec![retry_json]));
             }
         }
 
@@ -1858,6 +1920,21 @@ impl PersistentSubprocessController {
                     // lifetime.
                     inner.pending_resume_retry = None;
                     inner.confirmed_stale_resume_retry = None;
+                    // codex P1 on PR #2360 (sixth review pass, round 5):
+                    // an active spawn claim's own background drain
+                    // (`drain_queue_after_successful_spawn`) is a
+                    // SEPARATE, independently-scheduled task — killing
+                    // this process does not cancel it. Left untouched, its
+                    // next check would see `stdin_tx` gone with messages
+                    // still queued, treat that as a stall, and hand off to
+                    // `respawn_once_for_leftover_queue` — silently
+                    // reviving the agent moments after the user explicitly
+                    // stopped it. Clearing the queue AND releasing the
+                    // claim here means that same check instead sees an
+                    // empty queue and just concludes normally, with no
+                    // fallback respawn triggered.
+                    inner.pending_send_messages.clear();
+                    inner.spawning_in_progress = false;
                     Self::set_status(&mut inner, STATUS_DONE);
                     drop(inner);
 
@@ -2200,7 +2277,7 @@ mod send_input_tests {
             session_id: "dead-sid".to_string(),
             message_id: None,
         };
-        c.retry_after_resume_failure(config, "{}".to_string());
+        c.retry_after_resume_failure(config, vec!["{}".to_string()]);
 
         assert_eq!(
             c.inner.lock().unwrap().session_id,
@@ -2645,12 +2722,96 @@ mod send_input_tests {
             session_id: "dead-sid".to_string(),
             message_id: None,
         };
-        c.retry_after_resume_failure(config, "{}".to_string());
+        c.retry_after_resume_failure(config, vec!["{}".to_string()]);
 
         assert_eq!(
             c.inner.lock().unwrap().session_id.as_deref(),
             Some("fresh-concurrently-installed-sid"),
             "must not erase a session id a concurrent spawn already legitimately captured"
+        );
+    }
+
+    /// codex P1 on PR #2360 (sixth review pass, round 5): a doomed
+    /// process's stdin channel can have accepted MULTIPLE messages before
+    /// it turned out to be unreachable — not just the one that triggered
+    /// the spawn. `retry_after_resume_failure` now takes the whole batch
+    /// and must redeliver every one of them, in order. Uses an
+    /// already-running process (`DeliverDirect` for each) so this is
+    /// deterministic without needing a real subprocess spawn.
+    #[tokio::test]
+    async fn retry_after_resume_failure_redelivers_every_message_in_the_batch() {
+        let c = controller();
+        let (tx, mut rx) = mpsc::channel::<String>(8);
+        c.inner.lock().unwrap().stdin_tx = Some(tx);
+
+        let config = PersistentSpawnConfig {
+            cli_command: "unused".to_string(),
+            cli_args: vec![],
+            working_dir: String::new(),
+            env_vars: HashMap::new(),
+            session_id_field: "session_id".to_string(),
+            resume_flag: "--resume".to_string(),
+            session_id: String::new(),
+            message_id: None,
+        };
+        c.retry_after_resume_failure(
+            config,
+            vec!["msg-1".to_string(), "msg-2".to_string(), "msg-3".to_string()],
+        );
+
+        assert_eq!(rx.recv().await.unwrap(), "msg-1");
+        assert_eq!(rx.recv().await.unwrap(), "msg-2");
+        assert_eq!(rx.recv().await.unwrap(), "msg-3");
+    }
+
+    /// codex P1 on PR #2360 (sixth review pass, round 5): the drain must
+    /// track every message it successfully delivers beyond the first
+    /// (which `spawn_process` already stashed synchronously — see
+    /// `pending_resume_retry`'s own doc comment) into
+    /// `pending_resume_retry`'s own list, so a confirmed stale-resume
+    /// retry redelivers the WHOLE batch rather than just the message that
+    /// triggered the spawn.
+    #[tokio::test]
+    async fn drain_appends_later_messages_to_the_pending_resume_retry_without_duplicating_the_first() {
+        let c = controller();
+        let (tx, mut rx) = mpsc::channel::<String>(8);
+        let retry_config = PersistentSpawnConfig {
+            cli_command: "unused".to_string(),
+            cli_args: vec![],
+            working_dir: String::new(),
+            env_vars: HashMap::new(),
+            session_id_field: "session_id".to_string(),
+            resume_flag: "--resume".to_string(),
+            session_id: String::new(),
+            message_id: None,
+        };
+        {
+            let mut inner = c.inner.lock().unwrap();
+            inner.stdin_tx = Some(tx);
+            inner.spawning_in_progress = true;
+            inner.pending_send_messages.push_back("first".to_string());
+            inner.pending_send_messages.push_back("second".to_string());
+            // Simulates spawn_process's own synchronous stash for "first"
+            // — the message that triggered this spawn.
+            inner.pending_resume_retry =
+                Some(("sid".to_string(), retry_config.clone(), vec!["first".to_string()]));
+        }
+
+        c.drain_queue_after_successful_spawn(retry_config, true);
+
+        assert_eq!(rx.recv().await.unwrap(), "first");
+        assert_eq!(rx.recv().await.unwrap(), "second");
+        tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+
+        let inner = c.inner.lock().unwrap();
+        let (_, _, delivered) = inner
+            .pending_resume_retry
+            .as_ref()
+            .expect("must still be tracking this spawn's delivered messages");
+        assert_eq!(
+            delivered,
+            &vec!["first".to_string(), "second".to_string()],
+            "must contain the ORIGINAL message exactly once plus every later delivery, in order"
         );
     }
 }
@@ -2755,7 +2916,7 @@ mod resume_poison_tests {
     fn pending_resume_retry_is_cleared_once_the_resume_actually_succeeds() {
         let mut inner = inner_with_session_id(None);
         inner.pending_resume_retry =
-            Some(("dead-sid".to_string(), dummy_spawn_config(), "{}".to_string()));
+            Some(("dead-sid".to_string(), dummy_spawn_config(), vec!["{}".to_string()]));
 
         // The CLI echoes back the SAME sid it was given, confirming --resume
         // actually worked — this is genuine progress, so the retry safety
@@ -2773,7 +2934,7 @@ mod resume_poison_tests {
     fn pending_resume_retry_is_cleared_when_the_cli_starts_a_fresh_conversation_on_its_own() {
         let mut inner = inner_with_session_id(None);
         inner.pending_resume_retry =
-            Some(("dead-sid".to_string(), dummy_spawn_config(), "{}".to_string()));
+            Some(("dead-sid".to_string(), dummy_spawn_config(), vec!["{}".to_string()]));
 
         // A DIFFERENT (fresh) sid — the CLI gave up on --resume internally
         // and started its own new conversation without ever hitting the
@@ -2795,7 +2956,7 @@ mod resume_poison_tests {
     fn poison_resume_promotes_a_matching_pending_retry_to_confirmed() {
         let mut inner = inner_with_session_id(Some("dead-sid"));
         inner.pending_resume_retry =
-            Some(("dead-sid".to_string(), dummy_spawn_config(), "{}".to_string()));
+            Some(("dead-sid".to_string(), dummy_spawn_config(), vec!["{}".to_string()]));
 
         inner.poison_resume("dead-sid");
 
@@ -2816,7 +2977,7 @@ mod resume_poison_tests {
     fn confirmed_retry_survives_a_subsequent_refused_capture() {
         let mut inner = inner_with_session_id(Some("dead-sid"));
         inner.pending_resume_retry =
-            Some(("dead-sid".to_string(), dummy_spawn_config(), "{}".to_string()));
+            Some(("dead-sid".to_string(), dummy_spawn_config(), vec!["{}".to_string()]));
         inner.poison_resume("dead-sid");
         assert!(inner.confirmed_stale_resume_retry.is_some());
 
@@ -2836,7 +2997,7 @@ mod resume_poison_tests {
     fn poison_resume_does_not_promote_a_retry_captured_for_a_different_sid() {
         let mut inner = inner_with_session_id(None);
         inner.pending_resume_retry =
-            Some(("other-sid".to_string(), dummy_spawn_config(), "{}".to_string()));
+            Some(("other-sid".to_string(), dummy_spawn_config(), vec!["{}".to_string()]));
 
         inner.poison_resume("dead-sid");
 
