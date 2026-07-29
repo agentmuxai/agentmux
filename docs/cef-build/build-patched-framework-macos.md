@@ -4,7 +4,7 @@
 window drag / floating-pane edge-resize.
 **Time:** First build ~3-6 hours wall-clock (CPU-bound chromium compile).
 **Disk:** ~99 GB chromium working tree + build output.
-**Output:** A `Chromium Embedded Framework.framework` (~545 MB unstripped) with the
+**Output:** A `Chromium Embedded Framework.framework` (~547 MB unstripped) with the
 AgentMux `BeginWindowDrag` patch that upstream CEF / its prebuilt binary
 distribution lack.
 
@@ -100,7 +100,7 @@ cd ~/cef-build/chromium/chromium/src
 third_party/ninja/ninja -j 12 -l 16 -C out/Release_GN_arm64 cef_framework
 ```
 
-Output: `out/Release_GN_arm64/Chromium Embedded Framework.framework` (~545 MB
+Output: `out/Release_GN_arm64/Chromium Embedded Framework.framework` (~547 MB
 unstripped). Do **not** strip it here — `package-macos.sh` strips at bundle time, and
 the patch-verify gate keys on the local symbol that `strip -S -x` removes.
 
