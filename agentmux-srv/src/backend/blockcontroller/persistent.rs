@@ -165,6 +165,19 @@ struct PersistentInner {
     /// Cleared on kill and on a normal exit for the same
     /// reused-instance reason as `pending_resume_retry`.
     confirmed_stale_resume_retry: Option<(String, PersistentSpawnConfig, String)>,
+    /// Bumped by `spawn_process` every time it successfully spawns a child
+    /// (the original send_message-triggered spawn, or a retry's own
+    /// respawn). `send_message` captures this right after its own spawn
+    /// attempt (if any) and re-checks it just before writing to
+    /// `stdin_tx` — codex P1 on PR #2360 (third review pass): a
+    /// fast-failing stale-resume spawn can let the process-waiter task
+    /// confirm and install a retry's brand-new process (with its own
+    /// fresh `stdin_tx`) BEFORE `send_message`'s own later write runs.
+    /// If the epoch has moved on, that write is skipped — the retry
+    /// already delivers this exact message on the new process, so
+    /// writing here too would duplicate it, and erroring on a
+    /// mid-swap `stdin_tx` would falsely report a failed send.
+    spawn_epoch: u64,
     current_pid: Option<u32>,
     /// Channel to send messages to the stdin writer task.
     stdin_tx: Option<mpsc::Sender<String>>,
@@ -321,6 +334,7 @@ impl PersistentSubprocessController {
                 resume_poisoned: None,
                 pending_resume_retry: None,
                 confirmed_stale_resume_retry: None,
+                spawn_epoch: 0,
                 current_pid: None,
                 stdin_tx: None,
                 kill_tx: None,
@@ -510,6 +524,21 @@ impl PersistentSubprocessController {
         if is_fresh_spawn {
             self.spawn_process(config.clone(), Some(json_str.clone()))?;
         }
+        // Captured AFTER the spawn above (if any) so it reflects whatever
+        // is CURRENT at this point — see the tail-end check below and
+        // `spawn_epoch`'s own doc comment. codex P1 on PR #2360 (third
+        // review pass): on a fast-failing stale-resume spawn, the
+        // process-waiter task (on another thread) can detect the exit,
+        // confirm the retry, and install a BRAND NEW process — with its
+        // own fresh `stdin_tx` — before this function's own later stdin
+        // write below ever runs. Without tracking which spawn attempt this
+        // call's write belongs to, that write would either duplicate the
+        // message on the new process (if it read the new stdin_tx) or
+        // spuriously report a failed send (if it raced the narrow window
+        // where the old stdin_tx was already cleared but the new one
+        // wasn't installed yet) — even though the retry already delivers
+        // this exact message on its own.
+        let my_spawn_epoch = self.inner.lock().unwrap().spawn_epoch;
         // spawn_process already marks a fresh process's first turn active
         // (and starts its watchdog); for an already-running process (the
         // common case — every turn after the first) this is the only place
@@ -552,6 +581,18 @@ impl PersistentSubprocessController {
         );
 
         let inner = self.inner.lock().unwrap();
+        if inner.spawn_epoch != my_spawn_epoch {
+            // A NEWER spawn (a stale-resume retry, or any other respawn)
+            // has already taken over delivery for this exact attempt —
+            // `retry_after_resume_failure` already sends this SAME
+            // already-formatted `json_str` on the new process. Skip our
+            // own write entirely rather than duplicating it or risking a
+            // false "not running" error against a `stdin_tx` mid-swap.
+            // codex P1 on PR #2360 (third review pass).
+            drop(inner);
+            self.emit_message_accepted(config.message_id.as_deref());
+            return Ok(());
+        }
         let tx = inner.stdin_tx.as_ref()
             .ok_or("persistent process not running after spawn")?;
         tx.try_send(json_str)
@@ -933,23 +974,35 @@ impl PersistentSubprocessController {
             format!("failed to spawn persistent process: {e}")
         })?;
 
-        // Stash the TENTATIVE resume-retry payload synchronously, right
-        // here — before any background task (stdin writer, stdout/stderr
-        // readers, process-waiter) is created below. reagentx P1 on PR
-        // #2360: stashing this later, back in send_message after this
-        // function returned, left a window where a process that dies fast
-        // enough (the exact case this exists to catch) lets the
-        // process-waiter task — already racing on another thread once it's
-        // spawned — observe the exit and take() this payload while it's
-        // still `None`, silently losing the retry for the very case it's
-        // meant to catch. Keyed on the EXACT sid this spawn attempted (not
-        // `config.session_id`, which can differ from what's actually held
-        // in `inner.session_id` once an earlier call has already
-        // hydrated it) so `poison_resume`'s later confirmation check is
-        // unambiguous.
-        if let (Some(sid), Some(retry_json)) = (attempted_resume_sid.clone(), resume_retry_payload) {
+        // Bump spawn_epoch and stash the TENTATIVE resume-retry payload
+        // synchronously, right here — before any background task (stdin
+        // writer, stdout/stderr readers, process-waiter) is created below.
+        //
+        // The epoch bump (see its own doc comment) marks THIS as the
+        // newest spawn attempt for this controller — codex P1 on PR #2360
+        // (third review pass): without it, send_message's own later stdin
+        // write (after this function returns) has no way to notice that a
+        // stale-resume retry already installed a NEWER process (and
+        // `stdin_tx`) in the meantime, and would either duplicate the
+        // message on it or spuriously report a failed send.
+        //
+        // The retry-payload stash (reagentx P1 on PR #2360): doing this
+        // later, back in send_message after this function returned, left a
+        // window where a process that dies fast enough (the exact case
+        // this exists to catch) lets the process-waiter task — already
+        // racing on another thread once it's spawned — observe the exit
+        // and take() this payload while it's still `None`, silently losing
+        // the retry for the very case it's meant to catch. Keyed on the
+        // EXACT sid this spawn attempted (not `config.session_id`, which
+        // can differ from what's actually held in `inner.session_id` once
+        // an earlier call has already hydrated it) so `poison_resume`'s
+        // later confirmation check is unambiguous.
+        {
             let mut inner = self.inner.lock().unwrap();
-            inner.pending_resume_retry = Some((sid, config.clone(), retry_json));
+            inner.spawn_epoch += 1;
+            if let (Some(sid), Some(retry_json)) = (attempted_resume_sid.clone(), resume_retry_payload) {
+                inner.pending_resume_retry = Some((sid, config.clone(), retry_json));
+            }
         }
 
         let pid = child.id().unwrap_or(0);
@@ -1856,6 +1909,46 @@ mod send_input_tests {
              not race ahead of it"
         );
     }
+
+    /// codex P1 on PR #2360 (third review pass) added a `spawn_epoch` check
+    /// to `send_message`'s own stdin write, to detect a stale-resume retry
+    /// having already installed a newer process in the meantime. This
+    /// confirms that check is a pure no-op in the overwhelmingly common
+    /// case — no concurrent retry raced ahead — so an already-running
+    /// process still receives its message exactly as before. The actual
+    /// race this check exists to close (a genuine multi-threaded
+    /// interleaving between this function's own two lock acquisitions) is
+    /// not practical to inject deterministically without a test-only hook
+    /// in production code; verified via direct code inspection instead —
+    /// the check reads the SAME `inner.spawn_epoch` both times, so any
+    /// intervening bump (which only `spawn_process` performs, and only
+    /// while holding the same lock) is unconditionally visible.
+    #[tokio::test]
+    async fn send_message_still_delivers_normally_when_the_epoch_has_not_moved() {
+        let c = controller();
+        let (tx, mut rx) = mpsc::channel::<String>(4);
+        {
+            let mut inner = c.inner.lock().unwrap();
+            inner.stdin_tx = Some(tx);
+        }
+
+        let config = PersistentSpawnConfig {
+            cli_command: "unused".to_string(),
+            cli_args: vec![],
+            working_dir: String::new(),
+            env_vars: HashMap::new(),
+            session_id_field: "session_id".to_string(),
+            resume_flag: String::new(),
+            session_id: String::new(),
+            message_id: None,
+        };
+
+        c.send_message("hello".to_string(), config)
+            .expect("delivery to an already-running process must succeed");
+
+        let received = rx.try_recv().expect("the message must have been written to stdin_tx");
+        assert!(received.contains("hello"));
+    }
 }
 
 /// Covers the stderr-poison / stdout-capture race directly against
@@ -1874,6 +1967,7 @@ mod resume_poison_tests {
             resume_poisoned: None,
             pending_resume_retry: None,
             confirmed_stale_resume_retry: None,
+            spawn_epoch: 0,
             current_pid: None,
             stdin_tx: None,
             kill_tx: None,
