@@ -277,6 +277,19 @@ struct CriticalSection {
 }
 
 impl CriticalSection {
+    /// Deliberately never removes `lock_path` — one empty lock file
+    /// persists per `instance_id` that has ever called `claim`, same
+    /// bounded/accepted cost as `backend::base::WaveLock`'s single
+    /// global lock file. This is NOT an oversight: deleting a flock/
+    /// LockFileEx-locked file out from under a waiter is the classic
+    /// "unlink race" footgun — a process blocked in `open()` (before
+    /// it gets to actually lock) can end up holding a handle to a
+    /// *different* underlying file than a fresh claimant that
+    /// recreated the path after deletion, so both would believe they
+    /// hold "the" lock while actually holding two distinct advisory
+    /// locks on two distinct inodes. Leaving the lock file in place
+    /// forever avoids that hazard entirely at the cost of a handful of
+    /// permanently-empty files.
     fn enter(lock_path: &Path) -> std::io::Result<Self> {
         let file = std::fs::OpenOptions::new()
             .create(true)
