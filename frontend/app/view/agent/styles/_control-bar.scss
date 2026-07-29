@@ -165,14 +165,28 @@
     .agent-working-row-anchor {
         position: absolute;
         left: 0;
-        right: 0;
+        // Inset from the scrollbar gutter, not flush against it (right: 0)
+        // — .agent-working-row's opaque background (see --loading/--worked
+        // below) previously extended the full anchor width, painting over
+        // .agent-document's native scrollbar in that strip since this
+        // anchor's z-index: 2 sits above .agent-document's implicit
+        // z-index: auto. A right padding on the row used to compensate for
+        // the TEXT overlapping the scrollbar, but never stopped the row's
+        // own BACKGROUND from covering it — the scrollbar was still there,
+        // just invisible underneath. Insetting the anchor itself means
+        // nothing painted inside it can ever reach that strip, so the
+        // scrollbar stays visible and clickable without any z-index
+        // fight (which would also make .agent-document's own content
+        // paint over this row's text, defeating the overlay).
+        right: var(--agent-document-scrollbar-width, 14px);
         bottom: 0;
         z-index: 2;
-        // The anchor spans the full pane width (left:0/right:0) but the row
-        // itself only fills its own content width — without this, the empty
-        // margin beside the row would still intercept clicks meant for the
-        // message list underneath. Re-enabled on .agent-working-row itself
-        // below so its own text stays selectable/clickable.
+        // The anchor spans the full pane width (left:0/right:<scrollbar
+        // width>) but the row itself only fills its own content width —
+        // without this, the empty margin beside the row would still
+        // intercept clicks meant for the message list underneath.
+        // Re-enabled on .agent-working-row itself below so its own text
+        // stays selectable/clickable.
         pointer-events: none;
     }
 
@@ -182,13 +196,11 @@
         display: flex;
         align-items: center;
         gap: 5px;
-        // Right padding bumped past the left/top/bottom (space-3 → space-4 +
-        // 3px live-QA nudge): this row's right edge sits flush against
-        // .agent-document's native scrollbar (both it and the row fill the
-        // same .agent-document-scroll-region box), so the right-side
-        // elapsed-time/"Worked · Ns" text needs more breathing room there
-        // than the rest of the row needs elsewhere.
-        padding: var(--space-1) calc(var(--space-4) + 3px) var(--space-1-5) var(--space-3);
+        // Right padding now matches the other three sides — the anchor's
+        // own right inset (above) already clears the scrollbar gutter, so
+        // this no longer needs the extra buffer that used to compensate
+        // for the row extending flush against it.
+        padding: var(--space-1) var(--space-3) var(--space-1-5) var(--space-3);
         pointer-events: auto; // opt back in — the anchor wrapper disables it
 
         &--loading {
