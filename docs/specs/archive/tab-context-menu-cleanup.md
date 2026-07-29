@@ -1,7 +1,7 @@
 # Spec: Tab Context Menu Cleanup
 
 **Date:** 2026-03-18
-**Status:** Ready to implement
+**Status:** Superseded — moot (confirmed 2026-07-29, DOC-009 documentation analyst). `tab.tsx`'s `handleContextMenu` no longer opens a native menu at all; right-click opens a custom `TabContextPanel` (a 14-color `ColorSwatchPalette` plus Rename/Close buttons). None of this spec's described current-state baseline (native menu with Pin Tab/Rename/Copy TabId/Color/Backgrounds/Close) or its proposal (emoji labels) match what shipped. Kept for historical reference only — moved to `specs/archive`.
 
 ---
 
