@@ -50,8 +50,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.CEF_RUNTIME_TOKEN }}
         run: |
+          # gh release list's default order is NOT reliably publish-time-descending on
+          # this fork — sort by publishedAt explicitly rather than trusting [0]. See
+          # docs/specs/STATUS_CEF_PROPRIETARY_CODECS_MACOS_2026_07_27.md.
           TAG=$(gh release list --repo agentmuxai/cef --limit 30 \
-                  --json tagName --jq '[.[].tagName | select(startswith("cef-windows-x86_64-"))][0]')
+                  --json tagName,publishedAt \
+                  --jq '[.[] | select(.tagName | startswith("cef-windows-x86_64-"))] | sort_by(.publishedAt) | reverse | .[0].tagName')
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Cache codec-enabled CEF runtime
@@ -186,8 +190,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.CEF_RUNTIME_TOKEN }}
         run: |
+          # gh release list's default order is NOT reliably publish-time-descending on
+          # this fork — sort by publishedAt explicitly rather than trusting [0]. See
+          # docs/specs/STATUS_CEF_PROPRIETARY_CODECS_MACOS_2026_07_27.md.
           TAG=$(gh release list --repo agentmuxai/cef --limit 30 \
-                  --json tagName --jq '[.[].tagName | select(startswith("cef-macos-arm64-"))][0]')
+                  --json tagName,publishedAt \
+                  --jq '[.[] | select(.tagName | startswith("cef-macos-arm64-"))] | sort_by(.publishedAt) | reverse | .[0].tagName')
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
       - name: Cache patched macOS CEF framework
         id: cef-cache
@@ -297,8 +305,14 @@ jobs:
           # filter by the Linux prefix so a newer macOS tag can't shadow it
           # (this bit us: the unfiltered --limit 1 grabbed a macOS tarball with
           # no libcef.so inside, see docs/specs/SPEC_PATCHED_MACOS_CEF_FRAMEWORK_RELEASE_2026_06_29.md).
+          #
+          # gh release list's default order is ALSO not reliably publish-time-descending
+          # on this fork even after filtering to one platform — sort by publishedAt
+          # explicitly rather than trusting [0]. See
+          # docs/specs/STATUS_CEF_PROPRIETARY_CODECS_MACOS_2026_07_27.md.
           TAG=$(gh release list --repo agentmuxai/cef --limit 30 \
-                  --json tagName --jq '[.[].tagName | select(startswith("cef-linux-x86_64-"))][0]')
+                  --json tagName,publishedAt \
+                  --jq '[.[] | select(.tagName | startswith("cef-linux-x86_64-"))] | sort_by(.publishedAt) | reverse | .[0].tagName')
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
       - name: Cache patched libcef.so
         id: cef-cache
