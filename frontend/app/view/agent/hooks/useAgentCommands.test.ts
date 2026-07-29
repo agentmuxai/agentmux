@@ -1851,6 +1851,66 @@ describe("useAgentCommands — idle sendMessage runs the deferred controller ref
             dispose();
         });
     });
+
+    // reagent P2 on PR #2338 (twenty-ninth re-review): flushHeldMessages's
+    // rejection path restores authFailureToPreserve into the failure
+    // banner, but recallLatestHeld (the ArrowUp un-queue path) popped the
+    // item and returned it to the composer WITHOUT that same restoration —
+    // a message held because it captured a live auth failure at queue
+    // time silently lost its recovery banner on recall, with nothing left
+    // to bring it back.
+    it("restores the failure banner when recalling (ArrowUp) a held message that captured a live auth failure at queue time", async () => {
+        hub.dispatchSlashCommand.mockImplementation(async (_msg: string, _registry: unknown, ctx: { deferControllerRefreshUntilIdle: () => void }) => {
+            ctx.deferControllerRefreshUntilIdle();
+            return { kind: "handled" };
+        });
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh: async () => false,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => false,
+                backToPicker: async () => {},
+            });
+
+            // /login succeeds mid-turn (defers instead of refreshing now).
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("/login", /* wasAlreadyWorking */ true);
+
+            // A fresh idle send captures a live auth failure right before
+            // TurnStart clears it. The refresh is still blocked, so this
+            // gets held.
+            const capturedFailure: AgentFailure = { code: "auth", title: "Not logged in", detail: "401", retryable: true };
+            await commands.sendMessage("held message", /* wasAlreadyWorking */ false, capturedFailure);
+            expect(commands.hasHeldMessages()).toBe(true);
+
+            // The user presses ArrowUp to recall the message un-sent —
+            // BEFORE any flush ever runs.
+            const recalled = commands.recallLatestHeld();
+
+            expect(recalled?.text).toBe("held message");
+            expect(commands.hasHeldMessages()).toBe(false);
+            // The recovery banner must be restored, not silently dropped.
+            expect(paneSnapshot(BLOCK_ID)?.failure?.data.code).toBe("auth");
+            dispose();
+        });
+    });
 });
 
 // Codex P1 on PR #2338 (nineteenth re-review): a premature per-round

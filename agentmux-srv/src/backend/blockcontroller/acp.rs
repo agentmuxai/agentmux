@@ -58,6 +58,19 @@ fn is_latest_prompt_completion(response_id: Option<u64>, has_stop_reason: bool, 
     has_stop_reason && response_id == Some(latest_prompt_id)
 }
 
+/// Roll `latest` back to `previous_id`, but ONLY if `latest` still equals
+/// `rejected_id` — i.e. nothing newer has been sent in the meantime.
+/// Shared by both places a prompt can be discovered to have never
+/// actually completed: `send_input`'s synchronous enqueue-failure
+/// rollback, and the stdout-reader's async JSON-RPC error-response
+/// handling. compare_exchange (not an unconditional store) so a
+/// legitimately newer prompt sent since is never clobbered by restoring a
+/// stale "previous" value. Returns whether the rollback was applied.
+/// codex P2 on PR #2338 (twenty-ninth re-review).
+fn rollback_latest_prompt_id_if_unchanged(latest: &AtomicU64, rejected_id: u64, previous_id: u64) -> bool {
+    latest.compare_exchange(rejected_id, previous_id, Ordering::Relaxed, Ordering::Relaxed).is_ok()
+}
+
 /// Inner state protected by mutex.
 struct AcpInner {
     proc_status: String,
@@ -97,6 +110,20 @@ pub struct AcpController {
     /// could then read as backend-confirmed idle and force-restart the
     /// controller mid-turn. codex P2 on PR #2338 (twenty-seventh re-review).
     latest_prompt_id: Arc<AtomicU64>,
+    /// The `id` latest_prompt_id held immediately BEFORE its most recent
+    /// update — i.e. the id of the prompt that was in flight right before
+    /// the current "latest" one was sent. Lets a steering send's own
+    /// rejection roll `latest_prompt_id` back to the still-genuinely-in-
+    /// flight EARLIER prompt (mirrors send_input's synchronous
+    /// enqueue-failure rollback, but for an ASYNC agent-level rejection
+    /// arriving later in the stdout-reader task — see the JSON-RPC `error`
+    /// handling below). One level of history only, not a full stack of
+    /// every outstanding prompt: a second, deeper rejection while this
+    /// rollback is already pending isn't corrected — codex P2 on PR #2338
+    /// (twenty-ninth re-review) offered this as the proportionate fix
+    /// (vs. tracking every outstanding prompt) for what it characterized
+    /// as an agent-dependent edge case (mid-turn prompt rejection).
+    previous_prompt_id: Arc<AtomicU64>,
 }
 
 impl AcpController {
@@ -134,6 +161,7 @@ impl AcpController {
             health_monitor,
             next_rpc_id: Arc::new(AtomicU64::new(1)),
             latest_prompt_id: Arc::new(AtomicU64::new(0)),
+            previous_prompt_id: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -299,6 +327,7 @@ impl AcpController {
         let health_clone = self.health_monitor.clone();
         let rpc_id_clone = self.next_rpc_id.clone();
         let latest_prompt_id_clone = self.latest_prompt_id.clone();
+        let previous_prompt_id_clone = self.previous_prompt_id.clone();
         let wstore_clone = self.wstore.clone();
         let event_bus_clone = self.event_bus.clone();
         // Resolve the agent's GLOBAL transcript zone once (see persistent.rs).
@@ -437,6 +466,27 @@ impl AcpController {
                                     super::publish_controller_status(broker, &status);
                                 }
                             }
+                        }
+                    } else if json.get("id").is_some() && json.get("error").is_some() {
+                        // A JSON-RPC error response for the LATEST prompt —
+                        // mid-turn prompt acceptance is agent-dependent;
+                        // some agents reject a steering prompt sent while
+                        // an earlier one is still being processed. An
+                        // error response has neither `result` nor
+                        // `stopReason`, so it can never satisfy
+                        // is_latest_prompt_completion above — without this,
+                        // the rejected prompt's id would permanently
+                        // occupy latest_prompt_id, and the EARLIER prompt's
+                        // real eventual stopReason would be misclassified
+                        // as stale (its id no longer matches), leaving
+                        // turn_active stuck true for this pane. codex P2 on
+                        // PR #2338 (twenty-ninth re-review).
+                        if let Some(error_response_id) = json.get("id").and_then(|v| v.as_u64()) {
+                            let _ = rollback_latest_prompt_id_if_unchanged(
+                                &latest_prompt_id_clone,
+                                error_response_id,
+                                previous_prompt_id_clone.load(Ordering::Relaxed),
+                            );
                         }
                     }
                 }
@@ -638,8 +688,14 @@ impl Controller for AcpController {
             let prompt_id = self.next_id();
             // swap (not store) so the PREVIOUS value is available to
             // restore if this send's own enqueue fails below — see that
-            // rollback's comment for why.
+            // rollback's comment for why. Also persisted into the shared
+            // previous_prompt_id field so the stdout-reader task can
+            // perform the SAME rollback later, asynchronously, if the
+            // agent itself rejects this prompt with a JSON-RPC error
+            // instead of a channel-level enqueue failure — see that
+            // handling's own comment.
             let previous_prompt_id = self.latest_prompt_id.swap(prompt_id, Ordering::Relaxed);
+            self.previous_prompt_id.store(previous_prompt_id, Ordering::Relaxed);
             let req = serde_json::json!({
                 "jsonrpc": "2.0",
                 "id": prompt_id,
@@ -738,12 +794,7 @@ impl Controller for AcpController {
                 // call in the meantime is never clobbered by restoring
                 // this stale "previous" value. reagent P1 on PR #2338
                 // (twenty-eighth re-review).
-                let _ = self.latest_prompt_id.compare_exchange(
-                    prompt_id,
-                    previous_prompt_id,
-                    Ordering::Relaxed,
-                    Ordering::Relaxed,
-                );
+                let _ = rollback_latest_prompt_id_if_unchanged(&self.latest_prompt_id, prompt_id, previous_prompt_id);
                 return Err(e);
             }
         }
@@ -790,6 +841,28 @@ mod tests {
         assert!(!is_latest_prompt_completion(Some(2), true, 3), "an OLDER prompt's stopReason must not be trusted once a newer one has been sent");
         assert!(!is_latest_prompt_completion(Some(3), false, 3), "no stopReason at all is not turn-end, regardless of id");
         assert!(!is_latest_prompt_completion(None, true, 3), "a response with no id (malformed) must not be trusted");
+    }
+
+    /// Regression for codex P2 on PR #2338 (twenty-ninth re-review): the
+    /// shared rollback helper used by both send_input's enqueue-failure
+    /// path and the stdout-reader's JSON-RPC error-response handling.
+    #[test]
+    fn rollback_latest_prompt_id_if_unchanged_only_rolls_back_when_still_pointing_at_the_rejected_id() {
+        let latest = AtomicU64::new(2);
+        assert!(
+            rollback_latest_prompt_id_if_unchanged(&latest, 2, 1),
+            "must roll back when latest still points at the rejected id"
+        );
+        assert_eq!(latest.load(Ordering::Relaxed), 1, "must restore the previous id");
+
+        // A newer prompt was sent in the meantime (latest is now 3, not 2) —
+        // restoring the stale "previous" value must not clobber it.
+        let latest = AtomicU64::new(3);
+        assert!(
+            !rollback_latest_prompt_id_if_unchanged(&latest, 2, 1),
+            "must NOT roll back once a newer prompt has already been sent"
+        );
+        assert_eq!(latest.load(Ordering::Relaxed), 3, "the newer id must be left untouched");
     }
 
     /// Regression for reagent P1 on PR #2336: `send_input` used to call the
