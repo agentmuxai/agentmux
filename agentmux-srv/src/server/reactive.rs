@@ -15,6 +15,15 @@ use crate::backend::base;
 
 use super::AppState;
 
+/// Max cross-instance HTTP forwards a single inject request may go through
+/// (Tier 2a/2b/3 each increment before forwarding). A legitimate delivery
+/// is always exactly one hop (caller's instance → the owning instance);
+/// this only exists to bound a pathological cycle — two channels each
+/// holding a stale-but-PID-alive shared-registry entry pointing at the
+/// other for the same agent name would otherwise forward back and forth
+/// indefinitely, hanging the original request (reagent P1 on PR #2350).
+const MAX_FORWARD_HOPS: u8 = 3;
+
 /// Echo a successfully-sent jekt into the SENDER's own pane
 /// (SPEC_JEKT_SECURITY_AND_VISIBILITY §3.2).
 ///
@@ -113,6 +122,21 @@ pub(super) async fn handle_reactive_inject(
         .map(|e| e.starts_with("agent not found"))
         .unwrap_or(false);
 
+    if is_not_found && req.forward_hops >= MAX_FORWARD_HOPS {
+        tracing::warn!(
+            target = %req.target_agent,
+            hops = req.forward_hops,
+            "reactive inject: forward-hop limit reached, not forwarding further"
+        );
+        return Json(serde_json::to_value(&resp).unwrap_or_default());
+    }
+
+    // Every forward below sends this hop-incremented request, not the
+    // original `req` — a peer that also fails to find the agent locally
+    // and forwards onward needs to see the accumulated hop count too.
+    let mut forwarded_req = req.clone();
+    forwarded_req.forward_hops = req.forward_hops.saturating_add(1);
+
     if is_not_found {
         // Tier 2: same-host, different sidecar (file registry → HTTP loopback)
         let data_dir = base::get_wave_data_dir();
@@ -125,7 +149,7 @@ pub(super) async fn handle_reactive_inject(
                     url = %forward_url,
                     "cross-instance inject forward"
                 );
-                let mut fwd = state.http_client.post(&forward_url).json(&req);
+                let mut fwd = state.http_client.post(&forward_url).json(&forwarded_req);
                 if !entry.auth_key.is_empty() {
                     fwd = fwd.header("X-AuthKey", &entry.auth_key);
                 }
@@ -209,7 +233,7 @@ pub(super) async fn handle_reactive_inject(
                     url = %forward_url,
                     "cross-channel inject forward"
                 );
-                let mut fwd = state.http_client.post(&forward_url).json(&req);
+                let mut fwd = state.http_client.post(&forward_url).json(&forwarded_req);
                 if !entry.auth_key.is_empty() {
                     fwd = fwd.header("X-AuthKey", &entry.auth_key);
                 }
@@ -277,7 +301,7 @@ pub(super) async fn handle_reactive_inject(
                 url = %forward_url,
                 "LAN peer inject forward"
             );
-            let mut fwd = state.http_client.post(&forward_url).json(&req);
+            let mut fwd = state.http_client.post(&forward_url).json(&forwarded_req);
             if !peer_auth_key.is_empty() {
                 fwd = fwd.header("X-AuthKey", &peer_auth_key);
             }
