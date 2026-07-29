@@ -22,7 +22,7 @@
 //!
 //! See: https://github.com/agentclientprotocol/agent-client-protocol
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -45,30 +45,30 @@ pub const ACP_OUTPUT_SUBJECT: &str = "output";
 
 pub const BLOCK_CONTROLLER_ACP: &str = "acp";
 
-/// A `session/prompt` response only signals genuine turn-end if it (a) has
-/// a `stopReason` AND (b) its echoed `id` matches the id of the most
-/// recently SENT prompt. Extracted as a pure function so the staleness
-/// logic itself is directly unit-testable without spawning a real process
-/// — see `latest_prompt_id`'s doc comment for why (b) is necessary: the
-/// stdin-writer and stdout-reader tasks run independently with no ordering
-/// guarantee, so an EARLIER prompt's response can arrive after a
-/// steering/new prompt was already sent. codex P2 on PR #2338
-/// (twenty-seventh re-review).
-fn is_latest_prompt_completion(response_id: Option<u64>, has_stop_reason: bool, latest_prompt_id: u64) -> bool {
-    has_stop_reason && response_id == Some(latest_prompt_id)
-}
-
-/// Roll `latest` back to `previous_id`, but ONLY if `latest` still equals
-/// `rejected_id` — i.e. nothing newer has been sent in the meantime.
-/// Shared by both places a prompt can be discovered to have never
-/// actually completed: `send_input`'s synchronous enqueue-failure
-/// rollback, and the stdout-reader's async JSON-RPC error-response
-/// handling. compare_exchange (not an unconditional store) so a
-/// legitimately newer prompt sent since is never clobbered by restoring a
-/// stale "previous" value. Returns whether the rollback was applied.
-/// codex P2 on PR #2338 (twenty-ninth re-review).
-fn rollback_latest_prompt_id_if_unchanged(latest: &AtomicU64, rejected_id: u64, previous_id: u64) -> bool {
-    latest.compare_exchange(rejected_id, previous_id, Ordering::Relaxed, Ordering::Relaxed).is_ok()
+/// Remove `resolved_id` from the set of outstanding (sent, not yet
+/// resolved) prompts and report whether the set is now EMPTY — i.e.
+/// whether every prompt sent so far has now been resolved, by either a
+/// real `stopReason` completion or a JSON-RPC `error` rejection, meaning
+/// the turn has genuinely ended. Extracted as a pure function over a
+/// plain `HashSet` so this exact logic is directly unit-testable; call
+/// sites wrap it with the shared mutex around the real
+/// `outstanding_prompt_ids`.
+///
+/// Tracking every outstanding prompt — not just "the latest" — is what
+/// makes response ORDERING irrelevant: "is the turn over" only ever asks
+/// "is anything still outstanding," never "was this the most recent
+/// one." codex P2 on PR #2338 (thirtieth re-review) — superseded the
+/// twenty-seventh through twenty-ninth re-reviews' single latest/
+/// previous-id tracking (`is_latest_prompt_completion` +
+/// `rollback_latest_prompt_id_if_unchanged`, both removed), which could
+/// permanently strand `turn_active` at `true`: a steering prompt's
+/// rejection arriving AFTER the earlier prompt's completion had already
+/// been consumed (and discarded as "not the latest") rolled
+/// `latest_prompt_id` back to a prompt whose own completion would never
+/// arrive again — nothing left to ever satisfy the match.
+fn resolve_prompt_and_check_idle(outstanding: &mut HashSet<u64>, resolved_id: u64) -> bool {
+    outstanding.remove(&resolved_id);
+    outstanding.is_empty()
 }
 
 /// Inner state protected by mutex.
@@ -97,33 +97,17 @@ pub struct AcpController {
     health_monitor: Arc<HealthMonitor>,
     /// Monotonically increasing JSON-RPC request ID.
     next_rpc_id: Arc<AtomicU64>,
-    /// The `id` of the most recently SENT `session/prompt` request. 0 is a
-    /// safe "none sent yet" sentinel — `next_rpc_id` starts at 1, so no real
-    /// request ever gets id 0. Used to detect a stale, out-of-order
-    /// `stopReason` completion: when a steering/new prompt is sent while an
-    /// EARLIER prompt is still in flight, the earlier prompt's response can
-    /// arrive AFTER the new one is already sent (no ordering guarantee
-    /// between a separate stdin-writer task and a separate stdout-reader
-    /// task) — without this, that stale completion's hardcoded
-    /// `turn_active: false` would overwrite the genuinely-active NEW turn's
-    /// `true`, which flushPendingControllerRefresh (useAgentCommands.ts)
-    /// could then read as backend-confirmed idle and force-restart the
-    /// controller mid-turn. codex P2 on PR #2338 (twenty-seventh re-review).
-    latest_prompt_id: Arc<AtomicU64>,
-    /// The `id` latest_prompt_id held immediately BEFORE its most recent
-    /// update — i.e. the id of the prompt that was in flight right before
-    /// the current "latest" one was sent. Lets a steering send's own
-    /// rejection roll `latest_prompt_id` back to the still-genuinely-in-
-    /// flight EARLIER prompt (mirrors send_input's synchronous
-    /// enqueue-failure rollback, but for an ASYNC agent-level rejection
-    /// arriving later in the stdout-reader task — see the JSON-RPC `error`
-    /// handling below). One level of history only, not a full stack of
-    /// every outstanding prompt: a second, deeper rejection while this
-    /// rollback is already pending isn't corrected — codex P2 on PR #2338
-    /// (twenty-ninth re-review) offered this as the proportionate fix
-    /// (vs. tracking every outstanding prompt) for what it characterized
-    /// as an agent-dependent edge case (mid-turn prompt rejection).
-    previous_prompt_id: Arc<AtomicU64>,
+    /// Every `session/prompt` request id that has been SENT but not yet
+    /// RESOLVED (by either a real `stopReason` completion or a JSON-RPC
+    /// `error` rejection). The turn is genuinely over only once this set
+    /// is empty — see `resolve_prompt_and_check_idle`'s doc comment for
+    /// why tracking the full set (not just "the latest" id) is necessary:
+    /// steering can leave multiple prompts outstanding at once, and
+    /// responses/rejections can arrive in any order relative to each
+    /// other and relative to new sends (independent stdin-writer and
+    /// stdout-reader tasks, no ordering guarantee between them). codex P2
+    /// on PR #2338 (twenty-seventh through thirtieth re-reviews).
+    outstanding_prompt_ids: Arc<Mutex<HashSet<u64>>>,
 }
 
 impl AcpController {
@@ -160,8 +144,7 @@ impl AcpController {
             filestore,
             health_monitor,
             next_rpc_id: Arc::new(AtomicU64::new(1)),
-            latest_prompt_id: Arc::new(AtomicU64::new(0)),
-            previous_prompt_id: Arc::new(AtomicU64::new(0)),
+            outstanding_prompt_ids: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
@@ -326,8 +309,7 @@ impl AcpController {
         let inner_clone = self.inner.clone();
         let health_clone = self.health_monitor.clone();
         let rpc_id_clone = self.next_rpc_id.clone();
-        let latest_prompt_id_clone = self.latest_prompt_id.clone();
-        let previous_prompt_id_clone = self.previous_prompt_id.clone();
+        let outstanding_prompt_ids_clone = self.outstanding_prompt_ids.clone();
         let wstore_clone = self.wstore.clone();
         let event_bus_clone = self.event_bus.clone();
         // Resolve the agent's GLOBAL transcript zone once (see persistent.rs).
@@ -375,7 +357,7 @@ impl AcpController {
                                 // Flush pending prompt now that session is ready.
                                 if let Some(prompt) = inner.pending_prompt.take() {
                                     let id = rpc_id_clone.fetch_add(1, Ordering::Relaxed);
-                                    latest_prompt_id_clone.store(id, Ordering::Relaxed);
+                                    outstanding_prompt_ids_clone.lock().unwrap().insert(id);
                                     let req = serde_json::json!({
                                         "jsonrpc": "2.0",
                                         "id": id,
@@ -405,88 +387,72 @@ impl AcpController {
                         }
                     }
 
-                    // Reset health monitor on prompt result (turn complete)
-                    if json.get("id").is_some() && json.get("result").is_some() {
-                        // This is a response to a request (e.g., session/prompt result)
-                        if let Some(result) = json.get("result") {
-                            // Only trust this completion if it's for the
-                            // MOST RECENTLY SENT prompt — the stdin-writer
-                            // task and this stdout-reader task run
-                            // independently with no ordering guarantee
-                            // between them, so a steering/new prompt sent
-                            // while an EARLIER one is still in flight can
-                            // have that earlier prompt's stopReason arrive
-                            // AFTER the new one was already sent and marked
-                            // active. Without this check, the stale
-                            // completion's hardcoded turn_active: false
-                            // below would overwrite the genuinely-active
-                            // NEW turn's true. codex P2 on PR #2338
-                            // (twenty-seventh re-review).
-                            let is_latest_prompt = is_latest_prompt_completion(
-                                json.get("id").and_then(|v| v.as_u64()),
-                                result.get("stopReason").is_some(),
-                                latest_prompt_id_clone.load(Ordering::Relaxed),
-                            );
-                            if is_latest_prompt {
-                                health_clone.set_active_turn(false);
-                                // Publish the flip so live controllerstatus
-                                // subscribers see "turn ended" immediately,
-                                // mirroring persistent.rs's matching publish
-                                // on its own normal (non-kill, non-exit)
-                                // turn-end path. Without this, the ONLY
-                                // controllerstatus publishes for an ACP
-                                // controller (Gemini/Codex/Kimi in
-                                // catalog.ts) are on kill or process exit —
-                                // a normal turn-end here left the frontend's
-                                // `wasTurnActive` signal (fed only by live
-                                // controllerstatus events, never local
-                                // state) stuck at its last-seen value,
-                                // stranding useAgentCommands.ts's
-                                // flushPendingControllerRefresh (which
-                                // requires isBackendTurnConfirmedIdle —
-                                // wasTurnActive === false — before running a
-                                // /login-deferred controller restart) until
-                                // an unrelated event happened to republish
-                                // status. reagentx P1 on PR #2338
-                                // (twenty-second re-review).
-                                if let Some(ref broker) = broker_clone {
-                                    let status = {
-                                        let locked = inner_clone.lock().unwrap();
-                                        BlockControllerRuntimeStatus {
-                                            blockid: block_id_stdout.clone(),
-                                            version: locked.status_version,
-                                            shellprocstatus: locked.proc_status.clone(),
-                                            shellprocconnname: "local".to_string(),
-                                            shellprocexitcode: locked.proc_exit_code,
-                                            spawn_ts_ms: None,
-                                            is_agent_pane: true,
-                                            turn_active: false,
-                                        }
-                                    };
-                                    super::publish_controller_status(broker, &status);
-                                }
-                            }
-                        }
+                    // A prompt is RESOLVED — one way or another — by either
+                    // a real `stopReason` completion or a JSON-RPC `error`
+                    // rejection (mid-turn prompt acceptance is agent-
+                    // dependent; some agents reject a steering prompt sent
+                    // while an earlier one is still being processed).
+                    // Either way, remove it from the outstanding set and
+                    // only declare the turn genuinely over once NOTHING is
+                    // left outstanding — never based on "was this the most
+                    // recently sent prompt," which breaks under steering:
+                    // an earlier prompt's completion can arrive after a
+                    // newer one was sent, or a newer prompt's rejection can
+                    // arrive after an earlier one already completed. codex
+                    // P2 on PR #2338 (twenty-seventh through thirtieth
+                    // re-reviews).
+                    let resolved_id = if json.get("id").is_some()
+                        && json.get("result").and_then(|r| r.get("stopReason")).is_some()
+                    {
+                        json.get("id").and_then(|v| v.as_u64())
                     } else if json.get("id").is_some() && json.get("error").is_some() {
-                        // A JSON-RPC error response for the LATEST prompt —
-                        // mid-turn prompt acceptance is agent-dependent;
-                        // some agents reject a steering prompt sent while
-                        // an earlier one is still being processed. An
-                        // error response has neither `result` nor
-                        // `stopReason`, so it can never satisfy
-                        // is_latest_prompt_completion above — without this,
-                        // the rejected prompt's id would permanently
-                        // occupy latest_prompt_id, and the EARLIER prompt's
-                        // real eventual stopReason would be misclassified
-                        // as stale (its id no longer matches), leaving
-                        // turn_active stuck true for this pane. codex P2 on
-                        // PR #2338 (twenty-ninth re-review).
-                        if let Some(error_response_id) = json.get("id").and_then(|v| v.as_u64()) {
-                            let _ = rollback_latest_prompt_id_if_unchanged(
-                                &latest_prompt_id_clone,
-                                error_response_id,
-                                previous_prompt_id_clone.load(Ordering::Relaxed),
-                            );
+                        json.get("id").and_then(|v| v.as_u64())
+                    } else {
+                        None
+                    };
+                    if let Some(resolved_id) = resolved_id {
+                        let turn_is_over = {
+                            let mut outstanding = outstanding_prompt_ids_clone.lock().unwrap();
+                            resolve_prompt_and_check_idle(&mut outstanding, resolved_id)
+                        };
+                        if turn_is_over {
+                            health_clone.set_active_turn(false);
+                            // Publish the flip so live controllerstatus
+                            // subscribers see "turn ended" immediately,
+                            // mirroring persistent.rs's matching publish
+                            // on its own normal (non-kill, non-exit)
+                            // turn-end path. Without this, the ONLY
+                            // controllerstatus publishes for an ACP
+                            // controller (Gemini/Codex/Kimi in
+                            // catalog.ts) are on kill or process exit —
+                            // a normal turn-end here left the frontend's
+                            // `wasTurnActive` signal (fed only by live
+                            // controllerstatus events, never local
+                            // state) stuck at its last-seen value,
+                            // stranding useAgentCommands.ts's
+                            // flushPendingControllerRefresh (which
+                            // requires isBackendTurnConfirmedIdle —
+                            // wasTurnActive === false — before running a
+                            // /login-deferred controller restart) until
+                            // an unrelated event happened to republish
+                            // status. reagentx P1 on PR #2338
+                            // (twenty-second re-review).
+                            if let Some(ref broker) = broker_clone {
+                                let status = {
+                                    let locked = inner_clone.lock().unwrap();
+                                    BlockControllerRuntimeStatus {
+                                        blockid: block_id_stdout.clone(),
+                                        version: locked.status_version,
+                                        shellprocstatus: locked.proc_status.clone(),
+                                        shellprocconnname: "local".to_string(),
+                                        shellprocexitcode: locked.proc_exit_code,
+                                        spawn_ts_ms: None,
+                                        is_agent_pane: true,
+                                        turn_active: false,
+                                    }
+                                };
+                                super::publish_controller_status(broker, &status);
+                            }
                         }
                     }
                 }
@@ -683,19 +649,13 @@ impl Controller for AcpController {
                 inner.session_id.clone().unwrap_or_default()
             };
             // Not built via make_request: the id must be captured so it can
-            // be recorded as the latest prompt (see latest_prompt_id's doc
+            // be tracked as outstanding (see outstanding_prompt_ids's doc
             // comment) — make_request only returns the serialized string.
+            // Inserted BEFORE the enqueue below (not after), for the same
+            // happens-before reason mark_turn_active_returning_was_active
+            // is called before the enqueue — see that call's own comment.
             let prompt_id = self.next_id();
-            // swap (not store) so the PREVIOUS value is available to
-            // restore if this send's own enqueue fails below — see that
-            // rollback's comment for why. Also persisted into the shared
-            // previous_prompt_id field so the stdout-reader task can
-            // perform the SAME rollback later, asynchronously, if the
-            // agent itself rejects this prompt with a JSON-RPC error
-            // instead of a channel-level enqueue failure — see that
-            // handling's own comment.
-            let previous_prompt_id = self.latest_prompt_id.swap(prompt_id, Ordering::Relaxed);
-            self.previous_prompt_id.store(previous_prompt_id, Ordering::Relaxed);
+            self.outstanding_prompt_ids.lock().unwrap().insert(prompt_id);
             let req = serde_json::json!({
                 "jsonrpc": "2.0",
                 "id": prompt_id,
@@ -733,6 +693,11 @@ impl Controller for AcpController {
             // prior (twenty-fifth re-review) ordering, which fixed a
             // different bug (see the rollback below) by moving this after
             // the enqueue, reintroducing this race.
+            // The return value (was a turn already active?) is used ONLY to
+            // gate the watchdog spawn below, not to decide whether to roll
+            // back on enqueue failure (see that rollback's own comment) —
+            // outstanding_prompt_ids's emptiness is the authoritative signal
+            // for that now.
             let was_active = self.health_monitor.mark_turn_active_returning_was_active();
             if !was_active {
                 core::spawn_health_watchdog(&self.health_monitor);
@@ -764,37 +729,29 @@ impl Controller for AcpController {
             if let Err(e) = send_result {
                 // try_send can fail (channel full, or the stdin writer task
                 // already exited because the process died) — no turn
-                // actually starts. Roll back the state just established
-                // above, but ONLY if THIS call is what transitioned
-                // idle->active (!was_active): if a turn was ALREADY active
-                // (mid-turn steering), a genuinely active turn from an
-                // EARLIER successful send must not be clobbered by this
-                // failed one. The freshly-spawned watchdog (if any) exits
+                // actually starts for THIS prompt. Remove it from the
+                // outstanding set (it was never really sent) and only
+                // declare the turn over if NOTHING else is left outstanding
+                // — a turn ALREADY active from an earlier successful send
+                // (mid-turn steering) must not be clobbered by this failed
+                // one. This single emptiness check replaces what used to be
+                // two separate, easy-to-desync mechanisms: a `was_active`-
+                // conditioned health-monitor rollback, and a
+                // latest/previous-id compare-and-swap that could still
+                // strand turn_active under out-of-order responses (codex
+                // P2 on PR #2338, twenty-seventh through thirtieth
+                // re-reviews). The freshly-spawned watchdog (if any) exits
                 // on its own next tick once is_active_turn() reads false
-                // again — see spawn_health_watchdog's doc comment. codex P2
-                // on PR #2338 (twenty-fifth re-review).
-                if !was_active {
+                // again — see spawn_health_watchdog's doc comment.
+                let now_empty = {
+                    let mut outstanding = self.outstanding_prompt_ids.lock().unwrap();
+                    outstanding.remove(&prompt_id);
+                    outstanding.is_empty()
+                };
+                if now_empty {
                     self.health_monitor.set_active_turn(false);
                     self.publish_status();
                 }
-                // Roll back latest_prompt_id too — UNCONDITIONALLY,
-                // regardless of was_active (unlike the health-monitor
-                // rollback above): a prompt that was never actually sent
-                // must never be the id everything else waits to match
-                // against. Without this, a mid-turn steering send whose
-                // OWN enqueue fails leaves latest_prompt_id pointing at
-                // this failed, never-sent request — the EARLIER prompt
-                // that's still genuinely in flight then gets its real
-                // stopReason response misclassified as stale by
-                // is_latest_prompt_completion (its id no longer matches),
-                // so turn_active never flips back to false for that pane,
-                // permanently stranding flushPendingControllerRefresh.
-                // compare_exchange (not an unconditional store) so a
-                // legitimately newer prompt sent by another overlapping
-                // call in the meantime is never clobbered by restoring
-                // this stale "previous" value. reagent P1 on PR #2338
-                // (twenty-eighth re-review).
-                let _ = rollback_latest_prompt_id_if_unchanged(&self.latest_prompt_id, prompt_id, previous_prompt_id);
                 return Err(e);
             }
         }
@@ -829,40 +786,63 @@ mod tests {
         AcpController::new("tab".to_string(), "block".to_string(), None, None, None, None)
     }
 
-    /// Regression for codex P2 on PR #2338 (twenty-seventh re-review): the
-    /// staleness check that gates turn-end must reject any completion that
-    /// doesn't echo the id of the most recently sent prompt, even if it
-    /// carries a stopReason — this is exactly the out-of-order case an
-    /// earlier prompt's response arriving after a steering/new prompt was
-    /// already sent produces.
+    /// Regression for codex P2 on PR #2338 (twenty-seventh/thirtieth
+    /// re-reviews): the single-prompt case — one prompt sent, one
+    /// response — must still correctly declare the turn over.
     #[test]
-    fn is_latest_prompt_completion_requires_both_stop_reason_and_matching_id() {
-        assert!(is_latest_prompt_completion(Some(3), true, 3), "matching id + stopReason must be trusted");
-        assert!(!is_latest_prompt_completion(Some(2), true, 3), "an OLDER prompt's stopReason must not be trusted once a newer one has been sent");
-        assert!(!is_latest_prompt_completion(Some(3), false, 3), "no stopReason at all is not turn-end, regardless of id");
-        assert!(!is_latest_prompt_completion(None, true, 3), "a response with no id (malformed) must not be trusted");
+    fn resolve_prompt_and_check_idle_reports_empty_after_the_only_outstanding_prompt_resolves() {
+        let mut outstanding = HashSet::from([3]);
+        assert!(
+            resolve_prompt_and_check_idle(&mut outstanding, 3),
+            "resolving the only outstanding prompt must report the turn as over"
+        );
+        assert!(outstanding.is_empty());
     }
 
-    /// Regression for codex P2 on PR #2338 (twenty-ninth re-review): the
-    /// shared rollback helper used by both send_input's enqueue-failure
-    /// path and the stdout-reader's JSON-RPC error-response handling.
+    /// Regression for codex P2 on PR #2338 (twenty-seventh re-review): an
+    /// EARLIER prompt's response arriving after a steering/new prompt was
+    /// already sent must not end the turn while the newer one is still
+    /// outstanding.
     #[test]
-    fn rollback_latest_prompt_id_if_unchanged_only_rolls_back_when_still_pointing_at_the_rejected_id() {
-        let latest = AtomicU64::new(2);
+    fn resolve_prompt_and_check_idle_stays_active_while_a_newer_steering_prompt_is_still_outstanding() {
+        let mut outstanding = HashSet::from([1, 2]);
         assert!(
-            rollback_latest_prompt_id_if_unchanged(&latest, 2, 1),
-            "must roll back when latest still points at the rejected id"
+            !resolve_prompt_and_check_idle(&mut outstanding, 1),
+            "the newer (2) prompt is still outstanding — the turn must not end yet"
         );
-        assert_eq!(latest.load(Ordering::Relaxed), 1, "must restore the previous id");
+        assert_eq!(outstanding, HashSet::from([2]));
+    }
 
-        // A newer prompt was sent in the meantime (latest is now 3, not 2) —
-        // restoring the stale "previous" value must not clobber it.
-        let latest = AtomicU64::new(3);
+    /// Regression for codex P2 on PR #2338 (thirtieth re-review) — the
+    /// exact scenario the single latest/previous-id tracking (removed)
+    /// could not handle: the EARLIER prompt completes and is resolved
+    /// FIRST (while a steering prompt is still outstanding), and the
+    /// steering prompt is REJECTED afterward. The turn must end once that
+    /// rejection resolves the LAST remaining outstanding prompt — not get
+    /// permanently stuck because the earlier prompt's completion was
+    /// already "consumed."
+    #[test]
+    fn resolve_prompt_and_check_idle_ends_the_turn_when_a_later_rejection_resolves_the_last_outstanding_prompt() {
+        let mut outstanding = HashSet::from([1, 2]);
+        // The earlier prompt (1) completes first.
+        assert!(!resolve_prompt_and_check_idle(&mut outstanding, 1), "prompt 2 is still outstanding");
+        // The steering prompt (2) is REJECTED afterward — this must now
+        // correctly end the turn, since nothing else is outstanding.
         assert!(
-            !rollback_latest_prompt_id_if_unchanged(&latest, 2, 1),
-            "must NOT roll back once a newer prompt has already been sent"
+            resolve_prompt_and_check_idle(&mut outstanding, 2),
+            "the last outstanding prompt resolving (even via rejection) must end the turn"
         );
-        assert_eq!(latest.load(Ordering::Relaxed), 3, "the newer id must be left untouched");
+        assert!(outstanding.is_empty());
+    }
+
+    /// A response for an id that was never tracked (or already resolved) —
+    /// e.g. a duplicate delivery — must not panic; HashSet::remove is a
+    /// harmless no-op for a non-member.
+    #[test]
+    fn resolve_prompt_and_check_idle_is_a_harmless_no_op_for_an_untracked_id() {
+        let mut outstanding: HashSet<u64> = HashSet::new();
+        assert!(resolve_prompt_and_check_idle(&mut outstanding, 999));
+        assert!(outstanding.is_empty());
     }
 
     /// Regression for reagent P1 on PR #2336: `send_input` used to call the
@@ -997,11 +977,21 @@ mod tests {
         assert!(!published.turn_active, "the latest published status must reflect the rollback (turn_active: false)");
     }
 
-    /// Regression for codex P2 on PR #2338 (twenty-sixth re-review): the
-    /// rollback on enqueue failure must be conditioned on `!was_active` —
-    /// a mid-turn steering send (turn already genuinely active from an
+    /// Regression for codex P2 on PR #2338 (twenty-sixth re-review): a
+    /// mid-turn steering send (turn already genuinely active from an
     /// EARLIER successful send) whose OWN enqueue then fails must not roll
-    /// back and clobber that still-active turn.
+    /// back and clobber that still-active turn — the FIRST prompt's id
+    /// must remain outstanding.
+    ///
+    /// Also covers reagent P1 (twenty-eighth re-review) and codex P2
+    /// (twenty-ninth/thirtieth re-reviews): the failed second prompt's id
+    /// must NOT remain in the outstanding set either (it was never really
+    /// sent) — outstanding_prompt_ids's set-based tracking (superseding
+    /// the single latest/previous-id fields those rounds patched
+    /// incrementally) makes both of these hold simultaneously without any
+    /// special-cased rollback logic: removing the failed id and checking
+    /// emptiness is the ONLY rule, and it's correct regardless of send/
+    /// response ordering.
     #[tokio::test]
     async fn send_input_does_not_roll_back_an_already_active_turn_on_a_failed_steering_send() {
         let c = controller();
@@ -1011,7 +1001,9 @@ mod tests {
         // First send succeeds — turn is now genuinely active.
         assert!(c.send_input(BlockInputUnion::data(b"first".to_vec()), None).is_ok());
         assert!(c.health_monitor.is_active_turn());
-        let first_prompt_id = c.latest_prompt_id.load(Ordering::Relaxed);
+        let outstanding_after_first: Vec<u64> = c.outstanding_prompt_ids.lock().unwrap().iter().copied().collect();
+        assert_eq!(outstanding_after_first.len(), 1, "exactly the first prompt's id must be outstanding");
+        let first_prompt_id = outstanding_after_first[0];
 
         // Swap in a closed channel so the SECOND (steering) send's own
         // enqueue fails.
@@ -1023,17 +1015,11 @@ mod tests {
         assert!(res.is_err(), "the steering send's own enqueue should fail, got {res:?}");
         assert!(c.health_monitor.is_active_turn(), "the turn genuinely active from the FIRST send must not be rolled back by the second send's own failure");
 
-        // Regression for reagent P1 on PR #2338 (twenty-eighth re-review):
-        // latest_prompt_id must be rolled back to the FIRST (still
-        // genuinely in-flight) prompt's id, not left pointing at the
-        // second, never-sent request's id — otherwise the first prompt's
-        // real stopReason response is misclassified as stale by
-        // is_latest_prompt_completion (since its id no longer matches),
-        // and turn_active never flips back to false for this pane.
+        let outstanding_after_failure = c.outstanding_prompt_ids.lock().unwrap().clone();
         assert_eq!(
-            c.latest_prompt_id.load(Ordering::Relaxed),
-            first_prompt_id,
-            "latest_prompt_id must roll back to the still-in-flight FIRST prompt's id, not the failed second one"
+            outstanding_after_failure,
+            HashSet::from([first_prompt_id]),
+            "only the still-in-flight FIRST prompt's id must remain outstanding — the failed second one must not linger"
         );
     }
 }
