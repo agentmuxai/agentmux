@@ -3,10 +3,12 @@
 **Status:** Proposed
 **Author:** AgentY
 **Date:** 2026-07-29
-**Related:** `docs/specs/SPEC_MEDIA_PANE_2026_07_26.md` (v1 — implemented),
+**Related:** `docs/specs/SPEC_MEDIA_PANE_2026_07_26.md` (v1 — implemented,
+PR #2299, commit `bd7c20609`),
 `docs/specs/SPEC_MEDIA_PANE_V2_AGENT_WORKFLOW_GAPS_2026_07_28.md` (v2 —
-merged; this spec supersedes v2 §3's interaction model specifically, see
-below), `agentmux-srv/src/config/widgets.json`, `frontend/app/view/media/`.
+merged, PR #2344; this spec supersedes v2 §3's interaction model
+specifically, see below), `agentmux-srv/src/config/widgets.json`,
+`frontend/app/view/media/`.
 
 ## Motivation
 
