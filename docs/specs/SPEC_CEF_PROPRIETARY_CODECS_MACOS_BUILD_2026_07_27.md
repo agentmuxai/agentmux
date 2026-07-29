@@ -82,12 +82,20 @@ running, so the codec-updated `args-darwin.gn` is actually the one installed.
 
 1. **Fix `~/cef-build/rebuild-mac-cef.sh`** — update `ARGS_SRC`/`VERIFY` to this
    workspace's paths (above).
-2. **Run the script's stages 1–6 unchanged** (refresh patch branch to fork tip,
-   `gclient sync --nohooks` non-destructively, `runhooks`, mirror `cef/` into
-   `src/cef`, re-apply the 113 CEF patches via `patcher.py`, regenerate C-API
-   wrappers). This is the same "pull latest, re-apply patches" step the doc
-   already documents as safe/idempotent-ish; it's what keeps this a *rebuild*
-   rather than a fresh checkout.
+2. **Run the script's stages 1–6, with one fix** (refresh patch branch to fork
+   tip, `gclient sync --nohooks` non-destructively, `runhooks`, mirror `cef/`
+   into `src/cef`, re-apply the CEF patches, regenerate C-API wrappers). This
+   is the same "pull latest, re-apply patches" step the doc already documents
+   as safe/idempotent-ish; it's what keeps this a *rebuild* rather than a
+   fresh checkout. **Do not run the patch-apply stage as currently written in
+   `rebuild-mac-cef.sh`** — its `python3 cef/tools/patcher.py --root-dir=cef`
+   call uses a nonexistent flag, errors immediately, and the script's
+   `|| echo WARN` swallows that as non-fatal, silently applying **zero**
+   patches (including `BeginWindowDrag`) while the build proceeds anyway. Use
+   the plain default form instead: `cd cef && python3 tools/patcher.py` (no
+   args — it reads `patch/patch.cfg` itself). Confirmed working: 112 applied,
+   3 skipped, 0 failed. Verify with `git status` in `chromium/src` before
+   starting the long build — a clean tree there means no patches landed.
 3. **Install the refreshed `args-darwin.gn`** (with the codec block) →
    `gn gen out/Release_GN_arm64`. Verify with `grep` that `proprietary_codecs`
    etc. actually landed in the generated `args.gn` before starting the build

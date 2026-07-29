@@ -156,8 +156,14 @@ keys on the local symbol that `strip` removes — upload the **unstripped** fram
 
 ```bash
 CEF_OUT=~/cef-build/chromium/chromium/src/out/Release_GN_arm64
-# CEF version from Info.plist CFBundleShortVersionString (e.g. 148.0.9).
-CEF_VERSION="148.0.9"
+# CEF version from Info.plist CFBundleShortVersionString (e.g. 148.23.23).
+CEF_VERSION="148.23.23"
+# Append a suffix (e.g. -codecs) whenever the build adds a distinguishing
+# feature over the last release at the same numeric CEF_VERSION — see
+# docs/specs/SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md and the
+# "auto-detection is unreliable" warning below for why this matters more than
+# it looks like it should.
+TAG_SUFFIX="-codecs"
 
 bash /path/to/agentmux/scripts/verify-cef-framework-darwin.sh "$CEF_OUT"   # must exit 0
 
@@ -167,28 +173,55 @@ cd "$CEF_OUT"
 # `Chromium Embedded Framework -> Versions/Current/Chromium Embedded Framework`
 # symlink; if BSD tar mangles it, use `ditto -c -k --keepParent` (zip) instead and
 # adjust the CI extract step to `ditto -x -k`.
-tar -czf "cef-macos-arm64-${CEF_VERSION}.tar.gz" "Chromium Embedded Framework.framework"
+tar -czf "cef-macos-arm64-${CEF_VERSION}${TAG_SUFFIX}.tar.gz" "Chromium Embedded Framework.framework"
 
-gh release create "cef-macos-arm64-${CEF_VERSION}" --repo agentmuxai/cef \
+gh release create "cef-macos-arm64-${CEF_VERSION}${TAG_SUFFIX}" --repo agentmuxai/cef \
   --title "Patched CEF framework — macOS arm64 CEF ${CEF_VERSION}" \
-  --notes "BeginWindowDrag + drag-rightclick + transparency. Branch: agentmux/7778-drag-rightclick-and-transparency. Unstripped (~545 MB); packager strips at bundle time." \
-  "cef-macos-arm64-${CEF_VERSION}.tar.gz"
+  --notes "BeginWindowDrag + drag-rightclick + transparency. Branch: agentmux/7778-drag-rightclick-and-transparency. Unstripped (~547 MB); packager strips at bundle time." \
+  "cef-macos-arm64-${CEF_VERSION}${TAG_SUFFIX}.tar.gz"
 ```
 
 **Naming convention** (parallels Linux `cef-linux-x86_64-<ver>`):
-- Tag: `cef-macos-arm64-<CEF_VERSION>`
-- Asset: `cef-macos-arm64-<CEF_VERSION>.tar.gz`
+- Tag: `cef-macos-arm64-<CEF_VERSION>[-suffix]`
+- Asset: `cef-macos-arm64-<CEF_VERSION>[-suffix].tar.gz`
 
-`build-macos.yml` auto-detects the latest `cef-macos-arm64-*` release (or takes an
-explicit `cef-runtime-tag` input), downloads + caches it, sets
+`build-macos.yml` / `ci-nightly-artifacts.yml` auto-detect a `cef-macos-arm64-*`
+release via `gh release list --json tagName --jq '[.[] | select(startswith(...))][0]'`
+(or take an explicit `cef-runtime-tag` input), download + cache it, set
 `AGENTMUX_CEF_RUNTIME_DIR_DARWIN`, and the package gate verifies the patch.
+
+> ⚠️ **"Latest" here is not what you'd assume.** `gh release list`'s default
+> order is *not* reliably publish-time-descending on this fork — confirmed
+> 2026-07-28: every release created without an explicit `--target` picks up
+> `agentmuxai/cef`'s frozen default-branch HEAD commit date as its `created_at`
+> (not the actual `gh release create` call time), and `gh release list`
+> appears to sort by `created_at`. Net effect: a brand-new release can sort
+> **behind** an older one whose tag happened to target a newer commit, and
+> `[0]` after the `select()` picks the wrong (stale) tag. This actually
+> happened when cutting `cef-macos-arm64-148.23.23-codecs` — it initially
+> lost to the older `cef-macos-arm64-148.23.21` in this exact query. **Always
+> verify after cutting a release:**
+> ```bash
+> gh release list --repo agentmuxai/cef --limit 30 --json tagName \
+>   --jq '[.[].tagName | select(startswith("cef-macos-arm64-"))][0]'
+> ```
+> If it doesn't print the tag you just created, CI will silently keep shipping
+> the old framework. The reliable fix is deleting/retiring the superseding
+> older tag(s) so there's no ambiguity for `[0]` to get wrong — not something
+> a version bump or suffix alone fixes. See
+> `docs/specs/STATUS_CEF_PROPRIETARY_CODECS_MACOS_2026_07_27.md` for the
+> full incident and what was actually done about it for this release.
 
 ---
 
 ## Version skew with Linux (follow-up)
 
-The Linux release is at CEF `148.0.20`; this macOS framework is `148.0.9`. Functional
-parity for `BeginWindowDrag` is fine, but matching versions is cleaner for support.
-**Tracked follow-up:** rebuild macOS arm64 at `148.0.20` (and with
-`is_official_build=true` for the size win) and re-cut the release so both platforms
-converge.
+As of 2026-07-28 macOS is at CEF `148.23.23` (this doc's "verified artifact"
+table above) — check the current Linux release
+(`docs/cef-build/build-patched-libcef.md` or `gh release list --repo
+agentmuxai/cef`) before assuming either platform's exact version, since both
+move independently and this note will drift out of date the next time either
+rebuilds. **Tracked follow-up:** align both platforms on the same CEF version
+(and build macOS with `is_official_build=true` for the size win — see the
+size-reduction follow-up note in `scripts/cef-build/args-darwin.gn`) and
+re-cut the release so both platforms converge.

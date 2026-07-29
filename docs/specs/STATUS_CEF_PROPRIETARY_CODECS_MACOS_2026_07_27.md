@@ -39,7 +39,8 @@ and the "what/why" (root cause, GN flags, etc. are in
       present).
 - [x] Sanity-checked codec flags landed in generated `args.gn`
       (`proprietary_codecs=true` etc. all present).
-- [ ] Build `cef_framework` (ninja) — **in progress, restarted**.
+- [x] Build `cef_framework` (ninja) — succeeded on the restart (run 2); see
+      "Run 2" below.
   - Run 1 (started 2026-07-27 ~10:52 PDT): appeared to finish (background-task
     notification said "completed, exit code 0"), but that was a **false
     positive** — the invocation piped through `tee` without `pipefail`, so the
@@ -136,6 +137,44 @@ explicitly bringing the window to front and re-calling `.play()` (a
 background-tab pause transiently made one intermediate reading look stalled —
 resolved once focused). **No `DEMUXER_ERROR_NO_SUPPORTED_STREAMS`, no
 `MEDIA_ERR_DECODE` — the original bug is fixed in this build.**
+
+## Post-merge incident: CI's "latest tag" resolution doesn't reliably pick up this release
+
+Found 2026-07-28 while answering "will future builds automatically pull in
+this codec work?" — **the answer is currently no**, not without further
+action. Reproduced the exact query `build-macos.yml` and
+`ci-nightly-artifacts.yml` both use:
+
+```bash
+gh release list --repo agentmuxai/cef --limit 30 --json tagName \
+  --jq '[.[].tagName | select(startswith("cef-macos-arm64-"))][0]'
+# → cef-macos-arm64-148.23.21   (NOT cef-macos-arm64-148.23.23-codecs)
+```
+
+Root cause: `gh release list`'s default order is not reliably
+publish-time-descending on this fork. Checked the raw API
+(`created_at` vs `published_at`) for every `agentmuxai/cef` release: every
+release cut without an explicit `--target` — including this one, and the
+Linux/Windows codec releases cut around the same time by AgentU/Agent2 — got
+`created_at` frozen at `2026-04-23T15:56:22Z` (the fork's default-branch HEAD
+commit date, not the actual `gh release create` call time). Only
+`cef-macos-arm64-148.23.21` (cut 2026-07-02) has a "real" `created_at`, and
+`gh release list` appears to sort by `created_at`, so it sorts *ahead* of
+every more-recently-published release including this one. This is a
+pre-existing fragility in the shared CI resolution pattern (identical logic
+across all three platforms' workflows), not something introduced by this
+specific release — but it means the codec work is a no-op for CI until it's
+addressed.
+
+**Not yet remediated as of this write-up** — the reliable fix is deleting/
+retiring the stale `cef-macos-arm64-148.23.21` tag so `[0]` has nothing wrong
+to pick (a version bump or tag suffix alone doesn't fix a `created_at`-based
+sort). That's a destructive action on a shared distribution repo other
+workflows depend on, so it's being confirmed with the user rather than done
+unilaterally. Whoever picks this up: check `gh release list --repo
+agentmuxai/cef --limit 30 --json tagName --jq '[.[].tagName |
+select(startswith("cef-macos-arm64-"))][0]'` again first — if it already
+prints `cef-macos-arm64-148.23.23-codecs`, this has been handled.
 
 ## Notes / findings as they come up
 
