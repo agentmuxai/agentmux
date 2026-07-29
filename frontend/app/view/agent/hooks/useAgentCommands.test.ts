@@ -367,14 +367,17 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
         });
     });
 
-    it("trustedAfterRecovery bypasses loginWaiting() specifically, for the auto-retry after a recovery flow's own confirmed success", async () => {
-        // loginWaiting is a shared counter across relogin()/useGlobalLogin()/
-        // loginViaTerminal() (useAgentControllerStatus.ts) — it can still
-        // read true here because a DIFFERENT, unrelated recovery flow is
-        // overlapping with the one whose onRecovered callback triggered
-        // this exact resend. That other flow's own uncertainty has no
-        // bearing on whether THIS confirmed-good credential is safe to
-        // retry on. Codex P2 on PR #2338 (fifth re-review).
+    it("blocks a turn-initiating send while loginWaiting() is true even for a just-succeeded recovery's own auto-retry (no more trustedAfterRecovery bypass)", async () => {
+        // Codex P1 on PR #2338 (fourteenth re-review): an earlier version
+        // bypassed loginWaiting() here via a trustedAfterRecovery flag,
+        // reasoning that a DIFFERENT overlapping recovery flow's own
+        // uncertainty had no bearing on THIS flow's confirmed success. That
+        // missed that relogin()/useGlobalLogin()/loginViaTerminal() all
+        // unconditionally force-restart the controller once THEY finish —
+        // killing the very turn the bypass just let start. The flag was
+        // removed; this send must block like any other while a sibling
+        // recovery flow is still active, and will succeed once
+        // retryLastTurn fires again from whichever flow finishes last.
         const model = registerPane(BLOCK_ID, fullRegistration());
         model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
         model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
@@ -398,14 +401,11 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 backToPicker: async () => {},
             });
 
-            hub.agentInput.mockResolvedValueOnce(undefined);
             model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
-            await commands.sendMessage("u there", false, null, /* trustedAfterRecovery */ true);
+            await commands.sendMessage("u there", false);
 
-            expect(hub.agentInput).toHaveBeenCalledWith(
-                expect.anything(),
-                expect.objectContaining({ message: "u there" }),
-            );
+            expect(hub.agentInput).not.toHaveBeenCalled();
+            expect(paneSnapshot(BLOCK_ID)?.turnPhase.kind).toBe("Idle");
             dispose();
         });
     });
@@ -730,6 +730,60 @@ describe("useAgentCommands — ctx.isTurnActive() reflects the pre-TurnStart sna
             await commands.sendMessage("/login", /* wasAlreadyWorking */ true);
 
             expect(observedIsTurnActive).toBe(true);
+            dispose();
+        });
+    });
+
+    it("reads the LIVE (now-idle) state, not the frozen initial true, if the turn ends before the command checks isTurnActive() again", async () => {
+        // Codex P1 on PR #2338 (fourteenth re-review): /login's own OAuth
+        // poll can run for up to 5 minutes. If the turn that was active at
+        // submission time ends DURING that wait, a frozen `true` would keep
+        // reporting active long after the only edge that flushes a
+        // deferred refresh (turn-just-ended) has already passed — stranding
+        // the refresh forever.
+        let firstCheck: boolean | undefined;
+        let secondCheck: boolean | undefined;
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+        hub.dispatchSlashCommand.mockImplementation(async (_msg: string, _registry: unknown, ctx: { isTurnActive: () => boolean }) => {
+            firstCheck = ctx.isTurnActive();
+            // Simulates the ORIGINAL turn ending while /login's own poll is
+            // still running — an independent event, unrelated to /login's
+            // own (never re-dispatched, since wasAlreadyWorking was true)
+            // TurnStart.
+            model.dispatchPane({ type: "ReconcileTurnActive", at: Date.now(), active: false }, "system");
+            secondCheck = ctx.isTurnActive();
+            return { kind: "handled" };
+        });
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh: async () => true,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                backToPicker: async () => {},
+            });
+
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            // Promote Submitting -> Streaming so the later ReconcileTurnActive
+            // demotion (which only acts on a Streaming phase) has an effect.
+            model.dispatchPane({ type: "StreamFlushObserved", addedCount: 1, at: Date.now() }, "system");
+            await commands.sendMessage("/login", /* wasAlreadyWorking */ true);
+
+            expect(firstCheck).toBe(true);
+            expect(secondCheck).toBe(false);
             dispose();
         });
     });
