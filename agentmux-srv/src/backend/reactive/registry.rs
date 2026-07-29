@@ -174,8 +174,12 @@ pub fn cleanup_stale(data_dir: &Path, max_age_ms: u64) {
 // in by the caller rather than resolved here to keep this module free of
 // a dependency on the `registry` crate module).
 //
-// Layout: `<shared_dir>/agents/<agent_name>/<channel>.json`, one file per
-// (agent, channel) pair — NOT a single JSON array shared across channels.
+// Layout: `<shared_dir>/<agent_name>/<channel>.json` (`shared_dir` here is
+// already `resolve_shared_reactive_dir()`'s output, i.e.
+// `~/.agentmux/shared/agents/reactive/`, so the full real path is
+// `~/.agentmux/shared/agents/reactive/<agent_name>/<channel>.json`), one
+// file per (agent, channel) pair — NOT a single JSON array shared across
+// channels.
 // Each channel only ever reads/writes its OWN file, so two channels
 // registering the same agent name concurrently never contend on the same
 // file: no read-modify-write race is possible by construction, and no
@@ -199,8 +203,18 @@ fn sanitize_path_component(raw: &str) -> String {
 
 /// Directory holding one file per channel currently registering
 /// `agent_id` in the host-global shared registry.
+///
+/// Deliberately does NOT go through `agents_dir()` (which appends an
+/// `agents` segment for the per-channel registry, where the caller passes
+/// a bare data dir) — `shared_dir` here is already
+/// `registry::resolve_shared_reactive_dir()`'s output
+/// (`.../shared/agents/reactive`), so entries land at
+/// `.../shared/agents/reactive/<agent>/<channel>.json` as documented,
+/// not double-nested under an extra `agents/` (reagent P2 on #2350 —
+/// harmless since read/write agreed internally, but contradicted the
+/// documented layout).
 fn shared_agent_dir(shared_dir: &Path, agent_id: &str) -> PathBuf {
-    agents_dir(shared_dir).join(sanitize_path_component(agent_id))
+    shared_dir.join(sanitize_path_component(agent_id))
 }
 
 /// Path to one (agent, channel) pair's entry file.
@@ -300,8 +314,8 @@ pub fn lookup_all_shared(shared_dir: &Path, agent_id: &str) -> Vec<AgentEntry> {
 /// spec) — unlike [`lookup_all_shared`], which targets one known agent
 /// name, this enumerates the whole directory.
 pub fn list_all_shared(shared_dir: &Path) -> Vec<AgentEntry> {
-    let dir = agents_dir(shared_dir);
-    let Ok(entries) = std::fs::read_dir(&dir) else {
+    // Not agents_dir(shared_dir) -- see shared_agent_dir's doc comment.
+    let Ok(entries) = std::fs::read_dir(shared_dir) else {
         return Vec::new();
     };
     let mut out = Vec::new();
@@ -321,8 +335,8 @@ pub fn list_all_shared(shared_dir: &Path) -> Vec<AgentEntry> {
 /// statement, where per-channel TTL cleanup never reached an entry
 /// belonging to a channel that hadn't restarted.
 pub fn cleanup_stale_shared(shared_dir: &Path, max_age_ms: u64) {
-    let dir = agents_dir(shared_dir);
-    let Ok(agent_dirs) = std::fs::read_dir(&dir) else { return };
+    // Not agents_dir(shared_dir) -- see shared_agent_dir's doc comment.
+    let Ok(agent_dirs) = std::fs::read_dir(shared_dir) else { return };
     let cutoff = now_unix_millis().saturating_sub(max_age_ms);
     for agent_dir_entry in agent_dirs.flatten() {
         let agent_dir_path = agent_dir_entry.path();
@@ -582,10 +596,11 @@ mod shared_tests {
         let dir = tempfile::tempdir().unwrap();
         write_shared(dir.path(), "../../evil", "http://127.0.0.1:9001", "block1", "dev-a");
         // Sanitization (shared_agent_dir) must keep the write confined to
-        // the shared registry's own agents/ dir — no directory with `.`
-        // path segments should escape it.
-        let agents = agents_dir(dir.path());
-        for entry in std::fs::read_dir(&agents).unwrap() {
+        // the shared registry root — no directory with `.` path segments
+        // should escape it. Reading `dir.path()` directly (not
+        // `agents_dir(dir.path())`) since shared_agent_dir no longer nests
+        // under an extra `agents/` level.
+        for entry in std::fs::read_dir(dir.path()).unwrap() {
             let name = entry.unwrap().file_name();
             assert!(!name.to_string_lossy().contains(".."));
         }
