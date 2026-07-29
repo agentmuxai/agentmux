@@ -592,6 +592,22 @@ impl Controller for AcpController {
                     "text": message,
                 }
             }));
+            // Enqueue onto the stdin channel FIRST, before touching any
+            // turn-active state — try_send can fail (channel full, or the
+            // stdin writer task already exited because the process died),
+            // in which case no turn actually starts. Marking active and
+            // publishing turn_active: true before this succeeds would let a
+            // rejected prompt still re-promote the frontend to a working
+            // state and clear auth-recovery UI via notifyControllerHealthy,
+            // and would arm the health watchdog for work that never
+            // happened. codex P2 on PR #2338 (twenty-fifth re-review).
+            {
+                let inner = self.inner.lock().unwrap();
+                if let Some(ref tx) = inner.stdin_tx {
+                    tx.try_send(req)
+                        .map_err(|e| format!("ACP stdin send failed: {e}"))?;
+                }
+            }
             // reagent P1 (PR #2336): this controller wired wstore/event_bus
             // into HealthMonitor for the Unresponsive-failure/Restart
             // feature but never spawned the periodic watchdog — Dead (the
@@ -623,11 +639,6 @@ impl Controller for AcpController {
             // actually-active turn. codex P1 on PR #2338 (twenty-third
             // re-review).
             self.publish_status();
-            let inner = self.inner.lock().unwrap();
-            if let Some(ref tx) = inner.stdin_tx {
-                tx.try_send(req)
-                    .map_err(|e| format!("ACP stdin send failed: {e}"))?;
-            }
         }
 
         if let Some(sig) = input.sig_name {
@@ -743,5 +754,42 @@ mod tests {
             serde_json::from_value(history[0].data.clone().unwrap()).unwrap();
         assert!(published.turn_active, "published status must reflect the just-started turn as active");
         assert!(c.health_monitor.is_active_turn());
+    }
+
+    /// Regression for codex P2 on PR #2338 (twenty-fifth re-review):
+    /// `send_input` used to mark the turn active and publish
+    /// `turn_active: true` BEFORE attempting `tx.try_send(req)` — if the
+    /// enqueue itself fails (channel full, or the stdin writer task already
+    /// exited because the process died), no turn actually starts, but the
+    /// health/status state claimed one did anyway. A rejected prompt could
+    /// then re-promote the frontend to a working state and clear
+    /// auth-recovery UI via notifyControllerHealthy, and the health
+    /// watchdog would be armed for work that never happened. Fixed by
+    /// enqueueing first and only marking/publishing on success.
+    #[tokio::test]
+    async fn send_input_does_not_mark_or_publish_turn_active_when_enqueue_fails() {
+        let broker = Arc::new(wps::Broker::new());
+        let c = AcpController::new(
+            "tab".to_string(),
+            "block-acp-enqueue-fail".to_string(),
+            Some(broker.clone()),
+            None,
+            None,
+            None,
+        );
+        let (tx, rx) = mpsc::channel::<String>(8);
+        drop(rx); // Receiver gone — try_send fails with TrySendError::Closed.
+        c.inner.lock().unwrap().stdin_tx = Some(tx);
+
+        let res = c.send_input(BlockInputUnion::data(b"hello".to_vec()), None);
+        assert!(res.is_err(), "send_input should surface the enqueue failure, got {res:?}");
+        assert!(!c.health_monitor.is_active_turn(), "must not mark the turn active when the enqueue itself failed");
+
+        let history = broker.read_event_history(
+            wps::EVENT_CONTROLLER_STATUS,
+            "block:block-acp-enqueue-fail",
+            1,
+        );
+        assert!(history.is_empty(), "must not publish a controllerstatus event when the enqueue itself failed");
     }
 }
