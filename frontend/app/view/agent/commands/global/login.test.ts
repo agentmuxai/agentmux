@@ -52,6 +52,7 @@ function makeCtx(): SlashCommandContext {
         clearAuthFailure: vi.fn(),
         forceControllerRefresh: vi.fn().mockResolvedValue(true),
         isTurnActive: () => false,
+        deferControllerRefreshUntilIdle: vi.fn(),
         beginRecoveryFlow: vi.fn(),
         endRecoveryFlow: vi.fn(),
         openPicker: vi.fn(),
@@ -172,7 +173,13 @@ describe("/login registers as an in-flight recovery (codex P1 on PR #2338, ninth
 // calling forceControllerRefresh while a turn is actively streaming on that
 // controller would kill it and discard in-progress work.
 describe("/login does not restart an actively-streaming controller (codex P1 on PR #2338, tenth re-review)", () => {
-    it("skips forceControllerRefresh, but still reports success, when a turn is active", async () => {
+    it("defers forceControllerRefresh (does not skip-and-declare-healthy) when a turn is active", async () => {
+        // Codex P1 on PR #2338 (thirteenth re-review): persistent providers
+        // keep the controller alive across MANY turns, not just this one —
+        // declaring the pane healthy here (as an earlier version of this
+        // fix did) would leave the controller on the stale credential
+        // indefinitely, every fast-fail guard cleared, until the pane is
+        // manually reopened.
         vi.useFakeTimers();
         hub.persistAndLinkAccount.mockResolvedValue(true);
         const ctx = makeCtx();
@@ -184,11 +191,11 @@ describe("/login does not restart an actively-streaming controller (codex P1 on 
 
         expect(result).toEqual({ kind: "ok" });
         expect(ctx.forceControllerRefresh).not.toHaveBeenCalled();
-        // The login itself genuinely succeeded — only the forced restart
-        // was skipped to protect the active turn, so the pane should still
-        // report healthy.
-        expect(ctx.notifyControllerHealthy).toHaveBeenCalledOnce();
-        expect(ctx.clearAuthFailure).toHaveBeenCalledOnce();
+        expect(ctx.deferControllerRefreshUntilIdle).toHaveBeenCalledOnce();
+        // Guards stay up until the deferred refresh actually runs (once the
+        // turn ends) and succeeds — not declared healthy prematurely.
+        expect(ctx.notifyControllerHealthy).not.toHaveBeenCalled();
+        expect(ctx.clearAuthFailure).not.toHaveBeenCalled();
     });
 
     it("calls forceControllerRefresh normally when no turn is active", async () => {

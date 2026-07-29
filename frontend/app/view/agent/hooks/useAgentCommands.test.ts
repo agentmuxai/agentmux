@@ -734,3 +734,134 @@ describe("useAgentCommands — ctx.isTurnActive() reflects the pre-TurnStart sna
         });
     });
 });
+
+// Codex P1 on PR #2338 (thirteenth re-review): /login deferring its
+// controller restart while a turn is active (ctx.deferControllerRefreshUntilIdle)
+// is only safe if something actually runs that deferred restart once the
+// turn ends — otherwise a persistent controller (which stays alive across
+// MANY turns) is stranded on the stale credential forever, indistinguishable
+// from the bug this whole mechanism exists to fix.
+describe("useAgentCommands — flushPendingControllerRefresh", () => {
+    const setup = () => {
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+        return model;
+    };
+
+    it("is a no-op when nothing was deferred", async () => {
+        const model = setup();
+        const forceControllerRefresh = vi.fn(async () => true);
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                backToPicker: async () => {},
+            });
+
+            await commands.flushPendingControllerRefresh();
+
+            expect(forceControllerRefresh).not.toHaveBeenCalled();
+            dispose();
+        });
+    });
+
+    it("runs the deferred refresh exactly once, and clears the fast-fail guards only on success", async () => {
+        hub.dispatchSlashCommand.mockImplementation(async (_msg: string, _registry: unknown, ctx: { deferControllerRefreshUntilIdle: () => void }) => {
+            ctx.deferControllerRefreshUntilIdle();
+            return { kind: "handled" };
+        });
+        const model = setup();
+        const forceControllerRefresh = vi.fn(async () => true);
+        const notifyControllerHealthy = vi.fn();
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy,
+                forceControllerRefresh,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                backToPicker: async () => {},
+            });
+
+            // Simulates /login succeeding mid-turn: it defers instead of
+            // refreshing immediately.
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("/login", /* wasAlreadyWorking */ true);
+            expect(forceControllerRefresh).not.toHaveBeenCalled();
+
+            // The turn ending is what should trigger the deferred refresh.
+            await commands.flushPendingControllerRefresh();
+            expect(forceControllerRefresh).toHaveBeenCalledOnce();
+            expect(notifyControllerHealthy).toHaveBeenCalledOnce();
+            expect(paneSnapshot(BLOCK_ID)?.failure).toBeNull();
+
+            // A second turn-end (or any later call) must not re-run it —
+            // already consumed.
+            await commands.flushPendingControllerRefresh();
+            expect(forceControllerRefresh).toHaveBeenCalledOnce();
+
+            dispose();
+        });
+    });
+
+    it("does NOT clear the fast-fail guards when the deferred refresh itself fails", async () => {
+        hub.dispatchSlashCommand.mockImplementation(async (_msg: string, _registry: unknown, ctx: { deferControllerRefreshUntilIdle: () => void }) => {
+            ctx.deferControllerRefreshUntilIdle();
+            return { kind: "handled" };
+        });
+        const model = setup();
+        const forceControllerRefresh = vi.fn(async () => false);
+        const notifyControllerHealthy = vi.fn();
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy,
+                forceControllerRefresh,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                backToPicker: async () => {},
+            });
+
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("/login", /* wasAlreadyWorking */ true);
+            await commands.flushPendingControllerRefresh();
+
+            expect(forceControllerRefresh).toHaveBeenCalledOnce();
+            expect(notifyControllerHealthy).not.toHaveBeenCalled();
+            dispose();
+        });
+    });
+});
