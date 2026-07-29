@@ -4,6 +4,36 @@
 **Severity:** Low — cosmetic, no functional breakage (the tear-off itself works), but reads as broken/unpolished on every single Windows pane drag.
 **Observed by:** user, while testing the floating-pane resize-hit-target fix (PR #2332).
 
+> **Update (2026-07-29):** the "Fix direction" below was implemented
+> (`fix/pane-tearoff-cursor-windows`, PR #2335) and **found insufficient in
+> live testing** — automated review at the time also flagged (P2, unaddressed
+> before this update) that a window-level `dragover` listener setting
+> `dropEffect="copy"` whenever the cursor is outside the tile layout would
+> overwrite the tab strip's own drop-target `dropEffect` for in-app tab
+> redock, a correctness bug on top of the cursor not actually landing. Root
+> cause of the insufficiency, confirmed via direct research in a follow-up
+> session: Chromium's own `IDropSource::GiveFeedback` calls `SetCursor`
+> continuously during the OLE drag session this whole mechanism runs on top
+> of, based on its own drop-target hit-testing — no amount of `dropEffect`
+> tuning or cursor-polling can reliably out-race that. The follow-up session
+> explored eliminating the OLE session entirely (native Pointer Events +
+> `setPointerCapture`, no `draggable()`) instead — see
+> `docs/retro/retro-native-pointer-drag-tearoff-shelved-2026-07-29.md` for
+> that attempt's own outcome (also not shipped, but for different, unrelated
+> reasons — drop-zone/ghost regressions from rebuilding pragmatic-dnd's
+> functionality from scratch, not the cursor mechanism itself). That
+> follow-up also **revived** the `set_drag_cursor`/`restore_drag_cursor` API
+> this retro's own "Prevention" section says not to revive — worth flagging
+> explicitly: reviving it was correct *given the native-pointer-capture
+> context* (no OLE session left to fight, so a direct `SetCursor()` call
+> should reliably stick, unlike this retro's `dropEffect` proposal or the
+> earlier native `SetSystemCursor`-polling-thread attempt this retro also
+> describes) — the original "don't revive" advice assumed the OLE drag
+> session was staying in place, which the newer session's approach doesn't.
+> The rest of this document (root cause of the *original* circle-slash bug,
+> why it wasn't caught as "the same bug twice") is still accurate and worth
+> reading; only the "Fix direction" is superseded.
+
 ---
 
 ## TL;DR

@@ -1,4 +1,16 @@
-# Spec: schedule the deferred redock/floating-pane structural fixes (P3, P4, P6)
+# Spec: schedule the deferred redock/floating-pane structural fixes (P3, P6)
+
+> **Correction (2026-07-29 review pass):** this spec originally scoped P4
+> ("unowned floaters") as deferred/not-yet-shipped alongside P3 and P6. That
+> premise was stale even at authoring time: P4 shipped over a month earlier
+> in `cf71cd06` / #1574 ("remove owned-window z-order invariant; add floater
+> cascade + diagnostics", 2026-06-19) — floaters are already unowned
+> `WS_POPUP` + `WS_EX_TOOLWINDOW` HWNDs with Z-order-on-activation, per
+> `agentmux-cef/src/floating_pane.rs`'s own module doc ("Why no owner
+> (issue #1560)"). Former Phase 3 below is marked done rather than scheduled.
+> Scoping new work against the false premise risked duplicating shipped work
+> or misdiagnosing the real redock issue — flagged by automated review before
+> merge, fixed here rather than shipping the stale claim.
 
 ## Context
 
@@ -7,13 +19,15 @@ diagnosed the current "redock no longer lands reliably" complaint as the
 latest symptom of a subsystem that has regressed before. The prior regression
 already produced a living architecture doc —
 `docs/architecture/ARCHITECTURE_FLOATING_PANE_DOCKING_2026_05_30.md` — with a
-concrete, already-scoped modularization proposal (§9, P1-P6). **P1 and P2
-shipped** (canonical window resolver; explicit target-window threading
-through pane creation). **P3, P4, and P6 did not**, and a companion spec,
+concrete, already-scoped modularization proposal (§9, P1-P6). **P1, P2, and
+P4 shipped** (canonical window resolver; explicit target-window threading
+through pane creation; unowned floaters — `cf71cd06`/#1574, 2026-06-19,
+predates this spec by over a month). **P3 and P6 did not**, and this spec's
+own gate framing below now applies only to those two. A companion spec,
 `docs/specs/SPEC_FLOATING_PANE_DND_RETHINK_2026_06_22.md`, independently
 proposed the same P4 idea under the name **R2** ("unowned floaters") and
-explicitly deferred it: *"do last, gated on its own spec."* That gate has
-never been opened. This spec is that gate.
+deferred it at the time — that gate has since been opened by the same commit
+that shipped P4.
 
 Nothing here is a new idea — it's scheduling work that was already designed
 and explicitly deferred, plus folding in what the 2026-07-27 retro found has
@@ -36,10 +50,12 @@ different kind of fix than anything shipped so far.
 
 ## Plan
 
-Three independent, single-concern PRs, each gated on the fresh-profile
-checklist the architecture doc already prescribes (dock · redock ·
-terminal+browser resize · z-order · survival · browsers-render) before the
-next one starts — same sequencing discipline §9 already specifies.
+Two remaining independent, single-concern PRs (P4/R2 below is already
+shipped, kept here only as a marked-done reference so this doc still reads
+as the complete P1-P6 picture), each gated on the fresh-profile checklist the
+architecture doc already prescribes (dock · redock · terminal+browser resize
+· z-order · survival · browsers-render) before the next one starts — same
+sequencing discipline §9 already specifies.
 
 ### Phase 1 — P6: redock/floating integration test harness (do this first)
 
@@ -84,36 +100,37 @@ the way every prior fix in this history has.
   symptoms of orchestration living in five uncoordinated places instead of
   one state machine.
 
-### Phase 3 — P4 / R2: decouple floater OS-window lifetime (unowned floaters)
+### Phase 3 — P4 / R2: decouple floater OS-window lifetime (unowned floaters) — ✅ ALREADY SHIPPED, 2026-06-19
 
-- Adopt the unowned-floater model referenced in both the architecture doc and
-  the DnD-rethink spec's parked branch: closing a window can no longer
-  cascade-destroy floaters, and Z-order becomes last-clicked-to-front,
-  removing the owner-cascade theme entirely.
-- Re-anchor "floaters don't show in the taskbar" via `WS_EX_TOOLWINDOW`
-  (already independent of window ownership, per the architecture doc) rather
-  than relying on owner semantics for that behavior — this decouples two
-  properties (taskbar visibility, lifecycle ownership) that are currently
-  entangled only because both happen to come from the same Win32 owned-popup
-  model.
+- **Done, not scheduled.** `cf71cd06` ("remove owned-window z-order
+  invariant; add floater cascade + diagnostics", #1574) shipped the unowned-
+  floater model this section originally proposed: floaters are raw
+  `WS_POPUP` + `WS_EX_TOOLWINDOW` HWNDs with **no Win32 owner** (see
+  `agentmux-cef/src/floating_pane.rs`'s module doc, "Why no owner
+  (issue #1560)"), closing a window no longer cascade-destroys floaters, and
+  Z-order-on-activation is handled explicitly
+  (`agentmux-cef/src/browser_pane/callbacks.rs`'s `[pane-zorder]` raise-on-
+  activate, `floating_pane.rs`'s cascade-hook) rather than via the owned-
+  window invariant. Taskbar suppression already goes through
+  `WS_EX_TOOLWINDOW` independent of ownership, exactly as originally
+  proposed here.
   - **Cross-reference:** `docs/specs/SPEC_FLOATING_PANE_MULTI_MONITOR_TASKBAR_2026_07_27.md`
-    (new, same day) proposes *reintroducing* real taskbar presence for
-    floating panes under specific multi-monitor conditions. Sequence that
-    work **after** this phase — once taskbar visibility is driven by an
-    explicit, owner-independent flag instead of implicit owned-popup
-    behavior, toggling it per-monitor is a targeted change instead of fighting
-    the same owner-cascade coupling this phase removes.
-- This is the change the DnD-rethink spec calls "the recurring footgun" and
-  explicitly deferred — it directly eliminates the Z-order pinning,
-  owner-destroy cascade, and `GA_ROOT` quirks that every point-fix in this
-  feature's history (including P1/P2, R1, R3, Phase 4b/4c) has had to work
-  *around* rather than remove.
+    (new, same day as this spec) proposes *reintroducing* real taskbar
+    presence for floating panes under specific multi-monitor conditions.
+    Since the owner-independent `WS_EX_TOOLWINDOW` flag this phase would have
+    established already exists, that work is **unblocked now**, not gated on
+    a phase here.
+- This was the change the DnD-rethink spec called "the recurring footgun" —
+  it eliminated the Z-order pinning, owner-destroy cascade, and `GA_ROOT`
+  quirks that every point-fix in this feature's history before it (P1/P2, R1,
+  R3, Phase 4b/4c) had to work *around* rather than remove.
 
 ## Explicit non-goals
 
-- Not re-litigating P1/P2/R1/R3/Phase-4b/4c — confirmed still correctly in
-  place by the 2026-07-27 retro's static analysis; this spec only schedules
-  what was deferred.
+- Not re-litigating P1/P2/P4/R1/R3/Phase-4b/4c — confirmed still correctly in
+  place by the 2026-07-27 retro's static analysis (P4 confirmed shipped via
+  direct source inspection during this doc's 2026-07-29 correction pass);
+  this spec only schedules what's still actually deferred (P3, P6).
 - Not a rewrite of the hover-detection Z-order walk
   (`resolve_window_at_cursor`) — P1's canonical resolver already consolidated
   it; P3's atomic-move model reduces how often it's the *only* thing standing
@@ -134,5 +151,7 @@ floating-pane-adjacent PR after this ships.
 - Phase 2: `agentmux-srv/src/sagas/redock_floating_pane.rs`, a new
   `PaneLocation` state module, `agentmux-srv/src/server/service/tear_off.rs`,
   frontend `onNodeDelete`/`DeleteBlock` suppression path.
-- Phase 3: `agentmux-cef/src/ui_tasks/window.rs` (owner/Z-order code),
-  window-creation flags (`WS_EX_TOOLWINDOW` handling), cascade-hook removal.
+- Phase 3: already shipped — `agentmux-cef/src/floating_pane.rs` (owner/
+  Z-order code, `WS_EX_TOOLWINDOW` handling, cascade hook),
+  `agentmux-cef/src/browser_pane/callbacks.rs` (`[pane-zorder]` raise-on-
+  activate). No new files for this phase.
