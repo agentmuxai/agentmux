@@ -1236,6 +1236,15 @@ pub async fn bind_listeners_and_network(
         4 * 60 * 60 * 1000,
     );
 
+    // Same sweep for the host-global shared registry (Tier 2b, issue #1916)
+    // — additionally drops entries whose owning PID no longer exists on this
+    // host, since a channel that crashed without a clean unregister can
+    // leave an entry behind indefinitely otherwise (no other channel's
+    // startup would ever revisit it).
+    if let Some(shared_dir) = registry::resolve_shared_reactive_dir() {
+        backend::reactive::registry::cleanup_stale_shared(&shared_dir, 4 * 60 * 60 * 1000);
+    }
+
     // Tracks agent-spawned OS processes per block. Registered trackers
     // live as long as their agent pane; the background poller emits
     // delta events (`agent:process-added`/`-exited`) to the frontend.

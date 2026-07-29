@@ -534,12 +534,35 @@ async fn handle_discovery(State(state): State<AppState>) -> Json<serde_json::Val
     let version = state.version.clone();
     let local_url = state.local_web_url.clone();
 
+    // Tier 2b — other channels' agents on this same host (issue #1916), via
+    // the host-global shared registry. Excludes this instance's own channel
+    // (already covered by `agents`/`addressable` above) and this instance's
+    // own URL (a stale self-entry from a prior crash, if any).
+    let own_channel = std::env::var("AGENTMUX_CHANNEL").unwrap_or_else(|_| "stable".to_string());
+    let cross_channel: Vec<serde_json::Value> = crate::registry::resolve_shared_reactive_dir()
+        .map(|shared_dir| {
+            crate::backend::reactive::registry::list_all_shared(&shared_dir)
+                .into_iter()
+                .filter(|e| e.channel != own_channel && e.local_url != local_url)
+                .map(|e| {
+                    json!({
+                        "name": e.agent_id,
+                        "channel": e.channel,
+                        "local_url": e.local_url,
+                        "block_id": e.block_id,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
     Json(json!({
         "host": {
             "version": version,
             "local_url": local_url,
             "addressable": reachable,
             "agents": agents,
+            "cross_channel": cross_channel,
         },
         "lan": lan,
         "wan": { "subscribed_agents": wan_agents },

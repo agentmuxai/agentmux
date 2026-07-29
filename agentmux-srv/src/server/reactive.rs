@@ -168,6 +168,88 @@ pub(super) async fn handle_reactive_inject(
             }
         }
 
+        // Tier 2b: same host, DIFFERENT channel (host-global shared registry).
+        // Runs when Tier 2a had no same-channel entry or its forward already
+        // failed above — closes the gap issue #1916 tracked (Tier 2 previously
+        // only ever reached agents in the caller's own channel). Candidates are
+        // tried freshest-first (§4.3 of the cross-channel delivery spec);
+        // a failed forward evicts just that channel's entry and falls through
+        // to the next candidate, same evict-on-fail shape Tier 3 already uses.
+        if let Some(shared_dir) = crate::registry::resolve_shared_reactive_dir() {
+            let candidates = agent_registry::lookup_all_shared(&shared_dir, &req.target_agent);
+            for entry in candidates {
+                // Self-forward guard, matching Tier 2a. Also loopback-only
+                // (§5 of the spec): a poisoned registry entry can't redirect
+                // a forward off-box, since resolve_shared_reactive_dir() is a
+                // same-user local file, but defense in depth costs nothing here.
+                let is_loopback = entry.local_url.starts_with("http://127.0.0.1")
+                    || entry.local_url.starts_with("http://localhost")
+                    || entry.local_url.starts_with("http://[::1]");
+                if !is_loopback || entry.local_url == state.local_web_url {
+                    continue;
+                }
+
+                let forward_url = format!("{}/agentmux/reactive/inject", entry.local_url);
+                tracing::debug!(
+                    target = %req.target_agent,
+                    channel = %entry.channel,
+                    url = %forward_url,
+                    "cross-channel inject forward"
+                );
+                let mut fwd = state.http_client.post(&forward_url).json(&req);
+                if !entry.auth_key.is_empty() {
+                    fwd = fwd.header("X-AuthKey", &entry.auth_key);
+                }
+                match fwd.send().await {
+                    Ok(r) if r.status().is_success() => {
+                        if let Ok(body) = r.json::<serde_json::Value>().await {
+                            if body.get("success").and_then(|v| v.as_bool()) == Some(true) {
+                                echo_jekt_to_sender(
+                                    &state,
+                                    req.source_agent.as_deref(),
+                                    &req.target_agent,
+                                    &req.message,
+                                    body.get("request_id").and_then(|v| v.as_str()).unwrap_or(""),
+                                    body.get("effective_tier").and_then(|v| v.as_str()),
+                                    "host",
+                                    req.priority.as_deref().unwrap_or("normal"),
+                                );
+                                return Json(body);
+                            }
+                            // success:false — this channel's entry is stale
+                            // (e.g. agent unregistered without a clean
+                            // shutdown); evict and try the next candidate.
+                            tracing::warn!(
+                                target = %req.target_agent,
+                                channel = %entry.channel,
+                                "cross-channel forward: success=false — evicting and trying next candidate"
+                            );
+                            agent_registry::remove_shared(&shared_dir, &req.target_agent, &entry.channel);
+                        }
+                    }
+                    Ok(r) => {
+                        tracing::warn!(
+                            target = %req.target_agent,
+                            channel = %entry.channel,
+                            status = %r.status(),
+                            url = %forward_url,
+                            "cross-channel forward: non-success status"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            target = %req.target_agent,
+                            channel = %entry.channel,
+                            error = %e,
+                            url = %forward_url,
+                            "cross-channel forward failed — evicting stale entry"
+                        );
+                        agent_registry::remove_shared(&shared_dir, &req.target_agent, &entry.channel);
+                    }
+                }
+            }
+        }
+
         // Tier 3: LAN peer (mDNS lookup → HTTP). Runs when tier 2 had no registry
         // entry or its forward failed. Queries each discovered LAN peer for the
         // agent; result is cached for 60s to avoid per-inject mDNS fan-out.
@@ -317,6 +399,21 @@ pub(super) async fn handle_reactive_register(
             let data_dir = base::get_wave_data_dir();
             agent_registry::write(&data_dir, &req.agent_id, &state.local_web_url, &req.block_id);
 
+            // And to the host-global shared registry (Tier 2b) so instances
+            // running in OTHER channels on this host can reach this agent
+            // too — closes issue #1916 (Tier 2 previously only ever reached
+            // the caller's own channel).
+            if let Some(shared_dir) = crate::registry::resolve_shared_reactive_dir() {
+                let channel = std::env::var("AGENTMUX_CHANNEL").unwrap_or_else(|_| "stable".to_string());
+                agent_registry::write_shared(
+                    &shared_dir,
+                    &req.agent_id,
+                    &state.local_web_url,
+                    &req.block_id,
+                    &channel,
+                );
+            }
+
             // Auto-watch this agent's Claude Code config dir for subagent JSONL files.
             // Pass block_id so subagent events are stamped with the owning pane,
             // letting the frontend route ⚡ panels to that pane only. See
@@ -401,6 +498,11 @@ pub(super) async fn handle_reactive_unregister(
     // Also remove from cross-instance file registry.
     let data_dir = base::get_wave_data_dir();
     agent_registry::remove(&data_dir, &req.agent_id);
+    // And from the host-global shared registry (Tier 2b).
+    if let Some(shared_dir) = crate::registry::resolve_shared_reactive_dir() {
+        let channel = std::env::var("AGENTMUX_CHANNEL").unwrap_or_else(|_| "stable".to_string());
+        agent_registry::remove_shared(&shared_dir, &req.agent_id, &channel);
+    }
     // Drop the subagent filesystem watcher (handle + channel + task) — the
     // symmetric teardown for the watch_agent() call in the register handler.
     // Passes block_id (captured above) so a shared-agent-id watcher with
