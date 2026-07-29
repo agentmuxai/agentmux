@@ -324,26 +324,7 @@ impl Store {
     /// "does the promote-target clone for this template already
     /// exist?" and either reuses it or inserts it.
     pub fn agent_def_get(&self, id: &str) -> Result<Option<AgentDefinition>, StoreError> {
-        // Try local SQLite first (conn released before global registry check).
-        let local = {
-            let conn = self.conn.lock().unwrap();
-            let mut stmt = conn.prepare(
-                "SELECT id, slug, name, icon, provider, description,
-                        working_directory, shell, provider_flags, auto_start,
-                        restart_on_crash, idle_timeout_minutes, created_at,
-                        agent_type, environment, agent_bus_id, is_seeded,
-                        accounts, parent_id, branch_label, updated_at,
-                        user_hidden, container_image, container_volumes, container_name,
-                        use_ambient_login
-                 FROM db_agent_definitions
-                 WHERE id = ?1",
-            )?;
-            let mut rows = stmt.query_map(params![id], map_agent_definition_row)?;
-            match rows.next() {
-                Some(row) => Some(row?),
-                None => None,
-            }
-        }; // MutexGuard dropped here.
+        let local = self.agent_def_get_local_only(id)?;
         if local.is_some() {
             return Ok(local);
         }
@@ -359,6 +340,34 @@ impl Store {
                 tracing::warn!(agent_id = %id, error = %e, "agent_def_get: global registry lookup failed; returning not-found");
                 Ok(None)
             }
+        }
+    }
+
+    /// Local-only lookup — queries `db_agent_definitions` directly, no
+    /// registry fallback. Shared by `agent_def_get` (public read path,
+    /// unchanged behavior) and `instance_create`'s FK-backfill gate,
+    /// which specifically needs to know whether the FK-target table
+    /// itself has a row — NOT `agent_def_exists_local`, which queries
+    /// the newer, separately-maintained `db_agents` consolidated table
+    /// and isn't guaranteed to agree with `db_agent_definitions` in
+    /// every code path.
+    fn agent_def_get_local_only(&self, id: &str) -> Result<Option<AgentDefinition>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, slug, name, icon, provider, description,
+                    working_directory, shell, provider_flags, auto_start,
+                    restart_on_crash, idle_timeout_minutes, created_at,
+                    agent_type, environment, agent_bus_id, is_seeded,
+                    accounts, parent_id, branch_label, updated_at,
+                    user_hidden, container_image, container_volumes, container_name,
+                    use_ambient_login
+             FROM db_agent_definitions
+             WHERE id = ?1",
+        )?;
+        let mut rows = stmt.query_map(params![id], map_agent_definition_row)?;
+        match rows.next() {
+            Some(row) => Ok(Some(row?)),
+            None => Ok(None),
         }
     }
 
@@ -483,6 +492,32 @@ impl Store {
     /// so this is race-safe against concurrent inserts on the same
     /// connection.
     pub fn agent_def_insert(&self, agent: &mut AgentDefinition) -> Result<(), StoreError> {
+        self.agent_def_insert_local_only(agent, None)?;
+        // Mirror into the global cross-channel definition store. Content +
+        // skills are inserted after the definition (separate calls), so this
+        // initial record is content-less; agent_content_set / agent_skill_*
+        // re-mirror with the full payload. (P0.2b.)
+        self.registry_def_upsert(&agent.id);
+        Ok(())
+    }
+
+    /// Insert into local `db_agent_definitions` + dual-write `db_agents`
+    /// only — does NOT mirror to the global registry. Used directly by
+    /// `agent_def_insert` (which mirrors right after) and by
+    /// `agent_def_backfill_local_from_registry` (which must NOT mirror —
+    /// see that function's doc comment for why re-mirroring immediately
+    /// after this call would wipe the registry's real content/skills).
+    ///
+    /// `updated_at_override`: `None` stamps `updated_at = created_at`
+    /// (the original, unchanged behavior for genuinely new definitions).
+    /// `Some(ts)` stamps `updated_at = ts` instead — used by the backfill
+    /// path to preserve the registry record's real `updated_at` rather
+    /// than resetting it.
+    fn agent_def_insert_local_only(
+        &self,
+        agent: &mut AgentDefinition,
+        updated_at_override: Option<i64>,
+    ) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
         let base = if agent.slug.is_empty() {
             derive_slug(&agent.name)
@@ -537,8 +572,10 @@ impl Store {
                 agent.accounts,
                 agent.parent_id,
                 agent.branch_label,
-                // New definitions: updated_at == created_at.
-                agent.created_at,
+                // New definitions: updated_at == created_at, unless the
+                // caller supplied an override (backfill path preserving
+                // the registry record's real updated_at).
+                updated_at_override.unwrap_or(agent.created_at),
                 // Phase 2 (hide templates): new rows start visible. The
                 // user only hides via the explicit `agent_def_hide` RPC,
                 // and the agent-seed re-sync forces user_hidden = 0 on
@@ -554,17 +591,12 @@ impl Store {
         )?;
         // Persist the stamped updated_at before we leave the lock so the
         // dual-write helper sees the same value the SQL row carries.
-        let stamped_updated_at = agent.created_at;
+        let stamped_updated_at = updated_at_override.unwrap_or(agent.created_at);
         drop(conn);
         let mut snapshot = agent.clone();
         snapshot.updated_at = stamped_updated_at;
         // Mirror new definition into db_agents immediately.
         self.agents_dual_write_definition_upsert(&snapshot)?;
-        // Mirror into the global cross-channel definition store. Content +
-        // skills are inserted after the definition (separate calls), so this
-        // initial record is content-less; agent_content_set / agent_skill_*
-        // re-mirror with the full payload. (P0.2b.)
-        self.registry_def_upsert(&agent.id);
         // Reagent P1 on #1013 round 2: do NOT mutate the caller's
         // `&mut AgentDefinition` here. The PR is supposed to be
         // zero-behaviour-change; the previous version reflected
@@ -573,6 +605,81 @@ impl Store {
         // untouched. Callers that need the freshly-stamped value can
         // re-fetch the row via the normal read path.
         let _ = stamped_updated_at;
+        Ok(())
+    }
+
+    /// Materialize a local shadow of a registry-only definition — this
+    /// channel's `db_agent_definitions`/`db_agents` row plus a best-
+    /// effort local copy of content/skills — so `instance_create`'s FK
+    /// can succeed for an agent whose definition exists cross-channel
+    /// but was never created in THIS channel's SQLite.
+    ///
+    /// Deliberately does NOT call `registry_def_upsert` (unlike
+    /// `agent_def_insert`, which does): the registry is already
+    /// authoritative for this record. `registry_def_upsert` rebuilds
+    /// the registry record from `agent_content_get_all_local`/
+    /// `agent_skill_list_local` — LOCAL-only reads, by design (see that
+    /// function's own comment) — so calling it immediately after this
+    /// insert-with-no-content-yet would overwrite the registry's real
+    /// content/skills with empty arrays. Content/skill rows are instead
+    /// copied here via direct INSERTs (bypassing `agent_content_set`/
+    /// `agent_skill_insert`, which each call `registry_def_upsert`
+    /// themselves) so nothing re-mirrors mid-backfill.
+    ///
+    /// Copy failures for content/skills are logged and otherwise
+    /// ignored — the definition row alone satisfies the FK, and reads
+    /// still resolve content/skills correctly via the existing
+    /// cross-channel fallback even if this best-effort local copy is
+    /// incomplete. A slug collision against an unrelated local agent
+    /// will rename the local slug (existing `agent_def_insert_local_only`
+    /// behavior) — low-probability and non-fatal, since slug isn't the
+    /// FK target.
+    fn agent_def_backfill_local_from_registry(
+        &self,
+        record: &crate::registry::DefinitionRecord,
+    ) -> Result<(), StoreError> {
+        let mut def = super::def_registry_mirror::record_to_agent_definition(record);
+        self.agent_def_insert_local_only(&mut def, Some(record.data.updated_at))?;
+
+        let conn = self.conn.lock().unwrap();
+        for c in &record.data.content {
+            if let Err(e) = conn.execute(
+                "INSERT INTO db_agent_content (agent_id, content_type, content, updated_at)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(agent_id, content_type) DO UPDATE SET content=?3, updated_at=?4",
+                params![def.id, c.content_type, c.content, record.data.updated_at],
+            ) {
+                tracing::warn!(
+                    def_id = %def.id,
+                    content_type = %c.content_type,
+                    error = %e,
+                    "instance_create backfill: local content copy failed (non-fatal)"
+                );
+            }
+        }
+        for s in &record.data.skills {
+            if let Err(e) = conn.execute(
+                "INSERT INTO db_agent_skills (id, agent_id, name, trigger, skill_type, description, content, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    s.id,
+                    def.id,
+                    s.name,
+                    s.trigger,
+                    s.skill_type,
+                    s.description,
+                    s.content,
+                    record.data.updated_at,
+                ],
+            ) {
+                tracing::warn!(
+                    def_id = %def.id,
+                    skill = %s.name,
+                    error = %e,
+                    "instance_create backfill: local skill copy failed (non-fatal)"
+                );
+            }
+        }
         Ok(())
     }
 
@@ -1117,6 +1224,44 @@ impl Store {
 
     /// Insert a new instance row. Caller is responsible for the id (UUID).
     pub fn instance_create(&self, inst: &AgentInstance) -> Result<(), StoreError> {
+        // `definition_id` FKs to `db_agent_definitions(id)` — an agent
+        // created/last touched under a different channel (or a much
+        // older version) can have a real definition in the global
+        // cross-channel registry while this channel's local SQLite has
+        // never seen a row for it, which would otherwise fail this
+        // INSERT with a FOREIGN KEY error (root cause of
+        // docs/specs/REPORT_AGENT_DEFINITION_DB_GAP_2026_07_27.md and
+        // the "Moras" container-agent launch failure it was extended
+        // to cover). Backfill a local shadow row first when that's the
+        // case; if the registry doesn't have it either, this is a
+        // genuinely orphaned definition_id and the raw INSERT below
+        // should still surface its FK error unchanged.
+        if self.agent_def_get_local_only(&inst.definition_id)?.is_none() {
+            if let Some(reg) = self.shared_def_registry() {
+                match reg.get(&inst.definition_id) {
+                    Ok(Some(record)) => {
+                        if let Err(e) = self.agent_def_backfill_local_from_registry(&record) {
+                            tracing::warn!(
+                                definition_id = %inst.definition_id,
+                                error = %e,
+                                "instance_create: registry backfill failed, proceeding to raw insert"
+                            );
+                        }
+                    }
+                    Ok(None) => {
+                        // Not in the registry either — genuinely orphaned
+                        // id. Let the FK error surface below, unchanged.
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            definition_id = %inst.definition_id,
+                            error = %e,
+                            "instance_create: registry lookup failed, proceeding to raw insert"
+                        );
+                    }
+                }
+            }
+        }
         {
             let conn = self.conn.lock().unwrap();
             conn.execute(
@@ -1888,4 +2033,125 @@ fn map_agent_definition_row(row: &rusqlite::Row) -> rusqlite::Result<AgentDefini
         container_name: row.get(24)?,
         use_ambient_login: row.get(25)?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::registry::{
+        DefContentBlob, DefSkillBlob, DefinitionRecord, DefinitionRecordV1, DefinitionStore,
+        DEF_MAX_SUPPORTED_SCHEMA,
+    };
+    use std::sync::Arc;
+
+    /// Mirrors `def_registry_mirror.rs`'s own test fixture — a user
+    /// agent that exists only in the global cross-channel registry,
+    /// with one content blob and one skill, so a backfill has
+    /// something real to preserve.
+    fn global_user_agent(id: &str, name: &str) -> DefinitionRecord {
+        DefinitionRecord {
+            schema_version: DEF_MAX_SUPPORTED_SCHEMA,
+            data: DefinitionRecordV1 {
+                id: id.to_string(),
+                name: name.to_string(),
+                provider: "claude".to_string(),
+                is_seeded: 0,
+                updated_at: 42,
+                content: vec![DefContentBlob {
+                    content_type: "agentmd".to_string(),
+                    content: "be helpful".to_string(),
+                }],
+                skills: vec![DefSkillBlob {
+                    id: "sk1".to_string(),
+                    name: "greet".to_string(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+        }
+    }
+
+    fn instance(id: &str, definition_id: &str) -> AgentInstance {
+        AgentInstance {
+            id: id.to_string(),
+            definition_id: definition_id.to_string(),
+            parent_instance_id: String::new(),
+            block_id: String::new(),
+            session_id: String::new(),
+            status: "init".to_string(),
+            github_context: String::new(),
+            started_at: 1,
+            ended_at: 0,
+            created_at: 1,
+            identity_id: String::new(),
+            memory_id: String::new(),
+            instance_name: id.to_string(),
+            working_directory: String::new(),
+            display_hidden: false,
+        }
+    }
+
+    #[test]
+    fn instance_create_backfills_local_definition_from_registry_only_record() {
+        let store = Store::open_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let def_store = Arc::new(DefinitionStore::open(tmp.path().join("definitions")).unwrap());
+        def_store
+            .upsert(&global_user_agent("remote-1", "Remote"))
+            .unwrap();
+        store.set_def_registry(def_store.clone());
+
+        // Local db_agent_definitions has no row for "remote-1" — this
+        // is exactly the Moras/Oozp/Parko scenario. Without the
+        // backfill this INSERT fails with a FOREIGN KEY error.
+        let result = store.instance_create(&instance("inst-1", "remote-1"));
+        assert!(result.is_ok(), "instance_create failed: {result:?}");
+
+        // The backfilled local row must exist and satisfy the FK.
+        let local = store.agent_def_get_local_only("remote-1").unwrap();
+        assert!(local.is_some(), "backfill must create a local definition row");
+
+        // Critical regression guard: the registry's real content/skills
+        // must NOT have been wiped by the backfill (this is exactly
+        // what a naive `agent_def_insert`-based backfill would do —
+        // see agent_def_backfill_local_from_registry's doc comment).
+        let rec = def_store.get("remote-1").unwrap().unwrap();
+        assert_eq!(rec.data.content.len(), 1, "registry content must survive backfill");
+        assert_eq!(rec.data.skills.len(), 1, "registry skills must survive backfill");
+    }
+
+    #[test]
+    fn instance_create_still_errors_when_definition_missing_everywhere() {
+        let store = Store::open_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let def_store = Arc::new(DefinitionStore::open(tmp.path().join("definitions")).unwrap());
+        store.set_def_registry(def_store);
+
+        // No local row, nothing in the registry either — genuinely
+        // orphaned definition_id. Must still fail loudly, not silently
+        // swallow a real error.
+        let result = store.instance_create(&instance("inst-2", "nowhere"));
+        assert!(result.is_err(), "instance_create must still fail for a truly orphaned definition_id");
+    }
+
+    #[test]
+    fn instance_create_preserves_registry_updated_at_on_backfill() {
+        let store = Store::open_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let def_store = Arc::new(DefinitionStore::open(tmp.path().join("definitions")).unwrap());
+        def_store
+            .upsert(&global_user_agent("remote-2", "Remote2"))
+            .unwrap();
+        store.set_def_registry(def_store);
+
+        store
+            .instance_create(&instance("inst-3", "remote-2"))
+            .unwrap();
+
+        let local = store.agent_def_get_local_only("remote-2").unwrap().unwrap();
+        assert_eq!(
+            local.updated_at, 42,
+            "backfilled row must preserve the registry's real updated_at, not reset to created_at"
+        );
+    }
 }
