@@ -307,15 +307,54 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
     // at the next tool-call boundary, or recalled un-sent via `recallLatestHeld`
     // (ArrowUp). Holding — rather than sending immediately — is what makes the
     // recall a true un-send and lets the message land at a clean boundary.
-    const heldQueue: Array<{ id: string; text: string; authWasKnownBadAtQueueTime: boolean }> = [];
+    const heldQueue: Array<{
+        id: string;
+        text: string;
+        authWasKnownBadAtQueueTime: boolean;
+        /**
+         * A live "auth"-classified failure the CALLER captured before
+         * dispatching TurnStart (which unconditionally clears
+         * state.failure) — distinct from authWasKnownBadAtQueueTime
+         * (canRetry()/loginWaiting()), which a mid-turn 401/403 failure
+         * never sets. Without this, a message held because a deferred
+         * controller refresh was still blocked (the idle-send path below)
+         * loses the ONLY record that auth was bad at queue time: TurnStart
+         * already cleared the live failure by the time this item is
+         * queued, authWasKnownBadAtQueueTime reads false (canRetry/
+         * loginWaiting are untouched by a mid-turn auth failure), and if
+         * the deferred refresh that blocked this item subsequently FAILS
+         * (leaving the controller on the still-bad credential), a later
+         * flushHeldMessages sees neither a live failure nor a true queue
+         * flag and delivers straight to it. Restored via FailureObserved
+         * when this item is rejected specifically because of it, so the
+         * recovery banner ("Login Again"/"Use existing login") returns
+         * instead of silently vanishing. codex P2 on PR #2338 (twenty-third
+         * re-review).
+         */
+        authFailureToPreserve: AgentFailure | null;
+    }> = [];
     // Re-entrancy guard: only ONE flush drains the queue at a time. The flush
     // effect fires fire-and-forget on every tool/phase change, so without this
     // a second boundary could start a concurrent flush whose AgentInputCommand
     // interleaves with the first's — reordering sends. ReAgent P2 on PR #1484.
-    let flushing = false;
+    //
+    // Tracks the actual in-flight PROMISE (not just a boolean), mirroring
+    // inFlightControllerRefresh — a caller that arrives while a flush is
+    // already draining must be able to actually AWAIT its completion, not
+    // just see "already flushing" and silently no-op. sendMessage's idle
+    // path needs exactly this: when its own flushPendingControllerRefresh()
+    // call resolves a deferred refresh, that function's success path
+    // already kicks off flushHeldMessages() in the background (the safety
+    // net for triggers with no other way to drain the queue, e.g.
+    // trackTurnJustEnded's fire-and-forget call) — sendMessage must wait
+    // for THAT SAME drain to fully complete before its own direct
+    // deliverToBackend call, or the two AgentInputCommand chains race with
+    // no ordering guarantee. reagent P1 on PR #2338 (twenty-third
+    // re-review).
+    let inFlightHeldFlush: Promise<void> | null = null;
     onCleanup(() => {
         heldQueue.length = 0;
-        flushing = false;
+        inFlightHeldFlush = null;
     });
 
     // ── Inline picker state ───────────────────────────────────────────
@@ -735,7 +774,12 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             // opposite case here so flushHeldMessages can reject exactly
             // those items instead of blindly trusting initiatesTurn=false
             // for all of them. Codex P2 on PR #2338 (sixth re-review).
-            heldQueue.push({ id: messageId, text: message, authWasKnownBadAtQueueTime: opts.canRetry() || opts.loginWaiting() });
+            // authFailureToPreserve: null here — wasAlreadyWorking is true,
+            // so the caller (handleSendMessage) never dispatched TurnStart,
+            // which is the only thing that clears the live failure. The
+            // live check in flushHeldMessages below already covers this
+            // item without needing a separate snapshot.
+            heldQueue.push({ id: messageId, text: message, authWasKnownBadAtQueueTime: opts.canRetry() || opts.loginWaiting(), authFailureToPreserve: null });
             return;
         }
 
@@ -773,8 +817,35 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // reactive turnIdle effect) confirms idle and completes the
         // refresh. Codex P1 on PR #2338 (twenty-second re-review).
         if (controllerRefreshPendingUntilIdle) {
-            heldQueue.push({ id: messageId, text: message, authWasKnownBadAtQueueTime: opts.canRetry() || opts.loginWaiting() });
+            // Unlike the busy-path push above, TurnStart WAS just dispatched
+            // for this idle send (wasAlreadyWorking is false), which already
+            // cleared any live failure — authFailureToPreserve is the ONLY
+            // remaining record that auth was bad at queue time. Without
+            // carrying it, a subsequent FAILED deferred refresh (leaving the
+            // controller on the still-bad credential) would be invisible to
+            // flushHeldMessages: authWasKnownBadAtQueueTime is false
+            // (canRetry/loginWaiting are untouched by a mid-turn auth
+            // failure) and the live check finds nothing (already cleared).
+            // codex P2 on PR #2338 (twenty-third re-review).
+            heldQueue.push({ id: messageId, text: message, authWasKnownBadAtQueueTime: opts.canRetry() || opts.loginWaiting(), authFailureToPreserve });
             return;
+        }
+
+        // If THIS call is the one that just resolved a deferred refresh,
+        // flushPendingControllerRefresh's own success path already kicked
+        // off flushHeldMessages() in the background — the safety net for
+        // triggers with no other way to drain the queue (e.g.
+        // trackTurnJustEnded's fire-and-forget call in agent-view.tsx).
+        // Any messages already sitting in heldQueue predate this fresh one
+        // and must be FULLY delivered first to preserve FIFO submission
+        // order — awaiting here (now that flushHeldMessages returns its
+        // real in-flight promise instead of silently no-op'ing a
+        // concurrent caller) closes that race instead of letting this
+        // message's own deliverToBackend call below run concurrently with
+        // that background drain's AgentInputCommand calls. reagent P1 on
+        // PR #2338 (twenty-third re-review).
+        if (refreshedByDeferral) {
+            await flushHeldMessages();
         }
 
         // Idle send: deliver immediately and arm the lost-delivery safety timer.
@@ -1038,14 +1109,18 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
      * and a failed RPC removes the pending entry via the catch in
      * `deliverToBackend`.
      */
-    const flushHeldMessages = async (): Promise<void> => {
-        // Single-flight: if a flush is already draining, let it finish — its
-        // loop re-checks the queue each iteration, so any message queued while
+    const flushHeldMessages = (): Promise<void> => {
+        // Single-flight: if a flush is already draining, return the SAME
+        // in-flight promise so a caller that needs to wait for it (e.g.
+        // sendMessage's idle path, below) actually can — its loop
+        // re-checks the queue each iteration, so any message queued while
         // it runs is picked up in order. A concurrent flush would let two
-        // AgentInputCommand chains interleave and reorder sends. P2 on PR #1484.
-        if (flushing) return;
-        flushing = true;
-        try {
+        // AgentInputCommand chains interleave and reorder sends. P2 on
+        // PR #1484. Returning the promise (not silently no-op'ing) is what
+        // reagent P1 on PR #2338 (twenty-third re-review) required — see
+        // inFlightHeldFlush's own doc comment.
+        if (inFlightHeldFlush) return inFlightHeldFlush;
+        inFlightHeldFlush = (async () => {
             // /login succeeding mid-turn and this flush are both triggered
             // by the SAME turn-just-ended moment, via independent signals
             // (a live controllerstatus event vs. this pane's reactive
@@ -1135,16 +1210,40 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 // guard never even runs for a flushed item (initiatesTurn is
                 // always false here). reagent P1 on PR #2338 (sixteenth
                 // re-review).
-                if (item.authWasKnownBadAtQueueTime || paneSnapshot(opts.blockId)?.failure?.data.code === "auth") {
+                //
+                // (3) item.authFailureToPreserve — a live failure the
+                // CALLER captured before its own TurnStart cleared it (the
+                // idle-send blocked-refresh hold). Independent of (1): a
+                // mid-turn auth failure never sets canRetry/loginWaiting, so
+                // authWasKnownBadAtQueueTime alone would miss it, and by
+                // flush time TurnStart has already cleared the live state
+                // (1) checks — nothing else re-establishes it. Without this,
+                // a deferred refresh that ultimately FAILS leaves this item
+                // looking clean on both existing checks and it gets
+                // delivered to the still-bad credential. codex P2 on
+                // PR #2338 (twenty-third re-review).
+                const liveAuthFailure = paneSnapshot(opts.blockId)?.failure?.data.code === "auth";
+                if (item.authWasKnownBadAtQueueTime || item.authFailureToPreserve || liveAuthFailure) {
                     opts.log("auth", "held message not sent — not logged in", "warn");
+                    // Restore the recovery UI ("Login Again"/"Use existing
+                    // login") when THIS item's own captured snapshot is
+                    // what's causing the rejection and nothing already-live
+                    // covers it — otherwise the banner TurnStart cleared at
+                    // queue time never comes back. Mirrors sendMessage's own
+                    // restoreAuthFailureIfUnresolved for the bang/slash-
+                    // command local-command path.
+                    if (item.authFailureToPreserve && !liveAuthFailure) {
+                        opts.model.dispatchPane({ type: "FailureObserved", failure: item.authFailureToPreserve, at: Date.now() }, "system");
+                    }
                     opts.model.dispatchPane({ type: "PendingMessageRejected", id: item.id });
                     continue;
                 }
                 await deliverToBackend(item.text, item.id, /* armExpiry */ false, /* initiatesTurn */ false, /* authFailureToPreserve */ null);
             }
-        } finally {
-            flushing = false;
-        }
+        })().finally(() => {
+            inFlightHeldFlush = null;
+        });
+        return inFlightHeldFlush;
     };
 
     /**

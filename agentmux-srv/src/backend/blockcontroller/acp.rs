@@ -609,6 +609,20 @@ impl Controller for AcpController {
             if !was_active {
                 core::spawn_health_watchdog(&self.health_monitor);
             }
+            // Publish the turn_active flip, mirroring persistent.rs's
+            // send_message/send_user_message (which both call
+            // self.publish_status() right after this same
+            // mark_turn_active_returning_was_active() call). Without this,
+            // wasTurnActive === false left over from an EARLIER turn's
+            // end-of-turn publish (or the initial spawn publish) is
+            // indistinguishable from genuine current idleness — a `/login`
+            // that defers a controller refresh during THIS turn, followed
+            // by a premature frontend Done transition, would see
+            // isBackendTurnConfirmedIdle() read true from that stale
+            // signal and force-restart the controller, killing the
+            // actually-active turn. codex P1 on PR #2338 (twenty-third
+            // re-review).
+            self.publish_status();
             let inner = self.inner.lock().unwrap();
             if let Some(ref tx) = inner.stdin_tx {
                 tx.try_send(req)
@@ -689,6 +703,45 @@ mod tests {
 
         assert!(c.send_input(BlockInputUnion::data(b"first".to_vec()), None).is_ok());
         assert!(c.send_input(BlockInputUnion::data(b"second".to_vec()), None).is_ok());
+    }
+
+    /// Regression for codex P1 on PR #2338 (twenty-third re-review):
+    /// `send_input` marked the turn active via `health_monitor` but never
+    /// published the flip — the only controllerstatus publishes for ACP
+    /// were on spawn, kill, or process exit. A `wasTurnActive === false`
+    /// left over from an EARLIER turn's end-of-turn publish (or the initial
+    /// spawn publish) was therefore indistinguishable from genuine current
+    /// idleness: useAgentCommands.ts's `isBackendTurnConfirmedIdle()` (fed
+    /// only by live controllerstatus events) would read stale-true and let
+    /// `flushPendingControllerRefresh` force-restart a controller that is
+    /// actually mid-turn. Mirrors persistent.rs's send_message/
+    /// send_user_message, which both call `publish_status()` right after
+    /// the same `mark_turn_active_returning_was_active()` call.
+    #[tokio::test]
+    async fn send_input_publishes_the_turn_active_flip() {
+        let broker = Arc::new(wps::Broker::new());
+        let c = AcpController::new(
+            "tab".to_string(),
+            "block-acp-publish".to_string(),
+            Some(broker.clone()),
+            None,
+            None,
+            None,
+        );
+        let (tx, _rx) = mpsc::channel::<String>(8);
+        c.inner.lock().unwrap().stdin_tx = Some(tx);
+
+        assert!(c.send_input(BlockInputUnion::data(b"hello".to_vec()), None).is_ok());
+
+        let history = broker.read_event_history(
+            wps::EVENT_CONTROLLER_STATUS,
+            "block:block-acp-publish",
+            1,
+        );
+        assert_eq!(history.len(), 1, "send_input must publish a controllerstatus event");
+        let published: BlockControllerRuntimeStatus =
+            serde_json::from_value(history[0].data.clone().unwrap()).unwrap();
+        assert!(published.turn_active, "published status must reflect the just-started turn as active");
         assert!(c.health_monitor.is_active_turn());
     }
 }
