@@ -1355,6 +1355,17 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
     const recallLatestHeld = (): { text: string } | null => {
         const item = heldQueue.pop();
         if (!item) return null;
+        // Restore the recovery UI ("Login Again"/"Use existing login") when
+        // this item carries a live auth failure the caller captured before
+        // its own TurnStart cleared it (the idle-send blocked-refresh
+        // hold) — mirrors flushHeldMessages's own rejection path. Without
+        // this, recalling such a message via ArrowUp silently drops the
+        // banner TurnStart already cleared at queue time, with nothing
+        // left to bring it back. reagent P2 on PR #2338 (twenty-ninth
+        // re-review).
+        if (item.authFailureToPreserve && paneSnapshot(opts.blockId)?.failure?.data.code !== "auth") {
+            opts.model.dispatchPane({ type: "FailureObserved", failure: item.authFailureToPreserve, at: Date.now() }, "system");
+        }
         opts.model.dispatchPane({ type: "PendingMessageRejected", id: item.id });
         return { text: item.text };
     };
