@@ -327,15 +327,18 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
         });
     });
 
-    it("delivers a held message that was known-bad at queue time if auth has since recovered by flush time (codex P2 on PR #2338, fifteenth re-review)", async () => {
-        // The frozen authWasKnownBadAtQueueTime flag alone is too
-        // conservative: a recovery attempt can succeed in the gap between
-        // queueing (auth known-bad) and flushing (next tool-boundary/turn-
-        // end — or /login's own up-to-5-minute poll). Permanently trusting
-        // the frozen flag would discard a message that would now succeed,
-        // with no path back since the composer already cleared it. Must
-        // re-check the LIVE signals at flush time before rejecting.
-        let canRetryNow = true;
+    it("still rejects a held message known-bad at queue time even if a later-FAILED recovery cleared loginWaiting() without setting canRetry() (codex P1 on PR #2338, sixteenth re-review)", async () => {
+        // A prior version of this code re-checked LIVE canRetry()/
+        // loginWaiting() at flush time to avoid over-rejecting a message
+        // that recovered — but relogin()/useGlobalLogin()/loginViaTerminal()'s
+        // default retryAfterLogin:true failure path clears loginWaiting()
+        // and never sets canRetry() back to true, so both signals read
+        // false after a recovery attempt FAILS too, not just when it
+        // succeeds. The live re-check let a still-known-bad message through
+        // in exactly that case. Must always reject once flagged bad at
+        // queue time — never re-derive "is it fixed now" from these two
+        // signals alone.
+        let loginWaitingNow = true;
         const model = registerPane(BLOCK_ID, fullRegistration());
         model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
         model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
@@ -349,7 +352,55 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 documentAtom: [() => [], () => {}] as any,
                 log: () => {},
                 setAuthUrl: () => {},
-                canRetry: () => canRetryNow,
+                canRetry: () => false,
+                loginWaiting: () => loginWaitingNow,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh: async () => true,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                backToPicker: async () => {},
+            });
+
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("held during a recovery attempt", true);
+            expect(commands.hasHeldMessages()).toBe(true);
+
+            // The recovery attempt FAILS: loginWaiting() clears, but
+            // canRetry() was never set true (default retryAfterLogin:true).
+            loginWaitingNow = false;
+
+            await commands.flushHeldMessages();
+
+            expect(hub.agentInput).not.toHaveBeenCalled();
+            expect(commands.hasHeldMessages()).toBe(false);
+            dispose();
+        });
+    });
+
+    it("rejects a held message queued while healthy if the SAME turn later fails with a live auth error before flush (reagent P1 on PR #2338, sixteenth re-review)", async () => {
+        // authWasKnownBadAtQueueTime is false here — the turn was genuinely
+        // healthy when this message was queued. But FailureObserved (a
+        // mid-turn 401/403) ends the turn (Done) without touching
+        // canRetry/loginWaiting, and deliverToBackend's own guard never
+        // runs for a flushed item (initiatesTurn is always false) — so
+        // without an independent live-failure check, this held message
+        // would sail straight through to AgentInputCommand on the exact
+        // credential that just failed.
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
                 loginWaiting: () => false,
                 setAuthNotice: () => {},
                 notifyControllerHealthy: () => {},
@@ -360,19 +411,20 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
             });
 
             model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
-            await commands.sendMessage("held while known-bad, recovers later", true);
+            await commands.sendMessage("held behind a healthy turn", true);
             expect(commands.hasHeldMessages()).toBe(true);
 
-            // Recovery succeeds before the flush runs.
-            canRetryNow = false;
-            hub.agentInput.mockResolvedValueOnce(undefined);
+            // The turn this message was riding along with now fails with a
+            // live auth error.
+            model.dispatchPane(
+                { type: "FailureObserved", failure: { code: "auth", title: "Not logged in", detail: "401", retryable: true }, at: Date.now() },
+                "system",
+            );
 
             await commands.flushHeldMessages();
 
-            expect(hub.agentInput).toHaveBeenCalledWith(
-                expect.anything(),
-                expect.objectContaining({ message: "held while known-bad, recovers later" }),
-            );
+            expect(hub.agentInput).not.toHaveBeenCalled();
+            expect(commands.hasHeldMessages()).toBe(false);
             dispose();
         });
     });

@@ -813,33 +813,39 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         // click. Lazy arrow: retryLastTurn is defined below but only invoked at
         // runtime (post-click), by which point it's initialized.
         onRecovered: () => {
-            // Recovery just succeeded — explicitly resolve the failure this
-            // banner was showing rather than waiting for retryLastTurn's own
-            // TurnStart to clear it as a side effect. handleSendMessage
-            // captures the live "auth"-classified failure state BEFORE
-            // dispatching TurnStart (so a user's own fresh keystroke send
-            // gets fast-failed against a still-showing auth failure); without
-            // clearing here first, that same capture would see the stale
-            // failure on THIS auto-retry too and wrongly reject the very
-            // resend recovery just enabled. Codex P1 on PR #2338.
-            dispatchPane(model.blockId, { type: "FailureCleared" }, "system");
-            // Deliberately does NOT bypass loginWaiting() (an earlier
-            // version of this call did, via a since-removed
-            // trustedAfterRecovery flag). THIS flow's own credential is
-            // confirmed good, but if a DIFFERENT, overlapping recovery flow
-            // is still running, it will unconditionally force-restart the
-            // controller once IT finishes (relogin()/useGlobalLogin()/
+            // If a DIFFERENT, overlapping recovery flow is still running,
+            // leave the failure banner and loginWaiting() both untouched
+            // instead of clearing-and-retrying now. THIS flow's own
+            // credential is confirmed good, but relogin()/useGlobalLogin()/
             // loginViaTerminal() never check whether a turn is active
-            // before calling forceControllerRefresh — only /login's
-            // slash-command path does). Bypassing the guard here let this
-            // retry start a new turn that the sibling's later restart would
-            // then kill. Codex P1 on PR #2338 (fourteenth re-review). If a
-            // sibling IS still active, this retry now correctly blocks
-            // (same "wait for the login attempt to finish" path a fresh
-            // send would take) and fires again once the LAST remaining
-            // flow's own onRecovered runs — retryLastTurn always resends
-            // the most recent message, so whichever flow finishes last
-            // ends up triggering the actual retry.
+            // before calling forceControllerRefresh (only /login's
+            // slash-command path does) — clearing+retrying here used to let
+            // this resend start a new turn that the sibling's later restart
+            // would then kill (Codex P1, fourteenth re-review), and even
+            // after gating the SEND on loginWaiting() (so it correctly got
+            // rejected instead), clearing the banner unconditionally still
+            // discarded the user's only path back if that sibling
+            // ultimately FAILS: a failed flow only decrements the counter
+            // and never calls onRecovered, so nothing retries automatically,
+            // and the banner this comment used to clear first was the
+            // user's manual "Retry"/"Login Again" affordance too. Codex P2
+            // on PR #2338 (sixteenth re-review). Bailing out here instead
+            // leaves that banner up — the user can retry manually once the
+            // sibling settles, and if the sibling instead SUCCEEDS, ITS OWN
+            // onRecovered fires this same check with loginWaiting() now
+            // false, and completes the clear+retry then.
+            if (status.loginWaiting()) return;
+            // Recovery succeeded and no sibling is in flight — explicitly
+            // resolve the failure this banner was showing rather than
+            // waiting for retryLastTurn's own TurnStart to clear it as a
+            // side effect. handleSendMessage captures the live
+            // "auth"-classified failure state BEFORE dispatching TurnStart
+            // (so a user's own fresh keystroke send gets fast-failed
+            // against a still-showing auth failure); without clearing here
+            // first, that same capture would see the stale failure on THIS
+            // auto-retry too and wrongly reject the very resend recovery
+            // just enabled. Codex P1 on PR #2338.
+            dispatchPane(model.blockId, { type: "FailureCleared" }, "system");
             retryLastTurn();
         },
         getInitialTermSize: () => computeTermSizeFromEl(rootRef),
