@@ -161,18 +161,16 @@ export interface UseAgentCommands {
      *  send AND re-dispatches this same failure so the banner (and its
      *  "Login Again"/"Use existing login" actions) reappears instead of
      *  vanishing with no path back. Codex P1 on PR #2338 (third re-review).
-     *  `trustedAfterRecovery` should be true ONLY for the auto-retry
-     *  `retryLastTurn` fires from a recovery flow's own `onRecovered`
-     *  callback — bypasses the loginWaiting() check specifically, since
-     *  loginWaiting is a shared counter across all three recovery flows and
-     *  can still read true from a DIFFERENT, unrelated flow overlapping
-     *  with the one that just confirmed success. Codex P2 on PR #2338
-     *  (fifth re-review). */
+     *  No longer takes a "trust this auto-retry" flag (removed — see
+     *  deliverToBackend's checkAuthGuard doc comment, codex P1 on PR #2338,
+     *  fourteenth re-review): bypassing loginWaiting() for a just-succeeded
+     *  recovery flow's own auto-retry ignored that a DIFFERENT, still-
+     *  running sibling flow would later force-restart the controller
+     *  regardless, killing the very turn the bypass just let through. */
     sendMessage: (
         message: string,
         wasAlreadyWorking?: boolean,
         authFailureToPreserve?: AgentFailure | null,
-        trustedAfterRecovery?: boolean,
     ) => Promise<void>;
     /**
      * Deliver any messages held while the agent was busy (the "send now"
@@ -389,8 +387,23 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         clearAuthFailure: () => opts.model.dispatchPane({ type: "FailureCleared" }),
         forceControllerRefresh: opts.forceControllerRefresh,
         deferControllerRefreshUntilIdle,
+        // wasAlreadyWorking === false is frozen (never live-read) — that's
+        // the case an optimistic TurnStart corrupts (see the doc comment
+        // above). true/undefined fall through to a LIVE read instead of
+        // also freezing true: /login's own OAuth poll can run for up to 5
+        // minutes, and the ORIGINAL turn that was active at submission time
+        // can genuinely end during that wait — a frozen `true` would keep
+        // reporting active long after the turn-just-ended edge (the only
+        // trigger that flushes a deferred refresh) has already passed,
+        // stranding the deferred refresh forever. A live read at THIS
+        // later point is accurate again: nothing optimistic corrupts it
+        // once wasAlreadyWorking was already true (handleSendMessage never
+        // dispatches a fresh TurnStart in that case). Codex P1 on PR #2338
+        // (fourteenth re-review).
         isTurnActive: () =>
-            wasAlreadyWorking ?? workingFromPhase(paneSnapshot(opts.blockId)?.turnPhase ?? { kind: "Idle" }),
+            wasAlreadyWorking === false
+                ? false
+                : workingFromPhase(paneSnapshot(opts.blockId)?.turnPhase ?? { kind: "Idle" }),
         beginRecoveryFlow: opts.beginRecoveryFlow,
         endRecoveryFlow: opts.endRecoveryFlow,
         openPicker,
@@ -409,7 +422,6 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         message: string,
         wasAlreadyWorking = false,
         authFailureToPreserve: AgentFailure | null = null,
-        trustedAfterRecovery = false,
     ): Promise<void> => {
         // Crash trace: this is the entry point for "user pressed send."
         // The boundary dumps this trail when a renderer fault catches —
@@ -586,7 +598,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         }
 
         // Idle send: deliver immediately and arm the lost-delivery safety timer.
-        await deliverToBackend(message, messageId, /* armExpiry */ true, /* initiatesTurn */ true, authFailureToPreserve, trustedAfterRecovery);
+        await deliverToBackend(message, messageId, /* armExpiry */ true, /* initiatesTurn */ true, authFailureToPreserve);
     };
 
     /**
@@ -614,23 +626,6 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
          *  (mirrors initiatesTurn — a flush's guard question is about the
          *  ALREADY-active turn, not a fresh capture). */
         authFailureToPreserve: AgentFailure | null,
-        /** True only for the auto-retry `retryLastTurn` fires from a
-         *  recovery flow's own `onRecovered` callback. Bypasses the
-         *  loginWaiting() check specifically: loginWaiting is a shared
-         *  counter across all three recovery flows (relogin/useGlobalLogin/
-         *  loginViaTerminal), so it can still read true here if a
-         *  DIFFERENT, unrelated flow happens to be overlapping with the one
-         *  that just confirmed success — that flow's own uncertainty has no
-         *  bearing on whether THIS flow's confirmed credential is safe to
-         *  retry on. Does not bypass canRetry()/authFailureToPreserve —
-         *  both are already false/null by the time onRecovered fires (the
-         *  triggering flow clears canRetry on its own click, and the
-         *  onRecovered wiring dispatches FailureCleared before calling
-         *  retryLastTurn), so there is nothing left to bypass for them.
-         *  Codex P2 on PR #2338 (fifth re-review). Always false for a
-         *  held-message flush (mirrors initiatesTurn/authFailureToPreserve —
-         *  a flush is never the auto-retry path). */
-        trustedAfterRecovery: boolean,
     ): Promise<void> => {
         // The pane is ALREADY showing the mount-time "Log in" bar
         // (opts.canRetry()) — sending anyway used to travel all the way
@@ -678,9 +673,19 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // must capture it beforehand. Codex P1 on PR #2338 (second
         // re-review).
         //
-        // loginWaiting() specifically (not canRetry()/authFailureToPreserve)
-        // is skipped when trustedAfterRecovery is set — see its own doc
-        // comment above. Codex P2 on PR #2338 (fifth re-review).
+        // loginWaiting() is NEVER bypassed, even for the auto-retry
+        // retryLastTurn fires from a recovery flow's own onRecovered
+        // callback (an earlier version bypassed it via a since-removed
+        // trustedAfterRecovery flag, reasoning that a DIFFERENT overlapping
+        // flow's own uncertainty had no bearing on THIS flow's confirmed
+        // success). That reasoning missed that relogin()/useGlobalLogin()/
+        // loginViaTerminal() all unconditionally force-restart the
+        // controller once THEY finish, regardless of any turn the bypassed
+        // guard just let start — killing it. If a sibling flow really is
+        // still active, this now correctly blocks the retry (same "wait
+        // for the login attempt to finish" path a fresh send takes) and
+        // fires again once the LAST remaining flow's own onRecovered runs.
+        // Codex P1 on PR #2338 (fourteenth re-review).
         // Returns true when it's safe to proceed. False means it already
         // dispatched every rejection side-effect (PendingMessageRejected /
         // TurnStartFailed / FailureObserved / setAuthNotice) — callers just
@@ -691,7 +696,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // is a real async gap another recovery flow or a mid-turn failure
         // can land in. Codex P2 on PR #2338 (tenth re-review).
         const checkAuthGuard = (): boolean => {
-            const loginStillWaiting = opts.loginWaiting() && !trustedAfterRecovery;
+            const loginStillWaiting = opts.loginWaiting();
             if (!(initiatesTurn && (opts.canRetry() || loginStillWaiting || authFailureToPreserve))) {
                 return true;
             }
@@ -850,7 +855,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                     opts.model.dispatchPane({ type: "PendingMessageRejected", id: item.id });
                     continue;
                 }
-                await deliverToBackend(item.text, item.id, /* armExpiry */ false, /* initiatesTurn */ false, /* authFailureToPreserve */ null, /* trustedAfterRecovery */ false);
+                await deliverToBackend(item.text, item.id, /* armExpiry */ false, /* initiatesTurn */ false, /* authFailureToPreserve */ null);
             }
         } finally {
             flushing = false;

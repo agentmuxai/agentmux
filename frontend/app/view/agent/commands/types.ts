@@ -168,15 +168,21 @@ export interface SlashCommandContext {
      * would kill an in-progress turn and discard its work. Codex P1 on
      * PR #2338 (tenth re-review).
      *
-     * Backed by the PRE-`TurnStart` `wasAlreadyWorking` snapshot
-     * (`useAgentCommands.ts`'s `buildCommandContext`), NOT a live
-     * `paneSnapshot(...).turnPhase` read — `handleSendMessage`
+     * A `false` result is FROZEN at the pre-`TurnStart` `wasAlreadyWorking`
+     * snapshot (`useAgentCommands.ts`'s `buildCommandContext`), never a
+     * live `paneSnapshot(...).turnPhase` read — `handleSendMessage`
      * (agent-view.tsx) dispatches `TurnStart` optimistically before
      * `sendMessage` ever runs, so a live read would see that optimistic
      * "Submitting" phase and report `true` even for the ordinary case of
      * typing /login on a genuinely idle pane, permanently defeating this
      * check for the most common path. Codex P1 on PR #2338 (eleventh
-     * re-review).
+     * re-review). A `true`-or-unknown starting point instead falls through
+     * to a LIVE read on every call — /login's own OAuth poll can run for
+     * up to 5 minutes, during which the turn that was genuinely active at
+     * submission time can end; freezing `true` for that whole window would
+     * keep reporting active long after the only edge that flushes a
+     * deferred refresh (turn-just-ended) has already passed, stranding it
+     * forever. Codex P1 on PR #2338 (fourteenth re-review).
      */
     isTurnActive: () => boolean;
     /**
