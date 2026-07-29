@@ -472,12 +472,31 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         controllerRefreshPendingUntilIdle = false;
         inFlightControllerRefresh = (async () => {
             const refreshed = await opts.forceControllerRefresh();
-            // Best-effort, matching forceControllerRefresh's own contract —
-            // on failure it already logged a warning. Leaving the fast-fail
-            // guards untouched here (not clearing them) is the safe choice,
-            // not a regression: the controller is still on the stale
-            // credential, so a message should still be blocked until the
-            // user retries /login or reopens the pane.
+            if (!refreshed) {
+                // forceControllerRefresh's failure path
+                // (useAgentControllerStatus.ts) is best-effort — it only
+                // logs a warning and never sets canRetry()/loginWaiting()
+                // or state.failure. controllerRefreshPendingUntilIdle was
+                // ALREADY cleared above (this function commits to running
+                // once it decides to attempt the refresh, success or
+                // failure) — leaving it cleared here would mean NOTHING is
+                // left blocking: the very next fresh idle send would pass
+                // every guard in checkAuthGuard cleanly (canRetry,
+                // loginWaiting, authFailureToPreserve, live failure all
+                // read clean) and reach the still-stale, un-refreshed
+                // controller — reproducing the exact doomed "Working…"
+                // send this PR exists to prevent, just for the
+                // deferred-refresh-then-fails branch specifically. Re-arm
+                // the pending flag so the NEXT trigger (a later turn-end,
+                // the reactive turnIdle effect, or a fresh send's own
+                // call) retries the refresh instead of treating this as
+                // resolved — mirrors deferControllerRefreshUntilIdle's own
+                // semantics rather than inventing a new signal; every
+                // existing caller of flushPendingControllerRefresh already
+                // handles "still pending" correctly (hold, don't deliver).
+                // reagent P1 on PR #2338 (twenty-sixth re-review).
+                controllerRefreshPendingUntilIdle = true;
+            }
             if (refreshed) {
                 opts.notifyControllerHealthy();
                 opts.model.dispatchPane({ type: "FailureCleared" });

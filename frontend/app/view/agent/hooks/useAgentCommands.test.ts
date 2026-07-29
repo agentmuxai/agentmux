@@ -1139,6 +1139,21 @@ describe("useAgentCommands — flushPendingControllerRefresh", () => {
 
             expect(forceControllerRefresh).toHaveBeenCalledOnce();
             expect(notifyControllerHealthy).not.toHaveBeenCalled();
+
+            // reagent P1 on PR #2338 (twenty-sixth re-review): asserting
+            // notifyControllerHealthy wasn't called is not enough —
+            // forceControllerRefresh's own failure path never sets
+            // canRetry()/loginWaiting()/state.failure either, so nothing
+            // else was left blocking unless flushPendingControllerRefresh
+            // itself re-arms controllerRefreshPendingUntilIdle on failure.
+            // A subsequent fresh idle send must still be BLOCKED (held),
+            // not delivered to the still-stale controller.
+            await commands.sendMessage("fresh after failed refresh", /* wasAlreadyWorking */ false);
+            expect(hub.agentInput).not.toHaveBeenCalled();
+            expect(commands.hasHeldMessages()).toBe(true);
+            // The retry this send triggered also failed (mock always
+            // returns false) — called a second time.
+            expect(forceControllerRefresh).toHaveBeenCalledTimes(2);
             dispose();
         });
     });
