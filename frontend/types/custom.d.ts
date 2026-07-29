@@ -303,6 +303,16 @@ declare global {
         releaseDragCapture: () => Promise<void>;
         getMouseButtonState: () => Promise<boolean>;
         setJsDragActive: (active: boolean) => Promise<void>;
+        /** SPEC_NATIVE_POINTER_DRAG_TEAROFF_2026_07_28 — begin a native
+         *  pointer-capture window drag for `label`. `grabOffsetX/Y` are the
+         *  cursor's offset from the window's top-left (physical screen px)
+         *  at engage time. Windows-only; no-op elsewhere. */
+        engageNativeWindowDrag: (label: string, grabOffsetX: number, grabOffsetY: number) => Promise<void>;
+        /** Reposition the engaged window per pointermove. Cursor position
+         *  in physical screen px. No-op if no drag is engaged. */
+        updateNativeWindowDrag: (screenX: number, screenY: number) => Promise<void>;
+        /** End the native window drag gesture. Idempotent. */
+        endNativeWindowDrag: () => Promise<void>;
         /** Trigger on-demand migration run (maintenance panel retry).
          *  Returns immediately; progress arrives via `upgrade:migration-event` CEF events. */
         runMigrations: () => Promise<{ started: boolean }>;

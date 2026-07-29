@@ -55,7 +55,13 @@ export async function requestTearOff(
     // is exactly what CrossWindowDragMonitor's release-time performTearOff
     // relies on. When false (legacy mid-drag), SC_MOVE runs as before.
     skipScMove: boolean = false,
-): Promise<void> {
+    // Returns the destination window's label and its (newly-created) workspace
+    // id on success, or undefined on failure — SPEC_NATIVE_POINTER_DRAG_
+    // TEAROFF_2026_07_28's live-follow tracker needs both: the label to call
+    // engageNativeWindowDrag with, the workspace id to cancel-back into if the
+    // gesture is later aborted mid-drag. The original release-time caller
+    // (createTearOffTabAtRelease below) ignores the return value.
+): Promise<{ label: string; newWsId: string } | undefined> {
     const t0 = performance.now();
     // F1.B — orphan-cleanup state. We only restore the tab when we
     // can PROVE the destination window doesn't exist: the
@@ -144,6 +150,7 @@ export async function requestTearOff(
                 destWindowLabel,
                 totalMs: performance.now() - t0,
             });
+            return { label: destWindowLabel, newWsId };
         } else {
             // Step 3 — Win32 SC_MOVE handshake. Host waits for the new
             // window's HWND to register, then transfers cursor capture
@@ -183,6 +190,7 @@ export async function requestTearOff(
                 handshakeMs: result.handshakeMs,
                 totalMs: performance.now() - t0,
             });
+            return { label: destWindowLabel, newWsId };
         }
     } catch (e) {
         Logger.error("dnd", "tab tear-off failed", { tabId, error: String(e) });
@@ -309,5 +317,106 @@ export function createTearOffTabAtRelease(
                 true, // skipScMove — commit-on-release, no move-loop
             ),
         );
+    };
+}
+
+export type NativeTearOffResult = {
+    label: string;
+    newWsId: string;
+    /** Screen-px outer top-left the destination window was created at —
+     *  the point that lands under the cursor's grabbed pixel. Used by the
+     *  caller (droppable-tab.tsx) to derive engageNativeWindowDrag's
+     *  grab offset without a redundant HWND/rect query. */
+    anchorX: number;
+    anchorY: number;
+    originalTabIndex: number;
+    wasPinned: boolean;
+    sourceWorkspaceId: string;
+};
+
+export type NativeTearOffFn = (
+    draggedTabId: string,
+    screenX: number,
+    screenY: number,
+) => Promise<NativeTearOffResult | undefined>;
+
+/**
+ * SPEC_NATIVE_POINTER_DRAG_TEAROFF_2026_07_28 — builds the tear-off handler
+ * for the Windows native-pointer-drag tracker's `onTearOffStart`. Same
+ * anchor derivation and `requestTearOff(..., skipScMove=true)` call as
+ * `createTearOffTabAtRelease` above, with two differences: (1) `screenX/Y`
+ * come straight from the triggering PointerEvent — already real screen
+ * coordinates thanks to setPointerCapture, so no `window.screenX + clientX`
+ * conversion is needed (and wouldn't even be meaningful once the drag has
+ * left the window); (2) this fires at threshold-cross, not release, and
+ * returns the created window's label + anchor so the caller can hand off to
+ * `engageNativeWindowDrag` for live cursor-follow.
+ */
+export function createNativeTearOffHandler(
+    workspace: () => Workspace,
+    tabBarScrollRef: () => HTMLDivElement,
+): NativeTearOffFn {
+    return async (draggedTabId, screenX, screenY) => {
+        const ws = workspace();
+        const wsId = ws?.oid;
+        if (!wsId) return undefined;
+        const pinnedIds = ws?.pinnedtabids ?? [];
+        const tabIdsRaw = ws?.tabids ?? [];
+        const pinnedIdx = pinnedIds.indexOf(draggedTabId);
+        const wasPinned = pinnedIdx >= 0;
+        const originalTabIndex = wasPinned
+            ? pinnedIdx
+            : Math.max(0, tabIdsRaw.indexOf(draggedTabId));
+
+        const grabOffset = getTabGrabOffset();
+        const chromeBorderX = Math.max(0, window.outerWidth - window.innerWidth) / 2;
+        const chromeBorderY = Math.max(
+            0,
+            window.outerHeight - window.innerHeight - chromeBorderX,
+        );
+        const firstTabEl = tabBarScrollRef()?.querySelector(
+            ".tab-drop-wrapper",
+        ) as HTMLElement | null;
+        const firstTabRect = firstTabEl?.getBoundingClientRect();
+        // Falls back to the same half-width/16px-above formula the host's
+        // own open_window_at_position uses when no anchor is supplied
+        // (agentmux-cef/src/commands/drag.rs) — grabOffset/firstTabRect
+        // should always be present in practice (grabOffset is set at every
+        // pointerdown by the tracker's caller before a drag can begin), so
+        // this branch is defensive, not a normal path.
+        const anchorX =
+            grabOffset && firstTabRect
+                ? Math.round(screenX - grabOffset.x - firstTabRect.left - chromeBorderX)
+                : Math.round(Math.max(0, screenX - 600));
+        const anchorY =
+            grabOffset && firstTabRect
+                ? Math.round(screenY - grabOffset.y - firstTabRect.top - chromeBorderY)
+                : Math.round(Math.max(0, screenY - 16));
+
+        Logger.info("dnd", "native tab tear-off engage", {
+            draggedTabId, screenX, screenY, anchorX, anchorY,
+        });
+
+        const result = await requestTearOff(
+            draggedTabId,
+            wsId,
+            screenX,
+            screenY,
+            originalTabIndex,
+            wasPinned,
+            anchorX,
+            anchorY,
+            true, // skipScMove — window created immediately, followed via native drag instead
+        );
+        if (!result) return undefined;
+        return {
+            label: result.label,
+            newWsId: result.newWsId,
+            anchorX,
+            anchorY,
+            originalTabIndex,
+            wasPinned,
+            sourceWorkspaceId: wsId,
+        };
     };
 }

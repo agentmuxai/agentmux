@@ -182,7 +182,16 @@ function CrossWindowDragMonitor(): JSX.Element {
     return null;
 }
 
-async function handleCrossWindowDragEnd(
+/**
+ * SPEC_NATIVE_POINTER_DRAG_TEAROFF_2026_07_28 §3.5 — exported so
+ * TileLayout.win32.tsx's native pointer-drag tracker can call this directly
+ * at pointerup instead of relying on a native `dragend` event (which no
+ * longer fires once `draggable()` is removed from the pane header). Decides
+ * cross-window drop vs. tear-off exactly as the dragend/fallback paths above
+ * always have — GetWindowRect-based hit-test via startCrossDrag/updateCrossDrag,
+ * not gated on any HTML5 drag event specifically.
+ */
+export async function handleCrossWindowDragEnd(
     payload: DragItemPayload,
     sourceWindow: string | null,
     grabOffsetSnapshot: ReturnType<typeof getTabGrabOffset> = null,

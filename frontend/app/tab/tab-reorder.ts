@@ -12,9 +12,7 @@ import { onCleanup, onMount } from "solid-js";
 import { fireAndForget } from "@/util/util";
 import { isWindows } from "@/util/platformutil";
 import { monitorForElements, dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
-import { clearCrossTabDrop, getLayoutModelForTabById, tileItemType } from "@/layout/index";
-import { setTileDragInFlight } from "@/layout/lib/dragInFlight";
-import { pruneDanglingLeaves } from "@/layout/lib/layoutPersistence";
+import { getLayoutModelForTabById, tileItemType } from "@/layout/index";
 import { WorkspaceService } from "../store/services";
 import {
     tabItemType,
@@ -25,31 +23,23 @@ import {
     InsertionPoint,
     dragActivatedTabIds,
     globalDragTabId,
-    setHoveredDropTabId,
     dragEscaped,
     setDragEscaped,
+    TEAR_PAST_PX,
+    cleanupTileDragState,
 } from "./tabbar-dnd";
 import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
 import type { TearOffTabAtReleaseFn } from "./tab-tearoff-rpc";
 import { Logger } from "@/util/logger";
 
-// Pixels past the tab strip's bottom edge before a drag becomes a
-// tear-off (Chrome uses a similar small threshold). 24 px is enough
-// to filter out brief excursions while the user is still hunting for
-// the drop position; small enough that the tear feels intentional.
-// See docs/specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26 §4.1.
-// Pixels past the tab bar's bottom edge before tear-off triggers. Was
-// 24px historically, which left a ~24-pixel zone where the user saw
-// only the OS drag image with no real window. Lowered to 5 to match
-// Chrome's perceived-instant tear-off (just enough to filter trembles).
-// Spec: SPEC_TAB_TEAROFF_POSITION_AND_PAINT_2026-05-07.md §4.2.
-const TEAR_PAST_PX = 5;
-
 /**
  * Execute the reorder described by the insertion point.
- * All drop logic lives here — droppable-tab.tsx is visual-only.
+ * All drop logic lives here — droppable-tab.tsx is visual-only. Exported so
+ * droppable-tab.tsx's Windows native-pointer-drag tracker
+ * (SPEC_NATIVE_POINTER_DRAG_TEAROFF_2026_07_28.md) can call the exact same
+ * commit logic the pragmatic-dnd monitor below uses on non-Windows.
  */
-function executeReorder(
+export function executeReorder(
     ip: InsertionPoint,
     draggedTabId: string,
     tabs: string[],
@@ -93,165 +83,138 @@ export function useTabDragAndDrop(
     const { tabBarScrollRef } = refs;
 
     onMount(() => {
-        // Tear-off cursor (Windows). During a tab drag, the tear-off zone
-        // (cursor dragged OUTSIDE the strip) has no pragmatic drop target,
-        // and preventUnhandled is gated off on Windows — its SC_MOVE
-        // tear-off relies on the native window-move handshake, not the
-        // HTML5 snapback. pragmatic only calls preventDefault / sets
-        // dropEffect while over a drop target (see lifecycle-manager:
-        // `innerMost != null`), so out in the tear-off zone Chromium falls
-        // back to the no-drop circle-slash cursor — which reads as "you
-        // can't drop this", the opposite of the truth: releasing below the
-        // strip spawns a NEW window.
-        //
-        // Fill that gap ourselves: while a tab drag is in flight and the
-        // cursor is outside the strip, preventDefault + set dropEffect to
-        // "copy" so Chromium paints the "plus" cursor (the universal
-        // "create new" affordance). Over the strip we do nothing, leaving
-        // the move cursor to the strip's own drop target.
-        //
-        // The listener is installed ONCE here (not in the monitor's
-        // onDragStart) and gated on `globalDragTabId` — the module flag
-        // droppable-tab sets for the whole duration of a tab drag. This
-        // keeps it alive across HMR (which does not re-run a monitor's
-        // onDragStart) and independent of pragmatic's monitor dispatch.
-        // macOS/Linux already dodge the circle-slash via preventUnhandled,
-        // so this is Windows-only.
-        if (isWindows()) {
-            const onTearOffDragOver = (e: DragEvent) => {
+        // Tab-item drag detection (in-strip reorder + commit-on-release
+        // tear-off) is pragmatic-dnd/HTML5-driven and stays exactly as it
+        // was — but ONLY on macOS/Linux. On Windows, droppable-tab.tsx now
+        // drives the equivalent gesture from a raw Pointer Events state
+        // machine (attachNativePointerDragTracker,
+        // SPEC_NATIVE_POINTER_DRAG_TEAROFF_2026_07_28.md) that never starts
+        // an HTML5 drag session in the first place, so none of this block
+        // (including the old Windows-only dropEffect="copy" tear-off-cursor
+        // workaround it used to contain — deleted, nothing left to fight)
+        // ever runs there. `executeReorder`/`computeInsertionPoint` are
+        // still shared, just invoked directly by the tracker instead of via
+        // this monitor's callbacks.
+        if (!isWindows()) {
+            // Escape-to-abort: pragmatic-drag-and-drop's HTML5 drag session
+            // doesn't cancel itself on Escape (unlike a native OS drag loop,
+            // the web DnD spec gives browsers no obligation to honor it), so
+            // without this the tab drag simply continues regardless of
+            // Escape and still tears off / reorders normally on release.
+            // Mouse events are unreliable during an active HTML5 drag, but
+            // keyboard events are still delivered to the page normally, so a
+            // plain `keydown` listener works. Sets a flag `onDrop` below
+            // checks before deciding tear-off vs. reorder, rather than
+            // trying to interrupt the drag itself (there's no such API for
+            // HTML5 DnD).
+            const onDragEscape = (e: KeyboardEvent) => {
                 if (globalDragTabId == null) return; // not a tab drag
-                const rect = tabBarScrollRef()?.getBoundingClientRect();
-                const overStrip =
-                    rect != null &&
-                    e.clientX >= rect.left && e.clientX <= rect.right &&
-                    e.clientY >= rect.top && e.clientY <= rect.bottom;
-                if (overStrip) return; // strip drop target owns the cursor here
-                e.preventDefault();
-                if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+                if (e.key !== "Escape") return;
+                setDragEscaped(true);
             };
-            window.addEventListener("dragover", onTearOffDragOver);
-            onCleanup(() => window.removeEventListener("dragover", onTearOffDragOver));
+            window.addEventListener("keydown", onDragEscape, true);
+            onCleanup(() => window.removeEventListener("keydown", onDragEscape, true));
+
+            const cleanup = monitorForElements({
+                canMonitor: ({ source }) => source.data.type === tabItemType,
+
+                // Always compute insertion point from cursor position — drives the gap animation on all tabs
+                onDrag: ({ location }) => {
+                    // Tear-off is committed on RELEASE now (see onDrop), not
+                    // mid-drag — dragging down no longer eagerly spawns a
+                    // window that follows the cursor. So onDrag only tracks the
+                    // insertion point that drives the reorder gap animation.
+                    setInsertionPoint(computeInsertionPoint(location.current.input.clientX));
+                },
+
+                onDrop: ({ source, location }) => {
+                    // Escape was pressed at some point during this drag (see
+                    // the keydown listener above) — abort the WHOLE operation:
+                    // no reorder, no tear-off. The tab was never actually moved
+                    // (only the insertion-point preview did), so clearing that
+                    // and the cross-window payload is enough to fully restore
+                    // the pre-drag state; nothing to undo.
+                    if (dragEscaped) {
+                        setDragEscaped(false);
+                        setCurrentDragPayload(null);
+                        setInsertionPoint(null);
+                        Logger.info("dnd", "tab drag aborted via Escape", {
+                            draggedTabId: source.data.tabId,
+                        });
+                        return;
+                    }
+
+                    const ip = insertionPoint();
+                    const draggedTabId = source.data.tabId as string;
+
+                    // `insertionPoint` reflects the last cursor X, so it can be
+                    // non-null even when the user has dragged BELOW the tab bar
+                    // for a tear-off. Pragmatic-dnd registers no drop target for
+                    // the bar (insertion is purely X-driven), so we hit-test the
+                    // cursor against the strip's bounding rect ourselves to tell
+                    // "reorder inside the bar" from "tear-off below it".
+                    const input = location.current.input;
+                    const rect = tabBarScrollRef()?.getBoundingClientRect();
+                    const dropInsideBar =
+                        rect != null &&
+                        input.clientY >= rect.top && input.clientY <= rect.bottom &&
+                        input.clientX >= rect.left && input.clientX <= rect.right;
+
+                    // Commit-on-release tear-off: the tab was released BELOW the
+                    // strip (dragged down into the window body) and let go.
+                    // Spawn the new window at the release point NOW — deliberately
+                    // not mid-drag, so nothing detaches until the user releases
+                    // (the behaviour they expect). Lone tabs never tear (tearing
+                    // the only tab would just trade one single-tab window for
+                    // another and strand the source); their cross-window exit is
+                    // the host mouse-hook remount.
+                    const releasedBelowStrip =
+                        rect != null && input.clientY > rect.bottom + TEAR_PAST_PX;
+                    if (
+                        !dropInsideBar &&
+                        releasedBelowStrip &&
+                        draggedTabId != null &&
+                        tabIds().length > 1
+                    ) {
+                        // Clear the payload SYNCHRONOUSLY (before the async
+                        // tear-off) so CrossWindowDragMonitor's dragend handler —
+                        // which may fire for the same gesture — sees no payload
+                        // and doesn't double-process this tear.
+                        setCurrentDragPayload(null);
+                        tearOffTabAtRelease(draggedTabId, input);
+                        setInsertionPoint(null);
+                        return;
+                    }
+
+                    const willReorder = dropInsideBar && ip != null && draggedTabId != null;
+
+                    if (willReorder || location.current.dropTargets.length > 0) {
+                        setCurrentDragPayload(null);
+                    }
+
+                    if (willReorder) {
+                        const tabs = tabIds();
+                        const wsId = workspace()?.oid;
+
+                        executeReorder(ip, draggedTabId, tabs, wsId);
+
+                        // Trigger bounce on the dragged tab at its new position
+                        setBouncingTabId(draggedTabId);
+                        setTimeout(() => setBouncingTabId(null), 400);
+
+                        Logger.info("dnd", "tab drop", {
+                            draggedTabId,
+                            beforeTabId: ip.beforeTabId,
+                            afterTabId: ip.afterTabId,
+                            workspaceId: wsId,
+                        });
+                    }
+
+                    setInsertionPoint(null);
+                },
+            });
+            onCleanup(cleanup);
         }
-
-        // Escape-to-abort (cross-platform): pragmatic-drag-and-drop's HTML5
-        // drag session doesn't cancel itself on Escape (unlike a native OS
-        // drag loop, the web DnD spec gives browsers no obligation to honor
-        // it), so without this the tab drag simply continues regardless of
-        // Escape and still tears off / reorders normally on release. Mouse
-        // events are unreliable during an active HTML5 drag, but keyboard
-        // events are still delivered to the page normally, so a plain
-        // `keydown` listener works — gated the same way as the Windows
-        // tear-off-cursor listener above (`globalDragTabId` is the shared
-        // "a tab drag is in flight" flag). Sets a flag `onDrop` below checks
-        // before deciding tear-off vs. reorder, rather than trying to
-        // interrupt the drag itself (there's no such API for HTML5 DnD).
-        const onDragEscape = (e: KeyboardEvent) => {
-            if (globalDragTabId == null) return; // not a tab drag
-            if (e.key !== "Escape") return;
-            setDragEscaped(true);
-        };
-        window.addEventListener("keydown", onDragEscape, true);
-        onCleanup(() => window.removeEventListener("keydown", onDragEscape, true));
-
-        const cleanup = monitorForElements({
-            canMonitor: ({ source }) => source.data.type === tabItemType,
-
-            // Always compute insertion point from cursor position — drives the gap animation on all tabs
-            onDrag: ({ location }) => {
-                // Tear-off is committed on RELEASE now (see onDrop), not
-                // mid-drag — dragging down no longer eagerly spawns a
-                // window that follows the cursor. So onDrag only tracks the
-                // insertion point that drives the reorder gap animation.
-                setInsertionPoint(computeInsertionPoint(location.current.input.clientX));
-            },
-
-            onDrop: ({ source, location }) => {
-                // Escape was pressed at some point during this drag (see
-                // the keydown listener above) — abort the WHOLE operation:
-                // no reorder, no tear-off. The tab was never actually moved
-                // (only the insertion-point preview did), so clearing that
-                // and the cross-window payload is enough to fully restore
-                // the pre-drag state; nothing to undo.
-                if (dragEscaped) {
-                    setDragEscaped(false);
-                    setCurrentDragPayload(null);
-                    setInsertionPoint(null);
-                    Logger.info("dnd", "tab drag aborted via Escape", {
-                        draggedTabId: source.data.tabId,
-                    });
-                    return;
-                }
-
-                const ip = insertionPoint();
-                const draggedTabId = source.data.tabId as string;
-
-                // `insertionPoint` reflects the last cursor X, so it can be
-                // non-null even when the user has dragged BELOW the tab bar
-                // for a tear-off. Pragmatic-dnd registers no drop target for
-                // the bar (insertion is purely X-driven), so we hit-test the
-                // cursor against the strip's bounding rect ourselves to tell
-                // "reorder inside the bar" from "tear-off below it".
-                const input = location.current.input;
-                const rect = tabBarScrollRef()?.getBoundingClientRect();
-                const dropInsideBar =
-                    rect != null &&
-                    input.clientY >= rect.top && input.clientY <= rect.bottom &&
-                    input.clientX >= rect.left && input.clientX <= rect.right;
-
-                // Commit-on-release tear-off: the tab was released BELOW the
-                // strip (dragged down into the window body) and let go.
-                // Spawn the new window at the release point NOW — deliberately
-                // not mid-drag, so nothing detaches until the user releases
-                // (the behaviour they expect). Lone tabs never tear (tearing
-                // the only tab would just trade one single-tab window for
-                // another and strand the source); their cross-window exit is
-                // the host mouse-hook remount.
-                const releasedBelowStrip =
-                    rect != null && input.clientY > rect.bottom + TEAR_PAST_PX;
-                if (
-                    !dropInsideBar &&
-                    releasedBelowStrip &&
-                    draggedTabId != null &&
-                    tabIds().length > 1
-                ) {
-                    // Clear the payload SYNCHRONOUSLY (before the async
-                    // tear-off) so CrossWindowDragMonitor's dragend handler —
-                    // which may fire for the same gesture — sees no payload
-                    // and doesn't double-process this tear.
-                    setCurrentDragPayload(null);
-                    tearOffTabAtRelease(draggedTabId, input);
-                    setInsertionPoint(null);
-                    return;
-                }
-
-                const willReorder = dropInsideBar && ip != null && draggedTabId != null;
-
-                if (willReorder || location.current.dropTargets.length > 0) {
-                    setCurrentDragPayload(null);
-                }
-
-                if (willReorder) {
-                    const tabs = tabIds();
-                    const wsId = workspace()?.oid;
-
-                    executeReorder(ip, draggedTabId, tabs, wsId);
-
-                    // Trigger bounce on the dragged tab at its new position
-                    setBouncingTabId(draggedTabId);
-                    setTimeout(() => setBouncingTabId(null), 400);
-
-                    Logger.info("dnd", "tab drop", {
-                        draggedTabId,
-                        beforeTabId: ip.beforeTabId,
-                        afterTabId: ip.afterTabId,
-                        workspaceId: wsId,
-                    });
-                }
-
-                setInsertionPoint(null);
-            },
-        });
-        onCleanup(cleanup);
 
         // Pane (tile) drags over the tab bar (SPEC_PANE_DRAG_TO_TAB_2026_07_10.md,
         // spring-loaded-tabs revision). The interactive pieces live in
@@ -310,32 +273,11 @@ export function useTabDragAndDrop(
         //       with spring-activated tabs still recorded means the drag
         //       ended without (a) or (b) firing — clean up before the
         //       stuck overlay swallows the click's target.
-        const cleanupTileDragState = () => {
-            setHoveredDropTabId(null);
-            clearCrossTabDrop();
-            setTileDragInFlight(false);
-            // Reset EVERY tab's overlay, not just the spring-activated
-            // set: the SOURCE tab's activeDrag is normally reset by its
-            // own draggable's onDrop, but that dispatch is skipped
-            // whenever dragend is suppressed (swallowed-drag paths,
-            // source unmounted early, …) — and a stuck overlay is a dead
-            // tab. Safe here because this only runs at end-of-drag.
-            for (const tabId of tabIds()) {
-                getLayoutModelForTabById(tabId)?.activeDrag._set(false);
-            }
-            dragActivatedTabIds.clear();
-            // Deferred dangling-leaf prune: mid-drag pruning is gated off
-            // (see pruneDanglingLeaves), so the source tab's disowned
-            // leaf is removed HERE, after the gesture and the move RPC's
-            // Tab updates have settled. 250ms comfortably covers the
-            // observed 20-40ms RPC round-trip.
-            setTimeout(() => {
-                for (const tabId of tabIds()) {
-                    const model = getLayoutModelForTabById(tabId);
-                    if (model) pruneDanglingLeaves(model);
-                }
-            }, 250);
-        };
+        //
+        // Shared with TileLayout.win32.tsx's native pointer-drag tracker
+        // (Windows pane source — SPEC_NATIVE_POINTER_DRAG_TEAROFF_2026_07_28
+        // §3.5), which has no pragmatic-dnd monitor to dispatch this from —
+        // see cleanupTileDragState's own doc comment in tabbar-dnd.ts.
         const cleanupTileMonitor = monitorForElements({
             canMonitor: ({ source }) => source.data.type === tileItemType,
             onDrop: cleanupTileDragState,

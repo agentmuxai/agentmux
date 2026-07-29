@@ -797,6 +797,17 @@ export function buildCefApi(): AppApi {
         getMouseButtonState: async () => {
             return await invokeCommand<boolean>("get_mouse_button_state");
         },
+
+        // --- Native pointer-capture drag (SPEC_NATIVE_POINTER_DRAG_TEAROFF_2026_07_28) ---
+        engageNativeWindowDrag: async (label: string, grabOffsetX: number, grabOffsetY: number) => {
+            await invokeCommand("engage_native_window_drag", { label, grabOffsetX, grabOffsetY });
+        },
+        updateNativeWindowDrag: async (screenX: number, screenY: number) => {
+            await invokeCommand("update_native_window_drag", { screenX, screenY });
+        },
+        endNativeWindowDrag: async () => {
+            await invokeCommand("end_native_window_drag");
+        },
     };
 
     return api;

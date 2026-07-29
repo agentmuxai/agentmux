@@ -42,6 +42,94 @@ import { dragState, isCrossTabDrag } from "./tilelayout-drag-state";
 
 export const tileItemType = "TILE_ITEM";
 
+/**
+ * Nearest-pane drop-direction computation, shared by the dropTargetForElements
+ * fallback below (macOS/Linux, and Windows in-window drops that pragmatic-dnd
+ * still drives) and, per SPEC_NATIVE_POINTER_DRAG_TEAROFF_2026_07_28 §3.5,
+ * TileLayout.win32.tsx's native pointer-drag tracker (Windows tear-off
+ * source), which has no native drag session to hand this off to a per-node
+ * dropTargetForElements and so always hits this "nearest leaf" path directly.
+ * `clientX/Y` are viewport-relative. Dispatches ComputeMove/ClearPendingAction
+ * on `layoutModel` and records a cross-tab drop note when applicable — no
+ * return value, callers read layoutModel's reactive state for the result.
+ */
+export function computePaneHoverAndDispatch(
+    layoutModel: LayoutModel,
+    dragNodeId: string | null,
+    clientX: number,
+    clientY: number,
+): void {
+    if (!dragNodeId) return;
+    const container = layoutModel.displayContainerRef?.current;
+    if (!container) return;
+    const containerRect = container.getBoundingClientRect();
+    const offset = { x: clientX - containerRect.x, y: clientY - containerRect.y };
+
+    // If the cursor is inside the ORIGIN pane's rect, treat as a no-op drag —
+    // see the call site's own comment history for the full rationale.
+    const originRect = layoutModel.getNodeRectById(dragNodeId);
+    if (
+        originRect &&
+        offset.x >= originRect.left &&
+        offset.x <= originRect.left + originRect.width &&
+        offset.y >= originRect.top &&
+        offset.y <= originRect.top + originRect.height
+    ) {
+        layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+        return;
+    }
+
+    let bestLeafId: string | null = null;
+    let bestRect: { top: number; left: number; width: number; height: number } | null = null;
+    let bestDist = Infinity;
+    for (const leaf of layoutModel.leafs()) {
+        if (leaf.id === dragNodeId) continue;
+        const rect = layoutModel.getNodeRectById(leaf.id);
+        if (!rect) continue;
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        const dx = offset.x - cx;
+        const dy = offset.y - cy;
+        const dist = dx * dx + dy * dy;
+        if (dist < bestDist) {
+            bestDist = dist;
+            bestLeafId = leaf.id;
+            bestRect = rect;
+        }
+    }
+    if (!bestLeafId || !bestRect) return;
+
+    // Clamp to the chosen rect — see the call site's own comment history.
+    const clampedOffset = {
+        x: Math.max(bestRect.left, Math.min(bestRect.left + bestRect.width, offset.x)),
+        y: Math.max(bestRect.top, Math.min(bestRect.top + bestRect.height, offset.y)),
+    };
+
+    const crossTab = isCrossTabDrag(layoutModel);
+    const rawDirection = determineDropDirection(bestRect, clampedOffset);
+    const direction = crossTab ? clampCrossTabDirection(rawDirection) : rawDirection;
+    layoutModel.treeReducer({
+        type: LayoutTreeActionType.ComputeMove,
+        nodeId: bestLeafId,
+        nodeToMoveId: dragNodeId,
+        direction,
+        nodeToMove: crossTab ? dragState.node : undefined,
+    } as LayoutTreeComputeMoveNodeAction);
+    if (crossTab) {
+        const blockId = dragState.node?.data?.blockId;
+        const sourceTabId = dragState.layoutModel?.tabAtom()?.oid;
+        const targetTabId = layoutModel.tabAtom()?.oid;
+        const bestLeaf = layoutModel.leafs().find((l) => l.id === bestLeafId);
+        const targetBlockId = bestLeaf?.data?.blockId;
+        if (blockId && sourceTabId && targetTabId && targetBlockId
+            && direction !== undefined && direction !== DropDirection.Center) {
+            noteCrossTabDrop({ blockId, sourceTabId, targetTabId, targetBlockId, direction });
+        } else {
+            noteCrossTabDrop(null);
+        }
+    }
+}
+
 export function NodeBackdrops(props: { layoutModel: LayoutModel }) {
     const blockBlurAtom = getSettingsKeyAtom("window:magnifiedblockblursecondarypx");
     const blockBlur = () => blockBlurAtom();
@@ -221,92 +309,7 @@ export const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
     // cursor is over an overlay-node, the per-pane logic takes
     // precedence and this no-ops.
     const fallbackComputeDropDirection = throttle(50, (clientX: number, clientY: number) => {
-        const dragNodeId = dragState.nodeId;
-        if (!dragNodeId) return;
-        const container = props.layoutModel.displayContainerRef?.current;
-        if (!container) return;
-        const containerRect = container.getBoundingClientRect();
-        const offset = { x: clientX - containerRect.x, y: clientY - containerRect.y };
-
-        // If the cursor is inside the ORIGIN pane's rect, treat as a
-        // no-op drag — the user's slight wiggle within their own pane
-        // should not pick a "nearest other pane" target. Without this,
-        // a tiny drag-and-release on the same pane in a multi-pane
-        // layout would commit a Move to the closest neighbor on
-        // release. The drop is still caught by onDrop below (clearing
-        // the payload) so the cross-window monitor won't tear off.
-        const originRect = props.layoutModel.getNodeRectById(dragNodeId);
-        if (
-            originRect &&
-            offset.x >= originRect.left &&
-            offset.x <= originRect.left + originRect.width &&
-            offset.y >= originRect.top &&
-            offset.y <= originRect.top + originRect.height
-        ) {
-            props.layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
-            return;
-        }
-
-        let bestLeafId: string | null = null;
-        let bestRect: { top: number; left: number; width: number; height: number } | null = null;
-        let bestDist = Infinity;
-        for (const leaf of props.layoutModel.leafs()) {
-            if (leaf.id === dragNodeId) continue;
-            const rect = props.layoutModel.getNodeRectById(leaf.id);
-            if (!rect) continue;
-            const cx = rect.left + rect.width / 2;
-            const cy = rect.top + rect.height / 2;
-            const dx = offset.x - cx;
-            const dy = offset.y - cy;
-            const dist = dx * dx + dy * dy;
-            if (dist < bestDist) {
-                bestDist = dist;
-                bestLeafId = leaf.id;
-                bestRect = rect;
-            }
-        }
-        if (!bestLeafId || !bestRect) return;
-
-        // Clamp the cursor offset to the chosen rect — by definition
-        // the cursor is OUTSIDE every pane rect when this fallback
-        // runs (dead spot). determineDropDirection returns undefined
-        // for any point outside the supplied dimensions, which would
-        // make this fallback a no-op without clamping. Clamping
-        // resolves the cursor to the nearest edge of the chosen rect,
-        // which gives the natural quadrant for the drop: drag-into-
-        // gutter-right-of-paneA → clamps to paneA.right → returns
-        // Right quadrant of paneA → pane lands between A and B.
-        // (codex P2 on PR #838.)
-        const clampedOffset = {
-            x: Math.max(bestRect.left, Math.min(bestRect.left + bestRect.width, offset.x)),
-            y: Math.max(bestRect.top, Math.min(bestRect.top + bestRect.height, offset.y)),
-        };
-
-        const crossTab = isCrossTabDrag(props.layoutModel);
-        const rawDirection = determineDropDirection(bestRect, clampedOffset);
-        // Cross-tab Outer* clamp — see clampCrossTabDirection.
-        const direction = crossTab ? clampCrossTabDirection(rawDirection) : rawDirection;
-        props.layoutModel.treeReducer({
-            type: LayoutTreeActionType.ComputeMove,
-            nodeId: bestLeafId,
-            nodeToMoveId: dragNodeId,
-            direction,
-            // Cross-tab: see OverlayNode.computeDropDirection — preview only.
-            nodeToMove: crossTab ? dragState.node : undefined,
-        } as LayoutTreeComputeMoveNodeAction);
-        if (crossTab) {
-            const blockId = dragState.node?.data?.blockId;
-            const sourceTabId = dragState.layoutModel?.tabAtom()?.oid;
-            const targetTabId = props.layoutModel.tabAtom()?.oid;
-            const bestLeaf = props.layoutModel.leafs().find((l) => l.id === bestLeafId);
-            const targetBlockId = bestLeaf?.data?.blockId;
-            if (blockId && sourceTabId && targetTabId && targetBlockId
-                && direction !== undefined && direction !== DropDirection.Center) {
-                noteCrossTabDrop({ blockId, sourceTabId, targetTabId, targetBlockId, direction });
-            } else {
-                noteCrossTabDrop(null);
-            }
-        }
+        computePaneHoverAndDispatch(props.layoutModel, dragState.nodeId, clientX, clientY);
     });
 
     onMount(() => {

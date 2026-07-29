@@ -254,11 +254,24 @@ pub fn set_drag_cursor() -> Result<serde_json::Value, String> {
     #[cfg(target_os = "windows")]
     {
         use windows_sys::Win32::UI::WindowsAndMessaging::{
-            CopyIcon, LoadCursorW, SetSystemCursor, IDC_CROSS, OCR_NO,
+            CopyIcon, LoadCursorW, SetCursor, SetSystemCursor, IDC_CROSS, OCR_NO,
         };
         unsafe {
             let cross = LoadCursorW(std::ptr::null_mut(), IDC_CROSS);
             if !cross.is_null() {
+                // Primary fix: a direct SetCursor call. Per Win32 mouse-capture
+                // semantics, WM_SETCURSOR is delivered to NEITHER other windows
+                // NOR the capturing window itself while capture is held (see
+                // SPEC_NATIVE_POINTER_DRAG_TEAROFF_2026_07_28's investigation
+                // notes) — so once native pointer-capture engages (no OLE
+                // session, unlike the old GiveFeedback-racing approach this
+                // replaced), nothing calls SetCursor again until capture ends.
+                // One direct call here is therefore enough to stick for the
+                // whole gesture, including once the cursor leaves the window.
+                SetCursor(cross);
+                // Belt-and-suspenders: also override the OCR_NO system-cursor
+                // resource, in case anything anywhere still resolves a
+                // no-drop cursor by loading IDC_NO fresh mid-gesture.
                 let copy = CopyIcon(cross);
                 if !copy.is_null() {
                     SetSystemCursor(copy, OCR_NO);
@@ -269,12 +282,18 @@ pub fn set_drag_cursor() -> Result<serde_json::Value, String> {
     Ok(serde_json::Value::Null)
 }
 
-/// Restore all system cursors to defaults.
+/// Restore the cursor after a native pointer-capture drag ends.
 pub fn restore_drag_cursor() -> Result<serde_json::Value, String> {
     #[cfg(target_os = "windows")]
     {
-        use windows_sys::Win32::UI::WindowsAndMessaging::{SystemParametersInfoW, SPI_SETCURSORS};
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            LoadCursorW, SetCursor, SystemParametersInfoW, IDC_ARROW, SPI_SETCURSORS,
+        };
         unsafe {
+            let arrow = LoadCursorW(std::ptr::null_mut(), IDC_ARROW);
+            if !arrow.is_null() {
+                SetCursor(arrow);
+            }
             SystemParametersInfoW(SPI_SETCURSORS, 0, std::ptr::null_mut(), 0);
         }
     }
@@ -766,6 +785,130 @@ pub fn start_tab_drag_tracking(
 /// after a tear-off handshake superseded the session.
 pub fn stop_tab_drag_tracking() -> Result<serde_json::Value, String> {
     crate::commands::tear_off_hook::stop_active_hook_session();
+    Ok(serde_json::Value::Null)
+}
+
+/// SPEC_NATIVE_POINTER_DRAG_TEAROFF_2026_07_28 — begin a native window drag.
+/// Called once, at the moment a torn-off tab/pane window is created (or an
+/// already-floating window starts being re-dragged) under the frontend's
+/// `setPointerCapture` tracker. Resolves the label to an HWND ONCE via the
+/// strict resolver and caches it in `state.native_drag_target` so every
+/// subsequent `update_native_window_drag` call is a single `SetWindowPos`
+/// with no per-frame label→HWND lookup — the performance case the spec is
+/// built on. `grabOffsetX/Y` are the cursor's offset (in physical screen px)
+/// from the window's top-left at engage time, so `updateNativeWindowDrag`
+/// can reposition the window so that same point stays under the cursor.
+pub fn engage_native_window_drag(
+    state: &Arc<AppState>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let label = args
+            .get("label")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "missing label".to_string())?
+            .to_string();
+        let grab_offset_x = args
+            .get("grabOffsetX")
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| "missing grabOffsetX".to_string())? as i32;
+        let grab_offset_y = args
+            .get("grabOffsetY")
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| "missing grabOffsetY".to_string())? as i32;
+
+        let hwnd = unsafe { super::window::resolve_window_hwnd_strict(state, &label) }
+            .ok_or_else(|| format!("no window for label: {}", label))?;
+
+        tracing::info!(
+            target: "dnd:native_drag",
+            label = %label, hwnd = ?hwnd, grab_offset_x, grab_offset_y,
+            "[native_drag] engage"
+        );
+
+        *state.native_drag_target.lock() = Some(crate::state::NativeDragTarget {
+            label,
+            hwnd: hwnd as isize,
+            grab_offset_x,
+            grab_offset_y,
+        });
+        return Ok(serde_json::Value::Null);
+    }
+    #[allow(unreachable_code)]
+    {
+        let _ = (state, args);
+        Ok(serde_json::Value::Null)
+    }
+}
+
+/// SPEC_NATIVE_POINTER_DRAG_TEAROFF_2026_07_28 — reposition the engaged
+/// window per pointermove. Uses the HWND cached by `engage_native_window_drag`
+/// — no label lookup, no IPC round trip beyond this single call. `screenX/Y`
+/// are the current cursor position in physical screen px.
+pub fn update_native_window_drag(
+    state: &Arc<AppState>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            SetWindowPos, HWND_TOP, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER,
+        };
+
+        let screen_x = args
+            .get("screenX")
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| "missing screenX".to_string())? as i32;
+        let screen_y = args
+            .get("screenY")
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| "missing screenY".to_string())? as i32;
+
+        let target = state
+            .native_drag_target
+            .lock()
+            .clone()
+            .ok_or_else(|| "no active native drag target".to_string())?;
+
+        let new_x = screen_x - target.grab_offset_x;
+        let new_y = screen_y - target.grab_offset_y;
+
+        unsafe {
+            SetWindowPos(
+                target.hwnd as *mut std::ffi::c_void,
+                HWND_TOP,
+                new_x,
+                new_y,
+                0,
+                0,
+                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+        }
+        return Ok(serde_json::Value::Null);
+    }
+    #[allow(unreachable_code)]
+    {
+        let _ = (state, args);
+        Ok(serde_json::Value::Null)
+    }
+}
+
+/// SPEC_NATIVE_POINTER_DRAG_TEAROFF_2026_07_28 — end the native window
+/// drag gesture (pointerup, Escape-abort, or window/tab destroyed mid-drag).
+/// Idempotent — clearing an already-empty target is a no-op, matching
+/// `stop_tab_drag_tracking`'s idempotency convention.
+pub fn end_native_window_drag(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let cleared = state.native_drag_target.lock().take();
+        tracing::info!(
+            target: "dnd:native_drag",
+            label = ?cleared.as_ref().map(|t| t.label.clone()),
+            "[native_drag] end"
+        );
+    }
+    let _ = state;
     Ok(serde_json::Value::Null)
 }
 

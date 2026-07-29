@@ -30,3 +30,19 @@ pub struct DragSession {
     pub payload: DragPayload,
     pub started_at: u64,
 }
+
+/// Native pointer-capture tab/pane tear-off (SPEC_NATIVE_POINTER_DRAG_TEAROFF_2026_07_28.md).
+/// A torn-off window being live-dragged by the frontend's pointer tracker:
+/// resolved once at `engage_native_window_drag`, then `update_native_window_drag`
+/// repositions it per pointermove via a single cached HWND + grab offset,
+/// with no per-frame label→HWND re-resolution. Single active target — this
+/// gesture has one cursor, matching the same assumption `floating_redock_ghost`
+/// makes for the (unrelated) floating-pane redock ghost.
+#[cfg(target_os = "windows")]
+#[derive(Debug, Clone)]
+pub struct NativeDragTarget {
+    pub label: String,
+    pub hwnd: isize,
+    pub grab_offset_x: i32,
+    pub grab_offset_y: i32,
+}
