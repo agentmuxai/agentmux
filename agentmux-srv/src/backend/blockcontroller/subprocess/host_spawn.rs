@@ -45,7 +45,19 @@ impl SubprocessController {
             return Ok(());
         }
 
-        // Read the previously-captured session id once, up front — used
+        // Hydrate inner.session_id from the config-supplied id if the
+        // controller hasn't captured one yet — MUST run before the
+        // session_id_hint read just below. See
+        // `hydrate_session_id_from_config` for the full rationale
+        // (picker reattach: a fresh controller's inner.session_id is
+        // None, but config.session_id carries the persisted id).
+        // Reordering this after the read (reagent P0 on #2359, an
+        // earlier revision of this same PR) silently dropped --resume
+        // on every reattach's first turn — hydration ran too late for
+        // the read below to see it.
+        self.hydrate_session_id_from_config(config.session_id.as_deref());
+
+        // Read the (now-hydrated) session id once, up front — used
         // both by the lease claim below and by the resume-flag args
         // built after it.
         let session_id_hint = self.inner.lock().unwrap().session_id.clone();
@@ -102,11 +114,6 @@ impl SubprocessController {
         // reached once the lease claim above has succeeded (or was a
         // no-op) — see that block's comment.
         self.emit_message_accepted(&config);
-
-        // Hydrate inner.session_id from the config-supplied id if the
-        // controller hasn't captured one yet. See
-        // `hydrate_session_id_from_config` for the full rationale.
-        self.hydrate_session_id_from_config(config.session_id.as_deref());
 
         // Build CLI args, appending resume flag + session_id if we have one and the provider supports it
         let mut args = config.cli_args.clone();
