@@ -945,7 +945,21 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             // showing a turn genuinely streaming), permanently
             // fast-failing every subsequent send. reagentx P1 on PR #2338
             // (thirty-second re-review).
-            dispatchPane(model.blockId, { type: "FailureCleared" }, "system");
+            //
+            // Gated on the failure actually being "auth" — FailureCleared
+            // has no payload and unconditionally clears state.failure
+            // REGARDLESS of code (reducer.ts's FailureCleared case), so
+            // dispatching it unconditionally here would ALSO silently wipe
+            // an unrelated concurrent failure (rate_limited, overloaded,
+            // context_exceeded, unresponsive, etc.) that happens to be
+            // showing the moment a turn-active event arrives, even though
+            // that unrelated problem was never actually resolved. Mirrors
+            // the established pattern at useAgentFailure.ts's silent
+            // self-heal handler ("never blow away an unrelated concurrent
+            // failure"). reagentx P1 on PR #2338 (thirty-fifth re-review).
+            if (paneSnapshot(model.blockId)?.failure?.data.code === "auth") {
+                dispatchPane(model.blockId, { type: "FailureCleared" }, "system");
+            }
         },
     });
 

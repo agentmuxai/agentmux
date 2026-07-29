@@ -715,6 +715,39 @@ describe("useAgentCommands — authFailureToPreserve survives a local command", 
             dispose();
         });
     });
+
+    // reagentx P1 on PR #2338 (thirty-fifth re-review): ctx.clearAuthFailure()
+    // is named and documented as clearing an AUTH-specific failure, but used
+    // to dispatch the same unconditional FailureCleared the reducer applies
+    // regardless of code — an unrelated live failure (e.g. rate_limited)
+    // that arrives independently (useAgentFailure.ts's own AgentFailure
+    // subscription) while a /login attempt is still running would be
+    // silently dismissed the moment /login succeeds, even though that
+    // unrelated problem was never actually resolved.
+    it("does NOT clear an unrelated LIVE non-auth failure when the command calls ctx.clearAuthFailure()", async () => {
+        const rateLimited: AgentFailure = { code: "rate_limited", title: "Rate limited", detail: "429", retryable: true };
+        hub.dispatchSlashCommand.mockImplementation(async (_msg: string, _registry: unknown, ctx: { clearAuthFailure: () => void }) => {
+            // Simulates an UNRELATED failure arriving live, independently,
+            // while this command (e.g. /login's OAuth poll) is still
+            // running — mirrors useAgentFailure.ts's own AgentFailure
+            // subscription dispatching FailureObserved for a completely
+            // different reason.
+            model.dispatchPane({ type: "FailureObserved", failure: rateLimited, at: Date.now() }, "system");
+            ctx.clearAuthFailure();
+            return { kind: "handled" };
+        });
+        const model = setup();
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands(makeOpts(model));
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            // No auth failure was showing at send time — mirrors the
+            // ordinary /login-on-a-healthy-pane case.
+            await commands.sendMessage("/login", false, null);
+
+            expect(paneSnapshot(BLOCK_ID)?.failure?.data).toEqual(rateLimited);
+            dispose();
+        });
+    });
 });
 
 // Codex P2 on PR #2338 (tenth re-review): the auth guard originally ran
@@ -1156,6 +1189,59 @@ describe("useAgentCommands — flushPendingControllerRefresh", () => {
             await commands.flushPendingControllerRefresh();
             expect(forceControllerRefresh).toHaveBeenCalledOnce();
 
+            dispose();
+        });
+    });
+
+    // reagentx P1 on PR #2338 (thirty-fifth re-review): the success branch
+    // dispatched an unconditional FailureCleared, which the reducer applies
+    // regardless of data.code — so a deferred /login refresh succeeding
+    // would silently wipe an UNRELATED live failure (e.g. rate_limited)
+    // that arrived on this pane while the refresh was still deferred,
+    // even though that unrelated problem was never actually resolved.
+    it("does NOT clear an unrelated LIVE non-auth failure when the deferred refresh succeeds", async () => {
+        hub.dispatchSlashCommand.mockImplementation(async (_msg: string, _registry: unknown, ctx: { deferControllerRefreshUntilIdle: () => void }) => {
+            ctx.deferControllerRefreshUntilIdle();
+            return { kind: "handled" };
+        });
+        const model = setup();
+        const forceControllerRefresh = vi.fn(async () => true);
+        const notifyControllerHealthy = vi.fn();
+        const rateLimited: AgentFailure = { code: "rate_limited", title: "Rate limited", detail: "429", retryable: true };
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy,
+                forceControllerRefresh,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => true,
+                backToPicker: async () => {},
+            });
+
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("/login", /* wasAlreadyWorking */ true);
+
+            // An UNRELATED failure arrives live while the refresh is still
+            // deferred — mirrors useAgentFailure.ts's own AgentFailure
+            // subscription firing independently of this /login attempt.
+            model.dispatchPane({ type: "FailureObserved", failure: rateLimited, at: Date.now() }, "system");
+
+            await commands.flushPendingControllerRefresh();
+            expect(forceControllerRefresh).toHaveBeenCalledOnce();
+            expect(notifyControllerHealthy).toHaveBeenCalledOnce();
+            expect(paneSnapshot(BLOCK_ID)?.failure?.data).toEqual(rateLimited);
             dispose();
         });
     });
