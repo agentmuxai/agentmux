@@ -741,6 +741,15 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     function trackTurnJustEnded(active: boolean): void {
         if (didTurnJustEnd(wasTurnActive, active)) {
             setTurnJustEndedAtom((n) => n + 1);
+            // Run any controller refresh /login deferred because this exact
+            // turn was still active when it succeeded — see
+            // SlashCommandContext.deferControllerRefreshUntilIdle's doc
+            // comment. No-ops if nothing is pending. `commands` is defined
+            // further down this component body, but this function is only
+            // ever invoked from async event callbacks registered after the
+            // full component setup (including `commands`) has run. Codex
+            // P1 on PR #2338 (thirteenth re-review).
+            void commands.flushPendingControllerRefresh();
         }
         wasTurnActive = active;
     }

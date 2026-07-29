@@ -180,6 +180,22 @@ export interface SlashCommandContext {
      */
     isTurnActive: () => boolean;
     /**
+     * Defer the `forceControllerRefresh` restart until the currently-active
+     * turn ends, instead of skipping it outright. Persistent providers
+     * (`agentmux-srv`'s `persistent.rs`) keep the controller alive across
+     * MANY turns, not just this one — so a `/login` success that just skips
+     * the restart while `isTurnActive()` is true, and declares the pane
+     * healthy anyway, leaves the controller on the stale credential
+     * indefinitely (every fast-fail guard cleared, nothing left to catch
+     * the next message) until the pane is manually reopened. Codex P1 on
+     * PR #2338 (thirteenth re-review). Consumed by
+     * `useAgentCommands.flushPendingControllerRefresh`, which
+     * `agent-view.tsx` calls the moment its turn-just-ended edge detector
+     * fires — so `notifyControllerHealthy`/`clearAuthFailure` are deferred
+     * along with the restart itself, not declared early.
+     */
+    deferControllerRefreshUntilIdle: () => void;
+    /**
      * Register /login's own up-to-5-minute poll as an in-flight recovery
      * attempt, feeding the same shared counter behind
      * `useAgentControllerStatus`'s `loginWaiting()` that

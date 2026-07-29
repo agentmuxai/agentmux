@@ -30,20 +30,31 @@ import type { SlashCommand, SlashCommandContext, SlashResult } from "../types";
  * `agentmux-srv`'s `resync_controller` with `force: true` unconditionally
  * stops the existing controller process before respawning it (see
  * `blockcontroller/mod.rs`'s `needs_replace` check), so forcing a restart
- * mid-turn would kill in-progress agent work. If a turn IS active, the
- * refresh is skipped — the new credential takes effect on this pane's next
- * natural respawn instead, narrower than the original bug this call exists
- * to fix (a fully-idle stale controller) and strictly safer than
- * discarding live output. Codex P1 on PR #2338 (tenth re-review).
+ * mid-turn would kill in-progress agent work.
  *
- * If the refresh RPC itself fails (and wasn't skipped), the controller may
+ * If a turn IS active, the restart (and declaring the pane healthy) is
+ * DEFERRED until that turn ends, not skipped outright — persistent
+ * providers keep the controller alive across many turns, not just this
+ * one, so skipping-and-declaring-healthy would leave the controller on the
+ * stale credential indefinitely with every fast-fail guard already
+ * cleared. Codex P1 on PR #2338 (thirteenth re-review); superseded the
+ * tenth re-review's skip-and-declare-healthy approach, which reintroduced
+ * exactly the bug forceControllerRefresh was added to /login to fix, just
+ * delayed by one turn.
+ *
+ * If the refresh RPC itself fails (and wasn't deferred), the controller may
  * still be on the stale credential — declaring the pane healthy anyway
  * would clear every fast-fail guard this PR added and let the next message
  * reach that stale process regardless. Codex P1 on PR #2338 (tenth
  * re-review).
  */
 async function finalizeLoginSuccess(ctx: SlashCommandContext): Promise<SlashResult> {
-    const refreshed = ctx.isTurnActive() ? true : await ctx.forceControllerRefresh();
+    if (ctx.isTurnActive()) {
+        ctx.deferControllerRefreshUntilIdle();
+        ctx.log("auth", "login saved — the running agent will pick it up once the current turn finishes", "warn");
+        return { kind: "ok" };
+    }
+    const refreshed = await ctx.forceControllerRefresh();
     if (!refreshed) {
         return {
             kind: "error",

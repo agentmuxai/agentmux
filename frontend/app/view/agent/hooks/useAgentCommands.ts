@@ -231,6 +231,16 @@ export interface UseAgentCommands {
      * filter). Consumed by SlashHelpPanel to render the grouped list.
      */
     availableCommands: () => SlashCommand[];
+    /**
+     * Runs the controller refresh /login deferred because a turn was
+     * actively streaming when it succeeded (see
+     * SlashCommandContext.deferControllerRefreshUntilIdle's doc comment).
+     * No-ops if nothing is pending. agent-view.tsx calls this from its
+     * existing turn-just-ended edge detector (trackTurnJustEnded) so the
+     * deferred restart runs the moment the turn that blocked it actually
+     * finishes. Codex P1 on PR #2338 (thirteenth re-review).
+     */
+    flushPendingControllerRefresh: () => Promise<void>;
 }
 
 // Runtime-config + auth slash commands (/model /effort /permission-mode
@@ -320,6 +330,36 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         setHelpVisible(false);
     };
 
+    // Set by /login's finalizeLoginSuccess (login.ts) when it must skip an
+    // immediate forceControllerRefresh because a turn is actively streaming
+    // — forcing a restart mid-turn would kill it. Persistent providers
+    // (agentmux-srv's persistent.rs) keep the controller alive across MANY
+    // turns, not just this one, so treating the skip as "done" and clearing
+    // every fast-fail guard right away would leave the controller on the
+    // stale credential indefinitely (until the pane is manually reopened),
+    // guards and all. Codex P1 on PR #2338 (thirteenth re-review). Consumed
+    // by flushPendingControllerRefresh, which agent-view.tsx calls from its
+    // existing turn-just-ended edge detector (trackTurnJustEnded).
+    let controllerRefreshPendingUntilIdle = false;
+    const deferControllerRefreshUntilIdle = (): void => {
+        controllerRefreshPendingUntilIdle = true;
+    };
+    const flushPendingControllerRefresh = async (): Promise<void> => {
+        if (!controllerRefreshPendingUntilIdle) return;
+        controllerRefreshPendingUntilIdle = false;
+        const refreshed = await opts.forceControllerRefresh();
+        if (refreshed) {
+            opts.notifyControllerHealthy();
+            opts.model.dispatchPane({ type: "FailureCleared" });
+        }
+        // Best-effort, matching forceControllerRefresh's own contract — on
+        // failure it already logged a warning. Leaving the fast-fail guards
+        // untouched here (not clearing them) is the safe choice, not a
+        // regression: the controller is still on the stale credential, so a
+        // message should still be blocked until the user retries /login or
+        // reopens the pane.
+    };
+
     // Build the SlashCommandContext bundle. Used by sendMessage's
     // dispatch and by completions(); both need the same view of the
     // pane's reactive state.
@@ -348,6 +388,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         notifyControllerHealthy: opts.notifyControllerHealthy,
         clearAuthFailure: () => opts.model.dispatchPane({ type: "FailureCleared" }),
         forceControllerRefresh: opts.forceControllerRefresh,
+        deferControllerRefreshUntilIdle,
         isTurnActive: () =>
             wasAlreadyWorking ?? workingFromPhase(paneSnapshot(opts.blockId)?.turnPhase ?? { kind: "Idle" }),
         beginRecoveryFlow: opts.beginRecoveryFlow,
@@ -881,6 +922,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         helpVisible,
         closeHelp,
         availableCommands,
+        flushPendingControllerRefresh,
     };
 }
 
