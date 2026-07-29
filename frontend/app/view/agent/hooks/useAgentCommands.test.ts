@@ -1532,6 +1532,151 @@ describe("useAgentCommands — idle sendMessage runs the deferred controller ref
             dispose();
         });
     });
+
+    // reagentx P1 on PR #2338 (twenty-third re-review): when THIS fresh
+    // idle send is the one that resolves a pending deferred refresh,
+    // flushPendingControllerRefresh's success path fires flushHeldMessages()
+    // in the background to drain any PRE-EXISTING held items — but the
+    // caller (sendMessage) used to fall straight through to its own direct
+    // deliverToBackend call without waiting for that drain, so the two
+    // AgentInputCommand deliveries could interleave with no ordering
+    // guarantee, violating the file's documented FIFO submission-order
+    // invariant.
+    it("delivers a pre-existing held message before this fresh send's own message when THIS send is the one that resolves the deferred refresh (FIFO order)", async () => {
+        hub.dispatchSlashCommand.mockImplementation(async (_msg: string, _registry: unknown, ctx: { deferControllerRefreshUntilIdle: () => void }) => {
+            ctx.deferControllerRefreshUntilIdle();
+            return { kind: "handled" };
+        });
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+        const forceControllerRefresh = vi.fn(async () => true);
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => true,
+                backToPicker: async () => {},
+            });
+
+            // /login succeeds mid-turn (defers instead of refreshing now).
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("/login", /* wasAlreadyWorking */ true);
+
+            // An OLDER message gets held behind the same active turn.
+            await commands.sendMessage("old message", /* wasAlreadyWorking */ true);
+            expect(commands.hasHeldMessages()).toBe(true);
+
+            // The turn ends; local turnPhase reaches idle.
+            model.dispatchPane({ type: "StreamFlushObserved", addedCount: 1, at: Date.now() }, "system");
+            model.dispatchPane({ type: "ReconcileTurnActive", at: Date.now(), active: false }, "system");
+
+            // A fresh idle send arrives and is itself the call that resolves
+            // the deferred refresh (isBackendTurnConfirmedIdle is true).
+            await commands.sendMessage("new message", /* wasAlreadyWorking */ false);
+
+            expect(forceControllerRefresh).toHaveBeenCalledOnce();
+            expect(commands.hasHeldMessages()).toBe(false);
+            expect(hub.agentInput).toHaveBeenCalledTimes(2);
+            // FIFO: the pre-existing held message must be delivered BEFORE
+            // this send's own message, not interleaved/reordered.
+            expect(hub.agentInput.mock.calls[0][1]).toEqual(
+                expect.objectContaining({ message: "old message" }),
+            );
+            expect(hub.agentInput.mock.calls[1][1]).toEqual(
+                expect.objectContaining({ message: "new message" }),
+            );
+            dispose();
+        });
+    });
+
+    // codex P2 on PR #2338 (twenty-third re-review): a message held because
+    // its deferred refresh was still blocked (not the busy-path hold, which
+    // never has its live failure cleared by TurnStart) must carry its
+    // captured authFailureToPreserve — otherwise a SUBSEQUENT FAILED
+    // deferred refresh (leaving the controller on the still-bad credential)
+    // is invisible to flushHeldMessages: authWasKnownBadAtQueueTime is false
+    // (a mid-turn auth failure never sets canRetry/loginWaiting) and the
+    // live check finds nothing (TurnStart already cleared it at queue time).
+    it("rejects a held message (queued while a deferred refresh was blocked) whose captured authFailureToPreserve predates a since-FAILED refresh, and restores its banner", async () => {
+        hub.dispatchSlashCommand.mockImplementation(async (_msg: string, _registry: unknown, ctx: { deferControllerRefreshUntilIdle: () => void }) => {
+            ctx.deferControllerRefreshUntilIdle();
+            return { kind: "handled" };
+        });
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+        // The deferred refresh itself FAILS.
+        const forceControllerRefresh = vi.fn(async () => false);
+        let backendConfirmedIdle = false;
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => backendConfirmedIdle,
+                backToPicker: async () => {},
+            });
+
+            // /login succeeds mid-turn (defers instead of refreshing now).
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("/login", /* wasAlreadyWorking */ true);
+
+            // A fresh idle send captures a live auth failure right before
+            // TurnStart clears it — mirrors handleSendMessage's own
+            // capture. The refresh is still blocked, so this gets held.
+            const capturedFailure: AgentFailure = { code: "auth", title: "Not logged in", detail: "401", retryable: true };
+            await commands.sendMessage("fresh message", /* wasAlreadyWorking */ false, capturedFailure);
+            expect(commands.hasHeldMessages()).toBe(true);
+            expect(hub.agentInput).not.toHaveBeenCalled();
+
+            // The backend confirms idle — the deferred refresh runs but
+            // FAILS. flushPendingControllerRefresh's own auto-drain only
+            // fires on SUCCESS, so — mirroring agent-view.tsx's reactive
+            // turnIdle effect, which independently calls flushHeldMessages()
+            // whenever hasHeldMessages() is true regardless of the refresh
+            // outcome — a separate flushHeldMessages() call is what
+            // actually rejects the now-known-bad item in production.
+            backendConfirmedIdle = true;
+            await commands.flushPendingControllerRefresh();
+            await commands.flushHeldMessages();
+
+            expect(forceControllerRefresh).toHaveBeenCalledOnce();
+            // Must NOT have been delivered to the still-bad controller.
+            expect(hub.agentInput).not.toHaveBeenCalled();
+            expect(commands.hasHeldMessages()).toBe(false);
+            // The recovery banner must be restored, not silently dropped.
+            expect(paneSnapshot(BLOCK_ID)?.failure?.data.code).toBe("auth");
+            dispose();
+        });
+    });
 });
 
 // Codex P1 on PR #2338 (nineteenth re-review): a premature per-round
