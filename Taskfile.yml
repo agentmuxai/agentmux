@@ -676,13 +676,23 @@ tasks:
                   echo "" >&2
                 fi
                 mkdir -p dist/cef/locales
+                # Optional-file copies below use `[ -f src ] && cp` instead of
+                # `cp ... 2>/dev/null || true`: Task's shell (mvdan.cc/sh) runs
+                # `cp` as a native Go builtin, not a spawned cp.exe, and on
+                # Windows a missing SOURCE file surfaces as a hard
+                # GetFileAttributesEx task-engine error that bypasses the
+                # `2>/dev/null || true` shell-level suppression entirely —
+                # confirmed live when vulkan-1.dll was absent from a codec CEF
+                # runtime (docs/retro/retro-nightly-windows-cef-zip-backslash-paths-2026-07-29.md).
+                # An explicit existence check (already used below for the
+                # locale file) sidesteps the builtin's error path altogether.
                 # Core DLLs (required)
                 cp -f "$cefDir/libcef.dll" dist/cef/
-                cp -f "$cefDir/chrome_elf.dll" dist/cef/ 2>/dev/null || true
+                [ -f "$cefDir/chrome_elf.dll" ] && cp -f "$cefDir/chrome_elf.dll" dist/cef/
                 # GPU support (required — ANGLE + D3D compiler)
-                cp -f "$cefDir/libEGL.dll" dist/cef/ 2>/dev/null || true
-                cp -f "$cefDir/libGLESv2.dll" dist/cef/ 2>/dev/null || true
-                cp -f "$cefDir/d3dcompiler_47.dll" dist/cef/ 2>/dev/null || true
+                [ -f "$cefDir/libEGL.dll" ] && cp -f "$cefDir/libEGL.dll" dist/cef/
+                [ -f "$cefDir/libGLESv2.dll" ] && cp -f "$cefDir/libGLESv2.dll" dist/cef/
+                [ -f "$cefDir/d3dcompiler_47.dll" ] && cp -f "$cefDir/d3dcompiler_47.dll" dist/cef/
                 # Software-GL fallback (SwiftShader, ~6 MB). When the HARDWARE GPU process
                 # can't boot, Chromium falls back to SwiftShader for WebGL ONLY if these are
                 # present AND --enable-unsafe-swiftshader is set (app.rs). Without them, the
@@ -692,13 +702,15 @@ tasks:
                 # (GPU process STATUS_BREAKPOINTs at init — see issue / the DCHECK-build root
                 # cause). macOS/Linux bundles already ship SwiftShader; this restores parity.
                 # SAFETY NET ONLY — hardware GL is still preferred when it boots.
-                cp -f "$cefDir/vk_swiftshader.dll" dist/cef/ 2>/dev/null || true
-                cp -f "$cefDir/vulkan-1.dll" dist/cef/ 2>/dev/null || true
-                cp -f "$cefDir/vk_swiftshader_icd.json" dist/cef/ 2>/dev/null || true
+                [ -f "$cefDir/vk_swiftshader.dll" ] && cp -f "$cefDir/vk_swiftshader.dll" dist/cef/
+                [ -f "$cefDir/vulkan-1.dll" ] && cp -f "$cefDir/vulkan-1.dll" dist/cef/
+                [ -f "$cefDir/vk_swiftshader_icd.json" ] && cp -f "$cefDir/vk_swiftshader_icd.json" dist/cef/
                 # Data files (required)
-                cp -f "$cefDir/icudtl.dat" dist/cef/ 2>/dev/null || true
-                cp -f "$cefDir/v8_context_snapshot.bin" dist/cef/ 2>/dev/null || true
-                cp -f "$cefDir"/*.pak dist/cef/ 2>/dev/null || true
+                [ -f "$cefDir/icudtl.dat" ] && cp -f "$cefDir/icudtl.dat" dist/cef/
+                [ -f "$cefDir/v8_context_snapshot.bin" ] && cp -f "$cefDir/v8_context_snapshot.bin" dist/cef/
+                for pak in "$cefDir"/*.pak; do
+                  [ -f "$pak" ] && cp -f "$pak" dist/cef/
+                done
                 # Locales — en-US only (saves ~18 MB)
                 [ -f "$cefDir/locales/en-US.pak" ] && cp -f "$cefDir/locales/en-US.pak" dist/cef/locales/
                 # SKIPPED (not needed):

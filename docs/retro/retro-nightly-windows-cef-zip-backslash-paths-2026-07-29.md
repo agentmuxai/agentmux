@@ -60,3 +60,41 @@ pipeline crossing this same boundary.
 - `docs/cef-build/build-patched-cef-windows.md:208-228` — the
   `Compress-Archive` step that produces the backslash-path zip (unchanged;
   the fix is entirely on the consuming side).
+- `Taskfile.yml`'s `bundle:windows` task — second, distinct bug found while
+  live-verifying the fix above (see addendum below).
+
+## Addendum (same day): a second, distinct bug surfaced once extraction was fixed
+
+With the zip extraction fixed, a live verification run
+(`gh workflow run ci-nightly-artifacts.yml --ref
+fix/windows-cef-zip-extract-backslash-paths`) confirmed the codec-enabled CEF
+runtime now resolves and version-matches correctly (`✓ CEF runtime OK:
+libcef.dll ... matches linked cef crate major 148`) — but the build then
+failed one step later, in `Taskfile.yml`'s `bundle:windows` task:
+
+```
+task: Failed to run task "bundle:windows": GetFileAttributesEx
+D:\a\agentmux\agentmux/cef-runtime-windows/vulkan-1.dll: The system cannot
+find the file specified.
+```
+
+`vulkan-1.dll` (part of the optional SwiftShader software-GL fallback trio)
+happens to be absent from this particular codec-enabled CEF build. The
+bundling script's copy line for it —
+`cp -f "$cefDir/vulkan-1.dll" dist/cef/ 2>/dev/null || true` — was written to
+tolerate exactly that (matching every other optional-file copy in the same
+block). It didn't: Task's shell (`mvdan.cc/sh`) runs `cp` as a native Go
+builtin rather than spawning a real `cp.exe`, and on Windows a missing
+*source* file surfaces as a hard task-engine error (a raw
+`GetFileAttributesEx` failure) that bypasses `2>/dev/null || true`
+entirely — that shell-level suppression only catches errors the builtin
+reports through normal stderr/exit-code channels, not this one.
+
+Fixed by replacing every `cp ... 2>/dev/null || true` in `bundle:windows`
+with an explicit `[ -f src ] && cp ...` existence check — the same pattern
+the block already used for the locale-file copy, which is why that one line
+never hit this bug. Scoped to `bundle:windows` only: `bundle:linux`'s
+identical-looking `cp ... 2>/dev/null || true` lines run on a Linux runner,
+where Task's builtin `cp` doesn't go through `GetFileAttributesEx` and the
+Linux job in the same run completed successfully — no evidence that side is
+affected, so left as-is rather than speculatively changed.
