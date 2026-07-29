@@ -110,6 +110,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
     // Filestore — the spawn-gate error frame must be PERSISTED to the
     // block file, not just live-broadcast (reagent P1, PR #2164 round 2).
     let filestore_ai = state.filestore.clone();
+    let local_web_url_ai = state.local_web_url.clone();
     engine.register_handler(
         COMMAND_AGENT_INPUT,
         Box::new(move |data, _ctx| {
@@ -119,6 +120,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
             let broker = broker_ai.clone();
             let container_manager = container_manager_ai.clone();
             let filestore_gate = filestore_ai.clone();
+            let local_web_url = local_web_url_ai.clone();
             Box::pin(async move {
                 let cmd: CommandAgentInputData = serde_json::from_value(data)
                     .map_err(|e| format!("agentinput: {e}"))?;
@@ -480,6 +482,26 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                         if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
                             sub.add_agent(&agent_name);
                         }
+                        // Also mirror into the per-channel + host-global
+                        // shared file registries — this AgentInput/
+                        // SubprocessController path (unlike ShellController/
+                        // PersistentSubprocessController) previously only
+                        // ever registered in the in-memory Tier-1 map,
+                        // leaving it permanently unreachable via Tier 2/2b
+                        // cross-instance/cross-channel delivery (reagent P1,
+                        // third round on PR #2350).
+                        let data_dir = crate::backend::base::get_wave_data_dir();
+                        crate::backend::reactive::registry::write(
+                            &data_dir,
+                            &agent_name,
+                            &local_web_url,
+                            &cmd.blockid,
+                        );
+                        crate::backend::reactive::registry::write_shared_from_env(
+                            &agent_name,
+                            &local_web_url,
+                            &cmd.blockid,
+                        );
                     }
                 }
 
@@ -505,6 +527,13 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                         let handler = crate::backend::reactive::handler::get_global_handler();
                         let agent_name = handler.agent_id_for_block(&cmd.blockid);
                         handler.unregister_block(&cmd.blockid);
+                        if let Some(ref name) = agent_name {
+                            // Symmetric teardown for the registry writes added
+                            // alongside SubprocessSpawn's register_agent call.
+                            let data_dir = crate::backend::base::get_wave_data_dir();
+                            crate::backend::reactive::registry::remove(&data_dir, name);
+                            crate::backend::reactive::registry::remove_shared_from_env(name);
+                        }
                         if let (Some(sub), Some(name)) = (
                             crate::muxbus::cloud_subscriber::get_global_subscriber(),
                             agent_name,

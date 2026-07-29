@@ -138,6 +138,7 @@ pub async fn handle_inbound(headers: HeaderMap, body: Bytes) -> impl IntoRespons
             wait_for_idle: false,
             jekt_tier: None,
             delivery_tier: Some("wan".to_string()),
+            forward_hops: 0,
         };
         let result = handler.inject_message(req);
         if !result.success {

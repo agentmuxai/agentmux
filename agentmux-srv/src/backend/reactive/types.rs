@@ -52,6 +52,16 @@ pub struct InjectionRequest {
     /// Delivery tier of this jekt (host/lan/wan) — used in the marker.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delivery_tier: Option<String>,
+    /// Number of cross-instance HTTP forwards this request has already gone
+    /// through (Tier 2a/2b/3 each increment before forwarding). Bounds a
+    /// pathological cycle where two channels each hold a stale-but-
+    /// PID-alive shared-registry entry pointing at the other for the same
+    /// agent name — without this, such a cycle would forward back and
+    /// forth indefinitely, hanging the original request (reagent P1 on
+    /// PR #2350). `#[serde(default)]` so older callers (muxbus client,
+    /// any request that predates this field) default to 0, unaffected.
+    #[serde(default)]
+    pub forward_hops: u8,
 }
 
 /// Response from a message injection attempt.

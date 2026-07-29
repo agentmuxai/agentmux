@@ -259,6 +259,7 @@ fn test_handler_inject_no_sender() {
         wait_for_idle: false,
         jekt_tier: None,
         delivery_tier: None,
+        forward_hops: 0,
     });
 
     assert!(!resp.success);
@@ -278,6 +279,7 @@ fn test_handler_inject_agent_not_found() {
         wait_for_idle: false,
         jekt_tier: None,
         delivery_tier: None,
+        forward_hops: 0,
     });
 
     assert!(!resp.success);
@@ -313,6 +315,7 @@ async fn test_handler_inject_success() {
         wait_for_idle: false,
         jekt_tier: None,
         delivery_tier: None,
+        forward_hops: 0,
     });
 
     assert!(resp.success);
@@ -374,6 +377,7 @@ fn test_handler_inject_structured_delivery_skips_pty() {
         wait_for_idle: false,
         jekt_tier: None,
         delivery_tier: None,
+        forward_hops: 0,
     });
 
     assert!(resp.success);
@@ -419,6 +423,7 @@ async fn test_handler_inject_pty_fallback() {
         wait_for_idle: false,
         jekt_tier: None,
         delivery_tier: None,
+        forward_hops: 0,
     });
 
     assert!(resp.success);
@@ -465,6 +470,7 @@ fn test_handler_inject_structured_failure_no_pty_fallback() {
         wait_for_idle: false,
         jekt_tier: None,
         delivery_tier: None,
+        forward_hops: 0,
     });
 
     assert!(!resp.success);
@@ -490,6 +496,7 @@ fn test_handler_audit_log() {
         wait_for_idle: false,
         jekt_tier: None,
         delivery_tier: None,
+        forward_hops: 0,
     });
 
     let log = handler.get_audit_log(10);
@@ -616,6 +623,7 @@ fn test_injection_request_serde() {
         wait_for_idle: false,
         jekt_tier: None,
         delivery_tier: None,
+        forward_hops: 0,
     };
 
     let json = serde_json::to_string(&req).unwrap();
@@ -694,4 +702,30 @@ fn test_reactive_handler_list() {
 
     let agents = handler.list_agents();
     assert_eq!(agents.len(), 2);
+}
+
+// -- InjectionRequest::forward_hops --
+
+#[test]
+fn injection_request_forward_hops_defaults_to_zero_when_absent() {
+    // Older callers (muxbus client, any payload predating this field) must
+    // still deserialize -- the hop-count guard added for PR #2350's forward-
+    // loop fix must not break existing cross-instance callers.
+    let json = serde_json::json!({
+        "target_agent": "agent1",
+        "message": "hello",
+    });
+    let req: InjectionRequest = serde_json::from_value(json).unwrap();
+    assert_eq!(req.forward_hops, 0);
+}
+
+#[test]
+fn injection_request_forward_hops_round_trips() {
+    let json = serde_json::json!({
+        "target_agent": "agent1",
+        "message": "hello",
+        "forward_hops": 2,
+    });
+    let req: InjectionRequest = serde_json::from_value(json).unwrap();
+    assert_eq!(req.forward_hops, 2);
 }
