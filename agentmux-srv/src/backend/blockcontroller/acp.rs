@@ -22,7 +22,7 @@
 //!
 //! See: https://github.com/agentclientprotocol/agent-client-protocol
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -44,6 +44,32 @@ use crate::backend::wps;
 pub const ACP_OUTPUT_SUBJECT: &str = "output";
 
 pub const BLOCK_CONTROLLER_ACP: &str = "acp";
+
+/// Remove `resolved_id` from the set of outstanding (sent, not yet
+/// resolved) prompts and report whether the set is now EMPTY — i.e.
+/// whether every prompt sent so far has now been resolved, by either a
+/// real `stopReason` completion or a JSON-RPC `error` rejection, meaning
+/// the turn has genuinely ended. Extracted as a pure function over a
+/// plain `HashSet` so this exact logic is directly unit-testable; call
+/// sites wrap it with the shared mutex around the real
+/// `outstanding_prompt_ids`.
+///
+/// Tracking every outstanding prompt — not just "the latest" — is what
+/// makes response ORDERING irrelevant: "is the turn over" only ever asks
+/// "is anything still outstanding," never "was this the most recent
+/// one." codex P2 on PR #2338 (thirtieth re-review) — superseded the
+/// twenty-seventh through twenty-ninth re-reviews' single latest/
+/// previous-id tracking (`is_latest_prompt_completion` +
+/// `rollback_latest_prompt_id_if_unchanged`, both removed), which could
+/// permanently strand `turn_active` at `true`: a steering prompt's
+/// rejection arriving AFTER the earlier prompt's completion had already
+/// been consumed (and discarded as "not the latest") rolled
+/// `latest_prompt_id` back to a prompt whose own completion would never
+/// arrive again — nothing left to ever satisfy the match.
+fn resolve_prompt_and_check_idle(outstanding: &mut HashSet<u64>, resolved_id: u64) -> bool {
+    outstanding.remove(&resolved_id);
+    outstanding.is_empty()
+}
 
 /// Inner state protected by mutex.
 struct AcpInner {
@@ -71,6 +97,17 @@ pub struct AcpController {
     health_monitor: Arc<HealthMonitor>,
     /// Monotonically increasing JSON-RPC request ID.
     next_rpc_id: Arc<AtomicU64>,
+    /// Every `session/prompt` request id that has been SENT but not yet
+    /// RESOLVED (by either a real `stopReason` completion or a JSON-RPC
+    /// `error` rejection). The turn is genuinely over only once this set
+    /// is empty — see `resolve_prompt_and_check_idle`'s doc comment for
+    /// why tracking the full set (not just "the latest" id) is necessary:
+    /// steering can leave multiple prompts outstanding at once, and
+    /// responses/rejections can arrive in any order relative to each
+    /// other and relative to new sends (independent stdin-writer and
+    /// stdout-reader tasks, no ordering guarantee between them). codex P2
+    /// on PR #2338 (twenty-seventh through thirtieth re-reviews).
+    outstanding_prompt_ids: Arc<Mutex<HashSet<u64>>>,
 }
 
 impl AcpController {
@@ -107,6 +144,7 @@ impl AcpController {
             filestore,
             health_monitor,
             next_rpc_id: Arc::new(AtomicU64::new(1)),
+            outstanding_prompt_ids: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
@@ -271,6 +309,7 @@ impl AcpController {
         let inner_clone = self.inner.clone();
         let health_clone = self.health_monitor.clone();
         let rpc_id_clone = self.next_rpc_id.clone();
+        let outstanding_prompt_ids_clone = self.outstanding_prompt_ids.clone();
         let wstore_clone = self.wstore.clone();
         let event_bus_clone = self.event_bus.clone();
         // Resolve the agent's GLOBAL transcript zone once (see persistent.rs).
@@ -318,6 +357,36 @@ impl AcpController {
                                 // Flush pending prompt now that session is ready.
                                 if let Some(prompt) = inner.pending_prompt.take() {
                                     let id = rpc_id_clone.fetch_add(1, Ordering::Relaxed);
+                                    outstanding_prompt_ids_clone.lock().unwrap().insert(id);
+                                    // Mark the turn active + publish, mirroring
+                                    // send_input's identical pattern — without
+                                    // this, a prompt flushed here (queued before
+                                    // the controller finished starting) is
+                                    // invisible to is_active_turn()/wasTurnActive:
+                                    // a concurrently-deferred /login controller
+                                    // refresh could then read
+                                    // isBackendTurnConfirmedIdle() as true and
+                                    // force-restart the controller while this
+                                    // flushed prompt is genuinely in flight.
+                                    // reagentx P2 on PR #2338 (thirty-first
+                                    // re-review).
+                                    let was_active = health_clone.mark_turn_active_returning_was_active();
+                                    if !was_active {
+                                        core::spawn_health_watchdog(&health_clone);
+                                    }
+                                    if let Some(ref broker) = broker_clone {
+                                        let status = BlockControllerRuntimeStatus {
+                                            blockid: block_id_stdout.clone(),
+                                            version: inner.status_version,
+                                            shellprocstatus: inner.proc_status.clone(),
+                                            shellprocconnname: "local".to_string(),
+                                            shellprocexitcode: inner.proc_exit_code,
+                                            spawn_ts_ms: None,
+                                            is_agent_pane: true,
+                                            turn_active: true,
+                                        };
+                                        super::publish_controller_status(broker, &status);
+                                    }
                                     let req = serde_json::json!({
                                         "jsonrpc": "2.0",
                                         "id": id,
@@ -330,6 +399,34 @@ impl AcpController {
                                     if let Some(ref tx) = inner.stdin_tx {
                                         if tx.try_send(req).is_err() {
                                             tracing::warn!(block_id = %block_id_stdout, "[acp] session/prompt send failed — channel full or closed");
+                                            // Mirror send_input's enqueue-failure
+                                            // rollback: this prompt was never
+                                            // really sent, so it must not be
+                                            // left occupying the outstanding set
+                                            // or leave the turn marked active
+                                            // when nothing else is genuinely
+                                            // outstanding.
+                                            let now_empty = {
+                                                let mut outstanding = outstanding_prompt_ids_clone.lock().unwrap();
+                                                outstanding.remove(&id);
+                                                outstanding.is_empty()
+                                            };
+                                            if now_empty {
+                                                health_clone.set_active_turn(false);
+                                                if let Some(ref broker) = broker_clone {
+                                                    let status = BlockControllerRuntimeStatus {
+                                                        blockid: block_id_stdout.clone(),
+                                                        version: inner.status_version,
+                                                        shellprocstatus: inner.proc_status.clone(),
+                                                        shellprocconnname: "local".to_string(),
+                                                        shellprocexitcode: inner.proc_exit_code,
+                                                        spawn_ts_ms: None,
+                                                        is_agent_pane: true,
+                                                        turn_active: false,
+                                                    };
+                                                    super::publish_controller_status(broker, &status);
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -347,12 +444,71 @@ impl AcpController {
                         }
                     }
 
-                    // Reset health monitor on prompt result (turn complete)
-                    if json.get("id").is_some() && json.get("result").is_some() {
-                        // This is a response to a request (e.g., session/prompt result)
-                        if let Some(result) = json.get("result") {
-                            if result.get("stopReason").is_some() {
-                                health_clone.set_active_turn(false);
+                    // A prompt is RESOLVED — one way or another — by either
+                    // a real `stopReason` completion or a JSON-RPC `error`
+                    // rejection (mid-turn prompt acceptance is agent-
+                    // dependent; some agents reject a steering prompt sent
+                    // while an earlier one is still being processed).
+                    // Either way, remove it from the outstanding set and
+                    // only declare the turn genuinely over once NOTHING is
+                    // left outstanding — never based on "was this the most
+                    // recently sent prompt," which breaks under steering:
+                    // an earlier prompt's completion can arrive after a
+                    // newer one was sent, or a newer prompt's rejection can
+                    // arrive after an earlier one already completed. codex
+                    // P2 on PR #2338 (twenty-seventh through thirtieth
+                    // re-reviews).
+                    let resolved_id = if json.get("id").is_some()
+                        && json.get("result").and_then(|r| r.get("stopReason")).is_some()
+                    {
+                        json.get("id").and_then(|v| v.as_u64())
+                    } else if json.get("id").is_some() && json.get("error").is_some() {
+                        json.get("id").and_then(|v| v.as_u64())
+                    } else {
+                        None
+                    };
+                    if let Some(resolved_id) = resolved_id {
+                        let turn_is_over = {
+                            let mut outstanding = outstanding_prompt_ids_clone.lock().unwrap();
+                            resolve_prompt_and_check_idle(&mut outstanding, resolved_id)
+                        };
+                        if turn_is_over {
+                            health_clone.set_active_turn(false);
+                            // Publish the flip so live controllerstatus
+                            // subscribers see "turn ended" immediately,
+                            // mirroring persistent.rs's matching publish
+                            // on its own normal (non-kill, non-exit)
+                            // turn-end path. Without this, the ONLY
+                            // controllerstatus publishes for an ACP
+                            // controller (Gemini/Codex/Kimi in
+                            // catalog.ts) are on kill or process exit —
+                            // a normal turn-end here left the frontend's
+                            // `wasTurnActive` signal (fed only by live
+                            // controllerstatus events, never local
+                            // state) stuck at its last-seen value,
+                            // stranding useAgentCommands.ts's
+                            // flushPendingControllerRefresh (which
+                            // requires isBackendTurnConfirmedIdle —
+                            // wasTurnActive === false — before running a
+                            // /login-deferred controller restart) until
+                            // an unrelated event happened to republish
+                            // status. reagentx P1 on PR #2338
+                            // (twenty-second re-review).
+                            if let Some(ref broker) = broker_clone {
+                                let status = {
+                                    let locked = inner_clone.lock().unwrap();
+                                    BlockControllerRuntimeStatus {
+                                        blockid: block_id_stdout.clone(),
+                                        version: locked.status_version,
+                                        shellprocstatus: locked.proc_status.clone(),
+                                        shellprocconnname: "local".to_string(),
+                                        shellprocexitcode: locked.proc_exit_code,
+                                        spawn_ts_ms: None,
+                                        is_agent_pane: true,
+                                        turn_active: false,
+                                    }
+                                };
+                                super::publish_controller_status(broker, &status);
                             }
                         }
                     }
@@ -378,6 +534,7 @@ impl AcpController {
         let inner_wait = self.inner.clone();
         let broker_wait = self.broker.clone();
         let health_wait = self.health_monitor.clone();
+        let outstanding_prompt_ids_wait = self.outstanding_prompt_ids.clone();
         tokio::spawn(async move {
             tokio::select! {
                 _ = kill_rx => {
@@ -391,6 +548,20 @@ impl AcpController {
                     drop(inner);
 
                     health_wait.set_active_turn(false);
+                    // resync_controller (mod.rs) can REUSE this exact
+                    // AcpController instance across a kill+restart cycle
+                    // (needs_replace false, status STATUS_DONE — the
+                    // non-forced pane-reopen path, or after watchdog.rs's
+                    // max-runtime/idle-timeout stop) — outstanding_prompt_ids
+                    // is the SAME Arc across that reuse. Any prompt ids still
+                    // outstanding at kill time will never get a response (no
+                    // process left to answer), so without clearing here they
+                    // would linger forever: the NEXT turn's own prompt id
+                    // resolving would never empty the set, permanently
+                    // stranding turn_active at true for the rest of this
+                    // instance's lifetime. reagentx P1 on PR #2338
+                    // (thirty-third re-review).
+                    outstanding_prompt_ids_wait.lock().unwrap().clear();
 
                     if let Some(ref broker) = broker_wait {
                         let status = BlockControllerRuntimeStatus {
@@ -420,6 +591,9 @@ impl AcpController {
                     drop(inner);
 
                     health_wait.set_active_turn(false);
+                    // See the matching comment in the kill_rx branch above —
+                    // same reasoning applies to a natural process exit.
+                    outstanding_prompt_ids_wait.lock().unwrap().clear();
 
                     if let Some(ref broker) = broker_wait {
                         let status = BlockControllerRuntimeStatus {
@@ -549,13 +723,26 @@ impl Controller for AcpController {
                 let inner = self.inner.lock().unwrap();
                 inner.session_id.clone().unwrap_or_default()
             };
-            let req = self.make_request("session/prompt", serde_json::json!({
-                "sessionId": session_id,
-                "prompt": {
-                    "type": "text",
-                    "text": message,
+            // Not built via make_request: the id must be captured so it can
+            // be tracked as outstanding (see outstanding_prompt_ids's doc
+            // comment) — make_request only returns the serialized string.
+            // Inserted BEFORE the enqueue below (not after), for the same
+            // happens-before reason mark_turn_active_returning_was_active
+            // is called before the enqueue — see that call's own comment.
+            let prompt_id = self.next_id();
+            self.outstanding_prompt_ids.lock().unwrap().insert(prompt_id);
+            let req = serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": prompt_id,
+                "method": "session/prompt",
+                "params": {
+                    "sessionId": session_id,
+                    "prompt": {
+                        "type": "text",
+                        "text": message,
+                    }
                 }
-            }));
+            }).to_string();
             // reagent P1 (PR #2336): this controller wired wstore/event_bus
             // into HealthMonitor for the Unresponsive-failure/Restart
             // feature but never spawned the periodic watchdog — Dead (the
@@ -569,14 +756,88 @@ impl Controller for AcpController {
             // watchdog on top of an already-running one — see
             // `core::spawn_health_watchdog`'s own doc comment and
             // persistent.rs's identical guard.
+            //
+            // Established BEFORE the stdin enqueue below (not after) — a
+            // fast-responding ACP agent can have the stdout reader task
+            // observe and publish the resulting `stopReason` (turn_active:
+            // false) on a DIFFERENT tokio worker before this thread would
+            // otherwise reach this point, if the enqueue ran first. Only
+            // ordering it this way guarantees this mark happens-before the
+            // request can possibly be enqueued, sent, and answered. codex
+            // P2 on PR #2338 (twenty-sixth re-review) — superseded the
+            // prior (twenty-fifth re-review) ordering, which fixed a
+            // different bug (see the rollback below) by moving this after
+            // the enqueue, reintroducing this race.
+            // The return value (was a turn already active?) is used ONLY to
+            // gate the watchdog spawn below, not to decide whether to roll
+            // back on enqueue failure (see that rollback's own comment) —
+            // outstanding_prompt_ids's emptiness is the authoritative signal
+            // for that now.
             let was_active = self.health_monitor.mark_turn_active_returning_was_active();
             if !was_active {
                 core::spawn_health_watchdog(&self.health_monitor);
             }
-            let inner = self.inner.lock().unwrap();
-            if let Some(ref tx) = inner.stdin_tx {
-                tx.try_send(req)
-                    .map_err(|e| format!("ACP stdin send failed: {e}"))?;
+            // Publish the turn_active flip, mirroring persistent.rs's
+            // send_message/send_user_message (which both call
+            // self.publish_status() right after this same
+            // mark_turn_active_returning_was_active() call). Without this,
+            // wasTurnActive === false left over from an EARLIER turn's
+            // end-of-turn publish (or the initial spawn publish) is
+            // indistinguishable from genuine current idleness — a `/login`
+            // that defers a controller refresh during THIS turn, followed
+            // by a premature frontend Done transition, would see
+            // isBackendTurnConfirmedIdle() read true from that stale
+            // signal and force-restart the controller, killing the
+            // actually-active turn. codex P1 on PR #2338 (twenty-third
+            // re-review).
+            self.publish_status();
+
+            let send_result = {
+                let inner = self.inner.lock().unwrap();
+                if let Some(ref tx) = inner.stdin_tx {
+                    tx.try_send(req)
+                        .map_err(|e| format!("ACP stdin send failed: {e}"))
+                } else {
+                    // stdin_tx can vanish between the is_running() check
+                    // above and this re-lock — e.g. a concurrent stop() or
+                    // controller resync clearing it in between. Treating
+                    // this as success (the old behavior) silently lost the
+                    // message (never actually enqueued anywhere) while
+                    // still marking the turn active and leaving prompt_id
+                    // permanently outstanding — nothing will ever resolve
+                    // it. Handling it identically to a try_send failure
+                    // reuses the existing rollback below. codex P1 on
+                    // PR #2338 (thirty-fourth re-review).
+                    Err("ACP process not running — stdin sender vanished after the initial check".to_string())
+                }
+            };
+            if let Err(e) = send_result {
+                // try_send can fail (channel full, or the stdin writer task
+                // already exited because the process died) — no turn
+                // actually starts for THIS prompt. Remove it from the
+                // outstanding set (it was never really sent) and only
+                // declare the turn over if NOTHING else is left outstanding
+                // — a turn ALREADY active from an earlier successful send
+                // (mid-turn steering) must not be clobbered by this failed
+                // one. This single emptiness check replaces what used to be
+                // two separate, easy-to-desync mechanisms: a `was_active`-
+                // conditioned health-monitor rollback, and a
+                // latest/previous-id compare-and-swap that could still
+                // strand turn_active under out-of-order responses (codex
+                // P2 on PR #2338, twenty-seventh through thirtieth
+                // re-reviews). The freshly-spawned watchdog (if any) exits
+                // on its own next tick once is_active_turn() reads false
+                // again — see spawn_health_watchdog's doc comment.
+                let now_empty = {
+                    let mut outstanding = self.outstanding_prompt_ids.lock().unwrap();
+                    outstanding.remove(&prompt_id);
+                    outstanding.is_empty()
+                };
+                if now_empty {
+                    self.health_monitor.set_active_turn(false);
+                    self.publish_status();
+                }
+                return Err(e);
             }
         }
 
@@ -608,6 +869,65 @@ mod tests {
 
     fn controller() -> AcpController {
         AcpController::new("tab".to_string(), "block".to_string(), None, None, None, None)
+    }
+
+    /// Regression for codex P2 on PR #2338 (twenty-seventh/thirtieth
+    /// re-reviews): the single-prompt case — one prompt sent, one
+    /// response — must still correctly declare the turn over.
+    #[test]
+    fn resolve_prompt_and_check_idle_reports_empty_after_the_only_outstanding_prompt_resolves() {
+        let mut outstanding = HashSet::from([3]);
+        assert!(
+            resolve_prompt_and_check_idle(&mut outstanding, 3),
+            "resolving the only outstanding prompt must report the turn as over"
+        );
+        assert!(outstanding.is_empty());
+    }
+
+    /// Regression for codex P2 on PR #2338 (twenty-seventh re-review): an
+    /// EARLIER prompt's response arriving after a steering/new prompt was
+    /// already sent must not end the turn while the newer one is still
+    /// outstanding.
+    #[test]
+    fn resolve_prompt_and_check_idle_stays_active_while_a_newer_steering_prompt_is_still_outstanding() {
+        let mut outstanding = HashSet::from([1, 2]);
+        assert!(
+            !resolve_prompt_and_check_idle(&mut outstanding, 1),
+            "the newer (2) prompt is still outstanding — the turn must not end yet"
+        );
+        assert_eq!(outstanding, HashSet::from([2]));
+    }
+
+    /// Regression for codex P2 on PR #2338 (thirtieth re-review) — the
+    /// exact scenario the single latest/previous-id tracking (removed)
+    /// could not handle: the EARLIER prompt completes and is resolved
+    /// FIRST (while a steering prompt is still outstanding), and the
+    /// steering prompt is REJECTED afterward. The turn must end once that
+    /// rejection resolves the LAST remaining outstanding prompt — not get
+    /// permanently stuck because the earlier prompt's completion was
+    /// already "consumed."
+    #[test]
+    fn resolve_prompt_and_check_idle_ends_the_turn_when_a_later_rejection_resolves_the_last_outstanding_prompt() {
+        let mut outstanding = HashSet::from([1, 2]);
+        // The earlier prompt (1) completes first.
+        assert!(!resolve_prompt_and_check_idle(&mut outstanding, 1), "prompt 2 is still outstanding");
+        // The steering prompt (2) is REJECTED afterward — this must now
+        // correctly end the turn, since nothing else is outstanding.
+        assert!(
+            resolve_prompt_and_check_idle(&mut outstanding, 2),
+            "the last outstanding prompt resolving (even via rejection) must end the turn"
+        );
+        assert!(outstanding.is_empty());
+    }
+
+    /// A response for an id that was never tracked (or already resolved) —
+    /// e.g. a duplicate delivery — must not panic; HashSet::remove is a
+    /// harmless no-op for a non-member.
+    #[test]
+    fn resolve_prompt_and_check_idle_is_a_harmless_no_op_for_an_untracked_id() {
+        let mut outstanding: HashSet<u64> = HashSet::new();
+        assert!(resolve_prompt_and_check_idle(&mut outstanding, 999));
+        assert!(outstanding.is_empty());
     }
 
     /// Regression for reagent P1 on PR #2336: `send_input` used to call the
@@ -653,6 +973,138 @@ mod tests {
 
         assert!(c.send_input(BlockInputUnion::data(b"first".to_vec()), None).is_ok());
         assert!(c.send_input(BlockInputUnion::data(b"second".to_vec()), None).is_ok());
+    }
+
+    /// Regression for codex P1 on PR #2338 (twenty-third re-review):
+    /// `send_input` marked the turn active via `health_monitor` but never
+    /// published the flip — the only controllerstatus publishes for ACP
+    /// were on spawn, kill, or process exit. A `wasTurnActive === false`
+    /// left over from an EARLIER turn's end-of-turn publish (or the initial
+    /// spawn publish) was therefore indistinguishable from genuine current
+    /// idleness: useAgentCommands.ts's `isBackendTurnConfirmedIdle()` (fed
+    /// only by live controllerstatus events) would read stale-true and let
+    /// `flushPendingControllerRefresh` force-restart a controller that is
+    /// actually mid-turn. Mirrors persistent.rs's send_message/
+    /// send_user_message, which both call `publish_status()` right after
+    /// the same `mark_turn_active_returning_was_active()` call.
+    #[tokio::test]
+    async fn send_input_publishes_the_turn_active_flip() {
+        let broker = Arc::new(wps::Broker::new());
+        let c = AcpController::new(
+            "tab".to_string(),
+            "block-acp-publish".to_string(),
+            Some(broker.clone()),
+            None,
+            None,
+            None,
+        );
+        let (tx, _rx) = mpsc::channel::<String>(8);
+        c.inner.lock().unwrap().stdin_tx = Some(tx);
+
+        assert!(c.send_input(BlockInputUnion::data(b"hello".to_vec()), None).is_ok());
+
+        let history = broker.read_event_history(
+            wps::EVENT_CONTROLLER_STATUS,
+            "block:block-acp-publish",
+            1,
+        );
+        assert_eq!(history.len(), 1, "send_input must publish a controllerstatus event");
+        let published: BlockControllerRuntimeStatus =
+            serde_json::from_value(history[0].data.clone().unwrap()).unwrap();
+        assert!(published.turn_active, "published status must reflect the just-started turn as active");
         assert!(c.health_monitor.is_active_turn());
+    }
+
+    /// Regression for codex P2 on PR #2338 (twenty-fifth re-review), as
+    /// refined by codex P2 on PR #2338 (twenty-sixth re-review):
+    /// `send_input` marks the turn active and publishes BEFORE attempting
+    /// `tx.try_send(req)` (established ordering, not after — see the
+    /// twenty-sixth re-review's race fix below) — if the enqueue itself
+    /// fails (channel full, or the stdin writer task already exited
+    /// because the process died), no turn actually started, so the mark
+    /// and publish must be ROLLED BACK rather than left standing. A
+    /// rejected prompt left standing as "active" could re-promote the
+    /// frontend to a working state and clear auth-recovery UI via
+    /// notifyControllerHealthy, and the health watchdog would be armed for
+    /// work that never happened.
+    #[tokio::test]
+    async fn send_input_rolls_back_turn_active_when_enqueue_fails() {
+        let broker = Arc::new(wps::Broker::new());
+        let c = AcpController::new(
+            "tab".to_string(),
+            "block-acp-enqueue-fail".to_string(),
+            Some(broker.clone()),
+            None,
+            None,
+            None,
+        );
+        let (tx, rx) = mpsc::channel::<String>(8);
+        drop(rx); // Receiver gone — try_send fails with TrySendError::Closed.
+        c.inner.lock().unwrap().stdin_tx = Some(tx);
+
+        let res = c.send_input(BlockInputUnion::data(b"hello".to_vec()), None);
+        assert!(res.is_err(), "send_input should surface the enqueue failure, got {res:?}");
+        assert!(!c.health_monitor.is_active_turn(), "must not leave the turn marked active when the enqueue itself failed");
+
+        // The state is briefly marked active (established BEFORE the
+        // enqueue attempt to close the twenty-sixth re-review's race), then
+        // rolled back once the enqueue failure is discovered — so the
+        // LATEST published status must reflect the rollback, not the
+        // transient true a live subscriber may have also observed.
+        let history = broker.read_event_history(
+            wps::EVENT_CONTROLLER_STATUS,
+            "block:block-acp-enqueue-fail",
+            1,
+        );
+        assert_eq!(history.len(), 1, "send_input must publish the rollback so live subscribers see the corrected state");
+        let published: BlockControllerRuntimeStatus =
+            serde_json::from_value(history[0].data.clone().unwrap()).unwrap();
+        assert!(!published.turn_active, "the latest published status must reflect the rollback (turn_active: false)");
+    }
+
+    /// Regression for codex P2 on PR #2338 (twenty-sixth re-review): a
+    /// mid-turn steering send (turn already genuinely active from an
+    /// EARLIER successful send) whose OWN enqueue then fails must not roll
+    /// back and clobber that still-active turn — the FIRST prompt's id
+    /// must remain outstanding.
+    ///
+    /// Also covers reagent P1 (twenty-eighth re-review) and codex P2
+    /// (twenty-ninth/thirtieth re-reviews): the failed second prompt's id
+    /// must NOT remain in the outstanding set either (it was never really
+    /// sent) — outstanding_prompt_ids's set-based tracking (superseding
+    /// the single latest/previous-id fields those rounds patched
+    /// incrementally) makes both of these hold simultaneously without any
+    /// special-cased rollback logic: removing the failed id and checking
+    /// emptiness is the ONLY rule, and it's correct regardless of send/
+    /// response ordering.
+    #[tokio::test]
+    async fn send_input_does_not_roll_back_an_already_active_turn_on_a_failed_steering_send() {
+        let c = controller();
+        let (tx, _rx) = mpsc::channel::<String>(8);
+        c.inner.lock().unwrap().stdin_tx = Some(tx);
+
+        // First send succeeds — turn is now genuinely active.
+        assert!(c.send_input(BlockInputUnion::data(b"first".to_vec()), None).is_ok());
+        assert!(c.health_monitor.is_active_turn());
+        let outstanding_after_first: Vec<u64> = c.outstanding_prompt_ids.lock().unwrap().iter().copied().collect();
+        assert_eq!(outstanding_after_first.len(), 1, "exactly the first prompt's id must be outstanding");
+        let first_prompt_id = outstanding_after_first[0];
+
+        // Swap in a closed channel so the SECOND (steering) send's own
+        // enqueue fails.
+        let (tx2, rx2) = mpsc::channel::<String>(8);
+        drop(rx2);
+        c.inner.lock().unwrap().stdin_tx = Some(tx2);
+
+        let res = c.send_input(BlockInputUnion::data(b"second".to_vec()), None);
+        assert!(res.is_err(), "the steering send's own enqueue should fail, got {res:?}");
+        assert!(c.health_monitor.is_active_turn(), "the turn genuinely active from the FIRST send must not be rolled back by the second send's own failure");
+
+        let outstanding_after_failure = c.outstanding_prompt_ids.lock().unwrap().clone();
+        assert_eq!(
+            outstanding_after_failure,
+            HashSet::from([first_prompt_id]),
+            "only the still-in-flight FIRST prompt's id must remain outstanding — the failed second one must not linger"
+        );
     }
 }

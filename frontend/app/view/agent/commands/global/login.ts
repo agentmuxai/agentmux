@@ -21,7 +21,62 @@
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { persistAndLinkAccount, runProviderLogin } from "../../flows/run-provider-login";
-import type { SlashCommand, SlashResult } from "../types";
+import type { SlashCommand, SlashCommandContext, SlashResult } from "../types";
+
+/**
+ * Shared by both success branches below (tier-1 "opened" and tier-2/3
+ * "seeded"/"terminal-success"): restart an already-running controller onto
+ * the refreshed credential — unless a turn is actively streaming on it.
+ * `agentmux-srv`'s `resync_controller` with `force: true` unconditionally
+ * stops the existing controller process before respawning it (see
+ * `blockcontroller/mod.rs`'s `needs_replace` check), so forcing a restart
+ * mid-turn would kill in-progress agent work.
+ *
+ * If a turn IS active, the restart (and declaring the pane healthy) is
+ * DEFERRED until that turn ends, not skipped outright — persistent
+ * providers keep the controller alive across many turns, not just this
+ * one, so skipping-and-declaring-healthy would leave the controller on the
+ * stale credential indefinitely with every fast-fail guard already
+ * cleared. Codex P1 on PR #2338 (thirteenth re-review); superseded the
+ * tenth re-review's skip-and-declare-healthy approach, which reintroduced
+ * exactly the bug forceControllerRefresh was added to /login to fix, just
+ * delayed by one turn.
+ *
+ * If the refresh RPC itself fails (and wasn't deferred), the controller may
+ * still be on the stale credential — declaring the pane healthy anyway
+ * would clear every fast-fail guard this PR added and let the next message
+ * reach that stale process regardless. Codex P1 on PR #2338 (tenth
+ * re-review).
+ */
+async function finalizeLoginSuccess(ctx: SlashCommandContext): Promise<SlashResult> {
+    if (ctx.isTurnActive()) {
+        ctx.deferControllerRefreshUntilIdle();
+        ctx.log("auth", "login saved — the running agent will pick it up once the current turn finishes", "warn");
+        return { kind: "ok" };
+    }
+    const refreshed = await ctx.forceControllerRefresh();
+    if (!refreshed) {
+        return {
+            kind: "error",
+            message:
+                "/login: signed in, but couldn't refresh the running agent with the new login. " +
+                "Reopen this pane if it still shows as logged out.",
+        };
+    }
+    // A pane that already showed the mount-time "Log in" bar (canRetry()
+    // true) before the user typed /login directly, bypassing that button,
+    // would otherwise have every subsequent message fast-failed forever —
+    // /login never went through relogin(), the only other place that
+    // manages canRetry. Codex P1 on PR #2338.
+    ctx.notifyControllerHealthy();
+    // A stale pre-existing "auth" failure row must also be cleared —
+    // otherwise the caller's NEXT normal send re-captures it as
+    // authFailureToPreserve and both fast-fails the message and re-shows
+    // this now-stale banner, even though the credential is fine. reagent
+    // P1 on PR #2338 (re-review).
+    ctx.clearAuthFailure();
+    return { kind: "ok" };
+}
 
 export const loginCommand: SlashCommand = {
     name: "login",
@@ -36,6 +91,18 @@ export const loginCommand: SlashCommand = {
             return { kind: "error", message: "/login: provider or CLI path not available" };
         }
         ctx.log("auth", "running /login via GUI flow...");
+        // Registers this attempt (including the up-to-5-minute poll below)
+        // as an in-flight recovery on the SAME shared counter behind
+        // loginWaiting() that relogin()/useGlobalLogin()/loginViaTerminal()
+        // already use — without this, a second message sent while /login is
+        // still polling gets held with authWasKnownBadAtQueueTime: false
+        // (mid-turn "auth" failures never set canRetry either), so a /login
+        // that ultimately fails flushes that held message straight to the
+        // still-known-bad controller. Codex P1 on PR #2338 (ninth
+        // re-review). Paired with the endRecoveryFlow() in this function's
+        // own finally below — every return path (success, error, and the
+        // catch) goes through it exactly once.
+        ctx.beginRecoveryFlow();
         try {
             const authEnv: Record<string, string> = {};
             const envMeta = ctx.block()?.meta?.["cmd:env"];
@@ -124,7 +191,9 @@ export const loginCommand: SlashCommand = {
                             };
                         }
                         ctx.log("auth", "login complete — run /cost to verify");
-                        return { kind: "ok" };
+                        // See finalizeLoginSuccess's doc comment for the
+                        // active-turn / refresh-failure gating.
+                        return await finalizeLoginSuccess(ctx);
                     }
                     return {
                         kind: "error",
@@ -145,7 +214,9 @@ export const loginCommand: SlashCommand = {
                         if (outcome === "terminal-success") {
                             ctx.log("auth", "login complete — run /cost to verify");
                         }
-                        return { kind: "ok" };
+                        // See finalizeLoginSuccess's doc comment for the
+                        // active-turn / refresh-failure gating.
+                        return await finalizeLoginSuccess(ctx);
                     }
                     return {
                         kind: "error",
@@ -169,6 +240,8 @@ export const loginCommand: SlashCommand = {
             }
         } catch (err: any) {
             return { kind: "error", message: `/login failed: ${err?.message ?? String(err)}` };
+        } finally {
+            ctx.endRecoveryFlow();
         }
     },
 };

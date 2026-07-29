@@ -48,6 +48,13 @@ function makeCtx(): SlashCommandContext {
         documentAtom: [() => [], vi.fn()] as any,
         log: vi.fn(),
         setAuthUrl: vi.fn(),
+        notifyControllerHealthy: vi.fn(),
+        clearAuthFailure: vi.fn(),
+        forceControllerRefresh: vi.fn().mockResolvedValue(true),
+        isTurnActive: () => false,
+        deferControllerRefreshUntilIdle: vi.fn(),
+        beginRecoveryFlow: vi.fn(),
+        endRecoveryFlow: vi.fn(),
         openPicker: vi.fn(),
         openHelp: vi.fn(),
     };
@@ -81,6 +88,26 @@ describe("/login — tier-1 'opened' branch persist-failure gating", () => {
 
         expect(result).toEqual({ kind: "ok" });
         expect(ctx.log).toHaveBeenCalledWith("auth", "login complete — run /cost to verify");
+        // Codex P1 on PR #2338: a pane already showing the mount-time
+        // "Log in" bar before the user typed /login directly must not have
+        // every subsequent message fast-failed forever just because /login
+        // bypassed relogin() (the only other path that manages canRetry).
+        expect(ctx.notifyControllerHealthy).toHaveBeenCalledOnce();
+        // reagent P1 (re-review): a stale pre-existing "auth" failure row
+        // must also be cleared, or the caller's next send re-captures it and
+        // reproduces the exact "message silently rejected, stale banner
+        // reappears" bug this PR exists to fix.
+        expect(ctx.clearAuthFailure).toHaveBeenCalledOnce();
+        // Codex P1 (seventh re-review): an already-running persistent
+        // controller must be restarted onto the new credential, or the next
+        // message bypasses every guard in this file and still reaches the
+        // stale process.
+        expect(ctx.forceControllerRefresh).toHaveBeenCalledOnce();
+        // Codex P1 (ninth re-review): begin/end must pair exactly once
+        // regardless of outcome — see the dedicated describe block below
+        // for the failure-path case that actually motivated this.
+        expect(ctx.beginRecoveryFlow).toHaveBeenCalledOnce();
+        expect(ctx.endRecoveryFlow).toHaveBeenCalledOnce();
     });
 
     it("reagent P1 (re-review of PR #2318): returns an error, not ok, when persistAndLinkAccount fails to save the account", async () => {
@@ -97,5 +124,113 @@ describe("/login — tier-1 'opened' branch persist-failure gating", () => {
             message: "/login: the login succeeded, but AgentMux couldn't save the account record. Try again in a moment.",
         });
         expect(ctx.log).not.toHaveBeenCalledWith("auth", "login complete — run /cost to verify");
+        // A persist failure is not a confirmed-healthy credential — the
+        // mount-time "Log in" bar (if showing) must stay up.
+        expect(ctx.notifyControllerHealthy).not.toHaveBeenCalled();
+        expect(ctx.clearAuthFailure).not.toHaveBeenCalled();
+        expect(ctx.forceControllerRefresh).not.toHaveBeenCalled();
+        expect(ctx.beginRecoveryFlow).toHaveBeenCalledOnce();
+        expect(ctx.endRecoveryFlow).toHaveBeenCalledOnce();
+    });
+});
+
+describe("/login registers as an in-flight recovery (codex P1 on PR #2338, ninth re-review)", () => {
+    // Without this, loginWaiting() reads false for the whole duration of a
+    // /login attempt — a second message sent while it's still polling gets
+    // held with authWasKnownBadAtQueueTime: false (mid-turn "auth" failures
+    // never set canRetry either), so a /login that ultimately times out
+    // flushes that held message straight to the still-known-bad controller.
+    it("calls beginRecoveryFlow before the poll starts, and endRecoveryFlow exactly once even when the login times out", async () => {
+        vi.useFakeTimers();
+        hub.checkCliAuth.mockReset().mockResolvedValue({ authenticated: false });
+        const ctx = makeCtx();
+
+        const promise = loginCommand.handler(ctx, "");
+        // Registered synchronously, before the 5-minute poll loop even
+        // starts — a message sent the instant after /login is submitted
+        // must already see loginWaiting() as true.
+        expect(ctx.beginRecoveryFlow).toHaveBeenCalledOnce();
+        expect(ctx.endRecoveryFlow).not.toHaveBeenCalled();
+
+        await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+        const result = await promise;
+
+        expect(result).toEqual({
+            kind: "error",
+            message:
+                "/login: opened a login page, but no login was detected within 5 minutes. " +
+                "Complete the login there, then run /login again.",
+        });
+        // The failure path must release the flag exactly as reliably as
+        // success — a leaked true here would wedge every future send behind
+        // "wait for the login attempt to finish" forever.
+        expect(ctx.endRecoveryFlow).toHaveBeenCalledOnce();
+    });
+});
+
+// Codex P1 on PR #2338 (tenth re-review): agentmux-srv's resync_controller
+// with force:true unconditionally stops the existing controller process —
+// calling forceControllerRefresh while a turn is actively streaming on that
+// controller would kill it and discard in-progress work.
+describe("/login does not restart an actively-streaming controller (codex P1 on PR #2338, tenth re-review)", () => {
+    it("defers forceControllerRefresh (does not skip-and-declare-healthy) when a turn is active", async () => {
+        // Codex P1 on PR #2338 (thirteenth re-review): persistent providers
+        // keep the controller alive across MANY turns, not just this one —
+        // declaring the pane healthy here (as an earlier version of this
+        // fix did) would leave the controller on the stale credential
+        // indefinitely, every fast-fail guard cleared, until the pane is
+        // manually reopened.
+        vi.useFakeTimers();
+        hub.persistAndLinkAccount.mockResolvedValue(true);
+        const ctx = makeCtx();
+        ctx.isTurnActive = () => true;
+
+        const promise = loginCommand.handler(ctx, "");
+        await vi.advanceTimersByTimeAsync(2_000);
+        const result = await promise;
+
+        expect(result).toEqual({ kind: "ok" });
+        expect(ctx.forceControllerRefresh).not.toHaveBeenCalled();
+        expect(ctx.deferControllerRefreshUntilIdle).toHaveBeenCalledOnce();
+        // Guards stay up until the deferred refresh actually runs (once the
+        // turn ends) and succeeds — not declared healthy prematurely.
+        expect(ctx.notifyControllerHealthy).not.toHaveBeenCalled();
+        expect(ctx.clearAuthFailure).not.toHaveBeenCalled();
+    });
+
+    it("calls forceControllerRefresh normally when no turn is active", async () => {
+        vi.useFakeTimers();
+        hub.persistAndLinkAccount.mockResolvedValue(true);
+        const ctx = makeCtx();
+        ctx.isTurnActive = () => false;
+
+        const promise = loginCommand.handler(ctx, "");
+        await vi.advanceTimersByTimeAsync(2_000);
+        await promise;
+
+        expect(ctx.forceControllerRefresh).toHaveBeenCalledOnce();
+    });
+});
+
+// Codex P1 on PR #2338 (tenth re-review): forceControllerRefresh swallows
+// its own RPC failures internally (logs a warning, resolves normally) — the
+// caller must consume its boolean return, or a failed refresh still gets
+// declared "healthy" while the controller stays on the stale credential,
+// clearing every fast-fail guard this PR added for nothing.
+describe("/login retains auth gating when the controller refresh itself fails (codex P1 on PR #2338, tenth re-review)", () => {
+    it("returns an error and does NOT call notifyControllerHealthy/clearAuthFailure when forceControllerRefresh resolves false", async () => {
+        vi.useFakeTimers();
+        hub.persistAndLinkAccount.mockResolvedValue(true);
+        const ctx = makeCtx();
+        ctx.isTurnActive = () => false;
+        (ctx.forceControllerRefresh as any).mockResolvedValue(false);
+
+        const promise = loginCommand.handler(ctx, "");
+        await vi.advanceTimersByTimeAsync(2_000);
+        const result = await promise;
+
+        expect(result.kind).toBe("error");
+        expect(ctx.notifyControllerHealthy).not.toHaveBeenCalled();
+        expect(ctx.clearAuthFailure).not.toHaveBeenCalled();
     });
 });

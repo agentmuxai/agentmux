@@ -164,11 +164,45 @@ export interface UseAgentControllerStatus {
      * Kill (if running) and respawn this pane's controller process, then
      * refresh its runtime status. Originally internal-only (used by the
      * login-recovery flows to refresh a stale-but-alive process); exposed
-     * here so the `unresponsive` failure row's "Restart" action can reuse
-     * the exact same mechanism for a wedged/`Dead` process. See
-     * `forceControllerRefresh`'s own doc comment for the full rationale.
+     * two ways since:
+     *   - to the `unresponsive` failure row's "Restart" action, for a
+     *     wedged/`Dead` process (`context: "restart"`, PR #2336);
+     *   - to /login's slash-command handler (a fully separate code path
+     *     with no access to this hook's closure) so a successful /login on
+     *     a pane whose persistent controller was already alive actually
+     *     restarts it onto the refreshed credential — `send_message` only
+     *     spawns a fresh process when one isn't already running, so
+     *     without this the next message would bypass every guard in PR
+     *     #2338 (canRetry/loginWaiting/authFailureToPreserve are all
+     *     correctly cleared by then) and still reach the stale process,
+     *     reproducing the delayed "Not logged in" failure (codex P1,
+     *     seventh re-review; defaults to `context: "login"`).
+     * See `forceControllerRefresh`'s own doc comment for the full
+     * rationale. Best-effort — logs a warning on failure rather than
+     * throwing, matching every other call site.
      */
-    forceControllerRefresh: (context?: "login" | "restart") => Promise<void>;
+    forceControllerRefresh: (context?: "login" | "restart") => Promise<boolean>;
+    /**
+     * Mark a recovery attempt as in flight / resolved, feeding the same
+     * shared counter behind `loginWaiting()` that `relogin()`/
+     * `useGlobalLogin()`/`loginViaTerminal()` already use internally.
+     * Exposed so /login's slash-command handler (a fully separate code
+     * path — see `forceControllerRefresh`'s doc comment) can register its
+     * own up-to-5-minute poll as an in-flight recovery too. Without this,
+     * `loginWaiting()` reads `false` for the entire duration of a /login
+     * attempt: a second message the user sends while it's still polling
+     * gets held with `authWasKnownBadAtQueueTime: false` (neither
+     * `canRetry()` nor `loginWaiting()` is true — mid-turn "auth" failures
+     * don't set `canRetry`, and /login never touched `loginWaiting` at
+     * all), so if /login then fails, that held message flushes straight to
+     * the still-known-bad controller once the phase resets to Idle. Codex
+     * P1 on PR #2338 (ninth re-review). Caller MUST call `endRecoveryFlow`
+     * exactly once per `beginRecoveryFlow` call (a `finally` block), same
+     * contract as the counter's other three callers.
+     */
+    beginRecoveryFlow: () => void;
+    /** Pairs with `beginRecoveryFlow` — see its doc comment. */
+    endRecoveryFlow: () => void;
 }
 
 /**
@@ -208,6 +242,30 @@ export function useAgentControllerStatus(
 
     // Derived spinner state — caller wires this into the AgentFooter loading prop
     const isLoading = createMemo(() => flowRunning() || !agentReady());
+
+    // Shared counter behind loginWaiting: relogin()/useGlobalLogin()/
+    // loginViaTerminal() are guarded by TWO independent in-flight flags
+    // (reloginInFlight covers relogin+loginViaTerminal; seedInFlight covers
+    // useGlobalLogin only) — nothing disables the failure-row's OTHER
+    // recovery buttons while one is running, so a user can genuinely start
+    // both concurrently. A plain boolean loginWaiting, set/cleared
+    // independently by each function, lets whichever one finishes first
+    // clear the flag while the other is still polling for credentials —
+    // reopening the exact "send during an unconfirmed recovery" window this
+    // signal exists to close. Codex P2 on PR #2338 (fourth re-review). Each
+    // caller must call endRecoveryFlow() EXACTLY once per beginRecoveryFlow()
+    // call — see relogin()'s recoveryEnded guard for how a function that
+    // clears early (before onRecovered, per the reagent P0 fix) avoids a
+    // double-decrement from its own trailing finally.
+    let activeRecoveryFlows = 0;
+    const beginRecoveryFlow = () => {
+        activeRecoveryFlows += 1;
+        setLoginWaiting(true);
+    };
+    const endRecoveryFlow = () => {
+        activeRecoveryFlows = Math.max(0, activeRecoveryFlows - 1);
+        if (activeRecoveryFlows === 0) setLoginWaiting(false);
+    };
 
     // Mutable cancellation flag. Flipped by cancelLogin() and by onCleanup.
     // Read inside startLaunchFlow's polling loop via the isCancelled callback.
@@ -342,8 +400,17 @@ export function useAgentControllerStatus(
      *  nothing to do with signing in), so a restart-triggered RPC failure
      *  must not log a misleading "signed in, but..." message (reagent P2 on
      *  PR #2336). Defaults to "login" — every pre-existing call site stays
-     *  unchanged. */
-    const forceControllerRefresh = async (context: "login" | "restart" = "login"): Promise<void> => {
+     *  unchanged.
+     *
+     *  Returns whether the resync RPC actually succeeded. /login's
+     *  slash-command handler consumes this — it must NOT declare the
+     *  controller healthy (notifyControllerHealthy/clearAuthFailure) when
+     *  the refresh itself failed, or every fast-fail guard this PR added
+     *  gets cleared while the controller is still on the stale credential.
+     *  Codex P1 on PR #2338 (tenth re-review). The three original callers
+     *  (relogin/useGlobalLogin/loginViaTerminal) still ignore the return
+     *  value, unchanged — same best-effort contract they've always had. */
+    const forceControllerRefresh = async (context: "login" | "restart" = "login"): Promise<boolean> => {
         try {
             const initialTermSize = opts.getInitialTermSize?.();
             await RpcApi.ControllerResyncCommand(TabRpcClient, {
@@ -354,6 +421,7 @@ export function useAgentControllerStatus(
             });
             const rts = await BlockService.GetControllerStatus(opts.blockId);
             if (rts) opts.onControllerStatus?.(rts);
+            return true;
         } catch (e: any) {
             const detail = e?.message ?? String(e);
             if (context === "restart") {
@@ -365,6 +433,7 @@ export function useAgentControllerStatus(
                     "warn",
                 );
             }
+            return false;
         }
     };
 
@@ -429,7 +498,19 @@ export function useAgentControllerStatus(
         // launch flow.
         let cliPath = getBlockMetaKeyAtom(opts.blockId, "cmd")() as string | undefined;
         reloginInFlight = true;
-        setLoginWaiting(true);
+        beginRecoveryFlow();
+        // Guards against double-decrementing activeRecoveryFlows: the
+        // success branches below call this early (before onRecovered, so
+        // that callback doesn't see a stale loginWaiting — reagent P0), and
+        // the trailing finally also calls it unconditionally for the
+        // failure paths. Exactly one of those two call sites should ever
+        // actually decrement per invocation.
+        let recoveryEnded = false;
+        const endThisRecoveryFlow = () => {
+            if (recoveryEnded) return;
+            recoveryEnded = true;
+            endRecoveryFlow();
+        };
         setLaunchPhase({ kind: "checking-auth" });
         // Tracks whether this attempt actually reached a genuine success
         // branch below — declared outside the try so the `finally` block
@@ -579,6 +660,18 @@ export function useAgentControllerStatus(
                             // acknowledgement that the login actually succeeded.
                             opts.onLoginSuccess?.(authedEmail);
                             succeeded = true;
+                            // Clear BEFORE onRecovered — that callback can
+                            // synchronously resend the failed turn, and
+                            // useAgentCommands.ts's fast-fail guard checks
+                            // loginWaiting() before every send. Clearing only
+                            // in this function's trailing `finally` (which
+                            // runs AFTER onRecovered returns) let that resend
+                            // get spuriously rejected as "not logged in yet"
+                            // even though recovery just succeeded. reagent P0
+                            // on PR #2338 (this is genuinely done at this
+                            // point — forceControllerRefresh already
+                            // completed above).
+                            endThisRecoveryFlow();
                             if (retryAfterLogin) {
                                 opts.onRecovered?.();
                             } else {
@@ -633,6 +726,10 @@ export function useAgentControllerStatus(
                         await forceControllerRefresh();
                         opts.onLoginSuccess?.(null);
                         succeeded = true;
+                        // See the "opened" branch above — must clear before
+                        // onRecovered, not in the trailing finally. reagent
+                        // P0 on PR #2338.
+                        endThisRecoveryFlow();
                         if (retryAfterLogin) {
                             opts.onRecovered?.();
                         } else {
@@ -669,7 +766,7 @@ export function useAgentControllerStatus(
             setAuthNotice(msg);
         } finally {
             reloginInFlight = false;
-            setLoginWaiting(false);
+            endThisRecoveryFlow();
             setLaunchPhase(null);
             // Restore the mount-time "Log in" button on any unsuccessful
             // outcome — timeout, terminal-unavailable, persistence failure,
@@ -701,6 +798,28 @@ export function useAgentControllerStatus(
         }
         setAuthNotice(null);
         seedInFlight = true;
+        // Unlike relogin()/loginViaTerminal(), this credential-seed work was
+        // never reflected in loginWaiting — useAgentCommands.ts's fast-fail
+        // guard checks canRetry() || loginWaiting() before letting a send
+        // through, so without this a message typed while this async work is
+        // still resolving bypassed that guard entirely and reached
+        // AgentInputCommand on the same stale, already-known-bad credential
+        // the failure banner is showing for. reagent P1 on PR #2338.
+        //
+        // beginRecoveryFlow/endRecoveryFlow (a shared counter, not a bare
+        // boolean): nothing disables the failure row's OTHER recovery
+        // buttons while this one is in flight, so a user can genuinely
+        // start relogin()/loginViaTerminal() concurrently with this — a
+        // bare setLoginWaiting(false) here would clear the flag out from
+        // under that still-running flow. Codex P2 on PR #2338 (fourth
+        // re-review).
+        let recoveryEnded = false;
+        const endThisRecoveryFlow = () => {
+            if (recoveryEnded) return;
+            recoveryEnded = true;
+            endRecoveryFlow();
+        };
+        beginRecoveryFlow();
         try {
             // Mint a REAL per-account isolated dir and persist an
             // IdentityAccount row — not just a seed into whatever dir was
@@ -752,6 +871,11 @@ export function useAgentControllerStatus(
                 setAuthStatus("authenticated");
                 await forceControllerRefresh();
                 opts.onLoginSuccess?.(null);
+                // See relogin()'s identical comment — must clear before
+                // onRecovered, which can synchronously resend the failed
+                // turn straight into useAgentCommands.ts's loginWaiting()
+                // guard. reagent P0 on PR #2338.
+                endThisRecoveryFlow();
                 opts.onRecovered?.();
             } else {
                 const msg = "Couldn't use your global login — no valid global Claude credential was found. Try “Login via terminal”.";
@@ -764,6 +888,7 @@ export function useAgentControllerStatus(
             setAuthNotice(msg);
         } finally {
             seedInFlight = false;
+            endThisRecoveryFlow();
         }
     };
 
@@ -795,7 +920,17 @@ export function useAgentControllerStatus(
         // terminal windows with overlapping poll loops. Mirror relogin: flag
         // first, reset in finally.
         reloginInFlight = true;
-        setLoginWaiting(true);
+        // Shared counter, not a bare boolean — see beginRecoveryFlow's own
+        // doc comment: useGlobalLogin() is guarded by an independent
+        // in-flight flag and can genuinely run concurrently with this.
+        // Codex P2 on PR #2338 (fourth re-review).
+        let recoveryEnded = false;
+        const endThisRecoveryFlow = () => {
+            if (recoveryEnded) return;
+            recoveryEnded = true;
+            endRecoveryFlow();
+        };
+        beginRecoveryFlow();
         setLaunchPhase({ kind: "opening-login-terminal" });
         try {
             let cliPath = getBlockMetaKeyAtom(opts.blockId, "cmd")() as string | undefined;
@@ -859,6 +994,9 @@ export function useAgentControllerStatus(
                         setAuthStatus("authenticated");
                         await forceControllerRefresh();
                         opts.onLoginSuccess?.(null);
+                        // See relogin()'s identical comment — reagent P0 on
+                        // PR #2338.
+                        endThisRecoveryFlow();
                         opts.onRecovered?.();
                     } else {
                         setAuthStatus("unauthenticated");
@@ -884,7 +1022,7 @@ export function useAgentControllerStatus(
             setAuthNotice(msg);
         } finally {
             reloginInFlight = false;
-            setLoginWaiting(false);
+            endThisRecoveryFlow();
             setLaunchPhase(null);
         }
     };
@@ -940,7 +1078,9 @@ export function useAgentControllerStatus(
         useGlobalLogin,
         loginViaTerminal,
         notifyControllerHealthy,
-        cancelLogin,
         forceControllerRefresh,
+        cancelLogin,
+        beginRecoveryFlow,
+        endRecoveryFlow,
     };
 }
