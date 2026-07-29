@@ -75,8 +75,15 @@ fn agents_dir(data_dir: &Path) -> PathBuf {
 }
 
 fn agent_path(data_dir: &Path, agent_id: &str) -> PathBuf {
+    // Lowercase first so this matches `ReactiveHandler`'s own
+    // `agent_id.to_lowercase()` key convention (backend/reactive/handler.rs)
+    // — every other muxbus identity path is already case-insensitive, and a
+    // channel registering "AgentX" vs. a peer injecting to "agentx" must
+    // land on the same file, not two different ones (reagent P1 on #2350,
+    // caught in Tier 2b but pre-existing here for Tier 2a too).
     // Sanitize: only allow alphanumeric, dash, underscore to prevent path traversal.
     let safe: String = agent_id
+        .to_lowercase()
         .chars()
         .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
         .collect();
@@ -367,6 +374,25 @@ mod shared_tests {
         assert_eq!(found[0].channel, "dev-a");
         assert_eq!(found[0].local_url, "http://127.0.0.1:9001");
         assert_eq!(found[0].block_id, "block1");
+    }
+
+    #[test]
+    fn write_and_lookup_are_case_insensitive() {
+        let dir = tempfile::tempdir().unwrap();
+        write_shared(dir.path(), "AgentX", "http://127.0.0.1:9001", "block1", "dev-a");
+        // A peer looking up the lowercase form (as ReactiveHandler's
+        // Tier-1 in-memory map always does) must land on the same entry —
+        // reagent P1 on #2350.
+        let found = lookup_all_shared(dir.path(), "agentx");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].local_url, "http://127.0.0.1:9001");
+
+        // And a second write under a different-cased spelling of the same
+        // name must overwrite, not create a sibling file.
+        write_shared(dir.path(), "AGENTX", "http://127.0.0.1:9099", "block9", "dev-a");
+        let found = lookup_all_shared(dir.path(), "agentx");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].local_url, "http://127.0.0.1:9099");
     }
 
     #[test]
