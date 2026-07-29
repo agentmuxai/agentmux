@@ -58,7 +58,7 @@ impl SubprocessController {
 
         // Build CLI args, appending resume flag + session_id if we have one and the provider supports it
         let mut args = config.cli_args.clone();
-        {
+        let session_id_hint = {
             let inner = self.inner.lock().unwrap();
             if let Some(ref sid) = inner.session_id {
                 if !config.resume_flag.is_empty() {
@@ -66,7 +66,49 @@ impl SubprocessController {
                     args.push(sid.clone());
                 }
             }
-        }
+            inner.session_id.clone()
+        };
+
+        // Claim the cross-process session-ownership lease BEFORE
+        // flipping status to running — a refusal here should look like
+        // the turn never started, not leave status stuck mid-flight.
+        // Empty `instance_id` (container-mode branch in this PR) or no
+        // `lease_store` (registry unavailable) both mean leasing is a
+        // no-op for this spawn. See `registry::LeaseStore` and
+        // `docs/retros/RETRO_DEV_BUILD_SHARED_AGENT_SESSION_COLLISION_2026_07_29.md`.
+        let claimed_lease: Option<crate::registry::Lease> = if config.instance_id.is_empty() {
+            None
+        } else {
+            match &self.lease_store {
+                None => None,
+                Some(store) => match store.claim(
+                    &config.instance_id,
+                    &self.boot_id,
+                    &self.block_id,
+                    session_id_hint.as_deref(),
+                ) {
+                    Ok(lease) => Some(lease),
+                    Err(crate::registry::LeaseError::HeldByOther { owner_boot_id, age_ms, .. }) => {
+                        self.unlock_run();
+                        return Err(format!(
+                            "session '{}' is already owned by another AgentMux process \
+                             (boot {owner_boot_id}, renewed {age_ms}ms ago) — refusing to \
+                             start a turn against the same session from two processes at once",
+                            config.instance_id
+                        ));
+                    }
+                    Err(crate::registry::LeaseError::Io(e)) => {
+                        tracing::warn!(
+                            block_id = %self.block_id,
+                            instance_id = %config.instance_id,
+                            error = %e,
+                            "lease claim failed (io) — proceeding without a lease for this turn"
+                        );
+                        None
+                    }
+                },
+            }
+        };
 
         // Update status to running
         {
@@ -99,6 +141,15 @@ impl SubprocessController {
             let mut inner = self.inner.lock().unwrap();
             Self::set_status(&mut inner, STATUS_DONE);
             inner.proc_exit_code = -1;
+            if let (Some(store), Some(lease)) = (&self.lease_store, &claimed_lease) {
+                if let Err(release_err) = store.release(lease) {
+                    tracing::warn!(
+                        block_id = %self.block_id,
+                        error = %release_err,
+                        "lease release failed after spawn failure (self-heals via TTL expiry)"
+                    );
+                }
+            }
             self.unlock_run();
             format!("failed to spawn subprocess: {e}")
         })?;
@@ -372,6 +423,45 @@ impl SubprocessController {
 
         core::spawn_health_watchdog(&self.health_monitor);
 
+        // Renew the lease (if any) on the same cadence as the health
+        // watchdog above, for as long as this turn is active. A
+        // dedicated task rather than widening `spawn_health_watchdog`'s
+        // signature — that helper has 7 call sites across every
+        // controller type (ACP, persistent, container, host); only
+        // host-mode claims a lease in this PR (see module + struct doc
+        // comments), so touching the other 6 for an always-`None`
+        // param isn't warranted.
+        if let (Some(store), Some(lease)) = (self.lease_store.clone(), claimed_lease.clone()) {
+            let health_renew = Arc::clone(&self.health_monitor);
+            let block_id_renew = self.block_id.clone();
+            tokio::spawn(async move {
+                let mut interval =
+                    tokio::time::interval(std::time::Duration::from_millis(
+                        crate::registry::RENEW_INTERVAL_MS,
+                    ));
+                loop {
+                    interval.tick().await;
+                    if !health_renew.is_active_turn() {
+                        break;
+                    }
+                    if let Err(e) = store.renew(&lease) {
+                        // Lost the lease to a TTL reclaim mid-turn — log and
+                        // let the turn finish naturally rather than killing
+                        // it. Force-killing on lost renewal is deliberately
+                        // deferred (see the analysis doc's follow-ups); this
+                        // is a real residual gap, not an oversight.
+                        tracing::warn!(
+                            block_id = %block_id_renew,
+                            instance_id = %lease.instance_id(),
+                            error = %e,
+                            "lease renew failed — lease may have been reclaimed by another process"
+                        );
+                        break;
+                    }
+                }
+            });
+        }
+
         // Spawn process_waiter task
         let inner_wait = Arc::clone(&self.inner);
         let block_id_wait = self.block_id.clone();
@@ -384,6 +474,8 @@ impl SubprocessController {
         let last_inband_error_wait = Arc::clone(&last_inband_error);
         let wstore_wait = self.wstore.clone();
         let event_bus_wait = self.event_bus.clone();
+        let lease_store_wait = self.lease_store.clone();
+        let claimed_lease_wait = claimed_lease;
         tokio::spawn(async move {
             // Classified failure cause, surfaced to the pane after the readers drain.
             let mut run_failure: Option<crate::agents::failure::AgentFailure> = None;
@@ -559,7 +651,18 @@ impl SubprocessController {
                 });
             }
 
-            // Release run lock
+            // Release the lease (if any), then the run lock — mirrors
+            // the ordering in the spawn-failure closure above.
+            if let (Some(store), Some(lease)) = (&lease_store_wait, &claimed_lease_wait) {
+                if let Err(e) = store.release(lease) {
+                    tracing::warn!(
+                        block_id = %block_id_wait,
+                        instance_id = %lease.instance_id(),
+                        error = %e,
+                        "lease release failed (self-heals via TTL expiry)"
+                    );
+                }
+            }
             run_lock.store(false, Ordering::SeqCst);
 
             // Drain message queue: if messages were queued while this turn

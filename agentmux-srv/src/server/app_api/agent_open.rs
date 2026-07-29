@@ -103,7 +103,8 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         let _ = blockcontroller::resync_controller(
                             &block_for_resync, &tab_id, None, true,
                             Some(broker.clone()), Some(event_bus.clone()), Some(wstore.clone()),
-                            Some(filestore.clone()),
+                            Some(filestore.clone()), wstore.shared_agent_registry(),
+                            app_state.boot_id.clone(),
                         );
                     }
                     let status = blockcontroller::get_block_controller_status(&existing.oid)
@@ -435,6 +436,8 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     Some(event_bus.clone()),
                     Some(wstore.clone()),
                     Some(filestore.clone()),
+                    wstore.shared_agent_registry(),
+                    app_state.boot_id.clone(),
                 )?;
 
                 // 10. Broadcast block + tab + layout updates to frontend
