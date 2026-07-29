@@ -473,6 +473,33 @@ impl PersistentSubprocessController {
         inner.stdin_tx.is_some()
     }
 
+    /// Whether `send_message`'s own stdin write should be skipped in favor
+    /// of a retry that has already taken over delivery for this exact
+    /// attempt — see the call site's own doc comment for the full
+    /// reasoning behind the epoch mechanism itself.
+    ///
+    /// Gated on `is_fresh_spawn` — codex P1 on PR #2360 (fifth review
+    /// pass): only a message that triggered ITS OWN fresh spawn ever has
+    /// its payload captured into `pending_resume_retry` (see
+    /// `spawn_process`), so only THAT message can correctly hand off
+    /// delivery to a retry. A DIFFERENT message arriving while that same
+    /// doomed process is still nominally "running" (`is_fresh_spawn ==
+    /// false` for IT) has no such hand-off — its own content was never
+    /// captured anywhere else. If it happened to observe an epoch
+    /// mismatch too (the SAME retry racing ahead of its own tail-end
+    /// check), skipping would silently drop that message entirely while
+    /// `send_message` still reports success and emits
+    /// `agent-message-accepted` — worse than a duplicate, since the
+    /// content vanishes with no signal at all. Such a message must always
+    /// attempt delivery via whatever `stdin_tx` is CURRENT. Pulled out as
+    /// a pure function (an earlier cut of this fix omitted the
+    /// `is_fresh_spawn` guard inline) so the exact condition is directly,
+    /// deterministically testable without needing to reproduce the actual
+    /// multi-threaded race.
+    fn should_skip_own_delivery(is_fresh_spawn: bool, my_spawn_epoch: u64, current_spawn_epoch: u64) -> bool {
+        is_fresh_spawn && current_spawn_epoch != my_spawn_epoch
+    }
+
     /// Send a user message to the running CLI process.
     /// If the process isn't spawned yet, spawns it first.
     /// Emit `agent-message-accepted` for a given message_id, if set.
@@ -592,14 +619,7 @@ impl PersistentSubprocessController {
         );
 
         let inner = self.inner.lock().unwrap();
-        if inner.spawn_epoch != my_spawn_epoch {
-            // A NEWER spawn (a stale-resume retry, or any other respawn)
-            // has already taken over delivery for this exact attempt —
-            // `retry_after_resume_failure` already sends this SAME
-            // already-formatted `json_str` on the new process. Skip our
-            // own write entirely rather than duplicating it or risking a
-            // false "not running" error against a `stdin_tx` mid-swap.
-            // codex P1 on PR #2360 (third review pass).
+        if Self::should_skip_own_delivery(is_fresh_spawn, my_spawn_epoch, inner.spawn_epoch) {
             drop(inner);
             self.emit_message_accepted(config.message_id.as_deref());
             return Ok(());
@@ -643,6 +663,20 @@ impl PersistentSubprocessController {
                 error = %e,
                 "failed to respawn after a stale --resume session id"
             );
+            // Surface this, or the pane hangs forever with NO signal at
+            // all — codex P2 on PR #2360 (fifth review pass): the outer
+            // process-waiter already suppressed its own terminal-status
+            // publish for the ORIGINAL exit specifically because a retry
+            // was in flight, and send_message already returned success
+            // (possibly emitting agent-message-accepted) for the message
+            // this retry was supposed to deliver. If this respawn attempt
+            // ALSO fails, nothing else will ever tell the frontend this
+            // turn is over. `inner.proc_status`/`turn_active` are already
+            // `STATUS_DONE`/`false` (set by the original exit's own
+            // cleanup before this function was ever called) — this just
+            // actually broadcasts that state, which the original exit
+            // deliberately withheld pending this retry's outcome.
+            self.publish_status();
             return;
         }
         // Mirrors send_message's own post-spawn turn-active bookkeeping —
@@ -1420,15 +1454,29 @@ impl PersistentSubprocessController {
                     // to persisting an empty one, corrupting continuity
                     // despite the retry having succeeded. 500ms is
                     // generous — the stderr pipe closes and drains almost
-                    // immediately once the process has genuinely exited —
-                    // and only ever delays shutdown handling, never blocks
-                    // it indefinitely.
+                    // immediately once the process has genuinely exited.
+                    //
+                    // If it DOES take longer than that (e.g. `persist_session_id`
+                    // blocked on a slow store call), a bare `timeout()` alone
+                    // is not enough — codex P1 on PR #2360 (fifth review
+                    // pass): `timeout()` only stops WAITING for the handle,
+                    // it does not cancel the underlying task, which keeps
+                    // running in the background and can still call
+                    // `poison_resume`/`persist_session_id("")` AFTER this
+                    // task has already moved on (discarded the still-
+                    // tentative retry, or started a fresh child whose own
+                    // new session id that late write would then corrupt).
+                    // `abort()` on a separately-obtained `AbortHandle`
+                    // actually cancels it — the task stops at its next
+                    // yield point and can never reach either call again.
                     if let Some(handle) = stderr_reader_handle {
+                        let abort_handle = handle.abort_handle();
                         if tokio::time::timeout(std::time::Duration::from_millis(500), handle).await.is_err() {
                             tracing::warn!(
                                 block_id = %block_id_wait,
-                                "stderr reader did not finish within 500ms of process exit"
+                                "stderr reader did not finish within 500ms of process exit — aborting it"
                             );
+                            abort_handle.abort();
                         }
                     }
 
@@ -1974,6 +2022,33 @@ mod send_input_tests {
 
         let received = rx.try_recv().expect("the message must have been written to stdin_tx");
         assert!(received.contains("hello"));
+    }
+
+    /// codex P1 on PR #2360 (fifth review pass): an earlier cut of
+    /// `should_skip_own_delivery` (inlined at the call site at the time)
+    /// omitted the `is_fresh_spawn` guard — a SECOND message arriving on
+    /// an already-running process (its own content never captured into
+    /// any retry payload) could observe an UNRELATED epoch bump (from a
+    /// DIFFERENT message's own stale-resume retry) and silently skip its
+    /// own delivery, losing its content entirely while `send_message`
+    /// still reported success. This directly exercises the corrected
+    /// boolean condition with fabricated inputs — deterministic, no need
+    /// to reproduce the actual multi-threaded race.
+    #[test]
+    fn should_skip_own_delivery_only_when_this_calls_own_fresh_spawn_was_superseded() {
+        assert!(
+            !PersistentSubprocessController::should_skip_own_delivery(false, 1, 2),
+            "an already-running message must always deliver, regardless of an unrelated epoch bump"
+        );
+        assert!(
+            PersistentSubprocessController::should_skip_own_delivery(true, 1, 2),
+            "a fresh-spawn message superseded by a newer spawn must skip its own delivery"
+        );
+        assert!(
+            !PersistentSubprocessController::should_skip_own_delivery(true, 1, 1),
+            "the common, non-racing case (epoch unchanged) must always deliver"
+        );
+        assert!(!PersistentSubprocessController::should_skip_own_delivery(false, 1, 1));
     }
 }
 
