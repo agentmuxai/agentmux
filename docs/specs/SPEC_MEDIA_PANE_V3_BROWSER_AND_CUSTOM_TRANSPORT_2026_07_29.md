@@ -79,7 +79,9 @@ support that model — every reference tool keeps the browser and the
 preview visible **together**. This spec replaces that part of v2's
 design; v2's other proposals (thumbnail generation approach, pin/follow
 modes, EDL preview, codec transcode) are unaffected and still stand as
-written.
+written, **except §4's "keep native `<audio>`, no custom playback UI"
+decision** — see "Custom transport bar" below, which this spec
+supersedes.
 
 ## Non-goals (unchanged, restated because this spec touches UI surface)
 
@@ -255,4 +257,4 @@ rather than adding new decode-on-hover cost to every grid cell.
 | `frontend/app/view/media/media.tsx` | Split-pane layout, replaces v2 §3's picker/viewer-toggle sketch |
 | `frontend/app/view/media/` (new) | `PlaybackTransport` component (shared video/audio transport bar), grid component with hover-scrub, resizable-divider component (check for an existing shared one in this codebase before building new — panes elsewhere likely already need resizable splits) |
 | `agentmux-srv/src/server/files.rs` | Extend v2 §3's thumbnail route to optionally return a frame strip (N timestamps) for hover-scrub, not just one midpoint frame |
-| `docs/specs/SPEC_MEDIA_PANE_V2_AGENT_WORKFLOW_GAPS_2026_07_28.md` | §3's picker/viewer-toggle interaction model is superseded by this spec's persistent split; §1/§2/§4/§5/§6 unaffected |
+| `docs/specs/SPEC_MEDIA_PANE_V2_AGENT_WORKFLOW_GAPS_2026_07_28.md` | §3's picker/viewer-toggle interaction model is superseded by this spec's persistent split; §4's native-`<audio>`-element decision is also superseded (see "Custom transport bar"); §1/§2/§5/§6 unaffected |
