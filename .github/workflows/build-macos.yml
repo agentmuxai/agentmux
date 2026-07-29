@@ -123,9 +123,17 @@ jobs:
           if [ -z "$TAG" ]; then
             # agentmuxai/cef holds BOTH platforms' releases — filter to macOS arm64
             # (a bare --limit 1 would grab whichever platform released most recently).
+            #
+            # gh release list's default order is NOT reliably publish-time-descending
+            # on this fork — a release cut without an explicit --target inherits a
+            # frozen default-branch-HEAD created_at instead of the actual cut time, so
+            # trusting [0] after the filter can silently pick a stale tag (this bit the
+            # 2026-07-28 macOS codec release itself — see
+            # docs/specs/STATUS_CEF_PROPRIETARY_CODECS_MACOS_2026_07_27.md). Sort by
+            # publishedAt explicitly instead.
             TAG=$(gh release list --repo agentmuxai/cef --limit 30 \
-                    --json tagName \
-                    --jq '[.[].tagName | select(startswith("cef-macos-arm64-"))][0]')
+                    --json tagName,publishedAt \
+                    --jq '[.[] | select(.tagName | startswith("cef-macos-arm64-"))] | sort_by(.publishedAt) | reverse | .[0].tagName')
           fi
           if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
             echo "❌ no cef-macos-arm64-* release found in agentmuxai/cef" >&2
