@@ -45,34 +45,19 @@ impl SubprocessController {
             return Ok(());
         }
 
-        // Direct-spawn path (queue was empty): emit the accepted event
-        // now so the frontend can promote its pending entry. The
-        // drain-from-queue path (in process_waiter) emits the same
-        // event just before calling spawn_turn recursively.
-        self.emit_message_accepted(&config);
-
-        // Hydrate inner.session_id from the config-supplied id if the
-        // controller hasn't captured one yet. See
-        // `hydrate_session_id_from_config` for the full rationale.
-        self.hydrate_session_id_from_config(config.session_id.as_deref());
-
-        // Build CLI args, appending resume flag + session_id if we have one and the provider supports it
-        let mut args = config.cli_args.clone();
-        let session_id_hint = {
-            let inner = self.inner.lock().unwrap();
-            if let Some(ref sid) = inner.session_id {
-                if !config.resume_flag.is_empty() {
-                    args.push(config.resume_flag.clone());
-                    args.push(sid.clone());
-                }
-            }
-            inner.session_id.clone()
-        };
+        // Read the previously-captured session id once, up front — used
+        // both by the lease claim below and by the resume-flag args
+        // built after it.
+        let session_id_hint = self.inner.lock().unwrap().session_id.clone();
 
         // Claim the cross-process session-ownership lease BEFORE
-        // flipping status to running — a refusal here should look like
-        // the turn never started, not leave status stuck mid-flight.
-        // Empty `instance_id` (container-mode branch in this PR) or no
+        // `emit_message_accepted` / flipping status to running — a
+        // refusal here must look like the turn never started at all,
+        // not "frontend was told this message was accepted, then it
+        // silently never ran" (reagent P1 on #2359: emitting accepted
+        // before the claim meant a HeldByOther refusal left the
+        // frontend believing the message was in flight). Empty
+        // `instance_id` (container-mode branch in this PR) or no
         // `lease_store` (registry unavailable) both mean leasing is a
         // no-op for this spawn. See `registry::LeaseStore` and
         // `docs/retros/RETRO_DEV_BUILD_SHARED_AGENT_SESSION_COLLISION_2026_07_29.md`.
@@ -109,6 +94,28 @@ impl SubprocessController {
                 },
             }
         };
+
+        // Direct-spawn path (queue was empty): emit the accepted event
+        // now so the frontend can promote its pending entry. The
+        // drain-from-queue path (in process_waiter) emits the same
+        // event just before calling spawn_turn recursively. Only
+        // reached once the lease claim above has succeeded (or was a
+        // no-op) — see that block's comment.
+        self.emit_message_accepted(&config);
+
+        // Hydrate inner.session_id from the config-supplied id if the
+        // controller hasn't captured one yet. See
+        // `hydrate_session_id_from_config` for the full rationale.
+        self.hydrate_session_id_from_config(config.session_id.as_deref());
+
+        // Build CLI args, appending resume flag + session_id if we have one and the provider supports it
+        let mut args = config.cli_args.clone();
+        if let Some(ref sid) = session_id_hint {
+            if !config.resume_flag.is_empty() {
+                args.push(config.resume_flag.clone());
+                args.push(sid.clone());
+            }
+        }
 
         // Update status to running
         {
@@ -705,6 +712,32 @@ impl SubprocessController {
                             error = %e,
                             "failed to spawn queued turn"
                         );
+                        // The message was already popped from the queue —
+                        // a bare warn-log here means it vanishes with no
+                        // trace the user can see (reagent P1 on #2359,
+                        // most likely to fire on a lease refusal: another
+                        // process claimed this session in the gap between
+                        // this turn's release and the drain). Surface it
+                        // the same way other pre-spawn failures in this
+                        // module do (e.g. input.rs's container
+                        // ensure_running failure): a visible error frame
+                        // in the block, not just a log line.
+                        let error_frame = serde_json::json!({
+                            "type": "result",
+                            "is_error": true,
+                            "subtype": "error_during_execution",
+                            "error": {"message": format!("[AgentMux] queued message could not be sent: {e}")}
+                        }).to_string();
+                        if let Some(ref broker) = broker_wait {
+                            crate::backend::blockcontroller::shell::handle_append_block_file(
+                                broker,
+                                &block_id_wait,
+                                SUBPROCESS_OUTPUT_SUBJECT,
+                                format!("{error_frame}\n").as_bytes(),
+                                None,
+                                None,
+                            );
+                        }
                     }
                 }
             }
