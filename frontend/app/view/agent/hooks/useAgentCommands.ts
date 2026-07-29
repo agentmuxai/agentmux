@@ -779,7 +779,24 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             // which is the only thing that clears the live failure. The
             // live check in flushHeldMessages below already covers this
             // item without needing a separate snapshot.
-            heldQueue.push({ id: messageId, text: message, authWasKnownBadAtQueueTime: opts.canRetry() || opts.loginWaiting(), authFailureToPreserve: null });
+            const authWasKnownBadAtQueueTime = opts.canRetry() || opts.loginWaiting();
+            if (authWasKnownBadAtQueueTime) {
+                // Already known-bad RIGHT NOW — flushHeldMessages would
+                // unconditionally reject this exact item anyway (its own
+                // authWasKnownBadAtQueueTime check below), but only once
+                // some LATER trigger (a tool-call boundary or turn-end)
+                // happens to run it. A tool-less or stuck turn might never
+                // fire that trigger, leaving the message stuck in the
+                // "send now" panel with no feedback indefinitely —
+                // recreating the exact non-immediate-feedback problem this
+                // PR (retro-send-while-unauthenticated) exists to fix.
+                // Reject immediately instead of queueing it to be rejected
+                // later. codex P2 on PR #2338 (twenty-fourth re-review).
+                opts.log("auth", "message not sent — not logged in", "warn");
+                opts.model.dispatchPane({ type: "PendingMessageRejected", id: messageId });
+                return;
+            }
+            heldQueue.push({ id: messageId, text: message, authWasKnownBadAtQueueTime, authFailureToPreserve: null });
             return;
         }
 
