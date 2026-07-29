@@ -124,6 +124,22 @@ export interface UseAgentCommandsOptions {
     /** Pairs with `beginRecoveryFlow` — see its doc comment. */
     endRecoveryFlow: () => void;
     /**
+     * The last CONFIRMED backend `turn_active` reading, tracked from live
+     * controllerstatus events (agent-view.tsx's `wasTurnActive`, the same
+     * state `trackTurnJustEnded`'s edge detector uses) — `false` (not
+     * `undefined`, which means "no live event observed yet this mount")
+     * until proven otherwise. Threaded through so `isTurnActive()` can OR
+     * it in alongside the frontend's own `turnPhase`: a premature per-round
+     * `session_end` can transiently demote `turnPhase` to "Done" even
+     * while the backend controller genuinely still reports
+     * `turn_active: true` (see `useControllerStatusEvents.ts`'s
+     * `didTurnJustEnd` doc comment for the same divergence). Trusting
+     * `turnPhase` alone would let `/login`'s deferred-refresh check
+     * force-restart a controller that's still genuinely working. Codex P1
+     * on PR #2338 (nineteenth re-review).
+     */
+    isBackendTurnActive: () => boolean;
+    /**
      * The model-level backToPicker action. The hook delegates to this
      * rather than owning a duplicate implementation — the pane-frame
      * header button also calls it, so the logic needs to live in one
@@ -438,10 +454,24 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // once wasAlreadyWorking was already true (handleSendMessage never
         // dispatches a fresh TurnStart in that case). Codex P1 on PR #2338
         // (fourteenth re-review).
+        //
+        // ORs in opts.isBackendTurnActive() (the last CONFIRMED backend
+        // turn_active reading, tracked from live controllerstatus events)
+        // rather than trusting the frontend's own turnPhase alone: a
+        // premature per-round session_end can transiently demote turnPhase
+        // to "Done" even while the backend controller genuinely still
+        // reports turn_active: true (documented in
+        // useControllerStatusEvents.ts's didTurnJustEnd — the same
+        // divergence it's deliberately independent of turnPhase to avoid).
+        // If /login's OAuth poll happens to complete during exactly that
+        // window, trusting turnPhase alone would report idle and
+        // force-restart a controller that's still genuinely working,
+        // discarding its in-progress continuation. Codex P1 on PR #2338
+        // (nineteenth re-review).
         isTurnActive: () =>
             wasAlreadyWorking === false
                 ? false
-                : workingFromPhase(paneSnapshot(opts.blockId)?.turnPhase ?? { kind: "Idle" }),
+                : workingFromPhase(paneSnapshot(opts.blockId)?.turnPhase ?? { kind: "Idle" }) || opts.isBackendTurnActive(),
         beginRecoveryFlow: opts.beginRecoveryFlow,
         endRecoveryFlow: opts.endRecoveryFlow,
         openPicker,
@@ -770,11 +800,25 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // can land in. Codex P2 on PR #2338 (tenth re-review).
         const checkAuthGuard = (): boolean => {
             const loginStillWaiting = opts.loginWaiting();
-            if (!(initiatesTurn && (opts.canRetry() || loginStillWaiting || authFailureToPreserve))) {
+            // A NEW "auth" failure that arrives during the SetMetaCommand
+            // round-trip between the two checkAuthGuard() calls updates
+            // state.failure live — unlike authFailureToPreserve (captured
+            // ONCE, before TurnStart, for a different reason: TurnStart
+            // itself unconditionally clears state.failure, so a live read
+            // at the FIRST call would always miss whatever existed before
+            // it). By the time either call here runs, TurnStart has
+            // already fired, so a live read genuinely reflects only
+            // something that arrived SINCE — it can't double-count the
+            // original captured failure. canRetry()/loginWaiting() are not
+            // updated by a mid-turn 401/403 either, so without this check
+            // neither live accessor would catch it. Codex P2 on PR #2338
+            // (nineteenth re-review).
+            const liveAuthFailure = paneSnapshot(opts.blockId)?.failure?.data.code === "auth";
+            if (!(initiatesTurn && (opts.canRetry() || loginStillWaiting || authFailureToPreserve || liveAuthFailure))) {
                 return true;
             }
             opts.log("auth", "message not sent — not logged in", "warn");
-            if (!authFailureToPreserve) {
+            if (!authFailureToPreserve && !liveAuthFailure) {
                 opts.setAuthNotice(
                     loginStillWaiting
                         ? "Not logged in yet — wait for the login attempt to finish, then try again."
