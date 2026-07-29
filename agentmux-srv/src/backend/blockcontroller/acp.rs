@@ -45,6 +45,19 @@ pub const ACP_OUTPUT_SUBJECT: &str = "output";
 
 pub const BLOCK_CONTROLLER_ACP: &str = "acp";
 
+/// A `session/prompt` response only signals genuine turn-end if it (a) has
+/// a `stopReason` AND (b) its echoed `id` matches the id of the most
+/// recently SENT prompt. Extracted as a pure function so the staleness
+/// logic itself is directly unit-testable without spawning a real process
+/// — see `latest_prompt_id`'s doc comment for why (b) is necessary: the
+/// stdin-writer and stdout-reader tasks run independently with no ordering
+/// guarantee, so an EARLIER prompt's response can arrive after a
+/// steering/new prompt was already sent. codex P2 on PR #2338
+/// (twenty-seventh re-review).
+fn is_latest_prompt_completion(response_id: Option<u64>, has_stop_reason: bool, latest_prompt_id: u64) -> bool {
+    has_stop_reason && response_id == Some(latest_prompt_id)
+}
+
 /// Inner state protected by mutex.
 struct AcpInner {
     proc_status: String,
@@ -71,6 +84,19 @@ pub struct AcpController {
     health_monitor: Arc<HealthMonitor>,
     /// Monotonically increasing JSON-RPC request ID.
     next_rpc_id: Arc<AtomicU64>,
+    /// The `id` of the most recently SENT `session/prompt` request. 0 is a
+    /// safe "none sent yet" sentinel — `next_rpc_id` starts at 1, so no real
+    /// request ever gets id 0. Used to detect a stale, out-of-order
+    /// `stopReason` completion: when a steering/new prompt is sent while an
+    /// EARLIER prompt is still in flight, the earlier prompt's response can
+    /// arrive AFTER the new one is already sent (no ordering guarantee
+    /// between a separate stdin-writer task and a separate stdout-reader
+    /// task) — without this, that stale completion's hardcoded
+    /// `turn_active: false` would overwrite the genuinely-active NEW turn's
+    /// `true`, which flushPendingControllerRefresh (useAgentCommands.ts)
+    /// could then read as backend-confirmed idle and force-restart the
+    /// controller mid-turn. codex P2 on PR #2338 (twenty-seventh re-review).
+    latest_prompt_id: Arc<AtomicU64>,
 }
 
 impl AcpController {
@@ -107,6 +133,7 @@ impl AcpController {
             filestore,
             health_monitor,
             next_rpc_id: Arc::new(AtomicU64::new(1)),
+            latest_prompt_id: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -271,6 +298,7 @@ impl AcpController {
         let inner_clone = self.inner.clone();
         let health_clone = self.health_monitor.clone();
         let rpc_id_clone = self.next_rpc_id.clone();
+        let latest_prompt_id_clone = self.latest_prompt_id.clone();
         let wstore_clone = self.wstore.clone();
         let event_bus_clone = self.event_bus.clone();
         // Resolve the agent's GLOBAL transcript zone once (see persistent.rs).
@@ -318,6 +346,7 @@ impl AcpController {
                                 // Flush pending prompt now that session is ready.
                                 if let Some(prompt) = inner.pending_prompt.take() {
                                     let id = rpc_id_clone.fetch_add(1, Ordering::Relaxed);
+                                    latest_prompt_id_clone.store(id, Ordering::Relaxed);
                                     let req = serde_json::json!({
                                         "jsonrpc": "2.0",
                                         "id": id,
@@ -351,7 +380,25 @@ impl AcpController {
                     if json.get("id").is_some() && json.get("result").is_some() {
                         // This is a response to a request (e.g., session/prompt result)
                         if let Some(result) = json.get("result") {
-                            if result.get("stopReason").is_some() {
+                            // Only trust this completion if it's for the
+                            // MOST RECENTLY SENT prompt — the stdin-writer
+                            // task and this stdout-reader task run
+                            // independently with no ordering guarantee
+                            // between them, so a steering/new prompt sent
+                            // while an EARLIER one is still in flight can
+                            // have that earlier prompt's stopReason arrive
+                            // AFTER the new one was already sent and marked
+                            // active. Without this check, the stale
+                            // completion's hardcoded turn_active: false
+                            // below would overwrite the genuinely-active
+                            // NEW turn's true. codex P2 on PR #2338
+                            // (twenty-seventh re-review).
+                            let is_latest_prompt = is_latest_prompt_completion(
+                                json.get("id").and_then(|v| v.as_u64()),
+                                result.get("stopReason").is_some(),
+                                latest_prompt_id_clone.load(Ordering::Relaxed),
+                            );
+                            if is_latest_prompt {
                                 health_clone.set_active_turn(false);
                                 // Publish the flip so live controllerstatus
                                 // subscribers see "turn ended" immediately,
@@ -585,13 +632,23 @@ impl Controller for AcpController {
                 let inner = self.inner.lock().unwrap();
                 inner.session_id.clone().unwrap_or_default()
             };
-            let req = self.make_request("session/prompt", serde_json::json!({
-                "sessionId": session_id,
-                "prompt": {
-                    "type": "text",
-                    "text": message,
+            // Not built via make_request: the id must be captured so it can
+            // be recorded as the latest prompt (see latest_prompt_id's doc
+            // comment) — make_request only returns the serialized string.
+            let prompt_id = self.next_id();
+            self.latest_prompt_id.store(prompt_id, Ordering::Relaxed);
+            let req = serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": prompt_id,
+                "method": "session/prompt",
+                "params": {
+                    "sessionId": session_id,
+                    "prompt": {
+                        "type": "text",
+                        "text": message,
+                    }
                 }
-            }));
+            }).to_string();
             // reagent P1 (PR #2336): this controller wired wstore/event_bus
             // into HealthMonitor for the Unresponsive-failure/Restart
             // feature but never spawned the periodic watchdog — Dead (the
@@ -693,6 +750,20 @@ mod tests {
 
     fn controller() -> AcpController {
         AcpController::new("tab".to_string(), "block".to_string(), None, None, None, None)
+    }
+
+    /// Regression for codex P2 on PR #2338 (twenty-seventh re-review): the
+    /// staleness check that gates turn-end must reject any completion that
+    /// doesn't echo the id of the most recently sent prompt, even if it
+    /// carries a stopReason — this is exactly the out-of-order case an
+    /// earlier prompt's response arriving after a steering/new prompt was
+    /// already sent produces.
+    #[test]
+    fn is_latest_prompt_completion_requires_both_stop_reason_and_matching_id() {
+        assert!(is_latest_prompt_completion(Some(3), true, 3), "matching id + stopReason must be trusted");
+        assert!(!is_latest_prompt_completion(Some(2), true, 3), "an OLDER prompt's stopReason must not be trusted once a newer one has been sent");
+        assert!(!is_latest_prompt_completion(Some(3), false, 3), "no stopReason at all is not turn-end, regardless of id");
+        assert!(!is_latest_prompt_completion(None, true, 3), "a response with no id (malformed) must not be trusted");
     }
 
     /// Regression for reagent P1 on PR #2336: `send_input` used to call the

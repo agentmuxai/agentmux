@@ -428,8 +428,32 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
     // hitting the stale (or mid-restart) process. Codex P1 on PR #2338
     // (fifteenth re-review).
     let inFlightControllerRefresh: Promise<boolean> | null = null;
+    // Bounded automatic retry for a deferred refresh that FAILS. Re-arming
+    // controllerRefreshPendingUntilIdle alone (see flushPendingControllerRefresh's
+    // failure branch) doesn't guarantee anything ever re-checks it: by the
+    // time that branch runs, the turn-just-ended edge and the reactive
+    // turnIdle effect that triggered THIS attempt have already fired, and
+    // neither refires just because a plain closure variable changed — a
+    // held message could sit indefinitely unless the user happens to send
+    // another message or a new turn starts. Bounded, not indefinite: a
+    // persistent failure (backend genuinely down) is better served by the
+    // user's own next interaction — which already retries via its own call
+    // into flushPendingControllerRefresh — than an unbounded background
+    // timer quietly hammering the resync RPC forever. codex P2 on PR #2338
+    // (twenty-seventh re-review).
+    const CONTROLLER_REFRESH_RETRY_DELAY_MS = 5000;
+    const CONTROLLER_REFRESH_MAX_RETRIES = 3;
+    let controllerRefreshRetriesRemaining = CONTROLLER_REFRESH_MAX_RETRIES;
+    let refreshRetryTimer: ReturnType<typeof setTimeout> | null = null;
+    onCleanup(() => {
+        if (refreshRetryTimer) clearTimeout(refreshRetryTimer);
+    });
     const deferControllerRefreshUntilIdle = (): void => {
         controllerRefreshPendingUntilIdle = true;
+        // Fresh deferral episode — give it its own full retry budget
+        // rather than inheriting whatever an earlier, unrelated deferral
+        // happened to exhaust.
+        controllerRefreshRetriesRemaining = CONTROLLER_REFRESH_MAX_RETRIES;
     };
     // Returns whether it actually ran a refresh that succeeded (cleared the
     // guards) — sendMessage's idle-send path uses this to detect when its
@@ -496,6 +520,23 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 // handles "still pending" correctly (hold, don't deliver).
                 // reagent P1 on PR #2338 (twenty-sixth re-review).
                 controllerRefreshPendingUntilIdle = true;
+                // Re-arming the flag alone isn't enough: the trigger that
+                // led to THIS attempt (a turn-just-ended edge or the
+                // reactive turnIdle effect) has already fired and won't
+                // fire again just because a plain closure variable
+                // changed. Schedule a bounded retry so a TRANSIENT failure
+                // (the common case — a brief network hiccup) resolves on
+                // its own instead of stranding any held message until the
+                // user happens to send another message or a new turn
+                // starts. codex P2 on PR #2338 (twenty-seventh re-review).
+                if (controllerRefreshRetriesRemaining > 0) {
+                    controllerRefreshRetriesRemaining -= 1;
+                    if (refreshRetryTimer) clearTimeout(refreshRetryTimer);
+                    refreshRetryTimer = setTimeout(() => {
+                        refreshRetryTimer = null;
+                        void flushPendingControllerRefresh();
+                    }, CONTROLLER_REFRESH_RETRY_DELAY_MS);
+                }
             }
             if (refreshed) {
                 opts.notifyControllerHealthy();
