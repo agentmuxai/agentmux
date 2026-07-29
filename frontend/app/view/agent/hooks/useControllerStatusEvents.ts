@@ -70,6 +70,20 @@ export interface UseControllerStatusEventsOptions {
      * `ReconcileTurnActive`. See docs/retro/retro-agent2-stuck-queued-message-2026-07-16.md.
      */
     onTurnActive?: (active: boolean) => void;
+    /**
+     * Fires ONLY when a controllerstatus event proves a turn is genuinely
+     * running right now (`active === true`) — never for an idle/heartbeat
+     * event. An idle event merely means an agent-pane-type controller
+     * exists; it says nothing about whether ITS credential is currently
+     * valid. A persistent controller left alive from before a just-failed
+     * recovery attempt still emits these, so a caller using "any
+     * controllerstatus event arrived" as proof of health (as this hook's
+     * `onTurnActive` used to be used for) would have a stray idle event
+     * silently clear that recovery's own `canRetry=true`, letting the very
+     * next message bypass the fast-fail guard and reach the known-bad
+     * process. Codex P1 on PR #2338 (eighth re-review).
+     */
+    onActiveTurnConfirmed?: () => void;
 }
 
 export function useControllerStatusEvents(opts: UseControllerStatusEventsOptions): void {
@@ -96,6 +110,9 @@ export function useControllerStatusEvents(opts: UseControllerStatusEventsOptions
                 const active = deriveTurnActive(data);
                 if (opts.onTurnActive && active !== null) {
                     opts.onTurnActive(active);
+                }
+                if (active === true) {
+                    opts.onActiveTurnConfirmed?.();
                 }
             },
         });
