@@ -21,6 +21,7 @@ mod atomic;
 mod def_migrate;
 mod def_schema;
 mod def_store;
+mod leases;
 mod migrate;
 mod paths;
 mod schema;
@@ -47,6 +48,7 @@ pub use def_schema::{
     DEF_MAX_SUPPORTED_SCHEMA, DEF_MIN_SUPPORTED_SCHEMA,
 };
 pub use def_store::{DefStoreError, DefinitionStore};
+pub use leases::{Lease, LeaseError, LeaseStore, LEASE_TTL_MS, RENEW_INTERVAL_MS};
 pub use schema::{
     NamedAgentRecord, NamedAgentRecordV1, ValidationError, MAX_SUPPORTED_SCHEMA,
     MIN_SUPPORTED_SCHEMA,
