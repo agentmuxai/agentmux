@@ -136,6 +136,19 @@ struct PersistentInner {
     /// generated UUID) will never equal this one, so a stale poison value
     /// is permanently inert rather than something that needs clearing.
     resume_poisoned: Option<String>,
+    /// Set right after a FRESH spawn that attempted `--resume <sid>` —
+    /// captures the exact spawn config + already-formatted stdin line for
+    /// the message that triggered it. If the CLI then reports that exact
+    /// sid unreachable ("No conversation found"), the process-waiter task
+    /// moves this into a transparent retry (fresh process, no `--resume`,
+    /// same message redelivered) instead of losing the message and
+    /// surfacing a generic error — see `retry_after_resume_failure`.
+    /// Cleared by `try_capture_session_id` on ANY successful capture
+    /// (resume succeeded, or the CLI fell through to a fresh conversation
+    /// on its own) since a retry is then no longer needed; also cleared on
+    /// kill so a reused controller instance never retries a message from a
+    /// prior, unrelated lifetime.
+    pending_resume_retry: Option<(PersistentSpawnConfig, String)>,
     current_pid: Option<u32>,
     /// Channel to send messages to the stdin writer task.
     stdin_tx: Option<mpsc::Sender<String>>,
@@ -175,6 +188,12 @@ impl PersistentInner {
             return false;
         }
         self.session_id = Some(sid.to_string());
+        // Any successful capture — a resumed conversation confirming the
+        // sid it was given, or a fresh conversation the CLI started on its
+        // own — proves this spawn is genuinely progressing. The retry
+        // safety net (`pending_resume_retry`) only exists for a spawn that
+        // never gets this far, so it's no longer needed.
+        self.pending_resume_retry = None;
         true
     }
 }
@@ -200,6 +219,14 @@ pub struct PersistentSubprocessController {
     /// the reader skips for control frames — avoids a spurious fallback when the
     /// resumed turn's first activity is a tool-permission round-trip.
     stdout_seq: Arc<AtomicU64>,
+    /// Weak self-reference for the stale-`--resume`-session retry (see
+    /// `retry_after_resume_failure`) — set by `set_self_ref` right after
+    /// construction. The process-waiter task (a detached `tokio::spawn`
+    /// that only captures cloned Arc fields, never `&self`) needs a way to
+    /// call back into an instance method once the underlying process
+    /// actually exits; a `Weak` avoids a reference cycle (this same
+    /// struct's `spawn_process` is what schedules that task).
+    self_ref: Mutex<Option<std::sync::Weak<Self>>>,
 }
 
 /// How long to wait after delivering an AskUserQuestion answer before assuming
@@ -262,6 +289,7 @@ impl PersistentSubprocessController {
                 status_version: 0,
                 session_id: None,
                 resume_poisoned: None,
+                pending_resume_retry: None,
                 current_pid: None,
                 stdin_tx: None,
                 kill_tx: None,
@@ -273,7 +301,20 @@ impl PersistentSubprocessController {
             filestore,
             health_monitor,
             stdout_seq: Arc::new(AtomicU64::new(0)),
+            self_ref: Mutex::new(None),
         }
+    }
+
+    /// Sets the weak self-reference used by the process-waiter task to call
+    /// back into `retry_after_resume_failure` once a doomed process (stale
+    /// `--resume` session id) actually exits. Mirrors `SubprocessController::
+    /// set_self_ref`'s queued-message-drain pattern. Must be called by the
+    /// caller right after wrapping a fresh instance in `Arc` — a controller
+    /// that's never had this called simply never retries (the check is a
+    /// harmless no-op `Weak::upgrade()` failure), so this is safe to skip
+    /// for e.g. throwaway test instances.
+    pub fn set_self_ref(self: &Arc<Self>) {
+        *self.self_ref.lock().unwrap() = Some(Arc::downgrade(self));
     }
 
     fn set_status(inner: &mut PersistentInner, status: &str) {
@@ -415,7 +456,8 @@ impl PersistentSubprocessController {
 
     pub fn send_message(&self, message: String, config: PersistentSpawnConfig) -> Result<(), String> {
         // Spawn process if not running
-        if !self.is_running() {
+        let is_fresh_spawn = !self.is_running();
+        if is_fresh_spawn {
             self.spawn_process(config.clone())?;
         }
         // spawn_process already marks a fresh process's first turn active
@@ -455,6 +497,19 @@ impl PersistentSubprocessController {
         });
         let json_str = json_msg.to_string();
 
+        // A resume attempt was just made on this exact spawn — stash the
+        // config + already-formatted line so a stale-`--resume` failure
+        // (detected asynchronously by the stderr reader; see
+        // `retry_after_resume_failure`) can transparently retry this exact
+        // message once, fresh, instead of losing it. Scoped tightly to
+        // "resume was actually attempted" — a message on an
+        // already-running process, or a fresh spawn with no prior session
+        // to resume, has nothing a stale-resume failure could apply to.
+        if is_fresh_spawn && !config.session_id.is_empty() && !config.resume_flag.is_empty() {
+            let mut inner = self.inner.lock().unwrap();
+            inner.pending_resume_retry = Some((config.clone(), json_str.clone()));
+        }
+
         // Silently persist the user message to the blockfile + global zone so
         // `parseHistoryLines` can reconstruct `user_message` nodes on the next
         // open. No WPS event is published here — the live-display is handled by
@@ -477,6 +532,59 @@ impl PersistentSubprocessController {
         drop(inner);
         self.emit_message_accepted(config.message_id.as_deref());
         Ok(())
+    }
+
+    /// Retries the message that triggered a `--resume <sid>` attempt this
+    /// controller's own stderr reader just confirmed is unreachable ("No
+    /// conversation found with session ID" — see `poison_resume`). Called
+    /// from the process-waiter task once the doomed process has actually
+    /// exited, via the weak self-reference (mirrors `SubprocessController`'s
+    /// queued-message drain — see `set_self_ref`).
+    ///
+    /// Spawns fresh with `session_id` cleared, so no `--resume` is attempted
+    /// again (`inner.session_id` is already `None` from `poison_resume`;
+    /// clearing it here too keeps `spawn_process`'s own hydrate-from-config
+    /// step, which doesn't know about `resume_poisoned`, from re-adopting
+    /// the same dead id). Redelivers the EXACT already-formatted stdin line
+    /// directly on the new process — does NOT re-persist to the blockfile or
+    /// re-emit `agent-message-accepted`, since both already happened
+    /// correctly on the original (failed) attempt; only the underlying CLI
+    /// process needed a fresh, resume-less start.
+    fn retry_after_resume_failure(&self, mut config: PersistentSpawnConfig, json_str: String) {
+        config.session_id = String::new();
+        if let Err(e) = self.spawn_process(config) {
+            tracing::error!(
+                block_id = %self.block_id,
+                error = %e,
+                "failed to respawn after a stale --resume session id"
+            );
+            return;
+        }
+        // Mirrors send_message's own post-spawn turn-active bookkeeping —
+        // this retry IS the turn's real first (and only user-visible) send,
+        // just deferred past one doomed process.
+        let was_active = self.health_monitor.mark_turn_active_returning_was_active();
+        if !was_active {
+            core::spawn_health_watchdog(&self.health_monitor);
+            self.spawn_status_heartbeat();
+        }
+        self.publish_status();
+
+        let inner = self.inner.lock().unwrap();
+        let Some(tx) = inner.stdin_tx.as_ref() else {
+            tracing::error!(
+                block_id = %self.block_id,
+                "stale-resume retry spawn reported success but stdin_tx is unset"
+            );
+            return;
+        };
+        if let Err(e) = tx.try_send(json_str) {
+            tracing::warn!(
+                block_id = %self.block_id,
+                error = %e,
+                "failed to redeliver message after stale-resume retry spawn"
+            );
+        }
     }
 
     /// Deliver a user message to the **already-running** persistent process,
@@ -1139,6 +1247,10 @@ impl PersistentSubprocessController {
         let health_wait = Arc::clone(&self.health_monitor);
         // Captured so the waiter can deregister this agent from muxbus on exit.
         let agent_id_wait = agent_id_for_muxbus.clone();
+        // See `set_self_ref` / `retry_after_resume_failure` — lets this
+        // detached task call back into an instance method once the process
+        // actually exits, to transparently retry a stale-`--resume` failure.
+        let self_ref_wait = self.self_ref.lock().unwrap().clone().unwrap_or_default();
 
         tokio::spawn(async move {
             tokio::select! {
@@ -1158,6 +1270,10 @@ impl PersistentSubprocessController {
                     inner.current_pid = None;
                     inner.stdin_tx = None;
                     inner.kill_tx = None;
+                    // Taken (not just read) so a stale-resume retry can only
+                    // ever fire once per triggering spawn — see
+                    // `retry_after_resume_failure`'s doc comment.
+                    let retry_after_resume = inner.pending_resume_retry.take();
                     Self::set_status(&mut inner, STATUS_DONE);
                     drop(inner);
 
@@ -1193,6 +1309,25 @@ impl PersistentSubprocessController {
                         };
                         super::publish_controller_status(broker, &status);
                     }
+
+                    // A stale `--resume <sid>` is exactly what killed this
+                    // process (`retry_after_resume_failure`'s doc comment) —
+                    // retry the same message once, fresh, before this exit
+                    // is ever treated as a completed/failed turn from the
+                    // frontend's point of view. reagentx/codex never
+                    // reviewed this path (see docs/retros/
+                    // RETRO_STALE_RESUME_SESSION_ID_ACROSS_CHANNELS_2026_07_29.md) —
+                    // it's a different controller type than PR #2338's own
+                    // ACP-controller review surface.
+                    if let Some((retry_config, retry_json)) = retry_after_resume {
+                        if let Some(ctrl) = self_ref_wait.upgrade() {
+                            tracing::warn!(
+                                block_id = %block_id_wait,
+                                "stale --resume session id caused this exit — retrying fresh, without --resume"
+                            );
+                            ctrl.retry_after_resume_failure(retry_config, retry_json);
+                        }
+                    }
                 }
                 Ok(force) = kill_rx => {
                     tracing::info!(
@@ -1223,6 +1358,12 @@ impl PersistentSubprocessController {
                     inner.current_pid = None;
                     inner.stdin_tx = None;
                     inner.kill_tx = None;
+                    // A user-initiated kill is unrelated to any stale-resume
+                    // failure in flight; drop it so a future, unrelated exit
+                    // on a REUSED controller instance (resync_controller can
+                    // reuse the same instance across a kill+restart cycle)
+                    // never retries a message from this now-dead lifetime.
+                    inner.pending_resume_retry = None;
                     Self::set_status(&mut inner, STATUS_DONE);
                     drop(inner);
 
@@ -1555,10 +1696,24 @@ mod resume_poison_tests {
             status_version: 0,
             session_id: session_id.map(str::to_string),
             resume_poisoned: None,
+            pending_resume_retry: None,
             current_pid: None,
             stdin_tx: None,
             kill_tx: None,
             pending_questions: HashMap::new(),
+        }
+    }
+
+    fn dummy_spawn_config() -> PersistentSpawnConfig {
+        PersistentSpawnConfig {
+            cli_command: "claude".to_string(),
+            cli_args: vec![],
+            working_dir: String::new(),
+            env_vars: HashMap::new(),
+            session_id_field: "session_id".to_string(),
+            resume_flag: "--resume".to_string(),
+            session_id: "dead-sid".to_string(),
+            message_id: None,
         }
     }
 
@@ -1608,5 +1763,68 @@ mod resume_poison_tests {
         let captured = inner.try_capture_session_id("second-sid");
         assert!(!captured, "must not overwrite an already-captured session id");
         assert_eq!(inner.session_id.as_deref(), Some("first-sid"));
+    }
+
+    // reagentx/codex never reviewed this path (PR #2338's review surface was
+    // the ACP controller only) — see docs/retros/
+    // RETRO_STALE_RESUME_SESSION_ID_ACROSS_CHANNELS_2026_07_29.md. A stale
+    // `--resume <sid>` (first-ever use of a globally-known agent's session
+    // under a brand-new build/channel's own CLI install) used to lose the
+    // triggering message and surface a generic "Agent encountered an error"
+    // — the safety net is `pending_resume_retry`, and its correctness hinges
+    // entirely on being cleared if and only if the spawn it was captured for
+    // actually made real progress.
+    #[test]
+    fn pending_resume_retry_is_cleared_once_the_resume_actually_succeeds() {
+        let mut inner = inner_with_session_id(None);
+        inner.pending_resume_retry = Some((dummy_spawn_config(), "{}".to_string()));
+
+        // The CLI echoes back the SAME sid it was given, confirming --resume
+        // actually worked — this is genuine progress, so the retry safety
+        // net is no longer needed.
+        let captured = inner.try_capture_session_id("dead-sid");
+        assert!(captured);
+        assert!(
+            inner.pending_resume_retry.is_none(),
+            "a successful resume must stand down the retry safety net"
+        );
+    }
+
+    #[test]
+    fn pending_resume_retry_is_cleared_when_the_cli_starts_a_fresh_conversation_on_its_own() {
+        let mut inner = inner_with_session_id(None);
+        inner.pending_resume_retry = Some((dummy_spawn_config(), "{}".to_string()));
+
+        // A DIFFERENT (fresh) sid — the CLI gave up on --resume internally
+        // and started its own new conversation without ever hitting the
+        // stderr "No conversation found" path. Also genuine progress.
+        let captured = inner.try_capture_session_id("brand-new-sid");
+        assert!(captured);
+        assert!(inner.pending_resume_retry.is_none());
+    }
+
+    #[test]
+    fn pending_resume_retry_survives_a_refused_capture() {
+        // The exact race this whole mechanism exists for: stderr's
+        // poison_resume fires (confirming this spawn's resume attempt is
+        // dead) BEFORE the stdout reader's own echo of that same dead id
+        // loses the race and gets refused. The refused capture must NOT
+        // clear pending_resume_retry — no progress was made, so the retry
+        // this exact scenario needs must still fire once the process exits.
+        let mut inner = inner_with_session_id(Some("dead-sid"));
+        inner.pending_resume_retry = Some((dummy_spawn_config(), "{}".to_string()));
+
+        inner.poison_resume("dead-sid");
+        assert!(
+            inner.pending_resume_retry.is_some(),
+            "poison_resume alone must not clear the retry — the process hasn't exited yet"
+        );
+
+        let captured = inner.try_capture_session_id("dead-sid");
+        assert!(!captured, "the poisoned id must still be refused");
+        assert!(
+            inner.pending_resume_retry.is_some(),
+            "a refused (no-op) capture must not clear the retry safety net"
+        );
     }
 }
