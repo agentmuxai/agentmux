@@ -524,19 +524,33 @@ impl PersistentSubprocessController {
     /// `PersistentInner::spawning_in_progress`'s doc comment for the race
     /// this closes. All three outcomes are decided under ONE lock
     /// acquisition so nothing can slip through the gaps between them:
-    /// - the process is already running → `DeliverDirect`, no spawn
-    ///   decision at all.
-    /// - nobody is currently spawning → this caller claims the exclusive
-    ///   right to (`spawning_in_progress = true`), enqueues `json_str`
-    ///   alongside that claim, and returns `BecomeSpawner` — the caller
-    ///   must then call `spawn_process` and, regardless of outcome, call
-    ///   `release_spawn_claim_and_drain_queue`.
-    /// - someone else is already spawning → `json_str` is enqueued for
-    ///   THAT caller's own drain to deliver, and this call returns
-    ///   `Queued` with nothing further to do.
+    /// - the process is already running AND nobody is still draining a
+    ///   backlog into it → `DeliverDirect`, no spawn decision at all.
+    /// - someone is currently spawning OR still draining a backlog
+    ///   (`spawning_in_progress`) → `json_str` is enqueued for THAT
+    ///   caller's own drain to deliver, and this call returns `Queued`
+    ///   with nothing further to do. reagentx P1 on PR #2360 (sixth
+    ///   review pass, round 4): `spawn_process` sets `stdin_tx` well
+    ///   before the queued message that triggered the spawn is actually
+    ///   delivered (that happens later, on a background drain task —
+    ///   see `drain_queue_after_successful_spawn`). Gating `DeliverDirect`
+    ///   on `stdin_tx.is_some()` alone let a second, genuinely concurrent
+    ///   `send_message` call land in that exact window and write straight
+    ///   to stdin via `try_send`, racing ahead of the drain's own
+    ///   `Sender::send().await` for the message that actually triggered
+    ///   the spawn — silently reordering user input. Checking
+    ///   `!spawning_in_progress` too routes it into the queue instead,
+    ///   where the SAME already-running drain loop (it stays `true` for
+    ///   its entire lifetime — see the field's own doc comment) picks it
+    ///   up next, in order.
+    /// - nobody is running AND nobody is spawning → this caller claims the
+    ///   exclusive right to (`spawning_in_progress = true`), enqueues
+    ///   `json_str` alongside that claim, and returns `BecomeSpawner` —
+    ///   the caller must then call `spawn_process` and, regardless of
+    ///   outcome, call `release_spawn_claim_and_drain_queue`.
     fn decide_send_action(&self, json_str: &str) -> SendAction {
         let mut inner = self.inner.lock().unwrap();
-        if inner.stdin_tx.is_some() {
+        if inner.stdin_tx.is_some() && !inner.spawning_in_progress {
             SendAction::DeliverDirect
         } else if inner.spawning_in_progress {
             inner.pending_send_messages.push_back(json_str.to_string());
@@ -634,11 +648,24 @@ impl PersistentSubprocessController {
                 };
                 let Some((json_str, tx)) = next else {
                     // Either the queue is empty, or the process has
-                    // already exited again before we got to it — either
-                    // way, release the claim so a future caller can spawn.
+                    // already exited again before we got to it. Release
+                    // the claim ONLY if we're not about to hand off to a
+                    // fallback respawn — reagentx P1 on PR #2360 (sixth
+                    // review pass, round 4): releasing it unconditionally
+                    // here left a window, between this release and
+                    // `respawn_once_for_leftover_queue`'s own
+                    // `spawn_process` call re-establishing state, where a
+                    // concurrent `send_message`/`retry_after_resume_failure`
+                    // could see "not running, not spawning" and
+                    // independently spawn its own child process for the
+                    // same block — reintroducing the exact orphaned/
+                    // duplicate-process race `spawning_in_progress` was
+                    // added in this same PR to close.
                     let mut inner = inner_arc.lock().unwrap();
                     let stalled = inner.stdin_tx.is_none() && !inner.pending_send_messages.is_empty();
-                    inner.spawning_in_progress = false;
+                    if !(stalled && allow_fallback_respawn) {
+                        inner.spawning_in_progress = false;
+                    }
                     break stalled;
                 };
                 if let Err(e) = tx.send(json_str).await {
@@ -649,21 +676,27 @@ impl PersistentSubprocessController {
                     // The channel's gone, so no send from here will ever
                     // succeed again — put the message back (rather than
                     // silently discarding it) for a future spawn to pick
-                    // up, and release the claim now instead of busy-looping
-                    // on the same dead sender.
+                    // up. Same claim-retention rule as above.
                     let mut inner = inner_arc.lock().unwrap();
                     inner.pending_send_messages.push_front(e.0);
                     let stalled = !inner.pending_send_messages.is_empty();
-                    inner.spawning_in_progress = false;
+                    if !(stalled && allow_fallback_respawn) {
+                        inner.spawning_in_progress = false;
+                    }
                     break stalled;
                 }
             };
             if stalled_with_leftovers {
-                if let Some(ctrl) = self_ref.upgrade() {
-                    if allow_fallback_respawn {
-                        ctrl.respawn_once_for_leftover_queue(retry_config);
-                    } else {
-                        ctrl.publish_status();
+                match self_ref.upgrade() {
+                    Some(ctrl) if allow_fallback_respawn => ctrl.respawn_once_for_leftover_queue(retry_config),
+                    Some(ctrl) => ctrl.publish_status(),
+                    None => {
+                        // Nobody left to call back (e.g. a throwaway
+                        // instance that never called `set_self_ref`) — the
+                        // claim was deliberately kept held above pending
+                        // this hand-off, so it must still be released here
+                        // or no future caller could ever spawn again.
+                        inner_arc.lock().unwrap().spawning_in_progress = false;
                     }
                 }
             }
@@ -2244,6 +2277,37 @@ mod send_input_tests {
             inner.pending_send_messages.is_empty(),
             "must not queue when delivering directly to an already-running process"
         );
+    }
+
+    /// reagentx P1 on PR #2360 (sixth review pass, round 4): `spawn_process`
+    /// sets `stdin_tx` synchronously, well before the queued message that
+    /// triggered the spawn is actually delivered by the background drain
+    /// task (`drain_queue_after_successful_spawn`). A second caller
+    /// landing in that exact window — `stdin_tx` already live, but
+    /// `spawning_in_progress` still `true` because the drain hasn't
+    /// finished — must NOT take the `DeliverDirect` path: writing straight
+    /// to stdin via `try_send` there would race ahead of the drain's own
+    /// `Sender::send().await` for the message that actually triggered the
+    /// spawn, silently reordering user input. It must queue behind
+    /// whatever the still-active drain is working through instead.
+    #[test]
+    fn decide_send_action_queues_instead_of_delivering_direct_while_a_drain_is_still_active() {
+        let c = controller();
+        let (tx, _rx) = mpsc::channel::<String>(4);
+        {
+            let mut inner = c.inner.lock().unwrap();
+            inner.stdin_tx = Some(tx);
+            inner.spawning_in_progress = true;
+        }
+
+        let action = c.decide_send_action("msg-late-arrival");
+        assert!(
+            matches!(action, SendAction::Queued),
+            "must queue, not deliver direct, while a drain for an earlier message is still active"
+        );
+        let inner = c.inner.lock().unwrap();
+        assert_eq!(inner.pending_send_messages.len(), 1);
+        assert_eq!(inner.pending_send_messages[0], "msg-late-arrival");
     }
 
     /// Exercises the actual race with real OS threads, not just sequential
