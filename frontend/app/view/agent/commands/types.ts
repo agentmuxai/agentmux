@@ -167,6 +167,16 @@ export interface SlashCommandContext {
      * stops the existing controller process before respawning it, which
      * would kill an in-progress turn and discard its work. Codex P1 on
      * PR #2338 (tenth re-review).
+     *
+     * Backed by the PRE-`TurnStart` `wasAlreadyWorking` snapshot
+     * (`useAgentCommands.ts`'s `buildCommandContext`), NOT a live
+     * `paneSnapshot(...).turnPhase` read — `handleSendMessage`
+     * (agent-view.tsx) dispatches `TurnStart` optimistically before
+     * `sendMessage` ever runs, so a live read would see that optimistic
+     * "Submitting" phase and report `true` even for the ordinary case of
+     * typing /login on a genuinely idle pane, permanently defeating this
+     * check for the most common path. Codex P1 on PR #2338 (eleventh
+     * re-review).
      */
     isTurnActive: () => boolean;
     /**
