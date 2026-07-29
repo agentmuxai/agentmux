@@ -5,8 +5,8 @@
 **Date:** 2026-07-29
 **Related:** `docs/specs/SPEC_MUXBUS_DELIVERY_HIERARCHY_2026_06_15.md`,
 `docs/specs/SPEC_MUXBUS_AGENT_DISCOVERY_AND_PERSISTENT_DELIVERY_2026_06_16.md`,
-`docs/specs/SPEC_MUXBUS_CROSS_CHANNEL_DELIVERY_2026_07_02.md` (parked,
-issue #1916), `docs/specs/SPEC_MUXBUS_CROSS_CHANNEL_DUPLICATE_DELIVERY_2026_07_04.md`,
+issue #1916 / PR #2350 (Tier 2b same-host cross-channel delivery — see §2 row
+below), `docs/specs/SPEC_MUXBUS_CROSS_CHANNEL_DUPLICATE_DELIVERY_2026_07_04.md`,
 `docs/specs/SPEC_MUXBUS_MULTI_TENANT_SECURITY_2026_07_06.md`,
 `agentmux-srv/src/backend/lan_discovery.rs`,
 `agentmux-srv/src/muxbus/cloud_subscriber.rs`.
@@ -34,10 +34,10 @@ not assumed from prior specs.
 |---|---|---|
 | 1 — in-process | Same sidecar, in-memory `HashMap` lookup, direct PTY/stdin write | **Implemented.** `agentmux-srv/src/backend/reactive/handler.rs` |
 | 2 — same host, same channel | File registry at `{data_dir}/agents/{agent_id}.json`, HTTP loopback + `X-AuthKey` | **Implemented.** `server/reactive.rs::handle_reactive_inject`, `backend/reactive/registry.rs` |
-| 2 — same host, **different channel** | — | **Confirmed broken, unfixed.** `data_dir` resolves per-channel (`AGENTMUX_DATA_HOME`), so two channels on one host have disjoint registries. Spec exists (`SPEC_MUXBUS_CROSS_CHANNEL_DELIVERY_2026_07_02.md`), filed as **issue #1916 (still open, zero comments, zero linked PRs)**. A worktree exists (`wt-xchannel`) but contains **only the spec doc, zero code** — diffed against its own merge-base, no `.rs`/`.ts` changes anywhere. |
+| 2 — same host, **different channel** | Host-global shared registry at `~/.agentmux/shared/agents/reactive/` | **Confirmed broken as of this audit; fix in flight.** `data_dir` resolves per-channel (`AGENTMUX_DATA_HOME`), so two channels on one host have disjoint registries — tracked as **issue #1916**. Design implemented directly in **PR #2350** (Tier 2b: freshest-first forward, evict-on-fail, PID-liveness startup sweep, `host.cross_channel[]` on the discovery endpoint). No separate design doc landed in the repo for this — an earlier local draft existed only in an unpushed worktree and was never committed; PR #2350's description and commit messages are the authoritative record instead. |
 | 3 — LAN | mDNS/DNS-SD (`_agentmux._tcp.local.`) + **UDP broadcast fallback** (port 47891, for networks that filter multicast) | **Implemented, opt-in** (`network:lan_discovery`, default off). `agentmux-srv/src/backend/lan_discovery.rs`, with real unit tests including a live round-trip. TXT record carries `auth_key` **in plaintext** — a documented, intentional tradeoff, but worth revisiting (see Design §4). |
 | 4 — WAN/cloud | Persistent WebSocket to `muxbus-ws.agentmux.ai`, zero-payload wake → poll pending → **claim-before-deliver** (atomic, fixes a real duplicate-delivery bug, PR #1959) | **Implemented**, push-based (not poll-only). `agentmux-srv/src/muxbus/cloud_subscriber.rs` |
-| Discovery endpoint | `GET /agentmux/discovery` — aggregates `host` (same-channel only), `lan`, `wan.subscribed_agents` (this sidecar's own subscriptions only) | **Implemented, but no `host.cross_channel[]` field** — the 07-02 spec proposed one, never built. |
+| Discovery endpoint | `GET /agentmux/discovery` — aggregates `host` (same-channel only), `lan`, `wan.subscribed_agents` (this sidecar's own subscriptions only) | **Implemented; `host.cross_channel[]` added in PR #2350** alongside the Tier 2b fix above — at the time of this audit it did not yet exist. |
 | Mobile LAN pairing | QR-code pairing + UDP broadcast probe, phone↔desktop | **Implemented** — but in `agentmux-mobile`, and scoped to mobile-finds-desktop, not desktop-finds-desktop or agent-to-agent. |
 | Cloud-side enumeration | "What agents/instances exist on the platform/account" | **Does not exist — a stated non-goal.** `cloud_subscriber.rs`'s own doc comment: the server can't correlate a wake signal to any particular agent/account; there's no directory query anywhere. |
 | Cloud-side per-agent authorization | Verifying a credential is actually allowed to act as the `agent_id` it claims | **Does not exist yet.** Per-agent M2M credentials just landed client-side (PR #2342, today), but server-side enforcement is still log-only (`ENFORCE_AGENT_BINDING` unset). Any valid muxbus credential can currently inject to/claim/impersonate any `agent_id`, cross-account. |
@@ -55,9 +55,9 @@ shape: **a well-known local directory holding a socket/pipe + a small
 manifest/lock file** (PID, port, endpoint), discoverable by glob, with
 the lock file doing double duty as both mutex and liveness record
 (Chrome's `DevToolsActivePort`, PipeWire's `.lock`). This is *exactly*
-what the parked #1916 spec already proposes (`~/.agentmux/shared/reactive-agents/`,
-host-global, TTL + dead-pid sweep) — the design was already right, it
-just was never built.
+the shape #1916 called for — a host-global registry directory (shipped in
+PR #2350 as `~/.agentmux/shared/agents/reactive/`), TTL + dead-pid sweep — the
+design was already right, it just hadn't been built yet as of this audit.
 
 ### LAN discovery
 mDNS/DNS-SD as primary transport (best library support, works within a
@@ -127,28 +127,33 @@ needs new design, not just gap-filling. Strongest fits from research:
 
 ## Design
 
-### 1. Finish the same-host cross-channel fix first (issue #1916)
+### 1. Same-host cross-channel fix (issue #1916) — DONE, PR #2350
 
-The design already exists and matches best practice exactly (validated
-above against Docker/VS Code/Chrome DevTools). No new design needed —
-just build what's already spec'd:
+The design matched best practice exactly (validated above against
+Docker/VS Code/Chrome DevTools); no new design was needed. Shipped
+directly rather than sequenced behind this doc:
 
-- `get_shared_data_dir()` rooted at `~/.agentmux/shared` (reuses the
-  existing narrow I6 carve-out already used for muxbus creds/trust-center
-  — not a new exception to the isolation invariants).
-- `reactive/registry.rs` re-rooted there, per-name **list** (not single
-  entry) tagged with `channel`, `lookup_all()`, TTL + dead-pid sweep.
-- New Tier 2b in `server/reactive.rs`: after a same-channel Tier-2 miss,
-  iterate host-global candidates freshest-first.
-- `GET /agentmux/discovery` gains `host.cross_channel[]`.
-- Dual-read migration window (old per-channel path checked as fallback
-  for one release).
+- `registry::resolve_shared_reactive_dir()` rooted at
+  `~/.agentmux/shared/agents/reactive/` (reuses the existing narrow I6
+  carve-out already used for muxbus creds/trust-center — not a new
+  exception to the isolation invariants).
+- `backend/reactive/registry.rs` gained a sibling shared-registry API,
+  per-name **list** (not single entry) tagged with `channel`,
+  `write_shared`/`remove_shared`/`lookup_all_shared`/`list_all_shared`,
+  TTL + dead-pid sweep (`cleanup_stale_shared`, `pid_alive` via `sysinfo`).
+- New Tier 2b in `server/reactive.rs`: after a same-channel Tier-2 miss (or
+  its forward failing), iterate host-global candidates freshest-first,
+  evict-on-fail.
+- `GET /agentmux/discovery` gained `host.cross_channel[]`.
+- No migration window needed — this is a new, additive registry rather
+  than a re-root of the existing per-channel one, so there's no old-path
+  fallback to bridge.
 
-This is scoped, understood, low-risk, and has sat parked for 27 days for
-no reason other than nobody picking it up. Recommend this ships
-independently of everything else below — it's valuable on its own even
-before any RPC layer exists (a cross-channel *text message* is still
-strictly better than today's silent failure).
+This was scoped, understood, low-risk, and had sat parked for 27 days for
+no reason other than nobody picking it up — shipped independently of
+everything else below, since it's valuable on its own even before any RPC
+layer exists (a cross-channel *text message* is still strictly better
+than the prior silent failure).
 
 ### 2. Strengthen LAN trust (plaintext auth_key → pinned identity)
 
@@ -221,9 +226,9 @@ exists would make an already-flagged gap materially worse.
 
 ## Suggested sequencing
 
-1. Finish #1916 (same-host cross-channel) — spec'd, scoped, independent, valuable alone.
+1. ~~Finish #1916 (same-host cross-channel)~~ — **done, PR #2350.**
 2. Enforce Tier-4 per-agent authorization server-side (already tracked, already flagged as a gap, blocks item 5 below from being safe).
-3. LAN trust hardening (§2) — independent, can interleave with 1/2.
+3. LAN trust hardening (§2) — independent, can interleave with 2.
 4. Cloud coordination/directory endpoint (§3) — bigger lift, own spec, needed before meaningful WAN-tier enumeration.
 5. RPC layer (§4) — the real new capability, deliberately sequenced last and gated on #2, since it's the one item that turns a messaging bug into a security-relevant feature if done before authorization is solid.
 
@@ -249,11 +254,11 @@ exists would make an already-flagged gap materially worse.
 
 | File | Relevance |
 |---|---|
-| `agentmux-srv/src/backend/reactive/registry.rs`, `backend/base.rs` | §1 — host-global registry, `get_shared_data_dir()` |
-| `agentmux-srv/src/server/reactive.rs` | §1 — new Tier 2b; §4 — RPC dispatch if payload shape gains a "call" variant |
-| `agentmux-srv/src/server/mod.rs::handle_discovery` | §1 — `host.cross_channel[]`; §3 — new directory data if cloud gains it |
+| `agentmux-srv/src/backend/reactive/registry.rs`, `agentmux-srv/src/registry/paths.rs` | §1 — host-global registry; **§1 shipped in PR #2350** (`resolve_shared_reactive_dir`, `write_shared`/`remove_shared`/`lookup_all_shared`/`cleanup_stale_shared`) |
+| `agentmux-srv/src/server/reactive.rs` | §1 — new Tier 2b; **shipped in PR #2350**. §4 — RPC dispatch if payload shape gains a "call" variant (not yet started) |
+| `agentmux-srv/src/server/mod.rs::handle_discovery` | §1 — `host.cross_channel[]`; **shipped in PR #2350**. §3 — new directory data if cloud gains it (not yet started) |
 | `agentmux-srv/src/backend/lan_discovery.rs` | §2 — identity/pinning instead of plaintext `auth_key` in TXT record |
 | `agentmux-srv/src/muxbus/cloud_subscriber.rs`, `agentmux-srv/src/muxbus/agent_credentials.rs` | §3, §4 gating — coordination role, per-agent auth enforcement |
 | `agentmux-mcp/src/main.rs` | §4 — candidate source for (or explicit non-source for, per Open Question #2) the RPC method allowlist |
-| `docs/specs/SPEC_MUXBUS_CROSS_CHANNEL_DELIVERY_2026_07_02.md`, issue #1916 | §1 — the design to actually build, already correct per this doc's research |
+| issue #1916, PR #2350 | §1 — the design this doc called for, implemented directly against code rather than through a separate design doc (see the §2 audit row above for why) |
 | `docs/specs/SPEC_MUXBUS_MULTI_TENANT_SECURITY_2026_07_06.md` | §4 gating dependency — Tier-4 auth enforcement status |
