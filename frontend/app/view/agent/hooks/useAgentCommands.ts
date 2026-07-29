@@ -332,6 +332,21 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
          * re-review).
          */
         authFailureToPreserve: AgentFailure | null;
+        /**
+         * True only for the idle-send hold (the branch below gated on
+         * controllerRefreshPendingUntilIdle) — that path's caller
+         * (handleSendMessage in agent-view.tsx) already dispatched an
+         * OPTIMISTIC TurnStart before ever calling sendMessage, since
+         * wasAlreadyWorking is false there. The busy-path hold above never
+         * dispatches TurnStart (the pane was already legitimately busy with
+         * something else), so it stays false. When an item is later
+         * REJECTED (not delivered) here, this flag says whether that
+         * optimistic TurnStart needs rolling back — otherwise the pane is
+         * left in Submitting/"Working…" forever even though no message ever
+         * reached the backend. reagentx/codex P1 on PR #2338 (thirty-sixth
+         * re-review).
+         */
+        initiatedTurnOptimistically: boolean;
     }> = [];
     // Re-entrancy guard: only ONE flush drains the queue at a time. The flush
     // effect fires fire-and-forget on every tool/phase change, so without this
@@ -572,6 +587,28 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 // on PR #2338 (thirty-fifth re-review).
                 if (paneSnapshot(opts.blockId)?.failure?.data.code === "auth") {
                     opts.model.dispatchPane({ type: "FailureCleared" });
+                }
+                // A successful refresh proves the pane's state.failure (the
+                // single "auth" banner slot the reducer clears above) is
+                // resolved — any held item's authFailureToPreserve snapshot
+                // of that SAME slot predates the proof and is now stale.
+                // Without invalidating it here, flushHeldMessages (triggered
+                // below) would still reject a now-good message solely
+                // because of that pre-refresh snapshot, and would even
+                // re-dispatch it, resurrecting the "Not logged in" banner
+                // immediately after this same refresh just fixed it.
+                // Deliberately does NOT touch authWasKnownBadAtQueueTime —
+                // codex P1 on PR #2338 (sixteenth re-review) pins that flag
+                // (canRetry()/loginWaiting(), independent of state.failure)
+                // surviving an UNRELATED successful refresh on purpose: it
+                // can reflect a separate, still-failing recovery attempt
+                // this refresh's success says nothing about, and the file's
+                // standing rule is to always reject once flagged bad at
+                // queue time rather than re-derive "fixed now" from a
+                // signal that doesn't cover this case. reagentx/codex P1 on
+                // PR #2338 (thirty-sixth re-review).
+                for (const item of heldQueue) {
+                    item.authFailureToPreserve = null;
                 }
                 // A message can have been HELD (not delivered) specifically
                 // because this exact refresh was still pending/blocked —
@@ -927,7 +964,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 opts.model.dispatchPane({ type: "PendingMessageRejected", id: messageId });
                 return;
             }
-            heldQueue.push({ id: messageId, text: message, authWasKnownBadAtQueueTime, authFailureToPreserve: null });
+            heldQueue.push({ id: messageId, text: message, authWasKnownBadAtQueueTime, authFailureToPreserve: null, initiatedTurnOptimistically: false });
             return;
         }
 
@@ -975,7 +1012,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             // (canRetry/loginWaiting are untouched by a mid-turn auth
             // failure) and the live check finds nothing (already cleared).
             // codex P2 on PR #2338 (twenty-third re-review).
-            heldQueue.push({ id: messageId, text: message, authWasKnownBadAtQueueTime: opts.canRetry() || opts.loginWaiting(), authFailureToPreserve });
+            heldQueue.push({ id: messageId, text: message, authWasKnownBadAtQueueTime: opts.canRetry() || opts.loginWaiting(), authFailureToPreserve, initiatedTurnOptimistically: true });
             return;
         }
 
@@ -1373,6 +1410,21 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 const liveAuthFailure = paneSnapshot(opts.blockId)?.failure?.data.code === "auth";
                 if (item.authWasKnownBadAtQueueTime || item.authFailureToPreserve || liveAuthFailure) {
                     opts.log("auth", "held message not sent — not logged in", "warn");
+                    // Roll back the OPTIMISTIC TurnStart handleSendMessage
+                    // already dispatched for this item's idle-send hold —
+                    // dispatched BEFORE FailureObserved below (mirrors
+                    // checkAuthGuard's own ordering in deliverToBackend) so
+                    // turnPhase is already Idle when that reducer case runs.
+                    // Without this, the pane is stuck in Submitting/
+                    // "Working…" forever: this rejection never reaches
+                    // deliverToBackend's own initiatesTurn-gated
+                    // TurnStartFailed (it always calls that with
+                    // initiatesTurn=false for a flushed item), and nothing
+                    // else in this branch touches turnPhase. reagentx/codex
+                    // P1 on PR #2338 (thirty-sixth re-review).
+                    if (item.initiatedTurnOptimistically) {
+                        opts.model.dispatchPane({ type: "TurnStartFailed" }, "system");
+                    }
                     // Restore the recovery UI ("Login Again"/"Use existing
                     // login") when THIS item's own captured snapshot is
                     // what's causing the rejection and nothing already-live

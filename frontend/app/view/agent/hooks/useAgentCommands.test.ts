@@ -2008,6 +2008,151 @@ describe("useAgentCommands — idle sendMessage runs the deferred controller ref
         });
     });
 
+    // reagentx/codex P1 on PR #2338 (thirty-sixth re-review): the mirror
+    // image of the test above — when the SAME deferred refresh instead
+    // SUCCEEDS, the held item's captured authFailureToPreserve snapshot is
+    // now stale (state.failure was the SAME single "auth" slot the refresh's
+    // own success path just cleared) and must not reject the now-good
+    // message or resurrect the banner it captured.
+    it("does NOT reject a held message (queued while a deferred refresh was blocked) whose captured authFailureToPreserve predates a since-SUCCEEDED refresh, and does not resurrect its banner", async () => {
+        hub.dispatchSlashCommand.mockImplementation(async (_msg: string, _registry: unknown, ctx: { deferControllerRefreshUntilIdle: () => void }) => {
+            ctx.deferControllerRefreshUntilIdle();
+            return { kind: "handled" };
+        });
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+        // The deferred refresh SUCCEEDS this time.
+        const forceControllerRefresh = vi.fn(async () => true);
+        let backendConfirmedIdle = false;
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => backendConfirmedIdle,
+                backToPicker: async () => {},
+            });
+
+            // /login succeeds mid-turn (defers instead of refreshing now).
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("/login", /* wasAlreadyWorking */ true);
+
+            // A fresh idle send captures a live auth failure right before
+            // TurnStart clears it — mirrors handleSendMessage's own
+            // capture. The refresh is still blocked, so this gets held.
+            const capturedFailure: AgentFailure = { code: "auth", title: "Not logged in", detail: "401", retryable: true };
+            await commands.sendMessage("fresh message", /* wasAlreadyWorking */ false, capturedFailure);
+            expect(commands.hasHeldMessages()).toBe(true);
+            expect(hub.agentInput).not.toHaveBeenCalled();
+
+            // The backend confirms idle — the deferred refresh runs and
+            // SUCCEEDS, which should drain and deliver the held item.
+            backendConfirmedIdle = true;
+            await commands.flushPendingControllerRefresh();
+            await new Promise((resolve) => setTimeout(resolve, 0));
+
+            expect(forceControllerRefresh).toHaveBeenCalledOnce();
+            // Must have been delivered — the refresh that just succeeded
+            // fixed exactly the credential this item was held on.
+            expect(hub.agentInput).toHaveBeenCalledWith(
+                expect.anything(),
+                expect.objectContaining({ message: "fresh message" }),
+            );
+            expect(commands.hasHeldMessages()).toBe(false);
+            // The banner must NOT be resurrected over a credential that was
+            // just fixed.
+            expect(paneSnapshot(BLOCK_ID)?.failure).toBeNull();
+            dispose();
+        });
+    });
+
+    // reagentx/codex P1 on PR #2338 (thirty-sixth re-review): an idle-send
+    // hold (the branch gated on controllerRefreshPendingUntilIdle) has an
+    // OPTIMISTIC TurnStart already dispatched by handleSendMessage before
+    // sendMessage ever ran (wasAlreadyWorking is false there) — unlike the
+    // busy-path hold, which never dispatches TurnStart. When such an item is
+    // later REJECTED (not delivered), that optimistic TurnStart must be
+    // rolled back or the pane is stuck in Submitting/"Working…" forever even
+    // though no message ever reached the backend.
+    it("rolls back the optimistic TurnStart when rejecting an idle-held message, so the pane returns to Idle", async () => {
+        hub.dispatchSlashCommand.mockImplementation(async (_msg: string, _registry: unknown, ctx: { deferControllerRefreshUntilIdle: () => void }) => {
+            ctx.deferControllerRefreshUntilIdle();
+            return { kind: "handled" };
+        });
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+        // The deferred refresh itself FAILS — the held item is rejected.
+        const forceControllerRefresh = vi.fn(async () => false);
+        let backendConfirmedIdle = false;
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => backendConfirmedIdle,
+                backToPicker: async () => {},
+            });
+
+            // /login succeeds mid-turn (defers instead of refreshing now).
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("/login", /* wasAlreadyWorking */ true);
+
+            // A fresh idle send captures a live auth failure right before
+            // TurnStart clears it — mirrors handleSendMessage's own
+            // capture (and its own optimistic TurnStart dispatch, already
+            // in effect from the /login turn above). The refresh is still
+            // blocked, so this gets held via the idle-send push, which is
+            // the ONLY push site that sets initiatedTurnOptimistically:
+            // true.
+            const capturedFailure: AgentFailure = { code: "auth", title: "Not logged in", detail: "401", retryable: true };
+            await commands.sendMessage("fresh message", /* wasAlreadyWorking */ false, capturedFailure);
+            expect(commands.hasHeldMessages()).toBe(true);
+            expect(paneSnapshot(BLOCK_ID)?.turnPhase.kind).not.toBe("Idle");
+
+            // The backend confirms idle — the deferred refresh runs but
+            // FAILS, so a separate flushHeldMessages() rejects the item
+            // (its captured "auth" failure keeps it known-bad).
+            backendConfirmedIdle = true;
+            await commands.flushPendingControllerRefresh();
+            await commands.flushHeldMessages();
+
+            expect(hub.agentInput).not.toHaveBeenCalled();
+            expect(commands.hasHeldMessages()).toBe(false);
+            // The pane must not be stuck in Submitting/"Working…" forever —
+            // no message ever reached the backend for this optimistic turn.
+            expect(paneSnapshot(BLOCK_ID)?.turnPhase.kind).toBe("Idle");
+            dispose();
+        });
+    });
+
     // reagent P2 on PR #2338 (twenty-ninth re-review): flushHeldMessages's
     // rejection path restores authFailureToPreserve into the failure
     // banner, but recallLatestHeld (the ArrowUp un-queue path) popped the
