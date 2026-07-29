@@ -275,6 +275,45 @@ impl Store {
         Ok(out)
     }
 
+    /// Effective skills for an agent at launch/config-materialization time:
+    /// this agent's own ref-bound skills (via `skill_list`) take over
+    /// *entirely* when present (globals still included), otherwise fall back
+    /// to the legacy `db_agent_skills` table with globals layered on top. The
+    /// fallback decision is gated on *own* refs only — not the
+    /// global-inclusive list — so adding a global skill never discards a
+    /// legacy-only agent's skills.
+    ///
+    /// Single source of truth for two call sites that must stay consistent:
+    /// `write_agent_config_files` (the authoritative Rust materialization
+    /// path) and the `listagentskills` RPC handler, which the frontend's
+    /// pre-launch `ListAgentSkillsCommand` call depends on for its own
+    /// `buildConfigFiles` mirror. Before this was extracted, `listagentskills`
+    /// returned only legacy skills — silently hiding every standalone/Armory-
+    /// catalog skill (including any Agent-Skills-format one, see
+    /// SKILL_TYPE_AGENT_SKILL) from the actual "click Launch" flow, since
+    /// that RPC is window-scoped (no `check_s1`) and can't call the
+    /// agent-scoped `skill.list` RPC the way an already-running, authenticated
+    /// agent connection could (reagent P0 on PR #2322 — the launch UI is not
+    /// an authenticated agent connection, so it was never able to reach the
+    /// standalone Skill primitive via the RPC layer at all).
+    pub fn effective_skills(&self, agent_id: &str) -> Vec<AgentSkill> {
+        let legacy_skills = self.agent_skill_list(agent_id).unwrap_or_default();
+        let visible_skills: Vec<Skill> = self
+            .skill_list(agent_id)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|item| item.skill)
+            .collect();
+        let has_own_skill_refs = visible_skills.iter().any(|s| !s.is_global);
+        if has_own_skill_refs {
+            crate::backend::agent_config::skills_to_agent_skills(&visible_skills, agent_id)
+        } else {
+            let mut merged = legacy_skills;
+            merged.extend(crate::backend::agent_config::skills_to_agent_skills(&visible_skills, agent_id));
+            merged
+        }
+    }
+
     /// List every GLOBAL skill — the Armory catalog view. Unlike
     /// `skill_list`, this takes no `agent_id` and never includes an agent's
     /// private skills; it backs the window-scoped `skill.catalog.*` App API
@@ -306,6 +345,50 @@ impl Store {
                     updated_at: row.get(8)?,
                 },
                 bound_count: row.get(9)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    /// Catalog-tier sibling of `skill_list` (above) — same `bound_to_agent`
+    /// shape, but deliberately GLOBAL ROWS ONLY, unlike `skill_list`'s UNION
+    /// with `agent_id`'s own private skills. Backs `skill.catalog.list_for_agent`,
+    /// which — like every other `skill.catalog.*` command — has no
+    /// `check_s1`, so `agent_id` here is caller-supplied and unverified.
+    /// Returning private skill rows (whose `content`/`description`/`trigger`
+    /// can carry sensitive agent-authored material) for an arbitrary
+    /// caller-chosen `agent_id` would let any window connection read any
+    /// agent's private skills. Global rows carry nothing per-agent-secret —
+    /// they're already fully visible via `skill_list_global` (the Armory
+    /// catalog) — so exposing them alongside a caller-chosen agent's bind
+    /// status is safe. reagentx P0 on PR #2329.
+    pub fn skill_list_global_for_agent(&self, agent_id: &str) -> Result<Vec<SkillListItem>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT s.id, s.name, s.trigger, s.skill_type, s.description, s.content, s.is_global, s.created_at, s.updated_at,
+                    EXISTS(SELECT 1 FROM db_agent_skills_ref r WHERE r.skill_id = s.id AND r.agent_id = ?1) AS bound_to_agent
+             FROM db_skills s
+             WHERE s.is_global = 1
+             ORDER BY s.updated_at DESC",
+        )?;
+        let rows = stmt.query_map(params![agent_id], |row| {
+            Ok(SkillListItem {
+                skill: Skill {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    trigger: row.get(2)?,
+                    skill_type: row.get(3)?,
+                    description: row.get(4)?,
+                    content: row.get(5)?,
+                    is_global: row.get::<_, i64>(6)? != 0,
+                    created_at: row.get(7)?,
+                    updated_at: row.get(8)?,
+                },
+                bound_to_agent: row.get::<_, i64>(9)? != 0,
             })
         })?;
         let mut out = Vec::new();
@@ -510,5 +593,155 @@ impl Store {
             |row| row.get(0),
         )?;
         Ok(count > 0)
+    }
+}
+
+#[cfg(test)]
+mod effective_skills_tests {
+    use super::*;
+    use crate::backend::storage::store::AgentDefinition;
+
+    fn make_store() -> Store {
+        Store::open_in_memory().unwrap()
+    }
+
+    fn insert_agent(store: &Store, id: &str) {
+        let mut def = AgentDefinition {
+            id: id.to_string(),
+            slug: String::new(),
+            name: "Test Agent".to_string(),
+            icon: String::new(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 1_700_000_000_000,
+            agent_type: "host".to_string(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 1_700_000_000_000,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+        };
+        store.agent_def_insert(&mut def).unwrap();
+    }
+
+    fn global_skill(id: &str, name: &str) -> Skill {
+        Skill {
+            id: id.to_string(),
+            name: name.to_string(),
+            trigger: String::new(),
+            skill_type: "prompt".to_string(),
+            description: format!("{name} description"),
+            content: format!("{name} content"),
+            is_global: true,
+            created_at: 1_700_000_000_000,
+            updated_at: 1_700_000_000_000,
+        }
+    }
+
+    #[test]
+    fn falls_back_to_legacy_plus_globals_when_agent_has_no_own_refs() {
+        let store = make_store();
+        insert_agent(&store, "agent-1");
+
+        store.agent_skill_insert(&AgentSkill {
+            id: "legacy-1".to_string(),
+            agent_id: "agent-1".to_string(),
+            name: "Legacy Skill".to_string(),
+            trigger: "legacy".to_string(),
+            skill_type: "prompt".to_string(),
+            description: "legacy description".to_string(),
+            content: "legacy content".to_string(),
+            created_at: 1_700_000_000_000,
+        }).unwrap();
+
+        store.skill_upsert_unique_global(&global_skill("global-1", "Global Skill")).unwrap();
+        // Not bound to agent-1 -- has_own_skill_refs must stay false.
+
+        let effective = store.effective_skills("agent-1");
+        let names: Vec<&str> = effective.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names.len(), 2, "expected legacy + global, got: {names:?}");
+        assert!(names.contains(&"Legacy Skill"));
+        assert!(names.contains(&"Global Skill"));
+    }
+
+    #[test]
+    fn own_refs_take_over_entirely_and_discard_legacy_skills() {
+        let store = make_store();
+        insert_agent(&store, "agent-1");
+
+        store.agent_skill_insert(&AgentSkill {
+            id: "legacy-1".to_string(),
+            agent_id: "agent-1".to_string(),
+            name: "Legacy Skill".to_string(),
+            trigger: "legacy".to_string(),
+            skill_type: "prompt".to_string(),
+            description: "legacy description".to_string(),
+            content: "legacy content".to_string(),
+            created_at: 1_700_000_000_000,
+        }).unwrap();
+
+        store.skill_upsert_unique_global(&global_skill("global-1", "Global Skill")).unwrap();
+
+        // Bind a NEW (non-global) skill to agent-1 -- this must flip
+        // has_own_skill_refs to true and discard the legacy skill entirely.
+        let own_skill = Skill {
+            id: "own-1".to_string(),
+            name: "Own Skill".to_string(),
+            trigger: String::new(),
+            skill_type: "agent-skill".to_string(),
+            description: "own description".to_string(),
+            content: "own content".to_string(),
+            is_global: false,
+            created_at: 1_700_000_000_000,
+            updated_at: 1_700_000_000_000,
+        };
+        store.skill_upsert_unique("agent-1", &own_skill, true).unwrap();
+
+        let effective = store.effective_skills("agent-1");
+        let names: Vec<&str> = effective.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names.len(), 2, "expected own + global, legacy discarded, got: {names:?}");
+        assert!(names.contains(&"Own Skill"));
+        assert!(names.contains(&"Global Skill"));
+        assert!(!names.contains(&"Legacy Skill"), "legacy skill must be discarded once own refs exist");
+    }
+
+    #[test]
+    fn agent_skill_format_survives_the_merge_with_correct_skill_type() {
+        // Regression for PR #2322: an agent-skill-format skill materialized
+        // via effective_skills must retain skill_type == "agent-skill" so
+        // build_config_files still branches it to SKILL.md, not a slash
+        // command.
+        let store = make_store();
+        insert_agent(&store, "agent-1");
+
+        let own_skill = Skill {
+            id: "own-1".to_string(),
+            name: "Deploy Checklist".to_string(),
+            trigger: String::new(),
+            skill_type: "agent-skill".to_string(),
+            description: "checklist".to_string(),
+            content: "1. test\n2. deploy".to_string(),
+            is_global: false,
+            created_at: 1_700_000_000_000,
+            updated_at: 1_700_000_000_000,
+        };
+        store.skill_upsert_unique("agent-1", &own_skill, true).unwrap();
+
+        let effective = store.effective_skills("agent-1");
+        assert_eq!(effective.len(), 1);
+        assert_eq!(effective[0].skill_type, "agent-skill");
     }
 }

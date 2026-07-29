@@ -53,7 +53,7 @@ export type InitState = {
 /**
  * Document node types that make up the agent's markdown document
  */
-export type DocumentNode = MarkdownNode | SectionNode | ToolNode | AgentMessageNode | UserMessageNode | SubagentLinkNode | ShellNode | AgentErrorNode | ContextCompactedNode | JektMessageNode;
+export type DocumentNode = MarkdownNode | SectionNode | ToolNode | AgentMessageNode | UserMessageNode | ShellNode | AgentErrorNode | ContextCompactedNode | JektMessageNode;
 
 /**
  * Raw markdown text block
@@ -346,22 +346,6 @@ export interface UserMessageNode {
      * Spec:
      * `docs/specs/SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md`. */
     isStartup?: boolean;
-}
-
-/**
- * Subagent link — rendered as a clickable badge in the agent pane.
- * Clicking opens a subagent activity pane split from the parent.
- */
-export interface SubagentLinkNode {
-    type: "subagent_link";
-    id: string;
-    subagentId: string;
-    slug: string;
-    parentAgent: string;
-    sessionId: string;
-    status: "active" | "completed";
-    model: string | null;
-    timestamp?: number; // Unix ms
 }
 
 /**

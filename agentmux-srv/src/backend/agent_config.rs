@@ -5,14 +5,33 @@
 //!
 //! Ports the `buildConfigFiles`, `buildMcpConfig`, and `expandTemplate`
 //! functions from `frontend/app/view/agent/agent-model.ts`.
-//! All functions are pure — no I/O, no async.
+//! Most functions here are pure — no I/O, no async. The exception is the
+//! `managed skill files manifest` section near the end: real filesystem
+//! I/O shared by the two independent RPC handlers that materialize config
+//! files to disk (`agent.open`'s `write_agent_config_files` in
+//! `server/app_api/agent_open.rs`, and `writeagentconfig` in
+//! `server/editor_handlers.rs` — the latter is the actual "click Launch"
+//! path used on every normal agent launch). Lives here rather than in
+//! either handler file so the two callers can't drift out of sync on the
+//! manifest format or the path-traversal defense (reagent P1, PR #2322 —
+//! `writeagentconfig` initially had no cleanup at all).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use chrono::Utc;
 use serde_json::{json, Value};
 
-use crate::backend::storage::store::AgentSkill;
+use crate::backend::storage::store::{derive_slug, AgentSkill};
+
+/// `skill_type` value that materializes a skill as an Agent Skills-format
+/// `.claude/skills/<slug>/SKILL.md` instead of a `.claude/commands/<trigger>.md`
+/// slash command. Any other value (in practice, always `"prompt"` today) keeps
+/// the pre-existing slash-command behavior. See
+/// `docs/specs/REPORT_ARMORY_BUNDLE_STANDARD_RESEARCH_2026_07_16.md` Phase 0 —
+/// `skill_type` already existed end-to-end but was never branched on before
+/// this, making it the lowest-friction place to hang the format discriminator
+/// rather than adding a new column.
+pub const SKILL_TYPE_AGENT_SKILL: &str = "agent-skill";
 
 /// A single file to be written to the agent working directory.
 #[derive(Debug, Clone)]
@@ -98,13 +117,27 @@ pub fn build_config_files(
     }
 
     // ----------------------------------------------------------------
-    // Write each skill as a slash command: .claude/commands/{trigger}.md
+    // Write each skill as either a slash command
+    // (.claude/commands/{trigger}.md, default) or an Agent Skills-format
+    // SKILL.md (.claude/skills/{slug}/SKILL.md, skill_type ==
+    // SKILL_TYPE_AGENT_SKILL) for native Claude Code consumption.
     // ----------------------------------------------------------------
+    let mut used_skill_slugs: HashSet<String> = HashSet::new();
     for skill in skills {
-        if !skill.trigger.is_empty() && !skill.content.is_empty() {
+        if skill.content.is_empty() {
+            continue;
+        }
+        if skill.skill_type == SKILL_TYPE_AGENT_SKILL {
+            let slug = unique_skill_slug(&skill.name, &mut used_skill_slugs);
             let content = expand_template(&skill.content, &template_vars);
             files.push(AgentConfigFile {
-                filename: format!(".claude/commands/{}.md", skill.trigger),
+                filename: format!(".claude/skills/{slug}/SKILL.md"),
+                content: render_skill_md(&slug, &skill.description, &content),
+            });
+        } else if let Some(safe_trigger) = sanitize_trigger(&skill.trigger) {
+            let content = expand_template(&skill.content, &template_vars);
+            files.push(AgentConfigFile {
+                filename: format!(".claude/commands/{safe_trigger}.md"),
                 content,
             });
         }
@@ -535,6 +568,245 @@ pub fn expand_template(content: &str, vars: &HashMap<String, String>) -> String 
     result
 }
 
+/// Agent Skills spec caps `description` at 1024 characters.
+const SKILL_DESCRIPTION_MAX_LEN: usize = 1024;
+
+/// Truncate `s` to at most `max_units` UTF-16 code units, on a UTF-8 char
+/// boundary. Mirrors JS `.slice(0, n)` semantics (JS strings are indexed in
+/// UTF-16 code units, so a Rust byte-length cap diverges from the TS mirror
+/// for any non-ASCII text — reagent P2, PR #2322).
+fn truncate_utf16_units(s: &str, max_units: usize) -> String {
+    let mut units = 0usize;
+    for (byte_idx, ch) in s.char_indices() {
+        units += ch.len_utf16();
+        if units > max_units {
+            return s[..byte_idx].to_string();
+        }
+    }
+    s.to_string()
+}
+
+/// Render an Agent Skills-format `SKILL.md`: YAML frontmatter with the two
+/// required fields (`name`, `description` — per the spec's six-field
+/// frontmatter; AgentMux doesn't populate the four optional ones today:
+/// `license`, `compatibility`, `metadata`, `allowed-tools`), followed by the
+/// skill's content as the Markdown body. See https://agentskills.io/specification.
+///
+/// `slug` (not the skill's raw display name) is REQUIRED here — the spec
+/// requires `name` be lowercase/hyphenated and match its parent directory;
+/// callers must pass the same value used to build the `.claude/skills/<slug>/`
+/// path (reagent P1, PR #2322). `description` is validated: the spec requires
+/// a non-empty value (falls back to a placeholder) capped at 1024 **UTF-16
+/// code units** — matching the TS mirror's `.slice(0, 1024)` (JS string
+/// indexing is UTF-16-code-unit based), since the UI permits arbitrary-length
+/// free text with no spec-awareness and non-ASCII descriptions previously
+/// truncated to different byte vs. UTF-16 lengths between the two paths
+/// (reagent P2, PR #2322).
+///
+/// YAML double-quoted scalars use JSON-compatible escaping (YAML 1.2
+/// §7.3.1), so `serde_json::to_string` on a plain string produces a valid,
+/// correctly-escaped YAML value — this avoids hand-rolling YAML escaping or
+/// adding a yaml crate dependency (this workspace has neither today) just
+/// for two scalar fields.
+pub(crate) fn render_skill_md(slug: &str, description: &str, body: &str) -> String {
+    let owned_description;
+    let description = if description.trim().is_empty() {
+        "No description provided."
+    } else {
+        owned_description = truncate_utf16_units(description, SKILL_DESCRIPTION_MAX_LEN);
+        owned_description.as_str()
+    };
+    let name_yaml =
+        serde_json::to_string(slug).expect("string serialization is infallible");
+    let description_yaml =
+        serde_json::to_string(description).expect("string serialization is infallible");
+    format!("---\nname: {name_yaml}\ndescription: {description_yaml}\n---\n\n{body}")
+}
+
+/// Validate a skill's `trigger` is safe to use as a single path segment in
+/// `.claude/commands/<trigger>.md`. `trigger` is free-form user input with
+/// no format validation anywhere upstream (the skill create/update RPCs and
+/// the frontend form all accept it as-is), so a trigger containing a path
+/// separator or a `..` segment previously let the resulting filename
+/// resolve OUTSIDE the agent's working directory -- both for this write and,
+/// once stale-file cleanup existed, for the corresponding delete (reagent
+/// P1, PR #2322). Rejects (returns `None`) anything containing `/` or `\`,
+/// or that is exactly `.`/`..`; callers skip writing that skill's command
+/// file entirely rather than silently rewriting the trigger into something
+/// the user didn't ask for.
+fn sanitize_trigger(trigger: &str) -> Option<&str> {
+    if trigger.is_empty() || trigger == "." || trigger == ".." {
+        return None;
+    }
+    if trigger.contains('/') || trigger.contains('\\') {
+        return None;
+    }
+    Some(trigger)
+}
+
+/// Derive a slug for an Agent Skill name that is valid per the Agent Skills
+/// `name` grammar: lowercase letters, digits, and hyphens ONLY (no
+/// underscores). `derive_slug` is shared with agent role-slugs, which
+/// deliberately DO permit underscores, so it isn't spec-valid here as-is —
+/// hyphenate underscores (and re-collapse any resulting run of hyphens)
+/// rather than reusing it directly (Codex P1, PR #2322).
+fn skill_name_slug(name: &str) -> String {
+    let base = derive_slug(name).replace('_', "-");
+    let collapsed: String = base
+        .split('-')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    if collapsed.is_empty() {
+        "skill".to_string()
+    } else {
+        collapsed
+    }
+}
+
+/// Derive a filesystem-safe, COLLISION-FREE, spec-valid slug for an Agent
+/// Skill name within one caller-scoped `used` set. `skill_name_slug` alone
+/// can produce identical output for distinct names that differ only in
+/// punctuation/whitespace (e.g. "Deploy Checklist" and "Deploy!!!Checklist"
+/// both -> "deploy-checklist"), which would otherwise silently overwrite one
+/// skill's `SKILL.md` with another's on disk (reagent P1, PR #2322). Appends
+/// `-2`, `-3`, ... until the slug is unique within `used`, truncating the
+/// base first so the suffixed result never exceeds the spec's 64-character
+/// max (Codex P2, PR #2322 — a 64-char base plus `-2` was previously 66
+/// chars). `bundle_export.rs` also reuses this for MCP server export
+/// filenames, where the underscore-free/64-char constraints are stricter
+/// than strictly required but remain filesystem-safe, so sharing this
+/// implementation is still correct there.
+pub(crate) fn unique_skill_slug(name: &str, used: &mut HashSet<String>) -> String {
+    const MAX_LEN: usize = 64;
+    let base = skill_name_slug(name);
+    if used.insert(base.clone()) {
+        return base;
+    }
+    let mut n: u32 = 2;
+    loop {
+        let suffix = format!("-{n}");
+        let max_base_len = MAX_LEN.saturating_sub(suffix.len());
+        let mut truncated_base = base.clone();
+        if truncated_base.len() > max_base_len {
+            let mut end = max_base_len;
+            while end > 0 && !truncated_base.is_char_boundary(end) {
+                end -= 1;
+            }
+            truncated_base.truncate(end);
+        }
+        let candidate = format!("{truncated_base}{suffix}");
+        if used.insert(candidate.clone()) {
+            return candidate;
+        }
+        n += 1;
+    }
+}
+
+// ============================================================
+// Managed skill files manifest (I/O — see module doc comment)
+// ============================================================
+
+/// Hidden manifest (relative to the agent working directory) tracking which
+/// skill-derived paths (`.claude/commands/*.md`, `.claude/skills/*/SKILL.md`)
+/// AgentMux itself wrote on the last materialization, so a subsequent one
+/// can delete ones that are no longer current without touching any
+/// user-authored `.claude/commands`/`.claude/skills` content.
+pub const MANAGED_SKILL_FILES_MANIFEST: &str = ".claude/.agentmux-managed-skill-files.json";
+
+/// Compute the subset of `filenames` that are skill-derived managed paths
+/// (the ones tracked in [`MANAGED_SKILL_FILES_MANIFEST`]) — everything else
+/// (`CLAUDE.md`, `.mcp.json`, `.claude/settings.json`, ...) is always fully
+/// regenerated at a fixed path every launch, so it has no staleness problem
+/// to track.
+pub fn managed_skill_file_paths<'a>(
+    filenames: impl Iterator<Item = &'a str>,
+) -> std::collections::BTreeSet<String> {
+    filenames
+        .filter(|f| f.starts_with(".claude/commands/") || f.starts_with(".claude/skills/"))
+        .map(|f| f.to_string())
+        .collect()
+}
+
+/// Delete skill-derived files a PREVIOUS materialization wrote (per the
+/// on-disk manifest) but that are no longer part of `new_managed_paths` --
+/// e.g. a skill's format switched between `"prompt"`/`"agent-skill"`, or it
+/// was renamed/removed. Without this, the stale file stays on disk and
+/// Claude keeps treating it as active alongside the newly selected format
+/// (reagent P1 + Codex P1/P2, PR #2322).
+///
+/// MUST be called before writing the new files (so a deletion never races a
+/// write to the same path); callers must call
+/// [`write_managed_skill_file_manifest`] after writing to record the new
+/// set for the next materialization. Best-effort: any individual read/parse
+/// failure is treated as "no prior manifest" (nothing to clean up yet)
+/// rather than propagated, since a missing/corrupt manifest must never
+/// block the write that follows.
+///
+/// Every path is resolved through [`crate::backend::base::safe_join_within_base`]
+/// before deletion — defense in depth against a manifest path that somehow
+/// escapes the working directory (e.g. a future bypass of trigger
+/// sanitization upstream, or manual tampering with the manifest file
+/// itself); such a path is skipped with a warning, never followed.
+pub fn cleanup_stale_managed_skill_files(
+    base_path: &std::path::Path,
+    new_managed_paths: &std::collections::BTreeSet<String>,
+) {
+    let manifest_path = base_path.join(MANAGED_SKILL_FILES_MANIFEST);
+    let Ok(raw) = std::fs::read_to_string(&manifest_path) else {
+        return;
+    };
+    let Ok(old_paths) = serde_json::from_str::<Vec<String>>(&raw) else {
+        return;
+    };
+    for old in &old_paths {
+        if new_managed_paths.contains(old) {
+            continue;
+        }
+        let old_path = match crate::backend::base::safe_join_within_base(base_path, old) {
+            Ok(p) => p,
+            Err(_) => {
+                tracing::warn!(
+                    work_dir = %base_path.display(),
+                    path = %old,
+                    "cleanup_stale_managed_skill_files: refusing to delete a manifest path \
+                     that escapes the working directory"
+                );
+                continue;
+            }
+        };
+        let _ = std::fs::remove_file(&old_path);
+        // Agent Skills format nests under .claude/skills/<slug>/ -- clean up
+        // the now-empty slug directory too (no-op/fails silently if
+        // anything else still lives there, e.g. a future scripts/ dir).
+        if let Some(parent) = old_path.parent() {
+            let _ = std::fs::remove_dir(parent);
+        }
+    }
+}
+
+/// Record `new_managed_paths` as the manifest for the NEXT call to
+/// [`cleanup_stale_managed_skill_files`]. Best-effort: a write failure is
+/// logged, not propagated — losing this write only means the next
+/// materialization's stale-file cleanup is skipped once, not a correctness
+/// issue for the current one.
+pub fn write_managed_skill_file_manifest(
+    base_path: &std::path::Path,
+    new_managed_paths: &std::collections::BTreeSet<String>,
+) {
+    let manifest_path = base_path.join(MANAGED_SKILL_FILES_MANIFEST);
+    if let Ok(manifest_json) = serde_json::to_string(new_managed_paths) {
+        if let Err(e) = std::fs::write(&manifest_path, manifest_json) {
+            tracing::warn!(
+                work_dir = %base_path.display(),
+                error = %e,
+                "write_managed_skill_file_manifest: failed to write manifest; \
+                 stale file cleanup may be skipped on the next materialization"
+            );
+        }
+    }
+}
+
 // ============================================================
 // Tests
 // ============================================================
@@ -554,6 +826,55 @@ mod tests {
             content: content.to_string(),
             created_at: 0,
         }
+    }
+
+    fn make_agent_skill(name: &str, description: &str, content: &str) -> AgentSkill {
+        AgentSkill {
+            id: format!("skill-{}", derive_slug(name)),
+            agent_id: "agent-1".to_string(),
+            name: name.to_string(),
+            trigger: String::new(),
+            skill_type: SKILL_TYPE_AGENT_SKILL.to_string(),
+            description: description.to_string(),
+            content: content.to_string(),
+            created_at: 0,
+        }
+    }
+
+    #[test]
+    fn test_sanitize_trigger_rejects_path_traversal() {
+        // reagent P1, PR #2322: a trigger with a path separator or ".."
+        // must never be allowed to steer .claude/commands/<trigger>.md
+        // outside the working directory.
+        assert_eq!(sanitize_trigger("../../../../.ssh/authorized_keys"), None);
+        assert_eq!(sanitize_trigger("../evil"), None);
+        assert_eq!(sanitize_trigger("sub/evil"), None);
+        assert_eq!(sanitize_trigger("sub\\evil"), None);
+        assert_eq!(sanitize_trigger(".."), None);
+        assert_eq!(sanitize_trigger("."), None);
+        assert_eq!(sanitize_trigger(""), None);
+        assert_eq!(sanitize_trigger("deploy"), Some("deploy"));
+    }
+
+    #[test]
+    fn test_build_config_files_skips_prompt_skill_with_traversal_trigger() {
+        // reagent P1, PR #2322: build_config_files must not materialize a
+        // command file for a malicious trigger, not even under a sanitized
+        // name -- skip it outright.
+        let content_map = HashMap::new();
+        let skills = vec![make_skill(
+            "Evil",
+            "../../../../.ssh/authorized_keys",
+            "desc",
+            "malicious content",
+        )];
+        let files = build_config_files(&content_map, &skills, "Aria", "agent-1", "aria", "/tmp/aria");
+        assert!(
+            files.iter().all(|f| !f.filename.contains("..")),
+            "no config file path may contain '..': {:?}",
+            files.iter().map(|f| &f.filename).collect::<Vec<_>>()
+        );
+        assert!(!files.iter().any(|f| f.filename.starts_with(".claude/commands/")));
     }
 
     #[test]
@@ -640,6 +961,181 @@ mod tests {
         // Individual skill command files
         assert!(files.iter().any(|f| f.filename == ".claude/commands/deploy.md"));
         assert!(files.iter().any(|f| f.filename == ".claude/commands/test.md"));
+    }
+
+    #[test]
+    fn test_build_config_files_agent_skill_format_writes_skill_md() {
+        let content_map = HashMap::new();
+        let skills = vec![make_agent_skill(
+            "Deploy Checklist",
+            "Runs the pre-deploy checklist",
+            "1. Run tests\n2. Check migrations\n3. Deploy",
+        )];
+
+        let files = build_config_files(&content_map, &skills, "Aria", "agent-1", "aria", "/tmp/aria");
+
+        // Materializes to .claude/skills/<slug>/SKILL.md, not .claude/commands/
+        let skill_file = files
+            .iter()
+            .find(|f| f.filename == ".claude/skills/deploy-checklist/SKILL.md")
+            .expect("expected .claude/skills/deploy-checklist/SKILL.md");
+        assert!(!files.iter().any(|f| f.filename.starts_with(".claude/commands/")));
+
+        // YAML frontmatter with the two required Agent Skills fields.
+        // `name` is the slug (matching its parent directory per the Agent
+        // Skills spec), NOT the raw display name -- reagent P1 on #2322.
+        assert!(skill_file.content.starts_with("---\n"));
+        assert!(skill_file.content.contains("name: \"deploy-checklist\""));
+        assert!(skill_file
+            .content
+            .contains("description: \"Runs the pre-deploy checklist\""));
+        assert!(skill_file.content.contains("---\n\n1. Run tests"));
+
+        // Skills index in CLAUDE.md still lists it (trigger-agnostic)
+        let claude_md = files.iter().find(|f| f.filename == "CLAUDE.md").unwrap();
+        assert!(claude_md.content.contains("Deploy Checklist"));
+    }
+
+    #[test]
+    fn test_build_config_files_agent_skill_format_escapes_yaml_special_chars() {
+        // Names/descriptions with colons, quotes, or newlines must not
+        // corrupt the YAML frontmatter -- serde_json's escaping (valid YAML
+        // double-quoted-scalar syntax per YAML 1.2 §7.3.1) is what protects
+        // this; regression-test it explicitly rather than trusting the
+        // dependency silently.
+        let content_map = HashMap::new();
+        let skills = vec![make_agent_skill(
+            "Weird: \"Name\"",
+            "Has a colon: and \"quotes\"",
+            "body",
+        )];
+
+        let files = build_config_files(&content_map, &skills, "Aria", "agent-1", "aria", "/tmp/aria");
+        let skill_file = files
+            .iter()
+            .find(|f| f.filename.starts_with(".claude/skills/") && f.filename.ends_with("SKILL.md"))
+            .expect("expected a SKILL.md file");
+
+        // Frontmatter must parse as exactly 3 lines before the closing ---
+        // (name, description, and nothing else leaking onto a new line).
+        let end = skill_file.content.find("\n---\n\n").expect("closing frontmatter delimiter");
+        let frontmatter = &skill_file.content[4..end]; // skip leading "---\n"
+        let lines: Vec<&str> = frontmatter.lines().collect();
+        assert_eq!(lines.len(), 2, "frontmatter should be exactly name + description lines, got: {lines:?}");
+    }
+
+    #[test]
+    fn test_build_config_files_agent_skill_format_name_is_the_slug_not_display_name() {
+        // reagent P1 (PR #2322): the Agent Skills spec requires `name` be
+        // lowercase/hyphenated and match its parent directory -- the raw
+        // display name (e.g. "Deploy Checklist") is spec-invalid.
+        let content_map = HashMap::new();
+        let skills = vec![make_agent_skill("Deploy Checklist", "desc", "body")];
+        let files = build_config_files(&content_map, &skills, "Aria", "agent-1", "aria", "/tmp/aria");
+        let skill_file = files.iter().find(|f| f.filename.ends_with("SKILL.md")).unwrap();
+        assert!(skill_file.content.contains("name: \"deploy-checklist\""));
+        assert!(!skill_file.content.contains("name: \"Deploy Checklist\""));
+    }
+
+    #[test]
+    fn test_build_config_files_agent_skill_format_empty_description_gets_fallback() {
+        // reagent P1 (PR #2322): the Agent Skills spec requires a non-empty
+        // description; the UI permits creating a skill with none.
+        let content_map = HashMap::new();
+        let skills = vec![make_agent_skill("Deploy Checklist", "", "body")];
+        let files = build_config_files(&content_map, &skills, "Aria", "agent-1", "aria", "/tmp/aria");
+        let skill_file = files.iter().find(|f| f.filename.ends_with("SKILL.md")).unwrap();
+        assert!(!skill_file.content.contains("description: \"\""), "empty description must not reach the spec-invalid empty string: {}", skill_file.content);
+        assert!(skill_file.content.contains("description: \"No description provided.\""));
+    }
+
+    #[test]
+    fn test_build_config_files_agent_skill_format_truncates_long_description() {
+        // reagent P1 (PR #2322): the Agent Skills spec caps description at
+        // 1024 characters.
+        let content_map = HashMap::new();
+        let long_description = "x".repeat(2000);
+        let skills = vec![make_agent_skill("Deploy Checklist", &long_description, "body")];
+        let files = build_config_files(&content_map, &skills, "Aria", "agent-1", "aria", "/tmp/aria");
+        let skill_file = files.iter().find(|f| f.filename.ends_with("SKILL.md")).unwrap();
+        // Extract the description value between the quotes on its line.
+        let desc_line = skill_file.content.lines().find(|l| l.starts_with("description: ")).unwrap();
+        let quoted = desc_line.trim_start_matches("description: ");
+        let inner_len = quoted.len() - 2; // strip surrounding quotes
+        assert!(inner_len <= 1024, "description exceeds spec max of 1024 chars: {inner_len}");
+    }
+
+    #[test]
+    fn test_build_config_files_agent_skill_format_dedupes_colliding_slugs() {
+        // reagent P1 (PR #2322): two distinct skill names that derive_slug
+        // collapses to the same slug must NOT silently overwrite each
+        // other's SKILL.md file.
+        let content_map = HashMap::new();
+        let skills = vec![
+            make_agent_skill("Deploy Checklist", "First skill", "body one"),
+            make_agent_skill("Deploy!!!Checklist", "Second skill", "body two"),
+            make_agent_skill("Deploy   Checklist", "Third skill", "body three"),
+        ];
+
+        let files = build_config_files(&content_map, &skills, "Aria", "agent-1", "aria", "/tmp/aria");
+
+        let skill_files: Vec<&AgentConfigFile> = files
+            .iter()
+            .filter(|f| f.filename.starts_with(".claude/skills/") && f.filename.ends_with("SKILL.md"))
+            .collect();
+        assert_eq!(skill_files.len(), 3, "all three skills must materialize to distinct files");
+
+        let filenames: HashSet<&str> = skill_files.iter().map(|f| f.filename.as_str()).collect();
+        assert_eq!(filenames.len(), 3, "filenames must be unique: {filenames:?}");
+        assert!(filenames.contains(".claude/skills/deploy-checklist/SKILL.md"));
+        assert!(filenames.contains(".claude/skills/deploy-checklist-2/SKILL.md"));
+        assert!(filenames.contains(".claude/skills/deploy-checklist-3/SKILL.md"));
+
+        // Each file's content must correspond to the correct skill (not just
+        // present -- verify no cross-contamination from the dedup logic).
+        let first = skill_files.iter().find(|f| f.filename.ends_with("deploy-checklist/SKILL.md")).unwrap();
+        assert!(first.content.contains("body one"));
+        let second = skill_files.iter().find(|f| f.filename.ends_with("deploy-checklist-2/SKILL.md")).unwrap();
+        assert!(second.content.contains("body two"));
+        let third = skill_files.iter().find(|f| f.filename.ends_with("deploy-checklist-3/SKILL.md")).unwrap();
+        assert!(third.content.contains("body three"));
+    }
+
+    #[test]
+    fn test_unique_skill_slug_replaces_underscores_with_hyphens() {
+        // Codex P1, PR #2322: derive_slug (shared with agent role-slugs) keeps
+        // underscores, which is spec-invalid for an Agent Skills `name`.
+        let mut used = HashSet::new();
+        assert_eq!(unique_skill_slug("code_review", &mut used), "code-review");
+    }
+
+    #[test]
+    fn test_unique_skill_slug_suffixed_slug_stays_within_64_chars() {
+        // Codex P2, PR #2322: a 64-char base plus "-2" was previously 66 chars.
+        let mut used = HashSet::new();
+        let long = "a".repeat(100);
+        let first = unique_skill_slug(&long, &mut used);
+        assert_eq!(first.len(), 64);
+        let second = unique_skill_slug(&long, &mut used);
+        assert!(second.len() <= 64, "suffixed slug exceeds 64 chars: {second} ({})", second.len());
+        assert!(second.ends_with("-2"));
+    }
+
+    #[test]
+    fn test_render_skill_md_truncates_by_utf16_units_matching_ts_slice() {
+        // reagent P2, PR #2322: Rust previously capped by byte length while
+        // the TS mirror caps by UTF-16 code units (`.slice(0, 1024)`), so
+        // non-ASCII descriptions truncated to different lengths between the
+        // two paths. A 3-byte-per-char UTF-8 string (each char = 1 UTF-16
+        // unit) makes the byte-vs-unit divergence obvious: byte-based
+        // truncation would cut this off around char 341, not 1024.
+        let description: String = "\u{4e2d}".repeat(2000); // "中" x2000 (3 bytes each, 1 UTF-16 unit each)
+        let md = render_skill_md("slug", &description, "body");
+        let desc_line = md.lines().find(|l| l.starts_with("description: ")).unwrap();
+        let quoted = desc_line.trim_start_matches("description: ");
+        let inner = &quoted[1..quoted.len() - 1]; // strip surrounding quotes
+        let utf16_len: usize = inner.chars().map(|c| c.len_utf16()).sum();
+        assert_eq!(utf16_len, 1024, "expected exactly 1024 UTF-16 units, got {utf16_len}");
     }
 
     #[test]

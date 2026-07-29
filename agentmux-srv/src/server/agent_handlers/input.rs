@@ -223,7 +223,17 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                 // doesn't receive them.
                 env_vars.insert("AGENTMUX_BLOCKID".to_string(), cmd.blockid.clone());
                 // Agent display name for MuxBus self-identification.
-                // muxbus-client reads AGENTMUX_AGENT_ID (preferred) or AGENT_NAME.
+                // AGENTMUX_AGENT_ID is the canonical, app-wide agent-identity
+                // variable (used far beyond muxbus -- MCP tool routing, native
+                // memory, shell OSC titling, jekt auto-registration, etc; see
+                // this repo's CLAUDE.md Naming Conventions table). MUXBUS_AGENT_ID
+                // is set below too, mirroring the same value, purely so
+                // muxbus-client picks it up under the MUXBUS_* prefix it already
+                // checks first (alongside MUXBUS_TOKEN/MUXBUS_COGNITO_DOMAIN
+                // injected above) -- this does NOT make MUXBUS_AGENT_ID a second
+                // source of truth for agent identity app-wide, it's scoped to
+                // this one muxbus hand-off point (ARCH-002, 2026-07-28
+                // architecture analyst report).
                 // Only set if not already present in cmd:env — user-provided values take precedence.
                 if !env_vars.contains_key("AGENTMUX_AGENT_ID") {
                     let agent_display_name = crate::backend::obj::meta_get_string(
@@ -231,6 +241,11 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                     );
                     if !agent_display_name.is_empty() {
                         env_vars.insert("AGENTMUX_AGENT_ID".to_string(), agent_display_name);
+                    }
+                }
+                if !env_vars.contains_key("MUXBUS_AGENT_ID") {
+                    if let Some(agent_id) = env_vars.get("AGENTMUX_AGENT_ID").cloned() {
+                        env_vars.insert("MUXBUS_AGENT_ID".to_string(), agent_id);
                     }
                 }
                 // PATH includes BOTH bundled tools dir (portable

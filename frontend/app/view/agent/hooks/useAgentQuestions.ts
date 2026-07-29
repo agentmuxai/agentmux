@@ -40,6 +40,31 @@ export interface UseAgentQuestionsOptions {
     log: LogFn;
 }
 
+// Error shapes where the backend GUARANTEES the control_response was never
+// sent — every one of these is returned by `agent.answer`'s handler or
+// `PersistentSubprocessController::answer_question` (agentmux-srv's
+// websocket.rs / blockcontroller/persistent.rs) strictly BEFORE (or instead
+// of) the `tx.try_send(control_response...)` call, so falling back to the
+// follow-up-message path can never duplicate-deliver the answer for these.
+// Deliberately an allowlist, not a blocklist: reagent P2 on the PR that
+// widened this fallback flagged that an RPC-engine-level failure (e.g. the
+// "EC-TIME: timeout" the engine's own `tokio::time::timeout` wrapper can
+// emit under executor saturation — agentmux-srv/src/backend/rpc/engine.rs)
+// does NOT carry the same guarantee: the handler could have completed
+// tx.try_send successfully server-side even though the client sees an
+// error. Falling back unconditionally for THAT case would risk delivering
+// the answer twice (once via control protocol, once via follow-up
+// message). Anything not matching this allowlist — including EC-TIME and
+// any other unrecognized error — falls through to the original,
+// conservative rollback instead of guessing.
+const SAFE_TO_RETRY_VIA_FOLLOWUP = [
+    "no pending AskUserQuestion",
+    "UNSUPPORTED_CONTROLLER",
+    "no controller for block",
+    "persistent process not running",
+    "control_response send failed",
+] as const;
+
 export interface UseAgentQuestionsResult {
     pendingQuestions: () => ToolNode[];
     handleAnswer: (outcome: AnswerOutcome) => void;
@@ -114,22 +139,64 @@ export function useAgentQuestions(opts: UseAgentQuestionsOptions): UseAgentQuest
             answers: outcome.answers_map,
         }).catch((err: unknown) => {
             const msg = String(err);
-            // Phase 2 path: one-shot / container agents have no live stdin, and
-            // the CLI abandons the AskUserQuestion tool_use when the turn ends —
-            // a tool_result can no longer reach it (validated empirically:
-            // SPEC §10.1). Deliver the answer as a normal follow-up turn
-            // instead; the agent resumes the session and continues from the
-            // question with the answer as context. Keep the optimistic success.
-            if (msg.includes("UNSUPPORTED_CONTROLLER")) {
-                opts.log("agent", "Delivering AskUserQuestion answer as a follow-up message (non-persistent agent)");
-                void opts.sendMessage(outcome.answer_text).catch((e: unknown) => {
-                    opts.log("error", `answer follow-up failed: ${String(e)}`);
-                    applyDoc(originals);
-                });
+            // Phase 2 fallback: deliver as a normal follow-up turn instead of
+            // just rolling back — the agent resumes the session and
+            // continues from the question with the answer as context.
+            // Originally gated on UNSUPPORTED_CONTROLLER only (one-shot /
+            // container agents, which have no live stdin at all), but a
+            // PERSISTENT agent hits the identical "control protocol can't
+            // deliver this" shape whenever its `pending_questions` map
+            // doesn't have this tool_use_id — which is ALWAYS true after a
+            // pane close/reopen (or any process respawn): a fresh
+            // PersistentSubprocessController starts with an empty map, even
+            // though the persisted transcript still shows the question as
+            // the tail node (scrubOrphanedInProgress deliberately preserves
+            // it as "may still be answerable"). That backend error
+            // ("no pending AskUserQuestion for tool_use_id …") doesn't match
+            // UNSUPPORTED_CONTROLLER, so it used to fall straight to
+            // rollback — reproducing the exact "flicker and revert" bug
+            // whenever a question survives a reopen. Widened to the
+            // SAFE_TO_RETRY_VIA_FOLLOWUP allowlist (module-level, see its own
+            // comment) rather than "any failure": those specific backend
+            // error shapes structurally guarantee the control_response was
+            // never sent, so retrying via the follow-up path can't
+            // duplicate-deliver. An unrecognized error (including an
+            // RPC-engine-level timeout, where the handler could have
+            // succeeded server-side even though the client sees a failure —
+            // reagent P2) falls through to the original conservative
+            // rollback instead of guessing. The follow-up path also
+            // auto-spawns/resumes a dead process if needed (send_message's
+            // existing contract), so it self-heals a genuinely dead process
+            // too, not just the stale-in-memory-record case. See
+            // docs/reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md §2.7/§2.8.
+            if (SAFE_TO_RETRY_VIA_FOLLOWUP.some((marker) => msg.includes(marker))) {
+                opts.log("agent", `Delivering AskUserQuestion answer as a follow-up message (${msg})`);
+                // No rollback-on-failure here: `opts.sendMessage` (bound to
+                // handleSendMessage → useAgentCommands.ts's `sendMessage` →
+                // `deliverToBackend`) never rejects — `deliverToBackend`'s own
+                // catch swallows an `AgentInputCommand` RPC failure, dispatches
+                // PendingMessageRejected/TurnStartFailed for ITS OWN UI
+                // signal, and returns normally (by design: most callers fire
+                // this and forget). A `.catch()` here would therefore never
+                // run — reagent P1 caught this: the original version of this
+                // fix claimed to roll back on a failed fallback, but that
+                // branch was unreachable dead code, so a genuinely failed
+                // follow-up would have silently left the optimistic "success"
+                // state in place with the answer never delivered. Matches the
+                // pre-existing Phase 2 (UNSUPPORTED_CONTROLLER) contract,
+                // which had the exact same limitation already — not a
+                // regression introduced by widening the allowlist, just newly
+                // examined. A genuinely undeliverable pane (e.g. no live
+                // controller at all) still gets its own signal elsewhere via
+                // TurnStartFailed/the failure-recovery row; it's just not
+                // tied back to reverting this specific question node.
+                void opts.sendMessage(outcome.answer_text);
                 return;
             }
-            // Any other failure: roll the node back so the panel re-surfaces
-            // rather than falsely showing "answered" while the agent is blocked.
+            // Unrecognized failure (e.g. an RPC-engine timeout) — the
+            // control-protocol send may or may not have actually landed, so
+            // don't guess. Roll back so the panel re-surfaces rather than
+            // falsely showing "answered" while risking a duplicate delivery.
             opts.log("error", `agent.answer failed: ${msg}`);
             applyDoc(originals);
         });

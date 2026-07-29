@@ -115,4 +115,26 @@ export const McpApi = {
     ): Promise<{ bound: boolean }> {
         return client.rpcCall("mcp.catalog.bind", data, opts);
     },
+
+    // Catalog-tier siblings of McpListCommand / McpUnbindCommand — no
+    // agent_id/check_s1 gate on the *caller*, but agent_id is still required
+    // in the payload (whose bindings to list/unbind). Used by
+    // AgentStashModal's MCP Servers tab, which runs over the dashboard's
+    // connection and can never satisfy McpListCommand/McpUnbindCommand's
+    // check_s1.
+    McpCatalogListForAgentCommand(
+        client: RpcClient,
+        data: { agent_id: string },
+        opts?: RpcOpts,
+    ): Promise<McpServerListItem[]> {
+        return client.rpcCall("mcp.catalog.list_for_agent", data, opts);
+    },
+
+    McpCatalogUnbindCommand(
+        client: RpcClient,
+        data: { agent_id: string; mcp_id: string },
+        opts?: RpcOpts,
+    ): Promise<{ unbound: boolean }> {
+        return client.rpcCall("mcp.catalog.unbind", data, opts);
+    },
 };

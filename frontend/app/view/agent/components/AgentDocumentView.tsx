@@ -22,7 +22,7 @@
 import { createSignal, onMount, Show, type Accessor, type JSX } from "solid-js";
 import { Button } from "@/element/button";
 import type { SignalPair } from "../state";
-import type { DocumentNode, DocumentState, SubagentLinkNode } from "../types";
+import type { DocumentNode, DocumentState } from "../types";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
 import type { LayoutView } from "@/app/store/agent-pane-layout-store";
 import { AgentDocumentVirtualList } from "../virtualization/AgentDocumentVirtualList";
@@ -47,7 +47,6 @@ interface AgentDocumentViewProps {
      *  button on the auth-URL box so a stuck login has an exit besides
      *  closing the pane. Wired to useAgentControllerStatus's cancelLogin. */
     onCancelLogin?: () => void;
-    onSubagentClick?: (node: SubagentLinkNode) => void;
     /** Re-run the provider login flow — forwarded to the list so an inline
      *  auth-error node can offer a "Login Again" CTA (SPEC_REAUTH_FROM_AUTH_ERROR §7). */
     onAgentErrorLogin?: () => void;
@@ -196,7 +195,6 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
         <AgentDocumentVirtualList
             viewState={viewState}
             documentState={documentState}
-            onSubagentClick={props.onSubagentClick}
             onAgentErrorLogin={props.onAgentErrorLogin}
             onLoadOlder={props.onLoadOlder}
             loadingOlder={props.loadingOlder}

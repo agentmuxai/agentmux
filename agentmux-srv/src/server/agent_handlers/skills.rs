@@ -18,7 +18,18 @@ use crate::backend::storage::AgentSkill;
 use super::super::AppState;
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    // listagentskills → return all skills for an agent
+    // listagentskills → return this agent's EFFECTIVE skills (legacy
+    // db_agent_skills, or its own ref-bound db_skills + globals when any own
+    // refs exist — see Store::effective_skills). Window-scoped (no
+    // `check_s1`, hence `_ctx` unused) because this is called from
+    // `agent-model.ts`'s pre-launch `launchAgentDefinition`, before any
+    // agent connection exists to authenticate as — that's also exactly why
+    // this must reuse the same merge algorithm as the Rust
+    // `write_agent_config_files` path rather than the frontend calling the
+    // agent-scoped `skill.list` RPC directly (it would fail check_s1 pre-
+    // launch). Previously returned only agent_skill_list (legacy-only),
+    // silently hiding every standalone/Armory-catalog skill from the actual
+    // launch flow (reagent P0 on PR #2322).
     let wstore_lfs = state.wstore.clone();
     engine.register_handler(
         COMMAND_LIST_AGENT_SKILLS,
@@ -27,8 +38,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             Box::pin(async move {
                 let cmd: CommandListAgentSkillsData = serde_json::from_value(data)
                     .map_err(|e| format!("listagentskills: {e}"))?;
-                let skills = wstore.agent_skill_list(&cmd.agent_id)
-                    .map_err(|e| format!("listagentskills: {e}"))?;
+                let skills = wstore.effective_skills(&cmd.agent_id);
                 Ok(Some(serde_json::to_value(&skills).unwrap_or_default()))
             })
         }),

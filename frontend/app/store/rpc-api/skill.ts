@@ -114,4 +114,26 @@ export const SkillApi = {
     ): Promise<{ bound: boolean }> {
         return client.rpcCall("skill.catalog.bind", data, opts);
     },
+
+    // Catalog-tier siblings of SkillListCommand / SkillUnbindCommand — no
+    // agent_id/check_s1 gate on the *caller*, but agent_id is still required
+    // in the payload (whose bindings to list/unbind). Used by
+    // AgentStashModal's Skills tab, which runs over the dashboard's
+    // connection and can never satisfy SkillListCommand/SkillUnbindCommand's
+    // check_s1.
+    SkillCatalogListForAgentCommand(
+        client: RpcClient,
+        data: { agent_id: string },
+        opts?: RpcOpts,
+    ): Promise<SkillListItem[]> {
+        return client.rpcCall("skill.catalog.list_for_agent", data, opts);
+    },
+
+    SkillCatalogUnbindCommand(
+        client: RpcClient,
+        data: { agent_id: string; skill_id: string },
+        opts?: RpcOpts,
+    ): Promise<{ unbound: boolean }> {
+        return client.rpcCall("skill.catalog.unbind", data, opts);
+    },
 };

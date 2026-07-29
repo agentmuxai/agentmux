@@ -161,24 +161,27 @@ export interface UseAgentControllerStatus {
      */
     notifyControllerHealthy: () => void;
     /**
-     * Force the persistent controller to restart (or register, if none
-     * exists yet) so a just-refreshed credential actually takes effect —
-     * `send_message` only spawns a fresh process when one isn't already
-     * running, so an agent whose CLI was already alive keeps running on
-     * its stale env forever otherwise. relogin()/useGlobalLogin()/
-     * loginViaTerminal() all call this internally before declaring
-     * success; exposed here so /login's slash-command handler (a fully
-     * separate code path with no access to this hook's closure) can do
-     * the same. Without it, a successful /login on a pane whose
-     * persistent controller was already alive left that controller on
-     * the old credential — the next message would bypass every guard in
-     * this PR (canRetry/loginWaiting/authFailureToPreserve are all
-     * correctly cleared by then) and still reach the stale process,
-     * reproducing the delayed "Not logged in" failure. Codex P1 on
-     * PR #2338 (seventh re-review). Best-effort — logs a warning on
-     * failure rather than throwing, matching every other call site.
+     * Kill (if running) and respawn this pane's controller process, then
+     * refresh its runtime status. Originally internal-only (used by the
+     * login-recovery flows to refresh a stale-but-alive process); exposed
+     * two ways since:
+     *   - to the `unresponsive` failure row's "Restart" action, for a
+     *     wedged/`Dead` process (`context: "restart"`, PR #2336);
+     *   - to /login's slash-command handler (a fully separate code path
+     *     with no access to this hook's closure) so a successful /login on
+     *     a pane whose persistent controller was already alive actually
+     *     restarts it onto the refreshed credential — `send_message` only
+     *     spawns a fresh process when one isn't already running, so
+     *     without this the next message would bypass every guard in PR
+     *     #2338 (canRetry/loginWaiting/authFailureToPreserve are all
+     *     correctly cleared by then) and still reach the stale process,
+     *     reproducing the delayed "Not logged in" failure (codex P1,
+     *     seventh re-review; defaults to `context: "login"`).
+     * See `forceControllerRefresh`'s own doc comment for the full
+     * rationale. Best-effort — logs a warning on failure rather than
+     * throwing, matching every other call site.
      */
-    forceControllerRefresh: () => Promise<void>;
+    forceControllerRefresh: (context?: "login" | "restart") => Promise<void>;
 }
 
 /**
@@ -367,8 +370,17 @@ export function useAgentControllerStatus(
      *  first-ever-login path this IS that pane's only registration, so
      *  omitting either left a freshly spawned CLI's PTY at the default width
      *  until the next manual resize, and callers relying on
-     *  `onControllerStatus` never heard about it (reagent P2 on PR #2318). */
-    const forceControllerRefresh = async (): Promise<void> => {
+     *  `onControllerStatus` never heard about it (reagent P2 on PR #2318).
+     *
+     *  `context` picks the catch-block's log message — originally hardcoded
+     *  for the login-recovery case (the only caller until this point), but
+     *  the `unresponsive` failure row's "Restart" action now reuses this
+     *  same function for a completely unrelated reason (a wedged process,
+     *  nothing to do with signing in), so a restart-triggered RPC failure
+     *  must not log a misleading "signed in, but..." message (reagent P2 on
+     *  PR #2336). Defaults to "login" — every pre-existing call site stays
+     *  unchanged. */
+    const forceControllerRefresh = async (context: "login" | "restart" = "login"): Promise<void> => {
         try {
             const initialTermSize = opts.getInitialTermSize?.();
             await RpcApi.ControllerResyncCommand(TabRpcClient, {
@@ -380,11 +392,16 @@ export function useAgentControllerStatus(
             const rts = await BlockService.GetControllerStatus(opts.blockId);
             if (rts) opts.onControllerStatus?.(rts);
         } catch (e: any) {
-            opts.log(
-                "auth",
-                `signed in, but couldn't refresh the running agent with the new login — reopen this pane if it still shows as logged out: ${e?.message ?? String(e)}`,
-                "warn",
-            );
+            const detail = e?.message ?? String(e);
+            if (context === "restart") {
+                opts.log("agent", `couldn't restart the unresponsive agent process: ${detail}`, "warn");
+            } else {
+                opts.log(
+                    "auth",
+                    `signed in, but couldn't refresh the running agent with the new login — reopen this pane if it still shows as logged out: ${detail}`,
+                    "warn",
+                );
+            }
         }
     };
 
@@ -1031,5 +1048,6 @@ export function useAgentControllerStatus(
         notifyControllerHealthy,
         forceControllerRefresh,
         cancelLogin,
+        forceControllerRefresh,
     };
 }

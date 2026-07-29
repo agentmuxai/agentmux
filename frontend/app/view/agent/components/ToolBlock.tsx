@@ -42,7 +42,6 @@ import clsx from "clsx";
 import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 import type { BashResult, EditResult, GlobResult, GrepResult, WriteResult } from "../types";
-import { createBlock } from "@/store/global";
 import type { ToolNode } from "../types";
 import { ToolBlockOverlay } from "./ToolBlockOverlay";
 import { Tooltip } from "@/app/element/tooltip";
@@ -351,24 +350,6 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                             </span>
                         );
                     })()}
-                </Show>
-                <Show when={props.node.tool === "Agent"}>
-                    <button
-                        class="agent-tool-open-pane"
-                        title="Open subagent in new pane"
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            const agentId = (props.node.params as any).subagent_id || props.node.id;
-                            createBlock({
-                                meta: {
-                                    view: "subagent",
-                                    "subagent:id": agentId,
-                                } as any,
-                            });
-                        }}
-                    >
-                        ⧉
-                    </button>
                 </Show>
             </div>
             {/* Panel — three render modes per `panelMode()`:

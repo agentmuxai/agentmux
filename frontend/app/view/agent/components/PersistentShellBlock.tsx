@@ -14,7 +14,7 @@
 import clsx from "clsx";
 import { For, Show, createMemo, createSignal, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
-import { capChars, collapseSpinnerChunks, createChunkCapper, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
+import { capChars, createChunkCapper, createSpinnerCollapser, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
 import { LinkifiedText } from "@/app/element/linkified-text";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -88,12 +88,23 @@ export const PersistentShellBlock = (props: PersistentShellBlockProps): JSX.Elem
         }
     };
 
-    // createChunkCapper tracks total lines incrementally and returns hiddenLines.
-    // Using capChunksByLines directly only returns keptLines (no hidden count).
+    // Collapse redraws first, over the raw append-only chunk stream, THEN cap
+    // the (already deduplicated) result to the line budget — not the other
+    // way around. Capping the raw stream first would let spinner/progress
+    // noise (which is exactly what tends to dominate a long-running
+    // command's raw chunk count) evict real content from the budget before
+    // collapseSpinnerChunks ever got a chance to fold it down to one line.
+    // It also matters for perf: capChunksByLines' windowed output slides its
+    // start reference on every new chunk once a stream is sustained over
+    // budget, which would defeat createSpinnerCollapser's append-only
+    // identity tracking if fed the capped (rather than raw) chunks — reagent
+    // P1, PR #2330 (the O(n·L²) full-window redraw rescan on every streamed
+    // chunk this replaces).
+    const spinnerCollapse = createSpinnerCollapser<ToolLogChunk>();
     const chunkCap = createChunkCapper(MAX_TOOL_OUTPUT_LINES);
     const cappedView = createMemo(() => {
-        const { chunks, hiddenLines } = chunkCap(props.node.log.chunks as ToolLogChunk[]);
-        const { display, spinnerSlot } = collapseSpinnerChunks(chunks);
+        const { display: collapsed, spinnerSlot } = spinnerCollapse(props.node.log.chunks as ToolLogChunk[]);
+        const { chunks: display, hiddenLines } = chunkCap(collapsed);
         return { display, spinnerSlot, hiddenLines };
     });
     const visibleChunks = () => cappedView().display;

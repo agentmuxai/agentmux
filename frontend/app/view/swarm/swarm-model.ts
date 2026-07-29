@@ -746,9 +746,9 @@ export class SwarmViewModel implements ViewModel {
     // subagent file (see subagent_watcher.rs's process_jsonl_change) — a
     // backfill scan on pane reopen can fire dozens of these in a burst.
     // Debounce the resulting loadSubagents() RPC here instead of batching the
-    // broadcasts themselves, since useSubagentEvents.ts (a different consumer
-    // of the same events) needs one event per subagent to populate its
-    // per-agent document nodes.
+    // broadcasts themselves, since activity/subagent-source.ts (a different
+    // consumer of the same events, driving the ActivityDock) needs one event
+    // per subagent.
     private loadSubagentsDebounceTimer: ReturnType<typeof setTimeout> | undefined;
     private static readonly LOAD_SUBAGENTS_DEBOUNCE_MS = 150;
 
