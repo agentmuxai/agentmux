@@ -558,7 +558,21 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             }
             if (refreshed) {
                 opts.notifyControllerHealthy();
-                opts.model.dispatchPane({ type: "FailureCleared" });
+                // Gated on the failure actually being "auth" — FailureCleared
+                // has no payload and unconditionally clears state.failure
+                // regardless of code (reducer.ts's FailureCleared case), so
+                // dispatching it unconditionally here would silently
+                // dismiss an unrelated concurrent failure (rate_limited,
+                // overloaded, context_exceeded, unresponsive, etc.) showing
+                // on the same pane once a deferred /login refresh
+                // completes, even though that unrelated problem was never
+                // actually resolved. Mirrors the established pattern at
+                // useAgentFailure.ts's silent self-heal handler ("never
+                // blow away an unrelated concurrent failure"). reagentx P1
+                // on PR #2338 (thirty-fifth re-review).
+                if (paneSnapshot(opts.blockId)?.failure?.data.code === "auth") {
+                    opts.model.dispatchPane({ type: "FailureCleared" });
+                }
                 // A message can have been HELD (not delivered) specifically
                 // because this exact refresh was still pending/blocked —
                 // see sendMessage's idle-send path and flushHeldMessages's
@@ -615,7 +629,22 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         log: opts.log,
         setAuthUrl: opts.setAuthUrl,
         notifyControllerHealthy: opts.notifyControllerHealthy,
-        clearAuthFailure: () => opts.model.dispatchPane({ type: "FailureCleared" }),
+        // Gated on the failure actually being "auth" — FailureCleared has
+        // no payload and unconditionally clears state.failure regardless
+        // of code (reducer.ts's FailureCleared case), so dispatching it
+        // unconditionally here would silently dismiss an unrelated
+        // concurrent failure (rate_limited, overloaded, context_exceeded,
+        // unresponsive, etc.) showing on the same pane when a successful
+        // /login completes, even though that unrelated problem was never
+        // actually resolved. Mirrors the established pattern at
+        // useAgentFailure.ts's silent self-heal handler ("never blow away
+        // an unrelated concurrent failure"). reagentx P1 on PR #2338
+        // (thirty-fifth re-review).
+        clearAuthFailure: () => {
+            if (paneSnapshot(opts.blockId)?.failure?.data.code === "auth") {
+                opts.model.dispatchPane({ type: "FailureCleared" });
+            }
+        },
         forceControllerRefresh: opts.forceControllerRefresh,
         deferControllerRefreshUntilIdle,
         // wasAlreadyWorking === false is frozen (never live-read) — that's
