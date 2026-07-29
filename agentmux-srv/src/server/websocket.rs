@@ -771,6 +771,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     let broker_resync = state.broker.clone();
     let event_bus_resync = state.event_bus.clone();
     let filestore_resync = state.filestore.clone();
+    let boot_id_resync = state.boot_id.clone();
     engine.register_handler(
         COMMAND_CONTROLLER_RESYNC,
         Box::new(move |data, _ctx| {
@@ -778,6 +779,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
             let broker = broker_resync.clone();
             let event_bus = event_bus_resync.clone();
             let filestore = filestore_resync.clone();
+            let boot_id = boot_id_resync.clone();
             Box::pin(async move {
                 let cmd: CommandControllerResyncData = serde_json::from_value(data)
                     .map_err(|e| format!("controllerresync: {e}"))?;
@@ -791,6 +793,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                     .get(&cmd.blockid)
                     .map_err(|e| format!("controllerresync: load block: {e}"))?
                     .ok_or_else(|| format!("controllerresync: block {} not found", cmd.blockid))?;
+                let registry = wstore.shared_agent_registry();
                 blockcontroller::resync_controller(
                     &block,
                     &cmd.tabid,
@@ -800,6 +803,8 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                     Some(event_bus),
                     Some(wstore),
                     Some(filestore),
+                    registry,
+                    boot_id,
                 )?;
                 Ok(None)
             })

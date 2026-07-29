@@ -21,6 +21,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
     let broker_spawn = state.broker.clone();
     let event_bus_spawn = state.event_bus.clone();
     let filestore_spawn = state.filestore.clone();
+    let boot_id_spawn = state.boot_id.clone();
     engine.register_handler(
         COMMAND_SUBPROCESS_SPAWN,
         Box::new(move |data, _ctx| {
@@ -28,6 +29,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
             let broker = broker_spawn.clone();
             let event_bus = event_bus_spawn.clone();
             let filestore = filestore_spawn.clone();
+            let boot_id = boot_id_spawn.clone();
             Box::pin(async move {
                 let cmd: CommandSubprocessSpawnData = serde_json::from_value(data)
                     .map_err(|e| format!("subprocessspawn: {e}"))?;
@@ -42,6 +44,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                     Some(c) if c.controller_type() == blockcontroller::BLOCK_CONTROLLER_SUBPROCESS => c,
                     _ => {
                         // Create and register a new SubprocessController
+                        let registry = wstore.shared_agent_registry();
                         let ctrl = blockcontroller::subprocess::SubprocessController::new(
                             cmd.tabid.clone(),
                             cmd.blockid.clone(),
@@ -49,6 +52,8 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                             Some(event_bus),
                             Some(wstore),
                             Some(filestore),
+                            registry,
+                            boot_id,
                         );
                         let ctrl = std::sync::Arc::new(ctrl);
                         ctrl.set_self_ref();
@@ -77,6 +82,10 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                     // is None; spawn_turn captures it from CLI stdout
                     // on the first turn as before.
                     session_id: None,
+                    // COMMAND_SUBPROCESS_SPAWN has no block to read
+                    // agentId from (dead code — unused by the
+                    // frontend, per grep); empty disables leasing.
+                    instance_id: String::new(),
                 };
                 subprocess_ctrl.spawn_turn(config)?;
                 Ok(None)
@@ -338,6 +347,14 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                     let agent_mode = crate::backend::obj::meta_get_string(
                         &block.meta, "agentMode", "host",
                     );
+                    // Cross-process session-lease key (registry::LeaseStore) —
+                    // read once here for both branches below. Only the host
+                    // branch's spawn_turn actually enforces it in this PR;
+                    // the container branch's config field is unused for now
+                    // (struct-completeness — see host_spawn.rs's doc comment).
+                    let instance_id = crate::backend::obj::meta_get_string(
+                        &block.meta, "agentId", "",
+                    );
                     if agent_mode == "container" {
                         let cm = container_manager.get().await
                             .ok_or_else(|| "Docker not available on this host; cannot start container agent".to_string())?;
@@ -417,6 +434,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                             } else {
                                 Some(persisted_session_id)
                             },
+                            instance_id: instance_id.clone(),
                         };
                         subprocess_ctrl.spawn_container_turn(cm.clone(), container_name, base_cmd, config)?;
                     } else {
@@ -435,6 +453,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                             } else {
                                 Some(persisted_session_id)
                             },
+                            instance_id,
                         };
                         subprocess_ctrl.spawn_turn(config)?;
                     }
