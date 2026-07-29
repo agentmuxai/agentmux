@@ -1438,7 +1438,22 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                     opts.model.dispatchPane({ type: "PendingMessageRejected", id: item.id });
                     continue;
                 }
-                await deliverToBackend(item.text, item.id, /* armExpiry */ false, /* initiatesTurn */ false, /* authFailureToPreserve */ null);
+                // initiatesTurn: item.initiatedTurnOptimistically, NOT
+                // hardcoded false — an idle-send hold (the ONLY push site
+                // that sets this true) has a REAL optimistic TurnStart
+                // already dispatched by handleSendMessage. If this item's
+                // AgentInputCommand RPC now fails, deliverToBackend's own
+                // catch block only dispatches TurnStartFailed
+                // `if (initiatesTurn)` — hardcoding false here left that
+                // idle-path item's turnPhase stuck in Submitting/
+                // "Working…" forever on an RPC failure, with no expiry
+                // timer either (armExpiry is also false for every flushed
+                // item). A busy-path item (initiatedTurnOptimistically:
+                // false) is unaffected — it never dispatched TurnStart, so
+                // deliverToBackend's guard/catch stay no-ops for it exactly
+                // as before. reagentx P1 on PR #2338 (thirty-eighth
+                // re-review).
+                await deliverToBackend(item.text, item.id, /* armExpiry */ false, /* initiatesTurn */ item.initiatedTurnOptimistically, /* authFailureToPreserve */ null);
             }
         })().finally(() => {
             inFlightHeldFlush = null;
