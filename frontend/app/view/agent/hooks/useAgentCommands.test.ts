@@ -113,6 +113,7 @@ describe("useAgentCommands — turnPhase recovery on a failed send", () => {
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
                 isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => true,
                 backToPicker: async () => {},
             });
 
@@ -151,6 +152,7 @@ describe("useAgentCommands — turnPhase recovery on a failed send", () => {
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
                 isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => true,
                 backToPicker: async () => {},
             });
 
@@ -202,6 +204,7 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
                 isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => true,
                 backToPicker: async () => {},
             });
 
@@ -245,6 +248,7 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
                 isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => true,
                 backToPicker: async () => {},
             });
 
@@ -311,6 +315,7 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
                 isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => true,
                 backToPicker: async () => {},
             });
 
@@ -365,6 +370,7 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
                 isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => true,
                 backToPicker: async () => {},
             });
 
@@ -414,6 +420,7 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
                 isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => true,
                 backToPicker: async () => {},
             });
 
@@ -464,6 +471,7 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
                 isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => true,
                 backToPicker: async () => {},
             });
 
@@ -509,6 +517,7 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
                 isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => true,
                 backToPicker: async () => {},
             });
 
@@ -555,6 +564,7 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
                 isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => true,
                 backToPicker: async () => {},
             });
 
@@ -606,6 +616,7 @@ describe("useAgentCommands — authFailureToPreserve survives a local command", 
         beginRecoveryFlow: () => {},
         endRecoveryFlow: () => {},
         isBackendTurnActive: () => false,
+        isBackendTurnConfirmedIdle: () => true,
         backToPicker: async () => {},
     });
 
@@ -708,6 +719,7 @@ describe("useAgentCommands — re-checks the live auth guard immediately before 
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
                 isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => true,
                 backToPicker: async () => {},
             });
 
@@ -747,6 +759,7 @@ describe("useAgentCommands — re-checks the live auth guard immediately before 
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
                 isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => true,
                 backToPicker: async () => {},
             });
 
@@ -792,6 +805,7 @@ describe("useAgentCommands — re-checks the live auth guard immediately before 
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
                 isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => true,
                 backToPicker: async () => {},
             });
 
@@ -841,6 +855,7 @@ describe("useAgentCommands — ctx.isTurnActive() reflects the pre-TurnStart sna
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
                 isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => true,
                 backToPicker: async () => {},
             });
 
@@ -884,6 +899,7 @@ describe("useAgentCommands — ctx.isTurnActive() reflects the pre-TurnStart sna
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
                 isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => true,
                 backToPicker: async () => {},
             });
 
@@ -937,6 +953,7 @@ describe("useAgentCommands — ctx.isTurnActive() reflects the pre-TurnStart sna
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
                 isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => true,
                 backToPicker: async () => {},
             });
 
@@ -987,6 +1004,7 @@ describe("useAgentCommands — flushPendingControllerRefresh", () => {
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
                 isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => true,
                 backToPicker: async () => {},
             });
 
@@ -1023,6 +1041,7 @@ describe("useAgentCommands — flushPendingControllerRefresh", () => {
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
                 isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => true,
                 backToPicker: async () => {},
             });
 
@@ -1073,6 +1092,7 @@ describe("useAgentCommands — flushPendingControllerRefresh", () => {
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
                 isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => true,
                 backToPicker: async () => {},
             });
 
@@ -1127,6 +1147,7 @@ describe("useAgentCommands — flushHeldMessages serializes behind a pending/in-
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
                 isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => true,
                 backToPicker: async () => {},
             });
 
@@ -1205,6 +1226,7 @@ describe("useAgentCommands — flushHeldMessages serializes behind a pending/in-
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
                 isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => true,
                 backToPicker: async () => {},
             });
 
@@ -1279,6 +1301,7 @@ describe("useAgentCommands — idle sendMessage runs the deferred controller ref
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
                 isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => true,
                 backToPicker: async () => {},
             });
 
@@ -1341,6 +1364,7 @@ describe("useAgentCommands — idle sendMessage runs the deferred controller ref
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
                 isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => true,
                 backToPicker: async () => {},
             });
 
@@ -1403,6 +1427,7 @@ describe("useAgentCommands — isTurnActive() trusts the authoritative backend s
                 endRecoveryFlow: () => {},
                 // The backend controller is still genuinely running a turn.
                 isBackendTurnActive: () => true,
+                isBackendTurnConfirmedIdle: () => false,
                 backToPicker: async () => {},
             });
 
@@ -1458,6 +1483,7 @@ describe("useAgentCommands — isTurnActive() trusts the authoritative backend s
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
                 isBackendTurnActive: () => true,
+                isBackendTurnConfirmedIdle: () => false,
                 backToPicker: async () => {},
             });
 
@@ -1508,6 +1534,7 @@ describe("useAgentCommands — flushPendingControllerRefresh leaves the flag pen
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
                 isBackendTurnActive: () => backendActive,
+                isBackendTurnConfirmedIdle: () => !backendActive,
                 backToPicker: async () => {},
             });
 
@@ -1525,6 +1552,57 @@ describe("useAgentCommands — flushPendingControllerRefresh leaves the flag pen
             backendActive = false;
             await commands.flushPendingControllerRefresh();
             expect(forceControllerRefresh).toHaveBeenCalledOnce();
+            dispose();
+        });
+    });
+
+    // reagent P1 on PR #2338 (twenty-first re-review): isBackendTurnActive()
+    // is `wasTurnActive === true` — for a pane that mounts mid-turn, before
+    // the first live controllerstatus event arrives, that reads `false` even
+    // though the backend is NOT confirmed idle either (wasTurnActive is
+    // still `undefined`). flushPendingControllerRefresh's destructive
+    // force-restart must lean on POSITIVE idle confirmation
+    // (isBackendTurnConfirmedIdle), not merely the absence of a positive
+    // active signal — otherwise this unconfirmed state would incorrectly
+    // flush and could kill a genuinely-active turn.
+    it("does NOT run the refresh while the backend state is UNCONFIRMED — isBackendTurnActive() false does not imply isBackendTurnConfirmedIdle()", async () => {
+        hub.dispatchSlashCommand.mockImplementation(async (_msg: string, _registry: unknown, ctx: { deferControllerRefreshUntilIdle: () => void }) => {
+            ctx.deferControllerRefreshUntilIdle();
+            return { kind: "handled" };
+        });
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+        const forceControllerRefresh = vi.fn(async () => true);
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                // Neither confirmed active nor confirmed idle — the
+                // mount-mid-turn-before-first-event state.
+                isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => false,
+                backToPicker: async () => {},
+            });
+
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("/login", /* wasAlreadyWorking */ true);
+
+            await commands.flushPendingControllerRefresh();
+            expect(forceControllerRefresh).not.toHaveBeenCalled();
             dispose();
         });
     });

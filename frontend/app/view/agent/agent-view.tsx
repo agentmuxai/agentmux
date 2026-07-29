@@ -739,7 +739,19 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // isn't actually ending — reintroducing the over-trigger bug this fix
     // closes (reagent P1 on PR #2241).
     function trackTurnJustEnded(active: boolean): void {
-        if (didTurnJustEnd(wasTurnActive, active)) {
+        const turnJustEnded = didTurnJustEnd(wasTurnActive, active);
+        // Update BEFORE calling flushPendingControllerRefresh below, not
+        // after: that call synchronously checks isBackendTurnConfirmedIdle()
+        // (backed by this same wasTurnActive) at call time, before any
+        // await — the OLD ordering left it reading the STALE (pre-update)
+        // value on exactly the genuine turn-end edge this call exists to
+        // react to, so the deferred refresh's own safety gate saw the
+        // turn as still "active" and refused to run — stranding it
+        // forever on this trigger (the reactive turnIdle effect could
+        // still rescue it asynchronously, but only if it happened to fire
+        // separately). Codex P1 on PR #2338 (twenty-first re-review).
+        wasTurnActive = active;
+        if (turnJustEnded) {
             setTurnJustEndedAtom((n) => n + 1);
             // Run any controller refresh /login deferred because this exact
             // turn was still active when it succeeded — see
@@ -751,7 +763,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             // P1 on PR #2338 (thirteenth re-review).
             void commands.flushPendingControllerRefresh();
         }
-        wasTurnActive = active;
     }
 
     // Posts a permanent, visible line into the pane's own conversation \u2014
@@ -1120,6 +1131,20 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         // trackTurnJustEnded's own doc comment for why). Codex P1 on
         // PR #2338 (nineteenth re-review).
         isBackendTurnActive: () => wasTurnActive === true,
+        // Deliberately NOT `!isBackendTurnActive()` (which would treat
+        // `undefined` — never confirmed either way, e.g. a pane that
+        // mounts mid-turn before its first live controllerstatus event
+        // arrives — the SAME as confirmed idle). flushPendingControllerRefresh
+        // force-restarts the controller when it proceeds, so it must
+        // require POSITIVE confirmation of idle before doing something
+        // destructive — "we don't know yet" must lean toward "don't
+        // flush," not "safe to flush." A pane that mounts onto an
+        // already-active turn and never receives a live event before a
+        // premature per-round session_end demotes turnPhase would
+        // otherwise have a deferred /login refresh flushed prematurely,
+        // killing that still-active (just never locally confirmed) turn.
+        // reagent P1 on PR #2338 (twenty-first re-review).
+        isBackendTurnConfirmedIdle: () => wasTurnActive === false,
         backToPicker: () => model.backToPicker(),
         // Scroll the user's own message into view after Enter. The hook
         // defers this to the next animation frame so the mounted node is
