@@ -353,6 +353,42 @@ impl AcpController {
                         if let Some(result) = json.get("result") {
                             if result.get("stopReason").is_some() {
                                 health_clone.set_active_turn(false);
+                                // Publish the flip so live controllerstatus
+                                // subscribers see "turn ended" immediately,
+                                // mirroring persistent.rs's matching publish
+                                // on its own normal (non-kill, non-exit)
+                                // turn-end path. Without this, the ONLY
+                                // controllerstatus publishes for an ACP
+                                // controller (Gemini/Codex/Kimi in
+                                // catalog.ts) are on kill or process exit —
+                                // a normal turn-end here left the frontend's
+                                // `wasTurnActive` signal (fed only by live
+                                // controllerstatus events, never local
+                                // state) stuck at its last-seen value,
+                                // stranding useAgentCommands.ts's
+                                // flushPendingControllerRefresh (which
+                                // requires isBackendTurnConfirmedIdle —
+                                // wasTurnActive === false — before running a
+                                // /login-deferred controller restart) until
+                                // an unrelated event happened to republish
+                                // status. reagentx P1 on PR #2338
+                                // (twenty-second re-review).
+                                if let Some(ref broker) = broker_clone {
+                                    let status = {
+                                        let locked = inner_clone.lock().unwrap();
+                                        BlockControllerRuntimeStatus {
+                                            blockid: block_id_stdout.clone(),
+                                            version: locked.status_version,
+                                            shellprocstatus: locked.proc_status.clone(),
+                                            shellprocconnname: "local".to_string(),
+                                            shellprocexitcode: locked.proc_exit_code,
+                                            spawn_ts_ms: None,
+                                            is_agent_pane: true,
+                                            turn_active: false,
+                                        }
+                                    };
+                                    super::publish_controller_status(broker, &status);
+                                }
                             }
                         }
                     }

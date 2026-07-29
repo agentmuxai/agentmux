@@ -442,6 +442,28 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             if (refreshed) {
                 opts.notifyControllerHealthy();
                 opts.model.dispatchPane({ type: "FailureCleared" });
+                // A message can have been HELD (not delivered) specifically
+                // because this exact refresh was still pending/blocked —
+                // see sendMessage's idle-send path and flushHeldMessages's
+                // own gate, both of which push/leave items in heldQueue
+                // rather than deliver while controllerRefreshPendingUntilIdle
+                // is true. Once the refresh actually completes, nothing else
+                // is guaranteed to drain that queue: the reducer's
+                // ReconcileTurnActive is a no-op (same state reference, no
+                // re-render) when the frontend's turnPhase already reads
+                // idle/Done — the exact case this deferred-refresh machinery
+                // exists for — so the reactive turnIdle effect that would
+                // otherwise call flushHeldMessages never re-fires off the
+                // authoritative confirming event. Draining here, right after
+                // a successful refresh, closes that gap for every trigger
+                // path (trackTurnJustEnded's edge, the reactive effect, and
+                // flushHeldMessages's own recursive call — the last is a
+                // guaranteed no-op via its `flushing` single-flight guard).
+                // Fire-and-forget: callers awaiting this function's own
+                // return (sendMessage, flushHeldMessages) must not block on
+                // a full queue drain. Codex P1 on PR #2338 (twenty-second
+                // re-review).
+                if (heldQueue.length > 0) void flushHeldMessages();
             }
             return refreshed;
         })().finally(() => {
@@ -732,6 +754,28 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // the stale controller. reagent P1 on PR #2338 (seventeenth
         // re-review). No-ops when nothing is pending.
         const refreshedByDeferral = await flushPendingControllerRefresh();
+
+        // flushPendingControllerRefresh returns `false` for two DIFFERENT
+        // reasons that must not be conflated: (1) nothing was ever deferred
+        // — safe to send — or (2) a refresh IS deferred but
+        // isBackendTurnConfirmedIdle() isn't true yet, so it deliberately
+        // left the flag pending instead of running. Case (2) means the
+        // controller may still hold the stale pre-refresh credential (or
+        // the backend may not really be idle at all, despite this pane's
+        // local turnPhase already reading idle) — sending straight to
+        // deliverToBackend here would reach exactly the stale/still-busy
+        // controller the deferred refresh exists to protect against.
+        // controllerRefreshPendingUntilIdle is only cleared once
+        // flushPendingControllerRefresh actually commits to running, so it
+        // being still true here unambiguously means case (2). Hold the
+        // message instead of delivering it now — flushHeldMessages will
+        // drain it once a later trigger (the turn-just-ended edge, or the
+        // reactive turnIdle effect) confirms idle and completes the
+        // refresh. Codex P1 on PR #2338 (twenty-second re-review).
+        if (controllerRefreshPendingUntilIdle) {
+            heldQueue.push({ id: messageId, text: message, authWasKnownBadAtQueueTime: opts.canRetry() || opts.loginWaiting() });
+            return;
+        }
 
         // Idle send: deliver immediately and arm the lost-delivery safety timer.
         //
@@ -1027,6 +1071,28 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             // Codex P1 on PR #2338 (seventeenth re-review).
             if (!workingFromPhase(paneSnapshot(opts.blockId)?.turnPhase ?? { kind: "Idle" })) {
                 await flushPendingControllerRefresh();
+                // The call above no-ops (without clearing the flag) when a
+                // refresh is deferred but opts.isBackendTurnConfirmedIdle()
+                // isn't true yet — the same premature-session_end
+                // divergence that gate exists for: this pane's LOCAL
+                // turnPhase already reads not-working (we're inside this
+                // `if`), but the backend hasn't positively confirmed idle.
+                // The controller may still hold the stale pre-refresh
+                // credential in that case; draining now would deliver
+                // straight to it. Bail without draining — this is safe to
+                // strand here because flushPendingControllerRefresh's own
+                // success path proactively re-drains this exact queue once
+                // the refresh actually completes, so nothing is lost, only
+                // deferred to that later trigger. Scoped to this branch
+                // only: when the pane is genuinely still mid-turn
+                // (workingFromPhase true, the `if` above never even
+                // attempted the flush), the flag being pending is
+                // unrelated and draining is exactly the intended mid-turn
+                // tool-call-boundary behavior. Codex P1 on PR #2338
+                // (twenty-second re-review).
+                if (controllerRefreshPendingUntilIdle) {
+                    return;
+                }
             }
 
             // Drain one at a time, awaiting each delivery (incl. its cmd:args
