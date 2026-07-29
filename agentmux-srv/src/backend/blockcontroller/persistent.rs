@@ -549,47 +549,72 @@ impl PersistentSubprocessController {
     }
 
     /// Releases the exclusive spawn claim taken by `decide_send_action`
-    /// returning `BecomeSpawner`, delivering everything enqueued while
-    /// this caller was busy spawning (including its own message — see
-    /// `SendAction::BecomeSpawner`'s doc comment). Draining happens under
-    /// the SAME lock used to decide "queue vs. spawn," one message at a
-    /// time, so a message pushed onto the queue by a losing caller can
-    /// never be missed by a drain that already believed the queue was
-    /// empty.
+    /// returning `BecomeSpawner`. `spawn_succeeded` distinguishes two very
+    /// different situations:
     ///
-    /// Safe to call even when the just-attempted spawn failed:
-    /// `inner.stdin_tx` will be `None` in that case, so this leaves
-    /// whatever is still queued in place (for the next successful spawn to
-    /// pick up) rather than silently discarding it, while still releasing
-    /// `spawning_in_progress` so a future caller isn't blocked forever.
-    fn release_spawn_claim_and_drain_queue(&self) {
-        loop {
+    /// - **Failed spawn**: discards only the front item of the queue —
+    ///   the caller's OWN message. This is guaranteed to be at the front:
+    ///   nothing else could have been queued before `spawning_in_progress`
+    ///   was set (see `decide_send_action`), and the queue is always empty
+    ///   at the moment a new spawner claims it (the previous claim only
+    ///   ever releases once fully drained). codex P1 on PR #2360 (sixth
+    ///   review pass): leaving this message queued let an unrelated LATER
+    ///   successful spawn silently execute a prompt the caller was already
+    ///   told had failed (`send_message`/`retry_after_resume_failure`
+    ///   already report the failure), sometimes duplicating a message the
+    ///   user had re-sent by hand. Anything queued AFTER it (from other
+    ///   callers who got `SendAction::Queued` and were already told
+    ///   "accepted") is left in place for the next successful spawn.
+    /// - **Successful spawn**: hands the drain off to a background task
+    ///   that delivers everything queued, in order, via `Sender::send`
+    ///   (which awaits free capacity) rather than `try_send`. codex P2 on
+    ///   PR #2360 (sixth review pass): a synchronous `try_send` loop
+    ///   popped a message off the queue and then discarded it outright if
+    ///   the bounded stdin channel was momentarily full — losing input
+    ///   despite already having told that caller "accepted". Deferring to
+    ///   a task lets delivery simply wait for capacity instead.
+    fn release_spawn_claim_and_drain_queue(&self, spawn_succeeded: bool) {
+        if !spawn_succeeded {
             let mut inner = self.inner.lock().unwrap();
-            if inner.stdin_tx.is_none() {
-                // Nothing to deliver to right now (the spawn attempt
-                // failed, or the process has already exited again) —
-                // release the claim but leave whatever's still queued for
-                // the next successful spawn to pick up, rather than
-                // silently discarding it.
-                inner.spawning_in_progress = false;
-                break;
-            }
-            let Some(json_str) = inner.pending_send_messages.pop_front() else {
-                inner.spawning_in_progress = false;
-                break;
-            };
-            let tx = inner.stdin_tx.clone();
-            drop(inner);
-            if let Some(tx) = tx {
-                if let Err(e) = tx.try_send(json_str) {
+            inner.pending_send_messages.pop_front();
+            inner.spawning_in_progress = false;
+            return;
+        }
+        let inner_arc = Arc::clone(&self.inner);
+        let block_id = self.block_id.clone();
+        tokio::spawn(async move {
+            loop {
+                let next = {
+                    let mut inner = inner_arc.lock().unwrap();
+                    match inner.stdin_tx.clone() {
+                        Some(tx) => inner.pending_send_messages.pop_front().map(|m| (m, tx)),
+                        None => None,
+                    }
+                };
+                let Some((json_str, tx)) = next else {
+                    // Either the queue is empty, or the process has
+                    // already exited again before we got to it — either
+                    // way, release the claim so a future caller can spawn.
+                    inner_arc.lock().unwrap().spawning_in_progress = false;
+                    break;
+                };
+                if let Err(e) = tx.send(json_str).await {
                     tracing::warn!(
-                        block_id = %self.block_id,
-                        error = %e,
-                        "failed to deliver a queued message after a spawn"
+                        block_id = %block_id,
+                        "failed to deliver a queued message — receiver dropped, process likely exited"
                     );
+                    // The channel's gone, so no send from here will ever
+                    // succeed again — put the message back (rather than
+                    // silently discarding it) for a future spawn to pick
+                    // up, and release the claim now instead of busy-looping
+                    // on the same dead sender.
+                    let mut inner = inner_arc.lock().unwrap();
+                    inner.pending_send_messages.push_front(e.0);
+                    inner.spawning_in_progress = false;
+                    break;
                 }
             }
-        }
+        });
     }
 
     /// Send a user message to the running CLI process.
@@ -684,18 +709,19 @@ impl PersistentSubprocessController {
                 // `--resume`, which is what the retry payload is for.
                 let message_id = config.message_id.clone();
                 let spawn_result = self.spawn_process(config, Some(json_str));
+                // Only emit "accepted" on success — matches this
+                // function's prior (pre-queue) behavior, which propagated
+                // a spawn failure via `?` before ever reaching the
+                // "accepted" emission. A failed spawn's message is
+                // discarded by `release_spawn_claim_and_drain_queue` below
+                // (see its own doc comment), so telling the frontend
+                // "accepted" for it here would be a lie.
                 if spawn_result.is_ok() {
                     self.mark_turn_active_and_publish();
+                    self.emit_message_accepted(message_id.as_deref());
                 }
-                // Emit "accepted" for this caller's own message regardless
-                // of the spawn outcome — matches this function's prior
-                // behavior of always emitting it once the message was
-                // durably persisted above. `release_spawn_claim_and_drain_queue`
-                // (below) is what actually delivers it (or leaves it
-                // queued for a future spawn, on failure).
-                self.emit_message_accepted(message_id.as_deref());
-                self.release_spawn_claim_and_drain_queue();
-                spawn_result.map(|_| ())
+                self.release_spawn_claim_and_drain_queue(spawn_result.is_ok());
+                spawn_result
             }
         }
     }
@@ -765,7 +791,7 @@ impl PersistentSubprocessController {
                         "failed to respawn after a stale --resume session id"
                     ),
                 }
-                self.release_spawn_claim_and_drain_queue();
+                self.release_spawn_claim_and_drain_queue(spawn_result.is_ok());
                 if spawn_result.is_err() {
                     // Surface this, or the pane hangs forever with NO
                     // signal at all — codex P2 on PR #2360 (fifth review
@@ -2169,11 +2195,14 @@ mod send_input_tests {
         );
     }
 
-    /// The drain must deliver everything queued (including a caller's own
-    /// message, enqueued alongside the claim by `decide_send_action`) in
-    /// order, then release the claim so a future caller can spawn again.
-    #[test]
-    fn release_spawn_claim_and_drain_queue_delivers_everything_and_releases_claim() {
+    /// On a successful spawn, the drain must deliver everything queued
+    /// (including a caller's own message, enqueued alongside the claim by
+    /// `decide_send_action`) in order, then release the claim so a future
+    /// caller can spawn again. Delivery happens on a spawned background
+    /// task (see the function's own doc comment), so this must actually
+    /// wait for it rather than asserting immediately.
+    #[tokio::test]
+    async fn release_spawn_claim_and_drain_queue_delivers_everything_on_success() {
         let c = controller();
         let (tx, mut rx) = mpsc::channel::<String>(8);
         {
@@ -2184,41 +2213,52 @@ mod send_input_tests {
             inner.pending_send_messages.push_back("second".to_string());
         }
 
-        c.release_spawn_claim_and_drain_queue();
+        c.release_spawn_claim_and_drain_queue(true);
 
-        assert_eq!(rx.try_recv().unwrap(), "first");
-        assert_eq!(rx.try_recv().unwrap(), "second");
-        assert!(rx.try_recv().is_err(), "no extra deliveries");
+        assert_eq!(rx.recv().await.unwrap(), "first");
+        assert_eq!(rx.recv().await.unwrap(), "second");
+
+        // Give the background drain task its final iteration (observing
+        // the now-empty queue and releasing the claim) a chance to run.
+        tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
         let inner = c.inner.lock().unwrap();
         assert!(!inner.spawning_in_progress, "claim must be released once fully drained");
         assert!(inner.pending_send_messages.is_empty());
     }
 
-    /// Edge case: if the spawn this drain follows actually failed,
-    /// `stdin_tx` stays `None` — the drain must still release the claim
-    /// (or no future caller could ever spawn again) WITHOUT discarding
-    /// whatever is still queued, so a future successful spawn can deliver
-    /// it instead of the message being silently lost.
+    /// codex P1 on PR #2360 (sixth review pass): a FAILED spawn must
+    /// discard only the front item — the caller's own message, which
+    /// `send_message`/`retry_after_resume_failure` already reported as a
+    /// failure to their own caller — not leave it queued for an unrelated
+    /// later spawn to silently execute. Anything ELSE queued behind it
+    /// (from other callers who got `SendAction::Queued` and were already
+    /// told "accepted") must survive, for that next spawn to deliver.
     #[test]
-    fn release_spawn_claim_and_drain_queue_preserves_queue_when_spawn_failed() {
+    fn release_spawn_claim_and_drain_queue_discards_only_the_failed_spawners_own_message() {
         let c = controller();
         {
             let mut inner = c.inner.lock().unwrap();
             inner.spawning_in_progress = true;
-            inner.pending_send_messages.push_back("stuck".to_string());
+            inner.pending_send_messages.push_back("the-one-that-failed".to_string());
+            inner.pending_send_messages.push_back("queued-by-someone-else".to_string());
         }
 
-        c.release_spawn_claim_and_drain_queue();
+        c.release_spawn_claim_and_drain_queue(false);
 
         let inner = c.inner.lock().unwrap();
         assert!(
             !inner.spawning_in_progress,
-            "claim must still be released even when there was nothing to deliver to"
+            "claim must still be released even though the spawn failed"
         );
         assert_eq!(
             inner.pending_send_messages.len(),
             1,
-            "message must be left queued, not silently discarded, when there was no process to deliver to"
+            "only the failed spawner's own (front) message must be discarded"
+        );
+        assert_eq!(
+            inner.pending_send_messages[0],
+            "queued-by-someone-else",
+            "a message queued by a DIFFERENT caller (already told \"accepted\") must survive for the next spawn"
         );
     }
 }
