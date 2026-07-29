@@ -101,6 +101,18 @@ export interface UseAgentCommandsOptions {
      */
     notifyControllerHealthy: () => void;
     /**
+     * `useAgentControllerStatus.forceControllerRefresh` — threaded into the
+     * slash-command context so /login's handler can restart an already-
+     * running persistent controller onto its newly-refreshed credential,
+     * matching relogin()/useGlobalLogin()/loginViaTerminal(). Without this,
+     * a successful /login on a pane whose controller was already alive
+     * left it on the stale credential — the next message bypasses every
+     * guard in this PR (canRetry/loginWaiting/authFailureToPreserve are
+     * all correctly cleared by then) and still reaches the stale process.
+     * Codex P1 on PR #2338 (seventh re-review).
+     */
+    forceControllerRefresh: () => Promise<void>;
+    /**
      * The model-level backToPicker action. The hook delegates to this
      * rather than owning a duplicate implementation — the pane-frame
      * header button also calls it, so the logic needs to live in one
@@ -309,6 +321,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         setAuthUrl: opts.setAuthUrl,
         notifyControllerHealthy: opts.notifyControllerHealthy,
         clearAuthFailure: () => opts.model.dispatchPane({ type: "FailureCleared" }),
+        forceControllerRefresh: opts.forceControllerRefresh,
         openPicker,
         openHelp,
     });

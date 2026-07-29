@@ -123,6 +123,14 @@ export const loginCommand: SlashCommand = {
                                     "/login: the login succeeded, but AgentMux couldn't save the account record. Try again in a moment.",
                             };
                         }
+                        // Restart an already-running persistent controller so
+                        // this refreshed credential actually takes effect —
+                        // send_message only spawns a fresh process when one
+                        // isn't already running. Must happen BEFORE declaring
+                        // success below, matching relogin()/useGlobalLogin()/
+                        // loginViaTerminal()'s own ordering. Codex P1 on
+                        // PR #2338 (seventh re-review).
+                        await ctx.forceControllerRefresh();
                         ctx.log("auth", "login complete — run /cost to verify");
                         // A pane that already showed the mount-time "Log in"
                         // bar (canRetry() true) before the user typed /login
@@ -156,6 +164,8 @@ export const loginCommand: SlashCommand = {
                     // typed in successfully but the DB write itself failed.
                     // See REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md.
                     if (openedAccountId && openedAccountDir) {
+                        // See the "opened" branch's identical call above.
+                        await ctx.forceControllerRefresh();
                         if (outcome === "terminal-success") {
                             ctx.log("auth", "login complete — run /cost to verify");
                         }

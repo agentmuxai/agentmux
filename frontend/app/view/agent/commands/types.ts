@@ -148,6 +148,19 @@ export interface SlashCommandContext {
      */
     clearAuthFailure: () => void;
     /**
+     * Restart an already-running persistent controller so a just-refreshed
+     * credential actually takes effect — `send_message` only spawns a
+     * fresh process when one isn't already running. relogin()/
+     * useGlobalLogin()/loginViaTerminal() all call the equivalent
+     * (`useAgentControllerStatus.forceControllerRefresh`) before declaring
+     * success; /login must do the same, or a pane whose controller was
+     * already alive stays on the stale credential and the next message
+     * bypasses every guard in this file (nothing left to fast-fail on)
+     * while still reaching that stale process. Codex P1 on PR #2338
+     * (seventh re-review). Best-effort — never throws.
+     */
+    forceControllerRefresh: () => Promise<void>;
+    /**
      * Open the inline picker. Returns a promise that resolves with the
      * selected value, or rejects if the user dismisses (Esc / click-outside).
      * Set by useAgentCommands; the dispatcher only sees the function.
