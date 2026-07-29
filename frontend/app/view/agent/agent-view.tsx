@@ -881,7 +881,9 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         onTurnActive: (active) => {
             reconcileTurnActive(active);
             trackTurnJustEnded(active);
-            // A real controllerstatus event for this pane is independent
+        },
+        onActiveTurnConfirmed: () => {
+            // A controllerstatus event with an ACTIVE turn is independent
             // proof the CLI is alive and running turns — clear any stale
             // "Retry Login" / auth notice left over from the mount-time
             // gated launch flow's auth_failed classification. Otherwise
@@ -889,6 +891,13 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             // agent recovers and starts answering messages through this
             // same event stream, but nothing ever told useAgentControllerStatus
             // its earlier canRetry=true was stale. Reported live 2026-07-18.
+            // Gated on an ACTIVE turn specifically (not any controllerstatus
+            // event) — codex P1 on PR #2338 (eighth re-review): an idle
+            // heartbeat from a controller left alive from before a
+            // just-FAILED recovery attempt carries no proof the credential
+            // is valid, and would otherwise silently clear that recovery's
+            // own canRetry=true, letting the next message bypass the
+            // fast-fail guard and reach the still-known-bad process.
             status.notifyControllerHealthy();
         },
     });

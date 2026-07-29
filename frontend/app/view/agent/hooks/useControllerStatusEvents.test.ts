@@ -1,8 +1,24 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
-import { deriveTurnActive, didTurnJustEnd } from "./useControllerStatusEvents";
+import { createRoot } from "solid-js";
+import { describe, expect, it, vi } from "vitest";
+
+const hub = vi.hoisted(() => ({
+    handler: null as ((e: unknown) => void) | null,
+}));
+
+vi.mock("@/app/store/wps", () => ({
+    waveEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
+        if (sub.eventType === "controllerstatus") hub.handler = sub.handler;
+        return () => {
+            hub.handler = null;
+        };
+    }),
+}));
+vi.mock("@/app/store/wos", () => ({ makeORef: (a: string, b: string) => `${a}:${b}` }));
+
+import { deriveTurnActive, didTurnJustEnd, useControllerStatusEvents } from "./useControllerStatusEvents";
 
 // Guards the exact wire contract that a P0 review caught: BlockControllerRuntime
 // Status.is_agent_pane and .turn_active are both serialized
@@ -69,5 +85,64 @@ describe("didTurnJustEnd (ambient-summary trigger edge)", () => {
 
     it("undefined -> true (first reading ever, agent already mid-turn) is not a turn-end", () => {
         expect(didTurnJustEnd(undefined, true)).toBe(false);
+    });
+});
+
+// Codex P1 on PR #2338 (eighth re-review): a controllerstatus event proves
+// nothing about credential validity unless it reports an ACTIVE turn. A
+// caller using "any controllerstatus event for this pane arrived" as proof
+// of health would have a stray idle heartbeat — emitted by a persistent
+// controller left alive from before a just-FAILED recovery attempt —
+// silently clear that recovery's own canRetry=true, letting the very next
+// message bypass the fast-fail guard and reach the still-known-bad process.
+describe("useControllerStatusEvents — onActiveTurnConfirmed gating", () => {
+    const mount = (onActiveTurnConfirmed: () => void) => {
+        let dispose = () => {};
+        createRoot((d) => {
+            dispose = d;
+            useControllerStatusEvents({
+                blockId: "block-1",
+                log: () => {},
+                onTurnActive: () => {},
+                onActiveTurnConfirmed,
+            });
+        });
+        const fire = (data: unknown) => {
+            if (!hub.handler) throw new Error("controllerstatus handler not registered — onMount did not run");
+            hub.handler({ data });
+        };
+        return { fire, dispose };
+    };
+
+    it("does NOT fire on an idle/heartbeat event (turn_active omitted)", () => {
+        const onActiveTurnConfirmed = vi.fn();
+        const { fire, dispose } = mount(onActiveTurnConfirmed);
+        fire({ is_agent_pane: true });
+        expect(onActiveTurnConfirmed).not.toHaveBeenCalled();
+        dispose();
+    });
+
+    it("does NOT fire on an explicit turn_active:false event", () => {
+        const onActiveTurnConfirmed = vi.fn();
+        const { fire, dispose } = mount(onActiveTurnConfirmed);
+        fire({ is_agent_pane: true, turn_active: false });
+        expect(onActiveTurnConfirmed).not.toHaveBeenCalled();
+        dispose();
+    });
+
+    it("fires when a turn is genuinely active", () => {
+        const onActiveTurnConfirmed = vi.fn();
+        const { fire, dispose } = mount(onActiveTurnConfirmed);
+        fire({ is_agent_pane: true, turn_active: true });
+        expect(onActiveTurnConfirmed).toHaveBeenCalledOnce();
+        dispose();
+    });
+
+    it("does NOT fire for a non-agent (shell/PTY) pane event", () => {
+        const onActiveTurnConfirmed = vi.fn();
+        const { fire, dispose } = mount(onActiveTurnConfirmed);
+        fire({ shellprocstatus: "running" });
+        expect(onActiveTurnConfirmed).not.toHaveBeenCalled();
+        dispose();
     });
 });
