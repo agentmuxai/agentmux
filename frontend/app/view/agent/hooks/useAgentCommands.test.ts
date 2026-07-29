@@ -1157,6 +1157,71 @@ describe("useAgentCommands — flushPendingControllerRefresh", () => {
             dispose();
         });
     });
+
+    // codex P2 on PR #2338 (twenty-seventh re-review): re-arming
+    // controllerRefreshPendingUntilIdle on failure isn't enough on its
+    // own — nothing re-checks a plain closure variable just because it
+    // changed. The turn-just-ended edge and the reactive turnIdle effect
+    // that triggered THIS attempt have already fired; without a scheduled
+    // retry, a held message would sit indefinitely unless the user
+    // happens to send another message or a new turn starts.
+    it("automatically retries a failed deferred refresh after a delay, with no external trigger", async () => {
+        hub.dispatchSlashCommand.mockImplementation(async (_msg: string, _registry: unknown, ctx: { deferControllerRefreshUntilIdle: () => void }) => {
+            ctx.deferControllerRefreshUntilIdle();
+            return { kind: "handled" };
+        });
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+        // Fails on the first attempt, succeeds on the automatic retry.
+        let attempt = 0;
+        const forceControllerRefresh = vi.fn(async () => {
+            attempt += 1;
+            return attempt >= 2;
+        });
+        const notifyControllerHealthy = vi.fn();
+
+        vi.useFakeTimers();
+        try {
+            await createRoot(async (dispose) => {
+                const commands = useAgentCommands({
+                    blockId: BLOCK_ID,
+                    model,
+                    block: () => undefined,
+                    provider: () => undefined,
+                    documentAtom: [() => [], () => {}] as any,
+                    log: () => {},
+                    setAuthUrl: () => {},
+                    canRetry: () => false,
+                    loginWaiting: () => false,
+                    setAuthNotice: () => {},
+                    notifyControllerHealthy,
+                    forceControllerRefresh,
+                    beginRecoveryFlow: () => {},
+                    endRecoveryFlow: () => {},
+                    isBackendTurnActive: () => false,
+                    isBackendTurnConfirmedIdle: () => true,
+                    backToPicker: async () => {},
+                });
+
+                model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+                await commands.sendMessage("/login", /* wasAlreadyWorking */ true);
+                await commands.flushPendingControllerRefresh();
+
+                expect(forceControllerRefresh).toHaveBeenCalledOnce();
+                expect(notifyControllerHealthy).not.toHaveBeenCalled();
+
+                // No external trigger — just time passing.
+                await vi.advanceTimersByTimeAsync(5000);
+
+                expect(forceControllerRefresh).toHaveBeenCalledTimes(2);
+                expect(notifyControllerHealthy).toHaveBeenCalledOnce();
+                dispose();
+            });
+        } finally {
+            vi.useRealTimers();
+        }
+    });
 });
 
 // Codex P1 on PR #2338 (fifteenth re-review): /login succeeding mid-turn
