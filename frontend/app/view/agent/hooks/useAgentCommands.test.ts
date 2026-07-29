@@ -112,6 +112,7 @@ describe("useAgentCommands — turnPhase recovery on a failed send", () => {
                 forceControllerRefresh: async () => true,
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
+                isBackendTurnActive: () => false,
                 backToPicker: async () => {},
             });
 
@@ -149,6 +150,7 @@ describe("useAgentCommands — turnPhase recovery on a failed send", () => {
                 forceControllerRefresh: async () => true,
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
+                isBackendTurnActive: () => false,
                 backToPicker: async () => {},
             });
 
@@ -199,6 +201,7 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 forceControllerRefresh: async () => true,
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
+                isBackendTurnActive: () => false,
                 backToPicker: async () => {},
             });
 
@@ -241,6 +244,7 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 forceControllerRefresh: async () => true,
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
+                isBackendTurnActive: () => false,
                 backToPicker: async () => {},
             });
 
@@ -306,6 +310,7 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 forceControllerRefresh: async () => true,
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
+                isBackendTurnActive: () => false,
                 backToPicker: async () => {},
             });
 
@@ -359,6 +364,7 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 forceControllerRefresh: async () => true,
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
+                isBackendTurnActive: () => false,
                 backToPicker: async () => {},
             });
 
@@ -407,6 +413,7 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 forceControllerRefresh: async () => true,
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
+                isBackendTurnActive: () => false,
                 backToPicker: async () => {},
             });
 
@@ -456,6 +463,7 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 forceControllerRefresh: async () => true,
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
+                isBackendTurnActive: () => false,
                 backToPicker: async () => {},
             });
 
@@ -500,6 +508,7 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 forceControllerRefresh: async () => true,
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
+                isBackendTurnActive: () => false,
                 backToPicker: async () => {},
             });
 
@@ -545,6 +554,7 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 forceControllerRefresh: async () => true,
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
+                isBackendTurnActive: () => false,
                 backToPicker: async () => {},
             });
 
@@ -595,6 +605,7 @@ describe("useAgentCommands — authFailureToPreserve survives a local command", 
         forceControllerRefresh: async () => true,
         beginRecoveryFlow: () => {},
         endRecoveryFlow: () => {},
+        isBackendTurnActive: () => false,
         backToPicker: async () => {},
     });
 
@@ -696,6 +707,7 @@ describe("useAgentCommands — re-checks the live auth guard immediately before 
                 forceControllerRefresh: async () => true,
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
+                isBackendTurnActive: () => false,
                 backToPicker: async () => {},
             });
 
@@ -734,6 +746,7 @@ describe("useAgentCommands — re-checks the live auth guard immediately before 
                 forceControllerRefresh: async () => true,
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
+                isBackendTurnActive: () => false,
                 backToPicker: async () => {},
             });
 
@@ -741,6 +754,52 @@ describe("useAgentCommands — re-checks the live auth guard immediately before 
             await commands.sendMessage("u there", false);
 
             expect(hub.agentInput).toHaveBeenCalledOnce();
+            dispose();
+        });
+    });
+
+    it("blocks the send when a NEW live auth failure arrives during the SetMetaCommand round-trip, even with no captured authFailureToPreserve (codex P2 on PR #2338, nineteenth re-review)", async () => {
+        // No auth failure existed at the pre-TurnStart capture
+        // (authFailureToPreserve stays null for the whole call) — but one
+        // arrives mid-flight. canRetry()/loginWaiting() are NOT updated by
+        // a mid-turn 401/403 either, so without a live re-read of
+        // state.failure inside checkAuthGuard, nothing catches this.
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+
+        hub.setMeta.mockImplementation(async () => {
+            model.dispatchPane(
+                { type: "FailureObserved", failure: { code: "auth", title: "Not logged in", detail: "401", retryable: true }, at: Date.now() },
+                "system",
+            );
+        });
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => PROVIDER,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh: async () => true,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                isBackendTurnActive: () => false,
+                backToPicker: async () => {},
+            });
+
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("u there", false, /* authFailureToPreserve */ null);
+
+            expect(hub.setMeta).toHaveBeenCalledOnce();
+            expect(hub.agentInput).not.toHaveBeenCalled();
             dispose();
         });
     });
@@ -781,6 +840,7 @@ describe("useAgentCommands — ctx.isTurnActive() reflects the pre-TurnStart sna
                 forceControllerRefresh: async () => true,
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
+                isBackendTurnActive: () => false,
                 backToPicker: async () => {},
             });
 
@@ -823,6 +883,7 @@ describe("useAgentCommands — ctx.isTurnActive() reflects the pre-TurnStart sna
                 forceControllerRefresh: async () => true,
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
+                isBackendTurnActive: () => false,
                 backToPicker: async () => {},
             });
 
@@ -875,6 +936,7 @@ describe("useAgentCommands — ctx.isTurnActive() reflects the pre-TurnStart sna
                 forceControllerRefresh: async () => true,
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
+                isBackendTurnActive: () => false,
                 backToPicker: async () => {},
             });
 
@@ -924,6 +986,7 @@ describe("useAgentCommands — flushPendingControllerRefresh", () => {
                 forceControllerRefresh,
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
+                isBackendTurnActive: () => false,
                 backToPicker: async () => {},
             });
 
@@ -959,6 +1022,7 @@ describe("useAgentCommands — flushPendingControllerRefresh", () => {
                 forceControllerRefresh,
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
+                isBackendTurnActive: () => false,
                 backToPicker: async () => {},
             });
 
@@ -1008,6 +1072,7 @@ describe("useAgentCommands — flushPendingControllerRefresh", () => {
                 forceControllerRefresh,
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
+                isBackendTurnActive: () => false,
                 backToPicker: async () => {},
             });
 
@@ -1061,6 +1126,7 @@ describe("useAgentCommands — flushHeldMessages serializes behind a pending/in-
                 forceControllerRefresh,
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
+                isBackendTurnActive: () => false,
                 backToPicker: async () => {},
             });
 
@@ -1138,6 +1204,7 @@ describe("useAgentCommands — flushHeldMessages serializes behind a pending/in-
                 forceControllerRefresh,
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
+                isBackendTurnActive: () => false,
                 backToPicker: async () => {},
             });
 
@@ -1211,6 +1278,7 @@ describe("useAgentCommands — idle sendMessage runs the deferred controller ref
                 forceControllerRefresh,
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
+                isBackendTurnActive: () => false,
                 backToPicker: async () => {},
             });
 
@@ -1272,6 +1340,7 @@ describe("useAgentCommands — idle sendMessage runs the deferred controller ref
                 forceControllerRefresh,
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
+                isBackendTurnActive: () => false,
                 backToPicker: async () => {},
             });
 
@@ -1292,6 +1361,62 @@ describe("useAgentCommands — idle sendMessage runs the deferred controller ref
                 expect.objectContaining({ message: "fresh message" }),
             );
             expect(paneSnapshot(BLOCK_ID)?.failure).toBeNull();
+            dispose();
+        });
+    });
+});
+
+// Codex P1 on PR #2338 (nineteenth re-review): a premature per-round
+// session_end can transiently demote the frontend's own turnPhase to
+// "Done" even while the backend controller genuinely still reports
+// turn_active: true (the same divergence useControllerStatusEvents.ts's
+// didTurnJustEnd is deliberately independent of turnPhase to avoid).
+// isTurnActive() must trust the authoritative backend signal, not just
+// turnPhase, or /login's deferred-refresh check would force-restart a
+// controller that's still genuinely working.
+describe("useAgentCommands — isTurnActive() trusts the authoritative backend signal over a possibly-stale turnPhase", () => {
+    it("reads true when isBackendTurnActive() says active even though turnPhase currently reads Idle", async () => {
+        let observedIsTurnActive: boolean | undefined;
+        hub.dispatchSlashCommand.mockImplementation(async (_msg: string, _registry: unknown, ctx: { isTurnActive: () => boolean }) => {
+            observedIsTurnActive = ctx.isTurnActive();
+            return { kind: "handled" };
+        });
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh: async () => true,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                // The backend controller is still genuinely running a turn.
+                isBackendTurnActive: () => true,
+                backToPicker: async () => {},
+            });
+
+            // Simulates the premature per-round session_end: turnPhase
+            // transitions all the way back to Idle even though the turn
+            // (per isBackendTurnActive above) never actually ended.
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            model.dispatchPane({ type: "StreamFlushObserved", addedCount: 1, at: Date.now() }, "system");
+            model.dispatchPane({ type: "ReconcileTurnActive", at: Date.now(), active: false }, "system");
+            expect(paneSnapshot(BLOCK_ID)?.turnPhase.kind).toBe("Idle");
+
+            await commands.sendMessage("/login", /* wasAlreadyWorking */ true);
+
+            expect(observedIsTurnActive).toBe(true);
             dispose();
         });
     });

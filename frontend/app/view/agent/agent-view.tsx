@@ -1112,6 +1112,14 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         forceControllerRefresh: status.forceControllerRefresh,
         beginRecoveryFlow: status.beginRecoveryFlow,
         endRecoveryFlow: status.endRecoveryFlow,
+        // The last CONFIRMED backend turn_active reading (see
+        // UseAgentCommandsOptions.isBackendTurnActive's doc comment) —
+        // `wasTurnActive` is the same state trackTurnJustEnded's edge
+        // detector uses, tracked from live controllerstatus events only
+        // (never the mount-time GetControllerStatus one-shot — see
+        // trackTurnJustEnded's own doc comment for why). Codex P1 on
+        // PR #2338 (nineteenth re-review).
+        isBackendTurnActive: () => wasTurnActive === true,
         backToPicker: () => model.backToPicker(),
         // Scroll the user's own message into view after Enter. The hook
         // defers this to the next animation frame so the mounted node is
