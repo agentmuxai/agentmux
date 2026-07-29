@@ -519,26 +519,37 @@ impl PersistentSubprocessController {
         });
         let json_str = json_msg.to_string();
 
-        // Spawn process if not running
+        // Spawn process if not running. Binds directly to spawn_process's
+        // OWN return value for the epoch, rather than re-reading
+        // `inner.spawn_epoch` in a separate lock acquisition afterward —
+        // codex P1 on PR #2360 (fourth review pass): re-reading left a gap
+        // between spawn_process returning and that later read where a
+        // fast-failing stale-resume child's own retry could ALREADY have
+        // bumped the epoch again, making this capture the RETRY's epoch
+        // instead of THIS attempt's — silently defeating the whole check
+        // (the tail-end comparison would then always "match" the retry's
+        // epoch, letting this function duplicate the message on the
+        // retry's process). See spawn_process's doc comment for the full
+        // reasoning; see the tail-end check below and `spawn_epoch`'s own
+        // doc comment for what this value protects (codex P1, third review
+        // pass): a fast-failing stale-resume spawn's retry can install a
+        // BRAND NEW process — with its own fresh `stdin_tx` — before this
+        // function's own later stdin write below ever runs, which would
+        // otherwise either duplicate the message on the new process or
+        // spuriously report a failed send, even though the retry already
+        // delivers this exact message on its own.
+        //
+        // For an already-running process (no fresh spawn this call), there
+        // is no NEW spawn attempt of this call's own to bind atomically —
+        // reading the live value is correct here because `pending_resume_retry`
+        // is only ever set on a fresh, resume-attempting spawn, so nothing
+        // tied to THIS message's own delivery could race ahead of it.
         let is_fresh_spawn = !self.is_running();
-        if is_fresh_spawn {
-            self.spawn_process(config.clone(), Some(json_str.clone()))?;
-        }
-        // Captured AFTER the spawn above (if any) so it reflects whatever
-        // is CURRENT at this point — see the tail-end check below and
-        // `spawn_epoch`'s own doc comment. codex P1 on PR #2360 (third
-        // review pass): on a fast-failing stale-resume spawn, the
-        // process-waiter task (on another thread) can detect the exit,
-        // confirm the retry, and install a BRAND NEW process — with its
-        // own fresh `stdin_tx` — before this function's own later stdin
-        // write below ever runs. Without tracking which spawn attempt this
-        // call's write belongs to, that write would either duplicate the
-        // message on the new process (if it read the new stdin_tx) or
-        // spuriously report a failed send (if it raced the narrow window
-        // where the old stdin_tx was already cleared but the new one
-        // wasn't installed yet) — even though the retry already delivers
-        // this exact message on its own.
-        let my_spawn_epoch = self.inner.lock().unwrap().spawn_epoch;
+        let my_spawn_epoch = if is_fresh_spawn {
+            self.spawn_process(config.clone(), Some(json_str.clone()))?
+        } else {
+            self.inner.lock().unwrap().spawn_epoch
+        };
         // spawn_process already marks a fresh process's first turn active
         // (and starts its watchdog); for an already-running process (the
         // common case — every turn after the first) this is the only place
@@ -908,7 +919,21 @@ impl PersistentSubprocessController {
     }
 
     /// Spawn the persistent CLI process.
-    fn spawn_process(&self, config: PersistentSpawnConfig, resume_retry_payload: Option<String>) -> Result<(), String> {
+    /// Returns the `spawn_epoch` value THIS spawn assigned (see the field's
+    /// doc comment), captured atomically as part of this same call.
+    /// `send_message` binds to this return value directly for its own
+    /// fresh-spawn case, rather than re-reading `inner.spawn_epoch` in a
+    /// separate lock acquisition afterward — codex P1 on PR #2360 (fourth
+    /// review pass): re-reading left a window between this function
+    /// returning and that later read where a fast-failing stale-resume
+    /// child's own retry could ALREADY have bumped the epoch again,
+    /// making `send_message` capture the RETRY's epoch instead of this
+    /// original attempt's — silently defeating the epoch check entirely
+    /// (the later comparison would then always "match" the retry's own
+    /// epoch, letting `send_message` duplicate the message on the
+    /// retry's process). Returning it directly here closes that gap by
+    /// construction: there is no intervening read to race.
+    fn spawn_process(&self, config: PersistentSpawnConfig, resume_retry_payload: Option<String>) -> Result<u64, String> {
         // Build command — use make_cli_cmd to resolve .cmd wrappers to node on Windows
         let mut cmd = crate::server::cli_handlers::make_cli_cmd(&config.cli_command);
 
@@ -997,13 +1022,14 @@ impl PersistentSubprocessController {
         // can differ from what's actually held in `inner.session_id` once
         // an earlier call has already hydrated it) so `poison_resume`'s
         // later confirmation check is unambiguous.
-        {
+        let my_epoch = {
             let mut inner = self.inner.lock().unwrap();
             inner.spawn_epoch += 1;
             if let (Some(sid), Some(retry_json)) = (attempted_resume_sid.clone(), resume_retry_payload) {
                 inner.pending_resume_retry = Some((sid, config.clone(), retry_json));
             }
-        }
+            inner.spawn_epoch
+        };
 
         let pid = child.id().unwrap_or(0);
 
@@ -1548,7 +1574,7 @@ impl PersistentSubprocessController {
             }
         });
 
-        Ok(())
+        Ok(my_epoch)
     }
 
     pub fn stop_process(&self, force: bool) -> Result<(), String> {
