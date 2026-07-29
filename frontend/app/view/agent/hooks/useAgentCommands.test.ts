@@ -1238,4 +1238,61 @@ describe("useAgentCommands — idle sendMessage runs the deferred controller ref
             dispose();
         });
     });
+
+    it("does NOT reject the send on a stale authFailureToPreserve snapshot when the deferred refresh it just ran resolved it (reagent P1 on PR #2338, eighteenth re-review)", async () => {
+        // authFailureToPreserve is captured by the CALLER (handleSendMessage
+        // in agent-view.tsx) before TurnStart — and before sendMessage ever
+        // runs flushPendingControllerRefresh. If that refresh (deferred by
+        // an earlier /login success) resolves successfully here, it proves
+        // the controller is now confirmed on the fresh credential — the
+        // caller's already-captured "there was a live auth failure" snapshot
+        // is now stale and must not be trusted to reject this send.
+        hub.dispatchSlashCommand.mockImplementation(async (_msg: string, _registry: unknown, ctx: { deferControllerRefreshUntilIdle: () => void }) => {
+            ctx.deferControllerRefreshUntilIdle();
+            return { kind: "handled" };
+        });
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+        const forceControllerRefresh = vi.fn(async () => true);
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                backToPicker: async () => {},
+            });
+
+            // /login succeeds mid-turn (defers instead of refreshing now).
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("/login", /* wasAlreadyWorking */ true);
+
+            // A fresh idle send captures a (now-stale-by-the-time-it-matters)
+            // live auth failure — mirrors handleSendMessage's own capture
+            // right before dispatching TurnStart.
+            const staleAuthFailure: AgentFailure = { code: "auth", title: "Not logged in", detail: "401", retryable: true };
+            await commands.sendMessage("fresh message", /* wasAlreadyWorking */ false, staleAuthFailure);
+
+            expect(forceControllerRefresh).toHaveBeenCalledOnce();
+            // Must NOT have been fast-failed on the stale snapshot.
+            expect(hub.agentInput).toHaveBeenCalledWith(
+                expect.anything(),
+                expect.objectContaining({ message: "fresh message" }),
+            );
+            expect(paneSnapshot(BLOCK_ID)?.failure).toBeNull();
+            dispose();
+        });
+    });
 });

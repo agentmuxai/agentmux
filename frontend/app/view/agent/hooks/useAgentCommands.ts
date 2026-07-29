@@ -237,8 +237,14 @@ export interface UseAgentCommands {
      * existing turn-just-ended edge detector (trackTurnJustEnded) so the
      * deferred restart runs the moment the turn that blocked it actually
      * finishes. Codex P1 on PR #2338 (thirteenth re-review).
+     *
+     * Returns whether it actually ran a refresh that succeeded — callers
+     * that themselves carry an already-captured authFailureToPreserve
+     * snapshot (taken before this could have run) use this to detect that
+     * the snapshot has gone stale, rather than trusting it blindly. reagent
+     * P1 on PR #2338 (eighteenth re-review).
      */
-    flushPendingControllerRefresh: () => Promise<void>;
+    flushPendingControllerRefresh: () => Promise<boolean>;
 }
 
 // Runtime-config + auth slash commands (/model /effort /permission-mode
@@ -351,13 +357,25 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
     // ControllerResyncCommand still stopping/replacing the controller,
     // hitting the stale (or mid-restart) process. Codex P1 on PR #2338
     // (fifteenth re-review).
-    let inFlightControllerRefresh: Promise<void> | null = null;
+    let inFlightControllerRefresh: Promise<boolean> | null = null;
     const deferControllerRefreshUntilIdle = (): void => {
         controllerRefreshPendingUntilIdle = true;
     };
-    const flushPendingControllerRefresh = (): Promise<void> => {
+    // Returns whether it actually ran a refresh that succeeded (cleared the
+    // guards) — sendMessage's idle-send path uses this to detect when its
+    // caller's already-captured authFailureToPreserve snapshot (taken
+    // BEFORE this ran) has just gone stale: this function's own success
+    // dispatches FailureCleared, but by the time sendMessage's idle-send
+    // branch calls it, TurnStart has already cleared the reducer's live
+    // state.failure anyway — the caller captured authFailureToPreserve
+    // from the state that existed BEFORE that, so a live re-read here
+    // would always see it already gone and couldn't distinguish
+    // "genuinely resolved by this refresh" from "just cleared by
+    // TurnStart as always." The boolean makes that distinction explicit.
+    // reagent P1 on PR #2338 (eighteenth re-review).
+    const flushPendingControllerRefresh = (): Promise<boolean> => {
         if (inFlightControllerRefresh) return inFlightControllerRefresh;
-        if (!controllerRefreshPendingUntilIdle) return Promise.resolve();
+        if (!controllerRefreshPendingUntilIdle) return Promise.resolve(false);
         controllerRefreshPendingUntilIdle = false;
         inFlightControllerRefresh = (async () => {
             const refreshed = await opts.forceControllerRefresh();
@@ -371,6 +389,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 opts.notifyControllerHealthy();
                 opts.model.dispatchPane({ type: "FailureCleared" });
             }
+            return refreshed;
         })().finally(() => {
             inFlightControllerRefresh = null;
         });
@@ -630,10 +649,29 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // still hasn't run — racing or entirely preceding it and hitting
         // the stale controller. reagent P1 on PR #2338 (seventeenth
         // re-review). No-ops when nothing is pending.
-        await flushPendingControllerRefresh();
+        const refreshedByDeferral = await flushPendingControllerRefresh();
 
         // Idle send: deliver immediately and arm the lost-delivery safety timer.
-        await deliverToBackend(message, messageId, /* armExpiry */ true, /* initiatesTurn */ true, authFailureToPreserve);
+        //
+        // If the deferred refresh above just ran and succeeded, discard the
+        // caller's authFailureToPreserve snapshot instead of passing it
+        // through: it was captured BEFORE that refresh — and before
+        // TurnStart, which already clears the reducer's live state.failure
+        // regardless — so a live re-read here can't distinguish "this
+        // refresh just resolved it" from "TurnStart clears it every time."
+        // Trusting the stale snapshot would spuriously reject a message
+        // sent right after a deferred /login refresh completes and
+        // re-dispatch FailureObserved with a failure the credential fix
+        // just resolved, resurrecting the "Not logged in" banner
+        // immediately after it was actually fixed. reagent P1 on PR #2338
+        // (eighteenth re-review).
+        await deliverToBackend(
+            message,
+            messageId,
+            /* armExpiry */ true,
+            /* initiatesTurn */ true,
+            refreshedByDeferral ? null : authFailureToPreserve,
+        );
     };
 
     /**
