@@ -234,6 +234,28 @@ pub fn remove_shared(shared_dir: &Path, agent_id: &str, channel: &str) {
     }
 }
 
+/// Convenience wrapper over [`write_shared`]: resolves the shared dir and
+/// this process's channel itself, no-op if the shared root can't be
+/// resolved. Exists so call sites outside `server/reactive.rs`'s explicit
+/// register/unregister handlers (PTY shell auto-register, persistent
+/// stream-json controller auto-register — both call the per-channel
+/// `write`/`remove` directly, not through the HTTP handler) don't each
+/// repeat the same resolve-dir-then-read-env dance.
+pub fn write_shared_from_env(agent_id: &str, local_url: &str, block_id: &str) {
+    if let Some(shared_dir) = crate::registry::resolve_shared_reactive_dir() {
+        let channel = std::env::var("AGENTMUX_CHANNEL").unwrap_or_else(|_| "stable".to_string());
+        write_shared(&shared_dir, agent_id, local_url, block_id, &channel);
+    }
+}
+
+/// Convenience wrapper over [`remove_shared`] — see [`write_shared_from_env`].
+pub fn remove_shared_from_env(agent_id: &str) {
+    if let Some(shared_dir) = crate::registry::resolve_shared_reactive_dir() {
+        let channel = std::env::var("AGENTMUX_CHANNEL").unwrap_or_else(|_| "stable".to_string());
+        remove_shared(&shared_dir, agent_id, &channel);
+    }
+}
+
 /// Return every live candidate for `agent_id` across all channels,
 /// freshest-first (§4.3: Tier 2b prefers the freshest candidate). Does
 /// NOT filter by staleness/pid-liveness — callers needing that should use

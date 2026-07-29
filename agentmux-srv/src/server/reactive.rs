@@ -416,16 +416,7 @@ pub(super) async fn handle_reactive_register(
             // running in OTHER channels on this host can reach this agent
             // too — closes issue #1916 (Tier 2 previously only ever reached
             // the caller's own channel).
-            if let Some(shared_dir) = crate::registry::resolve_shared_reactive_dir() {
-                let channel = std::env::var("AGENTMUX_CHANNEL").unwrap_or_else(|_| "stable".to_string());
-                agent_registry::write_shared(
-                    &shared_dir,
-                    &req.agent_id,
-                    &state.local_web_url,
-                    &req.block_id,
-                    &channel,
-                );
-            }
+            agent_registry::write_shared_from_env(&req.agent_id, &state.local_web_url, &req.block_id);
 
             // Auto-watch this agent's Claude Code config dir for subagent JSONL files.
             // Pass block_id so subagent events are stamped with the owning pane,
@@ -512,10 +503,7 @@ pub(super) async fn handle_reactive_unregister(
     let data_dir = base::get_wave_data_dir();
     agent_registry::remove(&data_dir, &req.agent_id);
     // And from the host-global shared registry (Tier 2b).
-    if let Some(shared_dir) = crate::registry::resolve_shared_reactive_dir() {
-        let channel = std::env::var("AGENTMUX_CHANNEL").unwrap_or_else(|_| "stable".to_string());
-        agent_registry::remove_shared(&shared_dir, &req.agent_id, &channel);
-    }
+    agent_registry::remove_shared_from_env(&req.agent_id);
     // Drop the subagent filesystem watcher (handle + channel + task) — the
     // symmetric teardown for the watch_agent() call in the register handler.
     // Passes block_id (captured above) so a shared-agent-id watcher with
