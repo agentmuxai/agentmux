@@ -616,6 +616,22 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             return;
         }
 
+        // A turn can end via the session_end -> TurnEnd stream path
+        // (useTurnLifecycle.ts's finalizeTurn), which flips turnPhase to
+        // idle immediately and is NOT synchronized with the
+        // controllerstatus event stream that trackTurnJustEnded (and thus
+        // the deferred-refresh flush) is fed by. A fresh idle send — this
+        // is unconditionally the "pane is idle, initiating a new turn"
+        // branch — landing right after that TurnEnd but before the lagging
+        // controllerstatus event arrives would otherwise pass
+        // checkAuthGuard (canRetry()/loginWaiting()/authFailureToPreserve
+        // are all already clear once /login's handler returned) and reach
+        // AgentInputCommand while the deferred ControllerResyncCommand
+        // still hasn't run — racing or entirely preceding it and hitting
+        // the stale controller. reagent P1 on PR #2338 (seventeenth
+        // re-review). No-ops when nothing is pending.
+        await flushPendingControllerRefresh();
+
         // Idle send: deliver immediately and arm the lost-delivery safety timer.
         await deliverToBackend(message, messageId, /* armExpiry */ true, /* initiatesTurn */ true, authFailureToPreserve);
     };
@@ -864,7 +880,20 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             // the stale (or mid-restart) process. No-ops instantly when
             // nothing is pending. Codex P1 on PR #2338 (fifteenth
             // re-review).
-            await flushPendingControllerRefresh();
+            //
+            // Gated on the LIVE turn state, NOT called unconditionally:
+            // this function also runs at a mid-turn tool-call boundary
+            // (agent-view.tsx's reactive effect fires on newToolCall ||
+            // turnIdle, not turnIdle alone) and from the Esc-to-steer
+            // handler (handleEscapeOnEmptyComposer), both of which can run
+            // while a turn is STILL genuinely active. Calling the deferred
+            // refresh unconditionally here would force-restart the
+            // controller mid-turn — exactly the in-progress-work-destroying
+            // bug deferring it in the first place was meant to prevent.
+            // Codex P1 on PR #2338 (seventeenth re-review).
+            if (!workingFromPhase(paneSnapshot(opts.blockId)?.turnPhase ?? { kind: "Idle" })) {
+                await flushPendingControllerRefresh();
+            }
 
             // Drain one at a time, awaiting each delivery (incl. its cmd:args
             // round-trip) so messages reach the CLI's stdin in submission order.

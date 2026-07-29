@@ -1075,11 +1075,16 @@ describe("useAgentCommands — flushHeldMessages serializes behind a pending/in-
             await commands.sendMessage("hi", /* wasAlreadyWorking */ true);
             expect(commands.hasHeldMessages()).toBe(true);
 
-            // Simulates the turn ending: the live controllerstatus path
-            // fires flushPendingControllerRefresh WITHOUT awaiting it
-            // (mirrors agent-view.tsx's trackTurnJustEnded), and the
-            // reactive turnPhaseAtom effect independently calls
-            // flushHeldMessages around the same moment.
+            // Simulates the turn ending: turnPhase actually transitions to
+            // idle (flushHeldMessages' own internal refresh-await is gated
+            // on this being live-idle — see the "does NOT run... mid-turn"
+            // test below), the live controllerstatus path fires
+            // flushPendingControllerRefresh WITHOUT awaiting it (mirrors
+            // agent-view.tsx's trackTurnJustEnded), and the reactive
+            // turnPhaseAtom effect independently calls flushHeldMessages
+            // around the same moment.
+            model.dispatchPane({ type: "StreamFlushObserved", addedCount: 1, at: Date.now() }, "system");
+            model.dispatchPane({ type: "ReconcileTurnActive", at: Date.now(), active: false }, "system");
             const refreshPromise = commands.flushPendingControllerRefresh();
             const flushPromise = commands.flushHeldMessages();
 
@@ -1095,6 +1100,140 @@ describe("useAgentCommands — flushHeldMessages serializes behind a pending/in-
             expect(hub.agentInput).toHaveBeenCalledWith(
                 expect.anything(),
                 expect.objectContaining({ message: "hi" }),
+            );
+            dispose();
+        });
+    });
+
+    it("does NOT run the deferred refresh when flushHeldMessages is triggered mid-turn (e.g. a new-tool-call boundary or Esc-to-steer) — only once the pane is actually idle", async () => {
+        // Codex P1 on PR #2338 (seventeenth re-review): flushHeldMessages
+        // also runs at a mid-turn tool-call boundary (agent-view.tsx's
+        // reactive effect fires on newToolCall || turnIdle, not turnIdle
+        // alone) and from the Esc-to-steer handler — both while a turn can
+        // still be genuinely active. Running the deferred refresh
+        // unconditionally there would force-restart the controller
+        // mid-turn, exactly what deferring it was meant to prevent.
+        hub.dispatchSlashCommand.mockImplementation(async (_msg: string, _registry: unknown, ctx: { deferControllerRefreshUntilIdle: () => void }) => {
+            ctx.deferControllerRefreshUntilIdle();
+            return { kind: "handled" };
+        });
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+        const forceControllerRefresh = vi.fn(async () => true);
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                backToPicker: async () => {},
+            });
+
+            // /login succeeds mid-turn (defers instead of refreshing now).
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("/login", /* wasAlreadyWorking */ true);
+
+            // A second message is held behind the same active turn.
+            await commands.sendMessage("hi", /* wasAlreadyWorking */ true);
+            expect(commands.hasHeldMessages()).toBe(true);
+
+            // Promote to Streaming — the pane is genuinely still working —
+            // then flush as if triggered by a mid-turn tool-call boundary.
+            model.dispatchPane({ type: "StreamFlushObserved", addedCount: 1, at: Date.now() }, "system");
+            await commands.flushHeldMessages();
+
+            expect(forceControllerRefresh).not.toHaveBeenCalled();
+            expect(hub.agentInput).toHaveBeenCalledWith(
+                expect.anything(),
+                expect.objectContaining({ message: "hi" }),
+            );
+
+            // Now the turn genuinely ends — a later flush (or the
+            // reactive-effect trigger it mirrors) must run the deferred
+            // refresh.
+            model.dispatchPane({ type: "ReconcileTurnActive", at: Date.now(), active: false }, "system");
+            await commands.flushPendingControllerRefresh();
+
+            expect(forceControllerRefresh).toHaveBeenCalledOnce();
+            dispose();
+        });
+    });
+});
+
+// reagent P1 on PR #2338 (seventeenth re-review): a turn can end via the
+// independent session_end -> TurnEnd stream path (useTurnLifecycle.ts's
+// finalizeTurn), which is NOT synchronized with the controllerstatus event
+// stream that drives the deferred-refresh flush elsewhere. A fresh idle
+// send landing right after that TurnEnd but before the lagging
+// controllerstatus event would otherwise pass every guard (they're all
+// already clear) and reach AgentInputCommand while the deferred
+// ControllerResyncCommand still hasn't run.
+describe("useAgentCommands — idle sendMessage runs the deferred controller refresh before AgentInputCommand", () => {
+    it("awaits a pending/in-flight deferred refresh before delivering a fresh idle send", async () => {
+        hub.dispatchSlashCommand.mockImplementation(async (_msg: string, _registry: unknown, ctx: { deferControllerRefreshUntilIdle: () => void }) => {
+            ctx.deferControllerRefreshUntilIdle();
+            return { kind: "handled" };
+        });
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+
+        let resolveRefresh: (() => void) | undefined;
+        const forceControllerRefresh = vi.fn(
+            () => new Promise<boolean>((resolve) => { resolveRefresh = () => resolve(true); }),
+        );
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                backToPicker: async () => {},
+            });
+
+            // /login succeeds mid-turn (defers instead of refreshing now).
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("/login", /* wasAlreadyWorking */ true);
+            expect(forceControllerRefresh).not.toHaveBeenCalled();
+
+            // A fresh message is sent as a genuinely idle send — the exact
+            // TurnEnd-raced-ahead-of-controllerstatus scenario.
+            const sendPromise = commands.sendMessage("fresh message", /* wasAlreadyWorking */ false);
+
+            // The refresh RPC hasn't resolved yet — AgentInputCommand must
+            // not have fired.
+            expect(forceControllerRefresh).toHaveBeenCalledOnce();
+            expect(hub.agentInput).not.toHaveBeenCalled();
+
+            resolveRefresh?.();
+            await sendPromise;
+
+            expect(hub.agentInput).toHaveBeenCalledWith(
+                expect.anything(),
+                expect.objectContaining({ message: "fresh message" }),
             );
             dispose();
         });
