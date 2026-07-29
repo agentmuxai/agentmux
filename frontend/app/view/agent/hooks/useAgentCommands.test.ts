@@ -1420,4 +1420,112 @@ describe("useAgentCommands — isTurnActive() trusts the authoritative backend s
             dispose();
         });
     });
+
+    it("reads true when isBackendTurnActive() says active even for the FROZEN wasAlreadyWorking===false branch (codex P1 on PR #2338, twentieth re-review)", async () => {
+        // A premature per-round session_end can ALSO make handleSendMessage
+        // itself capture wasAlreadyWorking === false (turnPhase already
+        // read Done/Idle at capture time) even though the backend was
+        // never actually idle — not just corrupt a later live read (the
+        // scenario the previous test covers). Freezing false for this
+        // branch is still correct for its OWN reason (an optimistic
+        // TurnStart corrupting a LIVE read), but isBackendTurnActive()
+        // can't suffer that corruption — it's fed only by real backend
+        // events — so it must still be consulted even when
+        // wasAlreadyWorking itself is false.
+        let observedIsTurnActive: boolean | undefined;
+        hub.dispatchSlashCommand.mockImplementation(async (_msg: string, _registry: unknown, ctx: { isTurnActive: () => boolean }) => {
+            observedIsTurnActive = ctx.isTurnActive();
+            return { kind: "handled" };
+        });
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh: async () => true,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                isBackendTurnActive: () => true,
+                backToPicker: async () => {},
+            });
+
+            // handleSendMessage captured wasAlreadyWorking=false (turnPhase
+            // already showed idle at that moment).
+            await commands.sendMessage("/login", /* wasAlreadyWorking */ false);
+
+            expect(observedIsTurnActive).toBe(true);
+            dispose();
+        });
+    });
+});
+
+// Codex P1 on PR #2338 (twentieth re-review): a refresh can be correctly
+// deferred while a turn is active, then get FLUSHED before an authoritative
+// turn_active: false arrives — a premature frontend Done/Idle transition
+// triggers either the held-message flush or a fresh idle send, both of
+// which call flushPendingControllerRefresh based on turnPhase-derived
+// state. Checking isBackendTurnActive() centrally, inside
+// flushPendingControllerRefresh itself, closes this for every caller at
+// once instead of requiring each one to re-derive it.
+describe("useAgentCommands — flushPendingControllerRefresh leaves the flag pending while the backend is still active", () => {
+    it("does NOT run the refresh (and does not consume the pending flag) while isBackendTurnActive() is still true", async () => {
+        hub.dispatchSlashCommand.mockImplementation(async (_msg: string, _registry: unknown, ctx: { deferControllerRefreshUntilIdle: () => void }) => {
+            ctx.deferControllerRefreshUntilIdle();
+            return { kind: "handled" };
+        });
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+        const forceControllerRefresh = vi.fn(async () => true);
+        let backendActive = true;
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                isBackendTurnActive: () => backendActive,
+                backToPicker: async () => {},
+            });
+
+            // /login succeeds mid-turn (defers instead of refreshing now).
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("/login", /* wasAlreadyWorking */ true);
+
+            // Attempt to flush while the backend still confirms activity —
+            // e.g. triggered by a premature frontend Done/Idle transition.
+            await commands.flushPendingControllerRefresh();
+            expect(forceControllerRefresh).not.toHaveBeenCalled();
+
+            // The flag must still be pending — a LATER, genuine idle
+            // confirmation must still be able to run it.
+            backendActive = false;
+            await commands.flushPendingControllerRefresh();
+            expect(forceControllerRefresh).toHaveBeenCalledOnce();
+            dispose();
+        });
+    });
 });
