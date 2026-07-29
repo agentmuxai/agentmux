@@ -71,6 +71,26 @@ pub fn resolve_shared_store_path() -> Option<std::path::PathBuf> {
     resolve_global_shared_root().map(|h| h.join("store.db"))
 }
 
+/// Resolve the GLOBAL `<home>/shared/agents/reactive/` directory — the
+/// cross-channel presence registry for live reactive-injection targets
+/// (agent_id -> local_url/block_id/pid/auth_key, one entry per channel),
+/// used by MuxBus Tier 2b same-host cross-channel delivery
+/// (issue #1916 / `SPEC_MUXBUS_CROSS_CHANNEL_DELIVERY_2026_07_02.md`).
+///
+/// Sibling of [`resolve_shared_registry_dir`] in *location* (both live
+/// under `shared/agents/`), but a different *concern*: that registry
+/// mirrors durable agent definitions/session-resume state, while this one
+/// tracks live, ephemeral reachability for message forwarding — entries
+/// here are written at reactive-register time and removed at unregister,
+/// not persisted across restarts.
+///
+/// Returns `None` only if the global shared root can't be resolved —
+/// caller treats this as "cross-channel delivery disabled," falling back
+/// to same-channel-only Tier 2 (no behavior regression).
+pub fn resolve_shared_reactive_dir() -> Option<PathBuf> {
+    resolve_global_shared_root().map(|h| h.join("agents").join("reactive"))
+}
+
 /// Resolve the GLOBAL `<home>/shared/agents/transcripts/` directory.
 ///
 /// Sibling of [`resolve_shared_registry_dir`] / [`resolve_shared_definitions_dir`]:
@@ -175,6 +195,43 @@ mod tests {
         clear();
         // No env set — uses dirs::home_dir()/.agentmux/shared. Non-None.
         assert!(resolve_shared_registry_dir().is_some());
+    }
+
+    #[test]
+    fn reactive_dir_uses_shared_dir() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear();
+        std::env::set_var("AGENTMUX_SHARED_DIR", "/home/user/.agentmux/shared");
+        let r = resolve_shared_reactive_dir().unwrap();
+        assert_eq!(
+            r,
+            PathBuf::from("/home/user/.agentmux/shared/agents/reactive")
+        );
+        clear();
+    }
+
+    #[test]
+    fn reactive_dir_override_wins() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", "/tmp/test-home");
+        let r = resolve_shared_reactive_dir().unwrap();
+        assert_eq!(
+            r,
+            PathBuf::from("/tmp/test-home/shared/agents/reactive")
+        );
+        clear();
+    }
+
+    #[test]
+    fn reactive_dir_is_sibling_of_registry_dir() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear();
+        std::env::set_var("AGENTMUX_SHARED_DIR", "/home/user/.agentmux/shared");
+        let reactive = resolve_shared_reactive_dir().unwrap();
+        let registry = resolve_shared_registry_dir().unwrap();
+        assert_eq!(reactive.parent(), registry.parent());
+        clear();
     }
 
     #[test]

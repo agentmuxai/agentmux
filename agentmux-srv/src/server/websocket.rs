@@ -424,6 +424,7 @@ async fn handle_incoming_text(
                         wait_for_idle: false,
                         jekt_tier: None,   // auto-detected from keywords
                         delivery_tier: Some("host".to_string()),
+                        forward_hops: 0,
                     };
                     let resp = state.reactive_handler.inject_message(reactive_req);
                     if resp.success {
