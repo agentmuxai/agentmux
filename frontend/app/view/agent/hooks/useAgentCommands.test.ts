@@ -1005,6 +1005,63 @@ describe("useAgentCommands — ctx.isTurnActive() reflects the pre-TurnStart sna
             dispose();
         });
     });
+
+    // reagent P1 on PR #2338 (twenty-eighth re-review): a premature
+    // per-round session_end can demote LOCAL turnPhase to idle while the
+    // backend has NEVER confirmed idle (isBackendTurnConfirmedIdle stays
+    // false — the same "never confirmed either way" state as a pane that
+    // mounts mid-turn before its first live event). The live-read branch
+    // must not trust that local "idle" read as safe unless the backend has
+    // POSITIVELY confirmed it — otherwise finalizeLoginSuccess
+    // (login.ts) calls its immediate forceControllerRefresh path and kills
+    // a turn that is, in reality, still genuinely active.
+    it("still reads true when local turnPhase demotes to idle but the backend has NEVER confirmed idle either way", async () => {
+        let observedIsTurnActive: boolean | undefined;
+        hub.dispatchSlashCommand.mockImplementation(async (_msg: string, _registry: unknown, ctx: { isTurnActive: () => boolean }) => {
+            // Simulates a premature session_end demoting local turnPhase to
+            // idle DURING /login's own async work, before the backend has
+            // ever confirmed idle.
+            model.dispatchPane({ type: "ReconcileTurnActive", at: Date.now(), active: false }, "system");
+            observedIsTurnActive = ctx.isTurnActive();
+            return { kind: "handled" };
+        });
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh: async () => true,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                // Never confirmed active NOR confirmed idle — the "never
+                // confirmed either way" state.
+                isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => false,
+                backToPicker: async () => {},
+            });
+
+            // A turn is already genuinely in flight — wasAlreadyWorking=true,
+            // so the live-read branch is exercised (not the frozen false one).
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            model.dispatchPane({ type: "StreamFlushObserved", addedCount: 1, at: Date.now() }, "system");
+            await commands.sendMessage("/login", /* wasAlreadyWorking */ true);
+
+            expect(observedIsTurnActive).toBe(true);
+            dispose();
+        });
+    });
 });
 
 // Codex P1 on PR #2338 (thirteenth re-review): /login deferring its

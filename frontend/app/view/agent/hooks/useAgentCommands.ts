@@ -640,10 +640,34 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // frontend's own optimistic dispatch. ORing it in unconditionally
         // rescues this branch without reintroducing the bug freezing it
         // was meant to fix. Codex P1 on PR #2338 (twentieth re-review).
+        //
+        // The live-read branch ALSO requires opts.isBackendTurnActive() to
+        // be false AND opts.isBackendTurnConfirmedIdle() to be true before
+        // trusting a local "idle" read as safe — not just OR'ing in
+        // isBackendTurnActive() as an escape hatch. A turn that WAS active
+        // (wasAlreadyWorking !== false) but whose backend confirmation
+        // never arrived (isBackendTurnActive() and isBackendTurnConfirmedIdle()
+        // both false — the same "never confirmed either way" state
+        // isBackendTurnConfirmedIdle's own doc comment describes) can have
+        // its LOCAL turnPhase demoted to idle by a premature per-round
+        // session_end while the backend is still genuinely working — both
+        // signals then read false and this used to fall through to
+        // "safe," calling finalizeLoginSuccess's immediate
+        // forceControllerRefresh and killing the in-progress turn.
+        // Deliberately NOT applied to the wasAlreadyWorking === false
+        // branch: that frozen snapshot already correctly represents
+        // "genuinely idle from before this command was even invoked," and
+        // a pane that has simply never run a turn at all would have
+        // isBackendTurnConfirmedIdle() permanently false too (never
+        // confirmed idle OR active) — requiring confirmation there would
+        // make /login always defer even when it's the ordinary, safe,
+        // fresh-pane case. reagent P1 on PR #2338 (twenty-eighth
+        // re-review).
         isTurnActive: () =>
             (wasAlreadyWorking === false
                 ? false
-                : workingFromPhase(paneSnapshot(opts.blockId)?.turnPhase ?? { kind: "Idle" })) ||
+                : workingFromPhase(paneSnapshot(opts.blockId)?.turnPhase ?? { kind: "Idle" }) ||
+                  !opts.isBackendTurnConfirmedIdle()) ||
             opts.isBackendTurnActive(),
         beginRecoveryFlow: opts.beginRecoveryFlow,
         endRecoveryFlow: opts.endRecoveryFlow,

@@ -636,7 +636,10 @@ impl Controller for AcpController {
             // be recorded as the latest prompt (see latest_prompt_id's doc
             // comment) — make_request only returns the serialized string.
             let prompt_id = self.next_id();
-            self.latest_prompt_id.store(prompt_id, Ordering::Relaxed);
+            // swap (not store) so the PREVIOUS value is available to
+            // restore if this send's own enqueue fails below — see that
+            // rollback's comment for why.
+            let previous_prompt_id = self.latest_prompt_id.swap(prompt_id, Ordering::Relaxed);
             let req = serde_json::json!({
                 "jsonrpc": "2.0",
                 "id": prompt_id,
@@ -718,6 +721,29 @@ impl Controller for AcpController {
                     self.health_monitor.set_active_turn(false);
                     self.publish_status();
                 }
+                // Roll back latest_prompt_id too — UNCONDITIONALLY,
+                // regardless of was_active (unlike the health-monitor
+                // rollback above): a prompt that was never actually sent
+                // must never be the id everything else waits to match
+                // against. Without this, a mid-turn steering send whose
+                // OWN enqueue fails leaves latest_prompt_id pointing at
+                // this failed, never-sent request — the EARLIER prompt
+                // that's still genuinely in flight then gets its real
+                // stopReason response misclassified as stale by
+                // is_latest_prompt_completion (its id no longer matches),
+                // so turn_active never flips back to false for that pane,
+                // permanently stranding flushPendingControllerRefresh.
+                // compare_exchange (not an unconditional store) so a
+                // legitimately newer prompt sent by another overlapping
+                // call in the meantime is never clobbered by restoring
+                // this stale "previous" value. reagent P1 on PR #2338
+                // (twenty-eighth re-review).
+                let _ = self.latest_prompt_id.compare_exchange(
+                    prompt_id,
+                    previous_prompt_id,
+                    Ordering::Relaxed,
+                    Ordering::Relaxed,
+                );
                 return Err(e);
             }
         }
@@ -912,6 +938,7 @@ mod tests {
         // First send succeeds — turn is now genuinely active.
         assert!(c.send_input(BlockInputUnion::data(b"first".to_vec()), None).is_ok());
         assert!(c.health_monitor.is_active_turn());
+        let first_prompt_id = c.latest_prompt_id.load(Ordering::Relaxed);
 
         // Swap in a closed channel so the SECOND (steering) send's own
         // enqueue fails.
@@ -922,5 +949,18 @@ mod tests {
         let res = c.send_input(BlockInputUnion::data(b"second".to_vec()), None);
         assert!(res.is_err(), "the steering send's own enqueue should fail, got {res:?}");
         assert!(c.health_monitor.is_active_turn(), "the turn genuinely active from the FIRST send must not be rolled back by the second send's own failure");
+
+        // Regression for reagent P1 on PR #2338 (twenty-eighth re-review):
+        // latest_prompt_id must be rolled back to the FIRST (still
+        // genuinely in-flight) prompt's id, not left pointing at the
+        // second, never-sent request's id — otherwise the first prompt's
+        // real stopReason response is misclassified as stale by
+        // is_latest_prompt_completion (since its id no longer matches),
+        // and turn_active never flips back to false for this pane.
+        assert_eq!(
+            c.latest_prompt_id.load(Ordering::Relaxed),
+            first_prompt_id,
+            "latest_prompt_id must roll back to the still-in-flight FIRST prompt's id, not the failed second one"
+        );
     }
 }
