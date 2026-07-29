@@ -250,6 +250,8 @@ impl PersistentSubprocessController {
         let health_monitor = Arc::new(HealthMonitor::new(
             block_id.clone(),
             broker.clone(),
+            wstore.clone(),
+            event_bus.clone(),
         ));
         Self {
             tab_id,
@@ -548,13 +550,27 @@ impl PersistentSubprocessController {
     /// the JSON object mapping each question's text to the selected label(s) or
     /// free-text. Process must already be running (agent is mid-turn, blocked on
     /// this answer). Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md §2.3.
+    /// `pending_questions` is in-memory-only, scoped to THIS controller
+    /// instance — a fresh instance (pane reopen, or any process respawn)
+    /// starts with an empty map even though the persisted transcript can
+    /// still show the question as the tail node (deliberately preserved by
+    /// `scrubOrphanedInProgress` as "may still be answerable"). The frontend
+    /// (`useAgentQuestions.ts`'s `SAFE_TO_RETRY_VIA_FOLLOWUP` allowlist)
+    /// matches on this error's text (the "no pending AskUserQuestion" prefix)
+    /// to redeliver as a follow-up message instead of rolling back — keep
+    /// that exact prefix stable if this message ever changes. See
+    /// docs/reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md §2.7/§2.8.
     pub fn answer_question(&self, tool_use_id: String, answers: serde_json::Value) -> Result<(), String> {
         let (request_id, questions, tx) = {
             let mut inner = self.inner.lock().unwrap();
             let (rid, qs) = inner
                 .pending_questions
                 .remove(&tool_use_id)
-                .ok_or_else(|| format!("no pending AskUserQuestion for tool_use_id {tool_use_id}"))?;
+                .ok_or_else(|| format!(
+                    "no pending AskUserQuestion for tool_use_id {tool_use_id} — this controller \
+                     instance never recorded it (process likely respawned since the question was \
+                     asked, e.g. a pane close/reopen); the caller should redeliver as a follow-up message"
+                ))?;
             let tx = inner
                 .stdin_tx
                 .as_ref()
@@ -1394,6 +1410,25 @@ mod send_input_tests {
         assert!(
             err.contains("does not accept raw input"),
             "raw input should be rejected, got {err:?}"
+        );
+    }
+
+    /// Regression for REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md
+    /// §2.7/§2.8: a fresh controller instance (pane reopen, or any process
+    /// respawn) has an empty `pending_questions` map. Confirms the error
+    /// message is descriptive enough for `muxlog` diagnosis — the frontend
+    /// no longer depends on matching this exact string (it falls back on
+    /// ANY answer_question failure now), but a clear message still matters
+    /// for debugging a future recurrence.
+    #[test]
+    fn answer_question_on_untracked_tool_use_id_is_descriptive() {
+        let c = controller();
+        let err = c
+            .answer_question("tu-unknown".to_string(), serde_json::json!({}))
+            .unwrap_err();
+        assert!(
+            err.contains("tu-unknown") && err.contains("respawned"),
+            "error should name the tool_use_id and explain the likely cause, got {err:?}"
         );
     }
 

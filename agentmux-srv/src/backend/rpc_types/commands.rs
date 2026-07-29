@@ -308,6 +308,11 @@ pub const COMMAND_BUNDLE_GET: &str = "bundle.get";
 pub const COMMAND_BUNDLE_UPSERT: &str = "bundle.upsert";
 pub const COMMAND_BUNDLE_DELETE: &str = "bundle.delete";
 pub const COMMAND_BUNDLE_SELF_GET: &str = "bundle.self.get";
+// Armory Bundle Format (ABF) exporter — Phase 1 of
+// docs/specs/REPORT_ARMORY_BUNDLE_STANDARD_RESEARCH_2026_07_16.md /
+// https://docs.agentmux.ai/abf/. Serializes a bundle + its referenced
+// skills/MCP servers into the ABF on-disk layout.
+pub const COMMAND_BUNDLE_EXPORT: &str = "bundle.export";
 // Deprecated `preset.*` aliases — kept wired for one release (remove in Phase 4).
 pub const COMMAND_PRESET_LIST: &str = "preset.list";
 pub const COMMAND_PRESET_GET: &str = "preset.get";
@@ -337,6 +342,14 @@ pub const COMMAND_SKILL_CATALOG_DELETE: &str = "skill.catalog.delete";
 // catalog-tier sibling the Armory's "Bind to agent" action actually calls.
 // See docs/reports/REPORT_ARMORY_SKILLS_MARKDOWN_AND_BIND_BUG_2026_07_27.md.
 pub const COMMAND_SKILL_CATALOG_BIND: &str = "skill.catalog.bind";
+// Catalog-tier siblings of skill.list / skill.unbind — same no-check_s1
+// rationale as skill.catalog.bind above. AgentStashModal's Skills tab (the
+// per-agent Stash view, not the Armory catalog itself) runs over the
+// dashboard's connection, so it needs a window-scoped way to list what's
+// bound to one specific agent and to unbind, not just bind.
+// See docs/reports/REPORT_ARMORY_ARCHITECTURE_AND_NAMING_REVIEW_2026_07_23.md §2.2.
+pub const COMMAND_SKILL_CATALOG_LIST_FOR_AGENT: &str = "skill.catalog.list_for_agent";
+pub const COMMAND_SKILL_CATALOG_UNBIND: &str = "skill.catalog.unbind";
 
 // App API — v1 standalone MCP Server primitives
 pub const COMMAND_MCP_LIST: &str = "mcp.list";
@@ -363,6 +376,12 @@ pub const COMMAND_MCP_CATALOG_PROBE: &str = "mcp.catalog.probe";
 // Same fix as skill.catalog.bind — see
 // docs/reports/REPORT_ARMORY_SKILLS_MARKDOWN_AND_BIND_BUG_2026_07_27.md.
 pub const COMMAND_MCP_CATALOG_BIND: &str = "mcp.catalog.bind";
+// Catalog-tier siblings of mcp.list / mcp.unbind — same no-check_s1
+// rationale as mcp.catalog.bind above and skill.catalog.list_for_agent /
+// skill.catalog.unbind below. See
+// docs/reports/REPORT_ARMORY_ARCHITECTURE_AND_NAMING_REVIEW_2026_07_23.md §2.2.
+pub const COMMAND_MCP_CATALOG_LIST_FOR_AGENT: &str = "mcp.catalog.list_for_agent";
+pub const COMMAND_MCP_CATALOG_UNBIND: &str = "mcp.catalog.unbind";
 
 // App API Tier 1 — session archival commands
 pub const COMMAND_SESSION_ARCHIVE: &str = "session:archive";

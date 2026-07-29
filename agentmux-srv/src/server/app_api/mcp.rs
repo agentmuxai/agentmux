@@ -23,6 +23,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_mcp_catalog_delete(engine, state);
     register_mcp_catalog_probe(engine, state);
     register_mcp_catalog_bind(engine, state);
+    register_mcp_catalog_list_for_agent(engine, state);
+    register_mcp_catalog_unbind(engine, state);
 }
 
 fn register_mcp_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -190,10 +192,12 @@ fn register_mcp_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
 fn register_mcp_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
+    let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_MCP_BIND,
         Box::new(move |data, ctx| {
             let wstore = wstore.clone();
+            let broker = broker.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
                 struct Req { agent_id: String, mcp_id: String }
@@ -217,6 +221,14 @@ fn register_mcp_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 }
                 wstore.mcp_server_bind(&req.agent_id, &req.mcp_id)
                     .map_err(|e| format!("mcp.bind: {e}"))?;
+                // An agent binding a server to itself over its own authenticated
+                // connection should reach an already-open Stash MCP Servers tab
+                // for that agent too — same reactivity as the catalog-tier bind.
+                // reagentx P2 on PR #2329.
+                broker.publish(crate::backend::wps::WaveEvent {
+                    event: "mcp:changed".to_string(),
+                    scopes: vec![], sender: String::new(), persist: 0, data: None,
+                });
                 Ok(Some(json!({ "bound": true })))
             })
         }),
@@ -225,10 +237,12 @@ fn register_mcp_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
 fn register_mcp_unbind(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
+    let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_MCP_UNBIND,
         Box::new(move |data, ctx| {
             let wstore = wstore.clone();
+            let broker = broker.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
                 struct Req { agent_id: String, mcp_id: String }
@@ -237,6 +251,12 @@ fn register_mcp_unbind(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 check_s1(&ctx, &req.agent_id)?;
                 let unbound = wstore.mcp_server_unbind(&req.agent_id, &req.mcp_id)
                     .map_err(|e| format!("mcp.unbind: {e}"))?;
+                if unbound {
+                    broker.publish(crate::backend::wps::WaveEvent {
+                        event: "mcp:changed".to_string(),
+                        scopes: vec![], sender: String::new(), persist: 0, data: None,
+                    });
+                }
                 Ok(Some(json!({ "unbound": unbound })))
             })
         }),
@@ -377,10 +397,12 @@ fn register_mcp_catalog_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
 // See docs/reports/REPORT_ARMORY_SKILLS_MARKDOWN_AND_BIND_BUG_2026_07_27.md.
 fn register_mcp_catalog_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
+    let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_MCP_CATALOG_BIND,
         Box::new(move |data, _ctx| {
             let wstore = wstore.clone();
+            let broker = broker.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
                 struct Req { agent_id: String, mcp_id: String }
@@ -405,7 +427,91 @@ fn register_mcp_catalog_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 }
                 wstore.mcp_server_bind(&req.agent_id, &req.mcp_id)
                     .map_err(|e| format!("mcp.catalog.bind: {e}"))?;
+                // Lets any other open Stash/Armory view for this agent pick up
+                // the new binding without a manual refresh — mcp.bind (the
+                // check_s1 agent-self-service path) intentionally left alone.
+                broker.publish(crate::backend::wps::WaveEvent {
+                    event: "mcp:changed".to_string(),
+                    scopes: vec![], sender: String::new(), persist: 0, data: None,
+                });
                 Ok(Some(json!({ "bound": true })))
+            })
+        }),
+    );
+}
+
+/// Catalog-tier sibling of `mcp.list` (above) — GLOBAL SERVERS ONLY, each
+/// annotated with `bound_to_agent` for the caller-supplied `agent_id`, no
+/// `check_s1`. AgentStashModal's MCP Servers tab (the per-agent Stash view)
+/// runs over the dashboard's connection, which is never agent-authenticated,
+/// so `mcp.list`'s gate can never be satisfied from that caller — the exact
+/// same reasoning as `mcp.catalog.bind` above. Deliberately does NOT reuse
+/// `mcp.list`'s full computation (global + this agent's own private
+/// servers): with no `check_s1`, `agent_id` is unverified, and a private
+/// server's `config` can carry secrets — returning it for an arbitrary
+/// caller-chosen `agent_id` would be an IDOR into every agent's private MCP
+/// config. See `Store::mcp_server_list_global_for_agent`'s doc comment and
+/// docs/reports/REPORT_ARMORY_ARCHITECTURE_AND_NAMING_REVIEW_2026_07_23.md §2.2.
+fn register_mcp_catalog_list_for_agent(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let wstore = state.wstore.clone();
+    engine.register_handler(
+        COMMAND_MCP_CATALOG_LIST_FOR_AGENT,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            Box::pin(async move {
+                #[derive(serde::Deserialize)]
+                struct Req { agent_id: String }
+                let req: Req = serde_json::from_value(data)
+                    .map_err(|e| format!("mcp.catalog.list_for_agent: {e}"))?;
+                let servers = wstore.mcp_server_list_global_for_agent(&req.agent_id)
+                    .map_err(|e| format!("mcp.catalog.list_for_agent: {e}"))?;
+                Ok(Some(serde_json::to_value(&servers).map_err(|e| e.to_string())?))
+            })
+        }),
+    );
+}
+
+/// Catalog-tier sibling of `mcp.unbind` (above) — same DB write, no
+/// `check_s1`. Restricted to global rows only, matching the guard
+/// `register_mcp_catalog_bind`/`register_mcp_catalog_delete` already apply
+/// in this file: any window connection can sever any agent's binding to a
+/// *global* server (an intentional, pre-existing trust boundary — bind and
+/// delete already have the same or larger blast radius), but a private
+/// row's own binding must not be touchable via this no-`check_s1` surface,
+/// even though `mcp_id` is never exposed by any no-`check_s1` command
+/// today — defense in depth over relying solely on UUID secrecy.
+/// reagentx P1 on PR #2329 (round 2).
+fn register_mcp_catalog_unbind(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let wstore = state.wstore.clone();
+    let broker = state.broker.clone();
+    engine.register_handler(
+        COMMAND_MCP_CATALOG_UNBIND,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            let broker = broker.clone();
+            Box::pin(async move {
+                #[derive(serde::Deserialize)]
+                struct Req { agent_id: String, mcp_id: String }
+                let req: Req = serde_json::from_value(data)
+                    .map_err(|e| format!("mcp.catalog.unbind: {e}"))?;
+                match wstore.mcp_server_get(&req.mcp_id)
+                    .map_err(|e| format!("mcp.catalog.unbind: {e}"))?
+                {
+                    None => return Err("mcp.catalog.unbind: MCP server not found".to_string()),
+                    Some(s) if !s.is_global => {
+                        return Err("FORBIDDEN: can only unbind global MCP servers".to_string());
+                    }
+                    Some(_) => {}
+                }
+                let unbound = wstore.mcp_server_unbind(&req.agent_id, &req.mcp_id)
+                    .map_err(|e| format!("mcp.catalog.unbind: {e}"))?;
+                if unbound {
+                    broker.publish(crate::backend::wps::WaveEvent {
+                        event: "mcp:changed".to_string(),
+                        scopes: vec![], sender: String::new(), persist: 0, data: None,
+                    });
+                }
+                Ok(Some(json!({ "unbound": unbound })))
             })
         }),
     );

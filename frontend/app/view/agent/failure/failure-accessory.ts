@@ -36,6 +36,11 @@ export interface FailureActions {
     toggleDetails: () => void;
     /** Clear the failure (dismiss the row). */
     dismiss: () => void;
+    /** Kill and respawn the agent's controller process (`unresponsive` only —
+     *  the process is still alive but wedged, so "Retry" (re-send the last
+     *  message) wouldn't do anything; the process itself must be restarted
+     *  first). See docs/reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md §4. */
+    restart: () => void;
 }
 
 /** Transient view state for the failure row (no backing store). */
@@ -67,6 +72,7 @@ const ICON: Record<AgentFailure["code"], string> = {
     spawn_failure: "🧩",
     no_output: "❔",
     unknown_non_zero: "⚠",
+    unresponsive: "🧊",
 };
 
 /** Classes whose retry is safe to fire **automatically** (transient throttling). */
@@ -150,6 +156,17 @@ export function failureToRow(f: AgentFailure, view: FailureViewState, on: Failur
             actions.push({
                 glyph: "🆕", label: "New session", title: "Start a fresh session — the current one's context window is full",
                 primary: true, onClick: on.newSession,
+            });
+            break;
+        case "unresponsive":
+            // Not `retry` — the process is still running, just wedged;
+            // re-sending the last message wouldn't reach anything. Kill +
+            // respawn (ControllerResync{forcerestart:true}, the same
+            // mechanism already trusted for the post-login stale-process
+            // case) is the only real recovery.
+            actions.push({
+                glyph: "🔄", label: "Restart", title: "Restart the unresponsive agent process",
+                primary: true, onClick: on.restart,
             });
             break;
         default: // killed, no_output, unknown_non_zero

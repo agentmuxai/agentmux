@@ -45,7 +45,7 @@ use crate::broker::RefreshErrorKind;
 // the API's default stage. Full design/history in the agentmux-cloud repo's
 // muxbus/ directory (search for the WebSocket relay redesign writeup).
 const MUXBUS_WS_URL: &str = "wss://muxbus-ws.agentmux.ai";
-const MUXBUS_REST_URL: &str = "https://muxbus.agentmux.ai";
+pub(crate) const MUXBUS_REST_URL: &str = "https://muxbus.agentmux.ai";
 const RECONNECT_DELAY_SECS: u64 = 5;
 const MAX_RECONNECT_DELAY_SECS: u64 = 60;
 // AWS API Gateway WebSocket APIs enforce a 10-minute idle timeout with no
@@ -353,7 +353,7 @@ async fn run_loop(
         tracing::info!("cloud_subscriber: connecting to {}", MUXBUS_WS_URL);
         let session_start = std::time::Instant::now();
 
-        match connect_and_run(&token, agents.clone(), &mut ctrl_rx, &http).await {
+        match connect_and_run(&token, agents.clone(), &mut ctrl_rx, &wstore, &http).await {
             Ok(()) => {
                 // Apply the same >30s healthy-session guard as the error branch: a server
                 // that immediately closes after handshake must not suppress back-off.
@@ -398,6 +398,7 @@ async fn connect_and_run(
     token: &str,
     agents: Arc<Mutex<HashSet<String>>>,
     ctrl_rx: &mut mpsc::UnboundedReceiver<CtrlMsg>,
+    wstore: &Arc<Store>,
     http: &reqwest::Client,
 ) -> Result<(), String> {
     use tokio_tungstenite::tungstenite::ClientRequestBuilder;
@@ -470,7 +471,7 @@ async fn connect_and_run(
                     Some(Err(e)) => return Err(format!("ws recv: {e}")),
                     Some(Ok(Message::Text(text))) => {
                         if let Ok(server_msg) = serde_json::from_str::<ServerMsg>(&text) {
-                            match handle_server_msg(server_msg, token, http, &agents).await {
+                            match handle_server_msg(server_msg, token, http, &agents, wstore).await {
                                 Ok(()) => {}
                                 // Eviction or expired token — close stream to trigger reconnect.
                                 Err(ref e) if e.starts_with("reconnect:") => {
@@ -524,204 +525,36 @@ async fn handle_server_msg(
     token: &str,
     http: &reqwest::Client,
     agents: &Arc<Mutex<HashSet<String>>>,
+    wstore: &Arc<Store>,
 ) -> Result<(), String> {
     match msg {
         ServerMsg::InjectAvailable => {
             // Collect currently-registered agents without holding the lock across awaits.
             let registered: Vec<String> = agents.lock().unwrap().iter().cloned().collect();
-
-            #[derive(Deserialize)]
-            struct PendingResp { injections: Vec<PendingInj> }
-            #[derive(Deserialize)]
-            struct PendingInj {
-                id: String,
-                source_agent: Option<String>,
-                message: String,
-                priority: Option<String>,
-            }
-            #[derive(Deserialize)]
-            struct AckResp {
-                acknowledged: Vec<String>,
-                delivered_at: String,
-            }
-
             let handler = get_global_handler();
-            for agent_id in &registered {
-                let url = format!("{}/reactive/pending/{}", MUXBUS_REST_URL, agent_id);
-                let resp = match http
-                    .get(&url)
-                    .header("Authorization", format!("Bearer {}", token))
-                    .header("X-Agent-ID", agent_id)
-                    .send()
-                    .await
-                {
-                    Ok(r) => r,
-                    Err(e) => {
-                        tracing::warn!(agent_id = %agent_id, error = %e, "cloud_subscriber: fetch pending failed");
-                        continue;
-                    }
-                };
 
-                if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-                    // Token expired during session — reconnect to refresh.
-                    return Err("reconnect:token_expired".to_string());
-                }
-                if !resp.status().is_success() {
-                    tracing::warn!(
-                        status = %resp.status(),
-                        agent_id = %agent_id,
-                        "cloud_subscriber: fetch pending non-2xx"
-                    );
-                    continue;
-                }
+            // Concurrent, not sequential: each agent's sync can incur up to
+            // two CREDENTIAL_HTTP_TIMEOUT-bounded HTTP calls (credential
+            // fetch + pending fetch, worst case an unrevoked-then-retried
+            // claim too) — sequentially awaiting N agents compounds that
+            // into an N-times-longer block of this whole select! loop
+            // (pings, incoming messages, ctrl signals all wait on it).
+            // join_all bounds the wall-clock cost to the slowest single
+            // agent's chain regardless of N. reagentx P1 (round 4) on
+            // PR #2342.
+            let outcomes = futures_util::future::join_all(
+                registered
+                    .iter()
+                    .map(|agent_id| sync_agent_reactive(agent_id, token, http, wstore, handler)),
+            )
+            .await;
 
-                let body: PendingResp = match resp.json().await {
-                    Ok(b) => b,
-                    Err(e) => {
-                        tracing::warn!(error = %e, "cloud_subscriber: parse pending failed");
-                        continue;
-                    }
-                };
-
-                if body.injections.is_empty() {
-                    continue;
-                }
-
-                // Claim BEFORE delivering, not after: this is what prevents
-                // double-delivery when the same agent_id is concurrently
-                // registered by another AgentMux channel on this host (an
-                // intentionally-supported "two seats" workflow — see
-                // docs/specs/SPEC_MUXBUS_CROSS_CHANNEL_DUPLICATE_DELIVERY_2026_07_04.md).
-                // /reactive/ack now performs an atomic pending->delivered
-                // transition server-side; only injection ids that come back
-                // in `acknowledged` were actually won by this call and get
-                // delivered locally below. A previous version of this code
-                // delivered first and only acked successes afterward, which
-                // let two concurrent pollers both deliver the same injection.
-                let all_ids: Vec<String> = body.injections.iter().map(|inj| inj.id.clone()).collect();
-                let ack_url = format!("{}/reactive/ack", MUXBUS_REST_URL);
-                let claim_resp = match http
-                    .post(&ack_url)
-                    .header("Authorization", format!("Bearer {}", token))
-                    .header("X-Agent-ID", agent_id)
-                    .json(&serde_json::json!({ "injection_ids": all_ids }))
-                    .send()
-                    .await
-                {
-                    Ok(r) => r,
-                    Err(e) => {
-                        tracing::warn!(agent_id = %agent_id, error = %e, "cloud_subscriber: claim request failed");
-                        continue; // nothing claimed — retried on the next wake/poll
-                    }
-                };
-                if claim_resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-                    // Token expired during session — reconnect to refresh.
-                    return Err("reconnect:token_expired".to_string());
-                }
-                if !claim_resp.status().is_success() {
-                    tracing::warn!(
-                        status = %claim_resp.status(),
-                        agent_id = %agent_id,
-                        "cloud_subscriber: claim request non-2xx"
-                    );
-                    continue; // nothing claimed — retried on the next wake/poll
-                }
-                let claimed: AckResp = match claim_resp.json().await {
-                    Ok(b) => b,
-                    Err(e) => {
-                        // The server processed the claim (status was 2xx) before this
-                        // body failed to parse — some subset of `all_ids` may now be
-                        // flipped to "delivered" server-side with no local delivery
-                        // and no way for us to release them, since we don't know
-                        // which ids succeeded or their delivered_at stamp (required
-                        // by /reactive/release). We deliberately do NOT guess (e.g.
-                        // via /reactive/status) and release whatever looks delivered:
-                        // some of `all_ids` may have been legitimately claimed and
-                        // delivered by a *different* concurrent poller (another
-                        // channel/seat racing for the same agent_id), and blindly
-                        // releasing those would reintroduce the exact duplicate-
-                        // delivery bug this change exists to fix. Logging every
-                        // affected id loudly is the safe tradeoff: rare silent
-                        // message loss here, never a resurrected duplicate.
-                        tracing::error!(
-                            agent_id = %agent_id,
-                            injection_ids = ?all_ids,
-                            error = %e,
-                            "cloud_subscriber: parse claim response failed — these injections may be claimed server-side with no local delivery and cannot be safely auto-recovered"
-                        );
-                        continue;
-                    }
-                };
-                let delivered_at = claimed.delivered_at;
-                let claimed_ids: std::collections::HashSet<String> =
-                    claimed.acknowledged.into_iter().collect();
-
-                for inj in &body.injections {
-                    if !claimed_ids.contains(&inj.id) {
-                        // Another concurrent poller (this account's other
-                        // channel/seat) already won this claim — expected
-                        // under the "two seats" workflow, not an error.
-                        continue;
-                    }
-
-                    let req = InjectionRequest {
-                        target_agent: agent_id.clone(),
-                        message: inj.message.clone(),
-                        source_agent: inj.source_agent.clone(),
-                        request_id: Some(inj.id.clone()),
-                        priority: inj.priority.clone(),
-                        wait_for_idle: false,
-                        jekt_tier: None,       // auto-detected from keywords
-                        delivery_tier: Some("wan".to_string()),
-                    };
-                    let delivery = handler.inject_message(req);
-                    tracing::debug!(
-                        injection_id = %inj.id,
-                        agent_id = %agent_id,
-                        success = delivery.success,
-                        "cloud_subscriber: delivered injection"
-                    );
-
-                    if !delivery.success {
-                        // We hold the claim but local delivery failed (e.g.
-                        // agent not ready) — release it back to pending so
-                        // it's retried, instead of silently dropping it now
-                        // that claiming already marked it "delivered".
-                        let release_url = format!("{}/reactive/release", MUXBUS_REST_URL);
-                        match http
-                            .post(&release_url)
-                            .header("Authorization", format!("Bearer {}", token))
-                            .header("X-Agent-ID", agent_id)
-                            .json(&serde_json::json!({
-                                "injection_id": inj.id,
-                                "delivered_at": delivered_at,
-                            }))
-                            .send()
-                            .await
-                        {
-                            Ok(r) if r.status().is_success() => {}
-                            Ok(r) => {
-                                // Claim is stranded as "delivered" with no local
-                                // delivery and no retry until this is visible —
-                                // log loudly rather than discarding silently.
-                                tracing::warn!(
-                                    injection_id = %inj.id,
-                                    agent_id = %agent_id,
-                                    status = %r.status(),
-                                    "cloud_subscriber: release request non-2xx — injection stranded as delivered, message lost"
-                                );
-                            }
-                            Err(e) => {
-                                tracing::warn!(
-                                    injection_id = %inj.id,
-                                    agent_id = %agent_id,
-                                    error = %e,
-                                    "cloud_subscriber: release request failed — injection stranded as delivered, message lost"
-                                );
-                            }
-                        }
-                    }
-                }
+            if outcomes
+                .iter()
+                .any(|o| matches!(o, AgentSyncOutcome::ReconnectSharedTokenExpired))
+            {
+                // Shared account-level token expired during session — reconnect to refresh.
+                return Err("reconnect:token_expired".to_string());
             }
         }
         ServerMsg::Error { message } => {
@@ -736,13 +569,286 @@ async fn handle_server_msg(
     Ok(())
 }
 
+enum AgentSyncOutcome {
+    /// This agent's sync finished (successfully or with an already-logged,
+    /// non-fatal error) — nothing further to signal to the caller.
+    Ok,
+    /// The SHARED account-level token (not a per-agent credential) was
+    /// rejected — the whole WS session's auth is stale and needs a
+    /// reconnect. Only ever produced when no per-agent credential was in
+    /// play for the rejected call.
+    ReconnectSharedTokenExpired,
+}
+
+/// One registered agent's full pending-fetch → claim → deliver cycle for an
+/// `InjectAvailable` broadcast. Extracted from the loop body it used to be
+/// so `handle_server_msg` can run every agent's sync concurrently via
+/// `join_all` instead of sequentially — see the call site's own comment.
+///
+/// Retries once with the shared `token` if a per-agent credential is
+/// rejected (401) — without this, invalidating the credential alone left
+/// this agent's pending injection undelivered until an unrelated
+/// InjectAvailable broadcast happened to fire again (no periodic resync
+/// exists). reagentx P1 (round 4) on PR #2342.
+async fn sync_agent_reactive(
+    agent_id: &str,
+    token: &str,
+    http: &reqwest::Client,
+    wstore: &Arc<Store>,
+    handler: &'static crate::backend::reactive::handler::ReactiveHandler,
+) -> AgentSyncOutcome {
+    #[derive(Deserialize)]
+    struct PendingResp { injections: Vec<PendingInj> }
+    #[derive(Deserialize)]
+    struct PendingInj {
+        id: String,
+        source_agent: Option<String>,
+        message: String,
+        priority: Option<String>,
+    }
+    #[derive(Deserialize)]
+    struct AckResp {
+        acknowledged: Vec<String>,
+        delivered_at: String,
+    }
+
+    // Prefer a credential bound to exactly this agent_id over the shared
+    // account-level token — see agent_credentials.rs. Falls back to `token`
+    // (today's self-declared behavior) whenever this agent isn't
+    // provisioned yet or provisioning fails, so rollout never blocks
+    // delivery. `using_per_agent` tracks which one is currently in play so
+    // a 401 can be attributed correctly and, for a per-agent credential,
+    // retried once with the shared token instead of just giving up.
+    let per_agent_token = crate::muxbus::agent_credentials::ensure_agent_credential(agent_id, wstore, http).await;
+    let mut agent_token = per_agent_token.clone().unwrap_or_else(|| token.to_string());
+    let mut using_per_agent = per_agent_token.is_some();
+
+    let url = format!("{}/reactive/pending/{}", MUXBUS_REST_URL, agent_id);
+    let body: PendingResp = loop {
+        let resp = match http
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", agent_token))
+            .header("X-Agent-ID", agent_id)
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(agent_id = %agent_id, error = %e, "cloud_subscriber: fetch pending failed");
+                return AgentSyncOutcome::Ok;
+            }
+        };
+
+        if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+            if using_per_agent {
+                // The per-agent credential's cached token is stale/revoked
+                // server-side even though it looked locally valid —
+                // invalidate it (so the next agent_credentials call
+                // re-fetches instead of retrying the same rejected token)
+                // and retry THIS fetch immediately with the shared token,
+                // rather than tearing down the whole shared session (which
+                // would starve delivery for every OTHER agent too).
+                crate::muxbus::agent_credentials::invalidate_cached_token(agent_id, wstore);
+                tracing::warn!(
+                    agent_id = %agent_id,
+                    "cloud_subscriber: per-agent credential rejected (401) — invalidated, retrying with shared token",
+                );
+                agent_token = token.to_string();
+                using_per_agent = false;
+                continue;
+            }
+            return AgentSyncOutcome::ReconnectSharedTokenExpired;
+        }
+        if !resp.status().is_success() {
+            tracing::warn!(
+                status = %resp.status(),
+                agent_id = %agent_id,
+                "cloud_subscriber: fetch pending non-2xx"
+            );
+            return AgentSyncOutcome::Ok;
+        }
+
+        break match resp.json().await {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::warn!(error = %e, "cloud_subscriber: parse pending failed");
+                return AgentSyncOutcome::Ok;
+            }
+        };
+    };
+
+    if body.injections.is_empty() {
+        return AgentSyncOutcome::Ok;
+    }
+
+    // Claim BEFORE delivering, not after: this is what prevents
+    // double-delivery when the same agent_id is concurrently registered by
+    // another AgentMux channel on this host (an intentionally-supported
+    // "two seats" workflow — see
+    // docs/specs/SPEC_MUXBUS_CROSS_CHANNEL_DUPLICATE_DELIVERY_2026_07_04.md).
+    // /reactive/ack now performs an atomic pending->delivered transition
+    // server-side; only injection ids that come back in `acknowledged` were
+    // actually won by this call and get delivered locally below. A
+    // previous version of this code delivered first and only acked
+    // successes afterward, which let two concurrent pollers both deliver
+    // the same injection.
+    let all_ids: Vec<String> = body.injections.iter().map(|inj| inj.id.clone()).collect();
+    let ack_url = format!("{}/reactive/ack", MUXBUS_REST_URL);
+    let claimed: AckResp = loop {
+        let claim_resp = match http
+            .post(&ack_url)
+            .header("Authorization", format!("Bearer {}", agent_token))
+            .header("X-Agent-ID", agent_id)
+            .json(&serde_json::json!({ "injection_ids": all_ids }))
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(agent_id = %agent_id, error = %e, "cloud_subscriber: claim request failed");
+                return AgentSyncOutcome::Ok; // nothing claimed — retried on the next wake/poll
+            }
+        };
+
+        if claim_resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+            if using_per_agent {
+                // Same reasoning as the /reactive/pending 401 branch above:
+                // invalidate and retry THIS claim immediately with the
+                // shared token, rather than reconnecting the whole session
+                // or leaving this agent's already-fetched pending
+                // injections unclaimed until an unrelated broadcast fires.
+                crate::muxbus::agent_credentials::invalidate_cached_token(agent_id, wstore);
+                tracing::warn!(
+                    agent_id = %agent_id,
+                    "cloud_subscriber: per-agent credential rejected (401) on claim — invalidated, retrying with shared token",
+                );
+                agent_token = token.to_string();
+                using_per_agent = false;
+                continue;
+            }
+            return AgentSyncOutcome::ReconnectSharedTokenExpired;
+        }
+        if !claim_resp.status().is_success() {
+            tracing::warn!(
+                status = %claim_resp.status(),
+                agent_id = %agent_id,
+                "cloud_subscriber: claim request non-2xx"
+            );
+            return AgentSyncOutcome::Ok; // nothing claimed — retried on the next wake/poll
+        }
+
+        break match claim_resp.json().await {
+            Ok(b) => b,
+            Err(e) => {
+                // The server processed the claim (status was 2xx) before this
+                // body failed to parse — some subset of `all_ids` may now be
+                // flipped to "delivered" server-side with no local delivery
+                // and no way for us to release them, since we don't know
+                // which ids succeeded or their delivered_at stamp (required
+                // by /reactive/release). We deliberately do NOT guess (e.g.
+                // via /reactive/status) and release whatever looks delivered:
+                // some of `all_ids` may have been legitimately claimed and
+                // delivered by a *different* concurrent poller (another
+                // channel/seat racing for the same agent_id), and blindly
+                // releasing those would reintroduce the exact duplicate-
+                // delivery bug this change exists to fix. Logging every
+                // affected id loudly is the safe tradeoff: rare silent
+                // message loss here, never a resurrected duplicate.
+                tracing::error!(
+                    agent_id = %agent_id,
+                    injection_ids = ?all_ids,
+                    error = %e,
+                    "cloud_subscriber: parse claim response failed — these injections may be claimed server-side with no local delivery and cannot be safely auto-recovered"
+                );
+                return AgentSyncOutcome::Ok;
+            }
+        };
+    };
+
+    let delivered_at = claimed.delivered_at;
+    let claimed_ids: std::collections::HashSet<String> = claimed.acknowledged.into_iter().collect();
+
+    for inj in &body.injections {
+        if !claimed_ids.contains(&inj.id) {
+            // Another concurrent poller (this account's other channel/seat)
+            // already won this claim — expected under the "two seats"
+            // workflow, not an error.
+            continue;
+        }
+
+        let req = InjectionRequest {
+            target_agent: agent_id.to_string(),
+            message: inj.message.clone(),
+            source_agent: inj.source_agent.clone(),
+            request_id: Some(inj.id.clone()),
+            priority: inj.priority.clone(),
+            wait_for_idle: false,
+            jekt_tier: None,       // auto-detected from keywords
+            delivery_tier: Some("wan".to_string()),
+        };
+        let delivery = handler.inject_message(req);
+        tracing::debug!(
+            injection_id = %inj.id,
+            agent_id = %agent_id,
+            success = delivery.success,
+            "cloud_subscriber: delivered injection"
+        );
+
+        if !delivery.success {
+            // We hold the claim but local delivery failed (e.g. agent not
+            // ready) — release it back to pending so it's retried, instead
+            // of silently dropping it now that claiming already marked it
+            // "delivered".
+            let release_url = format!("{}/reactive/release", MUXBUS_REST_URL);
+            match http
+                .post(&release_url)
+                .header("Authorization", format!("Bearer {}", agent_token))
+                .header("X-Agent-ID", agent_id)
+                .json(&serde_json::json!({
+                    "injection_id": inj.id,
+                    "delivered_at": delivered_at,
+                }))
+                .send()
+                .await
+            {
+                Ok(r) if r.status().is_success() => {}
+                Ok(r) => {
+                    // Claim is stranded as "delivered" with no local
+                    // delivery and no retry until this is visible — log
+                    // loudly rather than discarding silently.
+                    tracing::warn!(
+                        injection_id = %inj.id,
+                        agent_id = %agent_id,
+                        status = %r.status(),
+                        "cloud_subscriber: release request non-2xx — injection stranded as delivered, message lost"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        injection_id = %inj.id,
+                        agent_id = %agent_id,
+                        error = %e,
+                        "cloud_subscriber: release request failed — injection stranded as delivered, message lost"
+                    );
+                }
+            }
+        }
+    }
+
+    AgentSyncOutcome::Ok
+}
+
 /// Load a valid (non-expired) access token via the broker, refreshing first
 /// if the stored credential is missing/stale. Returns None if no credentials
 /// are stored, the token is expired and refresh fails, or the refresh_token
 /// is absent — `ensure_fresh`'s own single-flight guard means this can run
 /// concurrently with the broker's background sweep for the same credential
 /// without either one duplicating the other's refresh attempt.
-async fn load_valid_token(
+///
+/// pub(crate): also used by agent_credentials.rs to authenticate the
+/// POST /agents/provision call, which requires the human's own user-level
+/// (PKCE) token, not an agent-bound M2M one.
+pub(crate) async fn load_valid_token(
     wstore: &Arc<Store>,
     scheduler: &crate::broker::RefreshScheduler,
 ) -> Option<String> {

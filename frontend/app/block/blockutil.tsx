@@ -18,9 +18,6 @@ export function blockViewToIcon(view: string): string {
     if (view == "help") {
         return "circle-question";
     }
-    if (view == "subagent") {
-        return "diagram-subtask";
-    }
     if (view == "swarm") {
         return "diagram-project";
     }
@@ -42,7 +39,6 @@ const VIEW_LABELS: Record<string, string> = {
     identity: "Identity",
     media: "Media",
     memory: "Memory",
-    subagent: "Subagent",
     swarm: "Swarm",
     sysinfo: "Sysinfo",
     term: "Terminal",

@@ -21,7 +21,7 @@ const mkView = (overrides: Partial<FailureViewState> = {}): FailureViewState => 
 });
 
 const mkActions = (): FailureActions & { _calls: Record<keyof FailureActions, number> } => {
-    const _calls = { retry: 0, loginAgain: 0, useExistingLogin: 0, loginViaTerminal: 0, openArmory: 0, newSession: 0, toggleDetails: 0, dismiss: 0 };
+    const _calls = { retry: 0, loginAgain: 0, useExistingLogin: 0, loginViaTerminal: 0, openArmory: 0, newSession: 0, toggleDetails: 0, dismiss: 0, restart: 0 };
     return {
         _calls,
         retry: vi.fn(() => void _calls.retry++),
@@ -32,6 +32,7 @@ const mkActions = (): FailureActions & { _calls: Record<keyof FailureActions, nu
         newSession: vi.fn(() => void _calls.newSession++),
         toggleDetails: vi.fn(() => void _calls.toggleDetails++),
         dismiss: vi.fn(() => void _calls.dismiss++),
+        restart: vi.fn(() => void _calls.restart++),
     };
 };
 
@@ -121,6 +122,20 @@ describe("failureToRow", () => {
         fresh?.onClick();
         expect(on._calls.newSession).toBe(1);
         // Must NOT offer a plain retry (resuming a full context just re-fails).
+        expect(action(row, "Retry")).toBeUndefined();
+        expect(action(row, "Retry now")).toBeUndefined();
+        expect(on._calls.retry).toBe(0);
+    });
+
+    it("unresponsive → Restart (not a plain retry — the process is wedged, not exited)", () => {
+        const on = mkActions();
+        const row = failureToRow(mkFailure({ code: "unresponsive", retryable: false }), mkView(), on);
+        const restart = action(row, "Restart");
+        expect(restart?.primary).toBe(true);
+        restart?.onClick();
+        expect(on._calls.restart).toBe(1);
+        // Must NOT offer a plain retry — re-sending the last message
+        // wouldn't reach anything; the process itself must be respawned.
         expect(action(row, "Retry")).toBeUndefined();
         expect(action(row, "Retry now")).toBeUndefined();
         expect(on._calls.retry).toBe(0);

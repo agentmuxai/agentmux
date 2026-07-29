@@ -14,11 +14,20 @@
 import { Logger } from "@/util/logger";
 
 /**
+ * `skill_type` value that materializes a skill as an Agent Skills-format
+ * `.claude/skills/<slug>/SKILL.md` instead of a `.claude/commands/<trigger>.md`
+ * slash command. Mirrors `SKILL_TYPE_AGENT_SKILL` in
+ * `agentmux-srv/src/backend/agent_config.rs` — keep the two in sync.
+ */
+const SKILL_TYPE_AGENT_SKILL = "agent-skill";
+
+/**
  * Build the list of config files to write to the agent working directory.
  * Assembles CLAUDE.md from soul + agentmd + memory + skills index,
- * writes each skill as a slash command in .claude/commands/,
- * writes hooks.json if present, auto-injects AgentMux MCP server,
- * and applies template variable substitution.
+ * writes each skill as a slash command in .claude/commands/ (or an Agent
+ * Skills-format SKILL.md under .claude/skills/, for skill_type ===
+ * SKILL_TYPE_AGENT_SKILL), writes hooks.json if present, auto-injects
+ * AgentMux MCP server, and applies template variable substitution.
  */
 export function buildConfigFiles(
     contentMap: Record<string, string>,
@@ -72,11 +81,25 @@ export function buildConfigFiles(
         files.push({ path: "CLAUDE.md", content: claudeMdParts.join("") });
     }
 
-    // Write each skill as a slash command: .claude/commands/{trigger}.md
+    // Write each skill as either a slash command (.claude/commands/{trigger}.md,
+    // default) or an Agent Skills-format SKILL.md (.claude/skills/{slug}/SKILL.md,
+    // skill_type === SKILL_TYPE_AGENT_SKILL).
+    const usedSkillSlugs = new Set<string>();
     for (const skill of skills) {
-        if (skill.trigger && skill.content) {
+        if (!skill.content) continue;
+        if (skill.skill_type === SKILL_TYPE_AGENT_SKILL) {
+            const slug = uniqueSkillSlug(skill.name, usedSkillSlugs);
             const content = expandTemplate(skill.content, templateVars);
-            files.push({ path: `.claude/commands/${skill.trigger}.md`, content });
+            files.push({
+                path: `.claude/skills/${slug}/SKILL.md`,
+                content: renderSkillMd(slug, skill.description, content),
+            });
+        } else {
+            const safeTrigger = sanitizeTrigger(skill.trigger);
+            if (safeTrigger) {
+                const content = expandTemplate(skill.content, templateVars);
+                files.push({ path: `.claude/commands/${safeTrigger}.md`, content });
+            }
         }
     }
 
@@ -114,6 +137,123 @@ export function expandTemplate(content: string, vars: Record<string, string>): s
     return content.replace(/\{\{(\w+)\}\}/g, (match, key) => {
         return vars[key] ?? match;
     });
+}
+
+/**
+ * Derive a filesystem-safe slug from a display name. Lowercase, ASCII
+ * alphanumeric + dash/underscore, consecutive dashes collapsed, trimmed to
+ * 64 chars. Falls back to "agent" if the input has no valid characters.
+ *
+ * Mirrors `derive_slug` in `agentmux-srv/src/backend/storage/agents.rs` —
+ * keep the two in sync, or a SKILL.md preview built here won't match the
+ * path the authoritative Rust launch path actually writes to.
+ */
+export function deriveSlug(name: string): string {
+    const filtered = name
+        .toLowerCase()
+        .replace(/[^a-z0-9-_]/g, "-");
+    const collapsed = filtered
+        .split("-")
+        .filter((s) => s.length > 0)
+        .join("-");
+    const trimmed = collapsed.slice(0, 64);
+    return trimmed || "agent";
+}
+
+/** Agent Skills spec caps `description` at 1024 characters. */
+const SKILL_DESCRIPTION_MAX_LEN = 1024;
+
+/**
+ * Render an Agent Skills-format `SKILL.md`: YAML frontmatter with the two
+ * required fields (`name`, `description`), followed by the skill's content
+ * as the Markdown body. See https://agentskills.io/specification.
+ *
+ * `slug` (not the skill's raw display name) is REQUIRED here — the spec
+ * requires `name` be lowercase/hyphenated and match its parent directory;
+ * callers must pass the same value used to build the `.claude/skills/<slug>/`
+ * path (reagent P1, PR #2322). `description` is validated: the spec requires
+ * a non-empty value (falls back to a placeholder) capped at 1024 characters.
+ *
+ * YAML double-quoted scalars use JSON-compatible escaping (YAML 1.2
+ * §7.3.1), so `JSON.stringify` on a plain string produces a valid,
+ * correctly-escaped YAML value — same reasoning as `render_skill_md` in
+ * `agentmux-srv/src/backend/agent_config.rs`, which this mirrors.
+ */
+export function renderSkillMd(slug: string, description: string, body: string): string {
+    const desc = description.trim()
+        ? description.slice(0, SKILL_DESCRIPTION_MAX_LEN)
+        : "No description provided.";
+    return `---\nname: ${JSON.stringify(slug)}\ndescription: ${JSON.stringify(desc)}\n---\n\n${body}`;
+}
+
+/**
+ * Validate a skill's `trigger` is safe to use as a single path segment in
+ * `.claude/commands/<trigger>.md`. `trigger` is free-form user input with no
+ * format validation anywhere upstream, so a trigger containing a path
+ * separator or a `..` segment previously let the resulting filename resolve
+ * OUTSIDE the agent's working directory (reagent P1, PR #2322). Returns
+ * `null` for anything containing "/" or "\\", or that is exactly "."/"..";
+ * callers skip writing that skill's command file entirely. Mirrors
+ * `sanitize_trigger` in `agentmux-srv/src/backend/agent_config.rs`.
+ */
+export function sanitizeTrigger(trigger: string): string | null {
+    if (!trigger || trigger === "." || trigger === "..") {
+        return null;
+    }
+    if (trigger.includes("/") || trigger.includes("\\")) {
+        return null;
+    }
+    return trigger;
+}
+
+/**
+ * Derive a slug for an Agent Skill name that is valid per the Agent Skills
+ * `name` grammar: lowercase letters, digits, and hyphens ONLY (no
+ * underscores). `deriveSlug` is shared with agent role-slugs, which
+ * deliberately DO permit underscores, so it isn't spec-valid here as-is —
+ * hyphenate underscores (and re-collapse any resulting run of hyphens)
+ * rather than reusing it directly (Codex P1, PR #2322). Mirrors
+ * `skill_name_slug` in `agentmux-srv/src/backend/agent_config.rs`.
+ */
+function skillNameSlug(name: string): string {
+    const collapsed = deriveSlug(name)
+        .replace(/_/g, "-")
+        .split("-")
+        .filter((s) => s.length > 0)
+        .join("-");
+    return collapsed || "skill";
+}
+
+/**
+ * Derive a filesystem-safe, COLLISION-FREE, spec-valid slug for a skill
+ * within one `buildConfigFiles` call. `skillNameSlug` alone can produce
+ * identical output for distinct names that differ only in
+ * punctuation/whitespace (e.g. "Deploy Checklist" and "Deploy!!!Checklist"
+ * both -> "deploy-checklist"), which would otherwise silently overwrite one
+ * skill's SKILL.md with another's (reagent P1, PR #2322). Appends "-2",
+ * "-3", ... until unique within `used`, truncating the base first so the
+ * suffixed result never exceeds the spec's 64-character max (Codex P2, PR
+ * #2322). Mirrors `unique_skill_slug` in
+ * `agentmux-srv/src/backend/agent_config.rs`.
+ */
+export function uniqueSkillSlug(name: string, used: Set<string>): string {
+    const MAX_LEN = 64;
+    const base = skillNameSlug(name);
+    if (!used.has(base)) {
+        used.add(base);
+        return base;
+    }
+    let n = 2;
+    for (;;) {
+        const suffix = `-${n}`;
+        const truncatedBase = base.slice(0, Math.max(0, MAX_LEN - suffix.length));
+        const candidate = `${truncatedBase}${suffix}`;
+        if (!used.has(candidate)) {
+            used.add(candidate);
+            return candidate;
+        }
+        n++;
+    }
 }
 
 /**

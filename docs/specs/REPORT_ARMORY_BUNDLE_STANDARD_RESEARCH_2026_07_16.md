@@ -529,7 +529,7 @@ my-bundle/
 
 ```jsonc
 {
-  "$schema": "https://agentmux.ai/schemas/armory-bundle/v0.1/bundle.schema.json",
+  "$schema": "https://docs.agentmux.ai/schemas/armory-bundle/v0.1/bundle.schema.json",
   "name": "acme-backend-dev",            // reverse-DNS optional for registry use
   "version": "1.2.0",                    // semver; immutable once published
   "description": "Backend dev bundle: repo conventions, GH tooling, deploy skills",

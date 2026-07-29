@@ -7,7 +7,6 @@ import type {
     DocumentState,
     MarkdownNode,
     SectionNode,
-    SubagentLinkNode,
     ToolNode,
     UserMessageNode,
 } from "../types";
@@ -17,7 +16,6 @@ import {
     estimateNode,
     estimateNodeForState,
     estimateSection,
-    estimateSubagentLink,
     estimateTextHeight,
     estimateUnwrappedTextHeight,
     estimateTool,
@@ -211,16 +209,6 @@ describe("per-kind estimators", () => {
             expect(estimateUserMessage(node, state)).toBe(32);
         });
     });
-
-    describe("estimateSubagentLink", () => {
-        it("returns the fixed subagent-link size", () => {
-            const node: SubagentLinkNode = {
-                type: "subagent_link", id: "sl1", subagentId: "x", slug: "y",
-                parentAgent: "p", sessionId: "s", status: "active", model: null,
-            };
-            expect(estimateSubagentLink(node)).toBe(56);
-        });
-    });
 });
 
 describe("estimateNode dispatch", () => {
@@ -243,17 +231,12 @@ describe("estimateNode dispatch", () => {
         const um: UserMessageNode = {
             type: "user_message", id: "um", message: "hi", timestamp: 0,
         };
-        const sl: SubagentLinkNode = {
-            type: "subagent_link", id: "sl", subagentId: "x", slug: "y",
-            parentAgent: "p", sessionId: "s", status: "active", model: null,
-        };
 
         expect(estimateNode(md, state)).toBe(estimateMarkdown(md));
         expect(estimateNode(sec, state)).toBe(estimateSection(sec));
         expect(estimateNode(tool, state)).toBe(estimateTool(tool, state));
         expect(estimateNode(am, state)).toBe(estimateAgentMessage(am, state));
         expect(estimateNode(um, state)).toBe(estimateUserMessage(um, state));
-        expect(estimateNode(sl, state)).toBe(estimateSubagentLink(sl));
     });
 });
 
@@ -320,15 +303,6 @@ describe("estimateNodeForState (Phase 2 — INV-3 per-state estimates)", () => {
         expect(estimateNodeForState(node, "expanded", state)).toBe(48);
     });
 
-    it("subagent_link: both states → fixed height", () => {
-        const node: SubagentLinkNode = {
-            type: "subagent_link", id: "sl1", subagentId: "x", slug: "y",
-            parentAgent: "p", sessionId: "s", status: "active", model: null,
-        };
-        expect(estimateNodeForState(node, "collapsed", state)).toBe(56);
-        expect(estimateNodeForState(node, "expanded", state)).toBe(56);
-    });
-
     it("ignores DocumentState entirely — document collapse/pin signals don't affect per-state estimates", () => {
         const tool: ToolNode = {
             type: "tool", id: "t2", tool: "Read", params: { file_path: "x" },
@@ -355,6 +329,5 @@ describe("STREAMING_CAPABLE", () => {
         expect(STREAMING_CAPABLE.section).toBe(false);
         expect(STREAMING_CAPABLE.tool).toBe(false);
         expect(STREAMING_CAPABLE.user_message).toBe(false);
-        expect(STREAMING_CAPABLE.subagent_link).toBe(false);
     });
 });

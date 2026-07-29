@@ -32,7 +32,7 @@ import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, untra
 import { trail } from "@/log/render-trail";
 import { Key } from "@solid-primitives/keyed";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
-import type { DocumentNode, DocumentState, SubagentLinkNode } from "../types";
+import type { DocumentNode, DocumentState } from "../types";
 import { agentPerfStore, startAgentLayoutShiftObserver } from "./perf-probe";
 import {
     captureTopmostAnchor,
@@ -61,7 +61,6 @@ import {
 export interface AgentDocumentVirtualListProps {
     viewState: AgentViewState;
     documentState: Accessor<DocumentState>;
-    onSubagentClick?: (node: SubagentLinkNode) => void;
     onLoadOlder?: () => Promise<void>;
     loadingOlder?: Accessor<boolean>;
     highlightNodeId?: Accessor<string | null>;
@@ -802,7 +801,6 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                                     <DocumentRow
                                         node={n}
                                         documentState={props.documentState}
-                                        onSubagentClick={props.onSubagentClick}
                                         highlightNodeId={props.highlightNodeId}
                                         onToggleCollapse={props.onToggleCollapse}
                                         onTogglePin={props.onTogglePin}
@@ -864,7 +862,6 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                                 <DocumentRow
                                     node={nodeAccessor}
                                     documentState={props.documentState}
-                                    onSubagentClick={props.onSubagentClick}
                                     highlightNodeId={props.highlightNodeId}
                                     onToggleCollapse={props.onToggleCollapse}
                                     onTogglePin={props.onTogglePin}
