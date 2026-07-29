@@ -1269,6 +1269,28 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         if ((newToolCall || turnIdle) && commands.hasHeldMessages()) {
             void commands.flushHeldMessages();
         }
+        // Independent of the above: run any controller refresh /login
+        // deferred because a turn was active when it succeeded, the moment
+        // this pane's OWN turnPhase reflects idle — regardless of whether
+        // there are any held messages to otherwise trigger it. Deliberately
+        // reacts to turnPhaseAtom directly rather than relying solely on
+        // trackTurnJustEnded's live-controllerstatus-event edge detector:
+        // (1) a turn also ends via the independent session_end -> TurnEnd
+        // stream path (useTurnLifecycle.ts's finalizeTurn), which is not
+        // synchronized with the controllerstatus event stream reagent P1
+        // found flushHeldMessages/trackTurnJustEnded alone don't cover; (2)
+        // a pane that mounts onto an ALREADY-active turn never initializes
+        // trackTurnJustEnded's wasTurnActive (deliberately, to avoid a
+        // false busy->idle edge on the very first live event — see its own
+        // doc comment), so if /login succeeds during that pre-existing turn
+        // and it ends before any OTHER live event arrives,
+        // didTurnJustEnd(undefined, false) never fires and — with no held
+        // messages either — nothing would ever run the deferred refresh at
+        // all. Codex P1 on PR #2338 (seventeenth re-review, both points).
+        // No-ops when nothing is pending.
+        if (turnIdle) {
+            void commands.flushPendingControllerRefresh();
+        }
     });
 
     // On first connect (no existing session), assemble a structured startup
