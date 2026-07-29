@@ -392,6 +392,18 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
     const flushPendingControllerRefresh = (): Promise<boolean> => {
         if (inFlightControllerRefresh) return inFlightControllerRefresh;
         if (!controllerRefreshPendingUntilIdle) return Promise.resolve(false);
+        // Leave the flag pending (don't claim it) while the backend still
+        // authoritatively confirms an active turn — regardless of WHY this
+        // was called. A premature per-round session_end can transiently
+        // move the frontend's turnPhase to Done/Idle while the backend
+        // controller genuinely still reports turn_active: true; every
+        // caller of this function (flushHeldMessages, the idle-send path,
+        // the turn-just-ended edge detector, the reactive turnIdle effect)
+        // can fire based on that falsely-idle turnPhase. Checking the
+        // authoritative signal HERE, once, centrally, closes the gap for
+        // all of them at once rather than requiring each call site to
+        // re-derive it. Codex P1 on PR #2338 (twentieth re-review).
+        if (opts.isBackendTurnActive()) return Promise.resolve(false);
         controllerRefreshPendingUntilIdle = false;
         inFlightControllerRefresh = (async () => {
             const refreshed = await opts.forceControllerRefresh();
@@ -468,10 +480,24 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // force-restart a controller that's still genuinely working,
         // discarding its in-progress continuation. Codex P1 on PR #2338
         // (nineteenth re-review).
+        //
+        // Applies to the wasAlreadyWorking === false branch too, not just
+        // the live-read branch: that same premature session_end can ALSO
+        // make handleSendMessage itself capture wasAlreadyWorking === false
+        // (turnPhase already read Done/Idle at capture time) even though
+        // the backend was never actually idle. Freezing false there is
+        // still correct for its own reason (an optimistic TurnStart
+        // corrupting a LIVE turnPhase read) — but isBackendTurnActive()
+        // can't suffer that corruption in the first place, since it's
+        // fed only by real backend controllerstatus events, never the
+        // frontend's own optimistic dispatch. ORing it in unconditionally
+        // rescues this branch without reintroducing the bug freezing it
+        // was meant to fix. Codex P1 on PR #2338 (twentieth re-review).
         isTurnActive: () =>
-            wasAlreadyWorking === false
+            (wasAlreadyWorking === false
                 ? false
-                : workingFromPhase(paneSnapshot(opts.blockId)?.turnPhase ?? { kind: "Idle" }) || opts.isBackendTurnActive(),
+                : workingFromPhase(paneSnapshot(opts.blockId)?.turnPhase ?? { kind: "Idle" })) ||
+            opts.isBackendTurnActive(),
         beginRecoveryFlow: opts.beginRecoveryFlow,
         endRecoveryFlow: opts.endRecoveryFlow,
         openPicker,
