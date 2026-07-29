@@ -2275,6 +2275,77 @@ describe("useAgentCommands — idle sendMessage runs the deferred controller ref
             dispose();
         });
     });
+
+    // reagentx P1 on PR #2338 (thirty-eighth re-review): flushHeldMessages
+    // hardcoded initiatesTurn=false when DELIVERING a held item, even when
+    // item.initiatedTurnOptimistically is true (the idle-send hold, which
+    // has a REAL optimistic TurnStart already dispatched by
+    // handleSendMessage). If that item's AgentInputCommand RPC then fails,
+    // deliverToBackend's own catch block only dispatches TurnStartFailed
+    // `if (initiatesTurn)` — so the pane was stuck in Submitting/
+    // "Working…" forever, with no expiry timer either (armExpiry is also
+    // false for every flushed item).
+    it("rolls back the optimistic TurnStart when an idle-held message's flush RPC fails", async () => {
+        hub.dispatchSlashCommand.mockImplementation(async (_msg: string, _registry: unknown, ctx: { deferControllerRefreshUntilIdle: () => void }) => {
+            ctx.deferControllerRefreshUntilIdle();
+            return { kind: "handled" };
+        });
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+        let backendConfirmedIdle = false;
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh: async () => true,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => backendConfirmedIdle,
+                backToPicker: async () => {},
+            });
+
+            // /login succeeds mid-turn (defers instead of refreshing now).
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("/login", /* wasAlreadyWorking */ true);
+
+            // A fresh idle send is held — no captured failure, so once the
+            // refresh below succeeds, flushHeldMessages will attempt to
+            // DELIVER (not reject) this item. This is the idle-send push
+            // site, the ONLY one that sets initiatedTurnOptimistically:
+            // true.
+            await commands.sendMessage("fresh message", /* wasAlreadyWorking */ false);
+            expect(commands.hasHeldMessages()).toBe(true);
+            expect(paneSnapshot(BLOCK_ID)?.turnPhase.kind).not.toBe("Idle");
+
+            // The backend confirms idle — the deferred refresh succeeds,
+            // so flushHeldMessages attempts delivery, but the RPC itself
+            // fails (a transient send failure, unrelated to auth).
+            hub.agentInput.mockRejectedValueOnce(new Error("transient send failure"));
+            backendConfirmedIdle = true;
+            await commands.flushPendingControllerRefresh();
+            await commands.flushHeldMessages();
+
+            expect(hub.agentInput).toHaveBeenCalledOnce();
+            expect(commands.hasHeldMessages()).toBe(false);
+            // The pane must not be stuck in Submitting/"Working…" forever —
+            // the RPC failed, but this item's own optimistic turn must
+            // still be rolled back.
+            expect(paneSnapshot(BLOCK_ID)?.turnPhase.kind).toBe("Idle");
+            dispose();
+        });
+    });
 });
 
 // Codex P1 on PR #2338 (nineteenth re-review): a premature per-round
