@@ -573,17 +573,58 @@ impl PersistentSubprocessController {
     ///   the bounded stdin channel was momentarily full — losing input
     ///   despite already having told that caller "accepted". Deferring to
     ///   a task lets delivery simply wait for capacity instead.
-    fn release_spawn_claim_and_drain_queue(&self, spawn_succeeded: bool) {
+    ///
+    /// If the background task discovers the process it was meant to drain
+    /// into has ALREADY died (`stdin_tx` gone) with messages still left
+    /// queued, it hands off to `respawn_once_for_leftover_queue` using
+    /// `retry_config` — reagentx/codex P1 on PR #2360 (sixth review pass,
+    /// rounds 3-4): a fast-dying child can let the process-waiter run this
+    /// SAME controller's own `retry_after_resume_failure` (via
+    /// `decide_send_action` returning `Queued`, since this spawn's claim
+    /// hasn't been released yet) BEFORE this caller's own thread even
+    /// reaches this function; that retry's `Queued` branch then does
+    /// nothing further, assuming (wrongly, in this exact race) that this
+    /// drain will deliver it. Without a fallback respawn, NOTHING is ever
+    /// left responsible for the leftover messages or for telling the
+    /// frontend the turn ended — the ORIGINAL exit deliberately suppressed
+    /// its own terminal-status publish expecting the retry to eventually
+    /// publish one.
+    fn release_spawn_claim_and_drain_queue(&self, spawn_succeeded: bool, retry_config: PersistentSpawnConfig) {
         if !spawn_succeeded {
-            let mut inner = self.inner.lock().unwrap();
-            inner.pending_send_messages.pop_front();
-            inner.spawning_in_progress = false;
+            // Discard only the front item — the caller's OWN message (see
+            // this function's own doc comment above for why it's
+            // guaranteed to be at the front). If anything else is queued
+            // behind it (from other callers already told "accepted"),
+            // hand off to a bounded fallback respawn rather than
+            // stranding it with nobody responsible for delivering it.
+            let leftovers = {
+                let mut inner = self.inner.lock().unwrap();
+                inner.pending_send_messages.pop_front();
+                !inner.pending_send_messages.is_empty()
+            };
+            if leftovers {
+                self.respawn_once_for_leftover_queue(retry_config);
+            } else {
+                self.inner.lock().unwrap().spawning_in_progress = false;
+            }
             return;
         }
+        self.drain_queue_after_successful_spawn(retry_config, true);
+    }
+
+    /// Drains the queue via a background task after a successful spawn —
+    /// see `release_spawn_claim_and_drain_queue`'s doc comment for the
+    /// `try_send` → `Sender::send` rationale. `allow_fallback_respawn`
+    /// bounds retry depth to exactly one extra hop: `true` from the public
+    /// entry point, `false` when called from `respawn_once_for_leftover_queue`
+    /// itself, so a SECOND stall just publishes a status update instead of
+    /// cascading indefinitely.
+    fn drain_queue_after_successful_spawn(&self, retry_config: PersistentSpawnConfig, allow_fallback_respawn: bool) {
         let inner_arc = Arc::clone(&self.inner);
         let block_id = self.block_id.clone();
+        let self_ref = self.self_ref.lock().unwrap().clone().unwrap_or_default();
         tokio::spawn(async move {
-            loop {
+            let stalled_with_leftovers = loop {
                 let next = {
                     let mut inner = inner_arc.lock().unwrap();
                     match inner.stdin_tx.clone() {
@@ -595,8 +636,10 @@ impl PersistentSubprocessController {
                     // Either the queue is empty, or the process has
                     // already exited again before we got to it — either
                     // way, release the claim so a future caller can spawn.
-                    inner_arc.lock().unwrap().spawning_in_progress = false;
-                    break;
+                    let mut inner = inner_arc.lock().unwrap();
+                    let stalled = inner.stdin_tx.is_none() && !inner.pending_send_messages.is_empty();
+                    inner.spawning_in_progress = false;
+                    break stalled;
                 };
                 if let Err(e) = tx.send(json_str).await {
                     tracing::warn!(
@@ -610,11 +653,54 @@ impl PersistentSubprocessController {
                     // on the same dead sender.
                     let mut inner = inner_arc.lock().unwrap();
                     inner.pending_send_messages.push_front(e.0);
+                    let stalled = !inner.pending_send_messages.is_empty();
                     inner.spawning_in_progress = false;
-                    break;
+                    break stalled;
+                }
+            };
+            if stalled_with_leftovers {
+                if let Some(ctrl) = self_ref.upgrade() {
+                    if allow_fallback_respawn {
+                        ctrl.respawn_once_for_leftover_queue(retry_config);
+                    } else {
+                        ctrl.publish_status();
+                    }
                 }
             }
         });
+    }
+
+    /// Attempts exactly one fallback respawn when either call site above is
+    /// about to release its claim with messages still queued and nobody
+    /// left responsible for delivering them. Forces `session_id` empty so
+    /// this fallback spawn never attempts `--resume` — reusing a
+    /// possibly-still-stale session id here would risk repeating the exact
+    /// failure this whole retry mechanism exists to recover from. If THIS
+    /// spawn also fails, or its own process also dies before its own drain
+    /// completes, gives up and publishes a status update rather than
+    /// cascading indefinitely — the queue itself is never discarded (this
+    /// function never pops anything itself — it isn't tied to a specific
+    /// message the way the original spawn attempt was), so a genuinely
+    /// later, unrelated send will still eventually pick it up.
+    fn respawn_once_for_leftover_queue(&self, mut config: PersistentSpawnConfig) {
+        config.session_id = String::new();
+        let retry_config = config.clone();
+        let spawn_result = self.spawn_process(config, None);
+        match &spawn_result {
+            Ok(_) => {
+                self.mark_turn_active_and_publish();
+                self.drain_queue_after_successful_spawn(retry_config, false);
+            }
+            Err(e) => {
+                tracing::error!(
+                    block_id = %self.block_id,
+                    error = %e,
+                    "fallback respawn for a leftover queue failed"
+                );
+                self.inner.lock().unwrap().spawning_in_progress = false;
+                self.publish_status();
+            }
+        }
     }
 
     /// Send a user message to the running CLI process.
@@ -708,6 +794,7 @@ impl PersistentSubprocessController {
                 // process is running and later dies from a stale
                 // `--resume`, which is what the retry payload is for.
                 let message_id = config.message_id.clone();
+                let retry_config = config.clone();
                 let spawn_result = self.spawn_process(config, Some(json_str));
                 // Only emit "accepted" on success — matches this
                 // function's prior (pre-queue) behavior, which propagated
@@ -720,7 +807,7 @@ impl PersistentSubprocessController {
                     self.mark_turn_active_and_publish();
                     self.emit_message_accepted(message_id.as_deref());
                 }
-                self.release_spawn_claim_and_drain_queue(spawn_result.is_ok());
+                self.release_spawn_claim_and_drain_queue(spawn_result.is_ok(), retry_config);
                 spawn_result
             }
         }
@@ -749,7 +836,6 @@ impl PersistentSubprocessController {
     /// start.
     fn retry_after_resume_failure(&self, mut config: PersistentSpawnConfig, json_str: String) {
         config.session_id = String::new();
-        self.inner.lock().unwrap().session_id = None;
 
         // This retry is itself a spawn attempt, and must not race a
         // genuinely concurrent `send_message` call the same way the
@@ -779,9 +865,23 @@ impl PersistentSubprocessController {
             }
             SendAction::Queued => {
                 // Someone else is already spawning — their own
-                // `release_spawn_claim_and_drain_queue` will deliver this.
+                // `release_spawn_claim_and_drain_queue` will deliver this
+                // (or, if their process turns out to already be dead, its
+                // own bounded fallback respawn will).
             }
             SendAction::BecomeSpawner => {
+                // Only clear inner.session_id now that THIS retry is
+                // actually about to spawn — codex P2 on PR #2360 (sixth
+                // review pass, round 3): clearing it unconditionally at
+                // the top of this function (the previous cut) could erase
+                // a session id a DIFFERENT, concurrently-installed process
+                // had already legitimately captured, if this retry
+                // instead resolved via `DeliverDirect` or `Queued` above —
+                // breaking in-memory session tracking and turn-end
+                // subagent reconciliation for that process's remaining
+                // lifetime.
+                self.inner.lock().unwrap().session_id = None;
+                let retry_config = config.clone();
                 let spawn_result = self.spawn_process(config, None);
                 match &spawn_result {
                     Ok(_) => self.mark_turn_active_and_publish(),
@@ -791,7 +891,7 @@ impl PersistentSubprocessController {
                         "failed to respawn after a stale --resume session id"
                     ),
                 }
-                self.release_spawn_claim_and_drain_queue(spawn_result.is_ok());
+                self.release_spawn_claim_and_drain_queue(spawn_result.is_ok(), retry_config);
                 if spawn_result.is_err() {
                     // Surface this, or the pane hangs forever with NO
                     // signal at all — codex P2 on PR #2360 (fifth review
@@ -2213,7 +2313,9 @@ mod send_input_tests {
             inner.pending_send_messages.push_back("second".to_string());
         }
 
-        c.release_spawn_claim_and_drain_queue(true);
+        // Never used for a fallback spawn in this test — the drain fully
+        // succeeds without ever stalling.
+        c.release_spawn_claim_and_drain_queue(true, unreachable_fallback_config());
 
         assert_eq!(rx.recv().await.unwrap(), "first");
         assert_eq!(rx.recv().await.unwrap(), "second");
@@ -2226,13 +2328,93 @@ mod send_input_tests {
         assert!(inner.pending_send_messages.is_empty());
     }
 
+    /// A `PersistentSpawnConfig` whose `cli_command` doesn't exist, so any
+    /// `spawn_process` attempt made with it fails fast and deterministically
+    /// (no real process, no hang) — used by tests that need to exercise
+    /// `respawn_once_for_leftover_queue`'s fallback path without spawning a
+    /// real CLI, matching this module's own established precedent (see
+    /// `retry_after_resume_failure_clears_inner_session_id_even_when_poison_resume_has_not_run_yet`).
+    fn unreachable_fallback_config() -> PersistentSpawnConfig {
+        PersistentSpawnConfig {
+            cli_command: "definitely-not-a-real-binary-xyz".to_string(),
+            cli_args: vec![],
+            working_dir: String::new(),
+            env_vars: HashMap::new(),
+            session_id_field: "session_id".to_string(),
+            resume_flag: String::new(),
+            session_id: String::new(),
+            message_id: None,
+        }
+    }
+
+    /// reagentx/codex P1 on PR #2360 (sixth review pass, rounds 3-4): if
+    /// the process a successful spawn just established dies before the
+    /// drain even gets to run (found via `stdin_tx` already `None`) with
+    /// messages still queued, nothing else will ever tell the frontend
+    /// the turn ended — the ORIGINAL exit deliberately suppressed its own
+    /// publish expecting a retry to publish one instead, and
+    /// `retry_after_resume_failure`'s own `Queued` branch does nothing
+    /// further (see its own doc comment). Confirms the drain hands off to
+    /// `respawn_once_for_leftover_queue`, which — using a config that
+    /// itself fails fast (no real process needed) — logs the failure and
+    /// publishes a status update instead of leaving the pane hanging with
+    /// no signal at all, while leaving the leftover messages queued
+    /// (this fallback path never pops anything itself — it isn't tied to
+    /// a specific message).
+    #[tokio::test]
+    async fn release_spawn_claim_and_drain_queue_falls_back_and_publishes_status_when_stalled() {
+        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let c = Arc::new(PersistentSubprocessController::new(
+            "tab".to_string(),
+            "block-stalled".to_string(),
+            Some(broker.clone()),
+            None,
+            None,
+            None,
+        ));
+        c.set_self_ref();
+        {
+            let mut inner = c.inner.lock().unwrap();
+            inner.spawning_in_progress = true;
+            inner.pending_send_messages.push_back("stuck-one".to_string());
+            inner.pending_send_messages.push_back("stuck-two".to_string());
+            // stdin_tx stays None — simulates the process this claim was
+            // spawning for having already died before the drain ran.
+        }
+
+        c.release_spawn_claim_and_drain_queue(true, unreachable_fallback_config());
+        // Let the spawned background task, and the fallback respawn
+        // attempt it triggers, run to completion.
+        tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+
+        let history = broker.read_event_history(
+            crate::backend::wps::EVENT_CONTROLLER_STATUS,
+            "block:block-stalled",
+            1,
+        );
+        assert_eq!(history.len(), 1, "must publish a status update instead of silently hanging");
+
+        let inner = c.inner.lock().unwrap();
+        assert!(!inner.spawning_in_progress, "claim must still be released");
+        assert_eq!(
+            inner.pending_send_messages.len(),
+            2,
+            "leftover messages must stay queued for whatever spawn comes next \
+             (the fallback attempt itself failed, matching the config used)"
+        );
+    }
+
     /// codex P1 on PR #2360 (sixth review pass): a FAILED spawn must
     /// discard only the front item — the caller's own message, which
     /// `send_message`/`retry_after_resume_failure` already reported as a
     /// failure to their own caller — not leave it queued for an unrelated
     /// later spawn to silently execute. Anything ELSE queued behind it
     /// (from other callers who got `SendAction::Queued` and were already
-    /// told "accepted") must survive, for that next spawn to deliver.
+    /// told "accepted") must survive — handed off to a bounded fallback
+    /// respawn (codex P2, round 4) rather than stranded with nobody
+    /// responsible for it; using a config that itself fails fast here, so
+    /// the leftover message ends up back in the queue rather than
+    /// delivered, but never discarded.
     #[test]
     fn release_spawn_claim_and_drain_queue_discards_only_the_failed_spawners_own_message() {
         let c = controller();
@@ -2243,12 +2425,12 @@ mod send_input_tests {
             inner.pending_send_messages.push_back("queued-by-someone-else".to_string());
         }
 
-        c.release_spawn_claim_and_drain_queue(false);
+        c.release_spawn_claim_and_drain_queue(false, unreachable_fallback_config());
 
         let inner = c.inner.lock().unwrap();
         assert!(
             !inner.spawning_in_progress,
-            "claim must still be released even though the spawn failed"
+            "claim must still be released even though the spawn and its fallback both failed"
         );
         assert_eq!(
             inner.pending_send_messages.len(),
@@ -2259,6 +2441,42 @@ mod send_input_tests {
             inner.pending_send_messages[0],
             "queued-by-someone-else",
             "a message queued by a DIFFERENT caller (already told \"accepted\") must survive for the next spawn"
+        );
+    }
+
+    /// codex P2 on PR #2360 (sixth review pass, round 3): `retry_after_
+    /// resume_failure` used to clear `inner.session_id` unconditionally at
+    /// the top of the function, before even deciding whether this call is
+    /// the one that's actually going to spawn. Confirms it's now scoped to
+    /// only the `BecomeSpawner` path — a concurrently-installed session id
+    /// (simulating a DIFFERENT spawn that's already running, so this call
+    /// resolves via `DeliverDirect`) must survive.
+    #[tokio::test]
+    async fn retry_after_resume_failure_preserves_a_concurrently_installed_session_id_when_not_the_spawner() {
+        let c = controller();
+        {
+            let mut inner = c.inner.lock().unwrap();
+            let (tx, _rx) = mpsc::channel::<String>(4);
+            inner.stdin_tx = Some(tx);
+            inner.session_id = Some("fresh-concurrently-installed-sid".to_string());
+        }
+
+        let config = PersistentSpawnConfig {
+            cli_command: "unused".to_string(),
+            cli_args: vec![],
+            working_dir: String::new(),
+            env_vars: HashMap::new(),
+            session_id_field: "session_id".to_string(),
+            resume_flag: "--resume".to_string(),
+            session_id: "dead-sid".to_string(),
+            message_id: None,
+        };
+        c.retry_after_resume_failure(config, "{}".to_string());
+
+        assert_eq!(
+            c.inner.lock().unwrap().session_id.as_deref(),
+            Some("fresh-concurrently-installed-sid"),
+            "must not erase a session id a concurrent spawn already legitimately captured"
         );
     }
 }
