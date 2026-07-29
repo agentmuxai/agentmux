@@ -748,6 +748,40 @@ describe("useAgentCommands — authFailureToPreserve survives a local command", 
             dispose();
         });
     });
+
+    // reagentx P1 on PR #2338 (thirty-ninth re-review): restoreAuthFailureIfUnresolved
+    // dispatched FailureObserved unconditionally, even when wasAlreadyWorking
+    // is true (handleSendMessage in agent-view.tsx captures authFailureToPreserve
+    // from LIVE state.failure regardless of wasAlreadyWorking, and only
+    // dispatches TurnStart — the thing that would need "unresolving" — when
+    // wasAlreadyWorking is false). If a stale "auth" failure was observed
+    // while idle (leaving turnPhase untouched) and the pane later resumed to
+    // a genuinely active turn via ReconcileTurnActive (which never touches
+    // state.failure), wasAlreadyWorking reads true and authFailureToPreserve
+    // is non-null simultaneously. The reducer's FailureObserved case
+    // unconditionally ends any currently-"working" turnPhase — so running a
+    // bang command in that state would silently terminate the real active
+    // turn as a side effect of merely restoring the stale banner.
+    it("does NOT terminate a genuinely active turn when a bang command restores a stale auth banner captured while wasAlreadyWorking is true", async () => {
+        const model = setup();
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands(makeOpts(model));
+            // A REAL turn is genuinely active — NOT an optimistic dispatch
+            // for this bang command (wasAlreadyWorking is passed as true
+            // below, so handleSendMessage's caller never dispatched
+            // TurnStart on this command's behalf).
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            const busyPhase = paneSnapshot(BLOCK_ID)?.turnPhase.kind;
+            expect(busyPhase).not.toBe("Idle");
+
+            await commands.sendMessage("!pwd", /* wasAlreadyWorking */ true, authFailure);
+
+            // The genuinely active turn must survive — restoring a stale
+            // auth banner is not a valid reason to end it.
+            expect(paneSnapshot(BLOCK_ID)?.turnPhase.kind).toBe(busyPhase);
+            dispose();
+        });
+    });
 });
 
 // Codex P2 on PR #2338 (tenth re-review): the auth guard originally ran

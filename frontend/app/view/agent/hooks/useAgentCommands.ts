@@ -804,6 +804,31 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // legitimately resolve it — restoreAuthFailureIfUnresolved skips
         // the restore when the command itself called ctx.clearAuthFailure().
         const restoreAuthFailureIfUnresolved = (clearedByCommand: boolean) => {
+            // Only meaningful when THIS call's caller dispatched an
+            // optimistic TurnStart (wasAlreadyWorking === false) — that's
+            // the ONLY case where TurnStart's unconditional state.failure
+            // clear could have wiped the banner this restores. When
+            // wasAlreadyWorking is true, nothing cleared state.failure on
+            // this call's behalf (no TurnStart was ever dispatched for
+            // it) — the live failure captured into authFailureToPreserve
+            // is therefore still showing, untouched, and re-dispatching
+            // FailureObserved here would be destructive, not just
+            // redundant: the reducer's FailureObserved case (reducer.ts)
+            // unconditionally ends any currently-"working" turnPhase
+            // (turnWasEnded = workingFromPhase(...)). Doing that while
+            // wasAlreadyWorking is genuinely true — a real, unrelated
+            // backend turn actively streaming — would silently terminate
+            // that real turn as a side effect of merely running !cmd or an
+            // unrelated /command. Every OTHER FailureObserved re-dispatch
+            // site in this file (checkAuthGuard, flushHeldMessages's
+            // rejection branch, recallLatestHeld) is reachable only via
+            // the idle-send path and already dispatches TurnStartFailed
+            // first so turnPhase reads Idle before this fires — this site
+            // has no such optimistic turn to roll back in the busy case,
+            // so skipping it entirely is the correct fix rather than
+            // inventing one. reagentx P1 on PR #2338 (thirty-ninth
+            // re-review).
+            if (wasAlreadyWorking) return;
             if (authFailureToPreserve && !clearedByCommand) {
                 opts.model.dispatchPane({ type: "FailureObserved", failure: authFailureToPreserve, at: Date.now() }, "system");
             }
