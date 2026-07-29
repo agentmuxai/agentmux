@@ -961,6 +961,30 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 // useAgentActivitySummary/useNextPromptSuggestion silently
                 // never fire for that turn's completion.
                 trackTurnJustEnded(active);
+                // Independent of the turnJustEnded edge above: this RPC
+                // response is itself a fresh, authoritative confirmation of
+                // idleness whenever active is false — attempt the deferred
+                // refresh unconditionally on that, not only when
+                // trackTurnJustEnded's edge detector fires. didTurnJustEnd
+                // requires prev===true (a CONFIRMED active state to
+                // transition FROM); a pane whose backend state was never
+                // confirmed either way before this poll (wasTurnActive
+                // undefined — e.g. the live confirming controllerstatus
+                // push was itself missed, the exact gap this poll exists to
+                // self-heal) computes turnJustEnded=false here even though
+                // this is the FIRST time idleness has been confirmed. The
+                // reactive turnPhaseAtom effect (below) can't rescue this
+                // either: ReconcileTurnActive no-ops (same state reference)
+                // once local turnPhase already reads idle/Done, so it never
+                // re-fires off this same confirmation. Without this call,
+                // a /login deferred mid-turn — where the turn then ends via
+                // session_end while the live idle controllerstatus push is
+                // lost — would leave the refresh (and any held messages)
+                // stuck until the user happens to send another message.
+                // codex P1 on PR #2338 (twenty-eighth re-review).
+                if (!active) {
+                    void commands.flushPendingControllerRefresh();
+                }
             })
             .catch(() => {
                 // Best-effort — the live subscription and next mount remain
