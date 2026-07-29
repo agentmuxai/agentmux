@@ -282,7 +282,7 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
         });
     });
 
-    it("rejects a held message that was already known-bad at queue time, without touching the active turn", async () => {
+    it("rejects a message that is already known-bad at queue time IMMEDIATELY, without ever entering the held queue, and without touching the active turn", async () => {
         // deliverToBackend's guard is deliberately gated on initiatesTurn
         // (always false for a flush), so it never sees a flushed item at
         // all — nothing else checks whether THIS specific message was
@@ -294,6 +294,14 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
         // reopened pane whose backend turn is genuinely still streaming
         // while its OWN mount-time auth check independently reports
         // auth_failed. Codex P2 on PR #2338 (sixth re-review).
+        //
+        // Rejects IMMEDIATELY rather than queueing-then-rejecting-at-flush:
+        // flushHeldMessages would unconditionally reject this exact item
+        // anyway, but only once some LATER trigger (a tool-call boundary or
+        // turn-end) happens to run it — a tool-less or stuck turn might
+        // never fire that trigger, leaving the message stuck in the "send
+        // now" panel with no feedback indefinitely. codex P2 on PR #2338
+        // (twenty-fourth re-review).
         const model = registerPane(BLOCK_ID, fullRegistration());
         model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
         model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
@@ -320,14 +328,13 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
             });
 
             // A turn is already active (independent of canRetry — see the
-            // comment above), so this send takes the held/queued path.
+            // comment above).
             model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
-            await commands.sendMessage("held while known-bad", true);
-            expect(commands.hasHeldMessages()).toBe(true);
             const busyPhase = paneSnapshot(BLOCK_ID)?.turnPhase.kind;
+            await commands.sendMessage("held while known-bad", true);
 
-            await commands.flushHeldMessages();
-
+            // Rejected immediately — never entered the held queue at all.
+            expect(commands.hasHeldMessages()).toBe(false);
             expect(hub.agentInput).not.toHaveBeenCalled();
             expect(paneSnapshot(BLOCK_ID)?.pending).toEqual([]);
             // The already-active turn must not be cut short by this
@@ -348,10 +355,26 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
         // in exactly that case. Must always reject once flagged bad at
         // queue time — never re-derive "is it fixed now" from these two
         // signals alone.
+        //
+        // Exercised via the blocked-deferred-refresh hold (idle-send path),
+        // not the busy-path hold: codex P2 on PR #2338 (twenty-fourth
+        // re-review) made the busy path reject a known-bad-at-queue-time
+        // message IMMEDIATELY rather than queueing it — that scenario can
+        // no longer reach heldQueue with authWasKnownBadAtQueueTime: true
+        // at all, so the frozen-flag protection this test pins is only
+        // still reachable via the OTHER push site (which intentionally does
+        // NOT immediate-reject, since canRetry()/loginWaiting() being true
+        // there can mean the SAME in-flight recovery this hold is already
+        // waiting on).
         let loginWaitingNow = true;
+        let backendConfirmedIdle = false;
         const model = registerPane(BLOCK_ID, fullRegistration());
         model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
         model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+        hub.dispatchSlashCommand.mockImplementation(async (_msg: string, _registry: unknown, ctx: { deferControllerRefreshUntilIdle: () => void }) => {
+            ctx.deferControllerRefreshUntilIdle();
+            return { kind: "handled" };
+        });
 
         await createRoot(async (dispose) => {
             const commands = useAgentCommands({
@@ -370,19 +393,33 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 beginRecoveryFlow: () => {},
                 endRecoveryFlow: () => {},
                 isBackendTurnActive: () => false,
-                isBackendTurnConfirmedIdle: () => true,
+                isBackendTurnConfirmedIdle: () => backendConfirmedIdle,
                 backToPicker: async () => {},
             });
 
+            // /login succeeds mid-turn (defers instead of refreshing now) —
+            // an UNRELATED deferred refresh is what blocks the send below.
             model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
-            await commands.sendMessage("held during a recovery attempt", true);
+            await commands.sendMessage("/login", /* wasAlreadyWorking */ true);
+
+            // A fresh idle send is held because the deferred refresh is
+            // still blocked; loginWaiting() is ALSO true right now (a
+            // separate, unrelated recovery attempt), captured into
+            // authWasKnownBadAtQueueTime.
+            await commands.sendMessage("held during a recovery attempt", /* wasAlreadyWorking */ false);
             expect(commands.hasHeldMessages()).toBe(true);
 
-            // The recovery attempt FAILS: loginWaiting() clears, but
-            // canRetry() was never set true (default retryAfterLogin:true).
+            // The unrelated recovery attempt FAILS: loginWaiting() clears,
+            // but canRetry() was never set true (default
+            // retryAfterLogin:true). The backend now confirms idle, so the
+            // deferred refresh this hold was actually waiting on runs (and
+            // succeeds) — isolating this test to the authWasKnownBadAtQueueTime
+            // frozen-flag concern, not authFailureToPreserve (covered by
+            // its own dedicated test).
             loginWaitingNow = false;
-
-            await commands.flushHeldMessages();
+            backendConfirmedIdle = true;
+            await commands.flushPendingControllerRefresh();
+            await new Promise((resolve) => setTimeout(resolve, 0));
 
             expect(hub.agentInput).not.toHaveBeenCalled();
             expect(commands.hasHeldMessages()).toBe(false);
