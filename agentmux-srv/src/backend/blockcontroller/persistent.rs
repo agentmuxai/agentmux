@@ -825,13 +825,22 @@ impl PersistentSubprocessController {
                 // since the persistent process never exits between turns.
                 // Without this, `turn_active` would go stale after turn 1.
                 self.mark_turn_active_and_publish();
-                self.persist_message_to_blockfile(&json_str);
                 let inner = self.inner.lock().unwrap();
                 let tx = inner.stdin_tx.as_ref()
                     .ok_or("persistent process not running after spawn")?;
-                tx.try_send(json_str)
+                // Persist only AFTER a successful send — reagentx P1 on PR
+                // #2360 (sixth review pass, round 5): `stdin_tx` can have
+                // gone `None` (process died) between `decide_send_action`'s
+                // check and this later lock re-acquisition, or `try_send`
+                // can fail with `Full` under load; persisting beforehand
+                // reproduces, for this path, the exact "persisted a
+                // never-delivered message" bug the immediately prior
+                // commit fixed for `BecomeSpawner`. Matches
+                // `send_user_message`'s existing (correct) ordering.
+                tx.try_send(json_str.clone())
                     .map_err(|e| format!("stdin send failed: {e}"))?;
                 drop(inner);
+                self.persist_message_to_blockfile(&json_str);
                 self.emit_message_accepted(config.message_id.as_deref());
                 Ok(())
             }
