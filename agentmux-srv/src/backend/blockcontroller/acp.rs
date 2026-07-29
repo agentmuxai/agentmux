@@ -534,6 +534,7 @@ impl AcpController {
         let inner_wait = self.inner.clone();
         let broker_wait = self.broker.clone();
         let health_wait = self.health_monitor.clone();
+        let outstanding_prompt_ids_wait = self.outstanding_prompt_ids.clone();
         tokio::spawn(async move {
             tokio::select! {
                 _ = kill_rx => {
@@ -547,6 +548,20 @@ impl AcpController {
                     drop(inner);
 
                     health_wait.set_active_turn(false);
+                    // resync_controller (mod.rs) can REUSE this exact
+                    // AcpController instance across a kill+restart cycle
+                    // (needs_replace false, status STATUS_DONE — the
+                    // non-forced pane-reopen path, or after watchdog.rs's
+                    // max-runtime/idle-timeout stop) — outstanding_prompt_ids
+                    // is the SAME Arc across that reuse. Any prompt ids still
+                    // outstanding at kill time will never get a response (no
+                    // process left to answer), so without clearing here they
+                    // would linger forever: the NEXT turn's own prompt id
+                    // resolving would never empty the set, permanently
+                    // stranding turn_active at true for the rest of this
+                    // instance's lifetime. reagentx P1 on PR #2338
+                    // (thirty-third re-review).
+                    outstanding_prompt_ids_wait.lock().unwrap().clear();
 
                     if let Some(ref broker) = broker_wait {
                         let status = BlockControllerRuntimeStatus {
@@ -576,6 +591,9 @@ impl AcpController {
                     drop(inner);
 
                     health_wait.set_active_turn(false);
+                    // See the matching comment in the kill_rx branch above —
+                    // same reasoning applies to a natural process exit.
+                    outstanding_prompt_ids_wait.lock().unwrap().clear();
 
                     if let Some(ref broker) = broker_wait {
                         let status = BlockControllerRuntimeStatus {
