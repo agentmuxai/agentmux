@@ -871,33 +871,42 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             // shift() (not a snapshot) so items queued mid-flush are included.
             while (heldQueue.length > 0) {
                 const item = heldQueue.shift()!;
-                if (item.authWasKnownBadAtQueueTime && (opts.canRetry() || opts.loginWaiting())) {
-                    // This item was queued while the pane already knew it was
-                    // logged out (or a recovery attempt was still unconfirmed)
-                    // — deliverToBackend's guard never sees it, since it's
-                    // deliberately skipped for every flushed item (see the
-                    // push-site comment). Reject it directly instead of
-                    // trusting the same "already-active turn" reasoning that
-                    // correctly applies to the OTHER items in this queue.
-                    // Does not touch turnPhase (mirrors deliverToBackend's own
-                    // initiatesTurn=false handling) — a real turn is still
-                    // genuinely active for whatever put this pane in the
-                    // "busy" branch to begin with. Codex P2 on PR #2338
-                    // (sixth re-review).
-                    //
-                    // Re-checks the LIVE signals here, not just the frozen
-                    // queue-time flag: a recovery attempt can succeed
-                    // between this item being queued and this flush running
-                    // (flush waits for the next tool-boundary/turn-end, and
-                    // /login's own poll can take up to 5 minutes) — trusting
-                    // the frozen flag alone would permanently discard a
-                    // message that would now succeed, with no path back
-                    // (the composer already cleared it). The frozen flag is
-                    // still the right gate for whether to even consider
-                    // rejecting (an item that was GOOD at queue time must
-                    // never be retroactively dropped just because auth flips
-                    // bad later — a DIFFERENT, already-settled rule). Codex
-                    // P2 on PR #2338 (fifteenth re-review).
+                // Rejects two independent kinds of known-bad held items:
+                //
+                // (1) item.authWasKnownBadAtQueueTime — queued while the
+                // pane already knew it was logged out (or a recovery
+                // attempt was still unconfirmed). Always rejected, not
+                // re-checked against live canRetry()/loginWaiting() at flush
+                // time — an EARLIER version of this code let a since-
+                // recovered item through by re-checking those two live
+                // signals, but a FAILED recovery (relogin()/useGlobalLogin()/
+                // loginViaTerminal()'s default retryAfterLogin:true path)
+                // clears loginWaiting() and never sets canRetry() back to
+                // true, so both signals read false after a failed attempt
+                // even though nothing was actually fixed — the live re-check
+                // let a known-bad item through anyway. Codex P1 on PR #2338
+                // (sixteenth re-review). Rejecting unconditionally trades a
+                // rare lost-message UX papercut (a message that WOULD have
+                // succeeded had this flush waited slightly longer) for never
+                // sending on a credential we have no live proof is fixed —
+                // the same trade the fast-fail guard makes everywhere else
+                // in this file. Does not touch turnPhase (mirrors
+                // deliverToBackend's own initiatesTurn=false handling) — a
+                // real turn is still genuinely active for whatever put this
+                // pane in the "busy" branch to begin with. Codex P2 on
+                // PR #2338 (sixth re-review).
+                //
+                // (2) A LIVE "auth"-classified state.failure right now —
+                // independent of the queue-time flag. A message queued while
+                // a turn was genuinely healthy (authWasKnownBadAtQueueTime:
+                // false) can still end up here if THAT SAME TURN later fails
+                // with a 401/403: FailureObserved ends the turn (Done)
+                // without touching canRetry/loginWaiting, so the frozen flag
+                // alone would miss it entirely, and deliverToBackend's own
+                // guard never even runs for a flushed item (initiatesTurn is
+                // always false here). reagent P1 on PR #2338 (sixteenth
+                // re-review).
+                if (item.authWasKnownBadAtQueueTime || paneSnapshot(opts.blockId)?.failure?.data.code === "auth") {
                     opts.log("auth", "held message not sent — not logged in", "warn");
                     opts.model.dispatchPane({ type: "PendingMessageRejected", id: item.id });
                     continue;
