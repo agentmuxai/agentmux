@@ -50,6 +50,7 @@ function makeCtx(): SlashCommandContext {
         setAuthUrl: vi.fn(),
         notifyControllerHealthy: vi.fn(),
         clearAuthFailure: vi.fn(),
+        forceControllerRefresh: vi.fn().mockResolvedValue(undefined),
         openPicker: vi.fn(),
         openHelp: vi.fn(),
     };
@@ -93,6 +94,11 @@ describe("/login — tier-1 'opened' branch persist-failure gating", () => {
         // reproduces the exact "message silently rejected, stale banner
         // reappears" bug this PR exists to fix.
         expect(ctx.clearAuthFailure).toHaveBeenCalledOnce();
+        // Codex P1 (seventh re-review): an already-running persistent
+        // controller must be restarted onto the new credential, or the next
+        // message bypasses every guard in this file and still reaches the
+        // stale process.
+        expect(ctx.forceControllerRefresh).toHaveBeenCalledOnce();
     });
 
     it("reagent P1 (re-review of PR #2318): returns an error, not ok, when persistAndLinkAccount fails to save the account", async () => {
@@ -113,5 +119,6 @@ describe("/login — tier-1 'opened' branch persist-failure gating", () => {
         // mount-time "Log in" bar (if showing) must stay up.
         expect(ctx.notifyControllerHealthy).not.toHaveBeenCalled();
         expect(ctx.clearAuthFailure).not.toHaveBeenCalled();
+        expect(ctx.forceControllerRefresh).not.toHaveBeenCalled();
     });
 });

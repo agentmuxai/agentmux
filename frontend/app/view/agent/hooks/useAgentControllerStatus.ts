@@ -160,6 +160,25 @@ export interface UseAgentControllerStatus {
      * auth_failed launch had left the button stuck showing.
      */
     notifyControllerHealthy: () => void;
+    /**
+     * Force the persistent controller to restart (or register, if none
+     * exists yet) so a just-refreshed credential actually takes effect —
+     * `send_message` only spawns a fresh process when one isn't already
+     * running, so an agent whose CLI was already alive keeps running on
+     * its stale env forever otherwise. relogin()/useGlobalLogin()/
+     * loginViaTerminal() all call this internally before declaring
+     * success; exposed here so /login's slash-command handler (a fully
+     * separate code path with no access to this hook's closure) can do
+     * the same. Without it, a successful /login on a pane whose
+     * persistent controller was already alive left that controller on
+     * the old credential — the next message would bypass every guard in
+     * this PR (canRetry/loginWaiting/authFailureToPreserve are all
+     * correctly cleared by then) and still reach the stale process,
+     * reproducing the delayed "Not logged in" failure. Codex P1 on
+     * PR #2338 (seventh re-review). Best-effort — logs a warning on
+     * failure rather than throwing, matching every other call site.
+     */
+    forceControllerRefresh: () => Promise<void>;
 }
 
 /**
@@ -1010,6 +1029,7 @@ export function useAgentControllerStatus(
         useGlobalLogin,
         loginViaTerminal,
         notifyControllerHealthy,
+        forceControllerRefresh,
         cancelLogin,
     };
 }

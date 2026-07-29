@@ -97,6 +97,7 @@ describe("useAgentCommands — turnPhase recovery on a failed send", () => {
                 loginWaiting: () => false,
                 setAuthNotice: () => {},
                 notifyControllerHealthy: () => {},
+                forceControllerRefresh: async () => {},
                 backToPicker: async () => {},
             });
 
@@ -131,6 +132,7 @@ describe("useAgentCommands — turnPhase recovery on a failed send", () => {
                 loginWaiting: () => false,
                 setAuthNotice: () => {},
                 notifyControllerHealthy: () => {},
+                forceControllerRefresh: async () => {},
                 backToPicker: async () => {},
             });
 
@@ -178,6 +180,7 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 loginWaiting: () => false,
                 setAuthNotice,
                 notifyControllerHealthy: () => {},
+                forceControllerRefresh: async () => {},
                 backToPicker: async () => {},
             });
 
@@ -217,6 +220,7 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 loginWaiting: () => false,
                 setAuthNotice: () => {},
                 notifyControllerHealthy: () => {},
+                forceControllerRefresh: async () => {},
                 backToPicker: async () => {},
             });
 
@@ -279,6 +283,7 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 loginWaiting: () => false,
                 setAuthNotice: () => {},
                 notifyControllerHealthy: () => {},
+                forceControllerRefresh: async () => {},
                 backToPicker: async () => {},
             });
 
@@ -324,6 +329,7 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 loginWaiting: () => true,
                 setAuthNotice,
                 notifyControllerHealthy: () => {},
+                forceControllerRefresh: async () => {},
                 backToPicker: async () => {},
             });
 
@@ -362,6 +368,7 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 loginWaiting: () => true,
                 setAuthNotice: () => {},
                 notifyControllerHealthy: () => {},
+                forceControllerRefresh: async () => {},
                 backToPicker: async () => {},
             });
 
@@ -407,6 +414,7 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
                 loginWaiting: () => false,
                 setAuthNotice,
                 notifyControllerHealthy: () => {},
+                forceControllerRefresh: async () => {},
                 backToPicker: async () => {},
             });
 
