@@ -445,7 +445,19 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
     const CONTROLLER_REFRESH_MAX_RETRIES = 3;
     let controllerRefreshRetriesRemaining = CONTROLLER_REFRESH_MAX_RETRIES;
     let refreshRetryTimer: ReturnType<typeof setTimeout> | null = null;
+    // onCleanup only runs ONCE, at dispose time — if a forceControllerRefresh()
+    // RPC is still in flight (no retry timer exists yet, since the failure
+    // branch below hasn't run) when the pane disposes, there's nothing for
+    // onCleanup to clear. If that RPC then resolves as a failure AFTER
+    // disposal, the retry-scheduling code below would otherwise create a
+    // BRAND NEW timer with nothing left to ever clean it up — retrying up
+    // to CONTROLLER_REFRESH_MAX_RETRIES times against an already-closed
+    // pane. This flag is checked before scheduling (not just relied on via
+    // onCleanup) to close that gap. codex P2 on PR #2338 (thirty-fourth
+    // re-review).
+    let isDisposed = false;
     onCleanup(() => {
+        isDisposed = true;
         if (refreshRetryTimer) clearTimeout(refreshRetryTimer);
     });
     const deferControllerRefreshUntilIdle = (): void => {
@@ -529,7 +541,13 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 // its own instead of stranding any held message until the
                 // user happens to send another message or a new turn
                 // starts. codex P2 on PR #2338 (twenty-seventh re-review).
-                if (controllerRefreshRetriesRemaining > 0) {
+                //
+                // !isDisposed: if the pane disposed while THIS refresh's
+                // own RPC was still in flight, onCleanup already ran with
+                // no timer to clear — scheduling one now would leak a
+                // retry against an already-closed pane. codex P2 on
+                // PR #2338 (thirty-fourth re-review).
+                if (!isDisposed && controllerRefreshRetriesRemaining > 0) {
                     controllerRefreshRetriesRemaining -= 1;
                     if (refreshRetryTimer) clearTimeout(refreshRetryTimer);
                     refreshRetryTimer = setTimeout(() => {

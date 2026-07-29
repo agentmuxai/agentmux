@@ -1279,6 +1279,76 @@ describe("useAgentCommands — flushPendingControllerRefresh", () => {
             vi.useRealTimers();
         }
     });
+
+    // codex P2 on PR #2338 (thirty-fourth re-review): onCleanup only runs
+    // ONCE, at dispose time. If a forceControllerRefresh() RPC is still in
+    // flight when the pane disposes, no retry timer exists yet for
+    // onCleanup to clear. Without isDisposed, a failure resolving AFTER
+    // disposal would schedule a brand-new timer with nothing left to ever
+    // clean it up.
+    it("does not schedule a retry if the pane disposes while the deferred refresh's own RPC is still in flight", async () => {
+        hub.dispatchSlashCommand.mockImplementation(async (_msg: string, _registry: unknown, ctx: { deferControllerRefreshUntilIdle: () => void }) => {
+            ctx.deferControllerRefreshUntilIdle();
+            return { kind: "handled" };
+        });
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+
+        let resolveRefresh: ((v: boolean) => void) | undefined;
+        const forceControllerRefresh = vi.fn(
+            () => new Promise<boolean>((resolve) => { resolveRefresh = resolve; }),
+        );
+
+        vi.useFakeTimers();
+        try {
+            let disposeFn: (() => void) | undefined;
+            let flushPromise: Promise<boolean> | undefined;
+            await createRoot(async (dispose) => {
+                disposeFn = dispose;
+                const commands = useAgentCommands({
+                    blockId: BLOCK_ID,
+                    model,
+                    block: () => undefined,
+                    provider: () => undefined,
+                    documentAtom: [() => [], () => {}] as any,
+                    log: () => {},
+                    setAuthUrl: () => {},
+                    canRetry: () => false,
+                    loginWaiting: () => false,
+                    setAuthNotice: () => {},
+                    notifyControllerHealthy: () => {},
+                    forceControllerRefresh,
+                    beginRecoveryFlow: () => {},
+                    endRecoveryFlow: () => {},
+                    isBackendTurnActive: () => false,
+                    isBackendTurnConfirmedIdle: () => true,
+                    backToPicker: async () => {},
+                });
+
+                model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+                await commands.sendMessage("/login", /* wasAlreadyWorking */ true);
+
+                // Kick off the flush — its own RPC is still unresolved.
+                flushPromise = commands.flushPendingControllerRefresh();
+            });
+
+            // Dispose WHILE the RPC is still in flight — onCleanup runs now,
+            // with no retry timer yet to clear.
+            disposeFn?.();
+
+            // The RPC now resolves as a FAILURE, after disposal.
+            resolveRefresh?.(false);
+            await flushPromise;
+
+            // No retry may be scheduled — advancing well past the retry
+            // delay must not trigger a second forceControllerRefresh call.
+            await vi.advanceTimersByTimeAsync(10000);
+            expect(forceControllerRefresh).toHaveBeenCalledOnce();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
 });
 
 // Codex P1 on PR #2338 (fifteenth re-review): /login succeeding mid-turn

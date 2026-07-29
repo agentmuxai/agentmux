@@ -798,7 +798,17 @@ impl Controller for AcpController {
                     tx.try_send(req)
                         .map_err(|e| format!("ACP stdin send failed: {e}"))
                 } else {
-                    Ok(())
+                    // stdin_tx can vanish between the is_running() check
+                    // above and this re-lock — e.g. a concurrent stop() or
+                    // controller resync clearing it in between. Treating
+                    // this as success (the old behavior) silently lost the
+                    // message (never actually enqueued anywhere) while
+                    // still marking the turn active and leaving prompt_id
+                    // permanently outstanding — nothing will ever resolve
+                    // it. Handling it identically to a try_send failure
+                    // reuses the existing rollback below. codex P1 on
+                    // PR #2338 (thirty-fourth re-review).
+                    Err("ACP process not running — stdin sender vanished after the initial check".to_string())
                 }
             };
             if let Err(e) = send_result {
