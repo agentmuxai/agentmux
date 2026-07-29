@@ -201,8 +201,14 @@ agents — don't re-derive from scratch. In rough chronological/topical order:
 
 ## Disposal
 
-`feat/native-pointer-drag-tabs` has this retro's worth of learning in it but
-is not close to mergeable as one PR. Recommend: leave uncommitted locally (or
-commit to this branch and push for reference only, not for review) rather
-than opening a PR against it — the fresh discussion should design its own
-scope rather than inherit this branch's.
+`feat/native-pointer-drag-tabs` (pushed, commit `416d3522`, **not** opened as
+a PR — do not open one against it as-is, do not merge) has this retro's
+worth of learning in it but is not close to mergeable as one PR. Pushed
+rather than left local-only so a future narrower attempt has real code to
+reference/cannibalize instead of starting blind, given this repo's long
+history (§ Related history above) of tear-off/redock work getting
+rediscovered from scratch across many agents. The fresh discussion should
+still design its own scope rather than inherit this branch's wholesale —
+see § Suggested scope above for what's actually worth reusing (the tab-side
+mechanics and the cursor-freeze fix) versus what isn't (the pane drop-zone/
+ghost rebuild).
