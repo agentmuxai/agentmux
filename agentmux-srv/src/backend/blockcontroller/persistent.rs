@@ -1203,11 +1203,37 @@ impl PersistentSubprocessController {
         if inner.stdin_tx.is_some() && !inner.spawning_in_progress {
             SendAction::DeliverDirect
         } else if inner.spawning_in_progress {
-            if !inner.pending_send_messages.iter().any(|m| m == first) {
-                inner.pending_send_messages.push_back(QueuedMessage::already_persisted(first.to_string()));
-            }
-            for msg in rest {
-                inner.pending_send_messages.push_back(QueuedMessage::already_persisted(msg.clone()));
+            // codex P2 on PR #2360 (sixth review pass, round 11): prepend
+            // rather than append. This retry batch represents messages
+            // that were accepted by the doomed process BEFORE whatever's
+            // currently sitting in the queue — anything already queued
+            // here arrived AFTER the original spawn had already claimed
+            // `spawning_in_progress`, so it's chronologically LATER than
+            // this batch. Appending would let the fresh process receive
+            // later-arriving input before this earlier-accepted batch.
+            //
+            // `first` may itself STILL be sitting in the queue (see
+            // `decide_send_action`'s doc comment on `skip_if_already_
+            // queued`) — always at index 0 if so, since it's the ONLY
+            // thing ever present when a claim starts and nothing but
+            // `push_back` ever touches this queue elsewhere. In that
+            // case `rest` belongs immediately after it (same batch,
+            // preserving order), not ahead of it.
+            let first_already_queued = inner.pending_send_messages.iter().any(|m| m == first);
+            if first_already_queued {
+                for (i, msg) in rest.iter().enumerate() {
+                    inner
+                        .pending_send_messages
+                        .insert(i + 1, QueuedMessage::already_persisted(msg.clone()));
+                }
+            } else {
+                let mut front: VecDeque<QueuedMessage> = VecDeque::new();
+                front.push_back(QueuedMessage::already_persisted(first.to_string()));
+                for msg in rest {
+                    front.push_back(QueuedMessage::already_persisted(msg.clone()));
+                }
+                front.append(&mut inner.pending_send_messages);
+                inner.pending_send_messages = front;
             }
             SendAction::Queued
         } else {
@@ -3327,6 +3353,36 @@ mod send_input_tests {
             inner.pending_send_messages.iter().cloned().collect::<Vec<_>>(),
             vec!["first".to_string(), "second".to_string()],
             "the already-queued first entry must not be duplicated, but the rest of the batch must still be appended"
+        );
+    }
+
+    /// codex P2 on PR #2360 (sixth review pass, round 11): the retry
+    /// batch represents content the doomed process accepted BEFORE
+    /// whatever's already sitting in the queue (which arrived AFTER the
+    /// original spawn claimed `spawning_in_progress`) — it must be
+    /// delivered first on the fresh process, not appended behind
+    /// later-arriving input.
+    #[test]
+    fn decide_retry_batch_action_prepends_ahead_of_an_unrelated_later_message() {
+        let c = controller();
+        {
+            let mut inner = c.inner.lock().unwrap();
+            inner.spawning_in_progress = true;
+            // "later-message" arrived after the original spawn's claim
+            // started, while the retry's own trigger ("A") had already
+            // been popped and delivered (and is no longer in the queue —
+            // it's now tracked only in the confirmed retry batch).
+            inner.pending_send_messages.push_back(QueuedMessage::fresh("later-message".to_string()));
+        }
+
+        let action = c.decide_retry_batch_action("A", &[]);
+
+        assert!(matches!(action, SendAction::Queued));
+        let inner = c.inner.lock().unwrap();
+        assert_eq!(
+            inner.pending_send_messages.iter().cloned().collect::<Vec<_>>(),
+            vec!["A".to_string(), "later-message".to_string()],
+            "the retry's own (chronologically earlier) message must precede the later, unrelated one"
         );
     }
 }
