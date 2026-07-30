@@ -210,6 +210,24 @@ struct PersistentInner {
     /// spawn or arrived while someone else's spawn was already in flight.
     /// Drained by `release_spawn_claim_and_drain_queue`.
     pending_send_messages: VecDeque<QueuedMessage>,
+    /// True while the drain (`drain_queue_after_successful_spawn`) is
+    /// between successfully sending a message on the live stdin channel
+    /// and finishing its OWN follow-up append of that message into
+    /// `pending_resume_retry`/`confirmed_stale_resume_retry` — see
+    /// `pending_resume_retry`'s own doc comment for why that append
+    /// exists. reagentx P1 on PR #2360 (sixth review pass, round 9): the
+    /// `Sender::send().await` and that follow-up append are two separate
+    /// lock acquisitions with an unavoidable gap between them (a mutex
+    /// can't be held across an `.await`). Without this flag, the
+    /// process-waiter's own exit-handling — running concurrently on a
+    /// DIFFERENT task — could `.take()` the confirmed retry batch in that
+    /// exact gap, dispatching a retry that's missing a message the doomed
+    /// process's channel had ALREADY accepted: the message stays marked
+    /// "accepted" and gets persisted, but is never actually delivered to
+    /// any process again. The exit-handling waits (briefly, bounded) for
+    /// this to go false before deciding the retry batch is final — see
+    /// its own comment at the `.take()` call site.
+    drain_send_in_flight: bool,
     current_pid: Option<u32>,
     /// Channel to send messages to the stdin writer task.
     stdin_tx: Option<mpsc::Sender<String>>,
@@ -425,6 +443,7 @@ impl PersistentSubprocessController {
                 confirmed_stale_resume_retry: None,
                 spawning_in_progress: false,
                 pending_send_messages: VecDeque::new(),
+                drain_send_in_flight: false,
                 current_pid: None,
                 stdin_tx: None,
                 kill_tx: None,
@@ -753,6 +772,15 @@ impl PersistentSubprocessController {
                 let delivered_copy = json_str.clone();
                 let was_first_delivery = is_first_delivery;
                 is_first_delivery = false;
+                // reagentx P1 on PR #2360 (sixth review pass, round 9):
+                // mark "in flight" for the ENTIRE send-then-append
+                // sequence below, not just the send — see
+                // `PersistentInner::drain_send_in_flight`'s own doc
+                // comment for the race this closes (the process-waiter's
+                // exit-handling can `.take()` the confirmed retry batch
+                // in the gap between a successful send and this task
+                // getting back around to recording it there).
+                inner_arc.lock().unwrap().drain_send_in_flight = true;
                 if let Err(e) = tx.send(json_str).await {
                     tracing::warn!(
                         block_id = %block_id,
@@ -763,6 +791,7 @@ impl PersistentSubprocessController {
                     // silently discarding it) for a future spawn to pick
                     // up. Same claim-retention rule as above.
                     let mut inner = inner_arc.lock().unwrap();
+                    inner.drain_send_in_flight = false;
                     inner.pending_send_messages.push_front(QueuedMessage { json_str: e.0, already_persisted });
                     let stalled = !inner.pending_send_messages.is_empty();
                     if !(stalled && allow_fallback_respawn) {
@@ -794,6 +823,7 @@ impl PersistentSubprocessController {
                         delivered.push(delivered_copy.clone());
                     }
                 }
+                inner_arc.lock().unwrap().drain_send_in_flight = false;
                 // Persist in actual delivery order — codex P2 on PR #2360
                 // (sixth review pass, round 5): persisting at the
                 // `decide_send_action` call site instead let two callers'
@@ -1965,6 +1995,29 @@ impl PersistentSubprocessController {
                         }
                     }
 
+                    // Wait (briefly, bounded) for the drain to finish
+                    // appending whatever message it's currently
+                    // mid-delivery on before deciding the retry batch
+                    // below is final — reagentx P1 on PR #2360 (sixth
+                    // review pass, round 9): `drain_queue_after_
+                    // successful_spawn`'s own "send, then append to the
+                    // retry batch" sequence has an unavoidable gap at the
+                    // `.await` (a mutex can't be held across it). Without
+                    // this wait, the `.take()` below could run in that
+                    // exact gap and dispatch a retry missing a message
+                    // the doomed process's channel had ALREADY accepted —
+                    // it stays marked "accepted" and gets persisted, but
+                    // is never actually delivered to any process again.
+                    // Same 500ms bound as the stderr-reader wait above,
+                    // for the same "best effort, don't hang forever"
+                    // reason.
+                    for _ in 0..50 {
+                        if !inner_wait.lock().unwrap().drain_send_in_flight {
+                            break;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    }
+
                     // Notify health monitor so Stalled/Dead watchdog stops.
                     health_wait.set_exited(exit_code);
 
@@ -2482,6 +2535,39 @@ mod send_input_tests {
             "awaiting the handle must observe the task's side effect having already happened, \
              not race ahead of it"
         );
+    }
+
+    /// Confirms the bounded-wait PRIMITIVE the process-waiter's
+    /// exit-handling relies on before deciding a confirmed stale-resume
+    /// retry batch is final — reagentx P1 on PR #2360 (sixth review pass,
+    /// round 9): it polls `drain_send_in_flight` every 10ms, bounded to
+    /// 500ms, so a flag that clears shortly after being observed `true`
+    /// must still be correctly picked up within the window (not missed by
+    /// a single stale read). The full cross-task race this guards against
+    /// isn't practical to reproduce deterministically (same reasoning as
+    /// this file's other cross-task timing fixes — see e.g. the
+    /// stderr-reader bound above), so this exercises the underlying
+    /// polling primitive directly.
+    #[tokio::test]
+    async fn a_flag_clearing_shortly_after_is_observed_by_a_bounded_polling_wait() {
+        let c = Arc::new(controller());
+        c.inner.lock().unwrap().drain_send_in_flight = true;
+
+        let c2 = Arc::clone(&c);
+        tokio::spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+            c2.inner.lock().unwrap().drain_send_in_flight = false;
+        });
+
+        let mut cleared = false;
+        for _ in 0..50 {
+            if !c.inner.lock().unwrap().drain_send_in_flight {
+                cleared = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(cleared, "the bounded wait must observe the flag clearing within its window");
     }
 
     /// Baseline: a message sent while the process is already running is
@@ -3102,6 +3188,10 @@ mod send_input_tests {
             .pending_resume_retry
             .as_ref()
             .expect("must still be tracking this spawn's delivered messages");
+        assert!(
+            !inner.drain_send_in_flight,
+            "must be cleared once the send-then-append sequence for the last message has fully completed"
+        );
         assert_eq!(
             delivered,
             &vec!["first".to_string(), "second".to_string()],
@@ -3237,6 +3327,7 @@ mod resume_poison_tests {
             confirmed_stale_resume_retry: None,
             spawning_in_progress: false,
             pending_send_messages: VecDeque::new(),
+            drain_send_in_flight: false,
             current_pid: None,
             stdin_tx: None,
             kill_tx: None,
