@@ -1454,18 +1454,28 @@ impl PersistentSubprocessController {
                 // (or, if their process turns out to already be dead, its
                 // own bounded fallback respawn will).
                 //
-                // reagentx P2 on PR #2371: that concurrent spawn's own
-                // eventual success or failure isn't tracked from here at
-                // all, so a held error line can't be conditioned on it
-                // the way `BecomeSpawner`'s own failure branch can.
-                // Flushing it now (same as the `self_ref` gone case)
-                // means the worst case is one possibly-superseded extra
-                // line if the other spawn does succeed — better than the
-                // alternative of losing it silently if that spawn also
-                // fails.
-                if let Some(line) = held_error_line {
-                    self.flush_error_line_now(line);
-                }
+                // reagentx P1 on PR #2371 (round 2): flushing eagerly HERE
+                // (an earlier cut of this fix did, reasoning that losing
+                // it silently on eventual failure was worse) contradicts
+                // this codebase's own established pattern for a `Queued`
+                // outcome — `decide_send_action`'s doc comment: side
+                // effects for a queued item happen "later, inside the
+                // drain, at the exact moment this message is actually
+                // delivered," not eagerly at enqueue time. Eventual
+                // success is the OVERWHELMINGLY common outcome for a
+                // queued message (that's the whole point of the
+                // queue/drain/fallback-respawn infrastructure below), so
+                // flushing eagerly would show a stale, wrong error bubble
+                // in the common case, immediately followed by the real
+                // (successful) response — reproducing the exact bug this
+                // PR exists to fix, just via a different path. Dropped
+                // instead: on the rare total-failure path (the fallback
+                // respawn ALSO fails), `release_spawn_claim_and_drain_queue`'s
+                // own stalled-fallback branch already publishes a status
+                // update and keeps the messages queued for a future spawn
+                // attempt — never silent forever, even without the
+                // specific original error text.
+                drop(held_error_line);
             }
             SendAction::BecomeSpawner => {
                 // Only clear inner.session_id now that THIS retry is
