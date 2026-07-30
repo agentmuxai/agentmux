@@ -359,22 +359,41 @@ impl PersistentInner {
     /// `confirmed_stale_resume_retry` untouched, giving `poison_resume` a
     /// real chance to promote the retry first if this turns out to be
     /// the doomed case after all.
+    ///
+    /// reagentx P1 (round 3 on this PR): `adopted` used to be gated
+    /// solely on `session_id.is_none()` — but a `--resume <sid>` spawn
+    /// ALWAYS hydrates `session_id` to the attempted sid BEFORE the
+    /// process even starts (`spawn_process`), so that check can never be
+    /// true for a resume attempt. When the CLI genuinely gives up on
+    /// `--resume` internally and starts a fresh conversation with a
+    /// DIFFERENT sid, `session_id` was left stuck on the stale attempted
+    /// one — the controller believed it was still talking to the old
+    /// conversation while the live process had moved on. `adopted` is
+    /// now true whenever the captured sid actually differs from whatever
+    /// `session_id` currently holds AND either nothing was captured yet
+    /// at all, or this call is the one that resolves resume tracking to
+    /// a genuinely different sid.
     fn try_capture_session_id(&mut self, sid: &str, is_confirmed_success: bool) -> bool {
         if self.resume_poisoned.as_deref() == Some(sid) {
             return false;
-        }
-        let adopted = self.session_id.is_none();
-        if adopted {
-            self.session_id = Some(sid.to_string());
         }
         let attempted_sid = self
             .pending_resume_retry
             .as_ref()
             .or(self.confirmed_stale_resume_retry.as_ref())
-            .map(|(attempted, _, _)| attempted.as_str());
-        if attempted_sid != Some(sid) || is_confirmed_success {
+            .map(|(attempted, _, _)| attempted.clone());
+        let resolves_tracking = match attempted_sid.as_deref() {
+            Some(attempted) => sid != attempted || is_confirmed_success,
+            None => false,
+        };
+        if resolves_tracking {
             self.pending_resume_retry = None;
             self.confirmed_stale_resume_retry = None;
+        }
+        let sid_is_new = self.session_id.as_deref() != Some(sid);
+        let adopted = sid_is_new && (self.session_id.is_none() || resolves_tracking);
+        if adopted {
+            self.session_id = Some(sid.to_string());
         }
         adopted
     }
@@ -419,12 +438,23 @@ impl PersistentInner {
     /// field is `Some`, this attempt has not yet been proven safe to
     /// persist immediately (it's either still tentative, or a confirmed
     /// retry is about to fire and drop this line entirely).
-    fn hold_back_error_result_line_if_resume_pending(&mut self, line_with_newline: String) -> bool {
+    ///
+    /// reagentx P2 (round 3 on this PR): returns any PREVIOUSLY held line
+    /// this call is about to supersede — `pending_error_result_line`
+    /// held exactly one line, so a SECOND `is_error:true` arriving while
+    /// resume tracking is still undecided used to silently overwrite the
+    /// first one, losing it forever (persistent mode can accept another
+    /// user message and produce another error before this generation's
+    /// resume outcome ever resolves). A genuinely doomed resume produces
+    /// at most one such line, so a second one arriving is unambiguous
+    /// proof the FIRST is a separate, already-settled turn's error — the
+    /// caller flushes it immediately instead of losing it.
+    fn hold_back_error_result_line_if_resume_pending(&mut self, line_with_newline: String) -> (bool, Option<String>) {
         if self.pending_resume_retry.is_some() || self.confirmed_stale_resume_retry.is_some() {
-            self.pending_error_result_line = Some(line_with_newline);
-            true
+            let superseded = self.pending_error_result_line.replace(line_with_newline);
+            (true, superseded)
         } else {
-            false
+            (false, None)
         }
     }
 }
@@ -2364,10 +2394,29 @@ impl PersistentSubprocessController {
                     // this can't be a stale-resume case and today's
                     // immediate-persist behavior is unchanged.
                     if is_error_result {
-                        hold_back_for_resume_retry = inner_read
+                        let (held, superseded) = inner_read
                             .lock()
                             .unwrap()
                             .hold_back_error_result_line_if_resume_pending(format!("{}\n", line));
+                        hold_back_for_resume_retry = held;
+                        // reagentx P2: a genuinely doomed resume produces
+                        // at most one held-back error line — a SECOND
+                        // one arriving while tracking is still undecided
+                        // means the FIRST was a separate, already-settled
+                        // turn's error. Flush it now rather than losing
+                        // it to this newer one.
+                        if let Some(old_line) = superseded {
+                            if let Some(ref broker) = broker_read {
+                                super::shell::handle_append_block_file(
+                                    broker,
+                                    &block_id_read,
+                                    PERSISTENT_OUTPUT_SUBJECT,
+                                    old_line.as_bytes(),
+                                    filestore_read.as_ref(),
+                                    global_output_zone.as_deref(),
+                                );
+                            }
+                        }
                     }
                 }
 
@@ -4622,7 +4671,7 @@ mod resume_poison_tests {
 
         // Tracking is still live, so the hold-back check correctly holds
         // the line back pending the retry decision.
-        let held_back = inner.hold_back_error_result_line_if_resume_pending(
+        let (held_back, _superseded) = inner.hold_back_error_result_line_if_resume_pending(
             r#"{"type":"result","is_error":true}"#.to_string() + "\n",
         );
         assert!(
@@ -4688,9 +4737,18 @@ mod resume_poison_tests {
         assert!(inner.confirmed_stale_resume_retry.is_none());
     }
 
+    // reagentx P1 (round 3 on this PR): the realistic precondition here
+    // is `session_id` already holding the STALE attempted sid — a
+    // `--resume <sid>` spawn always hydrates `session_id` to it BEFORE
+    // the process even starts (`spawn_process`). An earlier cut of this
+    // test started from `inner_with_session_id(None)`, which sidestepped
+    // that precondition and masked the actual bug: `adopted` was gated
+    // solely on `session_id.is_none()`, so this exact scenario (session_id
+    // already the stale sid) left `session_id` stuck on it forever even
+    // though the CLI had genuinely moved on to a brand-new conversation.
     #[test]
     fn pending_resume_retry_is_cleared_when_the_cli_starts_a_fresh_conversation_on_its_own() {
-        let mut inner = inner_with_session_id(None);
+        let mut inner = inner_with_session_id(Some("dead-sid"));
         inner.pending_resume_retry =
             Some(("dead-sid".to_string(), dummy_spawn_config(), vec!["{}".to_string()]));
 
@@ -4700,7 +4758,12 @@ mod resume_poison_tests {
         // unambiguous proof of progress on its own, even from a frame
         // that isn't itself a confirmed terminal success.
         let captured = inner.try_capture_session_id("brand-new-sid", false);
-        assert!(captured);
+        assert!(captured, "a genuinely different sid must be adopted even though session_id already held the stale attempted one");
+        assert_eq!(
+            inner.session_id.as_deref(),
+            Some("brand-new-sid"),
+            "session_id must move on to the fresh conversation, not stay stuck on the stale attempted sid"
+        );
         assert!(inner.pending_resume_retry.is_none());
         assert!(inner.confirmed_stale_resume_retry.is_none());
     }
@@ -4815,7 +4878,7 @@ mod resume_poison_tests {
         inner.pending_resume_retry =
             Some(("dead-sid".to_string(), dummy_spawn_config(), vec!["{}".to_string()]));
 
-        let held_back = inner.hold_back_error_result_line_if_resume_pending(
+        let (held_back, _superseded) = inner.hold_back_error_result_line_if_resume_pending(
             r#"{"type":"result","is_error":true}"#.to_string() + "\n",
         );
 
@@ -4845,7 +4908,7 @@ mod resume_poison_tests {
         assert!(inner.pending_resume_retry.is_none(), "sanity: poison_resume must have consumed it");
         assert!(inner.confirmed_stale_resume_retry.is_some(), "sanity: promoted to confirmed");
 
-        let held_back = inner.hold_back_error_result_line_if_resume_pending(
+        let (held_back, _superseded) = inner.hold_back_error_result_line_if_resume_pending(
             r#"{"type":"result","is_error":true}"#.to_string() + "\n",
         );
 
@@ -4866,7 +4929,7 @@ mod resume_poison_tests {
         let mut inner = inner_with_session_id(None);
         assert!(inner.pending_resume_retry.is_none());
 
-        let held_back = inner.hold_back_error_result_line_if_resume_pending(
+        let (held_back, _superseded) = inner.hold_back_error_result_line_if_resume_pending(
             r#"{"type":"result","is_error":true}"#.to_string() + "\n",
         );
 
@@ -4889,7 +4952,7 @@ mod resume_poison_tests {
         let mut inner = inner_with_session_id(Some("dead-sid"));
         inner.pending_resume_retry =
             Some(("dead-sid".to_string(), dummy_spawn_config(), vec!["{}".to_string()]));
-        let held_back = inner.hold_back_error_result_line_if_resume_pending(
+        let (held_back, _superseded) = inner.hold_back_error_result_line_if_resume_pending(
             r#"{"type":"result","is_error":true}"#.to_string() + "\n",
         );
         assert!(held_back);
@@ -4920,7 +4983,7 @@ mod resume_poison_tests {
         let mut inner = inner_with_session_id(None);
         inner.pending_resume_retry =
             Some(("dead-sid".to_string(), dummy_spawn_config(), vec!["{}".to_string()]));
-        let held_back = inner.hold_back_error_result_line_if_resume_pending(
+        let (held_back, _superseded) = inner.hold_back_error_result_line_if_resume_pending(
             r#"{"type":"result","is_error":true}"#.to_string() + "\n",
         );
         assert!(held_back);
@@ -4935,6 +4998,39 @@ mod resume_poison_tests {
         assert!(
             inner.pending_error_result_line.is_some(),
             "the stashed line must survive so the exit handler can flush it to the user"
+        );
+    }
+
+    // reagentx P2 (round 3 on this PR): `pending_error_result_line` holds
+    // exactly one line — a genuinely doomed resume produces at most one
+    // is_error:true before the retry decision resolves, but persistent
+    // mode can accept another user message and get a SECOND error before
+    // this generation's resume outcome is ever settled. The first line
+    // must not be silently lost to the second.
+    #[test]
+    fn a_second_held_back_line_supersedes_and_returns_the_first_instead_of_losing_it() {
+        let mut inner = inner_with_session_id(Some("dead-sid"));
+        inner.pending_resume_retry =
+            Some(("dead-sid".to_string(), dummy_spawn_config(), vec!["{}".to_string()]));
+
+        let (held_back, superseded) =
+            inner.hold_back_error_result_line_if_resume_pending("first turn's error\n".to_string());
+        assert!(held_back);
+        assert!(superseded.is_none(), "nothing was held yet, so there's nothing to supersede");
+
+        let (held_back, superseded) =
+            inner.hold_back_error_result_line_if_resume_pending("second turn's error\n".to_string());
+        assert!(held_back);
+        assert_eq!(
+            superseded.as_deref(),
+            Some("first turn's error\n"),
+            "the first held line must be returned to the caller for immediate flushing, \
+             not silently discarded"
+        );
+        assert_eq!(
+            inner.pending_error_result_line.as_deref(),
+            Some("second turn's error\n"),
+            "the newest line is what's still held, pending this generation's own retry decision"
         );
     }
 }
