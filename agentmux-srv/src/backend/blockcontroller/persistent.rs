@@ -773,15 +773,33 @@ impl PersistentSubprocessController {
         let block_id = self.block_id.clone();
         let self_ref = self.self_ref.lock().unwrap().clone().unwrap_or_default();
         tokio::spawn(async move {
-            // The very FIRST message this drain delivers is always the
-            // one that triggered the spawn — `spawn_process` already
-            // stashed it into `pending_resume_retry` synchronously,
-            // before this task even existed (necessary so a process that
-            // dies before this task's first poll can't lose it — see
-            // `pending_resume_retry`'s own doc comment). Appending it
-            // again below would duplicate that exact entry; only messages
-            // delivered AFTER it are genuinely new to the retry list.
-            let mut is_first_delivery = true;
+            // The message `spawn_process` already stashed synchronously
+            // into `pending_resume_retry` (before this task even existed —
+            // necessary so a process that dies before this task's first
+            // poll can't lose it, see that field's own doc comment) must
+            // be identified by CONTENT, not by "whatever this drain pops
+            // first" — codex P2 on PR #2360 (round 15, commit fdb8db6fd):
+            // a purely positional flag breaks exactly the way
+            // `release_spawn_claim_and_drain_queue`'s front-popping
+            // assumption did (see that function's own fix history): a
+            // prior "second stall" can leave older leftover messages
+            // queued ahead of a later spawner's own triggering message
+            // (`push_back` appends behind them), so the FIRST thing this
+            // drain pops isn't necessarily the seeded one. Treating it as
+            // if it were: (a) skips recording the OLDER leftover into the
+            // retry-batch tracking at all — silently dropping it forever
+            // if this process ALSO later dies from a stale resume, and
+            // (b) records the ACTUAL seeded/triggering message a SECOND
+            // time (once via `spawn_process`'s synchronous seed, once via
+            // this drain's own append) — a confirmed stale-resume retry
+            // would then redeliver that one message TWICE. Matching by
+            // content instead correctly identifies the seeded entry
+            // regardless of where it sits, exactly once (via
+            // `seed_already_matched`, so a later, genuinely-different
+            // delivery that happens to share identical content isn't ALSO
+            // wrongly skipped — same known, accepted content-identity
+            // limits as #2365).
+            let mut seed_already_matched = false;
             let stalled_with_leftovers = loop {
                 let next = {
                     let mut inner = inner_arc.lock().unwrap();
@@ -814,8 +832,18 @@ impl PersistentSubprocessController {
                 };
                 let QueuedMessage { json_str, already_persisted } = queued;
                 let delivered_copy = json_str.clone();
-                let was_first_delivery = is_first_delivery;
-                is_first_delivery = false;
+                let is_the_seed = !seed_already_matched && {
+                    let inner = inner_arc.lock().unwrap();
+                    inner
+                        .pending_resume_retry
+                        .as_ref()
+                        .or(inner.confirmed_stale_resume_retry.as_ref())
+                        .and_then(|(_, _, seeded)| seeded.first())
+                        == Some(&delivered_copy)
+                };
+                if is_the_seed {
+                    seed_already_matched = true;
+                }
                 // reagentx P1 on PR #2360 (sixth review pass, round 9):
                 // mark "in flight" for the ENTIRE send-then-append
                 // sequence below, not just the send — see
@@ -859,7 +887,7 @@ impl PersistentSubprocessController {
                 // and was persisted/removed from the queue without ever
                 // being added to the batch the replacement actually
                 // replays.
-                if !was_first_delivery {
+                if !is_the_seed {
                     let mut inner = inner_arc.lock().unwrap();
                     if let Some((_, _, ref mut delivered)) = inner.pending_resume_retry {
                         delivered.push(delivered_copy.clone());
@@ -1164,7 +1192,21 @@ impl PersistentSubprocessController {
                     let mut inner = self.inner.lock().unwrap();
                     let tx = inner.stdin_tx.clone();
                     for msg in std::iter::once(first).chain(rest) {
-                        let delivered = tx.as_ref().is_some_and(|tx| tx.try_send(msg.clone()).is_ok());
+                        // codex P2 on PR #2360 (round 15, commit
+                        // fdb8db6fd): once ANY earlier message in this
+                        // batch has failed direct delivery, stop
+                        // attempting `try_send` for the rest — the
+                        // bounded stdin channel's receiver runs
+                        // concurrently and can free capacity between
+                        // iterations, letting a LATER message in this same
+                        // batch succeed via `try_send` while an EARLIER
+                        // one sits queued (from the `Full` failure below),
+                        // reordering this batch relative to itself once
+                        // the drain eventually delivers the queued one.
+                        // `!any_failed` short-circuits every remaining
+                        // message straight to the queued branch, in
+                        // order, once the first failure is hit.
+                        let delivered = !any_failed && tx.as_ref().is_some_and(|tx| tx.try_send(msg.clone()).is_ok());
                         if !delivered {
                             any_failed = true;
                             // codex P2 on PR #2360 (sixth review pass,
@@ -3430,6 +3472,49 @@ mod send_input_tests {
         assert_eq!(inner.pending_send_messages[0], "stuck");
     }
 
+    /// codex P2 on PR #2360 (round 15, commit fdb8db6fd): once ANY message
+    /// in a multi-message retry batch fails direct delivery, every
+    /// remaining message must be queued too — not attempted via `try_send`
+    /// — so their relative order can never be disturbed by the bounded
+    /// stdin channel's receiver concurrently freeing capacity between
+    /// iterations (which could otherwise let a later message succeed
+    /// while an earlier, failed one sits queued behind it). Uses a
+    /// permanently-closed receiver so every message in the batch fails
+    /// deterministically; confirms all three end up queued in their
+    /// original order, none skipped, none lost.
+    #[tokio::test]
+    async fn retry_after_resume_failure_queues_the_rest_of_the_batch_in_order_once_one_fails() {
+        let c = controller();
+        let (tx, rx) = mpsc::channel::<String>(1);
+        drop(rx);
+        c.inner.lock().unwrap().stdin_tx = Some(tx);
+
+        let config = PersistentSpawnConfig {
+            cli_command: "unused".to_string(),
+            cli_args: vec![],
+            working_dir: String::new(),
+            env_vars: HashMap::new(),
+            session_id_field: "session_id".to_string(),
+            resume_flag: "--resume".to_string(),
+            session_id: String::new(),
+            message_id: None,
+        };
+        c.retry_after_resume_failure(
+            config,
+            vec!["msg-1".to_string(), "msg-2".to_string(), "msg-3".to_string()],
+        );
+
+        let inner = c.inner.lock().unwrap();
+        assert_eq!(
+            inner.pending_send_messages.len(),
+            3,
+            "every message in the batch must be queued, none skipped or lost"
+        );
+        assert_eq!(inner.pending_send_messages[0], "msg-1");
+        assert_eq!(inner.pending_send_messages[1], "msg-2");
+        assert_eq!(inner.pending_send_messages[2], "msg-3");
+    }
+
     /// codex P2 on PR #2360 (sixth review pass, round 7): pushing a failed
     /// direct-retry delivery onto the queue alone is not enough —
     /// `DeliverDirect` only fires when `spawning_in_progress` is `false`,
@@ -3524,6 +3609,74 @@ mod send_input_tests {
             delivered,
             &vec!["first".to_string(), "second".to_string()],
             "must contain the ORIGINAL message exactly once plus every later delivery, in order"
+        );
+    }
+
+    /// codex P2 on PR #2360 (round 15, commit fdb8db6fd): the message
+    /// `spawn_process` already stashed into `pending_resume_retry` is not
+    /// always the FIRST thing this drain pops — a prior "second stall" can
+    /// leave an older leftover queued ahead of a later spawner's own
+    /// triggering message (`push_back` appends behind it). A purely
+    /// positional "is this the first delivery" check would treat the
+    /// OLDER LEFTOVER as if it were the seed (dropping it from tracking
+    /// entirely) while recording the ACTUAL trigger message a second time
+    /// (once via the synchronous seed, once via this drain's own append).
+    /// Confirms content-based matching identifies the true seed regardless
+    /// of position: the older leftover is recorded, and the actual trigger
+    /// is not duplicated.
+    #[tokio::test]
+    async fn drain_identifies_the_seed_by_content_even_when_a_leftover_is_delivered_first() {
+        let c = controller();
+        let (tx, mut rx) = mpsc::channel::<String>(8);
+        let retry_config = PersistentSpawnConfig {
+            cli_command: "unused".to_string(),
+            cli_args: vec![],
+            working_dir: String::new(),
+            env_vars: HashMap::new(),
+            session_id_field: "session_id".to_string(),
+            resume_flag: "--resume".to_string(),
+            session_id: String::new(),
+            message_id: None,
+        };
+        {
+            let mut inner = c.inner.lock().unwrap();
+            inner.stdin_tx = Some(tx);
+            inner.spawning_in_progress = true;
+            // Simulates a "second stall" leaving an older leftover queued
+            // ahead of this spawn's own triggering message.
+            inner.pending_send_messages.push_back(QueuedMessage::fresh("older-leftover".to_string()));
+            inner.pending_send_messages.push_back(QueuedMessage::fresh("new-trigger".to_string()));
+            // spawn_process's own synchronous stash — seeded with the
+            // ACTUAL trigger message, not whatever happens to sit at the
+            // front of the queue.
+            inner.pending_resume_retry =
+                Some(("sid".to_string(), retry_config.clone(), vec!["new-trigger".to_string()]));
+        }
+
+        c.drain_queue_after_successful_spawn(retry_config, true);
+
+        assert_eq!(rx.recv().await.unwrap(), "older-leftover");
+        assert_eq!(rx.recv().await.unwrap(), "new-trigger");
+        tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+
+        let inner = c.inner.lock().unwrap();
+        let (_, _, delivered) = inner
+            .pending_resume_retry
+            .as_ref()
+            .expect("must still be tracking this spawn's delivered messages");
+        assert_eq!(
+            delivered.len(),
+            2,
+            "must contain exactly the older leftover plus the trigger, no omission, no duplication: {delivered:?}"
+        );
+        assert!(
+            delivered.contains(&"older-leftover".to_string()),
+            "the older leftover must not be silently dropped from the retry batch"
+        );
+        assert_eq!(
+            delivered.iter().filter(|m| *m == "new-trigger").count(),
+            1,
+            "the actual trigger message must not be recorded twice"
         );
     }
 
