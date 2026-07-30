@@ -2557,6 +2557,40 @@ impl PersistentSubprocessController {
                         }
                     }
 
+                    // reagentx P1 on PR #2371: mirror the child.wait() arm's
+                    // bounded await+abort of both reader tasks (above,
+                    // codex P1) before taking `pending_error_result_line`
+                    // below. Without this, a stop racing the doomed
+                    // attempt's in-flight terminal error line could take
+                    // `None` here while the stdout reader is still about to
+                    // stash it — silently losing a genuine error the stop
+                    // itself interrupted, and leaving a stale stash for a
+                    // LATER, unrelated exit on a reused controller instance
+                    // to wrongly pick up.
+                    if let Some(handle) = stderr_reader_handle {
+                        let abort_handle = handle.abort_handle();
+                        if tokio::time::timeout(std::time::Duration::from_millis(500), handle).await.is_err() {
+                            tracing::warn!(
+                                block_id = %block_id_wait,
+                                "stderr reader did not finish within 500ms of kill — aborting it"
+                            );
+                            abort_handle.abort();
+                        }
+                    }
+                    {
+                        let abort_handle = stdout_reader_handle.abort_handle();
+                        if tokio::time::timeout(std::time::Duration::from_millis(500), stdout_reader_handle)
+                            .await
+                            .is_err()
+                        {
+                            tracing::warn!(
+                                block_id = %block_id_wait,
+                                "stdout reader did not finish within 500ms of kill — aborting it"
+                            );
+                            abort_handle.abort();
+                        }
+                    }
+
                     health_wait.set_exited(-1);
 
                     let mut inner = inner_wait.lock().unwrap();
