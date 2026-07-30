@@ -233,6 +233,35 @@ struct PersistentInner {
     stdin_tx: Option<mpsc::Sender<String>>,
     /// Handle to kill the process.
     kill_tx: Option<tokio::sync::oneshot::Sender<bool>>,
+    /// Monotonic counter bumped once per `spawn_process` call (in the same
+    /// lock acquisition as stashing `pending_resume_retry`), uniquely
+    /// identifying that one spawn attempt for the rest of this controller
+    /// instance's lifetime. Note this is NOT the `spawn_epoch`/
+    /// `should_skip_own_delivery` mechanism removed earlier in this same
+    /// PR (see `spawning_in_progress`'s own doc comment) — that existed to
+    /// dedup a spawn-claim race, a job `spawning_in_progress` now fully
+    /// owns. This counter exists for a different, narrower purpose: giving
+    /// `stop_requested_generation` something stable to compare against.
+    spawn_generation: u64,
+    /// codex P1 on PR #2360 (round 16, commit ce1642d90): `stop_process`
+    /// can race a process that already exited (a confirmed stale-`--resume`
+    /// death) and is about to be silently retried — sending through
+    /// `kill_tx` is futile in that window regardless of whether it's
+    /// already `None` (the exit-handler cleared it) or still `Some`
+    /// (`tokio::select!` already committed to the `child.wait()` exit arm
+    /// before this call reached the lock, so the `kill_rx` arm will never
+    /// be polled again even if the send succeeds). Without an independent
+    /// signal, the exit-handler's retry decision has no way to know the
+    /// user explicitly asked to stop, and respawns a fresh CLI process
+    /// with the same prompt anyway — an explicit Stop that doesn't
+    /// actually stop anything. Set to the CURRENT `spawn_generation`
+    /// whenever `stop_process` runs (see its own doc comment); the
+    /// exit-handler compares this against the generation IT was spawned
+    /// with before deciding whether to retry, consuming (clearing) it
+    /// either way so it can never spuriously affect a later, different
+    /// generation — monotonic generation numbers are never reused, so an
+    /// unconsumed stale value here is inert, not a leak.
+    stop_requested_generation: Option<u64>,
     /// AskUserQuestion `can_use_tool` control_requests awaiting a user answer:
     /// `tool_use_id -> (request_id, questions JSON)`. Filled by the stdout
     /// reader when the CLI sends a `can_use_tool` control_request for
@@ -288,6 +317,21 @@ impl PersistentInner {
         self.pending_resume_retry = None;
         self.confirmed_stale_resume_retry = None;
         true
+    }
+
+    /// Returns `true` (and clears `stop_requested_generation`) if a stop
+    /// was requested for THIS exact spawn generation — see that field's
+    /// own doc comment for why `kill_tx` alone can't be trusted to signal
+    /// this. Extracted as its own method (mirroring `poison_resume`/
+    /// `try_capture_session_id` above) so this decision is directly unit
+    /// testable without needing a real child process exit.
+    fn consume_stop_requested_for_generation(&mut self, generation: u64) -> bool {
+        if self.stop_requested_generation == Some(generation) {
+            self.stop_requested_generation = None;
+            true
+        } else {
+            false
+        }
     }
 }
 
@@ -447,6 +491,8 @@ impl PersistentSubprocessController {
                 current_pid: None,
                 stdin_tx: None,
                 kill_tx: None,
+                spawn_generation: 0,
+                stop_requested_generation: None,
                 pending_questions: HashMap::new(),
             })),
             broker,
@@ -1731,12 +1777,16 @@ impl PersistentSubprocessController {
         // held in `inner.session_id` once an earlier call has already
         // hydrated it) so `poison_resume`'s later confirmation check is
         // unambiguous.
-        {
+        // Bumped in this SAME lock acquisition — see `spawn_generation`'s
+        // own doc comment for what this identifies and why.
+        let my_generation = {
             let mut inner = self.inner.lock().unwrap();
             if let (Some(sid), Some(retry_json)) = (attempted_resume_sid.clone(), resume_retry_payload) {
                 inner.pending_resume_retry = Some((sid, config.clone(), vec![retry_json]));
             }
-        }
+            inner.spawn_generation += 1;
+            inner.spawn_generation
+        };
 
         let pid = child.id().unwrap_or(0);
 
@@ -2097,6 +2147,9 @@ impl PersistentSubprocessController {
         // detached task call back into an instance method once the process
         // actually exits, to transparently retry a stale-`--resume` failure.
         let self_ref_wait = self.self_ref.lock().unwrap().clone().unwrap_or_default();
+        // This exact spawn's identity — see `stop_requested_generation`'s
+        // doc comment for why the retry decision below needs it.
+        let my_generation_wait = my_generation;
 
         tokio::spawn(async move {
             tokio::select! {
@@ -2198,6 +2251,12 @@ impl PersistentSubprocessController {
                     // unrelated later lifetime.
                     let retry_after_resume = inner.confirmed_stale_resume_retry.take();
                     inner.pending_resume_retry = None;
+                    // codex P1 on PR #2360 (round 16, commit ce1642d90): a
+                    // stop meant for THIS exact spawn generation must
+                    // override a pending retry — see `stop_requested_
+                    // generation`'s own doc comment for why `kill_tx` alone
+                    // can't be trusted to signal this.
+                    let stop_was_requested = inner.consume_stop_requested_for_generation(my_generation_wait);
                     Self::set_status(&mut inner, STATUS_DONE);
                     drop(inner);
 
@@ -2235,6 +2294,20 @@ impl PersistentSubprocessController {
                     // status ever lands. reagentx/codex never reviewed this
                     // controller type in PR #2338 (see docs/retros/
                     // RETRO_STALE_RESUME_SESSION_ID_ACROSS_CHANNELS_2026_07_29.md).
+                    // codex P1 on PR #2360 (round 16): an explicit stop
+                    // must win over a pending retry — treat it exactly
+                    // like "genuinely done, not retrying" below instead of
+                    // silently reviving the agent with the same prompt
+                    // right after the user asked it to stop.
+                    let retry_after_resume = if stop_was_requested {
+                        tracing::info!(
+                            block_id = %block_id_wait,
+                            "stop was requested while a stale-resume retry was pending — honoring the stop instead"
+                        );
+                        None
+                    } else {
+                        retry_after_resume
+                    };
                     if let Some((_attempted_sid, retry_config, retry_json)) = retry_after_resume {
                         if let Some(ctrl) = self_ref_wait.upgrade() {
                             tracing::warn!(
@@ -2361,15 +2434,17 @@ impl PersistentSubprocessController {
     pub fn stop_process(&self, force: bool) -> Result<(), String> {
         let kill_tx = {
             let mut inner = self.inner.lock().unwrap();
+            // Recorded unconditionally, not only when `kill_tx` is already
+            // `None` — see `stop_requested_generation`'s own doc comment
+            // for why a `Some(kill_tx)` here doesn't guarantee the send
+            // below actually reaches anything.
+            inner.stop_requested_generation = Some(inner.spawn_generation);
             inner.kill_tx.take()
         };
-        match kill_tx {
-            Some(tx) => {
-                let _ = tx.send(force);
-                Ok(())
-            }
-            None => Ok(()),
+        if let Some(tx) = kill_tx {
+            let _ = tx.send(force);
         }
+        Ok(())
     }
 
     pub fn session_id(&self) -> Option<String> {
@@ -2471,6 +2546,30 @@ mod send_input_tests {
             None,
             None,
         )
+    }
+
+    // codex P1 on PR #2360 (round 16, commit ce1642d90): `stop_process`
+    // must record which generation a stop was requested for even when
+    // there's no live `kill_tx` to send through — see
+    // `stop_requested_generation`'s own doc comment for why a `kill_tx`
+    // send alone can't be trusted (the process-waiter's `tokio::select!`
+    // can have already committed to its exit branch before this call
+    // reaches the lock, making the send futile even when `kill_tx` was
+    // still `Some`). Simulates the exact race here via no `kill_tx` at all
+    // (the narrower, always-reachable sub-case).
+    #[test]
+    fn stop_process_records_the_current_generation_even_with_no_live_kill_tx() {
+        let c = controller();
+        c.inner.lock().unwrap().spawn_generation = 3;
+        // kill_tx stays None — the process already exited (or never
+        // started); stop_process must still succeed and record intent.
+        let result = c.stop_process(false);
+        assert!(result.is_ok(), "must still return Ok when there's nothing live to signal");
+        assert_eq!(
+            c.inner.lock().unwrap().stop_requested_generation,
+            Some(3),
+            "must record a signal the exit-handler can check even with no live kill_tx to send through"
+        );
     }
 
     // A persistent controller has no PTY, but the agent pane's usePtyWidth hook
@@ -3842,6 +3941,8 @@ mod resume_poison_tests {
             current_pid: None,
             stdin_tx: None,
             kill_tx: None,
+            spawn_generation: 0,
+            stop_requested_generation: None,
             pending_questions: HashMap::new(),
         }
     }
@@ -3905,6 +4006,35 @@ mod resume_poison_tests {
         let captured = inner.try_capture_session_id("second-sid");
         assert!(!captured, "must not overwrite an already-captured session id");
         assert_eq!(inner.session_id.as_deref(), Some("first-sid"));
+    }
+
+    // codex P1 on PR #2360 (round 16, commit ce1642d90): the exit-handler's
+    // retry decision needs to recognize a stop requested for its EXACT
+    // generation and consume it exactly once.
+    #[test]
+    fn consume_stop_requested_for_generation_matches_and_clears() {
+        let mut inner = inner_with_session_id(None);
+        inner.stop_requested_generation = Some(5);
+        assert!(inner.consume_stop_requested_for_generation(5));
+        assert_eq!(
+            inner.stop_requested_generation, None,
+            "must clear once consumed so it can never spuriously affect a later generation"
+        );
+    }
+
+    // A stop recorded for a DIFFERENT generation (e.g. an older process
+    // that already finished handling it, or a not-yet-reached later one)
+    // must not be consumed or affect this one.
+    #[test]
+    fn consume_stop_requested_for_generation_ignores_a_mismatched_generation() {
+        let mut inner = inner_with_session_id(None);
+        inner.stop_requested_generation = Some(5);
+        assert!(!inner.consume_stop_requested_for_generation(7));
+        assert_eq!(
+            inner.stop_requested_generation,
+            Some(5),
+            "an unmatched generation must be left untouched, not discarded"
+        );
     }
 
     // reagentx/codex never reviewed this path (PR #2338's review surface was
