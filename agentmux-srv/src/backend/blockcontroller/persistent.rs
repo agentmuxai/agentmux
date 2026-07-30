@@ -209,7 +209,7 @@ struct PersistentInner {
     /// uniform delivery path regardless of whether a message triggered the
     /// spawn or arrived while someone else's spawn was already in flight.
     /// Drained by `release_spawn_claim_and_drain_queue`.
-    pending_send_messages: VecDeque<String>,
+    pending_send_messages: VecDeque<QueuedMessage>,
     current_pid: Option<u32>,
     /// Channel to send messages to the stdin writer task.
     stdin_tx: Option<mpsc::Sender<String>>,
@@ -286,6 +286,48 @@ enum SendAction {
     /// Another caller is already spawning — this message has been
     /// enqueued for that caller's own post-spawn drain to deliver.
     Queued,
+}
+
+/// A single entry in `pending_send_messages`: the formatted stdin JSON
+/// payload plus whether it's already been persisted to the blockfile.
+/// codex P2 on PR #2360 (sixth review pass, round 7): a stale-resume
+/// retry's redelivery has already been correctly persisted on its
+/// original (failed) attempt — see `retry_after_resume_failure`'s own doc
+/// comment — but the drain used to persist EVERY message it delivers
+/// unconditionally, double-persisting a replayed retry batch into the
+/// blockfile transcript.
+#[derive(Clone, Debug)]
+struct QueuedMessage {
+    json_str: String,
+    already_persisted: bool,
+}
+
+impl QueuedMessage {
+    fn fresh(json_str: String) -> Self {
+        Self { json_str, already_persisted: false }
+    }
+
+    fn already_persisted(json_str: String) -> Self {
+        Self { json_str, already_persisted: true }
+    }
+}
+
+impl PartialEq<str> for QueuedMessage {
+    fn eq(&self, other: &str) -> bool {
+        self.json_str == other
+    }
+}
+
+impl PartialEq<&str> for QueuedMessage {
+    fn eq(&self, other: &&str) -> bool {
+        self.json_str == *other
+    }
+}
+
+impl PartialEq<String> for QueuedMessage {
+    fn eq(&self, other: &String) -> bool {
+        self.json_str == *other
+    }
 }
 
 /// PersistentSubprocessController keeps a long-running CLI process alive,
@@ -582,12 +624,12 @@ impl PersistentSubprocessController {
             let already_queued =
                 skip_if_already_queued && inner.pending_send_messages.iter().any(|m| m == json_str);
             if !already_queued {
-                inner.pending_send_messages.push_back(json_str.to_string());
+                inner.pending_send_messages.push_back(QueuedMessage::fresh(json_str.to_string()));
             }
             SendAction::Queued
         } else {
             inner.spawning_in_progress = true;
-            inner.pending_send_messages.push_back(json_str.to_string());
+            inner.pending_send_messages.push_back(QueuedMessage::fresh(json_str.to_string()));
             SendAction::BecomeSpawner
         }
     }
@@ -685,7 +727,7 @@ impl PersistentSubprocessController {
                         None => None,
                     }
                 };
-                let Some((json_str, tx)) = next else {
+                let Some((queued, tx)) = next else {
                     // Either the queue is empty, or the process has
                     // already exited again before we got to it. Release
                     // the claim ONLY if we're not about to hand off to a
@@ -707,6 +749,7 @@ impl PersistentSubprocessController {
                     }
                     break stalled;
                 };
+                let QueuedMessage { json_str, already_persisted } = queued;
                 let delivered_copy = json_str.clone();
                 let was_first_delivery = is_first_delivery;
                 is_first_delivery = false;
@@ -720,7 +763,7 @@ impl PersistentSubprocessController {
                     // silently discarding it) for a future spawn to pick
                     // up. Same claim-retention rule as above.
                     let mut inner = inner_arc.lock().unwrap();
-                    inner.pending_send_messages.push_front(e.0);
+                    inner.pending_send_messages.push_front(QueuedMessage { json_str: e.0, already_persisted });
                     let stalled = !inner.pending_send_messages.is_empty();
                     if !(stalled && allow_fallback_respawn) {
                         inner.spawning_in_progress = false;
@@ -757,9 +800,16 @@ impl PersistentSubprocessController {
                 // own synchronous code run (and thus persist) in a
                 // different order than their messages are actually
                 // delivered, producing a blockfile transcript that
-                // doesn't match what the agent received.
-                if let Some(ctrl) = self_ref.upgrade() {
-                    ctrl.persist_message_to_blockfile(&delivered_copy);
+                // doesn't match what the agent received. Skipped for a
+                // stale-resume retry's redelivery — codex P2 on PR #2360
+                // (sixth review pass, round 7): that content was already
+                // correctly persisted on its ORIGINAL (failed) attempt;
+                // persisting it again here duplicated every replayed
+                // prompt in the blockfile transcript.
+                if !already_persisted {
+                    if let Some(ctrl) = self_ref.upgrade() {
+                        ctrl.persist_message_to_blockfile(&delivered_copy);
+                    }
                 }
             };
             if stalled_with_leftovers {
@@ -989,25 +1039,47 @@ impl PersistentSubprocessController {
                 // process by the time this retry got scheduled — no need
                 // for a dedicated respawn; deliver straight to it.
                 self.mark_turn_active_and_publish();
-                let mut inner = self.inner.lock().unwrap();
-                let tx = inner.stdin_tx.clone();
-                for msg in std::iter::once(first).chain(rest) {
-                    let delivered = tx.as_ref().is_some_and(|tx| tx.try_send(msg.clone()).is_ok());
-                    if !delivered {
-                        tracing::warn!(
-                            block_id = %self.block_id,
-                            "failed to redeliver message after stale-resume retry (already-running path) — requeueing for a future spawn"
-                        );
-                        // codex P2 on PR #2360 (sixth review pass, round
-                        // 6): this is the retry's own LAST-CHANCE delivery
-                        // attempt for this message — nothing else will
-                        // ever resend it, so discarding it here (an
-                        // earlier cut of this fix did, on both a `Full`
-                        // channel and a process that died again in this
-                        // exact gap) would lose it permanently despite
-                        // already having been reported as accepted.
-                        inner.pending_send_messages.push_back(msg);
+                let mut any_failed = false;
+                {
+                    let mut inner = self.inner.lock().unwrap();
+                    let tx = inner.stdin_tx.clone();
+                    for msg in std::iter::once(first).chain(rest) {
+                        let delivered = tx.as_ref().is_some_and(|tx| tx.try_send(msg.clone()).is_ok());
+                        if !delivered {
+                            any_failed = true;
+                            // codex P2 on PR #2360 (sixth review pass,
+                            // round 6): this is the retry's own
+                            // LAST-CHANCE delivery attempt for this
+                            // message — nothing else will ever resend it,
+                            // so discarding it here (an earlier cut of
+                            // this fix did, on both a `Full` channel and a
+                            // process that died again in this exact gap)
+                            // would lose it permanently despite already
+                            // having been reported as accepted.
+                            inner.pending_send_messages.push_back(QueuedMessage::already_persisted(msg));
+                        }
                     }
+                }
+                if any_failed {
+                    tracing::warn!(
+                        block_id = %self.block_id,
+                        "failed to redeliver one or more messages after stale-resume retry (already-running path) — draining via the queue instead"
+                    );
+                    // codex P2 on PR #2360 (sixth review pass, round 7):
+                    // pushing onto the queue alone is not enough —
+                    // `DeliverDirect` only fires when `spawning_in_progress`
+                    // is `false`, so nothing would EVER drain this entry:
+                    // future callers ALSO take `DeliverDirect` (bypassing
+                    // the queue entirely) for as long as this same process
+                    // stays alive, which could be indefinite, silently
+                    // reordering it behind much later input. Claim the
+                    // spawn flag and hand off to the SAME drain used after
+                    // a fresh spawn (with backpressure via `Sender::send`,
+                    // not `try_send`) instead of leaving it orphaned.
+                    // `allow_fallback_respawn: false` — the process is
+                    // still alive, there's nothing to fall back to spawn.
+                    self.inner.lock().unwrap().spawning_in_progress = true;
+                    self.drain_queue_after_successful_spawn(config.clone(), false);
                 }
             }
             SendAction::Queued => {
@@ -1083,17 +1155,17 @@ impl PersistentSubprocessController {
             SendAction::DeliverDirect
         } else if inner.spawning_in_progress {
             if !inner.pending_send_messages.iter().any(|m| m == first) {
-                inner.pending_send_messages.push_back(first.to_string());
+                inner.pending_send_messages.push_back(QueuedMessage::already_persisted(first.to_string()));
             }
             for msg in rest {
-                inner.pending_send_messages.push_back(msg.clone());
+                inner.pending_send_messages.push_back(QueuedMessage::already_persisted(msg.clone()));
             }
             SendAction::Queued
         } else {
             inner.spawning_in_progress = true;
-            inner.pending_send_messages.push_back(first.to_string());
+            inner.pending_send_messages.push_back(QueuedMessage::already_persisted(first.to_string()));
             for msg in rest {
-                inner.pending_send_messages.push_back(msg.clone());
+                inner.pending_send_messages.push_back(QueuedMessage::already_persisted(msg.clone()));
             }
             SendAction::BecomeSpawner
         }
@@ -1130,6 +1202,30 @@ impl PersistentSubprocessController {
 
         {
             let inner = self.inner.lock().unwrap();
+            // reagentx P1 on PR #2360 (sixth review pass, round 7):
+            // `spawn_process` sets `stdin_tx` synchronously, well before
+            // the queued message that triggered the spawn is actually
+            // delivered by the background drain task
+            // (`drain_queue_after_successful_spawn`). Gating purely on
+            // `stdin_tx.is_some()` (as `decide_send_action` used to,
+            // before round 4) let a message land in that exact window and
+            // `try_send` straight to the live channel, jumping ahead of
+            // whatever's still queued — the same reordering bug fixed for
+            // `send_message`'s own delivery path. Unlike `send_message`,
+            // this function has no spawn config and its persistence is a
+            // LIVE, visible append (see below), not the silent persist
+            // the generic queue drain performs — there's no safe way to
+            // queue behind that drain without either bypassing its
+            // ordering guarantee or losing the visibility requirement, so
+            // this errors instead of reordering; the caller (muxbus/jekt
+            // delivery) can retry shortly. Checked in the SAME lock
+            // acquisition as `stdin_tx` below, not a separate one, so
+            // nothing can slip through the gap between two checks.
+            if inner.spawning_in_progress {
+                return Err(
+                    "persistent process is still starting up — try again shortly".to_string(),
+                );
+            }
             let tx = inner
                 .stdin_tx
                 .as_ref()
@@ -2470,7 +2566,7 @@ mod send_input_tests {
         {
             let mut inner = c.inner.lock().unwrap();
             inner.spawning_in_progress = true;
-            inner.pending_send_messages.push_back("original-payload".to_string());
+            inner.pending_send_messages.push_back(QueuedMessage::fresh("original-payload".to_string()));
         }
 
         let action = c.decide_send_action("original-payload", true);
@@ -2547,6 +2643,59 @@ mod send_input_tests {
         assert_eq!(inner.pending_send_messages[0], "msg-late-arrival");
     }
 
+    /// codex P2 on PR #2360 (sixth review pass, round 7): a fresh message
+    /// (from `decide_send_action`) must be marked NOT already persisted —
+    /// the drain is responsible for persisting it, in delivery order.
+    #[test]
+    fn decide_send_action_marks_a_fresh_message_as_not_yet_persisted() {
+        let c = controller();
+        c.decide_send_action("hello", false);
+        let inner = c.inner.lock().unwrap();
+        assert!(
+            !inner.pending_send_messages[0].already_persisted,
+            "a genuinely new message must not be marked already-persisted"
+        );
+    }
+
+    /// codex P2 on PR #2360 (sixth review pass, round 7): a stale-resume
+    /// retry's batch (from `decide_retry_batch_action`) must be marked
+    /// already persisted — it was correctly persisted on its ORIGINAL
+    /// attempt, and the shared drain must not persist it a second time.
+    #[test]
+    fn decide_retry_batch_action_marks_every_entry_as_already_persisted() {
+        let c = controller();
+        c.decide_retry_batch_action("hello", &["world".to_string()]);
+        let inner = c.inner.lock().unwrap();
+        assert!(inner.pending_send_messages[0].already_persisted);
+        assert!(inner.pending_send_messages[1].already_persisted);
+    }
+
+    /// reagentx P1 on PR #2360 (sixth review pass, round 7): `spawn_process`
+    /// sets `stdin_tx` synchronously, well before the queued message that
+    /// triggered the spawn is actually delivered by the background drain.
+    /// A muxbus/jekt steering message (`send_user_message`) landing in
+    /// that window must not `try_send` straight to the live channel — it
+    /// has no way to safely queue behind the drain (its persistence is a
+    /// live, visible append, not the drain's silent persist), so it must
+    /// error instead of reordering ahead of whatever the drain is still
+    /// working through.
+    #[tokio::test]
+    async fn send_user_message_errors_instead_of_reordering_while_a_drain_is_still_active() {
+        let c = controller();
+        let (tx, _rx) = mpsc::channel::<String>(4);
+        {
+            let mut inner = c.inner.lock().unwrap();
+            inner.stdin_tx = Some(tx);
+            inner.spawning_in_progress = true;
+        }
+
+        let err = c.send_user_message("steer".to_string()).unwrap_err();
+        assert!(
+            err.contains("starting up"),
+            "should surface a clear, retryable error instead of reordering, got {err:?}"
+        );
+    }
+
     /// Exercises the actual race with real OS threads, not just sequential
     /// state assertions — reagentx P1 on PR #2360 (sixth review pass): many
     /// concurrent callers landing on a controller with no process running
@@ -2610,8 +2759,8 @@ mod send_input_tests {
             let mut inner = c.inner.lock().unwrap();
             inner.stdin_tx = Some(tx);
             inner.spawning_in_progress = true;
-            inner.pending_send_messages.push_back("first".to_string());
-            inner.pending_send_messages.push_back("second".to_string());
+            inner.pending_send_messages.push_back(QueuedMessage::fresh("first".to_string()));
+            inner.pending_send_messages.push_back(QueuedMessage::fresh("second".to_string()));
         }
 
         // Never used for a fallback spawn in this test — the drain fully
@@ -2677,8 +2826,8 @@ mod send_input_tests {
         {
             let mut inner = c.inner.lock().unwrap();
             inner.spawning_in_progress = true;
-            inner.pending_send_messages.push_back("stuck-one".to_string());
-            inner.pending_send_messages.push_back("stuck-two".to_string());
+            inner.pending_send_messages.push_back(QueuedMessage::fresh("stuck-one".to_string()));
+            inner.pending_send_messages.push_back(QueuedMessage::fresh("stuck-two".to_string()));
             // stdin_tx stays None — simulates the process this claim was
             // spawning for having already died before the drain ran.
         }
@@ -2722,8 +2871,8 @@ mod send_input_tests {
         {
             let mut inner = c.inner.lock().unwrap();
             inner.spawning_in_progress = true;
-            inner.pending_send_messages.push_back("the-one-that-failed".to_string());
-            inner.pending_send_messages.push_back("queued-by-someone-else".to_string());
+            inner.pending_send_messages.push_back(QueuedMessage::fresh("the-one-that-failed".to_string()));
+            inner.pending_send_messages.push_back(QueuedMessage::fresh("queued-by-someone-else".to_string()));
         }
 
         c.release_spawn_claim_and_drain_queue(false, unreachable_fallback_config());
@@ -2848,6 +2997,48 @@ mod send_input_tests {
         assert_eq!(inner.pending_send_messages[0], "stuck");
     }
 
+    /// codex P2 on PR #2360 (sixth review pass, round 7): pushing a failed
+    /// direct-retry delivery onto the queue alone is not enough —
+    /// `DeliverDirect` only fires when `spawning_in_progress` is `false`,
+    /// so nothing would EVER drain this entry for as long as the same
+    /// process stays alive (every future caller would ALSO take
+    /// `DeliverDirect`, bypassing the queue entirely). The claim must be
+    /// taken and a drain triggered instead — which, even against the same
+    /// dead sender used here, must still correctly release the claim
+    /// afterward (not leave it stuck forever) while preserving the
+    /// message for a future spawn.
+    #[tokio::test]
+    async fn retry_after_resume_failure_claims_the_spawn_flag_when_direct_delivery_fails() {
+        let c = controller();
+        let (tx, rx) = mpsc::channel::<String>(1);
+        drop(rx);
+        c.inner.lock().unwrap().stdin_tx = Some(tx);
+
+        let config = PersistentSpawnConfig {
+            cli_command: "unused".to_string(),
+            cli_args: vec![],
+            working_dir: String::new(),
+            env_vars: HashMap::new(),
+            session_id_field: "session_id".to_string(),
+            resume_flag: "--resume".to_string(),
+            session_id: String::new(),
+            message_id: None,
+        };
+        c.retry_after_resume_failure(config, vec!["stuck".to_string()]);
+
+        assert!(
+            c.inner.lock().unwrap().spawning_in_progress,
+            "must claim the spawn flag immediately so no concurrent caller bypasses the queue via DeliverDirect"
+        );
+
+        // Let the background drain (which will also fail against this
+        // same dead sender) run to completion.
+        tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+        let inner = c.inner.lock().unwrap();
+        assert!(!inner.spawning_in_progress, "claim must eventually be released, not stuck forever");
+        assert_eq!(inner.pending_send_messages.len(), 1, "message must remain queued, not lost");
+    }
+
     /// codex P1 on PR #2360 (sixth review pass, round 5): the drain must
     /// track every message it successfully delivers beyond the first
     /// (which `spawn_process` already stashed synchronously — see
@@ -2873,8 +3064,8 @@ mod send_input_tests {
             let mut inner = c.inner.lock().unwrap();
             inner.stdin_tx = Some(tx);
             inner.spawning_in_progress = true;
-            inner.pending_send_messages.push_back("first".to_string());
-            inner.pending_send_messages.push_back("second".to_string());
+            inner.pending_send_messages.push_back(QueuedMessage::fresh("first".to_string()));
+            inner.pending_send_messages.push_back(QueuedMessage::fresh("second".to_string()));
             // Simulates spawn_process's own synchronous stash for "first"
             // — the message that triggered this spawn.
             inner.pending_resume_retry =
@@ -2923,8 +3114,8 @@ mod send_input_tests {
             let mut inner = c.inner.lock().unwrap();
             inner.stdin_tx = Some(tx);
             inner.spawning_in_progress = true;
-            inner.pending_send_messages.push_back("first".to_string());
-            inner.pending_send_messages.push_back("second".to_string());
+            inner.pending_send_messages.push_back(QueuedMessage::fresh("first".to_string()));
+            inner.pending_send_messages.push_back(QueuedMessage::fresh("second".to_string()));
             // Simulates poison_resume having ALREADY promoted
             // pending_resume_retry to confirmed before the drain got to
             // "second".
@@ -2994,7 +3185,7 @@ mod send_input_tests {
         {
             let mut inner = c.inner.lock().unwrap();
             inner.spawning_in_progress = true;
-            inner.pending_send_messages.push_back("first".to_string());
+            inner.pending_send_messages.push_back(QueuedMessage::fresh("first".to_string()));
         }
 
         let action = c.decide_retry_batch_action("first", &["second".to_string()]);
