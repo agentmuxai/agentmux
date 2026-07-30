@@ -97,7 +97,7 @@ mod muxbus_registration_tests {
 }
 
 /// Configuration for spawning the persistent process.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PersistentSpawnConfig {
     pub cli_command: String,
     pub cli_args: Vec<String>,
@@ -1285,9 +1285,44 @@ impl PersistentSubprocessController {
     /// `send_message` uses, but enqueueing everything atomically in one
     /// lock acquisition (see its own doc comment for why per-message
     /// decisions aren't safe for a batch).
-    fn retry_after_resume_failure(&self, mut config: PersistentSpawnConfig, mut json_strs: Vec<String>) {
+    /// codex P2 on PR #2371: a held-back error line must reach the user
+    /// if a confirmed retry turns out NOT to actually launch (this
+    /// controller already being torn down, or the fresh `spawn_process`
+    /// call itself failing) — otherwise an already-accepted prompt ends
+    /// in total silence: neither the original error nor a replacement
+    /// one. `held_error_line` is only ever flushed on a path that does
+    /// NOT result in a live (or about-to-be-live) process actually
+    /// receiving this batch; every path that does (`DeliverDirect`,
+    /// `Queued`, or a successful `BecomeSpawner` spawn) drops it, same as
+    /// before this fix.
+    fn flush_error_line_now(&self, line: String) {
+        let Some(ref broker) = self.broker else { return };
+        let global_output_zone = super::shell::resolve_global_output_zone(&self.wstore, &self.block_id);
+        super::shell::handle_append_block_file(
+            broker,
+            &self.block_id,
+            PERSISTENT_OUTPUT_SUBJECT,
+            line.as_bytes(),
+            self.filestore.as_ref(),
+            global_output_zone.as_deref(),
+        );
+    }
+
+    fn retry_after_resume_failure(
+        &self,
+        mut config: PersistentSpawnConfig,
+        mut json_strs: Vec<String>,
+        held_error_line: Option<String>,
+    ) {
         config.session_id = String::new();
         let Some(first) = (!json_strs.is_empty()).then(|| json_strs.remove(0)) else {
+            // Nothing to retry at all (shouldn't happen in practice —
+            // the batch always has at least the triggering message) —
+            // but if it ever does, this is a no-op, not a launch, so any
+            // held error line must still reach the user.
+            if let Some(line) = held_error_line {
+                self.flush_error_line_now(line);
+            }
             return;
         };
         let rest = json_strs;
@@ -1419,6 +1454,14 @@ impl PersistentSubprocessController {
                     // broadcasts that state, which the original exit
                     // deliberately withheld pending this retry's outcome.
                     self.publish_status();
+                    // codex P2 on PR #2371: the retry never actually
+                    // launched — flush any held error line now instead
+                    // of silently dropping it, so the user gets at least
+                    // one explanation (the original error) instead of
+                    // total silence.
+                    if let Some(line) = held_error_line {
+                        self.flush_error_line_now(line);
+                    }
                 }
             }
         }
@@ -2329,29 +2372,35 @@ impl PersistentSubprocessController {
                     }
 
                     // codex P1 on PR #2371: same reasoning as the stderr
-                    // wait above, for the stdout reader. `child.wait()`
-                    // resolving does NOT mean the stdout reader has already
-                    // read and stashed the doomed attempt's terminal
-                    // error-result line into `pending_error_result_line` —
-                    // without this wait, `confirmed_stale_resume_retry.take()`
-                    // below could clear `pending_resume_retry` and this task
-                    // could launch the retry BEFORE the lagging stdout
-                    // reader ever stashes the line; that reader would then
-                    // find `pending_resume_retry` already `None` and append
-                    // the error immediately, reproducing the exact bubble
-                    // this PR exists to suppress.
-                    {
-                        let abort_handle = stdout_reader_handle.abort_handle();
-                        if tokio::time::timeout(std::time::Duration::from_millis(500), stdout_reader_handle)
-                            .await
-                            .is_err()
-                        {
-                            tracing::warn!(
-                                block_id = %block_id_wait,
-                                "stdout reader did not finish within 500ms of process exit — aborting it"
-                            );
-                            abort_handle.abort();
-                        }
+                    // wait above, for the stdout reader — but NOT the
+                    // same bounded-timeout-then-abort mechanism. Unlike
+                    // stderr, the stdout reader performs synchronous
+                    // FileStore/SQLite writes that can legitimately
+                    // contend for multiple seconds (SQLite's own busy
+                    // timeout), so a short bound would abort it mid-line,
+                    // discarding still-unread assistant/result frames and
+                    // truncating the persisted transcript — a worse
+                    // outcome than the race this wait exists to close.
+                    // `child.wait()` resolving already proves the
+                    // process's stdout pipe has closed (the process has
+                    // fully exited), so this reader's own
+                    // `lines.next_line()` loop is GUARANTEED to reach EOF
+                    // and return on its own — awaiting it fully (not
+                    // racing a timeout) is always eventually correct,
+                    // only possibly slow under contention. Logged if it
+                    // takes unusually long, purely for diagnostics — the
+                    // wait itself is never cut short.
+                    let stdout_drain_started = std::time::Instant::now();
+                    let _ = stdout_reader_handle.await;
+                    let stdout_drain_elapsed = stdout_drain_started.elapsed();
+                    if stdout_drain_elapsed > std::time::Duration::from_millis(500) {
+                        tracing::warn!(
+                            block_id = %block_id_wait,
+                            elapsed_ms = stdout_drain_elapsed.as_millis() as u64,
+                            "stdout reader took unusually long to drain after process exit \
+                             (likely FileStore/SQLite contention) — waited for it anyway rather \
+                             than aborting, to avoid truncating the transcript"
+                        );
                     }
 
                     // Wait (briefly, bounded) for the drain to finish
@@ -2466,20 +2515,37 @@ impl PersistentSubprocessController {
                         // Issue #2368: the retry is firing and will very
                         // likely succeed within milliseconds — the doomed
                         // attempt's own terminal error result must never
-                        // reach the user, so it's dropped here instead of
-                        // ever being appended to the blockfile.
-                        if pending_error_line.is_some() {
-                            tracing::info!(
-                                block_id = %block_id_wait,
-                                "dropping doomed attempt's error result — stale-resume retry is firing"
-                            );
-                        }
+                        // reach the user, so it's dropped (not flushed)
+                        // as long as the retry actually launches. Handed
+                        // to `retry_after_resume_failure` itself (codex
+                        // P2 on PR #2371) rather than dropped here
+                        // unconditionally — a retry that turns out NOT to
+                        // launch (this controller already gone, or the
+                        // fresh spawn itself failing) must still flush
+                        // it, or an already-accepted prompt ends in total
+                        // silence.
                         if let Some(ctrl) = self_ref_wait.upgrade() {
                             tracing::warn!(
                                 block_id = %block_id_wait,
                                 "stale --resume session id caused this exit — retrying fresh, without --resume"
                             );
-                            ctrl.retry_after_resume_failure(retry_config, retry_json);
+                            ctrl.retry_after_resume_failure(retry_config, retry_json, pending_error_line);
+                        } else if let Some(line) = pending_error_line {
+                            // The controller itself is already gone
+                            // (weak ref invalidated) — nothing can retry
+                            // this batch at all, so flush directly via
+                            // this task's own captured broker/filestore
+                            // rather than going through `ctrl`.
+                            if let Some(ref broker) = broker_wait {
+                                super::shell::handle_append_block_file(
+                                    broker,
+                                    &block_id_wait,
+                                    PERSISTENT_OUTPUT_SUBJECT,
+                                    line.as_bytes(),
+                                    filestore_wait.as_ref(),
+                                    global_output_zone_wait.as_deref(),
+                                );
+                            }
                         }
                     } else if let Some(ref broker) = broker_wait {
                         // Issue #2368: no retry is following after all
@@ -2577,18 +2643,24 @@ impl PersistentSubprocessController {
                             abort_handle.abort();
                         }
                     }
-                    {
-                        let abort_handle = stdout_reader_handle.abort_handle();
-                        if tokio::time::timeout(std::time::Duration::from_millis(500), stdout_reader_handle)
-                            .await
-                            .is_err()
-                        {
-                            tracing::warn!(
-                                block_id = %block_id_wait,
-                                "stdout reader did not finish within 500ms of kill — aborting it"
-                            );
-                            abort_handle.abort();
-                        }
+                    // codex P1 on PR #2371: await, don't abort — see the
+                    // child.wait() arm's identical comment above. By this
+                    // point the process is dead or dying (force-killed,
+                    // or the graceful 5s wait/force-kill above already
+                    // ran), so the stdout pipe will close and this
+                    // reader's loop is guaranteed to reach EOF on its
+                    // own; aborting risks truncating still-unread
+                    // assistant/result frames out of the transcript.
+                    let stdout_drain_started = std::time::Instant::now();
+                    let _ = stdout_reader_handle.await;
+                    let stdout_drain_elapsed = stdout_drain_started.elapsed();
+                    if stdout_drain_elapsed > std::time::Duration::from_millis(500) {
+                        tracing::warn!(
+                            block_id = %block_id_wait,
+                            elapsed_ms = stdout_drain_elapsed.as_millis() as u64,
+                            "stdout reader took unusually long to drain after kill — waited for it \
+                             anyway rather than aborting, to avoid truncating the transcript"
+                        );
                     }
 
                     health_wait.set_exited(-1);
@@ -3014,7 +3086,7 @@ mod send_input_tests {
             session_id: "dead-sid".to_string(),
             message_id: None,
         };
-        c.retry_after_resume_failure(config, vec!["{}".to_string()]);
+        c.retry_after_resume_failure(config, vec!["{}".to_string()], None);
 
         assert_eq!(
             c.inner.lock().unwrap().session_id,
@@ -3735,7 +3807,7 @@ mod send_input_tests {
             session_id: "dead-sid".to_string(),
             message_id: None,
         };
-        c.retry_after_resume_failure(config, vec!["{}".to_string()]);
+        c.retry_after_resume_failure(config, vec!["{}".to_string()], None);
 
         assert_eq!(
             c.inner.lock().unwrap().session_id.as_deref(),
@@ -3770,6 +3842,7 @@ mod send_input_tests {
         c.retry_after_resume_failure(
             config,
             vec!["msg-1".to_string(), "msg-2".to_string(), "msg-3".to_string()],
+            None,
         );
 
         assert_eq!(rx.recv().await.unwrap(), "msg-1");
@@ -3800,7 +3873,7 @@ mod send_input_tests {
             session_id: String::new(),
             message_id: None,
         };
-        c.retry_after_resume_failure(config, vec!["stuck".to_string()]);
+        c.retry_after_resume_failure(config, vec!["stuck".to_string()], None);
 
         let inner = c.inner.lock().unwrap();
         assert_eq!(
@@ -3841,6 +3914,7 @@ mod send_input_tests {
         c.retry_after_resume_failure(
             config,
             vec!["msg-1".to_string(), "msg-2".to_string(), "msg-3".to_string()],
+            None,
         );
 
         let inner = c.inner.lock().unwrap();
@@ -3881,7 +3955,7 @@ mod send_input_tests {
             session_id: String::new(),
             message_id: None,
         };
-        c.retry_after_resume_failure(config, vec!["stuck".to_string()]);
+        c.retry_after_resume_failure(config, vec!["stuck".to_string()], None);
 
         assert!(
             c.inner.lock().unwrap().spawning_in_progress,
@@ -3894,6 +3968,51 @@ mod send_input_tests {
         let inner = c.inner.lock().unwrap();
         assert!(!inner.spawning_in_progress, "claim must eventually be released, not stuck forever");
         assert_eq!(inner.pending_send_messages.len(), 1, "message must remain queued, not lost");
+    }
+
+    /// codex P2 on PR #2371: a confirmed retry that turns out NOT to
+    /// actually launch (here, `spawn_process` failing against a
+    /// nonexistent binary — the `BecomeSpawner` path's own failure case)
+    /// must flush a held-back error line instead of silently dropping
+    /// it. Without this, an already-accepted prompt whose stale-resume
+    /// retry then ALSO fails to spawn would end in total silence:
+    /// neither the original error nor a replacement one.
+    #[test]
+    fn retry_after_resume_failure_flushes_the_held_error_line_when_the_respawn_itself_fails() {
+        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let filestore = Arc::new(FileStore::open_in_memory().unwrap());
+        let block_id = "block-flush-on-failed-retry".to_string();
+        let c = PersistentSubprocessController::new(
+            "tab".to_string(),
+            block_id.clone(),
+            Some(broker),
+            None,
+            None,
+            Some(filestore.clone()),
+        );
+
+        let config = PersistentSpawnConfig {
+            cli_command: "definitely-not-a-real-binary-xyz".to_string(),
+            cli_args: vec![],
+            working_dir: String::new(),
+            env_vars: HashMap::new(),
+            session_id_field: "session_id".to_string(),
+            resume_flag: "--resume".to_string(),
+            session_id: String::new(),
+            message_id: None,
+        };
+        c.retry_after_resume_failure(config, vec!["{}".to_string()], Some("boom\n".to_string()));
+
+        let flushed = filestore
+            .read_file(&block_id, PERSISTENT_OUTPUT_SUBJECT)
+            .unwrap()
+            .map(|bytes| String::from_utf8_lossy(&bytes).contains("boom"))
+            .unwrap_or(false);
+        assert!(
+            flushed,
+            "a held error line must be flushed to the blockfile when the retry's own respawn fails, \
+             not silently dropped"
+        );
     }
 
     /// codex P1 on PR #2360 (sixth review pass, round 5): the drain must
