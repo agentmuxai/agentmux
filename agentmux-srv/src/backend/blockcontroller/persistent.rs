@@ -889,7 +889,35 @@ impl PersistentSubprocessController {
         // silently drops the message for good. Mirrors
         // `retry_after_resume_failure`'s own explicit clear for the exact
         // same reason.
-        self.inner.lock().unwrap().session_id = None;
+        //
+        // Poisons (rather than just clears) whatever sid was held —
+        // reagentx P1 on PR #2360 (sixth review pass, round 12): this
+        // fallback is reached with NO guarantee that `poison_resume` has
+        // actually run for the doomed process's sid — the exit-handler's
+        // own bounded wait (500ms) for that process's stderr-reader task
+        // can time out and abort it before it ever calls `poison_resume`
+        // (this drain-triggered path, unlike `retry_after_resume_failure`,
+        // does not require `confirmed_stale_resume_retry` to have been
+        // set, so it can fire even when that promotion never happened). In
+        // that case the SAME process's stdout-reader task — which has NO
+        // bound or abort mechanism at all — could still be concurrently
+        // racing to echo-capture that exact sid via
+        // `try_capture_session_id`, re-setting `inner.session_id` right
+        // after a plain clear and before `spawn_process`'s own `--resume`
+        // read, moments later. `poison_resume` additionally sets
+        // `resume_poisoned`, which `try_capture_session_id` checks and
+        // refuses regardless of ordering — closing that gap even when the
+        // stderr reader never got to poison it itself. Safe to call
+        // unconditionally: by the time this fallback runs, the exit
+        // handler has already unconditionally cleared
+        // `pending_resume_retry`, so `poison_resume`'s own retry-promotion
+        // side effect is always a no-op here.
+        {
+            let mut inner = self.inner.lock().unwrap();
+            if let Some(old_sid) = inner.session_id.clone() {
+                inner.poison_resume(&old_sid);
+            }
+        }
         let retry_config = config.clone();
         let spawn_result = self.spawn_process(config, None);
         match &spawn_result {
@@ -2599,6 +2627,46 @@ mod send_input_tests {
             None,
             "must clear inner.session_id directly, not rely on config.session_id alone"
         );
+    }
+
+    /// reagentx P1 on PR #2360 (sixth review pass, round 12): this
+    /// fallback is reached with no guarantee `poison_resume` has already
+    /// run for the doomed process's sid (its stderr-reader task could
+    /// have been aborted past its 500ms bound before ever calling it).
+    /// The doomed process's stdout-reader task has no such bound, so it
+    /// could still be concurrently racing to echo-capture that exact sid
+    /// — a plain clear alone leaves nothing to refuse it. Confirms this
+    /// fallback additionally poisons whatever sid it held, so a later
+    /// capture attempt for that exact sid is refused regardless of
+    /// ordering.
+    #[test]
+    fn respawn_once_for_leftover_queue_poisons_whatever_sid_it_held() {
+        let c = controller();
+        c.inner.lock().unwrap().session_id = Some("dead-sid".to_string());
+
+        let config = PersistentSpawnConfig {
+            cli_command: "definitely-not-a-real-binary-xyz".to_string(),
+            cli_args: vec![],
+            working_dir: String::new(),
+            env_vars: HashMap::new(),
+            session_id_field: "session_id".to_string(),
+            resume_flag: "--resume".to_string(),
+            session_id: "dead-sid".to_string(),
+            message_id: None,
+        };
+        c.respawn_once_for_leftover_queue(config);
+
+        {
+            let mut inner = c.inner.lock().unwrap();
+            assert_eq!(
+                inner.resume_poisoned.as_deref(),
+                Some("dead-sid"),
+                "must poison the sid it held, not just clear it, so a still-racing \
+                 stdout-reader capture attempt for that exact sid is refused"
+            );
+            let captured = inner.try_capture_session_id("dead-sid");
+            assert!(!captured, "a later capture attempt for the poisoned sid must be refused");
+        }
     }
 
     /// codex P1/P2 on PR #2360 (second review pass): the process-waiter
