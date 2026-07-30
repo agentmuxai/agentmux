@@ -2047,7 +2047,18 @@ impl PersistentSubprocessController {
         // its own copy to flush a held-back `pending_error_result_line`.
         let global_output_zone_wait = global_output_zone.clone();
 
-        tokio::spawn(async move {
+        // codex P1 on PR #2371: the JoinHandle is kept (not discarded) so the
+        // process-waiter task can await this task's full completion before
+        // resolving the retry decision, mirroring `stderr_reader_handle`
+        // below. `child.wait()` resolving is NOT proof this task has already
+        // read and stashed the doomed attempt's terminal error-result line
+        // in `pending_error_result_line` — without this wait, the waiter
+        // could clear `pending_resume_retry` and launch the retry first,
+        // after which this (now-lagging) reader would find
+        // `pending_resume_retry` already `None` and append the error line
+        // immediately, reproducing the exact bubble this PR exists to
+        // suppress.
+        let stdout_reader_handle: tokio::task::JoinHandle<()> = tokio::spawn(async move {
             let reader = BufReader::new(stdout);
             let mut lines = reader.lines();
             let mut stats = super::session_stats::SessionStatsAccumulator::new(block_id_read.clone());
@@ -2298,6 +2309,32 @@ impl PersistentSubprocessController {
                         }
                     }
 
+                    // codex P1 on PR #2371: same reasoning as the stderr
+                    // wait above, for the stdout reader. `child.wait()`
+                    // resolving does NOT mean the stdout reader has already
+                    // read and stashed the doomed attempt's terminal
+                    // error-result line into `pending_error_result_line` —
+                    // without this wait, `confirmed_stale_resume_retry.take()`
+                    // below could clear `pending_resume_retry` and this task
+                    // could launch the retry BEFORE the lagging stdout
+                    // reader ever stashes the line; that reader would then
+                    // find `pending_resume_retry` already `None` and append
+                    // the error immediately, reproducing the exact bubble
+                    // this PR exists to suppress.
+                    {
+                        let abort_handle = stdout_reader_handle.abort_handle();
+                        if tokio::time::timeout(std::time::Duration::from_millis(500), stdout_reader_handle)
+                            .await
+                            .is_err()
+                        {
+                            tracing::warn!(
+                                block_id = %block_id_wait,
+                                "stdout reader did not finish within 500ms of process exit — aborting it"
+                            );
+                            abort_handle.abort();
+                        }
+                    }
+
                     // Wait (briefly, bounded) for the drain to finish
                     // appending whatever message it's currently
                     // mid-delivery on before deciding the retry batch
@@ -2516,6 +2553,14 @@ impl PersistentSubprocessController {
                     // lifetime.
                     inner.pending_resume_retry = None;
                     inner.confirmed_stale_resume_retry = None;
+                    // codex P2 on PR #2371: a stashed error line must not be
+                    // silently lost on a user-initiated stop (it may be a
+                    // genuine error the stop itself interrupted), and must
+                    // not survive to be wrongly appended by a LATER,
+                    // unrelated exit on a reused controller instance —
+                    // take it now, alongside the resume-retry fields it's
+                    // cleared together with, and flush it below.
+                    let pending_error_line = inner.pending_error_result_line.take();
                     // codex P1 on PR #2360 (sixth review pass, round 5):
                     // an active spawn claim's own background drain
                     // (`drain_queue_after_successful_spawn`) is a
@@ -2533,6 +2578,22 @@ impl PersistentSubprocessController {
                     inner.spawning_in_progress = false;
                     Self::set_status(&mut inner, STATUS_DONE);
                     drop(inner);
+
+                    // Flush a held-back error line now — see the take()
+                    // above and `pending_error_result_line`'s own doc
+                    // comment.
+                    if let Some(line) = pending_error_line {
+                        if let Some(ref broker) = broker_wait {
+                            super::shell::handle_append_block_file(
+                                broker,
+                                &block_id_wait,
+                                PERSISTENT_OUTPUT_SUBJECT,
+                                line.as_bytes(),
+                                filestore_wait.as_ref(),
+                                global_output_zone_wait.as_deref(),
+                            );
+                        }
+                    }
 
                     // Deregister from muxbus (see the clean-exit arm above).
                     crate::backend::reactive::get_global_handler()
