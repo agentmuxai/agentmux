@@ -16,6 +16,7 @@
 .agent-composer-strip {
     display: grid;
     grid-template-columns: 1fr auto 1fr;
+    grid-template-areas: "controls stats right";
     align-items: center;
     gap: var(--space-2);
     min-height: 28px;
@@ -37,6 +38,7 @@
 // ── Controls zone (left column) ─────────────────────────────────────────────
 
 .agent-composer-strip-controls {
+    grid-area: controls;
     display: flex;
     align-items: center;
     gap: var(--space-1);
@@ -46,6 +48,7 @@
 // ── Stats zone (center column) ──────────────────────────────────────────────
 
 .agent-composer-strip-stats-zone {
+    grid-area: stats;
     justify-self: center;
 }
 
@@ -174,6 +177,7 @@
 // pinning now).
 
 .agent-composer-strip-right {
+    grid-area: right;
     display: flex;
     align-items: center;
     gap: var(--space-1-5);
@@ -257,24 +261,64 @@
     }
 }
 
-// Narrow-pane truncation — drop stats, then ctx text.
-@container modal-mount (max-width: 240px) {
-    .agent-composer-strip-stats,
-    .agent-composer-strip-ctx {
+// ── Responsive tiers ─────────────────────────────────────────────────────
+// Was `@container modal-mount` — that container name is only declared by
+// <Modal> portal mounts (modal.scss), never by the docked agent pane, so
+// these rules never matched in the real composer strip and nothing here
+// actually reflowed on a narrow pane. `.agent-view` is what establishes the
+// containment context around this strip (agent-view.scss, container-name:
+// agent-pane) — see SPEC_COMPOSER_STRIP_TWO_LINE_RESPONSIVE_2026_07_30.md
+// for the full audit + design.
+
+// Tier 2 — two-line layout. Controls + right zone (badges/ctx/auth/Shell)
+// share row 1; stats drop to their own full-width, centered row 2. Nothing
+// is hidden here — giving stats a dedicated row removes them from the row-1
+// space contest entirely, which is why the old "drop stats at ≤240px" idea
+// is gone: it's no longer needed once this tier is active.
+@container agent-pane (max-width: 480px) {
+    .agent-composer-strip {
+        grid-template-columns: 1fr auto;
+        grid-template-areas:
+            "controls right"
+            "stats    stats";
+        min-height: 52px;
+        row-gap: 2px;
+    }
+
+    .agent-composer-strip-stats-zone {
+        justify-self: stretch;
+        text-align: center;
+    }
+}
+
+// Tier 3 — row 1 (controls + right zone) is still crowded with 5 things;
+// shed the least essential, informational-only items first. Context text
+// and Shell stay visible at every tier — ctx is the one safety signal in
+// this bar (compaction proximity), Shell is the strip's one real action.
+@container agent-pane (max-width: 300px) {
+    .agent-composer-strip-auth {
         display: none;
     }
 }
 
-@container modal-mount (max-width: 320px) {
-    // Keep the runtime dropup visible — one compact trigger fits easily.
-    // (Previously `.agent-composer-strip-select { display:none }` here hid
-    // Mode/Model/Effort on any pane ≤320px, leaving only Log — see
-    // SPEC_COMPOSER_STRIP_RESPONSIVE_ARCHITECTURE_2026_07_02. Progressive
-    // collapse — short/icon/combined forms — is the follow-up.)
-    .agent-composer-strip-log-btn { font-size: 9px; padding: 1px 3px; }
-    // Only reintroduce a cap here, where the pane genuinely doesn't have
-    // room for the trigger's full "Mode · Model · Effort" summary.
-    .agent-runtime-dropup-trigger { max-width: 120px; }
+@container agent-pane (max-width: 260px) {
+    .agent-composer-strip-process-badge {
+        display: none;
+    }
+}
+
+// Tier 4 — controls trigger compacts to an ellipsized cap rather than
+// disappearing (never `display:none` the runtime controls — see
+// SPEC_COMPOSER_STRIP_RESPONSIVE_ARCHITECTURE_2026_07_02.md).
+@container agent-pane (max-width: 220px) {
+    .agent-runtime-dropup-trigger {
+        max-width: 120px;
+    }
+
+    .agent-composer-strip-log-btn {
+        font-size: 9px;
+        padding: 1px 3px;
+    }
 }
 
 // ── Resizable details drawer (ResizableDetailsDrawer.tsx) ──────────────────
