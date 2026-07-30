@@ -342,7 +342,24 @@ impl PersistentInner {
     /// result (an unrelated rate limit five messages later, say) as if it
     /// might still need to be dropped for a stale-resume retry — and
     /// each new one would silently overwrite whatever was already held.
-    fn try_capture_session_id(&mut self, sid: &str) -> bool {
+    ///
+    /// reagentx P0 (second finding on this PR): the CLI echoes back
+    /// whatever `--resume` sid it was given as its FIRST stdout line
+    /// REGARDLESS of whether that resume goes on to succeed or fail —
+    /// true even for a frame that isn't itself an error (e.g. a
+    /// "system"/init frame), and this first echo can arrive before the
+    /// independently-scheduled stderr reader has had a chance to report
+    /// "No conversation found" and poison it. So `sid` matching the
+    /// attempted sid alone is NOT proof of genuine progress. `sid`
+    /// differing from the attempted one (the CLI gave up and started
+    /// fresh) or `is_confirmed_success` (true only for a terminal
+    /// `result` with `is_error:false` — the whole turn actually
+    /// completed) are the only two unambiguous cases; any other same-sid
+    /// confirmation leaves `pending_resume_retry`/
+    /// `confirmed_stale_resume_retry` untouched, giving `poison_resume` a
+    /// real chance to promote the retry first if this turns out to be
+    /// the doomed case after all.
+    fn try_capture_session_id(&mut self, sid: &str, is_confirmed_success: bool) -> bool {
         if self.resume_poisoned.as_deref() == Some(sid) {
             return false;
         }
@@ -350,14 +367,15 @@ impl PersistentInner {
         if adopted {
             self.session_id = Some(sid.to_string());
         }
-        // Any confirmation of a non-poisoned sid — a resumed conversation
-        // confirming the sid it was already given, or a fresh
-        // conversation the CLI started on its own — proves this spawn is
-        // genuinely progressing. Neither the tentative nor the confirmed
-        // retry is needed anymore, whether or not THIS call is the one
-        // that originally adopted the session id.
-        self.pending_resume_retry = None;
-        self.confirmed_stale_resume_retry = None;
+        let attempted_sid = self
+            .pending_resume_retry
+            .as_ref()
+            .or(self.confirmed_stale_resume_retry.as_ref())
+            .map(|(attempted, _, _)| attempted.as_str());
+        if attempted_sid != Some(sid) || is_confirmed_success {
+            self.pending_resume_retry = None;
+            self.confirmed_stale_resume_retry = None;
+        }
         adopted
     }
 
@@ -2304,11 +2322,22 @@ impl PersistentSubprocessController {
                     if !is_error_result {
                         if let Some(sid) = parsed.get(&session_id_field).and_then(|v| v.as_str()) {
                             let sid_string = sid.to_string();
+                            // A genuinely successful terminal result (guaranteed
+                            // true here since `is_error_result` already excluded
+                            // the failing case) is the only unambiguous proof
+                            // that resuming THIS sid actually worked — any
+                            // earlier frame (e.g. a "system"/init frame) echoes
+                            // the same attempted sid regardless of whether the
+                            // resume goes on to fail. See
+                            // `try_capture_session_id`'s own doc comment.
+                            let is_confirmed_success = is_result_frame;
                             // See PersistentInner::try_capture_session_id — refuses
                             // to (re-)adopt an id the stderr reader (above) already
                             // confirmed unreachable, whichever task wins the race.
-                            let should_capture =
-                                inner_read.lock().unwrap().try_capture_session_id(&sid_string);
+                            let should_capture = inner_read
+                                .lock()
+                                .unwrap()
+                                .try_capture_session_id(&sid_string, is_confirmed_success);
                             if should_capture {
                                 tracing::info!(
                                     block_id = %block_id_read,
@@ -3264,7 +3293,7 @@ mod send_input_tests {
             Some("valid-unrelated-sid"),
             "must not permanently poison a sid that was never confirmed dead by the CLI"
         );
-        let captured = inner.try_capture_session_id("valid-unrelated-sid");
+        let captured = inner.try_capture_session_id("valid-unrelated-sid", true);
         assert!(captured, "a genuinely valid sid must still be capturable again later");
     }
 
@@ -4478,7 +4507,7 @@ mod resume_poison_tests {
         inner.poison_resume("dead-sid");
         assert_eq!(inner.session_id, None, "poisoning the live session id clears it");
 
-        let captured = inner.try_capture_session_id("dead-sid");
+        let captured = inner.try_capture_session_id("dead-sid", true);
         assert!(!captured, "must refuse to re-adopt a confirmed-poisoned id");
         assert_eq!(inner.session_id, None);
     }
@@ -4488,7 +4517,7 @@ mod resume_poison_tests {
     #[test]
     fn stdout_first_then_stderr_poison_still_clears() {
         let mut inner = inner_with_session_id(None);
-        let captured = inner.try_capture_session_id("dead-sid");
+        let captured = inner.try_capture_session_id("dead-sid", true);
         assert!(captured, "first capture with no prior state succeeds");
         assert_eq!(inner.session_id.as_deref(), Some("dead-sid"));
 
@@ -4503,7 +4532,7 @@ mod resume_poison_tests {
         let mut inner = inner_with_session_id(None);
         inner.poison_resume("dead-sid");
 
-        let captured = inner.try_capture_session_id("fresh-sid");
+        let captured = inner.try_capture_session_id("fresh-sid", true);
         assert!(captured, "a different id is not blocked by an unrelated poison");
         assert_eq!(inner.session_id.as_deref(), Some("fresh-sid"));
     }
@@ -4513,7 +4542,7 @@ mod resume_poison_tests {
     #[test]
     fn does_not_overwrite_an_already_captured_session_id() {
         let mut inner = inner_with_session_id(Some("first-sid"));
-        let captured = inner.try_capture_session_id("second-sid");
+        let captured = inner.try_capture_session_id("second-sid", true);
         assert!(!captured, "must not overwrite an already-captured session id");
         assert_eq!(inner.session_id.as_deref(), Some("first-sid"));
     }
@@ -4535,7 +4564,7 @@ mod resume_poison_tests {
         inner.pending_resume_retry =
             Some(("dead-sid".to_string(), dummy_spawn_config(), vec!["{}".to_string()]));
 
-        let captured = inner.try_capture_session_id("dead-sid");
+        let captured = inner.try_capture_session_id("dead-sid", true);
 
         assert!(!captured, "nothing new was adopted — session_id was already this exact sid");
         assert_eq!(inner.session_id.as_deref(), Some("dead-sid"));
@@ -4547,22 +4576,20 @@ mod resume_poison_tests {
         assert!(inner.confirmed_stale_resume_retry.is_none());
     }
 
-    // reagentx P0 on PR #2371: the real CLI's stream-json protocol embeds
-    // `session_id_field` on EVERY event, including the terminal `result`
-    // — so the doomed attempt's OWN `is_error:true` line carries the same
-    // (stale) sid it was given. This test documents the exact danger the
-    // stdout reader's `!is_error_result` gate exists to avoid: if
-    // `try_capture_session_id` were called for THAT line (as it would be
-    // without the gate, since the sid IS present on it), it clears
-    // `pending_resume_retry` before the hold-back check ever runs —
-    // reproducing the original bubble AND preventing PR #2360's own
-    // retry from ever being confirmed (poison_resume would find nothing
-    // left to promote). The actual fix lives in the stdout reader's
-    // control flow (skipping the call entirely for an error frame), not
-    // in `try_capture_session_id` itself — this test proves why that
-    // skip is load-bearing.
+    // reagentx P0 on PR #2371 (second finding on this PR): the real
+    // CLI's stream-json protocol embeds `session_id_field` on EVERY
+    // event, including the terminal `result` — so the doomed attempt's
+    // OWN `is_error:true` line carries the same (stale) sid it was
+    // given. The stdout reader's `!is_error_result` gate skips calling
+    // `try_capture_session_id` for that exact line, but this test proves
+    // the deeper fix: even if it WERE called here (belt-and-suspenders
+    // against a caller mistake, or a future frame type the gate doesn't
+    // anticipate), passing the correct `is_confirmed_success: false` (an
+    // error is never a confirmed success) means the ambiguous same-sid
+    // echo alone no longer clears tracking — see
+    // `try_capture_session_id`'s own doc comment.
     #[test]
-    fn calling_try_capture_session_id_on_the_doomed_error_frame_would_clear_tracking() {
+    fn calling_try_capture_session_id_on_the_doomed_error_frame_does_not_clear_tracking() {
         let mut inner = inner_with_session_id(Some("dead-sid"));
         inner.pending_resume_retry =
             Some(("dead-sid".to_string(), dummy_spawn_config(), vec!["{}".to_string()]));
@@ -4570,26 +4597,24 @@ mod resume_poison_tests {
         // Simulates the terminal error-result line's OWN embedded
         // session_id field — the same sid this generation attempted,
         // not yet poisoned (the stderr reader hasn't necessarily run
-        // yet).
-        let captured = inner.try_capture_session_id("dead-sid");
+        // yet), with `is_confirmed_success` correctly computed as
+        // `false` since this frame IS the error.
+        let captured = inner.try_capture_session_id("dead-sid", false);
         assert!(!captured);
         assert!(
-            inner.pending_resume_retry.is_none(),
-            "confirms the mechanism reagentx flagged: calling this for the error frame's \
-             own sid clears tracking before any hold-back check could run"
+            inner.pending_resume_retry.is_some(),
+            "an ambiguous same-sid echo on a frame that isn't a confirmed success must not \
+             clear tracking"
         );
 
-        // With tracking already cleared, the hold-back check (run
-        // AFTERWARD in the old, buggy ordering) finds nothing pending
-        // and persists immediately instead of holding back.
+        // Tracking is still live, so the hold-back check correctly holds
+        // the line back pending the retry decision.
         let held_back = inner.hold_back_error_result_line_if_resume_pending(
             r#"{"type":"result","is_error":true}"#.to_string() + "\n",
         );
         assert!(
-            !held_back,
-            "with tracking already cleared, the line would NOT be held back — this is the bug; \
-             the real fix is that the stdout reader must never call try_capture_session_id for \
-             this exact line in the first place"
+            held_back,
+            "tracking is still live, so the line must be held back, not persisted immediately"
         );
     }
 
@@ -4641,7 +4666,7 @@ mod resume_poison_tests {
         // The CLI echoes back the SAME sid it was given, confirming --resume
         // actually worked — this is genuine progress, so the retry safety
         // net is no longer needed.
-        let captured = inner.try_capture_session_id("dead-sid");
+        let captured = inner.try_capture_session_id("dead-sid", true);
         assert!(captured);
         assert!(
             inner.pending_resume_retry.is_none(),
@@ -4658,11 +4683,38 @@ mod resume_poison_tests {
 
         // A DIFFERENT (fresh) sid — the CLI gave up on --resume internally
         // and started its own new conversation without ever hitting the
-        // stderr "No conversation found" path. Also genuine progress.
-        let captured = inner.try_capture_session_id("brand-new-sid");
+        // stderr "No conversation found" path. A different sid is
+        // unambiguous proof of progress on its own, even from a frame
+        // that isn't itself a confirmed terminal success.
+        let captured = inner.try_capture_session_id("brand-new-sid", false);
         assert!(captured);
         assert!(inner.pending_resume_retry.is_none());
         assert!(inner.confirmed_stale_resume_retry.is_none());
+    }
+
+    // reagentx P0 (second finding on this PR): the CLI echoes the
+    // attempted sid on its FIRST stdout line regardless of whether the
+    // resume goes on to succeed or fail (e.g. a "system"/init frame) —
+    // so a same-sid capture that is NOT a confirmed success must leave
+    // `pending_resume_retry`/`confirmed_stale_resume_retry` untouched,
+    // giving `poison_resume` a real chance to promote the retry
+    // afterward if this turns out to be the doomed case.
+    #[test]
+    fn ambiguous_same_sid_echo_that_is_not_a_confirmed_success_leaves_tracking_untouched() {
+        let mut inner = inner_with_session_id(Some("dead-sid"));
+        inner.pending_resume_retry =
+            Some(("dead-sid".to_string(), dummy_spawn_config(), vec!["{}".to_string()]));
+
+        let captured = inner.try_capture_session_id("dead-sid", false);
+        assert!(!captured, "session_id was already held, nothing new adopted");
+        assert!(
+            inner.pending_resume_retry.is_some(),
+            "an unconfirmed same-sid echo must not resolve tracking"
+        );
+
+        // The retry still gets a real chance to be promoted afterward.
+        inner.poison_resume("dead-sid");
+        assert!(inner.confirmed_stale_resume_retry.is_some());
     }
 
     // reagentx P1 on PR #2360: poison_resume must promote a MATCHING
@@ -4701,7 +4753,7 @@ mod resume_poison_tests {
         inner.poison_resume("dead-sid");
         assert!(inner.confirmed_stale_resume_retry.is_some());
 
-        let captured = inner.try_capture_session_id("dead-sid");
+        let captured = inner.try_capture_session_id("dead-sid", true);
         assert!(!captured, "the poisoned id must still be refused");
         assert!(
             inner.confirmed_stale_resume_retry.is_some(),
