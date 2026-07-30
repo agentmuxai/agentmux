@@ -30,15 +30,40 @@ describe("ClaudeTranslator", () => {
             expect(events[0].type).toBe("session_end");
         });
 
-        it("skips thinking blocks in final assistant event", () => {
+        it("does NOT end the turn on a thinking-only message", () => {
             const t = new ClaudeTranslator();
             const events = t.translate({
                 type: "assistant",
                 message: { content: [{ type: "thinking", thinking: "let me think..." }] },
             });
-            // Thinking is not duplicated, but session_end IS emitted (thinking-only = turn done).
+            // Thinking-only has no tool_use AND no real text — a transitional
+            // message, not a real final answer. session_end must NOT fire here
+            // (SPEC_PERSISTENT_TURN_END_TEXT_GATE_2026_07_30.md).
+            expect(events).toHaveLength(0);
+        });
+
+        it("does NOT end the turn on whitespace-only text", () => {
+            const t = new ClaudeTranslator();
+            const events = t.translate({
+                type: "assistant",
+                message: { content: [{ type: "text", text: "   " }] },
+            });
+            expect(events).toHaveLength(0);
+        });
+
+        it("does NOT emit session_end when tool_use is accompanied by text in the same message", () => {
+            const t = new ClaudeTranslator();
+            const events = t.translate({
+                type: "assistant",
+                message: {
+                    content: [
+                        { type: "text", text: "Let me check that file." },
+                        { type: "tool_use", id: "tool_xyz", name: "Read", input: { file_path: "/foo.txt" } },
+                    ],
+                },
+            });
             expect(events).toHaveLength(1);
-            expect(events[0].type).toBe("session_end");
+            expect(events[0].type).toBe("tool_call");
         });
 
         it("preserves tool_use blocks in final assistant event", () => {
@@ -342,9 +367,10 @@ describe("ClaudeTranslator", () => {
                 type: "assistant",
                 message: { content: [] },
             });
-            // Empty content = no tool_use = turn end; session_end emitted for persistent mode.
-            expect(events).toHaveLength(1);
-            expect(events[0].type).toBe("session_end");
+            // Empty content has no tool_use AND no real text — a transitional
+            // message, not a real final answer. session_end must NOT fire here
+            // (SPEC_PERSISTENT_TURN_END_TEXT_GATE_2026_07_30.md).
+            expect(events).toHaveLength(0);
         });
 
         it("handles assistant with no message", () => {
