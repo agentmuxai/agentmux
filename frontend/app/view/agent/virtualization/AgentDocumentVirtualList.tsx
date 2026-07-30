@@ -129,6 +129,10 @@ export interface AgentDocumentVirtualListProps {
 export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): JSX.Element {
     let scrollRef!: HTMLDivElement;
     let virtualContainerRef: HTMLDivElement | undefined;
+    // Streaming-buffer's own element — observed by the content-resize pin
+    // below (never used for anything else, so it's fine that it's only set
+    // once the buffer first mounts).
+    let streamingBufferRef: HTMLDivElement | undefined;
     // Guard against concurrent older-history fetches triggered by scroll.
     let loadingOlderInFlight = false;
     // RAF-coalesced scroll handling (task #39): native `scroll` events can
@@ -488,6 +492,46 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             }
         });
         ro.observe(scrollRef);
+        onCleanup(() => ro.disconnect());
+    });
+
+    // Content-resize-driven pin. The effect above only re-pins when one of
+    // three hand-picked signals changes (nodes().length, layoutView().totalSize,
+    // workingRowHeight) — any OTHER source of the content growing taller is
+    // invisible to it, and the scrollbar visibly sits above true bottom until
+    // some unrelated signal happens to change and the effect re-runs. The
+    // clientHeight RO right above this one doesn't catch it either — it only
+    // fires on VIEWPORT resizes (scrollRef's own border-box), not content
+    // growth (scrollRef's box is fixed by the flex layout regardless of how
+    // tall its overflowing content gets).
+    //
+    // A concrete, confirmed example: MarkdownBlock throttles streaming
+    // re-parses and fires a bare `setTimeout` ~90ms after the last token to
+    // commit a syntax-highlighted re-render — a code block routinely reflows
+    // to a different height than its plain-text intermediate. That write is
+    // completely outside the Solid signal graph the effect above depends on.
+    //
+    // Fix: observe the two elements whose box size IS "how tall the content
+    // actually is" — the virtualized region and the streaming buffer —
+    // directly, and re-pin from ANY resize, regardless of what caused it.
+    // ResizeObserver's notification step runs after layout but before paint
+    // (the same guarantee the WICG spec's own chat-scroll example and
+    // libraries like use-stick-to-bottom rely on), so writing scrollTop
+    // synchronously here never produces a visible flash. See
+    // docs/specs/REPORT_AGENT_PANE_SCROLL_PIN_FLICKER_AUDIT_2026_07_30.md.
+    //
+    // workingRowHeight is NOT covered by this observer — it drives
+    // `.agent-document`'s own padding-bottom (scrollRef's box, not a child's),
+    // which changes scrollHeight without resizing either observed element.
+    // It stays covered by the effect above.
+    onMount(() => {
+        if (typeof ResizeObserver === "undefined") return;
+        const ro = new ResizeObserver(() => {
+            if (!scrollRef || !props.viewState.stickToBottom()) return;
+            scrollToTrueBottom();
+        });
+        if (virtualContainerRef) ro.observe(virtualContainerRef);
+        if (streamingBufferRef) ro.observe(streamingBufferRef);
         onCleanup(() => ro.disconnect());
     });
 
@@ -906,7 +950,11 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                 (SPEC_REPLACECHILD_CRASH_FULL_ANALYSIS_AND_FIX_2026-06-06.md §3.3) */}
             <Show when={partition()}>
                 {(p) => (
-                    <div class="agent-document-streaming-buffer" data-animate={animateEnabled() || undefined}>
+                    <div
+                        class="agent-document-streaming-buffer"
+                        data-animate={animateEnabled() || undefined}
+                        ref={(el) => { streamingBufferRef = el; }}
+                    >
                         <Key each={p().streamingNodes as DocumentNode[]} by={(n) => n.id}>
                             {(nodeAccessor) => (
                                 <DocumentRow
