@@ -1330,13 +1330,14 @@ impl PersistentSubprocessController {
     /// in total silence: neither the original error nor a replacement
     /// one. `held_error_line` is dropped only when delivery is CONFIRMED
     /// (a successful `BecomeSpawner` spawn, or every message in a
-    /// `DeliverDirect` batch landing via `try_send`) — reagentx P1: every
-    /// other path either can't confirm eventual delivery at all
-    /// (`Queued`, defers to an unrelated concurrent spawn) or hands off
-    /// to a fire-and-forget background task with no way to report
-    /// failure back here (`DeliverDirect`'s own `any_failed` fallback via
-    /// `drain_queue_after_successful_spawn`), so both flush immediately
-    /// rather than risk the same silent-loss failure mode.
+    /// `DeliverDirect` batch landing via `try_send`) — every OTHER path
+    /// (`Queued`, or `DeliverDirect`'s own `any_failed` fallback via
+    /// `drain_queue_after_successful_spawn`) hands off to a background
+    /// drain whose own `stalled_with_leftovers` branch already publishes
+    /// a status update on genuine total failure, so those paths drop the
+    /// line instead — see reagentx P1 (round 2 on this PR) on the
+    /// `Queued` arm below for why flushing eagerly there would reproduce
+    /// this PR's own bug via a different path.
     fn flush_error_line_now(&self, line: String) {
         let Some(ref broker) = self.broker else { return };
         let global_output_zone = super::shell::resolve_global_output_zone(&self.wstore, &self.block_id);
@@ -1449,16 +1450,22 @@ impl PersistentSubprocessController {
                     // `allow_fallback_respawn: false` — the process is
                     // still alive, there's nothing to fall back to spawn.
                     self.drain_queue_after_successful_spawn(config.clone(), false);
-                    // reagentx P1 on PR #2371: `drain_queue_after_successful_spawn`
-                    // is a fire-and-forget background task with no way to
-                    // report success or failure back to this call — same
-                    // reasoning as the `Queued` arm below: flush now
-                    // rather than risk the exact "total silence" failure
-                    // mode this PR exists to fix if that fallback drain
-                    // also fails to deliver.
-                    if let Some(line) = held_error_line {
-                        self.flush_error_line_now(line);
-                    }
+                    // reagentx P1 (round 2 on this PR): flushing eagerly
+                    // HERE (an earlier cut of this fix did, reasoning
+                    // that `drain_queue_after_successful_spawn` is a
+                    // fire-and-forget background task with no way to
+                    // report failure back to this call) contradicts the
+                    // same established pattern as the `Queued` arm below
+                    // — eventual delivery is the overwhelmingly common
+                    // outcome, so flushing eagerly would show a stale,
+                    // wrong error bubble immediately followed by the real
+                    // (successful) response. Dropped instead: on the rare
+                    // total-failure path, the drain's own
+                    // `stalled_with_leftovers` branch (with
+                    // `allow_fallback_respawn: false`) already calls
+                    // `publish_status()` — never silent forever, even
+                    // without the specific original error text.
+                    drop(held_error_line);
                 }
                 // If every message in the batch was delivered directly to
                 // a live, already-running process (the `!any_failed`
@@ -4143,17 +4150,22 @@ mod send_input_tests {
         );
     }
 
-    /// reagentx P1 on PR #2371: `DeliverDirect`'s own fallback (every
-    /// message in the batch fails `try_send`, so delivery hands off to
-    /// `drain_queue_after_successful_spawn` — a fire-and-forget
-    /// background task with no way to report success or failure back to
-    /// this call) must ALSO flush a held-back error line, for the exact
-    /// same "can't confirm eventual delivery" reason already covered for
-    /// `Queued` and a failed `BecomeSpawner` spawn. A closed stdin
-    /// receiver forces every `try_send` in the batch to fail
-    /// deterministically.
+    /// reagentx P1 (round 2 on this PR): `DeliverDirect`'s own fallback
+    /// (every message in the batch fails `try_send`, so delivery hands
+    /// off to `drain_queue_after_successful_spawn` — a fire-and-forget
+    /// background task) must NOT eagerly flush a held-back error line —
+    /// an earlier cut of this fix did, reasoning it couldn't confirm
+    /// eventual delivery, but that contradicts the same established
+    /// pattern as the `Queued` arm: eventual success is the
+    /// overwhelmingly common outcome, so flushing eagerly would show a
+    /// stale, wrong error bubble immediately followed by the real
+    /// (successful) response — reproducing this PR's own bug via a
+    /// different path. The drain's own `stalled_with_leftovers` branch
+    /// already publishes a status update on genuine total failure. A
+    /// closed stdin receiver forces every `try_send` in the batch to
+    /// fail deterministically.
     #[tokio::test]
-    async fn retry_after_resume_failure_flushes_the_held_error_line_when_the_deliver_direct_fallback_is_needed() {
+    async fn retry_after_resume_failure_does_not_flush_the_held_error_line_when_the_deliver_direct_fallback_is_needed() {
         let broker = Arc::new(crate::backend::wps::Broker::new());
         let filestore = Arc::new(FileStore::open_in_memory().unwrap());
         let block_id = "block-flush-on-deliver-direct-fallback".to_string();
@@ -4188,9 +4200,10 @@ mod send_input_tests {
             .map(|bytes| String::from_utf8_lossy(&bytes).contains("boom"))
             .unwrap_or(false);
         assert!(
-            flushed,
-            "a held error line must be flushed when DeliverDirect's own fallback drain is needed, \
-             not silently dropped just because that fallback can't report its own outcome back here"
+            !flushed,
+            "a held error line must NOT be eagerly flushed when DeliverDirect's own fallback drain \
+             is needed — eventual delivery is the common case, and the drain's own stalled branch \
+             already surfaces a genuine total failure"
         );
     }
 
