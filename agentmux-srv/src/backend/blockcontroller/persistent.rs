@@ -2114,6 +2114,28 @@ impl PersistentSubprocessController {
                         {
                             let mut inner = inner_wait.lock().unwrap();
                             inner.stdin_tx = None; // drops the sender → stdin writer exits → stdin closes
+                            // reagentx P0 on PR #2360 (sixth review pass,
+                            // round 10): must clear pending_send_messages/
+                            // spawning_in_progress in this SAME lock
+                            // acquisition as stdin_tx, not only later
+                            // (after child.wait()/the 5s timeout below).
+                            // During that window,
+                            // drain_queue_after_successful_spawn's
+                            // independently-scheduled background task
+                            // could observe stdin_tx.is_none() with
+                            // messages still queued, classify it as a
+                            // stall, and call
+                            // respawn_once_for_leftover_queue — spawning a
+                            // brand-new CLI process while the user's
+                            // graceful stop is still in progress. The
+                            // force-kill path doesn't have this gap (it
+                            // never clears stdin_tx early — all three
+                            // clear together below, after child.kill()
+                            // resolves), only this graceful one, since it
+                            // specifically needs stdin_tx gone early to
+                            // trigger EOF.
+                            inner.pending_send_messages.clear();
+                            inner.spawning_in_progress = false;
                         }
                         tokio::select! {
                             _ = child.wait() => {}
