@@ -1059,26 +1059,45 @@ impl PersistentSubprocessController {
                             inner.pending_send_messages.push_back(QueuedMessage::already_persisted(msg));
                         }
                     }
+                    if any_failed {
+                        // codex P2 on PR #2360 (sixth review pass, round
+                        // 7): pushing onto the queue alone is not enough —
+                        // `DeliverDirect` only fires when
+                        // `spawning_in_progress` is `false`, so nothing
+                        // would EVER drain this entry: future callers ALSO
+                        // take `DeliverDirect` (bypassing the queue
+                        // entirely) for as long as this same process stays
+                        // alive, which could be indefinite, silently
+                        // reordering it behind much later input.
+                        //
+                        // Claimed in this SAME lock acquisition as the
+                        // push above — reagentx P1 on PR #2360 (sixth
+                        // review pass, round 8): an earlier cut of this
+                        // fix claimed it in a SEPARATE, later lock
+                        // acquisition, leaving a window where a
+                        // concurrent `send_message` could observe
+                        // `stdin_tx.is_some() && !spawning_in_progress`
+                        // and take `DeliverDirect` itself — jumping ahead
+                        // of the just-queued retry messages — or, if the
+                        // process also died in that same window, take
+                        // `BecomeSpawner` and spawn a second, independent
+                        // child process for the same block, reintroducing
+                        // the exact concurrent-spawn TOCTOU
+                        // `spawning_in_progress` exists to prevent.
+                        inner.spawning_in_progress = true;
+                    }
                 }
                 if any_failed {
                     tracing::warn!(
                         block_id = %self.block_id,
                         "failed to redeliver one or more messages after stale-resume retry (already-running path) — draining via the queue instead"
                     );
-                    // codex P2 on PR #2360 (sixth review pass, round 7):
-                    // pushing onto the queue alone is not enough —
-                    // `DeliverDirect` only fires when `spawning_in_progress`
-                    // is `false`, so nothing would EVER drain this entry:
-                    // future callers ALSO take `DeliverDirect` (bypassing
-                    // the queue entirely) for as long as this same process
-                    // stays alive, which could be indefinite, silently
-                    // reordering it behind much later input. Claim the
-                    // spawn flag and hand off to the SAME drain used after
-                    // a fresh spawn (with backpressure via `Sender::send`,
-                    // not `try_send`) instead of leaving it orphaned.
+                    // Claim the spawn flag (above) and hand off to the
+                    // SAME drain used after a fresh spawn (with
+                    // backpressure via `Sender::send`, not `try_send`)
+                    // instead of leaving it orphaned.
                     // `allow_fallback_respawn: false` — the process is
                     // still alive, there's nothing to fall back to spawn.
-                    self.inner.lock().unwrap().spawning_in_progress = true;
                     self.drain_queue_after_successful_spawn(config.clone(), false);
                 }
             }
