@@ -890,34 +890,34 @@ impl PersistentSubprocessController {
         // `retry_after_resume_failure`'s own explicit clear for the exact
         // same reason.
         //
-        // Poisons (rather than just clears) whatever sid was held —
-        // reagentx P1 on PR #2360 (sixth review pass, round 12): this
-        // fallback is reached with NO guarantee that `poison_resume` has
-        // actually run for the doomed process's sid — the exit-handler's
-        // own bounded wait (500ms) for that process's stderr-reader task
-        // can time out and abort it before it ever calls `poison_resume`
-        // (this drain-triggered path, unlike `retry_after_resume_failure`,
-        // does not require `confirmed_stale_resume_retry` to have been
-        // set, so it can fire even when that promotion never happened). In
-        // that case the SAME process's stdout-reader task — which has NO
-        // bound or abort mechanism at all — could still be concurrently
-        // racing to echo-capture that exact sid via
-        // `try_capture_session_id`, re-setting `inner.session_id` right
-        // after a plain clear and before `spawn_process`'s own `--resume`
-        // read, moments later. `poison_resume` additionally sets
-        // `resume_poisoned`, which `try_capture_session_id` checks and
-        // refuses regardless of ordering — closing that gap even when the
-        // stderr reader never got to poison it itself. Safe to call
-        // unconditionally: by the time this fallback runs, the exit
-        // handler has already unconditionally cleared
-        // `pending_resume_retry`, so `poison_resume`'s own retry-promotion
-        // side effect is always a no-op here.
-        {
-            let mut inner = self.inner.lock().unwrap();
-            if let Some(old_sid) = inner.session_id.clone() {
-                inner.poison_resume(&old_sid);
-            }
-        }
+        // A plain clear, deliberately NOT `poison_resume` — reagentx P1
+        // on PR #2360 (sixth review pass, round 13): a prior cut of this
+        // fix called `poison_resume` here to defensively close a narrower
+        // race (a still-racing stdout-reader task from the doomed process
+        // could re-capture the same sid right after a plain clear). That
+        // was a regression: `respawn_once_for_leftover_queue` is reached
+        // from TWO triggers that have nothing to do with a CONFIRMED
+        // stale `--resume` — `release_spawn_claim_and_drain_queue`'s
+        // `!spawn_succeeded` branch (ANY `spawn_process` failure — a
+        // missing binary, an OS error) and
+        // `drain_queue_after_successful_spawn`'s stall branch (ANY
+        // process exit/crash with messages still queued, not
+        // specifically a stale-resume death). In both, `inner.session_id`
+        // could just as easily be a legitimately hydrated-but-unattempted
+        // id, or a genuinely valid, already-captured session from a
+        // process that ran fine and crashed for an unrelated reason.
+        // `poison_resume` is documented as PERMANENT (`resume_poisoned` is
+        // "never reset back to None") — poisoning a sid never actually
+        // confirmed dead by the CLI permanently breaks conversation
+        // continuity for that session, with no disclosure, for the rest
+        // of this controller instance's lifetime. A plain clear only
+        // affects THIS respawn's own `--resume` decision (already forced
+        // empty via `config.session_id` above) and carries no such
+        // permanent, over-broad risk. The narrower race the poisoning was
+        // meant to close is real but far rarer than the cases above;
+        // tracked as a documented follow-up instead of reintroducing this
+        // regression.
+        self.inner.lock().unwrap().session_id = None;
         let retry_config = config.clone();
         let spawn_result = self.spawn_process(config, None);
         match &spawn_result {
@@ -2629,20 +2629,25 @@ mod send_input_tests {
         );
     }
 
-    /// reagentx P1 on PR #2360 (sixth review pass, round 12): this
-    /// fallback is reached with no guarantee `poison_resume` has already
-    /// run for the doomed process's sid (its stderr-reader task could
-    /// have been aborted past its 500ms bound before ever calling it).
-    /// The doomed process's stdout-reader task has no such bound, so it
-    /// could still be concurrently racing to echo-capture that exact sid
-    /// — a plain clear alone leaves nothing to refuse it. Confirms this
-    /// fallback additionally poisons whatever sid it held, so a later
-    /// capture attempt for that exact sid is refused regardless of
-    /// ordering.
+    /// reagentx P1 on PR #2360 (sixth review pass, round 13): an earlier
+    /// cut of this fallback called `poison_resume` (not just a plain
+    /// clear) on whatever sid was held, reasoning defensively about a
+    /// narrower race. That was itself a regression: this fallback is
+    /// reached from triggers that have nothing to do with a CONFIRMED
+    /// stale `--resume` (a plain `spawn_process` failure, or ANY process
+    /// crash with messages still queued) — `inner.session_id` could just
+    /// as easily be a genuinely valid, already-captured session from a
+    /// process that ran fine and crashed for an unrelated reason.
+    /// `poison_resume` is PERMANENT (`resume_poisoned` is never reset),
+    /// so poisoning a sid never actually confirmed dead by the CLI would
+    /// permanently break that session's resume capability. Confirms a
+    /// valid sid survives this fallback well enough to still be captured
+    /// again later (i.e. NOT poisoned) — only the in-memory `session_id`
+    /// itself is cleared, forcing this one respawn to skip `--resume`.
     #[test]
-    fn respawn_once_for_leftover_queue_poisons_whatever_sid_it_held() {
+    fn respawn_once_for_leftover_queue_does_not_poison_the_sid_it_held() {
         let c = controller();
-        c.inner.lock().unwrap().session_id = Some("dead-sid".to_string());
+        c.inner.lock().unwrap().session_id = Some("valid-unrelated-sid".to_string());
 
         let config = PersistentSpawnConfig {
             cli_command: "definitely-not-a-real-binary-xyz".to_string(),
@@ -2651,22 +2656,19 @@ mod send_input_tests {
             env_vars: HashMap::new(),
             session_id_field: "session_id".to_string(),
             resume_flag: "--resume".to_string(),
-            session_id: "dead-sid".to_string(),
+            session_id: "valid-unrelated-sid".to_string(),
             message_id: None,
         };
         c.respawn_once_for_leftover_queue(config);
 
-        {
-            let mut inner = c.inner.lock().unwrap();
-            assert_eq!(
-                inner.resume_poisoned.as_deref(),
-                Some("dead-sid"),
-                "must poison the sid it held, not just clear it, so a still-racing \
-                 stdout-reader capture attempt for that exact sid is refused"
-            );
-            let captured = inner.try_capture_session_id("dead-sid");
-            assert!(!captured, "a later capture attempt for the poisoned sid must be refused");
-        }
+        let mut inner = c.inner.lock().unwrap();
+        assert_ne!(
+            inner.resume_poisoned.as_deref(),
+            Some("valid-unrelated-sid"),
+            "must not permanently poison a sid that was never confirmed dead by the CLI"
+        );
+        let captured = inner.try_capture_session_id("valid-unrelated-sid");
+        assert!(captured, "a genuinely valid sid must still be capturable again later");
     }
 
     /// codex P1/P2 on PR #2360 (second review pass): the process-waiter
