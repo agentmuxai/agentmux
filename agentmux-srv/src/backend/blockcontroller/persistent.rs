@@ -1310,11 +1310,15 @@ impl PersistentSubprocessController {
     /// controller already being torn down, or the fresh `spawn_process`
     /// call itself failing) — otherwise an already-accepted prompt ends
     /// in total silence: neither the original error nor a replacement
-    /// one. `held_error_line` is only ever flushed on a path that does
-    /// NOT result in a live (or about-to-be-live) process actually
-    /// receiving this batch; every path that does (`DeliverDirect`,
-    /// `Queued`, or a successful `BecomeSpawner` spawn) drops it, same as
-    /// before this fix.
+    /// one. `held_error_line` is dropped only when delivery is CONFIRMED
+    /// (a successful `BecomeSpawner` spawn, or every message in a
+    /// `DeliverDirect` batch landing via `try_send`) — reagentx P1: every
+    /// other path either can't confirm eventual delivery at all
+    /// (`Queued`, defers to an unrelated concurrent spawn) or hands off
+    /// to a fire-and-forget background task with no way to report
+    /// failure back here (`DeliverDirect`'s own `any_failed` fallback via
+    /// `drain_queue_after_successful_spawn`), so both flush immediately
+    /// rather than risk the same silent-loss failure mode.
     fn flush_error_line_now(&self, line: String) {
         let Some(ref broker) = self.broker else { return };
         let global_output_zone = super::shell::resolve_global_output_zone(&self.wstore, &self.block_id);
@@ -1427,7 +1431,22 @@ impl PersistentSubprocessController {
                     // `allow_fallback_respawn: false` — the process is
                     // still alive, there's nothing to fall back to spawn.
                     self.drain_queue_after_successful_spawn(config.clone(), false);
+                    // reagentx P1 on PR #2371: `drain_queue_after_successful_spawn`
+                    // is a fire-and-forget background task with no way to
+                    // report success or failure back to this call — same
+                    // reasoning as the `Queued` arm below: flush now
+                    // rather than risk the exact "total silence" failure
+                    // mode this PR exists to fix if that fallback drain
+                    // also fails to deliver.
+                    if let Some(line) = held_error_line {
+                        self.flush_error_line_now(line);
+                    }
                 }
+                // If every message in the batch was delivered directly to
+                // a live, already-running process (the `!any_failed`
+                // case), `held_error_line` is dropped here implicitly —
+                // genuine progress, same as a successful `BecomeSpawner`
+                // spawn.
             }
             SendAction::Queued => {
                 // Someone else is already spawning — their own
@@ -4082,6 +4101,57 @@ mod send_input_tests {
             flushed,
             "a held error line must be flushed to the blockfile when the retry's own respawn fails, \
              not silently dropped"
+        );
+    }
+
+    /// reagentx P1 on PR #2371: `DeliverDirect`'s own fallback (every
+    /// message in the batch fails `try_send`, so delivery hands off to
+    /// `drain_queue_after_successful_spawn` — a fire-and-forget
+    /// background task with no way to report success or failure back to
+    /// this call) must ALSO flush a held-back error line, for the exact
+    /// same "can't confirm eventual delivery" reason already covered for
+    /// `Queued` and a failed `BecomeSpawner` spawn. A closed stdin
+    /// receiver forces every `try_send` in the batch to fail
+    /// deterministically.
+    #[tokio::test]
+    async fn retry_after_resume_failure_flushes_the_held_error_line_when_the_deliver_direct_fallback_is_needed() {
+        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let filestore = Arc::new(FileStore::open_in_memory().unwrap());
+        let block_id = "block-flush-on-deliver-direct-fallback".to_string();
+        let c = PersistentSubprocessController::new(
+            "tab".to_string(),
+            block_id.clone(),
+            Some(broker),
+            None,
+            None,
+            Some(filestore.clone()),
+        );
+        let (tx, rx) = mpsc::channel::<String>(1);
+        drop(rx); // closed receiver — every try_send below fails
+        c.inner.lock().unwrap().stdin_tx = Some(tx);
+
+        let config = PersistentSpawnConfig {
+            cli_command: "unused".to_string(),
+            cli_args: vec![],
+            working_dir: String::new(),
+            env_vars: HashMap::new(),
+            session_id_field: "session_id".to_string(),
+            resume_flag: "--resume".to_string(),
+            session_id: String::new(),
+            message_id: None,
+        };
+        c.retry_after_resume_failure(config, vec!["stuck".to_string()], Some("boom\n".to_string()));
+        tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+
+        let flushed = filestore
+            .read_file(&block_id, PERSISTENT_OUTPUT_SUBJECT)
+            .unwrap()
+            .map(|bytes| String::from_utf8_lossy(&bytes).contains("boom"))
+            .unwrap_or(false);
+        assert!(
+            flushed,
+            "a held error line must be flushed when DeliverDirect's own fallback drain is needed, \
+             not silently dropped just because that fallback can't report its own outcome back here"
         );
     }
 
