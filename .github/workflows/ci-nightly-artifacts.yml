@@ -65,21 +65,34 @@ jobs:
           path: ${{ env.CEF_RUNTIME_DIR_WINDOWS }}
           key: cef-runtime-windows-${{ steps.cef.outputs.tag }}
 
+      # `Expand-Archive`, not bash `unzip`: the release zip is produced by
+      # PowerShell's `Compress-Archive` (docs/cef-build/build-patched-cef-windows.md
+      # §7), which stores internal entries with backslash path separators.
+      # Info-ZIP's `unzip` (the bash job's prior tool here) can't parse those
+      # as nested directories — it silently flattens/mangles them, so the
+      # libcef.dll lookup below always failed with "not found in zip" on any
+      # cache miss. Extracting with the same .NET zip implementation that
+      # created the archive round-trips correctly. See
+      # docs/retro/retro-nightly-windows-cef-zip-backslash-paths-2026-07-29.md.
       - name: Download codec-enabled CEF runtime
         if: steps.cef-cache.outputs.cache-hit != 'true'
-        shell: bash
+        shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.CEF_RUNTIME_TOKEN }}
         run: |
-          mkdir -p /tmp/cef-extract "$CEF_RUNTIME_DIR_WINDOWS"
-          gh release download "${{ steps.cef.outputs.tag }}" \
-            --repo agentmuxai/cef --pattern "*.zip" \
-            --dir /tmp/cef-extract --clobber
-          unzip -q /tmp/cef-extract/*.zip -d /tmp/cef-extract/unpacked
-          LIBCEF=$(find /tmp/cef-extract/unpacked -name "libcef.dll" | head -1)
-          if [ -z "$LIBCEF" ]; then echo "ERROR: libcef.dll not found in zip"; exit 1; fi
-          cp -r "$(dirname "$LIBCEF")/." "$CEF_RUNTIME_DIR_WINDOWS/"
-          rm -rf /tmp/cef-extract
+          $extractDir = "$env:RUNNER_TEMP\cef-extract"
+          New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
+          New-Item -ItemType Directory -Force -Path $env:CEF_RUNTIME_DIR_WINDOWS | Out-Null
+          gh release download "${{ steps.cef.outputs.tag }}" `
+            --repo agentmuxai/cef --pattern "*.zip" `
+            --dir $extractDir --clobber
+          $zip = Get-ChildItem "$extractDir\*.zip" | Select-Object -First 1
+          if (-not $zip) { Write-Error "ERROR: no .zip downloaded from release"; exit 1 }
+          Expand-Archive -Path $zip.FullName -DestinationPath "$extractDir\unpacked" -Force
+          $libcef = Get-ChildItem -Path "$extractDir\unpacked" -Filter "libcef.dll" -Recurse | Select-Object -First 1
+          if (-not $libcef) { Write-Error "ERROR: libcef.dll not found in zip"; exit 1 }
+          Copy-Item -Path "$($libcef.DirectoryName)\*" -Destination $env:CEF_RUNTIME_DIR_WINDOWS -Recurse -Force
+          Remove-Item -Recurse -Force $extractDir
 
       - name: Set AGENTMUX_CEF_RUNTIME_DIR_WINDOWS
         shell: bash
