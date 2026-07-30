@@ -657,19 +657,35 @@ impl PersistentSubprocessController {
     /// returning `BecomeSpawner`. `spawn_succeeded` distinguishes two very
     /// different situations:
     ///
-    /// - **Failed spawn**: discards only the front item of the queue —
-    ///   the caller's OWN message. This is guaranteed to be at the front:
-    ///   nothing else could have been queued before `spawning_in_progress`
-    ///   was set (see `decide_send_action`), and the queue is always empty
-    ///   at the moment a new spawner claims it (the previous claim only
-    ///   ever releases once fully drained). codex P1 on PR #2360 (sixth
-    ///   review pass): leaving this message queued let an unrelated LATER
-    ///   successful spawn silently execute a prompt the caller was already
-    ///   told had failed (`send_message`/`retry_after_resume_failure`
-    ///   already report the failure), sometimes duplicating a message the
-    ///   user had re-sent by hand. Anything queued AFTER it (from other
-    ///   callers who got `SendAction::Queued` and were already told
-    ///   "accepted") is left in place for the next successful spawn.
+    /// - **Failed spawn**: discards only `own_message` — the specific
+    ///   message THIS spawner pushed when it claimed `BecomeSpawner`, found
+    ///   by content match rather than assumed to be at the front. codex P2
+    ///   on PR #2360 (round 14, commit 8c2bc99ab): the queue is NOT always
+    ///   empty at the moment a new spawner claims it — the "second stall"
+    ///   path (`drain_queue_after_successful_spawn` with
+    ///   `allow_fallback_respawn: false`) deliberately releases
+    ///   `spawning_in_progress` while leaving genuinely leftover messages
+    ///   queued (see that function's own doc comment). A later
+    ///   `send_message` can then claim `BecomeSpawner` and `push_back` its
+    ///   own message BEHIND those leftovers. Assuming "front == my own
+    ///   message" in that case discarded an OLDER, unrelated, already-
+    ///   accepted prompt instead of the actually-failed one — silent data
+    ///   loss, plus handing the wrong (already-failed) message to the
+    ///   fallback respawn. Matching by content instead of position fixes
+    ///   this whenever the two differ, which is the overwhelming common
+    ///   case; the narrow residual case of two GENUINELY DIFFERENT messages
+    ///   sharing identical content (e.g. two "yes" replies) is the same
+    ///   content-identity-ambiguity gap already tracked in #2365 — this fix
+    ///   doesn't need to (and doesn't try to) close that, since either
+    ///   duplicate is content-equivalent to discard here. codex P1 on PR
+    ///   #2360 (sixth review pass): leaving this message queued let an
+    ///   unrelated LATER successful spawn silently execute a prompt the
+    ///   caller was already told had failed (`send_message`/
+    ///   `retry_after_resume_failure` already report the failure),
+    ///   sometimes duplicating a message the user had re-sent by hand.
+    ///   Anything else queued (from other callers who got
+    ///   `SendAction::Queued` and were already told "accepted") is left in
+    ///   place for the next successful spawn.
     /// - **Successful spawn**: hands the drain off to a background task
     ///   that delivers everything queued, in order, via `Sender::send`
     ///   (which awaits free capacity) rather than `try_send`. codex P2 on
@@ -694,14 +710,14 @@ impl PersistentSubprocessController {
     /// frontend the turn ended — the ORIGINAL exit deliberately suppressed
     /// its own terminal-status publish expecting the retry to eventually
     /// publish one.
-    fn release_spawn_claim_and_drain_queue(&self, spawn_succeeded: bool, retry_config: PersistentSpawnConfig) {
+    fn release_spawn_claim_and_drain_queue(&self, spawn_succeeded: bool, retry_config: PersistentSpawnConfig, own_message: &str) {
         if !spawn_succeeded {
-            // Discard only the front item — the caller's OWN message (see
-            // this function's own doc comment above for why it's
-            // guaranteed to be at the front). If anything else is queued
-            // behind it (from other callers already told "accepted"),
-            // hand off to a bounded fallback respawn rather than
-            // stranding it with nobody responsible for delivering it.
+            // Discard only `own_message` — see this function's own doc
+            // comment above for why position (front) is not a safe
+            // assumption. If anything else is queued (from other callers
+            // already told "accepted"), hand off to a bounded fallback
+            // respawn rather than stranding it with nobody responsible for
+            // delivering it.
             //
             // codex P2 on PR #2360 (round 13, commit e9678091f): clearing
             // `spawning_in_progress` in a SEPARATE, later lock acquisition
@@ -720,7 +736,16 @@ impl PersistentSubprocessController {
             // leave the claim held and hand off to the fallback respawn.
             let leftovers = {
                 let mut inner = self.inner.lock().unwrap();
-                inner.pending_send_messages.pop_front();
+                if let Some(idx) = inner.pending_send_messages.iter().position(|m| m == own_message) {
+                    inner.pending_send_messages.remove(idx);
+                } else {
+                    // Shouldn't normally happen — defensively log rather
+                    // than guess which OTHER entry to discard instead.
+                    tracing::warn!(
+                        block_id = %self.block_id,
+                        "failed spawn's own message was not found in the queue to discard"
+                    );
+                }
                 if inner.pending_send_messages.is_empty() {
                     inner.spawning_in_progress = false;
                     false
@@ -1069,6 +1094,7 @@ impl PersistentSubprocessController {
                 // `--resume`, which is what the retry payload is for.
                 let message_id = config.message_id.clone();
                 let retry_config = config.clone();
+                let own_message = json_str.clone();
                 let spawn_result = self.spawn_process(config, Some(json_str));
                 // Only emit "accepted" on success — codex P2 on PR #2360
                 // (sixth review pass, round 4): an earlier cut of this fix
@@ -1085,7 +1111,7 @@ impl PersistentSubprocessController {
                     self.mark_turn_active_and_publish();
                     self.emit_message_accepted(message_id.as_deref());
                 }
-                self.release_spawn_claim_and_drain_queue(spawn_result.is_ok(), retry_config);
+                self.release_spawn_claim_and_drain_queue(spawn_result.is_ok(), retry_config, &own_message);
                 spawn_result
             }
         }
@@ -1222,7 +1248,7 @@ impl PersistentSubprocessController {
                         "failed to respawn after a stale --resume session id"
                     ),
                 }
-                self.release_spawn_claim_and_drain_queue(spawn_result.is_ok(), retry_config);
+                self.release_spawn_claim_and_drain_queue(spawn_result.is_ok(), retry_config, &first);
                 if spawn_result.is_err() {
                     // Surface this, or the pane hangs forever with NO
                     // signal at all — codex P2 on PR #2360 (fifth review
@@ -3055,8 +3081,9 @@ mod send_input_tests {
         }
 
         // Never used for a fallback spawn in this test — the drain fully
-        // succeeds without ever stalling.
-        c.release_spawn_claim_and_drain_queue(true, unreachable_fallback_config());
+        // succeeds without ever stalling. `own_message` is only consulted
+        // on the failed-spawn path, so its value doesn't matter here.
+        c.release_spawn_claim_and_drain_queue(true, unreachable_fallback_config(), "first");
 
         assert_eq!(rx.recv().await.unwrap(), "first");
         assert_eq!(rx.recv().await.unwrap(), "second");
@@ -3123,7 +3150,7 @@ mod send_input_tests {
             // spawning for having already died before the drain ran.
         }
 
-        c.release_spawn_claim_and_drain_queue(true, unreachable_fallback_config());
+        c.release_spawn_claim_and_drain_queue(true, unreachable_fallback_config(), "stuck-one");
         // Let the spawned background task, and the fallback respawn
         // attempt it triggers, run to completion.
         tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
@@ -3166,7 +3193,7 @@ mod send_input_tests {
             inner.pending_send_messages.push_back(QueuedMessage::fresh("queued-by-someone-else".to_string()));
         }
 
-        c.release_spawn_claim_and_drain_queue(false, unreachable_fallback_config());
+        c.release_spawn_claim_and_drain_queue(false, unreachable_fallback_config(), "the-one-that-failed");
 
         let inner = c.inner.lock().unwrap();
         assert!(
@@ -3182,6 +3209,51 @@ mod send_input_tests {
             inner.pending_send_messages[0],
             "queued-by-someone-else",
             "a message queued by a DIFFERENT caller (already told \"accepted\") must survive for the next spawn"
+        );
+    }
+
+    /// codex P2 on PR #2360 (round 14, commit 8c2bc99ab): the queue is NOT
+    /// always empty at the moment a new spawner claims `BecomeSpawner` — the
+    /// "second stall" path (`drain_queue_after_successful_spawn` with
+    /// `allow_fallback_respawn: false`) deliberately releases
+    /// `spawning_in_progress` while leaving genuine leftover messages
+    /// queued. A later `send_message` can then claim `BecomeSpawner` and
+    /// `push_back` its own message BEHIND those leftovers — so the failed
+    /// spawner's own message is NOT at the front. Confirms
+    /// `release_spawn_claim_and_drain_queue`'s failed-spawn path finds and
+    /// discards the correct (content-matched) entry regardless of where it
+    /// sits, instead of assuming the front and silently destroying an
+    /// older, unrelated, already-accepted prompt.
+    #[test]
+    fn release_spawn_claim_and_drain_queue_discards_the_right_entry_when_it_is_not_at_the_front() {
+        let c = controller();
+        {
+            let mut inner = c.inner.lock().unwrap();
+            inner.spawning_in_progress = true;
+            // Simulates leftovers surviving a prior "second stall" release
+            // (queue non-empty, claim already given up by that path) plus a
+            // later BecomeSpawner appending its own message behind them.
+            inner.pending_send_messages.push_back(QueuedMessage::fresh("older-leftover-from-a-different-caller".to_string()));
+            inner.pending_send_messages.push_back(QueuedMessage::fresh("this-spawners-own-message-that-just-failed".to_string()));
+        }
+
+        c.release_spawn_claim_and_drain_queue(
+            false,
+            unreachable_fallback_config(),
+            "this-spawners-own-message-that-just-failed",
+        );
+
+        let inner = c.inner.lock().unwrap();
+        assert_eq!(
+            inner.pending_send_messages.len(),
+            1,
+            "only the actually-failed spawner's own message must be discarded"
+        );
+        assert_eq!(
+            inner.pending_send_messages[0],
+            "older-leftover-from-a-different-caller",
+            "an older, unrelated, already-accepted prompt must survive — not be silently destroyed \
+             because it happened to be sitting at the front"
         );
     }
 
@@ -3233,7 +3305,7 @@ mod send_input_tests {
                 })
                 .collect();
 
-            c.release_spawn_claim_and_drain_queue(false, unreachable_fallback_config());
+            c.release_spawn_claim_and_drain_queue(false, unreachable_fallback_config(), "the-one-that-failed");
 
             for h in handles {
                 h.join().unwrap();
