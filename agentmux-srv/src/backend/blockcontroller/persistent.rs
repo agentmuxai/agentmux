@@ -2253,20 +2253,41 @@ impl PersistentSubprocessController {
                             }
                         }
                     }
-                    if let Some(sid) = parsed.get(&session_id_field).and_then(|v| v.as_str()) {
-                        let sid_string = sid.to_string();
-                        // See PersistentInner::try_capture_session_id — refuses
-                        // to (re-)adopt an id the stderr reader (above) already
-                        // confirmed unreachable, whichever task wins the race.
-                        let should_capture =
-                            inner_read.lock().unwrap().try_capture_session_id(&sid_string);
-                        if should_capture {
-                            tracing::info!(
-                                block_id = %block_id_read,
-                                session_id = %sid_string,
-                                "persistent session ID captured"
-                            );
-                            core::persist_session_id(&block_id_read, &sid_string, &wstore_read, &event_bus_read);
+                    let is_error_result = is_result_frame
+                        && parsed.get("is_error").and_then(|v| v.as_bool()) == Some(true);
+                    // reagentx P0 on PR #2371: the real CLI's stream-json
+                    // protocol embeds `session_id_field` on EVERY event,
+                    // including the terminal `result` — so the doomed
+                    // attempt's own `is_error:true` line ALSO carries the
+                    // (stale) sid it was given. Calling
+                    // `try_capture_session_id` for THIS exact line would
+                    // clear `pending_resume_retry`/`confirmed_stale_resume_retry`
+                    // (a non-poisoned confirmation resolves tracking —
+                    // codex P1's fix, needed for the genuinely-successful-
+                    // resume case) BEFORE the hold-back check below ever
+                    // runs, reproducing the exact bubble this PR exists to
+                    // suppress AND preventing PR #2360's own retry from
+                    // ever being confirmed. An error frame's echoed sid is
+                    // never genuine progress (the turn failed) — skip
+                    // session-id capture entirely for this exact frame;
+                    // every other frame type (system/init, a successful
+                    // result) still captures normally.
+                    if !is_error_result {
+                        if let Some(sid) = parsed.get(&session_id_field).and_then(|v| v.as_str()) {
+                            let sid_string = sid.to_string();
+                            // See PersistentInner::try_capture_session_id — refuses
+                            // to (re-)adopt an id the stderr reader (above) already
+                            // confirmed unreachable, whichever task wins the race.
+                            let should_capture =
+                                inner_read.lock().unwrap().try_capture_session_id(&sid_string);
+                            if should_capture {
+                                tracing::info!(
+                                    block_id = %block_id_read,
+                                    session_id = %sid_string,
+                                    "persistent session ID captured"
+                                );
+                                core::persist_session_id(&block_id_read, &sid_string, &wstore_read, &event_bus_read);
+                            }
                         }
                     }
                     // Issue #2368: `pending_resume_retry` being live right now
@@ -2277,8 +2298,7 @@ impl PersistentSubprocessController {
                     // generation never attempted an untrusted `--resume`),
                     // this can't be a stale-resume case and today's
                     // immediate-persist behavior is unchanged.
-                    if is_result_frame && parsed.get("is_error").and_then(|v| v.as_bool()) == Some(true)
-                    {
+                    if is_error_result {
                         hold_back_for_resume_retry = inner_read
                             .lock()
                             .unwrap()
@@ -4445,6 +4465,52 @@ mod resume_poison_tests {
              session_id was already held before this call"
         );
         assert!(inner.confirmed_stale_resume_retry.is_none());
+    }
+
+    // reagentx P0 on PR #2371: the real CLI's stream-json protocol embeds
+    // `session_id_field` on EVERY event, including the terminal `result`
+    // — so the doomed attempt's OWN `is_error:true` line carries the same
+    // (stale) sid it was given. This test documents the exact danger the
+    // stdout reader's `!is_error_result` gate exists to avoid: if
+    // `try_capture_session_id` were called for THAT line (as it would be
+    // without the gate, since the sid IS present on it), it clears
+    // `pending_resume_retry` before the hold-back check ever runs —
+    // reproducing the original bubble AND preventing PR #2360's own
+    // retry from ever being confirmed (poison_resume would find nothing
+    // left to promote). The actual fix lives in the stdout reader's
+    // control flow (skipping the call entirely for an error frame), not
+    // in `try_capture_session_id` itself — this test proves why that
+    // skip is load-bearing.
+    #[test]
+    fn calling_try_capture_session_id_on_the_doomed_error_frame_would_clear_tracking() {
+        let mut inner = inner_with_session_id(Some("dead-sid"));
+        inner.pending_resume_retry =
+            Some(("dead-sid".to_string(), dummy_spawn_config(), vec!["{}".to_string()]));
+
+        // Simulates the terminal error-result line's OWN embedded
+        // session_id field — the same sid this generation attempted,
+        // not yet poisoned (the stderr reader hasn't necessarily run
+        // yet).
+        let captured = inner.try_capture_session_id("dead-sid");
+        assert!(!captured);
+        assert!(
+            inner.pending_resume_retry.is_none(),
+            "confirms the mechanism reagentx flagged: calling this for the error frame's \
+             own sid clears tracking before any hold-back check could run"
+        );
+
+        // With tracking already cleared, the hold-back check (run
+        // AFTERWARD in the old, buggy ordering) finds nothing pending
+        // and persists immediately instead of holding back.
+        let held_back = inner.hold_back_error_result_line_if_resume_pending(
+            r#"{"type":"result","is_error":true}"#.to_string() + "\n",
+        );
+        assert!(
+            !held_back,
+            "with tracking already cleared, the line would NOT be held back — this is the bug; \
+             the real fix is that the stdout reader must never call try_capture_session_id for \
+             this exact line in the first place"
+        );
     }
 
     // codex P1 on PR #2360 (round 16, commit ce1642d90): the exit-handler's
