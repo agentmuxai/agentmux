@@ -97,7 +97,7 @@ mod muxbus_registration_tests {
 }
 
 /// Configuration for spawning the persistent process.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct PersistentSpawnConfig {
     pub cli_command: String,
     pub cli_args: Vec<String>,
@@ -326,19 +326,39 @@ impl PersistentInner {
     /// check a losing race would silently re-adopt a known-dead id right
     /// after `poison_resume` cleared it. A genuinely different (fresh)
     /// sid is unaffected and still captured normally.
+    ///
+    /// codex P1 on PR #2371: resolves the tentative/confirmed retry
+    /// tracking whenever `sid` is confirmed genuine — NOT only on the
+    /// `adopted` (session_id was previously `None`) branch. A
+    /// `--resume <sid>` spawn ALWAYS has `session_id` already `Some`
+    /// BEFORE the process even starts (that's what makes `--resume` get
+    /// attached at all — see `spawn_process`), so on the common
+    /// resume-SUCCEEDED case the CLI's echoed sid matches what's already
+    /// held and this always used to return `false` immediately, WITHOUT
+    /// ever clearing `pending_resume_retry`. Since persistent mode never
+    /// exits between turns, that tentative state would then sit live for
+    /// the rest of this potentially long-lived process's life, wrongly
+    /// holding back every LATER, completely unrelated `is_error:true`
+    /// result (an unrelated rate limit five messages later, say) as if it
+    /// might still need to be dropped for a stale-resume retry — and
+    /// each new one would silently overwrite whatever was already held.
     fn try_capture_session_id(&mut self, sid: &str) -> bool {
-        if self.session_id.is_some() || self.resume_poisoned.as_deref() == Some(sid) {
+        if self.resume_poisoned.as_deref() == Some(sid) {
             return false;
         }
-        self.session_id = Some(sid.to_string());
-        // Any successful capture — a resumed conversation confirming the
-        // sid it was given, or a fresh conversation the CLI started on its
-        // own — proves this spawn is genuinely progressing. Neither the
-        // tentative nor the (mutually-exclusive-in-practice, but cleared
-        // defensively) confirmed retry is needed anymore.
+        let adopted = self.session_id.is_none();
+        if adopted {
+            self.session_id = Some(sid.to_string());
+        }
+        // Any confirmation of a non-poisoned sid — a resumed conversation
+        // confirming the sid it was already given, or a fresh
+        // conversation the CLI started on its own — proves this spawn is
+        // genuinely progressing. Neither the tentative nor the confirmed
+        // retry is needed anymore, whether or not THIS call is the one
+        // that originally adopted the session id.
         self.pending_resume_retry = None;
         self.confirmed_stale_resume_retry = None;
-        true
+        adopted
     }
 
     /// Returns `true` (and clears `stop_requested_generation`) if a stop
@@ -1414,6 +1434,19 @@ impl PersistentSubprocessController {
                 // `release_spawn_claim_and_drain_queue` will deliver this
                 // (or, if their process turns out to already be dead, its
                 // own bounded fallback respawn will).
+                //
+                // reagentx P2 on PR #2371: that concurrent spawn's own
+                // eventual success or failure isn't tracked from here at
+                // all, so a held error line can't be conditioned on it
+                // the way `BecomeSpawner`'s own failure branch can.
+                // Flushing it now (same as the `self_ref` gone case)
+                // means the worst case is one possibly-superseded extra
+                // line if the other spawn does succeed — better than the
+                // alternative of losing it silently if that spawn also
+                // fails.
+                if let Some(line) = held_error_line {
+                    self.flush_error_line_now(line);
+                }
             }
             SendAction::BecomeSpawner => {
                 // Only clear inner.session_id now that THIS retry is
@@ -2371,36 +2404,49 @@ impl PersistentSubprocessController {
                         }
                     }
 
-                    // codex P1 on PR #2371: same reasoning as the stderr
-                    // wait above, for the stdout reader — but NOT the
-                    // same bounded-timeout-then-abort mechanism. Unlike
-                    // stderr, the stdout reader performs synchronous
-                    // FileStore/SQLite writes that can legitimately
-                    // contend for multiple seconds (SQLite's own busy
-                    // timeout), so a short bound would abort it mid-line,
-                    // discarding still-unread assistant/result frames and
-                    // truncating the persisted transcript — a worse
-                    // outcome than the race this wait exists to close.
-                    // `child.wait()` resolving already proves the
-                    // process's stdout pipe has closed (the process has
-                    // fully exited), so this reader's own
-                    // `lines.next_line()` loop is GUARANTEED to reach EOF
-                    // and return on its own — awaiting it fully (not
-                    // racing a timeout) is always eventually correct,
-                    // only possibly slow under contention. Logged if it
-                    // takes unusually long, purely for diagnostics — the
-                    // wait itself is never cut short.
-                    let stdout_drain_started = std::time::Instant::now();
-                    let _ = stdout_reader_handle.await;
-                    let stdout_drain_elapsed = stdout_drain_started.elapsed();
-                    if stdout_drain_elapsed > std::time::Duration::from_millis(500) {
+                    // codex P1 on PR #2371 (round 1): the stdout reader
+                    // performs synchronous FileStore/SQLite writes that
+                    // can legitimately contend for multiple seconds
+                    // (SQLite's own busy timeout) — a short bound (the
+                    // stderr reader's 500ms above) would abort it
+                    // mid-line under ordinary contention, discarding
+                    // still-unread assistant/result frames and
+                    // truncating the persisted transcript.
+                    //
+                    // codex P1 on PR #2371 (round 2): but an UNBOUNDED
+                    // await isn't safe either — if the CLI spawned a
+                    // background descendant that inherited its stdout
+                    // descriptor, killing/waiting for the direct child
+                    // does NOT close that descriptor, so this reader's
+                    // `lines.next_line()` may never see EOF, hanging this
+                    // exit-handling step (and everything after it —
+                    // health status, muxbus deregistration, the retry
+                    // decision itself) forever.
+                    //
+                    // 10s is the compromise: generous enough that
+                    // ordinary SQLite contention never triggers the
+                    // abort (avoiding the round-1 truncation risk), but
+                    // still a hard ceiling so a genuinely stuck
+                    // descendant-held pipe (or anything else gone wrong)
+                    // can't hang this task indefinitely (closing the
+                    // round-2 gap). Aborting our own read loop doesn't
+                    // require the OS pipe to actually close — it just
+                    // stops OUR wait, accepting we may not have drained
+                    // every last buffered line, the same risk profile
+                    // the original 500ms bound already accepted, just at
+                    // a bound wide enough not to fire under normal load.
+                    let abort_handle = stdout_reader_handle.abort_handle();
+                    if tokio::time::timeout(std::time::Duration::from_secs(10), stdout_reader_handle)
+                        .await
+                        .is_err()
+                    {
                         tracing::warn!(
                             block_id = %block_id_wait,
-                            elapsed_ms = stdout_drain_elapsed.as_millis() as u64,
-                            "stdout reader took unusually long to drain after process exit \
-                             (likely FileStore/SQLite contention) — waited for it anyway rather \
-                             than aborting, to avoid truncating the transcript"
+                            "stdout reader did not finish within 10s of process exit \
+                             (SQLite contention, or a descendant process holding stdout open?) \
+                             — aborting it"
                         );
+                        abort_handle.abort();
                     }
 
                     // Wait (briefly, bounded) for the drain to finish
@@ -2643,24 +2689,28 @@ impl PersistentSubprocessController {
                             abort_handle.abort();
                         }
                     }
-                    // codex P1 on PR #2371: await, don't abort — see the
-                    // child.wait() arm's identical comment above. By this
-                    // point the process is dead or dying (force-killed,
-                    // or the graceful 5s wait/force-kill above already
-                    // ran), so the stdout pipe will close and this
-                    // reader's loop is guaranteed to reach EOF on its
-                    // own; aborting risks truncating still-unread
-                    // assistant/result frames out of the transcript.
-                    let stdout_drain_started = std::time::Instant::now();
-                    let _ = stdout_reader_handle.await;
-                    let stdout_drain_elapsed = stdout_drain_started.elapsed();
-                    if stdout_drain_elapsed > std::time::Duration::from_millis(500) {
+                    // codex P1 on PR #2371 (round 2): a bounded wait, not
+                    // an unconditional one — see the child.wait() arm's
+                    // identical comment above for the full reasoning. This
+                    // matters MORE here: codex flagged that every
+                    // remaining cleanup step (clearing current_pid/
+                    // kill_tx, STATUS_DONE, muxbus deregistration) runs
+                    // AFTER this await, so an unbounded hang here would
+                    // leave a user-initiated Stop making the controller
+                    // appear permanently alive if a descendant process
+                    // ever holds the stdout descriptor open.
+                    let abort_handle = stdout_reader_handle.abort_handle();
+                    if tokio::time::timeout(std::time::Duration::from_secs(10), stdout_reader_handle)
+                        .await
+                        .is_err()
+                    {
                         tracing::warn!(
                             block_id = %block_id_wait,
-                            elapsed_ms = stdout_drain_elapsed.as_millis() as u64,
-                            "stdout reader took unusually long to drain after kill — waited for it \
-                             anyway rather than aborting, to avoid truncating the transcript"
+                            "stdout reader did not finish within 10s of kill \
+                             (SQLite contention, or a descendant process holding stdout open?) \
+                             — aborting it"
                         );
+                        abort_handle.abort();
                     }
 
                     health_wait.set_exited(-1);
@@ -4366,6 +4416,35 @@ mod resume_poison_tests {
         let captured = inner.try_capture_session_id("second-sid");
         assert!(!captured, "must not overwrite an already-captured session id");
         assert_eq!(inner.session_id.as_deref(), Some("first-sid"));
+    }
+
+    // codex P1 on PR #2371: a `--resume <sid>` spawn ALWAYS has
+    // `session_id` already `Some` before the process starts (that's what
+    // makes `--resume` get attached at all) — so on the common
+    // resume-SUCCEEDED case, the CLI's first-line echo of that SAME sid
+    // must still resolve `pending_resume_retry`/`confirmed_stale_resume_retry`
+    // even though `captured` itself is `false` (nothing new was
+    // adopted). Without this, persistent mode never exiting between
+    // turns meant that tentative state sat live for the rest of the
+    // process's potentially long lifetime, wrongly holding back every
+    // LATER, unrelated `is_error:true` result as if it might still need
+    // to be dropped for a stale-resume retry.
+    #[test]
+    fn resolves_pending_retry_on_a_successful_resume_even_though_session_id_was_already_held() {
+        let mut inner = inner_with_session_id(Some("dead-sid"));
+        inner.pending_resume_retry =
+            Some(("dead-sid".to_string(), dummy_spawn_config(), vec!["{}".to_string()]));
+
+        let captured = inner.try_capture_session_id("dead-sid");
+
+        assert!(!captured, "nothing new was adopted — session_id was already this exact sid");
+        assert_eq!(inner.session_id.as_deref(), Some("dead-sid"));
+        assert!(
+            inner.pending_resume_retry.is_none(),
+            "a successful resume must stand down the retry safety net even when \
+             session_id was already held before this call"
+        );
+        assert!(inner.confirmed_stale_resume_retry.is_none());
     }
 
     // codex P1 on PR #2360 (round 16, commit ce1642d90): the exit-handler's
