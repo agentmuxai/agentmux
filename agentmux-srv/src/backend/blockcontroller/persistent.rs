@@ -268,6 +268,24 @@ struct PersistentInner {
     /// AskUserQuestion; consumed by `answer_question` to build the matching
     /// `control_response`. Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
     pending_questions: HashMap<String, (String, serde_json::Value)>,
+    /// A not-yet-persisted `result`/`is_error:true` stdout line, held back
+    /// by the stdout reader instead of being appended to the blockfile
+    /// immediately, whenever `pending_resume_retry` is still live at the
+    /// moment it arrives — i.e. this is the doomed first attempt of a
+    /// stale-`--resume` spawn, and a retry may still be confirmed for it
+    /// (issue #2368: PR #2360's transparent retry succeeds within
+    /// milliseconds, but this line had already been unconditionally
+    /// persisted before the retry decision ran, leaving a permanent
+    /// "Agent encountered an error" bubble even though the retry worked).
+    /// The process-waiter resolves it once the retry decision is final:
+    /// dropped entirely if a stale-resume retry is confirmed and about to
+    /// fire, or flushed to the blockfile otherwise (a genuine first-turn
+    /// error — auth failure, rate limit, or an explicit stop overriding a
+    /// confirmed retry — must still reach the user). Single-slot, like
+    /// `pending_resume_retry`: only one spawn is ever in flight at a time
+    /// (`spawning_in_progress` guarantees this), so no generation tag is
+    /// needed. Cleared (taken) by the process-waiter on every exit.
+    pending_error_result_line: Option<String>,
 }
 
 impl PersistentInner {
@@ -328,6 +346,25 @@ impl PersistentInner {
     fn consume_stop_requested_for_generation(&mut self, generation: u64) -> bool {
         if self.stop_requested_generation == Some(generation) {
             self.stop_requested_generation = None;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Called by the stdout reader for a terminal `result`/`is_error:true`
+    /// line. Stashes `line_with_newline` in `pending_error_result_line`
+    /// instead of persisting it immediately, when `pending_resume_retry`
+    /// is still live — i.e. a stale-`--resume` retry could still be
+    /// confirmed for this exact attempt (issue #2368). Returns `true` if
+    /// the line was held back (the caller must skip its normal blockfile
+    /// append for this line), `false` if it should persist immediately as
+    /// always. Extracted as its own method (mirroring `poison_resume`/
+    /// `consume_stop_requested_for_generation` above) so this decision is
+    /// directly unit testable without needing a real child process.
+    fn hold_back_error_result_line_if_resume_pending(&mut self, line_with_newline: String) -> bool {
+        if self.pending_resume_retry.is_some() {
+            self.pending_error_result_line = Some(line_with_newline);
             true
         } else {
             false
@@ -494,6 +531,7 @@ impl PersistentSubprocessController {
                 spawn_generation: 0,
                 stop_requested_generation: None,
                 pending_questions: HashMap::new(),
+                pending_error_result_line: None,
             })),
             broker,
             event_bus,
@@ -2004,6 +2042,10 @@ impl PersistentSubprocessController {
         // mirrored to the cross-channel store. `None` for non-agent blocks.
         let global_output_zone =
             super::shell::resolve_global_output_zone(&self.wstore, &self.block_id);
+        // Cloned before `global_output_zone` moves into the stdout-reader
+        // task below — the process-waiter task (spawned further down) needs
+        // its own copy to flush a held-back `pending_error_result_line`.
+        let global_output_zone_wait = global_output_zone.clone();
 
         tokio::spawn(async move {
             let reader = BufReader::new(stdout);
@@ -2033,6 +2075,14 @@ impl PersistentSubprocessController {
                 // Track session metadata (debounced 1 s)
                 stats.record_line(line.len(), &wstore_read);
 
+                // Set (instead of persisted immediately) when this line turns
+                // out to be a terminal `result`/`is_error:true` event arriving
+                // while a stale-`--resume` retry could still be confirmed for
+                // this exact attempt — see
+                // `PersistentInner::pending_error_result_line`. `false` for
+                // every other line, matching today's behavior exactly.
+                let mut hold_back_for_resume_retry = false;
+
                 // Parse JSON for health monitoring and session ID capture
                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&line) {
                     // Control-protocol frames (can_use_tool / AskUserQuestion) are
@@ -2047,11 +2097,13 @@ impl PersistentSubprocessController {
                     }
                     let (meaningful, _error) = classify_output_line(&parsed);
                     health_read.record_output(meaningful);
+                    let is_result_frame =
+                        parsed.get("type").and_then(|v| v.as_str()) == Some("result");
                     // Claude's turn-ending marker. Persistent mode never exits
                     // between turns, so this is the only place `turn_active`
                     // can go back to false without waiting for process exit —
                     // see `send_message`'s matching `set_active_turn(true)`.
-                    if parsed.get("type").and_then(|v| v.as_str()) == Some("result") {
+                    if is_result_frame {
                         health_read.set_active_turn(false);
                         // Publish the flip so the Swarm view's live
                         // ControllerStatus subscription reflects "turn
@@ -2111,6 +2163,25 @@ impl PersistentSubprocessController {
                             core::persist_session_id(&block_id_read, &sid_string, &wstore_read, &event_bus_read);
                         }
                     }
+                    // Issue #2368: `pending_resume_retry` being live right now
+                    // is exactly the same signal `poison_resume` itself
+                    // checks before confirming a retry (see its doc
+                    // comment) — if it's already `None` (a session id was
+                    // captured above or on an earlier line, or this
+                    // generation never attempted an untrusted `--resume`),
+                    // this can't be a stale-resume case and today's
+                    // immediate-persist behavior is unchanged.
+                    if is_result_frame && parsed.get("is_error").and_then(|v| v.as_bool()) == Some(true)
+                    {
+                        hold_back_for_resume_retry = inner_read
+                            .lock()
+                            .unwrap()
+                            .hold_back_error_result_line_if_resume_pending(format!("{}\n", line));
+                    }
+                }
+
+                if hold_back_for_resume_retry {
+                    continue;
                 }
 
                 // Publish line as WPS blockfile event and write-through to FileStore
@@ -2158,6 +2229,10 @@ impl PersistentSubprocessController {
         let broker_wait = self.broker.clone();
         let wstore_wait = self.wstore.clone();
         let health_wait = Arc::clone(&self.health_monitor);
+        // Needed only to flush a held-back `pending_error_result_line` when
+        // the stale-resume retry is NOT confirmed (or is overridden by an
+        // explicit stop) — see the exit-handler's own comment below.
+        let filestore_wait = self.filestore.clone();
         // Captured so the waiter can deregister this agent from muxbus on exit.
         let agent_id_wait = agent_id_for_muxbus.clone();
         // See `set_self_ref` / `retry_after_resume_failure` — lets this
@@ -2268,6 +2343,11 @@ impl PersistentSubprocessController {
                     // unrelated later lifetime.
                     let retry_after_resume = inner.confirmed_stale_resume_retry.take();
                     inner.pending_resume_retry = None;
+                    // Issue #2368: resolved below, once the final
+                    // retry-vs-not decision (including the stop-override
+                    // just past this block) is known — see
+                    // `PersistentInner::pending_error_result_line`.
+                    let pending_error_line = inner.pending_error_result_line.take();
                     // codex P1 on PR #2360 (round 16, commit ce1642d90): a
                     // stop meant for THIS exact spawn generation must
                     // override a pending retry — see `stop_requested_
@@ -2327,6 +2407,17 @@ impl PersistentSubprocessController {
                         retry_after_resume
                     };
                     if let Some((_attempted_sid, retry_config, retry_json)) = retry_after_resume {
+                        // Issue #2368: the retry is firing and will very
+                        // likely succeed within milliseconds — the doomed
+                        // attempt's own terminal error result must never
+                        // reach the user, so it's dropped here instead of
+                        // ever being appended to the blockfile.
+                        if pending_error_line.is_some() {
+                            tracing::info!(
+                                block_id = %block_id_wait,
+                                "dropping doomed attempt's error result — stale-resume retry is firing"
+                            );
+                        }
                         if let Some(ctrl) = self_ref_wait.upgrade() {
                             tracing::warn!(
                                 block_id = %block_id_wait,
@@ -2335,6 +2426,22 @@ impl PersistentSubprocessController {
                             ctrl.retry_after_resume_failure(retry_config, retry_json);
                         }
                     } else if let Some(ref broker) = broker_wait {
+                        // Issue #2368: no retry is following after all
+                        // (never confirmed, or an explicit stop overrode a
+                        // confirmed one) — a held-back error result is a
+                        // genuine first-turn failure the user must still
+                        // see, just persisted here instead of at
+                        // stdout-read time.
+                        if let Some(line) = pending_error_line {
+                            super::shell::handle_append_block_file(
+                                broker,
+                                &block_id_wait,
+                                PERSISTENT_OUTPUT_SUBJECT,
+                                line.as_bytes(),
+                                filestore_wait.as_ref(),
+                                global_output_zone_wait.as_deref(),
+                            );
+                        }
                         // Genuinely done, not retrying — publish the
                         // terminal status.
                         let status = BlockControllerRuntimeStatus {
@@ -3963,6 +4070,7 @@ mod resume_poison_tests {
             spawn_generation: 0,
             stop_requested_generation: None,
             pending_questions: HashMap::new(),
+            pending_error_result_line: None,
         }
     }
 
@@ -4162,6 +4270,118 @@ mod resume_poison_tests {
         assert!(
             inner.confirmed_stale_resume_retry.is_none(),
             "must not confirm a retry that wasn't captured for the poisoned sid"
+        );
+    }
+
+    // Issue #2368: PR #2360's transparent stale-resume retry fires and
+    // usually succeeds within milliseconds, but the doomed attempt's own
+    // terminal `result`/`is_error:true` stdout line had already been
+    // unconditionally persisted to the blockfile before the retry decision
+    // ever ran — leaving a permanent "Agent encountered an error" bubble
+    // even though the retry worked. These four tests cover
+    // `hold_back_error_result_line_if_resume_pending`'s decision in
+    // isolation, and the state combination the process-waiter's exit
+    // handler actually reads.
+
+    // While a stale-`--resume` retry could still be confirmed for this
+    // exact attempt (`pending_resume_retry` still live), the line must be
+    // held back rather than persisted immediately.
+    #[test]
+    fn holds_back_error_result_line_while_resume_retry_is_pending() {
+        let mut inner = inner_with_session_id(None);
+        inner.pending_resume_retry =
+            Some(("dead-sid".to_string(), dummy_spawn_config(), vec!["{}".to_string()]));
+
+        let held_back = inner.hold_back_error_result_line_if_resume_pending(
+            r#"{"type":"result","is_error":true}"#.to_string() + "\n",
+        );
+
+        assert!(held_back, "must report the line was held back, not persisted");
+        assert_eq!(
+            inner.pending_error_result_line.as_deref(),
+            Some("{\"type\":\"result\",\"is_error\":true}\n"),
+            "the exact line must be stashed for the exit handler to resolve"
+        );
+    }
+
+    // No `--resume` was attempted for this generation (or a session id was
+    // already captured, clearing `pending_resume_retry`) — this can't be a
+    // stale-resume case, so today's immediate-persist behavior must be
+    // completely unchanged: nothing is stashed.
+    #[test]
+    fn does_not_hold_back_error_result_line_when_no_resume_retry_is_pending() {
+        let mut inner = inner_with_session_id(None);
+        assert!(inner.pending_resume_retry.is_none());
+
+        let held_back = inner.hold_back_error_result_line_if_resume_pending(
+            r#"{"type":"result","is_error":true}"#.to_string() + "\n",
+        );
+
+        assert!(!held_back, "must not hold back a line with no resume retry in flight");
+        assert!(
+            inner.pending_error_result_line.is_none(),
+            "nothing should be stashed when the line persists immediately"
+        );
+    }
+
+    // The retry-firing case: once the stderr reader confirms the exact sid
+    // this attempt used is unreachable, `poison_resume` promotes the
+    // tentative retry to confirmed. The exit handler takes BOTH
+    // `confirmed_stale_resume_retry` and `pending_error_result_line`
+    // together — this proves they land in the same "retry is firing, drop
+    // the stashed line" state at once, exactly what the exit handler's
+    // `if let Some(...) = retry_after_resume` branch checks for.
+    #[test]
+    fn stashed_line_coincides_with_a_confirmed_retry_when_poisoned() {
+        let mut inner = inner_with_session_id(Some("dead-sid"));
+        inner.pending_resume_retry =
+            Some(("dead-sid".to_string(), dummy_spawn_config(), vec!["{}".to_string()]));
+        let held_back = inner.hold_back_error_result_line_if_resume_pending(
+            r#"{"type":"result","is_error":true}"#.to_string() + "\n",
+        );
+        assert!(held_back);
+
+        inner.poison_resume("dead-sid");
+
+        assert!(
+            inner.confirmed_stale_resume_retry.is_some(),
+            "poisoning the exact attempted sid must confirm the retry"
+        );
+        assert!(
+            inner.pending_error_result_line.is_some(),
+            "the stashed line must still be present for the exit handler to drop"
+        );
+    }
+
+    // The genuinely-erroring, no-retry case (e.g. an auth failure or rate
+    // limit on the very first message of a fresh `--resume` spawn, before
+    // any session id was ever captured): the line gets held back exactly
+    // like the stale-resume case (the stdout reader can't yet tell them
+    // apart), but `poison_resume` never fires because the stderr reader
+    // never saw "No conversation found". The exit handler must see
+    // `confirmed_stale_resume_retry: None` alongside a still-present
+    // `pending_error_result_line`, so it flushes (not drops) the line —
+    // a real first-turn failure must still reach the user.
+    #[test]
+    fn stashed_line_survives_when_no_poison_ever_fires() {
+        let mut inner = inner_with_session_id(None);
+        inner.pending_resume_retry =
+            Some(("dead-sid".to_string(), dummy_spawn_config(), vec!["{}".to_string()]));
+        let held_back = inner.hold_back_error_result_line_if_resume_pending(
+            r#"{"type":"result","is_error":true}"#.to_string() + "\n",
+        );
+        assert!(held_back);
+
+        // No poison_resume call — this generation exits for some unrelated
+        // reason (auth failure, rate limit, ...).
+
+        assert!(
+            inner.confirmed_stale_resume_retry.is_none(),
+            "an unrelated error must never be treated as a confirmed stale-resume retry"
+        );
+        assert!(
+            inner.pending_error_result_line.is_some(),
+            "the stashed line must survive so the exit handler can flush it to the user"
         );
     }
 }
