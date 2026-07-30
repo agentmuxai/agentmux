@@ -670,17 +670,25 @@ impl PersistentSubprocessController {
     ///   the caller must then call `spawn_process` and, regardless of
     ///   outcome, call `release_spawn_claim_and_drain_queue`.
     ///
-    /// `skip_if_already_queued` — always `false` for a genuine new message
-    /// (`send_message`): a user legitimately re-sending the exact same
-    /// text while an unrelated spawn is in flight must still queue both,
-    /// so this must never dedup by content there. `true` only for
-    /// `retry_after_resume_failure`, whose `json_str` is a KNOWN re-
-    /// delivery of content that may ALREADY be sitting in
-    /// `pending_send_messages` — pushed by the very spawn attempt whose
-    /// failure triggered this retry, if that spawn's own drain hasn't
-    /// reached it yet. codex P1 on PR #2360 (sixth review pass, round 4):
-    /// blindly queueing another copy there let a fallback spawn eventually
-    /// deliver the same prompt twice.
+    /// `skip_if_already_queued` — always `false` for the sole production
+    /// call site (`send_message`): a user legitimately re-sending the
+    /// exact same text while an unrelated spawn is in flight must still
+    /// queue both, so this must never dedup by content there.
+    ///
+    /// reagentx P2 on PR #2360 (round 16, commit ce1642d90): `true` is NOT
+    /// exercised by any production call site — `retry_after_resume_
+    /// failure` was refactored (round 6) to use `decide_retry_batch_
+    /// action` instead, a separate function with its own atomic,
+    /// batch-aware dedup/prepend logic (see that function's own doc
+    /// comment). The `true` path here now only exists for this file's own
+    /// unit tests, which document the exact scenario `decide_retry_batch_
+    /// action`'s own dedup check handles for a batch instead: codex P1 on
+    /// PR #2360 (sixth review pass, round 4) — a KNOWN re-delivery of
+    /// content that may ALREADY be sitting in `pending_send_messages`,
+    /// pushed by the very spawn attempt whose failure triggered a retry,
+    /// if that spawn's own drain hasn't reached it yet; blindly queueing
+    /// another copy there let a fallback spawn eventually deliver the
+    /// same prompt twice.
     fn decide_send_action(&self, json_str: &str, skip_if_already_queued: bool) -> SendAction {
         let mut inner = self.inner.lock().unwrap();
         if inner.stdin_tx.is_some() && !inner.spawning_in_progress {
