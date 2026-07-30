@@ -469,6 +469,7 @@ pub fn resync_controller(
                 filestore,
             );
             let ctrl = Arc::new(ctrl);
+            ctrl.set_self_ref();
             register_controller(block_id, ctrl.clone());
             ctrl.start(block_meta.clone(), rt_opts, force)
         }
