@@ -702,15 +702,34 @@ impl PersistentSubprocessController {
             // behind it (from other callers already told "accepted"),
             // hand off to a bounded fallback respawn rather than
             // stranding it with nobody responsible for delivering it.
+            //
+            // codex P2 on PR #2360 (round 13, commit e9678091f): clearing
+            // `spawning_in_progress` in a SEPARATE, later lock acquisition
+            // left a window between the emptiness check above and that
+            // clear where a concurrent `send_message` could observe
+            // `spawning_in_progress` still `true`, enqueue its message via
+            // `decide_send_action`'s `Queued` branch, and be told
+            // "accepted" — then this function's second lock would clear
+            // the claim without ever rechecking the queue, stranding that
+            // accepted message with no spawner and no drain ever
+            // responsible for it. The emptiness check and the flag clear
+            // must be one atomic decision under a single lock acquisition
+            // (same shape as the round-9 regression this whole PR already
+            // fixed once): only clear the claim here if the queue is STILL
+            // empty at the exact moment we're about to clear it; otherwise
+            // leave the claim held and hand off to the fallback respawn.
             let leftovers = {
                 let mut inner = self.inner.lock().unwrap();
                 inner.pending_send_messages.pop_front();
-                !inner.pending_send_messages.is_empty()
+                if inner.pending_send_messages.is_empty() {
+                    inner.spawning_in_progress = false;
+                    false
+                } else {
+                    true
+                }
             };
             if leftovers {
                 self.respawn_once_for_leftover_queue(retry_config);
-            } else {
-                self.inner.lock().unwrap().spawning_in_progress = false;
             }
             return;
         }
@@ -3164,6 +3183,76 @@ mod send_input_tests {
             "queued-by-someone-else",
             "a message queued by a DIFFERENT caller (already told \"accepted\") must survive for the next spawn"
         );
+    }
+
+    /// Exercises the actual race with real OS threads — codex P2 on PR
+    /// #2360 (round 13, commit e9678091f): a FAILED spawn's claim used to
+    /// be released in a lock acquisition SEPARATE from the emptiness check
+    /// that decided whether to release it at all. That left a window,
+    /// between the two, where a concurrent `send_message` could observe
+    /// `spawning_in_progress` still `true`, enqueue via `decide_send_action`'s
+    /// `Queued` branch, and be told "accepted" — then this function's
+    /// second lock would clear the claim without ever rechecking the
+    /// queue, stranding that accepted message with nobody left responsible
+    /// (no drain, no respawn, no disclosure). The fix merges the emptiness
+    /// check and the flag clear into one lock acquisition, so a racer's
+    /// push can now only land fully before or fully after that atomic
+    /// block — never inside it. Across many iterations and threads, the
+    /// invariant that must always hold: whenever a message is left queued
+    /// with the claim released, it's because a fallback respawn was
+    /// actually attempted (and disclosed its failure via a published
+    /// status) — never silently, with no attempt at all.
+    #[test]
+    fn release_spawn_claim_and_drain_queue_never_silently_strands_a_racing_send() {
+        use std::sync::Arc as StdArc;
+
+        for iteration in 0..30 {
+            let broker = StdArc::new(crate::backend::wps::Broker::new());
+            let block_id = format!("block-race-{iteration}");
+            let c = StdArc::new(PersistentSubprocessController::new(
+                "tab".to_string(),
+                block_id.clone(),
+                Some(broker.clone()),
+                None,
+                None,
+                None,
+            ));
+            c.set_self_ref();
+            {
+                let mut inner = c.inner.lock().unwrap();
+                inner.spawning_in_progress = true;
+                inner.pending_send_messages.push_back(QueuedMessage::fresh("the-one-that-failed".to_string()));
+            }
+
+            let handles: Vec<_> = (0..8)
+                .map(|i| {
+                    let c = StdArc::clone(&c);
+                    std::thread::spawn(move || {
+                        let _ = c.decide_send_action(&format!("racer-{iteration}-{i}"), false);
+                    })
+                })
+                .collect();
+
+            c.release_spawn_claim_and_drain_queue(false, unreachable_fallback_config());
+
+            for h in handles {
+                h.join().unwrap();
+            }
+
+            let inner = c.inner.lock().unwrap();
+            let stranded = !inner.spawning_in_progress && !inner.pending_send_messages.is_empty();
+            if stranded {
+                let published = !broker
+                    .read_event_history(crate::backend::wps::EVENT_CONTROLLER_STATUS, &format!("block:{block_id}"), 10)
+                    .is_empty();
+                assert!(
+                    published,
+                    "iteration {iteration}: a racing send was left queued with the claim already \
+                     released and no respawn attempt ever disclosed via a status publish — stranded \
+                     with nobody responsible for it"
+                );
+            }
+        }
     }
 
     /// codex P2 on PR #2360 (sixth review pass, round 3): `retry_after_
