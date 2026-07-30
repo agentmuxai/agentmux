@@ -270,9 +270,13 @@ struct PersistentInner {
     pending_questions: HashMap<String, (String, serde_json::Value)>,
     /// A not-yet-persisted `result`/`is_error:true` stdout line, held back
     /// by the stdout reader instead of being appended to the blockfile
-    /// immediately, whenever `pending_resume_retry` is still live at the
-    /// moment it arrives — i.e. this is the doomed first attempt of a
-    /// stale-`--resume` spawn, and a retry may still be confirmed for it
+    /// immediately, whenever `pending_resume_retry` OR
+    /// `confirmed_stale_resume_retry` is still live at the moment it
+    /// arrives — i.e. this is the doomed first attempt of a
+    /// stale-`--resume` spawn, and a retry may still be confirmed (or has
+    /// just been confirmed) for it. See
+    /// `hold_back_error_result_line_if_resume_pending`'s own doc comment
+    /// for why BOTH fields must be checked, not just the pending one
     /// (issue #2368: PR #2360's transparent retry succeeds within
     /// milliseconds, but this line had already been unconditionally
     /// persisted before the retry decision ran, leaving a permanent
@@ -354,16 +358,31 @@ impl PersistentInner {
 
     /// Called by the stdout reader for a terminal `result`/`is_error:true`
     /// line. Stashes `line_with_newline` in `pending_error_result_line`
-    /// instead of persisting it immediately, when `pending_resume_retry`
-    /// is still live — i.e. a stale-`--resume` retry could still be
-    /// confirmed for this exact attempt (issue #2368). Returns `true` if
-    /// the line was held back (the caller must skip its normal blockfile
-    /// append for this line), `false` if it should persist immediately as
-    /// always. Extracted as its own method (mirroring `poison_resume`/
+    /// instead of persisting it immediately, when a stale-`--resume` retry
+    /// could still be confirmed OR has already been confirmed for this
+    /// exact attempt (issue #2368). Returns `true` if the line was held
+    /// back (the caller must skip its normal blockfile append for this
+    /// line), `false` if it should persist immediately as always.
+    /// Extracted as its own method (mirroring `poison_resume`/
     /// `consume_stop_requested_for_generation` above) so this decision is
     /// directly unit testable without needing a real child process.
+    ///
+    /// Checks BOTH `pending_resume_retry` and `confirmed_stale_resume_retry`
+    /// — not just the former. `poison_resume` runs on the independently-
+    /// scheduled stderr-reader task and `.take()`s `pending_resume_retry`
+    /// the moment it promotes a retry to confirmed; live-reproduced
+    /// evidence (agent "Marks", 2026-07-30) showed the stderr reader's
+    /// poison_resume call landing ~500ms before the stdout reader finished
+    /// draining lines — by the time the stdout reader reached the doomed
+    /// line, `pending_resume_retry` was already `None` (already promoted),
+    /// so a check of that field alone missed the stash entirely and the
+    /// original bug reproduced despite this mechanism existing. Checking
+    /// `confirmed_stale_resume_retry` too closes that gap: once EITHER
+    /// field is `Some`, this attempt has not yet been proven safe to
+    /// persist immediately (it's either still tentative, or a confirmed
+    /// retry is about to fire and drop this line entirely).
     fn hold_back_error_result_line_if_resume_pending(&mut self, line_with_newline: String) -> bool {
-        if self.pending_resume_retry.is_some() {
+        if self.pending_resume_retry.is_some() || self.confirmed_stale_resume_retry.is_some() {
             self.pending_error_result_line = Some(line_with_newline);
             true
         } else {
@@ -4363,6 +4382,36 @@ mod resume_poison_tests {
             Some("{\"type\":\"result\",\"is_error\":true}\n"),
             "the exact line must be stashed for the exit handler to resolve"
         );
+    }
+
+    // Live-reproduced regression (agent "Marks", 2026-07-30): the stderr
+    // reader's poison_resume call landed well before the stdout reader
+    // finished draining lines, so by the time the stdout reader reached
+    // the doomed line, poison_resume had ALREADY `.take()`n
+    // pending_resume_retry into confirmed_stale_resume_retry — a check of
+    // pending_resume_retry alone found it `None` and let the line persist
+    // immediately, reproducing the exact bug this mechanism exists to fix.
+    #[test]
+    fn holds_back_error_result_line_when_the_retry_is_already_confirmed() {
+        let mut inner = inner_with_session_id(Some("dead-sid"));
+        inner.pending_resume_retry =
+            Some(("dead-sid".to_string(), dummy_spawn_config(), vec!["{}".to_string()]));
+        // Simulates poison_resume having already run and promoted the
+        // retry BEFORE the stdout reader ever reaches the doomed line.
+        inner.poison_resume("dead-sid");
+        assert!(inner.pending_resume_retry.is_none(), "sanity: poison_resume must have consumed it");
+        assert!(inner.confirmed_stale_resume_retry.is_some(), "sanity: promoted to confirmed");
+
+        let held_back = inner.hold_back_error_result_line_if_resume_pending(
+            r#"{"type":"result","is_error":true}"#.to_string() + "\n",
+        );
+
+        assert!(
+            held_back,
+            "must still hold back the line when the retry was already confirmed by the time \
+             the stdout reader got here, not just while it's still merely pending"
+        );
+        assert!(inner.pending_error_result_line.is_some());
     }
 
     // No `--resume` was attempted for this generation (or a session id was
