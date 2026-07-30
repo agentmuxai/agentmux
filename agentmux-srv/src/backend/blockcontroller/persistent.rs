@@ -873,6 +873,23 @@ impl PersistentSubprocessController {
     /// later, unrelated send will still eventually pick it up.
     fn respawn_once_for_leftover_queue(&self, mut config: PersistentSpawnConfig) {
         config.session_id = String::new();
+        // reagentx P0 on PR #2360 (sixth review pass, round 11): clearing
+        // `config.session_id` alone does nothing — `spawn_process`'s own
+        // `--resume` decision reads `inner.session_id` directly (see its
+        // own doc comment), never `config.session_id` (that field is only
+        // consulted to HYDRATE `inner.session_id` when it's still `None`,
+        // which is skipped here anyway since it's now empty). If the
+        // doomed process's stderr reader hasn't cleared `inner.session_id`
+        // yet (poison_resume races the drain's own `tx.send()` failure —
+        // exactly the fast-fail case this whole mechanism targets), this
+        // fallback respawn would reattach `--resume <stale-sid>` and
+        // reproduce the identical failure — and since this call passes
+        // `resume_retry_payload: None`, nothing re-arms to catch the
+        // repeat, so the process-waiter finds no confirmed retry and
+        // silently drops the message for good. Mirrors
+        // `retry_after_resume_failure`'s own explicit clear for the exact
+        // same reason.
+        self.inner.lock().unwrap().session_id = None;
         let retry_config = config.clone();
         let spawn_result = self.spawn_process(config, None);
         match &spawn_result {
@@ -2549,6 +2566,38 @@ mod send_input_tests {
             c.inner.lock().unwrap().session_id,
             None,
             "must clear inner.session_id directly, not rely on poison_resume having already done so"
+        );
+    }
+
+    /// reagentx P0 on PR #2360 (sixth review pass, round 11): same class
+    /// of bug as the test above, in a sibling fallback path added later —
+    /// `respawn_once_for_leftover_queue` cleared only `config.session_id`,
+    /// which `spawn_process`'s own `--resume` decision never reads (it
+    /// reads `inner.session_id` directly). If the doomed process's stderr
+    /// reader hasn't cleared `inner.session_id` yet, this fallback would
+    /// reattach `--resume` to the same dead sid and reproduce the
+    /// identical failure, with nothing left to catch the repeat.
+    #[test]
+    fn respawn_once_for_leftover_queue_clears_inner_session_id_even_when_poison_resume_has_not_run_yet() {
+        let c = controller();
+        c.inner.lock().unwrap().session_id = Some("dead-sid".to_string());
+
+        let config = PersistentSpawnConfig {
+            cli_command: "definitely-not-a-real-binary-xyz".to_string(),
+            cli_args: vec![],
+            working_dir: String::new(),
+            env_vars: HashMap::new(),
+            session_id_field: "session_id".to_string(),
+            resume_flag: "--resume".to_string(),
+            session_id: "dead-sid".to_string(),
+            message_id: None,
+        };
+        c.respawn_once_for_leftover_queue(config);
+
+        assert_eq!(
+            c.inner.lock().unwrap().session_id,
+            None,
+            "must clear inner.session_id directly, not rely on config.session_id alone"
         );
     }
 
