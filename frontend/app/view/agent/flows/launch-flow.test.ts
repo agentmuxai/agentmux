@@ -23,6 +23,7 @@ const hub = vi.hoisted(() => ({
     setMeta: vi.fn(),
     checkCliAuth: vi.fn(),
     listAgentIdentities: vi.fn(),
+    ensureAccountDir: vi.fn(),
     controllerResync: vi.fn(),
     getControllerStatus: vi.fn(),
     cancelCliLogin: vi.fn(),
@@ -41,6 +42,7 @@ vi.mock("@/app/store/rpc-api", () => ({
         SetMetaCommand: (...args: unknown[]) => hub.setMeta(...args),
         CheckCliAuthCommand: (...args: unknown[]) => hub.checkCliAuth(...args),
         ListAgentIdentitiesCommand: (...args: unknown[]) => hub.listAgentIdentities(...args),
+        EnsureAccountDirCommand: (...args: unknown[]) => hub.ensureAccountDir(...args),
         ControllerResyncCommand: (...args: unknown[]) => hub.controllerResync(...args),
     },
 }));
@@ -81,6 +83,7 @@ beforeEach(() => {
     hub.setMeta.mockReset().mockResolvedValue(undefined);
     hub.checkCliAuth.mockReset().mockResolvedValue({ authenticated: false });
     hub.listAgentIdentities.mockReset().mockResolvedValue([]);
+    hub.ensureAccountDir.mockReset().mockResolvedValue({ accountId: "unused", dir: undefined });
     hub.controllerResync.mockReset().mockResolvedValue(undefined);
     hub.getControllerStatus.mockReset().mockResolvedValue({ shellprocstatus: "init" });
     hub.cancelCliLogin.mockReset().mockResolvedValue(undefined);
@@ -281,5 +284,105 @@ describe("runLaunchFlow — Phase 3 (already authenticated)", () => {
 
         expect(result).toBe("success");
         expect(results).toEqual([false]);
+    });
+});
+
+describe("runLaunchFlow — mount-time auth check resolves the linked account's own dir", () => {
+    // Pins the fix for SPEC_AGENT_PANE_MOUNT_AUTH_CHECK_WRONG_DIR_2026_07_31.md:
+    // before this fix, the mount-time check always validated `authEnv`'s
+    // generic provider-default dir, even for an agent with a real bound
+    // account whose own dir (what the real spawn actually uses) may already
+    // be authenticated. Both SetMetaCommand's `cmd:env` and
+    // CheckCliAuthCommand's `auth_env` must reflect the linked account's own
+    // dir, not the generic one, whenever a link exists.
+    it("overrides the generic authEnv dir with the linked account's own dir for both SetMetaCommand and CheckCliAuthCommand", async () => {
+        hub.listAgentIdentities.mockResolvedValue([{ provider: "claude", account_id: "acct-1" }]);
+        hub.ensureAccountDir.mockResolvedValue({ accountId: "acct-1", dir: "/per-account/acct-1" });
+        hub.checkCliAuth.mockResolvedValue({ authenticated: true, email: "user@example.com" });
+
+        const result = await runLaunchFlow({
+            blockId: "block-1",
+            provider: claude,
+            log: vi.fn(),
+            setAuthUrl: vi.fn(),
+            isCancelled: () => false,
+            setLoginWaiting: vi.fn(),
+            authEnv: { CLAUDE_CONFIG_DIR: "/generic/shared/dir" },
+        });
+
+        expect(result).toBe("success");
+        // RpcApi.*Command(client, data, opts?) — the mock hub receives every
+        // positional arg, client first.
+        expect(hub.ensureAccountDir).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({ providerId: "claude", existingAccountId: "acct-1" }),
+        );
+        expect(hub.setMeta).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({
+                meta: expect.objectContaining({ "cmd:env": { CLAUDE_CONFIG_DIR: "/per-account/acct-1" } }),
+            }),
+        );
+        expect(hub.checkCliAuth).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({ auth_env: { CLAUDE_CONFIG_DIR: "/per-account/acct-1" } }),
+            expect.anything(),
+        );
+        // The linked-account lookup happens once up front and must not be
+        // repeated — it was previously only looked up a second time inside
+        // the (here, unreached) needsLogin branch.
+        expect(hub.listAgentIdentities).toHaveBeenCalledTimes(1);
+    });
+
+    it("falls back to the generic authEnv dir when no account is linked yet (genuine first-login)", async () => {
+        hub.listAgentIdentities.mockResolvedValue([]);
+        hub.checkCliAuth.mockResolvedValue({ authenticated: true, email: "user@example.com" });
+
+        const result = await runLaunchFlow({
+            blockId: "block-1",
+            provider: claude,
+            log: vi.fn(),
+            setAuthUrl: vi.fn(),
+            isCancelled: () => false,
+            setLoginWaiting: vi.fn(),
+            authEnv: { CLAUDE_CONFIG_DIR: "/generic/shared/dir" },
+        });
+
+        expect(result).toBe("success");
+        expect(hub.ensureAccountDir).not.toHaveBeenCalled();
+        expect(hub.setMeta).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({
+                meta: expect.objectContaining({ "cmd:env": { CLAUDE_CONFIG_DIR: "/generic/shared/dir" } }),
+            }),
+        );
+        expect(hub.checkCliAuth).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({ auth_env: { CLAUDE_CONFIG_DIR: "/generic/shared/dir" } }),
+            expect.anything(),
+        );
+    });
+
+    it("falls back to the generic authEnv dir when the linked account's dir can't be resolved (soft failure)", async () => {
+        hub.listAgentIdentities.mockResolvedValue([{ provider: "claude", account_id: "acct-1" }]);
+        hub.ensureAccountDir.mockResolvedValue({ accountId: "acct-1", dir: undefined });
+        hub.checkCliAuth.mockResolvedValue({ authenticated: true, email: "user@example.com" });
+
+        const result = await runLaunchFlow({
+            blockId: "block-1",
+            provider: claude,
+            log: vi.fn(),
+            setAuthUrl: vi.fn(),
+            isCancelled: () => false,
+            setLoginWaiting: vi.fn(),
+            authEnv: { CLAUDE_CONFIG_DIR: "/generic/shared/dir" },
+        });
+
+        expect(result).toBe("success");
+        expect(hub.checkCliAuth).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({ auth_env: { CLAUDE_CONFIG_DIR: "/generic/shared/dir" } }),
+            expect.anything(),
+        );
     });
 });
