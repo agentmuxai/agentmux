@@ -26,6 +26,7 @@ dependencies = [
  "agentmux-common",
  "anyhow",
  "base64",
+ "chrono",
  "clap",
  "dirs",
  "portable-pty",

@@ -22,6 +22,7 @@
 
 import { useTick } from "@/app/hook/useTick";
 import { compactionThreshold } from "@/app/store/agent-pane-state/context-window";
+import type { CompactionState } from "@/app/store/agent-pane-state/types";
 import { Show, createEffect, createMemo, createSignal, type JSX } from "solid-js";
 import type { SessionStats, TurnTokens } from "../types";
 import { AgentRuntimeDropup } from "./AgentRuntimeDropup";
@@ -109,6 +110,14 @@ interface AgentComposerStripProps {
      *  Docker sandbox" pane row — see
      *  docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md §3.2). */
     agentMode?: string;
+    /**
+     * Live "compaction in progress" state (reducer-owned, set by the
+     * `PreCompact` hook's `compaction_started` signal). While set, the
+     * center stats zone shows "Compacting…" plus a live elapsed
+     * counter instead of the normal turn/session stats — Tier 1/2 of
+     * docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md.
+     */
+    compacting?: CompactionState | null;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
@@ -128,7 +137,23 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         return s != null ? (tick(), Date.now() - s) : 0;
     });
 
+    // Live elapsed time since compaction started — a real stopwatch via
+    // Date.now() deltas (ticks every second through the same `useTick`
+    // this strip already uses for the turn-elapsed display). Once the
+    // authoritative `compact_boundary` event lands, `compacting` clears
+    // and the finalized transcript node shows the backend's real
+    // `durationMs` instead — this live reading is only ever the
+    // in-progress approximation. Tier 2 of
+    // docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md.
+    const compactingElapsedMs = createMemo(() => {
+        const c = props.compacting;
+        return c ? (tick(), Date.now() - c.startedAt) : 0;
+    });
+
     const rightText = createMemo((): string => {
+        if (props.compacting) {
+            return `Compacting…  ${fmtElapsed(compactingElapsedMs())}`;
+        }
         const parts: string[] = [];
         if (props.loading) {
             if (props.turnTokens) parts.push(fmtTokens(props.turnTokens));
@@ -201,7 +226,12 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                 rightmost column instead of sliding into the middle one. */}
             <span class="agent-composer-strip-stats-zone">
                 <Show when={rightText()}>
-                    <span class="agent-composer-strip-stats">{rightText()}</span>
+                    <span
+                        class="agent-composer-strip-stats"
+                        classList={{ "agent-composer-strip-stats--compacting": !!props.compacting }}
+                    >
+                        {rightText()}
+                    </span>
                 </Show>
             </span>
 
