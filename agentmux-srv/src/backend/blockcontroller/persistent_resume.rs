@@ -76,8 +76,23 @@ pub(super) enum ResumeState {
     /// The stderr reader confirmed `attempted_sid` unreachable under the
     /// current config dir — the retry WILL fire the moment the process
     /// actually exits, unless `stop_requested` overrides it.
+    ///
+    /// reagentx P1 (round 9 on this PR, also flagged inline by codex):
+    /// `attempted_sid` is carried forward from `AwaitingOutcome` (not
+    /// dropped at promotion) so `SessionCaptured` can still tell an
+    /// ambiguous same-sid echo apart from unambiguous progress even
+    /// after confirmation — see that arm's own doc comment for why
+    /// treating EVERY capture as unambiguous once confirmed was wrong:
+    /// `resume_poisoned` (`persistent.rs`) is a single, non-generation-
+    /// scoped, permanent field, so a lagging stderr-reader task from an
+    /// OLDER, already-superseded generation can overwrite it to a
+    /// different sid while THIS generation is still `ConfirmedRetry`,
+    /// silently disabling `try_capture_session_id`'s poison guard for
+    /// this generation's own attempted sid and letting a routine
+    /// same-sid echo reach this arm.
     ConfirmedRetry {
         generation: u64,
+        attempted_sid: String,
         retry: RetryPayload,
         held_error_line: Option<String>,
         stop_requested: bool,
@@ -273,17 +288,37 @@ pub(super) fn update(state: ResumeState, event: ResumeEvent) -> (ResumeState, Ve
                 )
             }
         }
-        (ResumeState::ConfirmedRetry { generation, held_error_line, .. }, ResumeEvent::SessionCaptured { generation: g, .. })
-            if generation == g =>
-        {
-            // Defensive: a confirmed retry means the sid is ALREADY known
-            // dead (poison_resume already won the race), so this path is
-            // not subject to the same first-echo ambiguity — a genuine
-            // capture shouldn't happen for this exact generation in
-            // practice at all, but if it somehow did, never leave stale
-            // tracking state (or a held error line) behind.
-            let effects = held_error_line.map(|line| vec![ResumeEffect::FlushErrorLine(line)]).unwrap_or_default();
-            (ResumeState::NotTracking { current_generation: generation }, effects)
+        // reagentx P1 (round 9 on this PR, also flagged inline by codex):
+        // this arm used to resolve UNCONDITIONALLY, reasoning that a
+        // confirmed retry means the sid is already known dead so the
+        // first-echo ambiguity couldn't apply. That reasoning breaks
+        // because `resume_poisoned` (persistent.rs) is a single,
+        // non-generation-scoped, PERMANENT field — a lagging stderr-
+        // reader task from an OLDER, already-superseded generation can
+        // overwrite it to a different sid while THIS generation is
+        // still `ConfirmedRetry`, silently disabling
+        // `try_capture_session_id`'s poison guard for this generation's
+        // own attempted sid. A routine same-sid echo (the CLI sends the
+        // attempted sid on every frame, ambiguous or not) can then reach
+        // this arm and used to wipe out the confirmed retry payload
+        // without ever firing it — silently losing every message the
+        // doomed process had already accepted, reproducing the exact
+        // #2368 bug class this PR exists to fix. Same unambiguity check
+        // as the `AwaitingOutcome` arm above: only a different sid or a
+        // confirmed terminal success resolves tracking here too.
+        (
+            ResumeState::ConfirmedRetry { generation, attempted_sid, retry, held_error_line, stop_requested },
+            ResumeEvent::SessionCaptured { generation: g, sid, is_confirmed_success },
+        ) if generation == g => {
+            if sid != attempted_sid || is_confirmed_success {
+                let effects = held_error_line.map(|line| vec![ResumeEffect::FlushErrorLine(line)]).unwrap_or_default();
+                (ResumeState::NotTracking { current_generation: generation }, effects)
+            } else {
+                (
+                    ResumeState::ConfirmedRetry { generation, attempted_sid, retry, held_error_line, stop_requested },
+                    vec![],
+                )
+            }
         }
 
         // The drain can keep appending messages to the retry batch while
@@ -301,11 +336,11 @@ pub(super) fn update(state: ResumeState, event: ResumeEvent) -> (ResumeState, Ve
             )
         }
         (
-            ResumeState::ConfirmedRetry { generation, mut retry, held_error_line, stop_requested },
+            ResumeState::ConfirmedRetry { generation, attempted_sid, mut retry, held_error_line, stop_requested },
             ResumeEvent::MessageAppendedToRetryBatch { generation: g, json },
         ) if generation == g => {
             retry.messages.push(json);
-            (ResumeState::ConfirmedRetry { generation, retry, held_error_line, stop_requested }, vec![])
+            (ResumeState::ConfirmedRetry { generation, attempted_sid, retry, held_error_line, stop_requested }, vec![])
         }
 
         // Promotion: only when the poisoned sid is the EXACT one this
@@ -315,7 +350,7 @@ pub(super) fn update(state: ResumeState, event: ResumeEvent) -> (ResumeState, Ve
             ResumeState::AwaitingOutcome { generation, attempted_sid, retry, held_error_line, stop_requested },
             ResumeEvent::ResumeUnreachable { generation: g, sid },
         ) if generation == g && attempted_sid == sid => {
-            (ResumeState::ConfirmedRetry { generation, retry, held_error_line, stop_requested }, vec![])
+            (ResumeState::ConfirmedRetry { generation, attempted_sid, retry, held_error_line, stop_requested }, vec![])
         }
 
         // A terminal error-result line arriving while a resume outcome
@@ -352,12 +387,12 @@ pub(super) fn update(state: ResumeState, event: ResumeEvent) -> (ResumeState, Ve
             )
         }
         (
-            ResumeState::ConfirmedRetry { generation, retry, held_error_line, stop_requested },
+            ResumeState::ConfirmedRetry { generation, attempted_sid, retry, held_error_line, stop_requested },
             ResumeEvent::ErrorResultLine { generation: g, line },
         ) if generation == g => {
             let effects = held_error_line.map(|old| vec![ResumeEffect::PersistImmediately(old)]).unwrap_or_default();
             (
-                ResumeState::ConfirmedRetry { generation, retry, held_error_line: Some(line), stop_requested },
+                ResumeState::ConfirmedRetry { generation, attempted_sid, retry, held_error_line: Some(line), stop_requested },
                 effects,
             )
         }
@@ -394,10 +429,13 @@ pub(super) fn update(state: ResumeState, event: ResumeEvent) -> (ResumeState, Ve
             vec![],
         ),
         (
-            ResumeState::ConfirmedRetry { generation, retry, held_error_line, .. },
+            ResumeState::ConfirmedRetry { generation, attempted_sid, retry, held_error_line, .. },
             ResumeEvent::StopRequested { generation: g },
         ) if generation == g => {
-            (ResumeState::ConfirmedRetry { generation, retry, held_error_line, stop_requested: true }, vec![])
+            (
+                ResumeState::ConfirmedRetry { generation, attempted_sid, retry, held_error_line, stop_requested: true },
+                vec![],
+            )
         }
 
         // Resolution. This is the only place a retry actually fires or a
@@ -418,7 +456,7 @@ pub(super) fn update(state: ResumeState, event: ResumeEvent) -> (ResumeState, Ve
             (ResumeState::NotTracking { current_generation: generation }, effects)
         }
         (
-            ResumeState::ConfirmedRetry { generation, retry, held_error_line, stop_requested },
+            ResumeState::ConfirmedRetry { generation, retry, held_error_line, stop_requested, .. },
             ResumeEvent::ProcessExited { generation: g },
         ) if generation == g => {
             let effects = if stop_requested {
@@ -822,12 +860,56 @@ mod tests {
             update(state, ResumeEvent::ResumeUnreachable { generation: 1, sid: "dead-sid".to_string() });
         assert!(matches!(&state, ResumeState::ConfirmedRetry { held_error_line: Some(_), .. }));
 
+        // An unambiguous capture (a genuinely different sid, or a
+        // confirmed terminal success) still resolves tracking and
+        // flushes the held line even after confirmation.
+        let (state, effects) = update(
+            state,
+            ResumeEvent::SessionCaptured { generation: 1, sid: "dead-sid".to_string(), is_confirmed_success: true },
+        );
+        assert_eq!(state, ResumeState::NotTracking { current_generation: 1 });
+        assert_eq!(effects, vec![ResumeEffect::FlushErrorLine("boom".to_string())]);
+    }
+
+    // reagentx P1 (round 9 on this PR, also flagged inline by codex): the
+    // `ConfirmedRetry` + `SessionCaptured` arm used to resolve
+    // UNCONDITIONALLY, discarding the confirmed `retry` payload without
+    // ever firing it. `resume_poisoned` (persistent.rs) is a single,
+    // non-generation-scoped, PERMANENT field — a lagging stderr-reader
+    // task from an OLDER, already-superseded generation can overwrite it
+    // to a different sid while THIS generation is still `ConfirmedRetry`,
+    // silently disabling `try_capture_session_id`'s poison guard for
+    // this generation's own attempted sid and letting a routine same-sid
+    // echo (ambiguous, not a confirmed success) reach this arm. That
+    // must NOT wipe out the confirmed retry — same unambiguity check as
+    // the `AwaitingOutcome` arm.
+    #[test]
+    fn ambiguous_same_sid_echo_after_confirmation_does_not_discard_the_confirmed_retry() {
+        let state = spawned_with_resume(1);
+        let (state, _) =
+            update(state, ResumeEvent::ResumeUnreachable { generation: 1, sid: "dead-sid".to_string() });
+        assert!(matches!(&state, ResumeState::ConfirmedRetry { attempted_sid, .. } if attempted_sid == "dead-sid"));
+
+        // The same attempted sid, echoed on a non-terminal frame — the
+        // exact ambiguous case the poison guard normally screens out,
+        // reachable here only because a stale, unrelated poison
+        // overwrote `resume_poisoned` first.
         let (state, effects) = update(
             state,
             ResumeEvent::SessionCaptured { generation: 1, sid: "dead-sid".to_string(), is_confirmed_success: false },
         );
+        assert!(effects.is_empty(), "an ambiguous echo must not flush or fire anything");
+        match &state {
+            ResumeState::ConfirmedRetry { retry, .. } => {
+                assert_eq!(retry.messages, vec!["{}".to_string()], "the confirmed retry must survive intact")
+            }
+            other => panic!("expected the confirmed retry to survive an ambiguous echo, got {other:?}"),
+        }
+
+        // The retry still fires normally once the process actually exits.
+        let (state, effects) = update(state, ResumeEvent::ProcessExited { generation: 1 });
         assert_eq!(state, ResumeState::NotTracking { current_generation: 1 });
-        assert_eq!(effects, vec![ResumeEffect::FlushErrorLine("boom".to_string())]);
+        assert_eq!(effects, vec![ResumeEffect::FireRetry { retry: dummy_retry(), held_error_line: None }]);
     }
 
     // reagentx P2 on PR #2373: an ErrorResultLine whose generation
