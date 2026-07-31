@@ -46,14 +46,20 @@ pub(super) struct RetryPayload {
 }
 
 /// One spawn attempt's resume/error-line lifecycle.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub(super) enum ResumeState {
     /// No `--resume` attempt is in flight for the current generation —
     /// either this spawn never attached `--resume`, or a prior attempt
     /// already resolved (session id captured, retry fired, or exited
-    /// with an unrelated error).
-    #[default]
-    NotTracking,
+    /// with an unrelated error). `current_generation` is whichever
+    /// generation this resolved FROM (or `0` if no spawn has ever
+    /// happened — see `Default` below). reagentx P1 (round 5 on PR
+    /// #2373): without this, `NotTracking` couldn't tell a legitimate
+    /// `ProcessExited` for the generation that just resolved apart from
+    /// a STALE one for an already-superseded older generation, letting
+    /// the older one incorrectly publish terminal status over a newer,
+    /// actively-running generation. See `ProcessExited`'s handling below.
+    NotTracking { current_generation: u64 },
     /// `--resume <attempted_sid>` was attached at spawn; outcome not yet
     /// known. `held_error_line` is `Some` once a terminal
     /// `result`/`is_error:true` stdout line has arrived but its
@@ -76,6 +82,16 @@ pub(super) enum ResumeState {
         held_error_line: Option<String>,
         stop_requested: bool,
     },
+}
+
+impl Default for ResumeState {
+    /// `current_generation: 0` — real generations start at 1
+    /// (`PersistentInner::spawn_generation` is bumped before its first
+    /// use), so this default can never accidentally match a genuine
+    /// `ProcessExited` event.
+    fn default() -> Self {
+        ResumeState::NotTracking { current_generation: 0 }
+    }
 }
 
 impl ResumeState {
@@ -108,9 +124,10 @@ pub(super) enum ResumeEvent {
     /// this spawn's identity for the rest of its lifetime.
     SpawnedWithResume { generation: u64, attempted_sid: String, retry: RetryPayload },
     /// A fresh spawn did NOT attach `--resume` (no session id held yet).
-    /// Carries no generation — a fresh spawn always resets tracking to
-    /// `NotTracking` regardless of which generation it is.
-    SpawnedFresh,
+    /// `generation` is this spawn's identity, carried so `NotTracking`
+    /// can tell a later, legitimate `ProcessExited` for THIS generation
+    /// apart from a stale one for whatever generation it superseded.
+    SpawnedFresh { generation: u64 },
     /// A session-id-bearing stdout frame arrived for this generation.
     /// `sid` is the id it carried; `is_confirmed_success` is true only
     /// when THIS exact frame is a terminal `result` with `is_error:false`
@@ -171,26 +188,61 @@ pub(super) enum ResumeEffect {
     PublishDone,
 }
 
+/// Resolves a PRIOR generation's still-unresolved tracking
+/// (`AwaitingOutcome`/`ConfirmedRetry`) that a fresh spawn is about to
+/// supersede.
+///
+/// reagentx P1 (round 5 on PR #2373): `SpawnedWithResume`/`SpawnedFresh`
+/// used to reset straight into the new generation's state with NO
+/// effects at all — normally safe, since a new spawn_process call is only
+/// supposed to happen after the previous generation's own `ProcessExited`
+/// already resolved it, but reachable out of order via
+/// `persistent.rs`'s `respawn_once_for_leftover_queue` (a stall-triggered
+/// fallback respawn, on a completely different path than this module's
+/// own confirmed-retry firing) racing the process-waiter task that would
+/// otherwise resolve the OLD generation first. Silently discarding a
+/// still-held error line lost a real user-facing error; the retry itself
+/// is dropped (not fired) rather than silently discarded-and-lost,
+/// because a brand-new spawn is already underway via a completely
+/// different code path — firing ANOTHER retry on top of it would
+/// double-spawn.
+fn resolve_superseded_generation(prior: ResumeState) -> Vec<ResumeEffect> {
+    match prior {
+        ResumeState::AwaitingOutcome { held_error_line, .. }
+        | ResumeState::ConfirmedRetry { held_error_line, .. } => {
+            held_error_line.map(|line| vec![ResumeEffect::FlushErrorLine(line)]).unwrap_or_default()
+        }
+        ResumeState::NotTracking { .. } => vec![],
+    }
+}
+
 /// The pure state transition. See the module doc comment for why this
 /// shape exists and what it replaces.
 pub(super) fn update(state: ResumeState, event: ResumeEvent) -> (ResumeState, Vec<ResumeEffect>) {
     match (state, event) {
         // A fresh spawn always starts (or restarts) tracking from
-        // scratch, regardless of what the previous generation's state
-        // was — the previous generation, if any, must have already
-        // resolved (its own ProcessExited already ran) before a new
-        // spawn_process call can happen on this same controller.
-        (_, ResumeEvent::SpawnedWithResume { generation, attempted_sid, retry }) => (
-            ResumeState::AwaitingOutcome {
-                generation,
-                attempted_sid,
-                retry,
-                held_error_line: None,
-                stop_requested: false,
-            },
-            vec![],
-        ),
-        (_, ResumeEvent::SpawnedFresh) => (ResumeState::NotTracking, vec![]),
+        // scratch — normally the previous generation, if any, has
+        // already resolved (its own ProcessExited already ran) before a
+        // new spawn_process call happens on this same controller, but
+        // `resolve_superseded_generation` closes the gap for the rare
+        // out-of-order case (see its own doc comment).
+        (prior, ResumeEvent::SpawnedWithResume { generation, attempted_sid, retry }) => {
+            let effects = resolve_superseded_generation(prior);
+            (
+                ResumeState::AwaitingOutcome {
+                    generation,
+                    attempted_sid,
+                    retry,
+                    held_error_line: None,
+                    stop_requested: false,
+                },
+                effects,
+            )
+        }
+        (prior, ResumeEvent::SpawnedFresh { generation }) => {
+            let effects = resolve_superseded_generation(prior);
+            (ResumeState::NotTracking { current_generation: generation }, effects)
+        }
 
         // A session capture resolves tracking ONLY when it's unambiguous
         // — see `SessionCaptured`'s own doc comment for why a same-sid
@@ -213,7 +265,7 @@ pub(super) fn update(state: ResumeState, event: ResumeEvent) -> (ResumeState, Ve
                 // resolves tracking) must be flushed, not silently
                 // discarded along with the state.
                 let effects = held_error_line.map(|line| vec![ResumeEffect::FlushErrorLine(line)]).unwrap_or_default();
-                (ResumeState::NotTracking, effects)
+                (ResumeState::NotTracking { current_generation: generation }, effects)
             } else {
                 (
                     ResumeState::AwaitingOutcome { generation, attempted_sid, retry, held_error_line, stop_requested },
@@ -231,7 +283,7 @@ pub(super) fn update(state: ResumeState, event: ResumeEvent) -> (ResumeState, Ve
             // practice at all, but if it somehow did, never leave stale
             // tracking state (or a held error line) behind.
             let effects = held_error_line.map(|line| vec![ResumeEffect::FlushErrorLine(line)]).unwrap_or_default();
-            (ResumeState::NotTracking, effects)
+            (ResumeState::NotTracking { current_generation: generation }, effects)
         }
 
         // The drain can keep appending messages to the retry batch while
@@ -309,8 +361,8 @@ pub(super) fn update(state: ResumeState, event: ResumeEvent) -> (ResumeState, Ve
                 effects,
             )
         }
-        (ResumeState::NotTracking, ResumeEvent::ErrorResultLine { line, .. }) => {
-            (ResumeState::NotTracking, vec![ResumeEffect::PersistImmediately(line)])
+        (ResumeState::NotTracking { current_generation }, ResumeEvent::ErrorResultLine { line, .. }) => {
+            (ResumeState::NotTracking { current_generation }, vec![ResumeEffect::PersistImmediately(line)])
         }
         // reagentx P2 on PR #2373: an ErrorResultLine whose generation
         // does NOT match what's currently tracked (a stale/lagging
@@ -363,7 +415,7 @@ pub(super) fn update(state: ResumeState, event: ResumeEvent) -> (ResumeState, Ve
                 effects.push(ResumeEffect::FlushErrorLine(line));
             }
             effects.push(ResumeEffect::PublishDone);
-            (ResumeState::NotTracking, effects)
+            (ResumeState::NotTracking { current_generation: generation }, effects)
         }
         (
             ResumeState::ConfirmedRetry { generation, retry, held_error_line, stop_requested },
@@ -389,10 +441,22 @@ pub(super) fn update(state: ResumeState, event: ResumeEvent) -> (ResumeState, Ve
                 // effect rather than pre-decided here.
                 vec![ResumeEffect::FireRetry { retry, held_error_line }]
             };
-            (ResumeState::NotTracking, effects)
+            (ResumeState::NotTracking { current_generation: generation }, effects)
         }
-        (ResumeState::NotTracking, ResumeEvent::ProcessExited { .. }) => {
-            (ResumeState::NotTracking, vec![ResumeEffect::PublishDone])
+        // reagentx P1 (round 5 on PR #2373): gated on `current_generation
+        // == g` — without this, a STALE `ProcessExited` for an
+        // already-superseded generation (one a fresh spawn moved past
+        // via `SpawnedFresh`/`SpawnedWithResume` before this exact exit
+        // event ever arrived) would match unconditionally and incorrectly
+        // `PublishDone` (turn_active:false) over a brand-new, actively
+        // running generation. A mismatched generation instead falls
+        // through to the catch-all below — a safe no-op, same treatment
+        // every OTHER state gives a stale event.
+        (
+            ResumeState::NotTracking { current_generation },
+            ResumeEvent::ProcessExited { generation: g },
+        ) if current_generation == g => {
+            (ResumeState::NotTracking { current_generation }, vec![ResumeEffect::PublishDone])
         }
 
         // Any other (state, event) pairing is either a mismatched sid
@@ -426,7 +490,7 @@ mod tests {
 
     fn spawned_with_resume(generation: u64) -> ResumeState {
         let (state, effects) = update(
-            ResumeState::NotTracking,
+            ResumeState::default(),
             ResumeEvent::SpawnedWithResume {
                 generation,
                 attempted_sid: "dead-sid".to_string(),
@@ -440,17 +504,21 @@ mod tests {
     #[test]
     fn fresh_spawn_persists_error_lines_immediately() {
         let (state, effects) = update(
-            ResumeState::NotTracking,
+            ResumeState::default(),
             ResumeEvent::ErrorResultLine { generation: 1, line: "boom".to_string() },
         );
-        assert_eq!(state, ResumeState::NotTracking);
+        assert_eq!(state, ResumeState::default());
         assert_eq!(effects, vec![ResumeEffect::PersistImmediately("boom".to_string())]);
     }
 
     #[test]
     fn fresh_spawn_exit_just_publishes_done() {
-        let (state, effects) = update(ResumeState::NotTracking, ResumeEvent::ProcessExited { generation: 1 });
-        assert_eq!(state, ResumeState::NotTracking);
+        let (state, effects) = update(ResumeState::default(), ResumeEvent::SpawnedFresh { generation: 1 });
+        assert_eq!(state, ResumeState::NotTracking { current_generation: 1 });
+        assert!(effects.is_empty());
+
+        let (state, effects) = update(state, ResumeEvent::ProcessExited { generation: 1 });
+        assert_eq!(state, ResumeState::NotTracking { current_generation: 1 });
         assert_eq!(effects, vec![ResumeEffect::PublishDone]);
     }
 
@@ -465,13 +533,13 @@ mod tests {
                 is_confirmed_success: true,
             },
         );
-        assert_eq!(state, ResumeState::NotTracking);
+        assert_eq!(state, ResumeState::NotTracking { current_generation: 1 });
         assert!(effects.is_empty());
 
         // A later, unrelated exit on this now-resolved generation must
         // not retry or dredge up anything.
         let (state, effects) = update(state, ResumeEvent::ProcessExited { generation: 1 });
-        assert_eq!(state, ResumeState::NotTracking);
+        assert_eq!(state, ResumeState::NotTracking { current_generation: 1 });
         assert_eq!(effects, vec![ResumeEffect::PublishDone]);
     }
 
@@ -521,7 +589,7 @@ mod tests {
         assert!(matches!(&state, ResumeState::ConfirmedRetry { held_error_line: Some(l), .. } if l == "boom"));
 
         let (state, effects) = update(state, ResumeEvent::ProcessExited { generation: 1 });
-        assert_eq!(state, ResumeState::NotTracking);
+        assert_eq!(state, ResumeState::NotTracking { current_generation: 1 });
         assert_eq!(
             effects,
             vec![ResumeEffect::FireRetry { retry: dummy_retry(), held_error_line: Some("boom".to_string()) }]
@@ -576,7 +644,7 @@ mod tests {
         assert!(matches!(&state, ResumeState::ConfirmedRetry { held_error_line: Some(l), .. } if l == "boom"));
 
         let (state, effects) = update(state, ResumeEvent::ProcessExited { generation: 1 });
-        assert_eq!(state, ResumeState::NotTracking);
+        assert_eq!(state, ResumeState::NotTracking { current_generation: 1 });
         assert_eq!(
             effects,
             vec![ResumeEffect::FireRetry { retry: dummy_retry(), held_error_line: Some("boom".to_string()) }]
@@ -595,7 +663,7 @@ mod tests {
             update(state, ResumeEvent::ErrorResultLine { generation: 1, line: "auth failed".to_string() });
 
         let (state, effects) = update(state, ResumeEvent::ProcessExited { generation: 1 });
-        assert_eq!(state, ResumeState::NotTracking);
+        assert_eq!(state, ResumeState::NotTracking { current_generation: 1 });
         assert_eq!(
             effects,
             vec![ResumeEffect::FlushErrorLine("auth failed".to_string()), ResumeEffect::PublishDone]
@@ -621,7 +689,7 @@ mod tests {
         // state.
         let state = spawned_with_resume(1);
         let (state, _) = update(state, ResumeEvent::ProcessExited { generation: 1 });
-        assert_eq!(state, ResumeState::NotTracking);
+        assert_eq!(state, ResumeState::NotTracking { current_generation: 1 });
 
         let state = spawned_with_resume(2);
         let (state, effects) =
@@ -677,7 +745,7 @@ mod tests {
         assert!(matches!(state, ResumeState::ConfirmedRetry { stop_requested: true, .. }));
 
         let (state, effects) = update(state, ResumeEvent::ProcessExited { generation: 1 });
-        assert_eq!(state, ResumeState::NotTracking);
+        assert_eq!(state, ResumeState::NotTracking { current_generation: 1 });
         assert_eq!(
             effects,
             vec![ResumeEffect::PublishDone],
@@ -694,7 +762,7 @@ mod tests {
         assert!(matches!(state, ResumeState::ConfirmedRetry { stop_requested: true, .. }));
 
         let (state, effects) = update(state, ResumeEvent::ProcessExited { generation: 1 });
-        assert_eq!(state, ResumeState::NotTracking);
+        assert_eq!(state, ResumeState::NotTracking { current_generation: 1 });
         assert_eq!(effects, vec![ResumeEffect::PublishDone]);
     }
 
@@ -711,7 +779,7 @@ mod tests {
         let (state, _) = update(state, ResumeEvent::StopRequested { generation: 1 });
 
         let (state, effects) = update(state, ResumeEvent::ProcessExited { generation: 1 });
-        assert_eq!(state, ResumeState::NotTracking);
+        assert_eq!(state, ResumeState::NotTracking { current_generation: 1 });
         assert_eq!(
             effects,
             vec![ResumeEffect::FlushErrorLine("boom".to_string()), ResumeEffect::PublishDone]
@@ -733,7 +801,7 @@ mod tests {
             state,
             ResumeEvent::SessionCaptured { generation: 1, sid: "dead-sid".to_string(), is_confirmed_success: true },
         );
-        assert_eq!(state, ResumeState::NotTracking);
+        assert_eq!(state, ResumeState::NotTracking { current_generation: 1 });
         assert_eq!(
             effects,
             vec![ResumeEffect::FlushErrorLine("boom".to_string())],
@@ -758,7 +826,7 @@ mod tests {
             state,
             ResumeEvent::SessionCaptured { generation: 1, sid: "dead-sid".to_string(), is_confirmed_success: false },
         );
-        assert_eq!(state, ResumeState::NotTracking);
+        assert_eq!(state, ResumeState::NotTracking { current_generation: 1 });
         assert_eq!(effects, vec![ResumeEffect::FlushErrorLine("boom".to_string())]);
     }
 
@@ -784,8 +852,8 @@ mod tests {
 
     #[test]
     fn spawned_fresh_with_no_resume_never_tracks_anything() {
-        let (state, effects) = update(ResumeState::NotTracking, ResumeEvent::SpawnedFresh);
-        assert_eq!(state, ResumeState::NotTracking);
+        let (state, effects) = update(ResumeState::default(), ResumeEvent::SpawnedFresh { generation: 1 });
+        assert_eq!(state, ResumeState::NotTracking { current_generation: 1 });
         assert!(effects.is_empty());
 
         let (state, effects) =
@@ -793,5 +861,70 @@ mod tests {
         assert_eq!(effects, vec![ResumeEffect::PersistImmediately("boom".to_string())]);
         let (_, effects) = update(state, ResumeEvent::ProcessExited { generation: 1 });
         assert_eq!(effects, vec![ResumeEffect::PublishDone]);
+    }
+
+    // reagentx P1 (round 5 on this PR): the exact race reagentx flagged —
+    // a fresh (or resumed) respawn firing via `SpawnedFresh`/
+    // `SpawnedWithResume` while a PRIOR generation is still
+    // `AwaitingOutcome`/`ConfirmedRetry` (its own `ProcessExited` hasn't
+    // arrived yet — reachable via `persistent.rs`'s
+    // `respawn_once_for_leftover_queue` racing the process-waiter task).
+    // The prior generation's held error line must reach the user instead
+    // of vanishing, and its own eventual (belated) `ProcessExited` must
+    // NOT corrupt the new generation's status.
+    #[test]
+    fn a_fresh_spawn_superseding_an_unresolved_generation_flushes_its_held_error_and_ignores_its_stale_exit() {
+        let state = spawned_with_resume(1);
+        let (state, _) =
+            update(state, ResumeEvent::ErrorResultLine { generation: 1, line: "generation 1's error".to_string() });
+        assert!(matches!(&state, ResumeState::AwaitingOutcome { generation: 1, held_error_line: Some(_), .. }));
+
+        // A brand-new spawn (generation 2) supersedes generation 1 before
+        // generation 1's own ProcessExited ever arrived.
+        let (state, effects) = update(state, ResumeEvent::SpawnedFresh { generation: 2 });
+        assert_eq!(
+            effects,
+            vec![ResumeEffect::FlushErrorLine("generation 1's error".to_string())],
+            "generation 1's held error must reach the user, not vanish when generation 2 supersedes it"
+        );
+        assert_eq!(state, ResumeState::NotTracking { current_generation: 2 });
+
+        // Generation 1's own (belated) ProcessExited must be a safe
+        // no-op now — NOT another PublishDone stomping generation 2.
+        let (state, effects) = update(state, ResumeEvent::ProcessExited { generation: 1 });
+        assert!(
+            effects.is_empty(),
+            "a stale ProcessExited for a superseded generation must not publish done over the new one"
+        );
+        assert_eq!(state, ResumeState::NotTracking { current_generation: 2 });
+
+        // Generation 2's OWN eventual exit must still work normally.
+        let (state, effects) = update(state, ResumeEvent::ProcessExited { generation: 2 });
+        assert_eq!(state, ResumeState::NotTracking { current_generation: 2 });
+        assert_eq!(effects, vec![ResumeEffect::PublishDone]);
+    }
+
+    // Same race, but the prior generation had already been CONFIRMED
+    // stale (poison_resume won) before the fresh respawn superseded it —
+    // its own queued retry must be dropped (not fired), not silently
+    // discarded, since a brand-new spawn is already underway via a
+    // completely different path.
+    #[test]
+    fn a_fresh_spawn_superseding_a_confirmed_retry_drops_it_without_double_spawning() {
+        let state = spawned_with_resume(1);
+        let (state, _) =
+            update(state, ResumeEvent::ResumeUnreachable { generation: 1, sid: "dead-sid".to_string() });
+        assert!(matches!(state, ResumeState::ConfirmedRetry { generation: 1, .. }));
+
+        let (state, effects) = update(state, ResumeEvent::SpawnedFresh { generation: 2 });
+        assert!(
+            effects.is_empty(),
+            "no held error line existed, so superseding a confirmed (but line-less) retry produces no effect"
+        );
+        assert_eq!(state, ResumeState::NotTracking { current_generation: 2 });
+
+        let (state, effects) = update(state, ResumeEvent::ProcessExited { generation: 1 });
+        assert!(effects.is_empty(), "generation 1's stale exit must not fire its now-superseded retry");
+        assert_eq!(state, ResumeState::NotTracking { current_generation: 2 });
     }
 }

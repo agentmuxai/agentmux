@@ -339,13 +339,13 @@ impl PersistentInner {
         // already makes for `SessionCaptured`).
         let sid_is_new = self.session_id.as_deref() != Some(sid);
         let session_id_was_none = self.session_id.is_none();
-        let was_tracking = !matches!(self.resume, persistent_resume::ResumeState::NotTracking);
+        let was_tracking = !matches!(self.resume, persistent_resume::ResumeState::NotTracking { .. });
         let effects = self.apply_resume_event(persistent_resume::ResumeEvent::SessionCaptured {
             generation,
             sid: sid.to_string(),
             is_confirmed_success,
         });
-        let just_resolved_tracking = was_tracking && matches!(self.resume, persistent_resume::ResumeState::NotTracking);
+        let just_resolved_tracking = was_tracking && matches!(self.resume, persistent_resume::ResumeState::NotTracking { .. });
         let adopted = sid_is_new && (session_id_was_none || just_resolved_tracking);
         if adopted {
             self.session_id = Some(sid.to_string());
@@ -502,7 +502,7 @@ impl PersistentSubprocessController {
                 status_version: 0,
                 session_id: None,
                 resume_poisoned: None,
-                resume: persistent_resume::ResumeState::NotTracking,
+                resume: persistent_resume::ResumeState::default(),
                 spawning_in_progress: false,
                 pending_send_messages: VecDeque::new(),
                 drain_send_in_flight: false,
@@ -1911,7 +1911,7 @@ impl PersistentSubprocessController {
                     });
                 }
                 _ => {
-                    inner.apply_resume_event(persistent_resume::ResumeEvent::SpawnedFresh);
+                    inner.apply_resume_event(persistent_resume::ResumeEvent::SpawnedFresh { generation });
                 }
             }
             generation
@@ -4571,7 +4571,7 @@ mod resume_poison_tests {
             status_version: 0,
             session_id: session_id.map(str::to_string),
             resume_poisoned: None,
-            resume: persistent_resume::ResumeState::NotTracking,
+            resume: persistent_resume::ResumeState::default(),
             spawning_in_progress: false,
             pending_send_messages: VecDeque::new(),
             drain_send_in_flight: false,
@@ -4673,7 +4673,7 @@ mod resume_poison_tests {
             "session_id must move on to the fresh conversation, not stay stuck on the stale \
              attempted sid"
         );
-        assert_eq!(inner.resume, persistent_resume::ResumeState::NotTracking);
+        assert_eq!(inner.resume, persistent_resume::ResumeState::NotTracking { current_generation: 1 });
     }
 
     // Once a session id is already held, a second stdout line (e.g. a
@@ -4708,13 +4708,13 @@ mod resume_poison_tests {
         assert_eq!(inner.session_id.as_deref(), Some("dead-sid"));
         assert_eq!(
             inner.resume,
-            persistent_resume::ResumeState::NotTracking,
+            persistent_resume::ResumeState::NotTracking { current_generation: 1 },
             "a successful resume must stand down the retry safety net even when \
              session_id was already held before this call"
         );
         assert_eq!(
             inner.resume,
-            persistent_resume::ResumeState::NotTracking,
+            persistent_resume::ResumeState::NotTracking { current_generation: 1 },
             "a successful resume must stand down the retry safety net even when \
              session_id was already held before this call"
         );
