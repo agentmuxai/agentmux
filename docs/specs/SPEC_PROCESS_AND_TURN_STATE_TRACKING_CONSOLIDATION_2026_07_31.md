@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-31
 **Type:** Consolidation spec — synthesizes multiple bugs/gaps found in one investigation session, proposes a unified fix direction
-**Status:** Investigation complete for all findings below; one fix already shipped (heartbeat pattern, operational — not a code change), one fix fully designed and ready to implement (`SPEC_PERSISTENT_TURN_END_TEXT_GATE_2026_07_30.md`), remainder need design work
+**Status:** Investigation complete for all findings below; two fixes already shipped — the heartbeat pattern (operational, no code change) and `SPEC_PERSISTENT_TURN_END_TEXT_GATE_2026_07_30.md` (merged via PR #2369 on 2026-07-30, **after** this session's initial pass mistakenly reported it as "not yet implemented" — see correction in §5.4). Note: #2369 merged *after* the `v0.54.7` release cut (2026-07-29), so it is not yet in any released/installed build — only a fresh `dev` build off `main` has it. Remainder need design work.
 **Trigger:** User asked "why are we still having trouble with `task dev`?" after a `task dev` background-task bookkeeping loss, plus reported a new regression: the agent pane spontaneously shows "Picked up more work — starting another round…" and gets stuck showing "Working" indefinitely. User's framing: **"we need a state machine for all these things, and it seems like they are always leaking."**
 **Related:** `RETRO_TASK_DEV_IDLE_KILL_FALSE_POSITIVE_2026_07_31.md`, `RETRO_BASHWRAP_PAGER_HANG_LEAK_2026_07_14.md`, `retro-task-dev-isolation-multi-agent-2026-06-23.md`, `retro-persistent-agent-working-status-stuck-2026-07-16.md`, `REPORT_LONGRUNNING_TOOLCALL_AUTODETECT_STATUS_2026_07_26.md`, `REPORT_LONGRUNNING_TOOLCALL_DOCK_VISIBILITY_2026_07_16.md`, `SPEC_PERSISTENT_TURN_END_TEXT_GATE_2026_07_30.md`, `SPEC_WORKING_STATE_AND_SCROLL_FOLLOW_HARDENING_2026_07_27.md`.
 
@@ -81,11 +81,13 @@ The current heuristic is `!hasToolUse` — it doesn't check whether the message 
 
 `settled-grace.ts` and the reducer's re-promotion logic are *reporting* the re-promotion correctly — they are not the bug. The actual recovery path for a genuinely-stuck `Streaming` phase is `StreamWatchdogTick`'s liveness recovery: force-recover to `Idle` after `LIVENESS_RECOVERY_MS = 180_000` (3 minutes) of **continuous silence** (`reducer.ts`, `types.ts:750`). But any subsequent real activity — a new tool call, a new chunk of text — resets the silence clock (`lastEventMs`) and restarts the 3-minute countdown from zero. During a long session where `ScheduleWakeup`/task-notification-driven resumptions keep arriving (as happened repeatedly in this exact conversation), each new round's tool activity can refresh `lastEventMs` before the prior window elapses — **perpetually deferring the watchdog's recovery for as long as new activity keeps arriving close enough together.** The result: the notification fires once (correctly reporting a real re-promotion), and then "Working" never clears, because the *specific episode* that triggered it never gets its own resolution — only a generic silence timer does, and that timer keeps getting reset by unrelated-but-real subsequent activity.
 
-### 5.4 The fix already exists
+### 5.4 The fix already exists — and, correction, was already merged
 
-`SPEC_PERSISTENT_TURN_END_TEXT_GATE_2026_07_30.md` — dated the day before this investigation, status **"Proposed — audited and designed, not yet implemented."** It tightens the heuristic to `!hasToolUse && hasText`: a message only counts as a real turn-end once it contains actual, non-whitespace explanation text, not merely "no tool_use present." This directly closes the transitional/empty-message misclassification that's the upstream trigger for the whole flap-then-stick sequence. Per that spec's own §4 ("Why this is safe"): every genuinely-finished turn ends with `stop_reason: "end_turn"`, which by definition carries real text, even a one-word reply — so this doesn't reintroduce the original #1757 "stuck forever" bug it replaced. Its own §6 ("Non-goals") is honest that it reduces, not eliminates, the notification's firing rate (Claude Code's own `Stop`-hook-driven mid-CLI resumption is a separate, unobservable-from-AgentMux case) — but it should substantially shrink the specific "spontaneous, then stuck" pattern reported here, since a tool-call-only resumption round no longer prematurely settles to `Done` in the first place.
+`SPEC_PERSISTENT_TURN_END_TEXT_GATE_2026_07_30.md`, dated the day before this investigation, was checked against the working tree at the time and showed status **"Proposed — audited and designed, not yet implemented."** This session's first report (below, §8, and the earlier chat response) took that status at face value and recommended implementing it. **Correction:** it had, by that point, already been implemented and merged — `PR #2369` ("fix(agent-stream): require real explanation text before ending a persistent-mode turn"), merged **2026-07-30T14:18:18Z**, exactly the `!hasToolUse && hasText` gate the spec describes (confirmed directly in `claude-translator.ts`'s current `handleAssistantMessage`, which cites this same spec file in its own comment). The spec file itself was simply never updated to reflect its own implementation — a docs-hygiene gap, not a code gap.
 
-**This spec is fully designed, has a written test plan, and touches exactly two files** (`claude-translator.ts`, `claude-translator.test.ts`) with no reducer or backend changes. It is ready to implement now, pending go-ahead — see §8.
+**Practical consequence:** PR #2369 merged *after* the `v0.54.7` release cut (2026-07-29T's `VERSION_HISTORY.md` entry). So the fix exists on `main` but is not present in any *released* build — a user's regular installed AgentMux instance won't have it until the next release ships, even though a fresh `dev` build off `main` right now does. This is the most likely explanation for why the stuck-"Working" symptom was still observed live during this investigation: the running instance being watched was on `v0.54.7`, predating the fix.
+
+Per that spec's own §4 ("Why this is safe"): every genuinely-finished turn ends with `stop_reason: "end_turn"`, which by definition carries real text, even a one-word reply — so this doesn't reintroduce the original #1757 "stuck forever" bug it replaced. Its own §6 ("Non-goals") is honest that it reduces, not eliminates, the notification's firing rate (Claude Code's own `Stop`-hook-driven mid-CLI resumption is a separate, unobservable-from-AgentMux case) — so some residual "Picked up more work…" firing is still expected even after this fix, just not the specific spontaneous-and-permanently-stuck pattern this investigation chased.
 
 ---
 
@@ -101,7 +103,7 @@ Mechanisms A–E in §1 are the frontend/process-tracking analogue of exactly th
 
 **A full unification (one registry, one set of events, one pure reducer, feeding *all* of the dock/registry/pane-status/background-task surfaces) is a substantial redesign** — not proposed as a single PR here. The concrete, incremental steps that move in that direction, roughly in the order they'd naturally land:
 
-1. Implement the already-designed `SPEC_PERSISTENT_TURN_END_TEXT_GATE_2026_07_30.md` fix (§5.4) — closes the most user-visible symptom (mechanism E) with no architecture change, immediately.
+1. ~~Implement the already-designed `SPEC_PERSISTENT_TURN_END_TEXT_GATE_2026_07_30.md` fix~~ — **done; see §5.4 correction.** Merged via PR #2369, 2026-07-30, before this spec was even finished being written. Not yet in a released build (post-dates `v0.54.7`).
 2. Add the still-missing "long-running attached process" pane status (`retro-persistent-agent-working-status-stuck-2026-07-16.md`'s own "Fix direction") — this is the one axis every mechanism-E investigation (that retro, and this one) has independently identified as the real missing state: *turn-phase* and *attached-background-process-liveness* are orthogonal, and the reducer currently only models the former.
 3. Give the dock (mechanism B) a generation/max-age fallback so an orphaned `"running"` entry can self-expire instead of waiting for a session boundary — directly closes §3.
 4. Longer-term: consider whether the dock (B) and the process registry (C) could share one underlying event-sourced model instead of two independently-derived views over different data — `REPORT_LONGRUNNING_TOOLCALL_AUTODETECT_STATUS_2026_07_26.md` already recommends this direction; this spec adds mechanisms A, D, and E to the same argument.
@@ -110,6 +112,7 @@ Mechanisms A–E in §1 are the frontend/process-tracking analogue of exactly th
 
 ## 7. Open items (not fixed by this spec, flagged for follow-up)
 
+- [x] ~~Implement `SPEC_PERSISTENT_TURN_END_TEXT_GATE_2026_07_30.md`~~ — already merged (PR #2369), see §5.4.
 - [ ] Bake the heartbeat-loop pattern (§2) into `scripts/dev-agent.cmd` itself, or document it prominently in `CLAUDE.md`, so it isn't rediscovered a third time.
 - [ ] Give `scrubOrphanedInProgress` (or a new mechanism) a way to expire an orphaned `"running"` `ToolNode` sooner than the next session boundary (§3).
 - [ ] Mechanism D (§4) has no fix available from inside this repo — document as a standing operational caveat: cross-check ground truth (`tasklist`/`muxlog`) before trusting a background-task "no completion record"/"failed" notification.
@@ -118,8 +121,6 @@ Mechanisms A–E in §1 are the frontend/process-tracking analogue of exactly th
 
 ---
 
-## 8. Immediate action requested
+## 8. Immediate action — corrected
 
-`SPEC_PERSISTENT_TURN_END_TEXT_GATE_2026_07_30.md` (§5.4 above) is fully designed, scoped to two files, has a written test plan, and directly targets the reported regression. It has been sitting "ready for review/go-ahead" since 2026-07-30 without being picked up — which is itself part of the honest answer to "why are we still having trouble": **the fix already existed and simply wasn't applied.**
-
-Recommend implementing it now. Awaiting go-ahead before making any frontend code changes.
+~~`SPEC_PERSISTENT_TURN_END_TEXT_GATE_2026_07_30.md` is fully designed... recommend implementing it now.~~ **Superseded — already merged, see §5.4.** No frontend code change is needed for this specific item. Practical follow-up instead: when a new release is cut, confirm `v0.54.7`'s successor includes PR #2369 (`VERSION_HISTORY.md` entry should list it), and if the stuck-"Working" symptom is reported again against a build that already includes it, that's a signal item 2/3 above (not this fix) is the remaining gap, per §5.4's own residual-scope note (Claude Code's own `Stop`-hook-driven resumption is unaffected by this fix).
