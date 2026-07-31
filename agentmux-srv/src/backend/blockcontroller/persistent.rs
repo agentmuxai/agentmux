@@ -2607,24 +2607,31 @@ impl PersistentSubprocessController {
                         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
                     }
 
-                    // Notify health monitor so Stalled/Dead watchdog stops.
-                    health_wait.set_exited(exit_code);
-
                     let mut inner = inner_wait.lock().unwrap();
-                    // reagentx P1 (round 6 on PR #2373): this belated
-                    // exit-handling can run AFTER a fresh spawn has
-                    // already superseded this generation (see
+                    // reagentx P1 (round 6 on PR #2373, extended round 8):
+                    // this belated exit-handling can run AFTER a fresh
+                    // spawn has already superseded this generation (see
                     // `respawn_once_for_leftover_queue`'s own doc comment
                     // and the kill arm below for the documented race that
                     // makes this reachable) — `inner.spawn_generation` is
                     // bumped on every NEW spawn, so a mismatch here means
                     // this exit is for an already-superseded generation.
-                    // Every field below belongs to THIS exact process
-                    // (its own pid/exit code/stdin/kill channel, or the
-                    // shared `proc_status` this process last knew to be
-                    // true) — writing them unconditionally would corrupt
-                    // a newer, actively-running generation's own state
-                    // with this stale one's.
+                    // Everything gated below belongs to THIS exact
+                    // process (its own pid/exit code/stdin/kill channel,
+                    // the shared `proc_status` this process last knew to
+                    // be true, its own health-monitor/muxbus/registry/
+                    // session-recovery registration) — running any of it
+                    // unconditionally would corrupt or tear down a newer,
+                    // actively-running generation's own state as if IT
+                    // had exited. reagentx round 8: the round-6 fix only
+                    // gated the field writes above, missing
+                    // `health_wait.set_exited` (a shared `HealthMonitor`
+                    // across generations) and the deregistration block
+                    // below — both keyed by `block_id`/`agent_id`, not
+                    // generation, so a stale exit incorrectly marked a
+                    // live process's health as exited and tore down its
+                    // muxbus/registry/session-recovery registration while
+                    // it kept running.
                     let is_current_generation = inner.spawn_generation == my_generation_wait;
                     if is_current_generation {
                         inner.proc_exit_code = exit_code;
@@ -2650,27 +2657,32 @@ impl PersistentSubprocessController {
                     }
                     drop(inner);
 
-                    // Deregister from muxbus so later sends fall through to the
-                    // lower tiers instead of resolving to a dead block. Mirrors
-                    // the shell controller's exit path. Done regardless of
-                    // whether a retry follows — this exact process's
-                    // resources are gone either way, and spawn_process's own
-                    // fresh registration (if a retry follows) doesn't clean
-                    // up state belonging to THIS dying process.
-                    crate::backend::reactive::get_global_handler()
-                        .unregister_block(&block_id_wait);
-                    if let Some(ref agent_id) = agent_id_wait {
-                        let data_dir = crate::backend::base::get_wave_data_dir();
-                        crate::backend::reactive::registry::remove(&data_dir, agent_id);
-                        crate::backend::reactive::registry::remove_shared_from_env(agent_id);
-                        if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
-                            sub.remove_agent(agent_id);
-                        }
-                    }
+                    if is_current_generation {
+                        // Notify health monitor so Stalled/Dead watchdog stops.
+                        health_wait.set_exited(exit_code);
 
-                    // Clear active pid — clean exit, no recovery needed.
-                    if let Some(ref wstore) = wstore_wait {
-                        super::session_recovery::clear_active_pid(wstore, &block_id_wait);
+                        // Deregister from muxbus so later sends fall through to the
+                        // lower tiers instead of resolving to a dead block. Mirrors
+                        // the shell controller's exit path. Done regardless of
+                        // whether a retry follows — this exact process's
+                        // resources are gone either way, and spawn_process's own
+                        // fresh registration (if a retry follows) doesn't clean
+                        // up state belonging to THIS dying process.
+                        crate::backend::reactive::get_global_handler()
+                            .unregister_block(&block_id_wait);
+                        if let Some(ref agent_id) = agent_id_wait {
+                            let data_dir = crate::backend::base::get_wave_data_dir();
+                            crate::backend::reactive::registry::remove(&data_dir, agent_id);
+                            crate::backend::reactive::registry::remove_shared_from_env(agent_id);
+                            if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
+                                sub.remove_agent(agent_id);
+                            }
+                        }
+
+                        // Clear active pid — clean exit, no recovery needed.
+                        if let Some(ref wstore) = wstore_wait {
+                            super::session_recovery::clear_active_pid(wstore, &block_id_wait);
+                        }
                     }
 
                     // A stale `--resume <sid>` is exactly what killed this
@@ -2845,23 +2857,23 @@ impl PersistentSubprocessController {
                         abort_handle.abort();
                     }
 
-                    health_wait.set_exited(-1);
-
                     let mut inner = inner_wait.lock().unwrap();
-                    // reagentx P1 (round 6 on PR #2373): same reasoning as
-                    // the child.wait() arm above — this graceful-stop
-                    // cleanup can itself run AFTER the documented race
-                    // just above (dropping `stdin_tx` early to trigger
-                    // EOF lets `respawn_once_for_leftover_queue` spawn a
-                    // brand-new generation while this kill is still
-                    // mid-flight) has already superseded this generation.
-                    // Every field below belongs to THIS exact kill (its
-                    // own pid/exit code/stdin/kill channel, its own
-                    // spawn claim/queue, or the shared `proc_status` this
-                    // stop last knew to be true) — mutating them
-                    // unconditionally would corrupt a newer, actively-
-                    // running generation's own state with this stale
-                    // one's.
+                    // reagentx P1 (round 6 on PR #2373, extended round 8):
+                    // same reasoning as the child.wait() arm above — this
+                    // graceful-stop cleanup can itself run AFTER the
+                    // documented race just above (dropping `stdin_tx`
+                    // early to trigger EOF lets
+                    // `respawn_once_for_leftover_queue` spawn a brand-new
+                    // generation while this kill is still mid-flight) has
+                    // already superseded this generation. Everything
+                    // gated below belongs to THIS exact kill (its own
+                    // pid/exit code/stdin/kill channel, its own spawn
+                    // claim/queue, the shared `proc_status` this stop
+                    // last knew to be true, its own health-monitor/
+                    // muxbus/registry/session-recovery registration) —
+                    // running any of it unconditionally would corrupt or
+                    // tear down a newer, actively-running generation's
+                    // own state as if IT had been stopped.
                     let is_current_generation = inner.spawn_generation == my_generation_wait;
                     if is_current_generation {
                         inner.proc_exit_code = -1;
@@ -2940,21 +2952,29 @@ impl PersistentSubprocessController {
                         }
                     }
 
-                    // Deregister from muxbus (see the clean-exit arm above).
-                    crate::backend::reactive::get_global_handler()
-                        .unregister_block(&block_id_wait);
-                    if let Some(ref agent_id) = agent_id_wait {
-                        let data_dir = crate::backend::base::get_wave_data_dir();
-                        crate::backend::reactive::registry::remove(&data_dir, agent_id);
-                        crate::backend::reactive::registry::remove_shared_from_env(agent_id);
-                        if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
-                            sub.remove_agent(agent_id);
-                        }
-                    }
+                    if is_current_generation {
+                        // Notify health monitor so Stalled/Dead watchdog
+                        // stops — shared `Arc<HealthMonitor>` across
+                        // generations, gated the same way as the
+                        // child.wait() arm above.
+                        health_wait.set_exited(-1);
 
-                    // Clear active pid — user-initiated stop, no recovery needed.
-                    if let Some(ref wstore) = wstore_wait {
-                        super::session_recovery::clear_active_pid(wstore, &block_id_wait);
+                        // Deregister from muxbus (see the clean-exit arm above).
+                        crate::backend::reactive::get_global_handler()
+                            .unregister_block(&block_id_wait);
+                        if let Some(ref agent_id) = agent_id_wait {
+                            let data_dir = crate::backend::base::get_wave_data_dir();
+                            crate::backend::reactive::registry::remove(&data_dir, agent_id);
+                            crate::backend::reactive::registry::remove_shared_from_env(agent_id);
+                            if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
+                                sub.remove_agent(agent_id);
+                            }
+                        }
+
+                        // Clear active pid — user-initiated stop, no recovery needed.
+                        if let Some(ref wstore) = wstore_wait {
+                            super::session_recovery::clear_active_pid(wstore, &block_id_wait);
+                        }
                     }
                 }
             }
