@@ -43,6 +43,12 @@
     align-items: center;
     gap: var(--space-1);
     justify-self: start;
+    // A grid item's default min-width is `auto` (its content's intrinsic
+    // size), not 0 — without this, `minmax(0, 1fr)` on the two-line tier's
+    // grid track (below) can't actually shrink the column past the trigger
+    // + HOST/SANDBOX badge's combined content width, defeating the trigger's
+    // own max-width cap and overflowing the row instead of clipping it.
+    min-width: 0;
 }
 
 // ── Stats zone (center column) ──────────────────────────────────────────────
@@ -56,7 +62,7 @@
 // a "Mode · Model · Effort" summary label + up-caret; same slim-pill footprint
 // as the former three separate selects/drop-ups combined into one. No fixed
 // max-width — sizes to its content; a cap only reappears under real space
-// pressure (see the ≤320px container query below), so it only ellipsizes
+// pressure (see the ≤220px container query below), so it only ellipsizes
 // when the pane genuinely has no room for it.
 .agent-runtime-dropup-trigger {
     display: inline-flex;
@@ -277,7 +283,12 @@
 // is gone: it's no longer needed once this tier is active.
 @container agent-pane (max-width: 480px) {
     .agent-composer-strip {
-        grid-template-columns: 1fr auto;
+        // minmax(0, 1fr), not bare 1fr — a bare 1fr track still has an
+        // implicit content-based minimum, so the controls column couldn't
+        // actually shrink past the trigger+badge's intrinsic width and
+        // would overflow the row instead of clipping (reagent P2 on this
+        // PR). Paired with .agent-composer-strip-controls's min-width: 0.
+        grid-template-columns: minmax(0, 1fr) auto;
         grid-template-areas:
             "controls right"
             "stats    stats";
