@@ -1898,24 +1898,45 @@ impl PersistentSubprocessController {
         // unambiguous.
         // Bumped in this SAME lock acquisition — see `spawn_generation`'s
         // own doc comment for what this identifies and why.
-        let my_generation = {
+        let (my_generation, superseded_effects) = {
             let mut inner = self.inner.lock().unwrap();
             inner.spawn_generation += 1;
             let generation = inner.spawn_generation;
-            match (attempted_resume_sid.clone(), resume_retry_payload) {
+            let effects = match (attempted_resume_sid.clone(), resume_retry_payload) {
                 (Some(sid), Some(retry_json)) => {
                     inner.apply_resume_event(persistent_resume::ResumeEvent::SpawnedWithResume {
                         generation,
                         attempted_sid: sid,
                         retry: persistent_resume::RetryPayload { config: config.clone(), messages: vec![retry_json] },
-                    });
+                    })
                 }
-                _ => {
-                    inner.apply_resume_event(persistent_resume::ResumeEvent::SpawnedFresh { generation });
+                _ => inner.apply_resume_event(persistent_resume::ResumeEvent::SpawnedFresh { generation }),
+            };
+            (generation, effects)
+        };
+        // reagentx P1 (round 7 on this PR): this fresh spawn can supersede
+        // a PRIOR generation that was still AwaitingOutcome/ConfirmedRetry
+        // with a held error line (see `resolve_superseded_generation`'s
+        // own doc comment for the exact race — reachable via
+        // `respawn_once_for_leftover_queue`) — flush it now, outside the
+        // lock, same as every other `ResumeEffect` call site in this
+        // module. Discarding this return value silently lost the exact
+        // "error disappears" bug class (#2368) this PR exists to fix.
+        for effect in superseded_effects {
+            match effect {
+                persistent_resume::ResumeEffect::FlushErrorLine(line)
+                | persistent_resume::ResumeEffect::PersistImmediately(line) => {
+                    self.flush_error_line_now(line);
+                }
+                other => {
+                    tracing::warn!(
+                        block_id = %self.block_id,
+                        effect = ?other,
+                        "unexpected ResumeEffect from a fresh spawn superseding a prior generation"
+                    );
                 }
             }
-            generation
-        };
+        }
 
         let pid = child.id().unwrap_or(0);
 
