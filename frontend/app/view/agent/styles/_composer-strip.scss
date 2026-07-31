@@ -188,6 +188,10 @@
     align-items: center;
     gap: var(--space-1-5);
     justify-self: end;
+    // Same nested-flex-in-grid min-width trap as .agent-composer-strip-controls
+    // above — without this, the two-line tier's right column (below) can't
+    // actually shrink past ctx text + Shell's combined content width either.
+    min-width: 0;
 }
 
 .agent-composer-strip-stats {
@@ -283,12 +287,14 @@
 // is gone: it's no longer needed once this tier is active.
 @container agent-pane (max-width: 480px) {
     .agent-composer-strip {
-        // minmax(0, 1fr), not bare 1fr — a bare 1fr track still has an
-        // implicit content-based minimum, so the controls column couldn't
-        // actually shrink past the trigger+badge's intrinsic width and
-        // would overflow the row instead of clipping (reagent P2 on this
-        // PR). Paired with .agent-composer-strip-controls's min-width: 0.
-        grid-template-columns: minmax(0, 1fr) auto;
+        // minmax(0, 1fr) / minmax(0, auto), not bare 1fr / auto — both track
+        // sizing keywords keep an implicit content-based minimum on their
+        // own, so EITHER column could overflow the row instead of shrinking
+        // to fit (reagent P1 re-review: the first fix only covered the
+        // controls column, missing that the right column has the identical
+        // problem). Paired with min-width: 0 on both
+        // .agent-composer-strip-controls and .agent-composer-strip-right.
+        grid-template-columns: minmax(0, 1fr) minmax(0, auto);
         grid-template-areas:
             "controls right"
             "stats    stats";
