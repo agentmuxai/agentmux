@@ -39,6 +39,16 @@ const TOOL_CHUNK_PERSIST: usize = 1024;
 /// publish so the frontend can subscribe once per block on mount.
 const TOOL_CHUNK_EVENT: &str = "tool_chunk";
 
+/// Event name for the `PreCompact`-hook-sourced "compaction started"
+/// signal. See `docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md`
+/// §4.2 / Tier 1.
+const COMPACTION_STARTED_EVENT: &str = "compaction_started";
+
+/// Only the latest "compaction started" ping matters for a given
+/// block — unlike `tool_chunk`, there's no history to replay for a
+/// late subscriber, just current state.
+const COMPACTION_STARTED_PERSIST: usize = 1;
+
 impl WpsClient {
     /// Build a client from the env. Returns `None` when the required
     /// env vars are missing — the caller surfaces a system chunk
@@ -74,10 +84,42 @@ impl WpsClient {
         block_id: Option<&str>,
         payload: &T,
     ) -> Result<()> {
+        self.publish(TOOL_CHUNK_EVENT, TOOL_CHUNK_PERSIST, block_id, payload)
+            .await
+    }
+
+    /// Publish a `compaction_started` event — the `PreCompact`-hook
+    /// signal that fires the instant Claude Code begins compacting.
+    /// `persist = 1`: only the latest ping matters, unlike
+    /// `tool_chunk`'s replay history.
+    pub async fn publish_compaction_started<T: Serialize>(
+        &self,
+        block_id: Option<&str>,
+        payload: &T,
+    ) -> Result<()> {
+        self.publish(
+            COMPACTION_STARTED_EVENT,
+            COMPACTION_STARTED_PERSIST,
+            block_id,
+            payload,
+        )
+        .await
+    }
+
+    /// Shared publish path for every WPS event this crate emits.
+    /// `event`/`persist` vary per call site; the scoping (`block:<id>`)
+    /// and auth/error-handling are identical across all of them.
+    async fn publish(
+        &self,
+        event: &str,
+        persist: usize,
+        block_id: Option<&str>,
+        payload: &impl Serialize,
+    ) -> Result<()> {
         let body = WpsPublishRequest {
-            event: TOOL_CHUNK_EVENT.to_string(),
+            event: event.to_string(),
             scopes: block_id.map(|b| vec![format!("block:{b}")]).unwrap_or_default(),
-            persist: TOOL_CHUNK_PERSIST,
+            persist,
             data: serde_json::to_value(payload)?,
         };
         let url = format!("{}{}", self.endpoint, PUBLISH_PATH);
@@ -140,5 +182,23 @@ mod tests {
         let c = WpsClient::from_env().expect("client");
         assert_eq!(c.endpoint, "http://127.0.0.1:9999");
         clear_env();
+    }
+
+    // ── event/persist constants (refactor of `publish` into a shared
+    // helper — SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md §4.2) ──
+
+    #[test]
+    fn compaction_started_event_name_and_persist() {
+        assert_eq!(COMPACTION_STARTED_EVENT, "compaction_started");
+        // Only the latest ping matters — no chunk history to replay.
+        assert_eq!(COMPACTION_STARTED_PERSIST, 1);
+    }
+
+    #[test]
+    fn tool_chunk_event_name_and_persist_unchanged_by_refactor() {
+        // The `publish` extraction must not change `publish_chunk`'s
+        // existing wire behavior.
+        assert_eq!(TOOL_CHUNK_EVENT, "tool_chunk");
+        assert_eq!(TOOL_CHUNK_PERSIST, 1024);
     }
 }

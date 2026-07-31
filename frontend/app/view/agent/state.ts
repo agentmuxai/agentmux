@@ -30,7 +30,7 @@ import {
     StreamingState,
     TurnTokens,
 } from "./types";
-import type { InitPhase, PaneFailure, TurnPhase } from "@/app/store/agent-pane-state/types";
+import type { CompactionState, InitPhase, PaneFailure, TurnPhase } from "@/app/store/agent-pane-state/types";
 
 /**
  * A signal pair: [getter, setter]
@@ -117,6 +117,13 @@ export interface AgentAtoms {
      * `turnPhase`. See SPEC_AGENT_PANE_UNIFIED_FAILURE_REDUCER_2026_07_06.md.
      */
     failureAtom: SignalPair<PaneFailure | null>;
+    /**
+     * Live "compaction in progress" state, or null. Reducer-owned (see
+     * `AgentPaneState.compacting`). Drives the "Compacting…" status chip
+     * + elapsed counter in `AgentComposerStrip`. See
+     * docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md.
+     */
+    compactingAtom: SignalPair<CompactionState | null>;
 }
 
 /**
@@ -183,5 +190,6 @@ export function createAgentAtoms(agentId: string): AgentAtoms {
         detailsOpenAtom: createSignal<boolean>(false),
         currentToolArgAtom: createSignal<string | null>(null),
         failureAtom: createSignal<PaneFailure | null>(null),
+        compactingAtom: createSignal<CompactionState | null>(null),
     };
 }

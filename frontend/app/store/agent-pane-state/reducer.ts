@@ -36,6 +36,7 @@ import {
     AgentPaneCommand,
     AgentPaneEvent,
     AgentPaneState,
+    COMPACTION_HEURISTIC_SUPPRESS_MS,
     INTERRUPT_TIMEOUT_MS,
     KindBeforeDisconnect,
     LIVENESS_RECOVERY_MS,
@@ -671,12 +672,26 @@ export function update(
             // non-trivial baseline. Compaction typically drops 80–95%;
             // normal turn-to-turn growth is monotonically increasing.
             // AgentMux /clear is frontend-only and does not affect tokens.
+            //
+            // Backstop only for Claude: a REAL `CompactionBoundary` event
+            // (exact backend data, not inferred) already fired its own
+            // `context-compacted` and reconciled `lastContextTokens` to
+            // `postTokens` — suppress this heuristic within the window
+            // below so the same boundary doesn't produce two events.
+            // Providers without a structured signal (codex/gemini/copilot)
+            // never set `lastCompactionBoundaryAt`, so the heuristic stays
+            // fully active for them. See
+            // docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md §4.3.
             const prev = state.lastContextTokens;
-            if (prev != null && prev > 10_000 && command.input < prev * 0.5) {
+            const suppressedByRealBoundary =
+                state.lastCompactionBoundaryAt != null
+                && nowMs - state.lastCompactionBoundaryAt < COMPACTION_HEURISTIC_SUPPRESS_MS;
+            if (!suppressedByRealBoundary && prev != null && prev > 10_000 && command.input < prev * 0.5) {
                 events.push({
                     type: "context-compacted",
                     tokensBefore: prev,
                     tokensAfter: command.input,
+                    source: "heuristic",
                 });
             }
             return { state: nextState, events };
@@ -985,6 +1000,56 @@ export function update(
             return {
                 state: { ...state, failure: null },
                 events: [{ type: "failure-cleared" }],
+            };
+        }
+
+        case "CompactionStarted": {
+            // Mirrors ProviderWaiting's "observable activity" bump — a
+            // long compaction with no other stream output must not trip
+            // the stuck-stream watchdog. No-op if the stream isn't
+            // subscribed (a stray/late event after teardown).
+            if (state.lastEventMs == null) {
+                return { state, events: [] };
+            }
+            const next: AgentPaneState = {
+                ...state,
+                lastEventMs: command.at,
+                compacting: { trigger: command.trigger, startedAt: command.at },
+            };
+            if (next.turnPhase.kind === "Streaming") {
+                next.turnPhase = { ...next.turnPhase, lastEventMs: command.at };
+            }
+            return {
+                state: next,
+                events: [{ type: "compaction-started", trigger: command.trigger }],
+            };
+        }
+
+        case "CompactionBoundary": {
+            const next: AgentPaneState = {
+                ...state,
+                compacting: null,
+                lastCompactionBoundaryAt: command.at,
+                lastContextTokens: command.postTokens,
+            };
+            if (state.lastEventMs != null) {
+                next.lastEventMs = command.at;
+                if (next.turnPhase.kind === "Streaming") {
+                    next.turnPhase = { ...next.turnPhase, lastEventMs: command.at };
+                }
+            }
+            return {
+                state: next,
+                events: [
+                    {
+                        type: "context-compacted",
+                        tokensBefore: command.preTokens,
+                        tokensAfter: command.postTokens,
+                        source: "real",
+                        trigger: command.trigger,
+                        durationMs: command.durationMs,
+                    },
+                ],
             };
         }
 

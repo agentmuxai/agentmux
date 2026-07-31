@@ -42,12 +42,13 @@ import { createTranslator } from "./providers/translator-factory";
 import type { PendingMessage, SignalPair } from "./state";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { ContextCompactedNode, DocumentNode } from "./types";
-import type { TurnPhase } from "@/app/store/agent-pane-state/types";
+import type { AgentPaneEvent, TurnPhase } from "@/app/store/agent-pane-state/types";
 import { getNodeIdSet } from "@/app/store/agent-document-store";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
-import { createStreamFlushQueue } from "./stream-flush-queue";
+import { createStreamFlushQueue, type StreamFlushQueue } from "./stream-flush-queue";
 import { useToolChunkStream } from "./hooks/useToolChunkStream";
 import { useShellNodeStream } from "./hooks/useShellNodeStream";
+import { useCompactionStream } from "./hooks/useCompactionStream";
 import { useTurnLifecycle } from "./hooks/useTurnLifecycle";
 import { usePendingMessageAcceptance } from "./hooks/usePendingMessageAcceptance";
 
@@ -78,6 +79,40 @@ function extractToolArg(tool: string, params: Record<string, unknown> | undefine
                 if (typeof p[k] === "string") return p[k] as string;
             }
             return undefined;
+    }
+}
+
+/**
+ * Shared node-construction for the reducer's `context-compacted` event —
+ * used by BOTH the real `CompactionBoundary` path and the `TokensIn`
+ * heuristic fallback, so the two never drift into different node shapes.
+ * `source`/`trigger`/`durationMs` come straight from the event: "real"
+ * carries all three, "heuristic" carries only `source`. See
+ * docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md §4.3.
+ */
+function pushContextCompactedNodes(
+    paneEvents: AgentPaneEvent[] | undefined,
+    queue: StreamFlushQueue,
+    hasNodeId: (id: string) => boolean,
+    addNodeId: (id: string) => void,
+): void {
+    for (const ev of paneEvents ?? []) {
+        if (ev.type !== "context-compacted") continue;
+        const compactNode: ContextCompactedNode = {
+            type: "context_compacted",
+            id: `context-compacted-${Date.now()}`,
+            tokensBefore: ev.tokensBefore,
+            tokensAfter: ev.tokensAfter,
+            timestamp: Date.now(),
+            source: ev.source,
+            trigger: ev.trigger,
+            durationMs: ev.durationMs,
+        };
+        if (!hasNodeId(compactNode.id)) {
+            addNodeId(compactNode.id);
+            queue.pushNewNode(compactNode);
+            queue.scheduleFlush();
+        }
     }
 }
 
@@ -178,6 +213,7 @@ export function useAgentStream({
     // rather than scheduling their own flush.
     useToolChunkStream({ blockId, queue });
     useShellNodeStream({ blockId, queue });
+    useCompactionStream({ blockId, model, queue, hasNodeId, addNodeId });
 
     onMount(() => {
         if (!enabled || !blockId) return;
@@ -334,6 +370,39 @@ export function useAgentStream({
                     continue;
                 }
 
+                // Real compaction-boundary completion data (Tier 1/2 —
+                // docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md).
+                // Claude Code's `system`/`compact_boundary` frame arrives on this
+                // same raw stdout stream (mirrors agentmux-srv's
+                // `translator/claude.rs::handle_system_message`); intercepted here
+                // directly — like the message_start/message_delta token
+                // extraction below — rather than routed through the provider
+                // translator, which has no StreamEvent shape for it. Malformed/
+                // missing `compactMetadata` fields degrade to a no-op, same
+                // "skip rather than guess" philosophy as the backend translator.
+                if (rawEvent.type === "system" && rawEvent.subtype === "compact_boundary") {
+                    const meta = rawEvent.compactMetadata;
+                    const trigger: "manual" | "auto" | null =
+                        meta?.trigger === "auto" ? "auto" :
+                        meta?.trigger === "manual" ? "manual" :
+                        null;
+                    const preTokens = typeof meta?.preTokens === "number" ? meta.preTokens : null;
+                    const postTokens = typeof meta?.postTokens === "number" ? meta.postTokens : null;
+                    const durationMs = typeof meta?.durationMs === "number" ? meta.durationMs : null;
+                    if (trigger != null && preTokens != null && postTokens != null && durationMs != null) {
+                        const paneEvents = model.dispatchPane({
+                            type: "CompactionBoundary",
+                            trigger,
+                            preTokens,
+                            postTokens,
+                            durationMs,
+                            at: Date.now(),
+                        });
+                        pushContextCompactedNodes(paneEvents, queue, hasNodeId, addNodeId);
+                    }
+                    continue;
+                }
+
                 // Extract live token counts from Anthropic stream events before
                 // the translator discards them. message_start carries input_tokens
                 // for this turn; message_delta carries the running output_tokens.
@@ -356,24 +425,12 @@ export function useAgentStream({
                             const modelId = inner.message?.model as string | undefined;
                             const paneEvents = model.dispatchPane({ type: "TokensIn", input: inputTok, model: modelId });
                             // Detect context compaction from the reducer's event output.
-                            // The reducer emits "context-compacted" when input tokens
-                            // drop ≥50% from a >10k baseline — the signature of compaction.
-                            for (const ev of paneEvents ?? []) {
-                                if (ev.type === "context-compacted") {
-                                    const compactNode: ContextCompactedNode = {
-                                        type: "context_compacted",
-                                        id: `context-compacted-${Date.now()}`,
-                                        tokensBefore: ev.tokensBefore,
-                                        tokensAfter: ev.tokensAfter,
-                                        timestamp: Date.now(),
-                                    };
-                                    if (!hasNodeId(compactNode.id)) {
-                                        addNodeId(compactNode.id);
-                                        queue.pushNewNode(compactNode);
-                                        queue.scheduleFlush();
-                                    }
-                                }
-                            }
+                            // Primary signal for Claude is the real CompactionBoundary
+                            // path above; this heuristic (≥50% token drop from a >10k
+                            // baseline) is suppressed by the reducer itself shortly
+                            // after a real boundary landed, and remains the ONLY signal
+                            // for providers with no structured event (codex/gemini/copilot).
+                            pushContextCompactedNodes(paneEvents, queue, hasNodeId, addNodeId);
                         }
                     } else if (inner?.type === "message_delta") {
                         const outputTok = inner.usage?.output_tokens as number | undefined;

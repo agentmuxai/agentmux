@@ -411,6 +411,136 @@ describe("agent-pane-state reducer", () => {
         });
     });
 
+    describe("Compaction (SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31)", () => {
+        describe("CompactionStarted", () => {
+            it("sets compacting and bumps lastEventMs while subscribed", () => {
+                const s0 = ready(100);
+                const r = update(s0, { type: "CompactionStarted", trigger: "manual", at: 200 }, 200);
+                expect(r.state.compacting).toEqual({ trigger: "manual", startedAt: 200 });
+                expect(r.state.lastEventMs).toBe(200);
+                expect(r.events).toEqual([{ type: "compaction-started", trigger: "manual" }]);
+            });
+
+            it("is a no-op when the stream is not subscribed", () => {
+                const s0 = mk();
+                const r = update(s0, { type: "CompactionStarted", trigger: "auto", at: 200 });
+                expect(r.state).toBe(s0);
+                expect(r.events).toEqual([]);
+            });
+
+            it("refreshes a Streaming phase's own lastEventMs so the watchdog doesn't misfire", () => {
+                const s0 = streaming(100);
+                const r = update(s0, { type: "CompactionStarted", trigger: "auto", at: 500 }, 500);
+                expect(r.state.turnPhase.kind).toBe("Streaming");
+                if (r.state.turnPhase.kind === "Streaming") {
+                    expect(r.state.turnPhase.lastEventMs).toBe(500);
+                }
+            });
+        });
+
+        describe("CompactionBoundary", () => {
+            it("clears compacting, records lastCompactionBoundaryAt, and reconciles lastContextTokens", () => {
+                const s0 = update(ready(100), {
+                    type: "CompactionStarted",
+                    trigger: "manual",
+                    at: 200,
+                }, 200).state;
+                const r = update(s0, {
+                    type: "CompactionBoundary",
+                    trigger: "manual",
+                    preTokens: 100_000,
+                    postTokens: 5_000,
+                    durationMs: 12_000,
+                    at: 300,
+                }, 300);
+                expect(r.state.compacting).toBeNull();
+                expect(r.state.lastCompactionBoundaryAt).toBe(300);
+                expect(r.state.lastContextTokens).toBe(5_000);
+                expect(r.events).toEqual([
+                    {
+                        type: "context-compacted",
+                        tokensBefore: 100_000,
+                        tokensAfter: 5_000,
+                        source: "real",
+                        trigger: "manual",
+                        durationMs: 12_000,
+                    },
+                ]);
+            });
+
+            it("works even if no CompactionStarted preceded it (compact_boundary without a live PreCompact hook signal)", () => {
+                const r = update(mk(), {
+                    type: "CompactionBoundary",
+                    trigger: "auto",
+                    preTokens: 50_000,
+                    postTokens: 2_000,
+                    durationMs: 8_000,
+                    at: 100,
+                });
+                expect(r.state.compacting).toBeNull();
+                expect(r.state.lastContextTokens).toBe(2_000);
+                expect(r.events[0]).toMatchObject({ type: "context-compacted", source: "real", trigger: "auto" });
+            });
+        });
+
+        describe("TokensIn heuristic suppression", () => {
+            it("fires the heuristic normally with source: heuristic when no real boundary landed", () => {
+                const s0 = update(mk(), { type: "TokensIn", input: 50_000 }, 100).state;
+                const r = update(s0, { type: "TokensIn", input: 1_000 }, 200);
+                expect(r.events).toContainEqual({
+                    type: "context-compacted",
+                    tokensBefore: 50_000,
+                    tokensAfter: 1_000,
+                    source: "heuristic",
+                });
+            });
+
+            it("suppresses the heuristic shortly after a real CompactionBoundary landed", () => {
+                const s0 = update(mk(), { type: "TokensIn", input: 50_000 }, 100).state;
+                const s1 = update(s0, {
+                    type: "CompactionBoundary",
+                    trigger: "manual",
+                    preTokens: 50_000,
+                    postTokens: 3_000,
+                    durationMs: 9_000,
+                    at: 150,
+                }, 150).state;
+                // Next turn's TokensIn shows the post-compaction fill growing
+                // back up but still nowhere near the ORIGINAL 50k baseline —
+                // since lastContextTokens is now 3_000 (reconciled by the
+                // boundary), this wouldn't even trip the ≥50% heuristic on
+                // its own, but the suppression guard is the belt-and-braces
+                // check under test here regardless.
+                const r = update(s1, { type: "TokensIn", input: 20_000 }, 200);
+                const compactionEvents = r.events.filter((e) => e.type === "context-compacted");
+                expect(compactionEvents).toEqual([]);
+            });
+
+            it("re-arms the heuristic once the suppression window has elapsed", () => {
+                const s0 = update(mk(), { type: "TokensIn", input: 50_000 }, 100).state;
+                const s1 = update(s0, {
+                    type: "CompactionBoundary",
+                    trigger: "manual",
+                    preTokens: 50_000,
+                    postTokens: 3_000,
+                    durationMs: 9_000,
+                    at: 150,
+                }, 150).state;
+                // Grow context back past 10k, then simulate a LATER, genuinely
+                // new compaction (another ≥50% drop) well past the
+                // suppression window (150 + 120_000ms).
+                const s2 = update(s1, { type: "TokensIn", input: 40_000 }, 1_000).state;
+                const r = update(s2, { type: "TokensIn", input: 1_000 }, 400_000);
+                expect(r.events).toContainEqual({
+                    type: "context-compacted",
+                    tokensBefore: 40_000,
+                    tokensAfter: 1_000,
+                    source: "heuristic",
+                });
+            });
+        });
+    });
+
     describe("Stop flow", () => {
         it("RequestStop while working transitions to Interrupting", () => {
             // PR G: RequestStop is only meaningful while a turn is in

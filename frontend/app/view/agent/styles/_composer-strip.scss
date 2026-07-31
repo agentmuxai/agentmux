@@ -200,6 +200,15 @@
     color: var(--secondary-text-color);
     letter-spacing: 0.01em;
     white-space: nowrap;
+
+    // Live "Compacting… Ns" readout (Tier 1/2 —
+    // SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md). Reuses the
+    // same amber the ctx meter's "high" band uses so the state reads as
+    // "notable but not an error" at a glance.
+    &--compacting {
+        color: var(--warning-color, #d9a441);
+        font-weight: 500;
+    }
 }
 
 .agent-composer-strip-process-badge {
