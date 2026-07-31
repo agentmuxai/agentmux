@@ -47,6 +47,7 @@ import { WpsEvent } from "@/app/store/wps-events";
 import * as WOS from "@/app/store/wos";
 import { BlockService } from "@/app/store/services";
 import { staticTabId } from "@/app/store/global";
+import { ensureAccountDir } from "./register-seeded-account";
 import type { LaunchPhase } from "./launch-phase";
 import type { ProviderDefinition } from "../providers";
 
@@ -134,6 +135,38 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
     // docs/retros/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md.
     const blockData = WOS.getWaveObjectAtom<Block>(oref)();
     const agentMode = blockData?.meta?.agentMode ?? "host";
+    const agentDefinitionId = blockData?.meta?.agentId as string | undefined;
+
+    // Resolve this agent's ALREADY-BOUND account dir (if any) up front, and
+    // use it in place of `authEnv`'s generic provider-default dir for both
+    // the meta env below and the auth check in Phase 2. Without this, the
+    // mount-time auth check validates the wrong directory for any agent with
+    // a real account binding — `ensureAuthDir` (which built `authEnv`) has no
+    // way to know which account this specific agent is bound to, so it
+    // always resolves the shared default, which can disagree with the
+    // per-account dir the real spawn (`inject_identity_env`) uses. See
+    // docs/specs/SPEC_AGENT_PANE_MOUNT_AUTH_CHECK_WRONG_DIR_2026_07_31.md.
+    let linkedAccountId: string | undefined;
+    let linkLookupDone = false;
+    let effectiveAuthEnv = authEnv;
+    if (agentDefinitionId && provider.authConfigDirEnvVar) {
+        linkLookupDone = true;
+        try {
+            const links = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, {
+                agent_id: agentDefinitionId,
+            });
+            linkedAccountId = links.find((l) => l.provider === provider.id)?.account_id;
+        } catch {
+            // Best-effort — treated as "no linked account" if this lookup fails.
+        }
+        if (linkedAccountId) {
+            const minted = await ensureAccountDir(provider.id, log, linkedAccountId);
+            if (minted?.dir) {
+                effectiveAuthEnv = { ...authEnv, [provider.authConfigDirEnvVar]: minted.dir };
+            }
+        }
+    }
+
     if (agentMode === "container") {
         log("docker", "container agent — checking for container runtime...");
         await ensureCapability("docker", { force: true });
@@ -210,7 +243,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
         oref,
         meta: {
             cmd: cliResult.cli_path,
-            ...(authEnv && Object.keys(authEnv).length > 0 ? { "cmd:env": authEnv } : {}),
+            ...(effectiveAuthEnv && Object.keys(effectiveAuthEnv).length > 0 ? { "cmd:env": effectiveAuthEnv } : {}),
         },
     });
 
@@ -222,7 +255,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
         const authResult = await RpcApi.CheckCliAuthCommand(TabRpcClient, {
             cli_path: cliResult.cli_path,
             auth_check_args: provider.authCheckCommand,
-            auth_env: authEnv,
+            auth_env: effectiveAuthEnv,
         }, { timeout: 30000 });
         if (authResult.authenticated) {
             const emailPart = authResult.email ? ` as ${authResult.email}` : "";
@@ -239,8 +272,6 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
     }
 
     if (needsLogin) {
-        const agentDefinitionId = blockData?.meta?.agentId as string | undefined;
-
         // Reuse the account already bound to this agent for this provider,
         // if any — used only to distinguish first-login from auth-expired
         // wording below. A REAL account link can only exist if a prior
@@ -250,8 +281,12 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
         // model.ts's launchAgent() writes `cmd` into meta unconditionally
         // at agent-CREATION time, before any login ever happens, so it was
         // true on every genuine first-ever login too).
-        let existingAccountId: string | undefined;
-        if (agentDefinitionId) {
+        //
+        // Already looked up above (`linkLookupDone`) for any oauth-class
+        // provider — reuse that result instead of calling
+        // ListAgentIdentitiesCommand a second time per mount.
+        let existingAccountId: string | undefined = linkedAccountId;
+        if (!linkLookupDone && agentDefinitionId) {
             try {
                 const links = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, {
                     agent_id: agentDefinitionId,
