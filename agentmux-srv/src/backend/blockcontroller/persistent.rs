@@ -2590,20 +2590,43 @@ impl PersistentSubprocessController {
                     health_wait.set_exited(exit_code);
 
                     let mut inner = inner_wait.lock().unwrap();
-                    inner.proc_exit_code = exit_code;
-                    inner.current_pid = None;
-                    inner.stdin_tx = None;
-                    inner.kill_tx = None;
+                    // reagentx P1 (round 6 on PR #2373): this belated
+                    // exit-handling can run AFTER a fresh spawn has
+                    // already superseded this generation (see
+                    // `respawn_once_for_leftover_queue`'s own doc comment
+                    // and the kill arm below for the documented race that
+                    // makes this reachable) — `inner.spawn_generation` is
+                    // bumped on every NEW spawn, so a mismatch here means
+                    // this exit is for an already-superseded generation.
+                    // Every field below belongs to THIS exact process
+                    // (its own pid/exit code/stdin/kill channel, or the
+                    // shared `proc_status` this process last knew to be
+                    // true) — writing them unconditionally would corrupt
+                    // a newer, actively-running generation's own state
+                    // with this stale one's.
+                    let is_current_generation = inner.spawn_generation == my_generation_wait;
+                    if is_current_generation {
+                        inner.proc_exit_code = exit_code;
+                        inner.current_pid = None;
+                        inner.stdin_tx = None;
+                        inner.kill_tx = None;
+                    }
                     // One event resolves the ENTIRE retry/error-line
                     // decision — including any earlier `StopRequested`
                     // (see `stop_process`), already baked into the state
                     // by `persistent_resume::update` before this event
                     // ever arrives. See `persistent_resume`'s module doc
                     // comment for why this replaced four separate field
-                    // reads/writes.
+                    // reads/writes. Safe to call unconditionally even for
+                    // a superseded generation — `update()`'s own
+                    // generation-matching arms (and `NotTracking`'s
+                    // `current_generation`) already no-op a stale event
+                    // on their own.
                     let effects = inner
                         .apply_resume_event(persistent_resume::ResumeEvent::ProcessExited { generation: my_generation_wait });
-                    Self::set_status(&mut inner, STATUS_DONE);
+                    if is_current_generation {
+                        Self::set_status(&mut inner, STATUS_DONE);
+                    }
                     drop(inner);
 
                     // Deregister from muxbus so later sends fall through to the
@@ -2804,10 +2827,27 @@ impl PersistentSubprocessController {
                     health_wait.set_exited(-1);
 
                     let mut inner = inner_wait.lock().unwrap();
-                    inner.proc_exit_code = -1;
-                    inner.current_pid = None;
-                    inner.stdin_tx = None;
-                    inner.kill_tx = None;
+                    // reagentx P1 (round 6 on PR #2373): same reasoning as
+                    // the child.wait() arm above — this graceful-stop
+                    // cleanup can itself run AFTER the documented race
+                    // just above (dropping `stdin_tx` early to trigger
+                    // EOF lets `respawn_once_for_leftover_queue` spawn a
+                    // brand-new generation while this kill is still
+                    // mid-flight) has already superseded this generation.
+                    // Every field below belongs to THIS exact kill (its
+                    // own pid/exit code/stdin/kill channel, its own
+                    // spawn claim/queue, or the shared `proc_status` this
+                    // stop last knew to be true) — mutating them
+                    // unconditionally would corrupt a newer, actively-
+                    // running generation's own state with this stale
+                    // one's.
+                    let is_current_generation = inner.spawn_generation == my_generation_wait;
+                    if is_current_generation {
+                        inner.proc_exit_code = -1;
+                        inner.current_pid = None;
+                        inner.stdin_tx = None;
+                        inner.kill_tx = None;
+                    }
                     // A user-initiated kill overrides any resume-retry
                     // decision in flight, for a REUSED controller instance
                     // (`resync_controller` can reuse the same instance
@@ -2820,7 +2860,10 @@ impl PersistentSubprocessController {
                     // silently lost on a user-initiated stop (it may be a
                     // genuine error the stop itself interrupted) — it's
                     // flushed below via the effects this produces, same as
-                    // the "genuinely done" case.
+                    // the "genuinely done" case. Safe to call
+                    // unconditionally even for a superseded generation —
+                    // `update()`'s own generation-matching arms already
+                    // no-op a stale event on their own.
                     inner.apply_resume_event(persistent_resume::ResumeEvent::StopRequested {
                         generation: my_generation_wait,
                     });
@@ -2838,10 +2881,14 @@ impl PersistentSubprocessController {
                     // stopped it. Clearing the queue AND releasing the
                     // claim here means that same check instead sees an
                     // empty queue and just concludes normally, with no
-                    // fallback respawn triggered.
-                    inner.pending_send_messages.clear();
-                    inner.spawning_in_progress = false;
-                    Self::set_status(&mut inner, STATUS_DONE);
+                    // fallback respawn triggered. Gated the same way as
+                    // above — a NEWER generation's own claim/queue must
+                    // never be cleared by this stale one's cleanup.
+                    if is_current_generation {
+                        inner.pending_send_messages.clear();
+                        inner.spawning_in_progress = false;
+                        Self::set_status(&mut inner, STATUS_DONE);
+                    }
                     drop(inner);
 
                     // Flush a held-back error line now, if the resume
