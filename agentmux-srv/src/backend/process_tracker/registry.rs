@@ -37,6 +37,25 @@ pub fn global() -> Option<Arc<AgentProcessRegistry>> {
     GLOBAL.get().cloned()
 }
 
+/// Assign a freshly-spawned child PID to `block_id`'s tracker, creating the
+/// tracker if needed. The single call site every `Controller` impl should use
+/// immediately after its own spawn — no-ops cleanly (with a warn log) if the
+/// registry global isn't initialized (tests) or the platform tracker rejects
+/// the PID, since this is opportunistic enrichment, not a liveness signal on
+/// its own (see `broker::process::ProcessStatus`'s own doc comment).
+pub fn track_spawned(block_id: &str, pid: u32) {
+    let Some(registry) = global() else { return };
+    let tracker = registry.ensure_tracker(block_id);
+    if let Err(e) = tracker.assign_process(pid) {
+        tracing::warn!(
+            block_id = %block_id,
+            pid = pid,
+            err = %e,
+            "[process-tracker] assign_process failed"
+        );
+    }
+}
+
 pub struct AgentProcessRegistry {
     inner: Mutex<HashMap<String, RegistryEntry>>,
     broker: Option<Arc<wps::Broker>>,
@@ -199,4 +218,70 @@ pub fn spawn_poller(registry: Arc<AgentProcessRegistry>) {
             registry.poll_and_emit();
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn track_spawned_is_a_safe_no_op_without_a_global_registry() {
+        // `GLOBAL` is only ever set by `bootstrap.rs` at real host startup —
+        // never in this test binary — so this exercises the exact "tests
+        // silently skip tracker registration" behavior the module doc for
+        // `AgentProcessRegistry` promises. Must not panic.
+        track_spawned("test-block-track-spawned-no-global", 999_999);
+    }
+
+    #[test]
+    #[ignore = "environment-dependent: fails with AssignProcessToJobObject \
+        Access Denied when run under this dev machine's agent-shell harness \
+        (both Git Bash and PowerShell reproduce identically), because that \
+        harness already assigns spawned children to its own session/pane job \
+        object for reaping (see docs/specs/REPORT_BASHWRAP_LONGRUNNING_PROCESS_DETERMINISM_2026_07_26.md, \
+        'owning session/pane's job object') and Windows denies re-assigning a \
+        process into a second, unrelated job in that configuration. Not \
+        reproduced as a defect in the shipped app itself — SubprocessController \
+        and PersistentSubprocessController already exercise this exact API \
+        successfully in production, outside this harness's process tree. Run \
+        with `--ignored` (or from a plain, non-harness-wrapped shell / real \
+        `task dev` instance) to verify the mechanism directly."]
+    fn ensure_tracker_and_assign_process_track_a_real_short_lived_child() {
+        // Uses a fresh, non-global `AgentProcessRegistry` (not `track_spawned`'s
+        // `global()` path) so this doesn't touch the process-wide `GLOBAL`
+        // OnceLock other tests in this binary may rely on being unset.
+        //
+        // Spawns a real, disposable child (rather than assigning the test
+        // process's own PID) because `JobObjectTracker`'s Drop impl closes the
+        // job handle, which fires `KILL_ON_JOB_CLOSE` on Windows — assigning
+        // the test runner's own PID would kill the test process the moment
+        // the registry (and its tracker) drops at the end of this test.
+        let mut child = if cfg!(windows) {
+            std::process::Command::new("cmd")
+                .args(["/C", "exit 0"])
+                .spawn()
+        } else {
+            std::process::Command::new("sh")
+                .args(["-c", "exit 0"])
+                .spawn()
+        }
+        .expect("failed to spawn a disposable test child");
+        let pid = child.id();
+
+        let registry = AgentProcessRegistry::new(None);
+        let tracker = registry.ensure_tracker("test-block-real-spawn");
+        tracker
+            .assign_process(pid)
+            .expect("assign_process should succeed for a live child we just spawned");
+
+        let members = registry.list_block("test-block-real-spawn");
+        assert!(
+            members.iter().any(|p| p.pid == pid),
+            "expected pid {pid} to appear in list_block after assign_process"
+        );
+
+        // Reap before `registry` drops, so KILL_ON_JOB_CLOSE has nothing left
+        // to terminate.
+        child.wait().expect("disposable child should exit cleanly");
+    }
 }

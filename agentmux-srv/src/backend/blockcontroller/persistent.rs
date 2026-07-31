@@ -1958,17 +1958,7 @@ impl PersistentSubprocessController {
         // Matches `SubprocessController`'s identical path — both controller
         // types share the same swarm-pane visibility story.
         if pid != 0 {
-            if let Some(registry) = crate::backend::process_tracker::registry::global() {
-                let tracker = registry.ensure_tracker(&self.block_id);
-                if let Err(e) = tracker.assign_process(pid) {
-                    tracing::warn!(
-                        block_id = %self.block_id,
-                        pid = pid,
-                        err = %e,
-                        "[process-tracker] assign_process failed"
-                    );
-                }
-            }
+            crate::backend::process_tracker::registry::track_spawned(&self.block_id, pid);
         }
 
         let (kill_tx, kill_rx) = tokio::sync::oneshot::channel::<bool>();
