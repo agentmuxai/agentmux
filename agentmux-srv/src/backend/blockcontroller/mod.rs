@@ -15,6 +15,7 @@ pub mod acp;
 pub mod core;
 pub mod health;
 pub mod persistent;
+mod persistent_resume;
 pub mod pidregistry;
 pub mod process_tree;
 pub mod session_recovery;
