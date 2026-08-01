@@ -43,6 +43,7 @@ import { onCleanup } from "solid-js";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
+import type { AgentPaneEvent } from "@/app/store/agent-pane-state/types";
 import type { CompactionStartedNode } from "../types";
 import type { StreamFlushQueue } from "../stream-flush-queue";
 
@@ -113,6 +114,21 @@ export function resolveCompactionStart(
     return { trigger, startedAt: Math.min(rawStartedAt, now) };
 }
 
+/**
+ * Whether the reducer actually accepted a dispatched `CompactionStarted`
+ * command. The reducer's round-5 fix (`workingFromPhase` gate) makes it a
+ * no-op — empty `events`, state unchanged — when this ping arrives after
+ * the turn's own `TurnEnd` already fired on the separate NDJSON stream, a
+ * real and expected race given `compaction_started`'s separate WPS
+ * transport. Pure and exported for direct unit coverage (reagent P1, PR
+ * #2378 round 6): without this check, a stray ping the reducer correctly
+ * rejected would still get a permanent "Compacting conversation…"
+ * transcript node pushed for a compaction that isn't actually happening.
+ */
+export function wasCompactionStartedAccepted(paneEvents: AgentPaneEvent[]): boolean {
+    return paneEvents.some((ev) => ev.type === "compaction-started");
+}
+
 export function useCompactionStream(opts: UseCompactionStreamOptions): void {
     const unsub = waveEventSubscribe({
         eventType: WpsEvent.CompactionStarted,
@@ -122,7 +138,8 @@ export function useCompactionStream(opts: UseCompactionStreamOptions): void {
             if (!resolved) return;
             const { trigger, startedAt } = resolved;
 
-            opts.model.dispatchPane({ type: "CompactionStarted", trigger, at: startedAt });
+            const paneEvents = opts.model.dispatchPane({ type: "CompactionStarted", trigger, at: startedAt });
+            if (!wasCompactionStartedAccepted(paneEvents)) return;
 
             const node: CompactionStartedNode = {
                 type: "compaction_started",

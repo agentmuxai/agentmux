@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { resolveCompactionStart } from "./useCompactionStream";
+import { resolveCompactionStart, wasCompactionStartedAccepted } from "./useCompactionStream";
 
 // Codex P1 on PR #2378: `compaction_started` is a persisted WPS event
 // (persist: 1) with no completion tombstone — a late/reconnecting
@@ -84,5 +84,25 @@ describe("resolveCompactionStart", () => {
         expect(resolveCompactionStart(null, NOW)).toBeNull();
         expect(resolveCompactionStart(undefined, NOW)).toBeNull();
         expect(resolveCompactionStart("not-an-object", NOW)).toBeNull();
+    });
+});
+
+describe("wasCompactionStartedAccepted", () => {
+    // reagent P1 on PR #2378 (round 6): the reducer's round-5 fix makes
+    // CompactionStarted a no-op (empty events) when a stray ping races
+    // past the turn's own TurnEnd. Without checking dispatchPane's return
+    // value, the caller would push a permanent "Compacting…" transcript
+    // node for a compaction that isn't actually happening.
+
+    it("returns true when the reducer accepted the transition", () => {
+        expect(wasCompactionStartedAccepted([{ type: "compaction-started", trigger: "manual" }])).toBe(true);
+    });
+
+    it("returns false when the reducer rejected it as a no-op (empty events)", () => {
+        expect(wasCompactionStartedAccepted([])).toBe(false);
+    });
+
+    it("returns false when only unrelated events are present", () => {
+        expect(wasCompactionStartedAccepted([{ type: "tokens-updated", input: 1, output: null }])).toBe(false);
     });
 });
