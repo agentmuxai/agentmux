@@ -775,8 +775,11 @@ describe("agent-pane-state reducer", () => {
                     frameTimestamp: new Date(500).toISOString(),
                 }, 1_500);
                 expect(r.state.compacting).toEqual({ trigger: "manual", startedAt: 1_000 });
-                // The boundary's own data is still real and recorded.
-                expect(r.state.lastCompactionBoundaryAt).toBe(1_500);
+                // The boundary's own data is still real and recorded --
+                // lastCompactionBoundaryAt takes the boundary's own parsed
+                // completion time (frameTimestamp: 500), not the frontend
+                // receipt time (at: 1_500) -- see codex round 10.
+                expect(r.state.lastCompactionBoundaryAt).toBe(500);
                 expect(r.state.lastContextTokens).toBe(3_000);
             });
 
@@ -814,6 +817,29 @@ describe("agent-pane-state reducer", () => {
                     frameTimestamp: null,
                 }, 1_500);
                 expect(r.state.compacting).toBeNull();
+            });
+
+            it("records the boundary's own parsed completion time, not the frontend's receipt time, as lastCompactionBoundaryAt (codex P2, round 10)", () => {
+                // Compaction N truly completed at t=50 (frameTimestamp), but
+                // its boundary frame is delayed in delivery and only
+                // reaches the frontend at t=500 (receipt/`at`). Compaction
+                // N+1's own `CompactionStarted.at` carries the WPS payload's
+                // embedded TRUE start time (t=60), not a receipt timestamp
+                // -- comparing it against N's inflated receipt-time
+                // boundary (500) instead of N's true completion (50) would
+                // falsely reject N+1's genuinely-later start.
+                const s0 = update(streaming(30), {
+                    type: "CompactionBoundary",
+                    trigger: "manual",
+                    preTokens: 50_000,
+                    postTokens: 3_000,
+                    durationMs: 9_000,
+                    at: 500,
+                    frameTimestamp: new Date(50).toISOString(),
+                }, 500).state;
+                expect(s0.lastCompactionBoundaryAt).toBe(50);
+                const r = update(s0, { type: "CompactionStarted", trigger: "auto", at: 60 }, 600);
+                expect(r.state.compacting).toEqual({ trigger: "auto", startedAt: 60 });
             });
         });
 
