@@ -25,16 +25,18 @@
  * handled directly in `useAgentStream.ts`, which also clears the
  * `compacting` pane flag this hook sets.
  *
- * Codex P1 on PR #2378: the WPS broker persists this event
- * (`persist: 1`, see `wps_client.rs`) so a late/reconnecting
- * subscriber replays it — but there is no completion tombstone, since
- * `compact_boundary` arrives over the separate NDJSON stream, not
- * WPS. Without a staleness check, reopening a pane after its
- * compaction already finished would replay the original "started"
- * ping and get stuck showing "Compacting…" forever. Fixed by using
- * the payload's own `startedAt` (previously ignored — every replay
- * was treated as a fresh start via `Date.now()`) to reject anything
- * older than a real compaction could plausibly still be running.
+ * Codex P1 on PR #2378 (two rounds): this event is published with
+ * `persist: 0` (`wps_client.rs`) — never retained/replayed — because
+ * there is no completion tombstone (`compact_boundary` arrives over
+ * the separate NDJSON stream, not WPS), so a replayed "started" ping
+ * is indistinguishable from a genuinely active one and a timestamp-
+ * age guard alone cannot fix that on the receiving end: a pane
+ * reconnecting seconds after a real, already-finished compaction
+ * would still fall well within any plausible-duration window. Only a
+ * currently-live subscriber ever sees this event now. The `startedAt`
+ * staleness check below is kept as defense-in-depth against a
+ * malformed/delayed live delivery, not as the mechanism preventing
+ * stale replays — that's `persist: 0`'s job.
  */
 
 import { onCleanup } from "solid-js";

@@ -44,10 +44,19 @@ const TOOL_CHUNK_EVENT: &str = "tool_chunk";
 /// §4.2 / Tier 1.
 const COMPACTION_STARTED_EVENT: &str = "compaction_started";
 
-/// Only the latest "compaction started" ping matters for a given
-/// block — unlike `tool_chunk`, there's no history to replay for a
-/// late subscriber, just current state.
-const COMPACTION_STARTED_PERSIST: usize = 1;
+/// `persist: 0` — never retained/replayed. A late/reconnecting
+/// subscriber must NOT see a past "compaction started" ping: there
+/// is no matching completion tombstone (`compact_boundary` arrives
+/// over the separate NDJSON stream, not WPS), so replaying a
+/// retained start indistinguishably resurrects "Compacting…" for a
+/// compaction that may have finished seconds after the ping — a
+/// timestamp-age guard alone can't tell "recently finished" apart
+/// from "still running" (Codex P1, PR #2378 round 2). Only a
+/// currently-live subscriber should ever see this event; a
+/// disconnected pane already clears its own `compacting` flag on
+/// `StreamUnsubscribe` (reducer.ts), so there is nothing worth
+/// replaying on reconnect regardless.
+const COMPACTION_STARTED_PERSIST: usize = 0;
 
 impl WpsClient {
     /// Build a client from the env. Returns `None` when the required
@@ -90,8 +99,8 @@ impl WpsClient {
 
     /// Publish a `compaction_started` event — the `PreCompact`-hook
     /// signal that fires the instant Claude Code begins compacting.
-    /// `persist = 1`: only the latest ping matters, unlike
-    /// `tool_chunk`'s replay history.
+    /// `persist = 0`: live subscribers only, never replayed — see
+    /// `COMPACTION_STARTED_PERSIST`'s doc comment.
     pub async fn publish_compaction_started<T: Serialize>(
         &self,
         block_id: Option<&str>,
@@ -190,8 +199,12 @@ mod tests {
     #[test]
     fn compaction_started_event_name_and_persist() {
         assert_eq!(COMPACTION_STARTED_EVENT, "compaction_started");
-        // Only the latest ping matters — no chunk history to replay.
-        assert_eq!(COMPACTION_STARTED_PERSIST, 1);
+        // Never retained/replayed (Codex P1, PR #2378 round 2) — a
+        // reconnecting subscriber must not resurrect a past ping for
+        // a compaction that has since finished; see the constant's
+        // doc comment for why an age-based guard alone can't fix
+        // this on the receiving end.
+        assert_eq!(COMPACTION_STARTED_PERSIST, 0);
     }
 
     #[test]

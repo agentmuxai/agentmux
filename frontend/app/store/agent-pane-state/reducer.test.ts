@@ -577,6 +577,55 @@ describe("agent-pane-state reducer", () => {
                 expect(r.state.compacting).toBeNull();
             });
         });
+
+        describe("StreamWatchdogTick is suspended while compacting (codex P1, PR #2378 round 2)", () => {
+            // CompactionStarted only bumps lastEventMs ONCE, at the start —
+            // it is never re-bumped on later ticks. The captured real
+            // example (spec doc §2) took ~232s, comfortably past both
+            // STUCK_THRESHOLD_MS (45s) and LIVENESS_RECOVERY_MS (180s).
+            // Without an explicit suspension, a perfectly normal compaction
+            // would trip a false "stream-stuck" diagnostic and then get
+            // force-demoted from Streaming to Idle out from under an
+            // actively-compacting turn.
+
+            it("emits no stream-stuck diagnostic past STUCK_THRESHOLD_MS while compacting", () => {
+                const s0 = update(streaming(1_000), { type: "CompactionStarted", trigger: "auto", at: 1_000 }, 1_000).state;
+                const tick = 1_000 + STUCK_THRESHOLD_MS + 1_000;
+                const r = update(s0, { type: "StreamWatchdogTick", nowMs: tick });
+                expect(r.state).toBe(s0);
+                expect(r.events).toEqual([]);
+            });
+
+            it("does NOT force-recover Streaming -> Idle past LIVENESS_RECOVERY_MS while compacting", () => {
+                const s0 = update(streaming(1_000), { type: "CompactionStarted", trigger: "manual", at: 1_000 }, 1_000).state;
+                const tick = 1_000 + LIVENESS_RECOVERY_MS + 60_000; // well past, e.g. a ~232s-class compaction
+                const r = update(s0, { type: "StreamWatchdogTick", nowMs: tick });
+                expect(r.state.turnPhase.kind).toBe("Streaming");
+                expect(r.state).toBe(s0);
+                expect(r.events).toEqual([]);
+            });
+
+            it("re-arms the watchdog once CompactionBoundary clears compacting", () => {
+                const s0 = update(streaming(1_000), { type: "CompactionStarted", trigger: "manual", at: 1_000 }, 1_000).state;
+                const s1 = update(s0, {
+                    type: "CompactionBoundary",
+                    trigger: "manual",
+                    preTokens: 100_000,
+                    postTokens: 5_000,
+                    durationMs: 232_000,
+                    at: 233_000,
+                }, 233_000).state;
+                expect(s1.compacting).toBeNull();
+                // lastEventMs was bumped to 233_000 by the boundary itself
+                // (see the CompactionBoundary reducer case) — a tick past
+                // LIVENESS_RECOVERY_MS measured from THAT point behaves
+                // exactly like the ordinary hang-recovery case.
+                const tick = 233_000 + LIVENESS_RECOVERY_MS + 1_000;
+                const r = update(s1, { type: "StreamWatchdogTick", nowMs: tick });
+                expect(r.state.turnPhase.kind).toBe("Idle");
+                expect(r.events[0]).toMatchObject({ type: "working-recovered" });
+            });
+        });
     });
 
     describe("Stop flow", () => {
