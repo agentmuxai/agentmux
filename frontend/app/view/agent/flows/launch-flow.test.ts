@@ -373,6 +373,46 @@ describe("runLaunchFlow — mount-time auth check resolves the linked account's 
         );
     });
 
+    it("prefers the LAST canonical-equivalent link when both a canonical and legacy-alias row exist (codex P1 on PR #2377)", async () => {
+        // ListAgentIdentitiesCommand mirrors the backend's own
+        // `ORDER BY provider` — canonical "claude" sorts before the alias
+        // "claude-code" lexicographically, matching this fixture's order.
+        // inject_identity_env's injection loop iterates the same order and
+        // overwrites the config-dir env var per binding (plain HashMap
+        // insert), so the LAST one — the alias row here — is what the real
+        // spawn actually ends up using. Array.prototype.find would wrongly
+        // pick the first (canonical) row instead.
+        hub.listAgentIdentities.mockResolvedValue([
+            { provider: "claude", account_id: "acct-canonical" },
+            { provider: "claude-code", account_id: "acct-alias" },
+        ]);
+        hub.getIdentityAccount.mockImplementation((_client: unknown, data: { id: string }) => {
+            if (data.id === "acct-alias") {
+                return Promise.resolve({ id: "acct-alias", secret_ref: { backend: "oauth_config_dir", dir: "/per-account/acct-alias" } });
+            }
+            return Promise.resolve({ id: "acct-canonical", secret_ref: { backend: "oauth_config_dir", dir: "/per-account/acct-canonical" } });
+        });
+        hub.checkCliAuth.mockResolvedValue({ authenticated: true, email: "user@example.com" });
+
+        const result = await runLaunchFlow({
+            blockId: "block-1",
+            provider: claude,
+            log: vi.fn(),
+            setAuthUrl: vi.fn(),
+            isCancelled: () => false,
+            setLoginWaiting: vi.fn(),
+            authEnv: { CLAUDE_CONFIG_DIR: "/generic/shared/dir" },
+        });
+
+        expect(result).toBe("success");
+        expect(hub.getIdentityAccount).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ id: "acct-alias" }));
+        expect(hub.checkCliAuth).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({ auth_env: { CLAUDE_CONFIG_DIR: "/per-account/acct-alias" } }),
+            expect.anything(),
+        );
+    });
+
     it("never calls the account-dir lookup for an api-key provider, even one with authConfigDirEnvVar set (codex P2 on PR #2377)", async () => {
         // Kimi is api-key-class but still declares authConfigDirEnvVar for an
         // unrelated purpose — gating on authType (not the env-var field)
