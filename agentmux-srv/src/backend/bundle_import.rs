@@ -96,17 +96,6 @@ pub struct ParsedBundleImport {
 /// still produce a usable bundle rather than an all-or-nothing failure on
 /// e.g. one corrupt skill among five good ones.
 pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImport, String> {
-    let by_path: HashMap<&str, &str> = files
-        .iter()
-        .map(|f| (f.path.as_str(), f.content.as_str()))
-        .collect();
-
-    let manifest_raw = by_path
-        .get("armory.json")
-        .ok_or_else(|| "armory.json: missing from bundle".to_string())?;
-    let manifest: Value = serde_json::from_str(manifest_raw)
-        .map_err(|e| format!("armory.json: malformed JSON ({e})"))?;
-
     let mut warnings: Vec<String> = Vec::new();
 
     // §4.3.5: reject anything under accounts/ other than requirements.json
@@ -115,14 +104,35 @@ pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImp
     // the manifest references, since a malicious/malformed bundle's
     // `components` object is not a trustworthy inventory of its own
     // contents.
-    for file in files {
-        if file.path.starts_with("accounts/") && file.path != "accounts/requirements.json" {
-            warnings.push(format!(
-                "{}: rejected — only accounts/requirements.json is ever read from the accounts/ directory",
-                file.path
-            ));
-        }
-    }
+    //
+    // Codex P1, PR #2379: a rejected file must be excluded from `by_path`
+    // entirely, not merely warned about — otherwise a malicious bundle
+    // whose `components.instructions`/`components.mcpServers` REFERENCES
+    // `accounts/secrets.json` would still have that content looked up and
+    // folded into the imported bundle by the code below (and, on a later
+    // re-export of that same bundle, written unredacted straight into
+    // `instructions/AGENTS.md`) — defeating the accounts/ allowlist this
+    // exact loop exists to enforce.
+    let by_path: HashMap<&str, &str> = files
+        .iter()
+        .filter(|f| {
+            let rejected = f.path.starts_with("accounts/") && f.path != "accounts/requirements.json";
+            if rejected {
+                warnings.push(format!(
+                    "{}: rejected — only accounts/requirements.json is ever read from the accounts/ directory",
+                    f.path
+                ));
+            }
+            !rejected
+        })
+        .map(|f| (f.path.as_str(), f.content.as_str()))
+        .collect();
+
+    let manifest_raw = by_path
+        .get("armory.json")
+        .ok_or_else(|| "armory.json: missing from bundle".to_string())?;
+    let manifest: Value = serde_json::from_str(manifest_raw)
+        .map_err(|e| format!("armory.json: malformed JSON ({e})"))?;
 
     let name = manifest
         .get("name")
@@ -308,19 +318,77 @@ fn parse_skill_md(content: &str) -> Option<ParsedSkill> {
     })
 }
 
+/// Per-entry decompressed-size cap. Generous for any legitimate
+/// instructions/SKILL.md/context file (10 MB of text is already an
+/// absurdly large single bundle component) while bounding how much a
+/// single malicious entry can force into memory.
+const MAX_ENTRY_UNCOMPRESSED_BYTES: u64 = 10 * 1024 * 1024;
+
+/// Aggregate decompressed-size cap across the whole archive. Bounds a
+/// zip-bomb-style archive built from many medium-sized entries that would
+/// each individually pass [`MAX_ENTRY_UNCOMPRESSED_BYTES`].
+const MAX_TOTAL_UNCOMPRESSED_BYTES: u64 = 50 * 1024 * 1024;
+
 /// Unpack a `.abf` zip archive into a flat file list, applying the same
 /// path-safety check as everywhere else in this module to every entry
 /// name before it's trusted (§4.3.4) — a zip's own internal paths are
 /// exactly as untrusted as any other part of the archive's content.
 /// Directory entries are skipped; anything that fails the safety check is
 /// dropped with a warning rather than surfaced as a file.
+///
+/// Codex P1, PR #2379: also bounds decompressed size, per-entry and in
+/// aggregate — `read_to_string` alone has no size limit, so an untrusted
+/// `.abf` containing a highly compressed entry (a classic zip-bomb shape;
+/// DEFLATE alone permits ratios past 1000:1) could otherwise exhaust the
+/// server process's memory through `bundle.import`. An oversized single
+/// entry is skipped with a warning (matches this function's existing
+/// per-entry-problem philosophy); an oversized AGGREGATE fails the whole
+/// import — letting a partially-capped import through silently would be
+/// more confusing than useful, and hitting the aggregate cap at all
+/// already indicates a genuinely abusive archive rather than one bad file.
 pub fn unzip_bundle_import(zip_bytes: &[u8]) -> Result<(Vec<BundleImportFile>, Vec<String>), String> {
     use std::io::Read;
     let cursor = std::io::Cursor::new(zip_bytes);
     let mut archive = zip::ZipArchive::new(cursor).map_err(|e| format!("not a valid zip archive: {e}"))?;
+
+    // First pass: collect every non-dir entry's raw name, to DETECT
+    // whether every single one shares one common wrapping directory
+    // (`zip_bundle_export`'s convention: `<root_slug>/armory.json`, etc.)
+    // before deciding whether to strip a path component at all.
+    //
+    // reagent P1, PR #2379: the previous version unconditionally stripped
+    // the first `/`-delimited segment of EVERY entry, on the assumption a
+    // wrapper always exists. A hand-built `.abf` zipped directly from the
+    // loose directory tree (no wrapping folder) — which this spec's §2
+    // explicitly requires an importer to also accept — has entries like
+    // `instructions/AGENTS.md` already bundle-relative; blindly stripping
+    // silently mangled it to `AGENTS.md`, breaking every `components.*`
+    // path lookup in `parse_bundle_import` (each degrades to a "not
+    // found" warning and the content is dropped) with no error surfaced.
+    // Only strip when EVERY entry agrees on the same first segment.
+    let mut raw_names: Vec<String> = Vec::new();
+    for i in 0..archive.len() {
+        let entry = archive
+            .by_index(i)
+            .map_err(|e| format!("zip archive: failed to read entry {i}: {e}"))?;
+        if entry.is_dir() {
+            continue;
+        }
+        raw_names.push(entry.name().to_string());
+    }
+    let common_wrapper: Option<&str> = raw_names.first().and_then(|first| {
+        let candidate = first.split_once('/').map(|(root, _)| root)?;
+        raw_names
+            .iter()
+            .all(|n| n.split_once('/').map(|(root, _)| root == candidate).unwrap_or(false))
+            .then_some(candidate)
+    });
+    let strip_len: Option<usize> = common_wrapper.map(|w| w.len() + 1); // +1 for the '/'
+
     let mut out = Vec::new();
     let mut warnings = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
+    let mut total_uncompressed: u64 = 0;
     for i in 0..archive.len() {
         let mut entry = archive
             .by_index(i)
@@ -329,14 +397,10 @@ pub fn unzip_bundle_import(zip_bytes: &[u8]) -> Result<(Vec<BundleImportFile>, V
             continue;
         }
         let raw_name = entry.name().to_string();
-        // `zip_bundle_export` wraps every entry in a single top-level
-        // `<root_slug>/` directory (mirrors the spec's §5.1 on-disk
-        // layout, where the bundle-slug directory IS the archive root) —
-        // strip that one wrapping component before treating the rest as
-        // the bundle-relative path. An entry with no `/` at all (no
-        // wrapping directory) is kept as-is rather than rejected, so a
-        // hand-built `.abf` without the convention still round-trips.
-        let relative_name = raw_name.split_once('/').map(|(_, rest)| rest).unwrap_or(&raw_name);
+        let relative_name = match strip_len {
+            Some(n) if raw_name.len() > n => &raw_name[n..],
+            _ => raw_name.as_str(),
+        };
         let Some(safe_name) = sanitize_context_relative_path(relative_name) else {
             warnings.push(format!("{raw_name}: not a safe path; skipped"));
             continue;
@@ -345,11 +409,46 @@ pub fn unzip_bundle_import(zip_bytes: &[u8]) -> Result<(Vec<BundleImportFile>, V
             warnings.push(format!("{safe_name}: duplicate entry in archive; first occurrence kept"));
             continue;
         }
-        let mut content = String::new();
-        if let Err(e) = entry.read_to_string(&mut content) {
-            warnings.push(format!("{safe_name}: not valid UTF-8 text; skipped ({e})"));
+
+        // Declared size check first — cheap, and avoids decompressing at
+        // all for an entry that's already too large per its own metadata.
+        let declared_size = entry.size();
+        if declared_size > MAX_ENTRY_UNCOMPRESSED_BYTES {
+            warnings.push(format!(
+                "{safe_name}: declared uncompressed size ({declared_size} bytes) exceeds the per-entry limit ({MAX_ENTRY_UNCOMPRESSED_BYTES} bytes); skipped"
+            ));
             continue;
         }
+        total_uncompressed = total_uncompressed.saturating_add(declared_size);
+        if total_uncompressed > MAX_TOTAL_UNCOMPRESSED_BYTES {
+            return Err(format!(
+                "zip archive: aggregate declared uncompressed size exceeds the total limit ({MAX_TOTAL_UNCOMPRESSED_BYTES} bytes) — rejecting the whole import"
+            ));
+        }
+
+        // Hard backstop on the actual read, independent of the declared
+        // size above: read at most one byte past the cap so an entry
+        // whose real decompressed content exceeds what it declared is
+        // still caught (rather than trusting zip metadata alone).
+        let mut limited = entry.by_ref().take(MAX_ENTRY_UNCOMPRESSED_BYTES + 1);
+        let mut buf: Vec<u8> = Vec::new();
+        if let Err(e) = limited.read_to_end(&mut buf) {
+            warnings.push(format!("{safe_name}: failed to read entry: {e}"));
+            continue;
+        }
+        if buf.len() as u64 > MAX_ENTRY_UNCOMPRESSED_BYTES {
+            warnings.push(format!(
+                "{safe_name}: actual decompressed size exceeds the per-entry limit ({MAX_ENTRY_UNCOMPRESSED_BYTES} bytes), despite a smaller declared size; skipped"
+            ));
+            continue;
+        }
+        let content = match String::from_utf8(buf) {
+            Ok(s) => s,
+            Err(e) => {
+                warnings.push(format!("{safe_name}: not valid UTF-8 text; skipped ({e})"));
+                continue;
+            }
+        };
         out.push(BundleImportFile { path: safe_name, content });
     }
     Ok((out, warnings))
@@ -522,6 +621,34 @@ mod tests {
     }
 
     #[test]
+    fn a_rejected_accounts_file_referenced_by_a_component_is_never_surfaced_in_the_result() {
+        // Codex P1, PR #2379: a rejected accounts/ file must be excluded
+        // from lookups entirely, not merely warned about — otherwise a
+        // malicious bundle whose components.instructions REFERENCES
+        // accounts/secrets.json would still get that content folded into
+        // the imported bundle's instructions, defeating the whole
+        // accounts/ allowlist. This is the exact attack shape: point a
+        // legitimate-looking component path at the rejected file.
+        let files = vec![
+            file("armory.json", &minimal_manifest(serde_json::json!({
+                "instructions": ["accounts/secrets.json"],
+            }))),
+            file("accounts/secrets.json", "GITHUB_TOKEN=ghp_should_never_leak_into_a_bundle"),
+        ];
+        let result = parse_bundle_import(&files).unwrap();
+        assert!(
+            !result.instructions.contains("ghp_should_never_leak_into_a_bundle"),
+            "rejected accounts/ content leaked into instructions: {:?}",
+            result.instructions
+        );
+        assert!(result.warnings.iter().any(|w| w.contains("accounts/secrets.json") && w.contains("rejected")));
+        // The reference itself now resolves to "not found" (the file was
+        // excluded from lookups), which is the correct, safe outcome —
+        // not a crash, not a silent success with leaked content.
+        assert!(result.warnings.iter().any(|w| w.contains("accounts/secrets.json") && w.contains("not found")));
+    }
+
+    #[test]
     fn warns_on_unrecognized_version_but_does_not_fail() {
         let manifest = serde_json::to_string(&serde_json::json!({
             "name": "test-bundle",
@@ -591,5 +718,142 @@ mod tests {
     fn unzip_rejects_a_non_zip_input() {
         let err = unzip_bundle_import(b"not a zip file").unwrap_err();
         assert!(err.contains("not a valid zip archive"));
+    }
+
+    /// Build a zip archive directly from `(path, content)` pairs — no
+    /// `bundle_export` involvement, so these tests cover a hand-built
+    /// `.abf` independent of the exporter's own wrapping convention.
+    fn build_zip(entries: &[(&str, &str)]) -> Vec<u8> {
+        use std::io::Write;
+        use zip::write::SimpleFileOptions;
+        let mut buf = std::io::Cursor::new(Vec::new());
+        let mut writer = zip::ZipWriter::new(&mut buf);
+        let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        for (path, content) in entries {
+            writer.start_file(*path, options).unwrap();
+            writer.write_all(content.as_bytes()).unwrap();
+        }
+        writer.finish().unwrap();
+        buf.into_inner()
+    }
+
+    #[test]
+    fn unzips_a_flat_bundle_with_no_wrapping_directory() {
+        // reagent P1, PR #2379: the spec's §2 explicitly requires an
+        // unwrapped directory tree (zipped directly, no bundle-slug
+        // folder) to round-trip just like the exporter's own wrapped
+        // form. Nested paths must survive UNCHANGED — no stripping.
+        let zip_bytes = build_zip(&[
+            ("armory.json", "{}"),
+            ("instructions/AGENTS.md", "Be concise."),
+            ("skills/deploy/SKILL.md", "---\nname: \"deploy\"\ndescription: \"d\"\n---\n\nbody"),
+        ]);
+        let (files, warnings) = unzip_bundle_import(&zip_bytes).unwrap();
+        assert!(warnings.is_empty());
+        assert!(files.iter().any(|f| f.path == "armory.json"));
+        assert!(files.iter().any(|f| f.path == "instructions/AGENTS.md" && f.content == "Be concise."));
+        assert!(files.iter().any(|f| f.path == "skills/deploy/SKILL.md"));
+    }
+
+    #[test]
+    fn unzips_a_wrapped_bundle_with_a_directory_other_than_the_exporters_own_slug() {
+        // The wrapper-detection must work for ANY consistent single root
+        // name, not just names zip_bundle_export happens to produce.
+        let zip_bytes = build_zip(&[
+            ("my-hand-built-bundle/armory.json", "{}"),
+            ("my-hand-built-bundle/instructions/AGENTS.md", "Be concise."),
+        ]);
+        let (files, warnings) = unzip_bundle_import(&zip_bytes).unwrap();
+        assert!(warnings.is_empty());
+        assert!(files.iter().any(|f| f.path == "armory.json"));
+        assert!(files.iter().any(|f| f.path == "instructions/AGENTS.md"));
+    }
+
+    #[test]
+    fn does_not_strip_when_entries_disagree_on_a_common_wrapper() {
+        // An inconsistent archive (some entries wrapped, some not) must
+        // not have a wrapper GUESSED at — every entry keeps its raw path,
+        // which then fails components.* lookups with a clear "not found"
+        // warning downstream rather than silently importing wrong content.
+        let zip_bytes = build_zip(&[
+            ("root-a/armory.json", "{}"),
+            ("root-b/instructions/AGENTS.md", "Be concise."),
+        ]);
+        let (files, _warnings) = unzip_bundle_import(&zip_bytes).unwrap();
+        assert!(files.iter().any(|f| f.path == "root-a/armory.json"));
+        assert!(files.iter().any(|f| f.path == "root-b/instructions/AGENTS.md"));
+    }
+
+    #[test]
+    fn full_import_of_a_flat_hand_built_abf_finds_every_component() {
+        // End-to-end: unzip -> parse, for the unwrapped case specifically
+        // (the exact scenario reagent's finding said silently broke).
+        let manifest = minimal_manifest(serde_json::json!({
+            "instructions": ["instructions/AGENTS.md"],
+            "skills": ["skills/deploy"],
+        }));
+        let zip_bytes = build_zip(&[
+            ("armory.json", &manifest),
+            ("instructions/AGENTS.md", "Be concise."),
+            ("skills/deploy/SKILL.md", "---\nname: \"deploy\"\ndescription: \"d\"\n---\n\nbody"),
+        ]);
+        let (files, warnings) = unzip_bundle_import(&zip_bytes).unwrap();
+        assert!(warnings.is_empty());
+        let parsed = parse_bundle_import(&files).unwrap();
+        assert_eq!(parsed.instructions, "Be concise.");
+        assert_eq!(parsed.skills.len(), 1);
+        assert!(parsed.warnings.is_empty(), "unexpected warnings: {:?}", parsed.warnings);
+    }
+
+    // ── decompression size bounds (Codex P1, PR #2379) ────────────────
+    //
+    // Content is a repeated single character so it compresses to a few KB
+    // in the actual test zip regardless of its declared/logical size —
+    // these tests exercise the real cap logic without moving tens of MB
+    // through the test binary.
+
+    #[test]
+    fn skips_a_single_entry_exceeding_the_per_entry_cap() {
+        let oversized = "a".repeat(MAX_ENTRY_UNCOMPRESSED_BYTES as usize + 1);
+        let zip_bytes = build_zip(&[
+            ("armory.json", "{}"),
+            ("instructions/AGENTS.md", &oversized),
+        ]);
+        let (files, warnings) = unzip_bundle_import(&zip_bytes).unwrap();
+        assert!(files.iter().any(|f| f.path == "armory.json"));
+        assert!(!files.iter().any(|f| f.path == "instructions/AGENTS.md"));
+        assert!(warnings.iter().any(|w| w.contains("instructions/AGENTS.md") && w.contains("exceeds the per-entry limit")));
+    }
+
+    #[test]
+    fn accepts_an_entry_right_at_the_per_entry_cap() {
+        let exactly_at_cap = "a".repeat(MAX_ENTRY_UNCOMPRESSED_BYTES as usize);
+        let zip_bytes = build_zip(&[
+            ("armory.json", "{}"),
+            ("instructions/AGENTS.md", &exactly_at_cap),
+        ]);
+        let (files, warnings) = unzip_bundle_import(&zip_bytes).unwrap();
+        assert!(warnings.is_empty());
+        assert!(files.iter().any(|f| f.path == "instructions/AGENTS.md"));
+    }
+
+    #[test]
+    fn rejects_the_whole_import_when_aggregate_declared_size_exceeds_the_total_cap() {
+        // Six entries at ~90% of the per-entry cap each -- individually
+        // well under MAX_ENTRY_UNCOMPRESSED_BYTES, but summing to ~5.4x
+        // MAX_TOTAL_UNCOMPRESSED_BYTES's actual ratio (6 * 0.9*10MB = 54MB
+        // > the 50MB aggregate cap).
+        let each = "a".repeat((MAX_ENTRY_UNCOMPRESSED_BYTES as f64 * 0.9) as usize);
+        let zip_bytes = build_zip(&[
+            ("armory.json", "{}"),
+            ("instructions/context/a.md", &each),
+            ("instructions/context/b.md", &each),
+            ("instructions/context/c.md", &each),
+            ("instructions/context/d.md", &each),
+            ("instructions/context/e.md", &each),
+            ("instructions/context/f.md", &each),
+        ]);
+        let err = unzip_bundle_import(&zip_bytes).unwrap_err();
+        assert!(err.contains("aggregate declared uncompressed size exceeds"));
     }
 }
