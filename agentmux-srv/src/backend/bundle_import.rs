@@ -179,12 +179,24 @@ pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImp
     // ------------------------------------------------------------------
     let mut instructions_parts: Vec<String> = Vec::new();
     let mut context_files: Vec<ImportedContextFile> = Vec::new();
+    // Codex P1, PR #2379 round 2: components.instructions is manifest-
+    // controlled and its length is NOT bounded by the decompression caps
+    // (those cap the underlying file *content*, not how many times a
+    // manifest can reference the same path). Without dedup, an untrusted
+    // manifest repeating one path thousands of times clones that path's
+    // content into instructions_parts once per repetition, letting a
+    // sub-50MB archive expand to many gigabytes before `join`.
+    let mut seen_instruction_paths: HashSet<&str> = HashSet::new();
     if let Some(paths) = components.and_then(|c| c.get("instructions")).and_then(|v| v.as_array()) {
         for path_val in paths {
             let Some(path) = path_val.as_str() else {
                 warnings.push("components.instructions: non-string entry skipped".to_string());
                 continue;
             };
+            if !seen_instruction_paths.insert(path) {
+                warnings.push(format!("components.instructions: \"{path}\" referenced more than once; duplicate skipped"));
+                continue;
+            }
             let Some(content) = by_path.get(path) else {
                 warnings.push(format!("components.instructions: \"{path}\" not found among the bundle's files; skipped"));
                 continue;
@@ -211,12 +223,17 @@ pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImp
     // ------------------------------------------------------------------
     let mut skills: Vec<ParsedSkill> = Vec::new();
     let mut skipped_skills: Vec<String> = Vec::new();
+    let mut seen_skill_dirs: HashSet<&str> = HashSet::new();
     if let Some(dirs) = components.and_then(|c| c.get("skills")).and_then(|v| v.as_array()) {
         for dir_val in dirs {
             let Some(dir) = dir_val.as_str() else {
                 warnings.push("components.skills: non-string entry skipped".to_string());
                 continue;
             };
+            if !seen_skill_dirs.insert(dir) {
+                warnings.push(format!("components.skills: \"{dir}\" referenced more than once; duplicate skipped"));
+                continue;
+            }
             let skill_md_path = format!("{}/SKILL.md", dir.trim_end_matches('/'));
             let Some(content) = by_path.get(skill_md_path.as_str()) else {
                 warnings.push(format!("components.skills: \"{skill_md_path}\" not found; skipped"));
@@ -239,12 +256,17 @@ pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImp
     // RPC handler's job, §4.5).
     // ------------------------------------------------------------------
     let mut mcp_servers: Vec<Value> = Vec::new();
+    let mut seen_mcp_paths: HashSet<&str> = HashSet::new();
     if let Some(paths) = components.and_then(|c| c.get("mcpServers")).and_then(|v| v.as_array()) {
         for path_val in paths {
             let Some(path) = path_val.as_str() else {
                 warnings.push("components.mcpServers: non-string entry skipped".to_string());
                 continue;
             };
+            if !seen_mcp_paths.insert(path) {
+                warnings.push(format!("components.mcpServers: \"{path}\" referenced more than once; duplicate skipped"));
+                continue;
+            }
             let Some(content) = by_path.get(path) else {
                 warnings.push(format!("components.mcpServers: \"{path}\" not found; skipped"));
                 continue;
@@ -522,6 +544,41 @@ mod tests {
     fn rejects_malformed_armory_json() {
         let err = parse_bundle_import(&[file("armory.json", "not json")]).unwrap_err();
         assert!(err.contains("malformed JSON"));
+    }
+
+    #[test]
+    fn deduplicates_repeated_instruction_references_instead_of_cloning_content_per_reference() {
+        // Codex P1, PR #2379 round 3: components.instructions is manifest-
+        // controlled and its length isn't bounded by the decompression
+        // caps -- those cap file CONTENT, not how many times a manifest
+        // can reference the same path. An untrusted manifest repeating one
+        // path thousands of times must not clone that content once per
+        // repetition.
+        let files = vec![
+            file("armory.json", &minimal_manifest(serde_json::json!({
+                "instructions": ["instructions/AGENTS.md", "instructions/AGENTS.md", "instructions/AGENTS.md"],
+            }))),
+            file("instructions/AGENTS.md", "Be concise."),
+        ];
+        let result = parse_bundle_import(&files).unwrap();
+        assert_eq!(result.instructions, "Be concise.");
+        assert!(result.warnings.iter().any(|w| w.contains("referenced more than once")));
+    }
+
+    #[test]
+    fn deduplicates_repeated_skill_and_mcp_references() {
+        let files = vec![
+            file("armory.json", &minimal_manifest(serde_json::json!({
+                "skills": ["skills/deploy", "skills/deploy"],
+                "mcpServers": ["mcp/server.json", "mcp/server.json"],
+            }))),
+            file("skills/deploy/SKILL.md", "---\nname: \"deploy\"\ndescription: \"d\"\n---\n\nbody"),
+            file("mcp/server.json", r#"{"command":"npx","args":["-y","thing"]}"#),
+        ];
+        let result = parse_bundle_import(&files).unwrap();
+        assert_eq!(result.skills.len(), 1);
+        assert_eq!(result.mcp_servers.len(), 1);
+        assert!(result.warnings.iter().filter(|w| w.contains("referenced more than once")).count() == 2);
     }
 
     #[test]
