@@ -369,25 +369,41 @@ fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // account, never writes anything derived from a match.
                 let mut resolved_requirement_ids: Vec<String> = Vec::new();
                 let mut unresolved_requirements: Vec<serde_json::Value> = Vec::new();
+                // codex P1, PR #2379 round 4: query each distinct provider
+                // ONCE, not once per requirement row -- bundle_import.rs
+                // bounds the requirements array length, but even at that
+                // bound many rows commonly share a handful of providers
+                // (or an attacker can repeat one provider many times), and
+                // each identity_list call is a synchronous store query.
+                let mut match_count_by_provider: std::collections::HashMap<&str, usize> =
+                    std::collections::HashMap::new();
                 for requirement in &parsed.requirements {
-                    // Codex P2, PR #2379 round 2: account CRUD routes
-                    // through id_store (shared/store.db when available), not
-                    // wstore (the per-channel database) -- see identity.rs's
-                    // own handler registrations. Querying wstore here would
-                    // report zero/stale matches for accounts that actually
-                    // exist, incorrectly placing requirements in
-                    // unresolved_requirements.
-                    let matches = id_store
-                        .identity_list(Some(&requirement.provider))
-                        .map_err(|e| format!("bundle.import: account lookup failed: {e}"))?;
-                    if matches.len() == 1 {
+                    let match_count = match match_count_by_provider.get(requirement.provider.as_str()) {
+                        Some(&n) => n,
+                        None => {
+                            // Codex P2, PR #2379 round 2: account CRUD routes
+                            // through id_store (shared/store.db when available), not
+                            // wstore (the per-channel database) -- see identity.rs's
+                            // own handler registrations. Querying wstore here would
+                            // report zero/stale matches for accounts that actually
+                            // exist, incorrectly placing requirements in
+                            // unresolved_requirements.
+                            let n = id_store
+                                .identity_list(Some(&requirement.provider))
+                                .map_err(|e| format!("bundle.import: account lookup failed: {e}"))?
+                                .len();
+                            match_count_by_provider.insert(requirement.provider.as_str(), n);
+                            n
+                        }
+                    };
+                    if match_count == 1 {
                         resolved_requirement_ids.push(requirement.id.clone());
                     } else {
                         unresolved_requirements.push(json!({
                             "id": requirement.id,
                             "provider": requirement.provider,
                             "env": requirement.env,
-                            "match_count": matches.len(),
+                            "match_count": match_count,
                         }));
                     }
                 }
@@ -405,6 +421,21 @@ fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // failure into an apparently-successful lossy import.
                 // Only the confirmed-conflict shape is swallowed; anything
                 // else aborts the whole RPC.
+                // codex P2, PR #2379 round 4: rollback previously discarded
+                // every skill_delete error via `let _ = ...`, so if the SAME
+                // failing store also rejects the cleanup deletes, previously-
+                // inserted global skills could silently survive an RPC that
+                // reports failure. No transaction primitive exists on Store
+                // today, so full atomicity is out of scope here; surfacing
+                // the rollback failure instead of swallowing it is the fix
+                // that fits — the caller at least learns cleanup itself may
+                // not have fully succeeded.
+                let rollback_skills = |ids: &[String]| -> Vec<String> {
+                    ids.iter()
+                        .filter_map(|id| wstore.skill_delete(id).err().map(|e| format!("{id}: {e}")))
+                        .collect()
+                };
+
                 let now = now_ms();
                 let mut imported_skill_ids: Vec<String> = Vec::new();
                 let mut skipped_skills = parsed.skipped_skills.clone();
@@ -435,13 +466,19 @@ fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             // leaves orphaned global skill rows (bound to
                             // no bundle, but visible/bindable by any agent)
                             // behind a failed RPC.
-                            for id in &imported_skill_ids {
-                                let _ = wstore.skill_delete(id);
-                            }
-                            return Err(format!(
+                            let rollback_errors = rollback_skills(&imported_skill_ids);
+                            let mut msg = format!(
                                 "bundle.import: failed to create skill \"{}\": {e}",
                                 skill.slug
-                            ));
+                            );
+                            if !rollback_errors.is_empty() {
+                                msg.push_str(&format!(
+                                    "; additionally, rollback of {} previously-created skill(s) failed and may have left orphaned global skill row(s): {}",
+                                    rollback_errors.len(),
+                                    rollback_errors.join("; ")
+                                ));
+                            }
+                            return Err(msg);
                         }
                     }
                 }
@@ -472,10 +509,16 @@ fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // Codex P2, PR #2379: same rollback as above — the
                     // skills this RPC just created must not survive a
                     // failed bundle creation as orphaned global rows.
-                    for id in &imported_skill_ids {
-                        let _ = wstore.skill_delete(id);
+                    let rollback_errors = rollback_skills(&imported_skill_ids);
+                    let mut msg = format!("bundle.import: {e}");
+                    if !rollback_errors.is_empty() {
+                        msg.push_str(&format!(
+                            "; additionally, rollback of {} previously-created skill(s) failed and may have left orphaned global skill row(s): {}",
+                            rollback_errors.len(),
+                            rollback_errors.join("; ")
+                        ));
                     }
-                    return Err(format!("bundle.import: {e}"));
+                    return Err(msg);
                 }
 
                 broker.publish(crate::backend::wps::WaveEvent {

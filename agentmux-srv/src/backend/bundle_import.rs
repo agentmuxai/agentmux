@@ -130,7 +130,16 @@ pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImp
             warnings.push(format!("{}: not a safe path; skipped", f.path));
             continue;
         };
-        if safe_path.starts_with("accounts/") && safe_path != "accounts/requirements.json" {
+        // reagent P1, PR #2379 round 4: case-insensitive on the DIRECTORY
+        // check -- sanitize_context_relative_path never case-folds, so
+        // `ACCOUNTS/secrets.json` (or any other-case variant) previously
+        // sailed past the literal lowercase `starts_with` check while a
+        // manifest reference using the identical casing would still
+        // resolve it. The exception itself stays exact-match against the
+        // canonical lowercase spelling the exporter always emits — an
+        // other-case "requirements.json" is still inside the rejected
+        // directory, just not recognized as the one allowed file.
+        if safe_path.to_ascii_lowercase().starts_with("accounts/") && safe_path != "accounts/requirements.json" {
             warnings.push(format!(
                 "{safe_path}: rejected — only accounts/requirements.json is ever read from the accounts/ directory"
             ));
@@ -186,18 +195,29 @@ pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImp
     // manifest repeating one path thousands of times clones that path's
     // content into instructions_parts once per repetition, letting a
     // sub-50MB archive expand to many gigabytes before `join`.
-    let mut seen_instruction_paths: HashSet<&str> = HashSet::new();
+    let mut seen_instruction_paths: HashSet<String> = HashSet::new();
     if let Some(paths) = components.and_then(|c| c.get("instructions")).and_then(|v| v.as_array()) {
         for path_val in paths {
-            let Some(path) = path_val.as_str() else {
+            let Some(raw_path) = path_val.as_str() else {
                 warnings.push("components.instructions: non-string entry skipped".to_string());
                 continue;
             };
-            if !seen_instruction_paths.insert(path) {
+            // codex P2, PR #2379 round 4: normalize the manifest's OWN
+            // reference the same way `by_path`'s keys are normalized
+            // (round 4's earlier fix) — otherwise a valid non-canonical
+            // spelling here (e.g. `./instructions/AGENTS.md`) no longer
+            // matches the now-canonicalized lookup key and the component
+            // is reported missing even though the file is genuinely
+            // present under an equivalent spelling.
+            let Some(path) = sanitize_context_relative_path(raw_path) else {
+                warnings.push(format!("components.instructions: \"{raw_path}\" is not a safe path; skipped"));
+                continue;
+            };
+            if !seen_instruction_paths.insert(path.clone()) {
                 warnings.push(format!("components.instructions: \"{path}\" referenced more than once; duplicate skipped"));
                 continue;
             }
-            let Some(content) = by_path.get(path) else {
+            let Some(content) = by_path.get(path.as_str()) else {
                 warnings.push(format!("components.instructions: \"{path}\" not found among the bundle's files; skipped"));
                 continue;
             };
@@ -223,28 +243,34 @@ pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImp
     // ------------------------------------------------------------------
     let mut skills: Vec<ParsedSkill> = Vec::new();
     let mut skipped_skills: Vec<String> = Vec::new();
-    let mut seen_skill_dirs: HashSet<&str> = HashSet::new();
+    let mut seen_skill_dirs: HashSet<String> = HashSet::new();
     if let Some(dirs) = components.and_then(|c| c.get("skills")).and_then(|v| v.as_array()) {
         for dir_val in dirs {
-            let Some(dir) = dir_val.as_str() else {
+            let Some(raw_dir) = dir_val.as_str() else {
                 warnings.push("components.skills: non-string entry skipped".to_string());
                 continue;
             };
-            if !seen_skill_dirs.insert(dir) {
+            // codex P2, PR #2379 round 4: same normalization as
+            // components.instructions above.
+            let Some(dir) = sanitize_context_relative_path(raw_dir) else {
+                warnings.push(format!("components.skills: \"{raw_dir}\" is not a safe path; skipped"));
+                continue;
+            };
+            if !seen_skill_dirs.insert(dir.clone()) {
                 warnings.push(format!("components.skills: \"{dir}\" referenced more than once; duplicate skipped"));
                 continue;
             }
             let skill_md_path = format!("{}/SKILL.md", dir.trim_end_matches('/'));
             let Some(content) = by_path.get(skill_md_path.as_str()) else {
                 warnings.push(format!("components.skills: \"{skill_md_path}\" not found; skipped"));
-                skipped_skills.push(dir.to_string());
+                skipped_skills.push(dir.clone());
                 continue;
             };
             match parse_skill_md(content) {
                 Some(skill) => skills.push(skill),
                 None => {
                     warnings.push(format!("{skill_md_path}: malformed SKILL.md frontmatter; skipped"));
-                    skipped_skills.push(dir.to_string());
+                    skipped_skills.push(dir.clone());
                 }
             }
         }
@@ -256,18 +282,24 @@ pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImp
     // RPC handler's job, §4.5).
     // ------------------------------------------------------------------
     let mut mcp_servers: Vec<Value> = Vec::new();
-    let mut seen_mcp_paths: HashSet<&str> = HashSet::new();
+    let mut seen_mcp_paths: HashSet<String> = HashSet::new();
     if let Some(paths) = components.and_then(|c| c.get("mcpServers")).and_then(|v| v.as_array()) {
         for path_val in paths {
-            let Some(path) = path_val.as_str() else {
+            let Some(raw_path) = path_val.as_str() else {
                 warnings.push("components.mcpServers: non-string entry skipped".to_string());
                 continue;
             };
-            if !seen_mcp_paths.insert(path) {
+            // codex P2, PR #2379 round 4: same normalization as
+            // components.instructions above.
+            let Some(path) = sanitize_context_relative_path(raw_path) else {
+                warnings.push(format!("components.mcpServers: \"{raw_path}\" is not a safe path; skipped"));
+                continue;
+            };
+            if !seen_mcp_paths.insert(path.clone()) {
                 warnings.push(format!("components.mcpServers: \"{path}\" referenced more than once; duplicate skipped"));
                 continue;
             }
-            let Some(content) = by_path.get(path) else {
+            let Some(content) = by_path.get(path.as_str()) else {
                 warnings.push(format!("components.mcpServers: \"{path}\" not found; skipped"));
                 continue;
             };
@@ -295,7 +327,26 @@ pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImp
                 requirements: Vec<AccountRequirement>,
             }
             match serde_json::from_str::<RequirementsDoc>(content) {
-                Ok(doc) => requirements = doc.requirements,
+                Ok(doc) => {
+                    // codex P1, PR #2379 round 4: unbounded, the RPC
+                    // handler's per-requirement account lookup becomes a
+                    // synchronous store query per row — a permitted 10 MB
+                    // JSON entry can hold tens/hundreds of thousands of
+                    // (duplicate or distinct) requirements and keep that
+                    // handler busy for a prolonged time. Bounding here
+                    // protects the parse step itself; the handler
+                    // separately dedupes by provider so its actual query
+                    // count stays low even at this cap.
+                    if doc.requirements.len() > MAX_ACCOUNT_REQUIREMENTS {
+                        warnings.push(format!(
+                            "accounts/requirements.json: {} requirements exceeds the limit ({MAX_ACCOUNT_REQUIREMENTS}); only the first {MAX_ACCOUNT_REQUIREMENTS} are used",
+                            doc.requirements.len()
+                        ));
+                        requirements = doc.requirements.into_iter().take(MAX_ACCOUNT_REQUIREMENTS).collect();
+                    } else {
+                        requirements = doc.requirements;
+                    }
+                }
                 Err(e) => warnings.push(format!("accounts/requirements.json: malformed JSON ({e}); ignored")),
             }
         } else {
@@ -370,6 +421,15 @@ const MAX_TOTAL_UNCOMPRESSED_BYTES: u64 = 50 * 1024 * 1024;
 /// 2) — a crafted archive of many tiny/valid entries passes both size caps
 /// while still forcing unbounded iteration work.
 const MAX_ENTRY_COUNT: usize = 10_000;
+
+/// Maximum number of account requirements accepted from a single bundle's
+/// `accounts/requirements.json`. A real bundle needs a handful at most —
+/// one per distinct external account it depends on. Exists to bound the
+/// RPC handler's downstream per-provider account-lookup work (codex P1,
+/// PR #2379 round 4): an untrusted archive's requirements array,
+/// unbounded, could otherwise drive a synchronous store query for every
+/// row.
+const MAX_ACCOUNT_REQUIREMENTS: usize = 1_000;
 
 /// Unpack a `.abf` zip archive into a flat file list, applying the same
 /// path-safety check as everywhere else in this module to every entry
@@ -741,6 +801,64 @@ mod tests {
         // excluded from lookups), which is the correct, safe outcome —
         // not a crash, not a silent success with leaked content.
         assert!(result.warnings.iter().any(|w| w.contains("accounts/secrets.json") && w.contains("not found")));
+    }
+
+    #[test]
+    fn rejects_an_other_case_accounts_path_the_same_as_the_canonical_lowercase_one() {
+        // reagent P1, PR #2379 round 4: sanitize_context_relative_path
+        // never case-folds, so a literal lowercase `starts_with("accounts/")`
+        // check let `ACCOUNTS/secrets.json` sail through unrejected.
+        let files = vec![
+            file("armory.json", &minimal_manifest(serde_json::json!({
+                "instructions": ["ACCOUNTS/secrets.json"],
+            }))),
+            file("ACCOUNTS/secrets.json", "GITHUB_TOKEN=ghp_should_never_leak_case_variant"),
+        ];
+        let result = parse_bundle_import(&files).unwrap();
+        assert!(!result.instructions.contains("ghp_should_never_leak_case_variant"));
+        assert!(result.warnings.iter().any(|w| w.contains("ACCOUNTS/secrets.json") && w.contains("rejected")));
+    }
+
+    #[test]
+    fn resolves_a_non_canonical_manifest_reference_against_the_normalized_file_path() {
+        // codex P2, PR #2379 round 4: by_path's keys are normalized (round
+        // 4's earlier accounts/ fix), so a manifest reference using a
+        // valid but non-canonical spelling of the SAME path must be
+        // normalized identically before the lookup, or a genuinely present
+        // file is reported "not found".
+        let files = vec![
+            file("armory.json", &minimal_manifest(serde_json::json!({
+                "instructions": ["./instructions/AGENTS.md"],
+            }))),
+            file("instructions/AGENTS.md", "Be concise."),
+        ];
+        let result = parse_bundle_import(&files).unwrap();
+        assert_eq!(result.instructions, "Be concise.");
+        assert!(result.warnings.iter().all(|w| !w.contains("not found")), "unexpected warnings: {:?}", result.warnings);
+    }
+
+    #[test]
+    fn caps_the_number_of_account_requirements_accepted_from_a_single_bundle() {
+        // codex P1, PR #2379 round 4: an unbounded requirements array lets
+        // a small (well within the per-entry size cap) accounts/requirements.json
+        // drive an unbounded number of downstream per-provider account
+        // lookups in the RPC handler.
+        let many: Vec<_> = (0..MAX_ACCOUNT_REQUIREMENTS + 50)
+            .map(|i| serde_json::json!({
+                "id": format!("req-{i}"), "provider": "github", "kind": "api-key",
+                "env": "GITHUB_TOKEN", "optional": false,
+            }))
+            .collect();
+        let requirements_doc = serde_json::json!({ "requirements": many }).to_string();
+        let files = vec![
+            file("armory.json", &minimal_manifest(serde_json::json!({
+                "accounts": "accounts/requirements.json",
+            }))),
+            file("accounts/requirements.json", &requirements_doc),
+        ];
+        let result = parse_bundle_import(&files).unwrap();
+        assert_eq!(result.requirements.len(), MAX_ACCOUNT_REQUIREMENTS);
+        assert!(result.warnings.iter().any(|w| w.contains("exceeds the limit")));
     }
 
     #[test]
