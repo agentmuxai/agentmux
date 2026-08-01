@@ -387,8 +387,17 @@ fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
                 // Skills — global, not bound to any agent (mirrors
                 // skill.catalog.upsert's own is_global: true convention for
-                // a shared-resource creation path). A name conflict is a
-                // per-skill warning, not an aborted import.
+                // a shared-resource creation path). A genuine name
+                // conflict (the ONLY intentional business error
+                // `skill_upsert_unique_global` returns —
+                // `StoreError::Other` containing "already exists") is a
+                // per-skill warning, not an aborted import. Codex P2, PR
+                // #2379: any OTHER error (locked/corrupt store, I/O
+                // failure) previously hit this same arm and was silently
+                // treated as a skip too — turning an infrastructure
+                // failure into an apparently-successful lossy import.
+                // Only the confirmed-conflict shape is swallowed; anything
+                // else aborts the whole RPC.
                 let now = now_ms();
                 let mut imported_skill_ids: Vec<String> = Vec::new();
                 let mut skipped_skills = parsed.skipped_skills.clone();
@@ -406,9 +415,26 @@ fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     };
                     match wstore.skill_upsert_unique_global(&row) {
                         Ok(()) => imported_skill_ids.push(row.id),
-                        Err(e) => {
-                            warnings.push(format!("skill \"{}\": {e}", skill.slug));
+                        Err(crate::backend::storage::error::StoreError::Other(msg))
+                            if msg.contains("already exists") =>
+                        {
+                            warnings.push(format!("skill \"{}\": {msg}", skill.slug));
                             skipped_skills.push(skill.slug.clone());
+                        }
+                        Err(e) => {
+                            // Codex P2, PR #2379: roll back every skill this
+                            // loop already created before propagating —
+                            // otherwise an infra failure partway through
+                            // leaves orphaned global skill rows (bound to
+                            // no bundle, but visible/bindable by any agent)
+                            // behind a failed RPC.
+                            for id in &imported_skill_ids {
+                                let _ = wstore.skill_delete(id);
+                            }
+                            return Err(format!(
+                                "bundle.import: failed to create skill \"{}\": {e}",
+                                skill.slug
+                            ));
                         }
                     }
                 }
@@ -435,9 +461,15 @@ fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     created_at: now,
                     updated_at: now,
                 };
-                id_store
-                    .bundle_memory_upsert(&memory)
-                    .map_err(|e| format!("bundle.import: {e}"))?;
+                if let Err(e) = id_store.bundle_memory_upsert(&memory) {
+                    // Codex P2, PR #2379: same rollback as above — the
+                    // skills this RPC just created must not survive a
+                    // failed bundle creation as orphaned global rows.
+                    for id in &imported_skill_ids {
+                        let _ = wstore.skill_delete(id);
+                    }
+                    return Err(format!("bundle.import: {e}"));
+                }
 
                 broker.publish(crate::backend::wps::WaveEvent {
                     event: "memories:changed".to_string(),
