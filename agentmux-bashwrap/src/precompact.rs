@@ -158,12 +158,12 @@ fn build_payload(trigger: Trigger, session_id: &str) -> CompactionStartedPayload
 mod tests {
     use super::*;
     use clap::Parser;
-    use std::sync::Mutex;
+    use crate::test_env_lock::ENV_LOCK;
 
-    // Mirrors wps_client.rs's ENV_LOCK — std::env mutation races under
-    // cargo test's default parallel execution.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-
+    // Shared with wps_client.rs's test module (crate::test_env_lock) — both
+    // mutate the SAME process-global env vars under cargo test's default
+    // parallel execution; a private per-module lock didn't actually
+    // synchronize cross-module (Codex P2, PR #2378 round 6).
     fn clear_env() {
         std::env::remove_var("AGENTMUX_LOCAL_URL");
         std::env::remove_var("AGENTMUX_AUTH_KEY");
