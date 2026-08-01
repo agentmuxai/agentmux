@@ -16,6 +16,10 @@ import { createRoot } from "solid-js";
 const hub = vi.hoisted(() => ({
     registerSeededAccount: vi.fn(),
     runProviderLogin: vi.fn(),
+    // undefined by default (matches every existing test's assumption that
+    // this agent has no definition id) — set per-test to exercise
+    // existingAccountIdFor's ListAgentIdentitiesCommand lookup.
+    agentDefinitionId: undefined as string | undefined,
 }));
 
 vi.mock("@/app/store/global", () => ({
@@ -23,7 +27,11 @@ vi.mock("@/app/store/global", () => ({
         cancelCliLogin: () => Promise.resolve(),
         ensureAuthDir: () => Promise.resolve("/tmp/auth-dir"),
     }),
-    getBlockMetaKeyAtom: (_blockId: string, key: string) => () => (key === "cmd" ? "claude-cli" : undefined),
+    getBlockMetaKeyAtom: (_blockId: string, key: string) => () => {
+        if (key === "cmd") return "claude-cli";
+        if (key === "agentId") return hub.agentDefinitionId;
+        return undefined;
+    },
     staticTabId: () => "tab-1",
 }));
 vi.mock("@/app/store/rpc-api", () => ({
@@ -49,11 +57,13 @@ vi.mock("../flows/register-seeded-account", () => ({
 }));
 
 import { useAgentControllerStatus } from "./useAgentControllerStatus";
+import { RpcApi } from "@/app/store/rpc-api";
 
 const claude = { id: "claude" } as any; // no authConfigDirEnvVar — skips the link-env sub-path
 
 afterEach(() => {
     vi.clearAllMocks();
+    hub.agentDefinitionId = undefined;
 });
 
 describe("useAgentControllerStatus — useGlobalLogin sets loginWaiting while in flight (reagent P1 on PR #2338)", () => {
@@ -183,6 +193,38 @@ describe("useAgentControllerStatus — overlapping recovery flows share one coun
             await terminalPromise;
 
             expect(status.loginWaiting()).toBe(false);
+            dispose();
+        });
+    });
+});
+
+describe("useAgentControllerStatus — existingAccountIdFor canonicalizes provider IDs (codex P1 on PR #2377, second round)", () => {
+    it("relogin() passes the alias-linked account_id as existingAccountId, not undefined", async () => {
+        // Before this fix, existingAccountIdFor's strict `l.provider ===
+        // providerId` comparison missed a link stored under a legacy alias
+        // ("claude-code"), so runProviderLogin would mint a brand-new
+        // canonical account instead of reusing/refreshing the existing one —
+        // leaving both rows present, and since spawn injection processes the
+        // canonical row first and the alias row last, the stale alias
+        // directory would silently overwrite the freshly-authenticated one.
+        hub.agentDefinitionId = "def-1";
+        vi.mocked(RpcApi.ListAgentIdentitiesCommand).mockResolvedValue([
+            { provider: "claude-code", account_id: "acct-under-alias" },
+        ] as any);
+        hub.runProviderLogin.mockResolvedValue("terminal-unavailable");
+
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({
+                blockId: "block-1",
+                provider: () => claude,
+                log: () => {},
+            });
+
+            await status.relogin({ retryAfterLogin: false });
+
+            expect(hub.runProviderLogin).toHaveBeenCalledWith(
+                expect.objectContaining({ existingAccountId: "acct-under-alias" }),
+            );
             dispose();
         });
     });

@@ -43,6 +43,7 @@ import { runLaunchFlow } from "../flows/launch-flow";
 import { persistAndLinkAccount, runProviderLogin } from "../flows/run-provider-login";
 import { registerSeededAccount } from "../flows/register-seeded-account";
 import { LOGIN_LINK_CAPTURE_LABEL_MS, type LaunchPhase } from "../flows/launch-phase";
+import { lastLinkedAccountId } from "../providers/provider-id-aliases";
 import type { ProviderDefinition } from "../providers";
 
 import type { LogFn } from "../types";
@@ -443,13 +444,23 @@ export function useAgentControllerStatus(
      *  orphaning a new one on every retry (the same class of gap reagent
      *  caught in launch-flow.ts's Phase 2 — this hook's `relogin`/
      *  `loginViaTerminal` had it too, just never flagged directly since
-     *  neither reported "auth_failed" the same visible way Phase 2 did). */
+     *  neither reported "auth_failed" the same visible way Phase 2 did).
+     *
+     *  Uses `lastLinkedAccountId` (codex P1 on PR #2377, second round), not
+     *  a raw `.find()`: a strict comparison misses a link stored under a
+     *  legacy alias, so `runProviderLogin` would mint and link a NEW
+     *  canonical account without replacing the alias row — leaving both
+     *  rows present, and since spawn injection processes the canonical row
+     *  first and the alias row last, the stale alias directory would
+     *  silently overwrite the freshly-authenticated one. Recovery would
+     *  report success while the very next spawn still used the expired
+     *  credential. */
     const existingAccountIdFor = async (providerId: string): Promise<string | undefined> => {
         const agentDefinitionId = getBlockMetaKeyAtom(opts.blockId, "agentId")() as string | undefined;
         if (!agentDefinitionId) return undefined;
         try {
             const links = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, { agent_id: agentDefinitionId });
-            return links.find((l) => l.provider === providerId)?.account_id;
+            return lastLinkedAccountId(links, providerId);
         } catch {
             return undefined;
         }
