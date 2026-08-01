@@ -47,7 +47,7 @@ import { WpsEvent } from "@/app/store/wps-events";
 import * as WOS from "@/app/store/wos";
 import { BlockService } from "@/app/store/services";
 import { staticTabId } from "@/app/store/global";
-import { ensureAccountDir } from "./register-seeded-account";
+import { canonicalProviderId } from "../providers/provider-id-aliases";
 import type { LaunchPhase } from "./launch-phase";
 import type { ProviderDefinition } from "../providers";
 
@@ -146,23 +146,49 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
     // always resolves the shared default, which can disagree with the
     // per-account dir the real spawn (`inject_identity_env`) uses. See
     // docs/specs/SPEC_AGENT_PANE_MOUNT_AUTH_CHECK_WRONG_DIR_2026_07_31.md.
+    //
+    // Gated on `authType === "oauth"`, not `authConfigDirEnvVar` truthy —
+    // some api-key providers (e.g. Kimi) also populate that field for an
+    // unrelated purpose, and the backend deliberately returns no isolated
+    // dir for non-oauth providers (codex P2 on PR #2377: calling the
+    // OAuth-directory RPC for those anyway logged a spurious "no isolated
+    // config dir" error on every mount despite nothing being wrong).
+    //
+    // Compares canonicalized provider IDs (codex P1 on PR #2377): a link row
+    // persisted under a legacy alias (e.g. "claude-code") must still match
+    // `provider.id`'s canonical form, the same way the backend spawn
+    // resolver already canonicalizes before matching.
+    //
+    // Reads the account's own stored OAuth dir via GetIdentityAccountCommand
+    // rather than `ensureAccountDir`/`identity.ensureaccountdir` (codex P1 on
+    // PR #2377): that RPC deterministically reconstructs a dir path from
+    // `account_id` + provider instead of reading the account row, so it can
+    // return an empty freshly-created directory for an account whose real
+    // credential lives at a different, non-canonical stored path (e.g.
+    // carried forward from a bundle-era migration) — silently disagreeing
+    // with `inject_identity_env`'s actual spawn-time read of `secret_ref.dir`,
+    // reintroducing the exact false-"Log in" bug this fix targets.
     let linkedAccountId: string | undefined;
     let linkLookupDone = false;
     let effectiveAuthEnv = authEnv;
-    if (agentDefinitionId && provider.authConfigDirEnvVar) {
+    if (agentDefinitionId && provider.authType === "oauth") {
         linkLookupDone = true;
         try {
             const links = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, {
                 agent_id: agentDefinitionId,
             });
-            linkedAccountId = links.find((l) => l.provider === provider.id)?.account_id;
+            linkedAccountId = links.find((l) => canonicalProviderId(l.provider) === provider.id)?.account_id;
         } catch {
             // Best-effort — treated as "no linked account" if this lookup fails.
         }
         if (linkedAccountId) {
-            const minted = await ensureAccountDir(provider.id, log, linkedAccountId);
-            if (minted?.dir) {
-                effectiveAuthEnv = { ...authEnv, [provider.authConfigDirEnvVar]: minted.dir };
+            try {
+                const account = await RpcApi.GetIdentityAccountCommand(TabRpcClient, { id: linkedAccountId });
+                if (account?.secret_ref?.backend === "oauth_config_dir" && account.secret_ref.dir) {
+                    effectiveAuthEnv = { ...authEnv, [provider.authConfigDirEnvVar]: account.secret_ref.dir };
+                }
+            } catch {
+                // Best-effort — fall back to authEnv's generic dir if this lookup fails.
             }
         }
     }
@@ -291,7 +317,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
                 const links = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, {
                     agent_id: agentDefinitionId,
                 });
-                existingAccountId = links.find((l) => l.provider === provider.id)?.account_id;
+                existingAccountId = links.find((l) => canonicalProviderId(l.provider) === provider.id)?.account_id;
             } catch {
                 // Best-effort — treated as "no existing account" if this lookup fails.
             }
