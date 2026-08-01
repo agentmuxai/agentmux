@@ -113,20 +113,31 @@ pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImp
     // re-export of that same bundle, written unredacted straight into
     // `instructions/AGENTS.md`) — defeating the accounts/ allowlist this
     // exact loop exists to enforce.
-    let by_path: HashMap<&str, &str> = files
-        .iter()
-        .filter(|f| {
-            let rejected = f.path.starts_with("accounts/") && f.path != "accounts/requirements.json";
-            if rejected {
-                warnings.push(format!(
-                    "{}: rejected — only accounts/requirements.json is ever read from the accounts/ directory",
-                    f.path
-                ));
-            }
-            !rejected
-        })
-        .map(|f| (f.path.as_str(), f.content.as_str()))
-        .collect();
+    // Codex P1, PR #2379 (round 2): the accounts/ allowlist check above
+    // only ever saw a ZIP entry's already-normalized path (unzip_bundle_import
+    // runs every entry through `sanitize_context_relative_path` first). The
+    // raw `files` RPC input skips that step entirely, so a spelling like
+    // `./accounts/secrets.json` or `accounts\secrets.json` doesn't match the
+    // literal `starts_with("accounts/")` check and sails through unrejected
+    // — while a manifest `components.*` entry using the exact same raw
+    // spelling still resolves it via `by_path.get(path)` below. Normalize
+    // every file's path the same way regardless of source (zip or raw
+    // list) before the allowlist check and before it becomes a lookup key,
+    // so both intake paths enforce the same rule on the same canonical form.
+    let mut by_path: HashMap<String, &str> = HashMap::new();
+    for f in files {
+        let Some(safe_path) = sanitize_context_relative_path(&f.path) else {
+            warnings.push(format!("{}: not a safe path; skipped", f.path));
+            continue;
+        };
+        if safe_path.starts_with("accounts/") && safe_path != "accounts/requirements.json" {
+            warnings.push(format!(
+                "{safe_path}: rejected — only accounts/requirements.json is ever read from the accounts/ directory"
+            ));
+            continue;
+        }
+        by_path.insert(safe_path, f.content.as_str());
+    }
 
     let manifest_raw = by_path
         .get("armory.json")
@@ -329,6 +340,15 @@ const MAX_ENTRY_UNCOMPRESSED_BYTES: u64 = 10 * 1024 * 1024;
 /// each individually pass [`MAX_ENTRY_UNCOMPRESSED_BYTES`].
 const MAX_TOTAL_UNCOMPRESSED_BYTES: u64 = 50 * 1024 * 1024;
 
+/// Maximum number of entries an archive may contain. A legitimate bundle
+/// (instructions, a handful of context files, a handful of skills, one
+/// manifest) never comes close to this; it exists purely to bound the CPU
+/// cost of iterating + path-sanitizing + hashing every entry, independent
+/// of the per-entry/aggregate byte caps below (reagent P2, PR #2379 round
+/// 2) — a crafted archive of many tiny/valid entries passes both size caps
+/// while still forcing unbounded iteration work.
+const MAX_ENTRY_COUNT: usize = 10_000;
+
 /// Unpack a `.abf` zip archive into a flat file list, applying the same
 /// path-safety check as everywhere else in this module to every entry
 /// name before it's trusted (§4.3.4) — a zip's own internal paths are
@@ -350,6 +370,13 @@ pub fn unzip_bundle_import(zip_bytes: &[u8]) -> Result<(Vec<BundleImportFile>, V
     use std::io::Read;
     let cursor = std::io::Cursor::new(zip_bytes);
     let mut archive = zip::ZipArchive::new(cursor).map_err(|e| format!("not a valid zip archive: {e}"))?;
+
+    if archive.len() > MAX_ENTRY_COUNT {
+        return Err(format!(
+            "zip archive: {} entries exceeds the limit ({MAX_ENTRY_COUNT}) — rejecting the whole import",
+            archive.len()
+        ));
+    }
 
     // First pass: collect every non-dir entry's raw name, to DETECT
     // whether every single one shares one common wrapping directory
@@ -412,18 +439,19 @@ pub fn unzip_bundle_import(zip_bytes: &[u8]) -> Result<(Vec<BundleImportFile>, V
 
         // Declared size check first — cheap, and avoids decompressing at
         // all for an entry that's already too large per its own metadata.
+        // This is ONLY a cheap pre-filter: `entry.size()` is the zip's own
+        // declared/attacker-controlled uncompressed size, not a verified
+        // value, so it must never feed the aggregate cap below (reagent
+        // P1, PR #2379 round 2) — an archive of many entries that each lie
+        // with a tiny declared size while actually containing content up
+        // to the per-entry cap would otherwise pass both checks here while
+        // still exhausting memory once decompressed.
         let declared_size = entry.size();
         if declared_size > MAX_ENTRY_UNCOMPRESSED_BYTES {
             warnings.push(format!(
                 "{safe_name}: declared uncompressed size ({declared_size} bytes) exceeds the per-entry limit ({MAX_ENTRY_UNCOMPRESSED_BYTES} bytes); skipped"
             ));
             continue;
-        }
-        total_uncompressed = total_uncompressed.saturating_add(declared_size);
-        if total_uncompressed > MAX_TOTAL_UNCOMPRESSED_BYTES {
-            return Err(format!(
-                "zip archive: aggregate declared uncompressed size exceeds the total limit ({MAX_TOTAL_UNCOMPRESSED_BYTES} bytes) — rejecting the whole import"
-            ));
         }
 
         // Hard backstop on the actual read, independent of the declared
@@ -441,6 +469,16 @@ pub fn unzip_bundle_import(zip_bytes: &[u8]) -> Result<(Vec<BundleImportFile>, V
                 "{safe_name}: actual decompressed size exceeds the per-entry limit ({MAX_ENTRY_UNCOMPRESSED_BYTES} bytes), despite a smaller declared size; skipped"
             ));
             continue;
+        }
+
+        // Aggregate cap enforced against ACTUAL bytes read, not the
+        // declared size — the only value that can't be lied about by the
+        // archive's own metadata.
+        total_uncompressed = total_uncompressed.saturating_add(buf.len() as u64);
+        if total_uncompressed > MAX_TOTAL_UNCOMPRESSED_BYTES {
+            return Err(format!(
+                "zip archive: aggregate decompressed size exceeds the total limit ({MAX_TOTAL_UNCOMPRESSED_BYTES} bytes) — rejecting the whole import"
+            ));
         }
         let content = match String::from_utf8(buf) {
             Ok(s) => s,
@@ -838,11 +876,14 @@ mod tests {
     }
 
     #[test]
-    fn rejects_the_whole_import_when_aggregate_declared_size_exceeds_the_total_cap() {
+    fn rejects_the_whole_import_when_aggregate_size_exceeds_the_total_cap() {
         // Six entries at ~90% of the per-entry cap each -- individually
         // well under MAX_ENTRY_UNCOMPRESSED_BYTES, but summing to ~5.4x
         // MAX_TOTAL_UNCOMPRESSED_BYTES's actual ratio (6 * 0.9*10MB = 54MB
-        // > the 50MB aggregate cap).
+        // > the 50MB aggregate cap). Real content, so this exercises the
+        // aggregate check regardless of whether it's keyed on declared or
+        // actual bytes -- see the dedicated "lying declared size" test
+        // below for the distinction that matters (reagent P1, round 2).
         let each = "a".repeat((MAX_ENTRY_UNCOMPRESSED_BYTES as f64 * 0.9) as usize);
         let zip_bytes = build_zip(&[
             ("armory.json", "{}"),
@@ -854,6 +895,66 @@ mod tests {
             ("instructions/context/f.md", &each),
         ]);
         let err = unzip_bundle_import(&zip_bytes).unwrap_err();
-        assert!(err.contains("aggregate declared uncompressed size exceeds"));
+        assert!(err.contains("aggregate decompressed size exceeds"));
+    }
+
+    #[test]
+    fn aggregate_cap_is_enforced_against_actual_bytes_even_when_declared_size_understates_them() {
+        // reagent P1, PR #2379 round 2: the aggregate check must accumulate
+        // ACTUAL decompressed bytes, not the zip's own declared/attacker-
+        // controlled `entry.size()` -- otherwise many entries that each lie
+        // with a tiny declared size while really containing content up to
+        // the per-entry cap would pass both checks and still exhaust
+        // memory. `ZipWriter`'s public API always writes a correct
+        // declared size for real content, so this is verified by patching
+        // the archive's declared-size fields post-write to a tiny value
+        // while leaving the real (large) compressed/uncompressed payload
+        // bytes untouched -- exactly the "lying" shape the finding
+        // describes. The local file header's uncompressed-size field sits
+        // at a fixed offset (22) from the start of each entry's header.
+        let each = "a".repeat((MAX_ENTRY_UNCOMPRESSED_BYTES as f64 * 0.9) as usize);
+        let mut zip_bytes = build_zip(&[
+            ("armory.json", "{}"),
+            ("instructions/context/a.md", &each),
+            ("instructions/context/b.md", &each),
+            ("instructions/context/c.md", &each),
+            ("instructions/context/d.md", &each),
+            ("instructions/context/e.md", &each),
+            ("instructions/context/f.md", &each),
+        ]);
+        // Local file header signature: 0x04034b50, little-endian bytes
+        // 50 4B 03 04. Uncompressed size is the u32 at header offset 22.
+        let sig = [0x50u8, 0x4b, 0x03, 0x04];
+        let mut i = 0usize;
+        let mut patched = 0;
+        while i + 26 <= zip_bytes.len() {
+            if zip_bytes[i..i + 4] == sig {
+                zip_bytes[i + 22..i + 26].copy_from_slice(&1u32.to_le_bytes());
+                patched += 1;
+            }
+            i += 1;
+        }
+        assert!(patched >= 6, "expected to patch every local file header, patched {patched}");
+        let err = unzip_bundle_import(&zip_bytes).unwrap_err();
+        assert!(
+            err.contains("aggregate decompressed size exceeds"),
+            "declared-size lie should not bypass the aggregate cap: {err:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_an_archive_with_more_entries_than_the_count_cap() {
+        // reagent P2, PR #2379 round 2: per-entry/aggregate byte caps alone
+        // don't bound the CPU cost of iterating + sanitizing + hashing an
+        // archive with an enormous number of small, individually-valid
+        // entries.
+        let mut entries: Vec<(String, String)> = (0..=MAX_ENTRY_COUNT)
+            .map(|i| (format!("instructions/context/f{i}.md"), "x".to_string()))
+            .collect();
+        entries.push(("armory.json".to_string(), "{}".to_string()));
+        let refs: Vec<(&str, &str)> = entries.iter().map(|(p, c)| (p.as_str(), c.as_str())).collect();
+        let zip_bytes = build_zip(&refs);
+        let err = unzip_bundle_import(&zip_bytes).unwrap_err();
+        assert!(err.contains("entries exceeds the limit"));
     }
 }
