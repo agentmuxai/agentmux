@@ -110,6 +110,22 @@ muxlog() {
     case "$action" in tail) tail -f "$logfile" ;; cat) cat "$logfile" ;; *) grep "$action" "$logfile" ;; esac
 }
 
+# ─── muxspect ───────────────────────────────────────────────────────────────
+# Live process/turn-state introspection for the CURRENT instance (muxlog's
+# live-state sibling — muxlog answers "what happened", muxspect answers
+# "what's happening right now"). Delegates to the shared Node core
+# (muxspect.mjs, deployed next to this rcfile). `muxspect help` for usage.
+# No non-Node fallback: introspection needs a real authenticated HTTP call.
+_AGENTMUX_MUXSPECT_JS="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)/muxspect.mjs"
+muxspect() {
+    if command -v node >/dev/null 2>&1 && [ -f "$_AGENTMUX_MUXSPECT_JS" ]; then
+        node "$_AGENTMUX_MUXSPECT_JS" "$@"
+        return
+    fi
+    echo "muxspect: Node unavailable or core missing at $_AGENTMUX_MUXSPECT_JS" >&2
+    return 1
+}
+
 # Append to PROMPT_COMMAND (array-safe)
 if [[ $(declare -p PROMPT_COMMAND 2>/dev/null) == "declare -a"* ]]; then
     PROMPT_COMMAND+=(_agentmux_si_prompt_command)

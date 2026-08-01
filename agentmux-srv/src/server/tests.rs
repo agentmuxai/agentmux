@@ -1273,3 +1273,90 @@ async fn resolve_agent_definition_id_maps_slug_and_passes_through_def_id() {
     // Unknown ids error instead of silently writing bogus link rows.
     assert!(super::app_api::resolve_agent_definition_id(&state, "no-such-agent").is_err());
 }
+
+// ---- muxspect (docs/specs/SPEC_MUXSPECT_LIVE_INTROSPECTION_TOOL_2026_08_01.md) ----
+
+/// `GET /api/v1/muxspect/list` returns the full `ProcessStatus` collection
+/// (not just `block_ids`, unlike `agent.tracked-blocks`) and is auth-gated
+/// like every other `/api/v1/*` route.
+#[tokio::test]
+async fn muxspect_list_returns_full_process_status_collection() {
+    let state = test_state();
+    let app = build_router(state);
+
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri("/api/v1/muxspect/list")
+        .header("X-AuthKey", "test-secret-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(json["blocks"].is_array(), "response has a blocks array");
+}
+
+/// `GET /api/v1/muxspect/list` rejects a request with no/wrong auth key —
+/// same auth_middleware every other route already goes through.
+#[tokio::test]
+async fn muxspect_list_requires_auth() {
+    let state = test_state();
+    let app = build_router(state);
+
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri("/api/v1/muxspect/list")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+/// `GET /api/v1/muxspect/describe` composes ProcessBroker status +
+/// controller status + process tree into one response — the "describe
+/// everything about block X" query
+/// REPORT_PROCESS_ARCHITECTURE_STATE_AND_RETHINK_2026_07_22.md §5.4 named as
+/// missing. For a block with no controller, this must still succeed and
+/// report `Lifecycle::Unknown` rather than erroring — an unknown block is a
+/// legitimate, common answer (e.g. a stale/closed pane), not a failure.
+#[tokio::test]
+async fn muxspect_describe_composes_status_for_an_unknown_block() {
+    let state = test_state();
+    let app = build_router(state);
+
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri("/api/v1/muxspect/describe?block_id=no-such-block")
+        .header("X-AuthKey", "test-secret-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["block_id"], "no-such-block");
+    assert_eq!(json["process_status"]["lifecycle"], "unknown");
+    assert_eq!(json["controller_status"], serde_json::Value::Null);
+    assert_eq!(json["tracking_confidence"], "none");
+    assert!(json["processes"].as_array().unwrap().is_empty());
+}
+
+/// Missing `block_id` is a client error, not a panic or a silent empty
+/// success — mirrors `/api/v1/self`'s identical guard.
+#[tokio::test]
+async fn muxspect_describe_requires_block_id() {
+    let state = test_state();
+    let app = build_router(state);
+
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri("/api/v1/muxspect/describe")
+        .header("X-AuthKey", "test-secret-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}

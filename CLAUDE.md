@@ -204,6 +204,12 @@ identically across `task dev`, portable, and install builds. Not loaded in a
 tool-spawned subshell? Call the core directly: `node ~/.agentmux/shell/muxlog.mjs ls`.
 Full reference: `docs/MUXLOG.md`.
 
+`muxlog` is history (log files on disk); for **live** state — is this block's
+controller actually running right now, what's its process tree — use
+`muxspect` (`muxspect list`, `muxspect describe <block_id>`), its sibling
+tool. Only queries the instance you're already inside (Phase 1 — no
+cross-instance support yet). Full reference: `docs/MUXSPECT.md`.
+
 ---
 
 ## Version Management
