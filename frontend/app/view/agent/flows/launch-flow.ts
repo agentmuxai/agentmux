@@ -47,7 +47,7 @@ import { WpsEvent } from "@/app/store/wps-events";
 import * as WOS from "@/app/store/wos";
 import { BlockService } from "@/app/store/services";
 import { staticTabId } from "@/app/store/global";
-import { canonicalProviderId } from "../providers/provider-id-aliases";
+import { lastLinkedAccountId } from "../providers/provider-id-aliases";
 import type { LaunchPhase } from "./launch-phase";
 import type { ProviderDefinition } from "../providers";
 
@@ -110,31 +110,6 @@ export interface LaunchFlowOptions {
 }
 
 export type LaunchFlowResult = "success" | "auth_failed" | "fatal";
-
-/**
- * Pick the linked account_id for `canonicalId` from a raw
- * ListAgentIdentitiesCommand result, matching the backend spawn resolver's
- * own precedence when a migrated agent has BOTH a canonical and a
- * legacy-alias link row for the same provider (codex P1 on PR #2377).
- *
- * `db_agent_identity_links` keys on the raw `(agent_id, provider)` pair, so
- * a canonical row ("claude") and an alias row ("claude-code") can coexist
- * for the same agent. The backend query that lists them orders by the raw
- * provider column (`identities.rs::agent_identity_list_for_agent`,
- * `ORDER BY provider`), and `inject_identity_env`'s injection loop iterates
- * that same order, `HashMap::insert`-ing each OAuth binding's config-dir env
- * var — so whichever binding is processed LAST silently overwrites the
- * env var an earlier one wrote. The real spawn therefore always ends up
- * using the LAST canonical-equivalent row in that order, not the first —
- * `Array.prototype.find` would pick the wrong one whenever both rows exist.
- */
-function lastLinkedAccountId(
-    links: Array<{ provider: string; account_id: string }>,
-    canonicalId: string,
-): string | undefined {
-    const matches = links.filter((l) => canonicalProviderId(l.provider) === canonicalId);
-    return matches.length > 0 ? matches[matches.length - 1].account_id : undefined;
-}
 
 export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlowResult> {
     const { blockId, provider, log, authEnv } = opts;

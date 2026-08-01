@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { _PROVIDER_ID_ALIASES_FOR_TEST as frontendAliases, canonicalProviderId } from "./provider-id-aliases";
+import { _PROVIDER_ID_ALIASES_FOR_TEST as frontendAliases, canonicalProviderId, lastLinkedAccountId } from "./provider-id-aliases";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../..");
 
@@ -48,5 +48,28 @@ describe("provider ID alias table — frontend/backend consistency", () => {
         expect(canonicalProviderId("claude-code")).toBe("claude");
         expect(canonicalProviderId("claude")).toBe("claude");
         expect(canonicalProviderId("some-unrecognized-id")).toBe("some-unrecognized-id");
+    });
+
+    describe("lastLinkedAccountId", () => {
+        it("returns undefined when no link matches", () => {
+            expect(lastLinkedAccountId([{ provider: "codex", account_id: "acct-1" }], "claude")).toBeUndefined();
+            expect(lastLinkedAccountId([], "claude")).toBeUndefined();
+        });
+
+        it("matches a canonical link directly", () => {
+            expect(lastLinkedAccountId([{ provider: "claude", account_id: "acct-1" }], "claude")).toBe("acct-1");
+        });
+
+        it("matches a link stored under a legacy alias", () => {
+            expect(lastLinkedAccountId([{ provider: "claude-code", account_id: "acct-1" }], "claude")).toBe("acct-1");
+        });
+
+        it("prefers the LAST canonical-equivalent match, mirroring the backend's HashMap::insert overwrite order", () => {
+            const links = [
+                { provider: "claude", account_id: "acct-canonical" },
+                { provider: "claude-code", account_id: "acct-alias" },
+            ];
+            expect(lastLinkedAccountId(links, "claude")).toBe("acct-alias");
+        });
     });
 });
