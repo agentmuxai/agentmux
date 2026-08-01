@@ -42,7 +42,7 @@ import { createTranslator } from "./providers/translator-factory";
 import type { PendingMessage, SignalPair } from "./state";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { ContextCompactedNode, DocumentNode } from "./types";
-import { parseCompactBoundaryFrame } from "./compact-boundary";
+import { parseCompactBoundaryFrame, contextCompactedNodeId, contextCompactedLiveTimestamp } from "./compact-boundary";
 import type { AgentPaneEvent, TurnPhase } from "@/app/store/agent-pane-state/types";
 import { getNodeIdSet } from "@/app/store/agent-document-store";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
@@ -99,24 +99,35 @@ function pushContextCompactedNodes(
 ): void {
     for (const ev of paneEvents ?? []) {
         if (ev.type !== "context-compacted") continue;
-        // Codex P2, PR #2378 round 7: keyed on the frame's own stable
-        // timestamp when available (source: "real", i.e. a genuine
-        // compact_boundary frame) — MUST match parseHistoryLines.ts's own
-        // `context-compacted-${rawEvent.timestamp}` id exactly, or the
-        // same compaction processed live AND later re-seen in a mount-time
-        // history range (a real race — independent requests) gets two
-        // different ids and shows up twice, since the document store dedups
-        // by id. The heuristic path has no frame to key on, so it keeps the
-        // Date.now() fallback — nothing in history replay can ever produce
-        // a competing node for a heuristic-sourced detection to collide
+        // Codex P2, PR #2378 round 7 (id) / round 12 (timestamp + shared
+        // helpers): a "real" event (source: "real", i.e. a genuine
+        // compact_boundary frame) is keyed and timestamped via the SAME
+        // functions parseHistoryLines.ts uses — see compact-boundary.ts's
+        // doc comments for why sharing them, not independently
+        // reimplementing the fallback logic in each file, is what actually
+        // prevents the two consumers from drifting. The heuristic path has
+        // no frame to key or time on, so it keeps its own Date.now()-based
+        // id/timestamp — nothing in history replay can ever produce a
+        // competing node for a heuristic-sourced detection to collide
         // with, so a live-only id is fine there.
-        const idSuffix = ev.frameTimestamp ?? `${Date.now()}`;
+        const id =
+            ev.source === "real"
+                ? contextCompactedNodeId({
+                      trigger: ev.trigger,
+                      preTokens: ev.tokensBefore,
+                      postTokens: ev.tokensAfter,
+                      durationMs: ev.durationMs,
+                      frameTimestamp: ev.frameTimestamp,
+                  })
+                : `context-compacted-${Date.now()}`;
+        const timestamp =
+            ev.source === "real" ? contextCompactedLiveTimestamp(ev.frameTimestamp) : Date.now();
         const compactNode: ContextCompactedNode = {
             type: "context_compacted",
-            id: `context-compacted-${idSuffix}`,
+            id,
             tokensBefore: ev.tokensBefore,
             tokensAfter: ev.tokensAfter,
-            timestamp: Date.now(),
+            timestamp,
             source: ev.source,
             trigger: ev.trigger,
             durationMs: ev.durationMs,

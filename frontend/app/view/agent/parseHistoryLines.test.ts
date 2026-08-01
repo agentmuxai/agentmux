@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { parseHistoryLines } from "./parseHistoryLines";
+import { contextCompactedNodeId } from "./compact-boundary";
 import type { ToolNode } from "./types";
 
 // The Claude translator passes through events that already match the
@@ -192,6 +193,33 @@ describe("parseHistoryLines", () => {
             const lines = [compactBoundaryLine(), compactBoundaryLine()];
             const { nodes } = parseHistoryLines(lines, "claude-stream-json");
             expect(nodes.filter((n) => n.type === "context_compacted")).toHaveLength(1);
+        });
+
+        it("keys a timestamp-less boundary's id the same way the live path would (codex P2, round 12)", () => {
+            // Constructed without a top-level `timestamp` field -- the
+            // defensive fallback case. Before round 12 this used a
+            // batch-relative `nodes.length` counter here, while
+            // useAgentStream.ts's live path used `Date.now()`; the same
+            // underlying boundary seen live AND via a history-replay
+            // overlap could then get two different ids and show up twice.
+            const raw = JSON.parse(compactBoundaryLine());
+            delete raw.timestamp;
+            const lines = [
+                line({ type: "text", content: "before" }),
+                JSON.stringify(raw),
+            ];
+            const { nodes } = parseHistoryLines(lines, "claude-stream-json");
+            const compacted = nodes.find((n) => n.type === "context_compacted") as any;
+            expect(compacted).toBeDefined();
+            expect(compacted.id).toBe(
+                contextCompactedNodeId({
+                    trigger: "manual",
+                    preTokens: 783_887,
+                    postTokens: 11_775,
+                    durationMs: 231_606,
+                    frameTimestamp: null,
+                }),
+            );
         });
     });
 });

@@ -11,7 +11,7 @@
 
 import { createTranslator } from "./providers/translator-factory";
 import { ClaudeCodeStreamParser } from "./stream-parser";
-import { parseCompactBoundaryFrame } from "./compact-boundary";
+import { parseCompactBoundaryFrame, contextCompactedNodeId } from "./compact-boundary";
 import type { ContextCompactedNode, DocumentNode, SessionStats } from "./types";
 
 export interface ParsedHistory {
@@ -110,10 +110,16 @@ export function parseHistoryLines(
                 const parsedTs = typeof rawEvent.timestamp === "string" ? Date.parse(rawEvent.timestamp) : NaN;
                 const node: ContextCompactedNode = {
                     type: "context_compacted",
-                    // Keyed on the frame's own timestamp (stable across
-                    // replays of the same persisted line), not Date.now() —
-                    // this is a batch parse of history, not a live event.
-                    id: `context-compacted-${typeof rawEvent.timestamp === "string" ? rawEvent.timestamp : nodes.length}`,
+                    // Codex P2, PR #2378 round 12: shares useAgentStream.ts's
+                    // exact id-construction function (including its
+                    // content-derived fallback for the timestamp-less
+                    // case) instead of independently reimplementing it here
+                    // with a different fallback (previously nodes.length,
+                    // a batch-relative counter) — the same underlying
+                    // boundary seen live AND via a history-replay overlap
+                    // must always land on the identical id, or the
+                    // document store's same-id dedup can't merge them.
+                    id: contextCompactedNodeId(data),
                     tokensBefore: data.preTokens,
                     tokensAfter: data.postTokens,
                     timestamp: Number.isNaN(parsedTs) ? 0 : parsedTs,
