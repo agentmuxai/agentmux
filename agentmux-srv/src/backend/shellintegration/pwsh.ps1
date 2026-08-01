@@ -84,6 +84,20 @@ function Global:muxlog {
     }
 }
 
+# ─── muxspect ───────────────────────────────────────────────────────────────
+# Live process/turn-state introspection for the CURRENT instance (muxlog's
+# live-state sibling). Delegates to the shared Node core (muxspect.mjs).
+# `muxspect help` for usage. No non-Node fallback: introspection needs a real
+# authenticated HTTP call.
+$global:AgentmuxMuxspectJs = Join-Path $PSScriptRoot "..\muxspect.mjs"
+function Global:muxspect {
+    if ((Get-Command node -ErrorAction SilentlyContinue) -and (Test-Path $global:AgentmuxMuxspectJs)) {
+        node $global:AgentmuxMuxspectJs @args
+        return
+    }
+    Write-Error "muxspect: Node unavailable or core missing at $global:AgentmuxMuxspectJs"
+}
+
 # Hook into the prompt function
 if (Test-Path Function:\prompt) {
     $global:_agentmux_original_prompt = $function:prompt

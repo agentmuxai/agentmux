@@ -21,6 +21,10 @@ const FISH_SCRIPT: &str = include_str!("shellintegration/fish.fish");
 /// shell's `muxlog` function delegates to it. One tested implementation does log
 /// discovery + NDJSON rendering + filtering for all shells.
 const MUXLOG_JS: &str = include_str!("shellintegration/muxlog.mjs");
+/// Shared muxspect core (Node) — muxlog's live-state sibling. Deployed once
+/// at `<shell>/muxspect.mjs`; every shell's `muxspect` function delegates to
+/// it. See docs/specs/SPEC_MUXSPECT_LIVE_INTROSPECTION_TOOL_2026_08_01.md.
+const MUXSPECT_JS: &str = include_str!("shellintegration/muxspect.mjs");
 const VERSION_MARKER: &str = env!("CARGO_PKG_VERSION");
 
 // ─── Shell type ──────────────────────────────────────────────────────────────
@@ -96,6 +100,13 @@ pub fn deploy_scripts(wave_data_dir: &Path) {
     let muxlog_path = shell_base.join("muxlog.mjs");
     if let Err(e) = std::fs::write(&muxlog_path, MUXLOG_JS) {
         tracing::warn!("shell integration: failed to write {}: {}", muxlog_path.display(), e);
+        all_ok = false;
+    }
+
+    // Deploy the shared muxspect core the same way, right next to muxlog.mjs.
+    let muxspect_path = shell_base.join("muxspect.mjs");
+    if let Err(e) = std::fs::write(&muxspect_path, MUXSPECT_JS) {
+        tracing::warn!("shell integration: failed to write {}: {}", muxspect_path.display(), e);
         all_ok = false;
     }
 
@@ -234,5 +245,27 @@ mod tests {
     fn test_unknown_shell_returns_none() {
         let dir = Path::new("/tmp");
         assert!(get_shell_startup(ShellType::Unknown, dir).is_none());
+    }
+
+    /// `muxspect.mjs` deploys next to `muxlog.mjs` — codified as a test since
+    /// it's easy to add a new embedded script and forget the deploy line
+    /// (see docs/specs/SPEC_MUXSPECT_LIVE_INTROSPECTION_TOOL_2026_08_01.md).
+    #[test]
+    fn deploy_scripts_writes_muxlog_and_muxspect_side_by_side() {
+        let tmp = std::env::temp_dir().join(format!(
+            "agentmux-shellintegration-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        deploy_scripts(&tmp);
+
+        let shell_base = tmp.join("shell");
+        let muxlog = shell_base.join("muxlog.mjs");
+        let muxspect = shell_base.join("muxspect.mjs");
+        assert!(muxlog.exists(), "muxlog.mjs should be deployed");
+        assert!(muxspect.exists(), "muxspect.mjs should be deployed alongside it");
+        assert_eq!(std::fs::read_to_string(&muxspect).unwrap(), MUXSPECT_JS);
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

@@ -25,6 +25,7 @@ mod drone_handlers;
 mod cron;
 mod messaging_handlers;
 mod muxbus_handlers;
+mod muxspect_handlers;
 mod native_memory_handlers;
 
 #[cfg(test)]
@@ -358,6 +359,13 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/tab/activate", post(handle_tab_activate))
         .route("/api/v1/tab/new", post(handle_tab_new))
         .route("/api/v1/window/focus", post(handle_window_focus))
+        // Live-state introspection for the `muxspect` CLI (Phase 1 of
+        // docs/specs/SPEC_MUXSPECT_LIVE_INTROSPECTION_TOOL_2026_08_01.md) —
+        // read-only, diagnostic-only, reached the same way agentmux-mcp
+        // reaches every other /api/v1/* route (X-AuthKey from the caller's
+        // own environment, no new IPC).
+        .route("/api/v1/muxspect/list", get(muxspect_handlers::handle_muxspect_list))
+        .route("/api/v1/muxspect/describe", get(muxspect_handlers::handle_muxspect_describe))
         // Agent App API — identity / preset / memory namespaces, the MCP-facing
         // slice of the app-API RPC surface (SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28).
         // The agent identity (`agent_id`) is supplied by agentmux-mcp from its
