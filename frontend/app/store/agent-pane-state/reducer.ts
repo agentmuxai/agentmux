@@ -1157,6 +1157,7 @@ export function update(
                         source: "real",
                         trigger: command.trigger,
                         durationMs: command.durationMs,
+                        frameTimestamp: command.frameTimestamp,
                     },
                 ],
             };

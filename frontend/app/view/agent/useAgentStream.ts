@@ -99,9 +99,21 @@ function pushContextCompactedNodes(
 ): void {
     for (const ev of paneEvents ?? []) {
         if (ev.type !== "context-compacted") continue;
+        // Codex P2, PR #2378 round 7: keyed on the frame's own stable
+        // timestamp when available (source: "real", i.e. a genuine
+        // compact_boundary frame) — MUST match parseHistoryLines.ts's own
+        // `context-compacted-${rawEvent.timestamp}` id exactly, or the
+        // same compaction processed live AND later re-seen in a mount-time
+        // history range (a real race — independent requests) gets two
+        // different ids and shows up twice, since the document store dedups
+        // by id. The heuristic path has no frame to key on, so it keeps the
+        // Date.now() fallback — nothing in history replay can ever produce
+        // a competing node for a heuristic-sourced detection to collide
+        // with, so a live-only id is fine there.
+        const idSuffix = ev.frameTimestamp ?? `${Date.now()}`;
         const compactNode: ContextCompactedNode = {
             type: "context_compacted",
-            id: `context-compacted-${Date.now()}`,
+            id: `context-compacted-${idSuffix}`,
             tokensBefore: ev.tokensBefore,
             tokensAfter: ev.tokensAfter,
             timestamp: Date.now(),
@@ -406,6 +418,7 @@ export function useAgentStream({
                             postTokens: compactBoundary.postTokens,
                             durationMs: compactBoundary.durationMs,
                             at: Date.now(),
+                            frameTimestamp: compactBoundary.frameTimestamp,
                         });
                         pushContextCompactedNodes(paneEvents, queue, hasNodeId, addNodeId);
                     }
