@@ -68,3 +68,48 @@ export function parseCompactBoundaryFrame(rawEvent: unknown): CompactBoundaryDat
     const frameTimestamp = typeof e.timestamp === "string" ? e.timestamp : null;
     return { trigger, preTokens, postTokens, durationMs, frameTimestamp };
 }
+
+/**
+ * Stable `context_compacted` node id for a REAL `compact_boundary`, shared
+ * by both consumers so they can never independently drift — the exact bug
+ * class this module already exists to prevent (see the module doc
+ * comment). Codex P2, PR #2378 round 12: previously each consumer built
+ * its OWN fallback for the (defensive-only — the real CLI always sends a
+ * timestamp, but both consumers parse defensively) timestamp-less case:
+ * `useAgentStream.ts` used `Date.now()`, `parseHistoryLines.ts` used a
+ * batch-relative node count. The same underlying boundary seen live AND
+ * via a history-replay overlap could then get two different ids,
+ * bypassing the document store's same-id dedup. Falls back to a
+ * content-derived key instead — computed identically by both consumers
+ * since both now call this one function with the same fields.
+ */
+export function contextCompactedNodeId(data: {
+    trigger?: "manual" | "auto";
+    preTokens: number;
+    postTokens: number;
+    durationMs?: number;
+    frameTimestamp?: string | null;
+}): string {
+    const suffix =
+        data.frameTimestamp ??
+        `notime-${data.trigger ?? "?"}-${data.preTokens}-${data.postTokens}-${data.durationMs ?? "?"}`;
+    return `context-compacted-${suffix}`;
+}
+
+/**
+ * Epoch-ms completion time for a REAL `compact_boundary`'s
+ * `context_compacted` node — parses `frameTimestamp` (the frame's own
+ * completion time) when present/valid, falling back to `Date.now()` only
+ * when it's absent or unparseable (codex P2, PR #2378 round 12: the live
+ * path previously always recorded the frontend's receipt time here,
+ * discarding the frame's own completion time even when available — and
+ * since the live/replay nodes now share an id, a later history replay
+ * can't correct a live node that already won the document store's dedup).
+ * `parseHistoryLines.ts` deliberately does NOT reuse this fallback — a
+ * timestamp-less line replayed from history should read as unknown (0),
+ * not silently claim to have happened "now".
+ */
+export function contextCompactedLiveTimestamp(frameTimestamp: string | null | undefined): number {
+    const parsed = typeof frameTimestamp === "string" ? Date.parse(frameTimestamp) : NaN;
+    return Number.isNaN(parsed) ? Date.now() : parsed;
+}

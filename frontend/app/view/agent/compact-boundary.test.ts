@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { parseCompactBoundaryFrame } from "./compact-boundary";
+import { parseCompactBoundaryFrame, contextCompactedNodeId, contextCompactedLiveTimestamp } from "./compact-boundary";
 
 // Shared by useAgentStream.ts (live) and parseHistoryLines.ts (replay) —
 // Codex P1, PR #2378 round 2: this used to be inlined only in the live
@@ -102,5 +102,61 @@ describe("parseCompactBoundaryFrame", () => {
         expect(parseCompactBoundaryFrame(null)).toBeNull();
         expect(parseCompactBoundaryFrame(undefined)).toBeNull();
         expect(parseCompactBoundaryFrame("not-an-object")).toBeNull();
+    });
+});
+
+describe("contextCompactedNodeId", () => {
+    it("keys on frameTimestamp when present", () => {
+        expect(
+            contextCompactedNodeId({
+                trigger: "manual",
+                preTokens: 1,
+                postTokens: 1,
+                durationMs: 1,
+                frameTimestamp: "2026-07-21T17:55:35.500Z",
+            }),
+        ).toBe("context-compacted-2026-07-21T17:55:35.500Z");
+    });
+
+    it("falls back to a content-derived key when frameTimestamp is absent, identically regardless of call site", () => {
+        // codex P2, PR #2378 round 12: this is the exact bug -- both
+        // useAgentStream.ts (live) and parseHistoryLines.ts (replay) must
+        // compute the SAME id for the SAME timestamp-less frame, or the
+        // document store's same-id dedup can't merge a boundary seen by
+        // both paths. Calling the shared function twice with equivalent
+        // data (as each consumer independently does) must be idempotent.
+        const data = { trigger: "auto" as const, preTokens: 500, postTokens: 100, durationMs: 9_000, frameTimestamp: null };
+        expect(contextCompactedNodeId(data)).toBe(contextCompactedNodeId({ ...data }));
+        expect(contextCompactedNodeId(data)).toBe("context-compacted-notime-auto-500-100-9000");
+    });
+
+    it("treats a missing frameTimestamp field the same as an explicit null", () => {
+        expect(contextCompactedNodeId({ preTokens: 1, postTokens: 2, durationMs: 3 })).toBe(
+            contextCompactedNodeId({ preTokens: 1, postTokens: 2, durationMs: 3, frameTimestamp: null }),
+        );
+    });
+});
+
+describe("contextCompactedLiveTimestamp", () => {
+    it("parses a valid frameTimestamp", () => {
+        expect(contextCompactedLiveTimestamp("2026-07-21T17:55:35.500Z")).toBe(
+            Date.parse("2026-07-21T17:55:35.500Z"),
+        );
+    });
+
+    it("falls back to Date.now() when frameTimestamp is null", () => {
+        const before = Date.now();
+        const result = contextCompactedLiveTimestamp(null);
+        const after = Date.now();
+        expect(result).toBeGreaterThanOrEqual(before);
+        expect(result).toBeLessThanOrEqual(after);
+    });
+
+    it("falls back to Date.now() when frameTimestamp is unparseable", () => {
+        const before = Date.now();
+        const result = contextCompactedLiveTimestamp("not-a-date");
+        const after = Date.now();
+        expect(result).toBeGreaterThanOrEqual(before);
+        expect(result).toBeLessThanOrEqual(after);
     });
 });
