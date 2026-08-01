@@ -1180,7 +1180,19 @@ export function update(
                 // back to `command.at` when frameTimestamp is unparseable,
                 // same as preservesNewerCompaction above.
                 lastCompactionBoundaryAt: Number.isNaN(boundaryAt) ? command.at : boundaryAt,
-                lastContextTokens: command.postTokens,
+                // reagent P2 on PR #2378 (round 11): gated the same way as
+                // `compacting` above. When this boundary belongs to an
+                // OLDER compaction that's finishing after a newer one has
+                // already started (preservesNewerCompaction), its
+                // postTokens describes a context-fill state that's already
+                // stale -- overwriting the live lastContextTokens with it
+                // would show a smaller/incorrect reading while the newer
+                // compaction is still confirmed in flight. The
+                // context-compacted event below still reports this
+                // boundary's own true tokens (accurate historical record
+                // of what that specific compaction did); only the live
+                // state gate changes here.
+                lastContextTokens: preservesNewerCompaction ? state.lastContextTokens : command.postTokens,
             };
             if (state.lastEventMs != null) {
                 next.lastEventMs = command.at;

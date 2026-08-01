@@ -775,12 +775,40 @@ describe("agent-pane-state reducer", () => {
                     frameTimestamp: new Date(500).toISOString(),
                 }, 1_500);
                 expect(r.state.compacting).toEqual({ trigger: "manual", startedAt: 1_000 });
-                // The boundary's own data is still real and recorded --
                 // lastCompactionBoundaryAt takes the boundary's own parsed
                 // completion time (frameTimestamp: 500), not the frontend
                 // receipt time (at: 1_500) -- see codex round 10.
                 expect(r.state.lastCompactionBoundaryAt).toBe(500);
-                expect(r.state.lastContextTokens).toBe(3_000);
+                // lastContextTokens is NOT overwritten with this older
+                // boundary's postTokens -- the newer N+1 compaction is
+                // confirmed still active, so showing its stale 3_000
+                // reading would be a regression from whatever context-fill
+                // value was live before it (reagent P2, round 11).
+                expect(r.state.lastContextTokens).toBe(null);
+            });
+
+            it("preserves the pre-existing lastContextTokens (not just null) against a stale delayed boundary (reagent P2, round 11)", () => {
+                // A real, live context-fill value (8_000) is already
+                // established before the delayed older boundary shows up,
+                // so this proves the fix preserves whatever was actually
+                // live -- not merely that it happens to stay null.
+                const withTokens = update(streaming(100), { type: "TokensIn", input: 8_000 }, 500).state;
+                const s0 = update(withTokens, {
+                    type: "CompactionStarted",
+                    trigger: "manual",
+                    at: 1_000,
+                }, 1_000).state;
+                const r = update(s0, {
+                    type: "CompactionBoundary",
+                    trigger: "manual",
+                    preTokens: 50_000,
+                    postTokens: 3_000,
+                    durationMs: 9_000,
+                    at: 1_500,
+                    frameTimestamp: new Date(500).toISOString(),
+                }, 1_500);
+                expect(r.state.compacting).toEqual({ trigger: "manual", startedAt: 1_000 });
+                expect(r.state.lastContextTokens).toBe(8_000);
             });
 
             it("DOES clear compacting when the boundary's frameTimestamp is at or after the current compaction's start", () => {
