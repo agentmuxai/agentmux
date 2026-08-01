@@ -576,6 +576,31 @@ describe("agent-pane-state reducer", () => {
                 expect(r.state.turnPhase.kind).toBe("Interrupting");
                 expect(r.state.compacting).toBeNull();
             });
+
+            it("FailureObserved clears compacting when it ends the turn (reagent P1, round 3)", () => {
+                // A backend failure classification (e.g. the CLI erroring out
+                // partway through) can arrive mid-compaction just like any
+                // other turn-ending transition — same bug class as the four
+                // above, just reached via an error instead of a clean exit.
+                const s0 = update(streaming(100), { type: "CompactionStarted", trigger: "manual", at: 150 }, 150).state;
+                expect(s0.compacting).not.toBeNull();
+                const failure: AgentFailure = { code: "rate_limited", title: "Rate limited", detail: "429", retryable: true };
+                const r = update(s0, { type: "FailureObserved", failure, at: 200 });
+                expect(r.state.turnPhase).toEqual({ kind: "Done", outcome: "errored", finishedAt: 200 });
+                expect(r.state.compacting).toBeNull();
+            });
+
+            it("FailureObserved does NOT clear compacting when it's a stray/late no-op (turn already ended)", () => {
+                // If the turn already ended, FailureObserved leaves turnPhase
+                // alone (per its own existing "stray/late event" handling) —
+                // compacting should be left alone too, since nothing about
+                // this transition is authoritative in that case.
+                const s0 = mk(); // Idle, not working
+                const failure: AgentFailure = { code: "rate_limited", title: "Rate limited", detail: "429", retryable: true };
+                const r = update(s0, { type: "FailureObserved", failure, at: 200 });
+                expect(r.events).toContainEqual({ type: "failure-observed", code: "rate_limited", turnWasEnded: false });
+                expect(r.state.compacting).toBe(s0.compacting);
+            });
         });
 
         describe("StreamWatchdogTick is suspended while compacting (codex P1, PR #2378 round 2)", () => {

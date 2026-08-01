@@ -1023,6 +1023,15 @@ export function update(
                     currentToolArg: turnWasEnded ? null : state.currentToolArg,
                     turnTokens: turnWasEnded ? null : state.turnTokens,
                     failure: { data: command.failure, at: command.at },
+                    // reagent P1 on PR #2378 (round 3): a failure classification
+                    // ends the turn the same way TurnEnd/TurnReset/RequestStop/
+                    // StreamUnsubscribe do — same "whatever compaction was in
+                    // flight is now moot" reasoning as those, just reached via
+                    // an error instead of a clean transition. Without this, a
+                    // failure observed mid-compaction (e.g. the CLI erroring out
+                    // partway through) reproduces the exact stuck-"Compacting…"
+                    // bug this PR already fixed for the other four transitions.
+                    compacting: turnWasEnded ? null : state.compacting,
                 },
                 events: [
                     { type: "failure-observed", code: command.failure.code, turnWasEnded },
