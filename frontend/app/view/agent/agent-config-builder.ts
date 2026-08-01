@@ -257,16 +257,42 @@ export function uniqueSkillSlug(name: string, used: Set<string>): string {
 }
 
 /**
- * Build .claude/hooks.json content with the auto-injected PreToolUse:Bash
- * entry pointing at `agentmux-bashwrap hook`. User-supplied hooks merge
- * in: non-PreToolUse keys win on collision; user PreToolUse matchers
- * are appended BEFORE ours so a user deny-rule can short-circuit before
- * our rewrite fires.
+ * Merge a user-supplied `settings.json`-level hook-array (`PreToolUse`
+ * or `PreCompact`) with whatever is already staged in `hooksObj` under
+ * `key` (AgentMux's own auto-injected entries, possibly already
+ * carrying legacy `content_map["hooks"]`-merged user entries from the
+ * earlier pass). User entries are PREPENDED so their matchers/gates
+ * get first refusal; AgentMux's own entries always stay last.
  *
- * Mirror of `build_hooks_config` in
+ * Mirror of `prepend_user_hook_array` in
+ * `agentmux-srv/src/backend/agent_config.rs` — keep the two in sync.
+ */
+function prependUserHookArray(hooksObj: Record<string, unknown>, key: string, userValue: unknown): void {
+    if (!Array.isArray(userValue)) {
+        console.warn(`agent-model: user settings.hooks.${key} is not an array; dropped`);
+        return;
+    }
+    const ours = Array.isArray(hooksObj[key]) ? hooksObj[key] as unknown[] : [];
+    hooksObj[key] = [...userValue, ...ours];
+}
+
+/**
+ * Build .claude/hooks.json content with the auto-injected PreToolUse:Bash
+ * entry pointing at `agentmux-bashwrap hook`, plus two PreCompact entries
+ * (matcher "manual" / "auto") pointing at `agentmux-bashwrap precompact`
+ * so a live "compaction started" signal reaches the sidecar (see
+ * docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md §4.2).
+ * User-supplied hooks merge in: non-PreToolUse/PreCompact keys win on
+ * collision; user PreToolUse/PreCompact matchers are appended BEFORE
+ * ours so a user deny-rule (or custom PreCompact observer) can
+ * short-circuit before our rewrite/observation fires.
+ *
+ * Mirror of `build_settings_with_hooks` in
  * `agentmux-srv/src/backend/agent_config.rs`. The two paths must stay
- * in sync — keep changes aligned across both files. See
- * docs/specs/SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §5.
+ * in sync — keep changes aligned across both files (Codex P1, PR #2378:
+ * this mirror originally lagged the Rust builder by one hook type,
+ * so agents launched through the standard picker never got PreCompact
+ * installed). See docs/specs/SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §5.
  */
 export function buildSettingsWithHooks(
     userSettingsContent: string | undefined,
@@ -278,8 +304,27 @@ export function buildSettingsWithHooks(
             { type: "command", command: "agentmux-bashwrap hook" },
         ],
     };
+    // `PreCompact` requires an explicit `matcher` ("manual" or "auto") —
+    // Claude Code has no confirmed wildcard-all value for this hook —
+    // so two separate entries are registered, each with a different
+    // static `--trigger=` argv baked in so the binary knows which fired
+    // without needing it from stdin (PreCompact's stdin payload carries
+    // no `trigger` field; see `agentmux-bashwrap/src/precompact.rs`).
+    const agentmuxPrecompactManual = {
+        matcher: "manual",
+        hooks: [
+            { type: "command", command: "agentmux-bashwrap precompact --trigger=manual" },
+        ],
+    };
+    const agentmuxPrecompactAuto = {
+        matcher: "auto",
+        hooks: [
+            { type: "command", command: "agentmux-bashwrap precompact --trigger=auto" },
+        ],
+    };
     const hooksObj: Record<string, unknown> = {};
     const pretooluseEntries: unknown[] = [];
+    const precompactEntries: unknown[] = [];
 
     if (userHooksContent) {
         let parsed: unknown;
@@ -297,6 +342,12 @@ export function buildSettingsWithHooks(
                     } else {
                         console.warn("agent-model: user hooks.PreToolUse is not an array; dropping");
                     }
+                } else if (k === "PreCompact") {
+                    if (Array.isArray(v)) {
+                        precompactEntries.push(...v);
+                    } else {
+                        console.warn("agent-model: user hooks.PreCompact is not an array; dropping");
+                    }
                 } else {
                     hooksObj[k] = v;
                 }
@@ -307,6 +358,8 @@ export function buildSettingsWithHooks(
     }
     pretooluseEntries.push(agentmuxPretooluse);
     hooksObj["PreToolUse"] = pretooluseEntries;
+    precompactEntries.push(agentmuxPrecompactManual, agentmuxPrecompactAuto);
+    hooksObj["PreCompact"] = precompactEntries;
 
     // Wrap into settings.json shape, merging any user-supplied settings.
     const settingsObj: Record<string, unknown> = {};
@@ -324,21 +377,21 @@ export function buildSettingsWithHooks(
             console.warn("agent-model: user settings top-level is not an object; dropping");
         }
     }
-    // Merge existing user settings.hooks. For PreToolUse, user matchers are
-    // PREPENDED so they short-circuit before our auto-injected entry. Other
-    // event types (PostToolUse, Stop, etc.) pass through. Reagent P1 on
-    // #813 caught the previous `continue` as a silent drop of user
-    // PreToolUse from settings.json.
+    // Merge existing user settings.hooks. For PreToolUse and PreCompact,
+    // user matchers are PREPENDED so they short-circuit before our
+    // auto-injected entries. Other event types (PostToolUse, Stop, etc.)
+    // pass through. Reagent P1 on #813 caught the previous `continue` as
+    // a silent drop of user PreToolUse from settings.json; PreCompact is
+    // deliberately folded into the same array-merge discipline rather
+    // than the generic `if (!(k in hooksObj))` path below, or a
+    // user-supplied PreCompact entry would hit that path and be
+    // silently and permanently dropped the moment PreCompact became
+    // auto-injected too (Codex P1, PR #2378).
     const existingHooks = settingsObj["hooks"];
     if (existingHooks != null && typeof existingHooks === "object" && !Array.isArray(existingHooks)) {
         for (const [k, v] of Object.entries(existingHooks as Record<string, unknown>)) {
-            if (k === "PreToolUse") {
-                if (Array.isArray(v)) {
-                    const ours = Array.isArray(hooksObj["PreToolUse"]) ? hooksObj["PreToolUse"] as unknown[] : [];
-                    hooksObj["PreToolUse"] = [...v, ...ours];
-                } else {
-                    console.warn("agent-model: user settings.hooks.PreToolUse is not an array; dropped");
-                }
+            if (k === "PreToolUse" || k === "PreCompact") {
+                prependUserHookArray(hooksObj, k, v);
                 continue;
             }
             if (!(k in hooksObj)) hooksObj[k] = v;

@@ -539,6 +539,44 @@ describe("agent-pane-state reducer", () => {
                 });
             });
         });
+
+        describe("compacting cleared by other lifecycle transitions (reagent P1, PR #2378)", () => {
+            // If compact_boundary never arrives — the CLI crashes mid-compaction,
+            // the network drops, or a reconnect/truncate race intervenes — only
+            // clearing `compacting` on CompactionBoundary would strand the
+            // composer strip showing "Compacting… Ns" forever, surviving
+            // reconnects and every subsequent turn. Each of these four
+            // transitions must clear it independently.
+
+            it("StreamUnsubscribe clears compacting while a turn was working", () => {
+                const s0 = update(streaming(100), { type: "CompactionStarted", trigger: "manual", at: 150 }, 150).state;
+                expect(s0.compacting).not.toBeNull();
+                const r = update(s0, { type: "StreamUnsubscribe", at: 200 }, 200);
+                expect(r.state.compacting).toBeNull();
+            });
+
+            it("TurnEnd clears compacting", () => {
+                const s0 = update(streaming(100), { type: "CompactionStarted", trigger: "auto", at: 150 }, 150).state;
+                expect(s0.compacting).not.toBeNull();
+                const r = update(s0, { type: "TurnEnd", stats: null }, 200);
+                expect(r.state.compacting).toBeNull();
+            });
+
+            it("TurnReset clears compacting", () => {
+                const s0 = update(streaming(100), { type: "CompactionStarted", trigger: "manual", at: 150 }, 150).state;
+                expect(s0.compacting).not.toBeNull();
+                const r = update(s0, { type: "TurnReset" }, 200);
+                expect(r.state.compacting).toBeNull();
+            });
+
+            it("RequestStop clears compacting when entering Interrupting", () => {
+                const s0 = update(streaming(100), { type: "CompactionStarted", trigger: "auto", at: 150 }, 150).state;
+                expect(s0.compacting).not.toBeNull();
+                const r = update(s0, { type: "RequestStop", at: 200 }, 200);
+                expect(r.state.turnPhase.kind).toBe("Interrupting");
+                expect(r.state.compacting).toBeNull();
+            });
+        });
     });
 
     describe("Stop flow", () => {

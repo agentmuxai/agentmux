@@ -24,6 +24,17 @@
  * later as a `compact_boundary` frame on the normal NDJSON stream —
  * handled directly in `useAgentStream.ts`, which also clears the
  * `compacting` pane flag this hook sets.
+ *
+ * Codex P1 on PR #2378: the WPS broker persists this event
+ * (`persist: 1`, see `wps_client.rs`) so a late/reconnecting
+ * subscriber replays it — but there is no completion tombstone, since
+ * `compact_boundary` arrives over the separate NDJSON stream, not
+ * WPS. Without a staleness check, reopening a pane after its
+ * compaction already finished would replay the original "started"
+ * ping and get stuck showing "Compacting…" forever. Fixed by using
+ * the payload's own `startedAt` (previously ignored — every replay
+ * was treated as a fresh start via `Date.now()`) to reject anything
+ * older than a real compaction could plausibly still be running.
  */
 
 import { onCleanup } from "solid-js";
@@ -42,27 +53,80 @@ export interface UseCompactionStreamOptions {
     addNodeId: (id: string) => void;
 }
 
+/**
+ * A `compaction_started` ping older than this is treated as stale —
+ * almost certainly a WPS replay of a compaction that already
+ * finished (its `compact_boundary` completion arrived over the
+ * separate NDJSON stream while nobody was subscribed to see it), not
+ * a real one still in flight. The real captured example in the spec
+ * doc (§2) took ~232s; 10 minutes is a generous multiple of that so
+ * a genuinely slow compaction is never misclassified as stale.
+ */
+const MAX_PLAUSIBLE_COMPACTION_MS = 10 * 60 * 1000;
+
+/**
+ * Tolerance for `startedAt` appearing slightly in the future relative
+ * to this client's clock (delivery jitter / minor clock skew between
+ * this machine and wherever the hook process's clock reads from —
+ * both are local to the same host today, but this stays defensive).
+ * A genuinely stale replay is stale by minutes, not milliseconds, so
+ * this tolerance can't mask the bug the age check exists to catch.
+ */
+const CLOCK_SKEW_TOLERANCE_MS = 60 * 1000;
+
+export type CompactionTrigger = "manual" | "auto";
+
+/**
+ * Validate + resolve a raw `compaction_started` WPS payload into a
+ * trigger + clamped `startedAt`, or `null` to reject it outright
+ * (malformed shape, unparseable/missing timestamp, or stale replay —
+ * see the module doc comment). Pure and exported so the staleness
+ * logic has direct unit coverage without spinning up a SolidJS
+ * reactive-root harness for the subscription wiring itself.
+ */
+export function resolveCompactionStart(
+    data: unknown,
+    now: number,
+): { trigger: CompactionTrigger; startedAt: number } | null {
+    if (!data || typeof data !== "object") return null;
+    const d = data as Record<string, unknown>;
+    const trigger: CompactionTrigger | null =
+        d.trigger === "auto" ? "auto" :
+        d.trigger === "manual" ? "manual" :
+        null;
+    if (!trigger) return null;
+
+    // Malformed/missing startedAt degrades to "reject" (fail closed),
+    // not "treat as fresh" — same "skip rather than guess" philosophy
+    // as the backend translator. In practice this binary always sends
+    // a valid RFC3339 timestamp (precompact.rs), so a parse failure
+    // here would itself indicate something is wrong worth not acting on.
+    const rawStartedAt = typeof d.startedAt === "string" ? Date.parse(d.startedAt) : NaN;
+    if (Number.isNaN(rawStartedAt)) return null;
+    const age = now - rawStartedAt;
+    if (age < -CLOCK_SKEW_TOLERANCE_MS || age > MAX_PLAUSIBLE_COMPACTION_MS) return null;
+    // Clamp a within-tolerance "future" timestamp to now, so the live
+    // elapsed-time display (Date.now() - startedAt) never briefly
+    // reads negative.
+    return { trigger, startedAt: Math.min(rawStartedAt, now) };
+}
+
 export function useCompactionStream(opts: UseCompactionStreamOptions): void {
     const unsub = waveEventSubscribe({
         eventType: WpsEvent.CompactionStarted,
         scope: `block:${opts.blockId}`,
         handler: (event: any) => {
-            const data = event?.data;
-            if (!data || typeof data !== "object") return;
-            const trigger =
-                data.trigger === "auto" ? "auto" :
-                data.trigger === "manual" ? "manual" :
-                null;
-            if (!trigger) return;
+            const resolved = resolveCompactionStart(event?.data, Date.now());
+            if (!resolved) return;
+            const { trigger, startedAt } = resolved;
 
-            const at = Date.now();
-            opts.model.dispatchPane({ type: "CompactionStarted", trigger, at });
+            opts.model.dispatchPane({ type: "CompactionStarted", trigger, at: startedAt });
 
             const node: CompactionStartedNode = {
                 type: "compaction_started",
-                id: `compaction-started-${at}`,
+                id: `compaction-started-${startedAt}`,
                 trigger,
-                startedAt: at,
+                startedAt,
             };
             if (!opts.hasNodeId(node.id)) {
                 opts.addNodeId(node.id);
