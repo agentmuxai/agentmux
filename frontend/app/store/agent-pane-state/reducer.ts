@@ -433,6 +433,11 @@ export function update(
                     currentToolArg: null,
                     turnTokens: null,
                     turnPhase: { kind: "Idle" },
+                    // Same reasoning as the other authoritative terminal
+                    // transitions above: the backend has just confirmed
+                    // there is no active turn, so whatever compaction the
+                    // frontend still thought was in flight is stale.
+                    compacting: null,
                 },
                 events: [{ type: "turn-inactive-reconciled", at: command.at }],
             };
@@ -868,6 +873,15 @@ export function update(
                         outcome: "interrupted",
                         finishedAt: command.at,
                     },
+                    // reagent + codex P1 on PR #2378 (round 4): a fifth
+                    // authoritative terminal transition, same bug class as
+                    // the four already fixed. Round 3 deliberately stopped
+                    // RequestStop from clearing `compacting` (so it survives
+                    // a failed stop attempt) — but if the interrupt instead
+                    // TIMES OUT here, that IS an authoritative end of the
+                    // turn, same as TurnEnd/TurnReset/StreamUnsubscribe/
+                    // FailureObserved, and must clear it the same way.
+                    compacting: null,
                 },
                 events: [{ type: "interrupt-timed-out", at: command.at }],
             };
@@ -905,6 +919,14 @@ export function update(
                         outcome: "errored",
                         finishedAt: command.at,
                     },
+                    // Same reasoning as InterruptTimeoutElapsed above:
+                    // realistically compaction only happens once Streaming
+                    // has started, so `compacting` shouldn't be set while
+                    // still Submitting — but CompactionStarted's own
+                    // handling doesn't gate on phase kind, so clear it here
+                    // too for the same defensive completeness reagent/codex
+                    // asked for on the other bounded-timeout arm.
+                    compacting: null,
                 },
                 events: [{ type: "submit-timed-out", at: command.at }],
             };

@@ -621,6 +621,47 @@ describe("agent-pane-state reducer", () => {
                 expect(r.events).toContainEqual({ type: "failure-observed", code: "rate_limited", turnWasEnded: false });
                 expect(r.state.compacting).toBe(s0.compacting);
             });
+
+            it("InterruptTimeoutElapsed clears compacting (reagent + codex P1, round 4)", () => {
+                // A fifth authoritative terminal transition found across
+                // three review rounds: round 3 deliberately stopped
+                // RequestStop from clearing compacting (so it survives a
+                // failed stop attempt) — but if the interrupt instead TIMES
+                // OUT, that IS authoritative and must clear it.
+                const s0 = ready(100);
+                const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+                const s2 = update(s1, { type: "StreamSubscribe", at: 120 }).state;
+                const s3 = update(s2, { type: "CompactionStarted", trigger: "manual", at: 150 }, 150).state;
+                const s4 = update(s3, { type: "RequestStop", at: 200 }).state;
+                expect(s4.compacting).not.toBeNull();
+                const deadline = 200 + INTERRUPT_TIMEOUT_MS;
+                const r = update(s4, { type: "InterruptTimeoutElapsed", at: deadline });
+                expect(r.state.turnPhase.kind).toBe("Done");
+                expect(r.state.compacting).toBeNull();
+            });
+
+            it("SubmitTimeoutElapsed clears compacting (defensive completeness, round 4)", () => {
+                const s0 = ready(100);
+                const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+                expect(s1.turnPhase.kind).toBe("Submitting");
+                const s2 = update(s1, { type: "CompactionStarted", trigger: "auto", at: 120 }, 120).state;
+                expect(s2.compacting).not.toBeNull();
+                const deadline = 110 + SUBMIT_TIMEOUT_MS;
+                const r = update(s2, { type: "SubmitTimeoutElapsed", at: deadline });
+                expect(r.state.turnPhase.kind).toBe("Done");
+                expect(r.state.compacting).toBeNull();
+            });
+
+            it("ReconcileTurnActive(active: false) clears compacting (reagent + codex P1, round 4)", () => {
+                // The backend has authoritatively confirmed no turn is
+                // active — whatever compaction the frontend still thought
+                // was in flight is stale.
+                const s0 = update(streaming(100), { type: "CompactionStarted", trigger: "manual", at: 150 }, 150).state;
+                expect(s0.compacting).not.toBeNull();
+                const r = update(s0, { type: "ReconcileTurnActive", at: 200, active: false });
+                expect(r.state.turnPhase.kind).toBe("Idle");
+                expect(r.state.compacting).toBeNull();
+            });
         });
 
         describe("StreamWatchdogTick is suspended while compacting (codex P1, PR #2378 round 2)", () => {
