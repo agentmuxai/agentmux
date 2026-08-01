@@ -20,6 +20,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::backend::providers::resolve_provider_alias;
 use crate::backend::storage::store::{SecretRef, Store};
 use crate::backend::wps::{Broker, WaveEvent};
 
@@ -269,8 +270,15 @@ pub fn inject_identity_env_with_broker(
     // agent uses, whether or not a binding row exists for it). A missing
     // definition row reads as flag=false / no expected provider — the
     // per-binding gate still applies to whatever links exist.
+    //
+    // Canonicalized via `resolve_provider_alias` (codex P1 on PR #2377): a
+    // definition's own `provider` field predates this alias table in rare
+    // cases, and this value is compared below against `injected_oauth` /
+    // `bindings`' raw (possibly aliased) provider strings — comparing
+    // uncanonicalized would let a genuinely-injected alias-only binding
+    // still trip the "no account bound" gate.
     let (use_ambient, def_provider) = match wstore.agent_def_get(&instance.definition_id) {
-        Ok(Some(d)) => (d.use_ambient_login != 0, Some(d.provider)),
+        Ok(Some(d)) => (d.use_ambient_login != 0, Some(resolve_provider_alias(&d.provider).to_string())),
         Ok(None) => (false, None),
         Err(e) => {
             tracing::warn!(
@@ -447,7 +455,10 @@ pub fn inject_identity_env_with_broker(
                     }
                 };
                 env_vars.insert(config_dir_env_var.to_string(), dir.clone());
-                injected_oauth.insert(binding.provider.clone());
+                // Canonicalized (codex P1 on PR #2377) — see def_provider's
+                // doc comment above; def_provider is now canonical too, so
+                // this must match it on the same terms.
+                injected_oauth.insert(resolve_provider_alias(&binding.provider).to_string());
                 tracing::info!(
                     target: "identity",
                     "injected {} for oauth provider {} (identity={}, account={})",
@@ -526,7 +537,13 @@ pub fn inject_identity_env_with_broker(
     if let Some(p) = def_provider {
         if matches!(provider_class(&p), Some(ProviderClass::OAuth { .. }))
             && !injected_oauth.contains(&p)
-            && !bindings.iter().any(|b| b.provider == p)
+            // Canonicalized (codex P1 on PR #2377): `b.provider` is the raw
+            // DB value and may still be a legacy alias even though `p` is
+            // canonical — without this, a binding that failed injection for
+            // an unrelated reason (already gated above) would be
+            // misclassified as "no binding at all" here whenever it's
+            // stored under an alias.
+            && !bindings.iter().any(|b| resolve_provider_alias(&b.provider) == p)
         {
             gate_oauth_failure(&p, "no account bound for the agent's provider")?;
         }
@@ -744,6 +761,79 @@ mod tests {
         );
         assert!(env.get("CLAUDE_CONFIG_DIR").is_none());
         assert!(env.is_empty());
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn inject_oauth_class_succeeds_when_the_only_binding_is_under_a_legacy_alias() {
+        // codex P1 on PR #2377: a definition's own `provider` is canonical
+        // ("claude"), but its only db_agent_identity_links row is still
+        // under a legacy alias ("claude-code") — carried forward from
+        // before providers.rs's alias table existed, or a definition/link
+        // pair that otherwise drifted. The binding injects successfully
+        // (provider_class already resolves aliases), but before this fix
+        // the def-provider gate compared the raw `injected_oauth`/binding
+        // provider strings against the canonical def_provider and treated
+        // the alias-bound account as "no account bound at all" — blocking
+        // a spawn that had already successfully injected valid credentials
+        // moments earlier in the same function.
+        let store = make_store();
+
+        let mut def = crate::backend::storage::store::AgentDefinition {
+            id: "def-1".to_string(),
+            slug: String::new(),
+            name: "T".to_string(),
+            icon: "✦".to_string(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: String::new(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+        };
+        store.agent_def_insert(&mut def).unwrap();
+
+        let claude = make_account(
+            "acct-alias",
+            "claude-code",
+            SecretRef::OAuthConfigDir {
+                dir: "/var/agentmux/identities/id-alias/claude".to_string(),
+            },
+        );
+        store.identity_upsert(&claude).unwrap();
+        // Bound under the alias, not the canonical "claude".
+        store
+            .agent_identity_link("def-1", "acct-alias", "claude-code")
+            .unwrap();
+
+        insert_block_for_agent(&store, "block-alias", "def-1");
+        let inst = make_instance("block-alias", "id-alias");
+        store.instance_create(&inst).unwrap();
+
+        let mut env: HashMap<String, String> = HashMap::new();
+        let res = inject_identity_env(store.clone(), store, "block-alias", &mut env);
+
+        assert!(res.is_ok(), "expected Ok, got {res:?}");
+        assert_eq!(
+            env.get("CLAUDE_CONFIG_DIR").map(String::as_str),
+            Some("/var/agentmux/identities/id-alias/claude"),
+        );
     }
 
     // ── Layer 3 — spawn gating (SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4
