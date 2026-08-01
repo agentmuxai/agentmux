@@ -480,7 +480,12 @@ pub fn inject_identity_env_with_broker(
                     .duration_since(UNIX_EPOCH)
                     .map(|d| d.as_millis() as i64)
                     .unwrap_or(0);
-                if let Some(probed) = probe_oauth_status(&binding.provider, &dir, now_ms) {
+                // Canonicalized (codex P2 on PR #2377): probe_oauth_status
+                // only recognizes the canonical "claude"/"codex"/"openclaw"
+                // strings — passing a raw alias like "claude-code" always
+                // returned None, silently never refreshing an alias-bound
+                // account's status or publishing identityaccounts:changed.
+                if let Some(probed) = probe_oauth_status(resolve_provider_alias(&binding.provider), &dir, now_ms) {
                     let new_status = probed.as_str();
                     if account.status != new_status {
                         let mut updated = account.clone();
@@ -1594,6 +1599,84 @@ mod tests {
 
         // Status row was UPDATED to needs_reauth.
         let after = store.identity_get("acct-claude").unwrap().unwrap();
+        assert_eq!(after.status, oauth_status::NEEDS_REAUTH);
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn inject_oauth_class_probe_canonicalizes_a_legacy_alias_binding() {
+        // codex P2 on PR #2377 (third round): probe_oauth_status only
+        // recognizes canonical provider strings ("claude"/"codex"/
+        // "openclaw") — passing the raw alias ("claude-code") a
+        // migrated/legacy binding may still carry always returned None,
+        // silently never refreshing that account's status. Same fixture
+        // as inject_oauth_class_probes_and_flips_status_to_needs_reauth
+        // above, but bound under the alias instead of the canonical id.
+        let store = make_store();
+
+        let mut def = crate::backend::storage::store::AgentDefinition {
+            id: "def-1".to_string(),
+            slug: String::new(),
+            name: "T".to_string(),
+            icon: "✦".to_string(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: String::new(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+        };
+        store.agent_def_insert(&mut def).unwrap();
+
+        let tmp = tempfile::tempdir().unwrap();
+        let bundle_dir = tmp.path().to_str().unwrap().to_string();
+
+        let claude = IdentityAccount {
+            id: "acct-alias".to_string(),
+            name: "claude-code-acct-alias".to_string(),
+            provider: "claude-code".to_string(),
+            kind: "oauth".to_string(),
+            display_name: String::new(),
+            secret_ref: SecretRef::OAuthConfigDir { dir: bundle_dir },
+            context: serde_json::json!({}),
+            status: oauth_status::VALID.to_string(),
+            created_at: 0,
+            updated_at: 0,
+        };
+        store.identity_upsert(&claude).unwrap();
+        // Bound under the alias, not the canonical "claude".
+        store
+            .agent_identity_link("def-1", "acct-alias", "claude-code")
+            .unwrap();
+
+        insert_block_for_agent(&store, "block-probe-alias", "def-1");
+        let inst = make_instance("block-probe-alias", "id-probe-alias");
+        store.instance_create(&inst).unwrap();
+
+        let mut env: HashMap<String, String> = HashMap::new();
+        inject_identity_env(store.clone(), store.clone(), "block-probe-alias", &mut env).unwrap();
+
+        assert!(env.get("CLAUDE_CONFIG_DIR").is_some());
+        // Status row was UPDATED to needs_reauth — proves the probe ran
+        // with the canonicalized provider id, not the raw alias (which
+        // would have returned None and left status untouched at "valid").
+        let after = store.identity_get("acct-alias").unwrap().unwrap();
         assert_eq!(after.status, oauth_status::NEEDS_REAUTH);
     }
 
