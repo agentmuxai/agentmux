@@ -370,7 +370,14 @@ fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let mut resolved_requirement_ids: Vec<String> = Vec::new();
                 let mut unresolved_requirements: Vec<serde_json::Value> = Vec::new();
                 for requirement in &parsed.requirements {
-                    let matches = wstore
+                    // Codex P2, PR #2379 round 2: account CRUD routes
+                    // through id_store (shared/store.db when available), not
+                    // wstore (the per-channel database) -- see identity.rs's
+                    // own handler registrations. Querying wstore here would
+                    // report zero/stale matches for accounts that actually
+                    // exist, incorrectly placing requirements in
+                    // unresolved_requirements.
+                    let matches = id_store
                         .identity_list(Some(&requirement.provider))
                         .map_err(|e| format!("bundle.import: account lookup failed: {e}"))?;
                     if matches.len() == 1 {
