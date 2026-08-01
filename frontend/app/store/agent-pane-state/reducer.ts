@@ -284,6 +284,20 @@ export function update(
             if (state.lastEventMs == null) {
                 return { state, events: [] };
             }
+            // Codex P1 on PR #2378 (round 2): CompactionStarted only bumps
+            // lastEventMs ONCE, at the moment compaction begins — it isn't
+            // re-bumped on every tick while compaction is still running.
+            // The captured real example (spec doc §2) took ~232s: past
+            // STUCK_THRESHOLD_MS (45s) alone that's a cosmetic false
+            // "stream-stuck" warning, but past LIVENESS_RECOVERY_MS (180s)
+            // it would force-demote a perfectly healthy, actively-
+            // compacting Streaming turn to Idle out from under it. Suspend
+            // the watchdog entirely for as long as `compacting` is set —
+            // CompactionBoundary (or any of the other lifecycle events that
+            // clear `compacting`, see the tests above) re-arms it.
+            if (state.compacting != null) {
+                return { state, events: [] };
+            }
             const idleSinceMs = command.nowMs - state.lastEventMs;
             if (idleSinceMs < STUCK_THRESHOLD_MS) {
                 return { state, events: [] };

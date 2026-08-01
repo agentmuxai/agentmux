@@ -42,6 +42,7 @@ import { createTranslator } from "./providers/translator-factory";
 import type { PendingMessage, SignalPair } from "./state";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { ContextCompactedNode, DocumentNode } from "./types";
+import { parseCompactBoundaryFrame } from "./compact-boundary";
 import type { AgentPaneEvent, TurnPhase } from "@/app/store/agent-pane-state/types";
 import { getNodeIdSet } from "@/app/store/agent-document-store";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
@@ -377,25 +378,33 @@ export function useAgentStream({
                 // `translator/claude.rs::handle_system_message`); intercepted here
                 // directly — like the message_start/message_delta token
                 // extraction below — rather than routed through the provider
-                // translator, which has no StreamEvent shape for it. Malformed/
-                // missing `compactMetadata` fields degrade to a no-op, same
-                // "skip rather than guess" philosophy as the backend translator.
+                // translator, which has no StreamEvent shape for it. Parsing is
+                // shared with `parseHistoryLines.ts`'s replay path via
+                // `compact-boundary.ts` (Codex P1, PR #2378 round 2) so the two
+                // can't drift on what counts as a valid frame.
                 if (rawEvent.type === "system" && rawEvent.subtype === "compact_boundary") {
-                    const meta = rawEvent.compactMetadata;
-                    const trigger: "manual" | "auto" | null =
-                        meta?.trigger === "auto" ? "auto" :
-                        meta?.trigger === "manual" ? "manual" :
-                        null;
-                    const preTokens = typeof meta?.preTokens === "number" ? meta.preTokens : null;
-                    const postTokens = typeof meta?.postTokens === "number" ? meta.postTokens : null;
-                    const durationMs = typeof meta?.durationMs === "number" ? meta.durationMs : null;
-                    if (trigger != null && preTokens != null && postTokens != null && durationMs != null) {
+                    // Compaction happens MID-turn — flushParserPending() is
+                    // only called at finalizeTurn (useTurnLifecycle.ts), so
+                    // without an explicit flush here the parser's
+                    // currentTextNode/currentThinkingNode accumulator never
+                    // sees this line and keeps accumulating text from AFTER
+                    // the compaction onto the SAME node id as text from
+                    // BEFORE it — silently merging content across the
+                    // boundary and rendering it before the compaction
+                    // marker, live, not just on history replay (same root
+                    // cause as the parseHistoryLines.ts fix). Flushed
+                    // unconditionally, even when the metadata below fails
+                    // to parse — it's still a real boundary in the
+                    // underlying conversation.
+                    parser.flushPending();
+                    const compactBoundary = parseCompactBoundaryFrame(rawEvent);
+                    if (compactBoundary) {
                         const paneEvents = model.dispatchPane({
                             type: "CompactionBoundary",
-                            trigger,
-                            preTokens,
-                            postTokens,
-                            durationMs,
+                            trigger: compactBoundary.trigger,
+                            preTokens: compactBoundary.preTokens,
+                            postTokens: compactBoundary.postTokens,
+                            durationMs: compactBoundary.durationMs,
                             at: Date.now(),
                         });
                         pushContextCompactedNodes(paneEvents, queue, hasNodeId, addNodeId);
