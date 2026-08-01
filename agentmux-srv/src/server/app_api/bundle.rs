@@ -7,6 +7,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_bundle_delete(engine, state);
     register_bundle_self_get(engine, state);
     register_bundle_export(engine, state);
+    register_bundle_import(engine, state);
 }
 
 /// Normalize a `bundle.upsert` request body into the shape the `Memory` struct
@@ -282,6 +283,181 @@ fn register_bundle_export(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     obj.insert("warnings".to_string(), json!(all_warnings));
                 }
                 Ok(Some(result))
+            })
+        }),
+    );
+}
+
+/// `bundle.import` — ABF importer, Phase 2 of
+/// docs/specs/SPEC_ABF_V0_1_SINGLE_FILE_AND_IMPORTER_2026_08_01.md. Window-
+/// scoped like `bundle.export` (bundles aren't agent-specific). Accepts
+/// EITHER `zip_base64` (a `.abf` archive, mirroring `bundle.export`'s own
+/// `zip_base64` response field) OR `files` (a raw `[{path, content}]`
+/// list) — exactly one must be present. Hands the bytes to the pure
+/// `bundle_import` module for parsing/validation, then owns every Store
+/// side-effect: creates the bundle row, creates one global Skill row per
+/// parsed skill, and performs READ-ONLY account-requirement lookups
+/// (never creates an account, never writes a secret anywhere — see the
+/// spec's §4.5 correction for why this stopped short of "resolving"
+/// placeholders in place).
+fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let id_store = state.id_store.clone();
+    let wstore = state.wstore.clone();
+    let broker = state.broker.clone();
+    engine.register_handler(
+        COMMAND_BUNDLE_IMPORT,
+        Box::new(move |data, _ctx| {
+            let id_store = id_store.clone();
+            let wstore = wstore.clone();
+            let broker = broker.clone();
+            Box::pin(async move {
+                #[derive(serde::Deserialize, Default)]
+                struct FileEntry {
+                    path: String,
+                    content: String,
+                }
+                #[derive(serde::Deserialize, Default)]
+                struct Req {
+                    #[serde(default)]
+                    zip_base64: Option<String>,
+                    #[serde(default)]
+                    files: Option<Vec<FileEntry>>,
+                }
+                let req: Req = serde_json::from_value(data)
+                    .map_err(|e| format!("bundle.import: {e}"))?;
+
+                let (files, mut warnings): (Vec<crate::backend::bundle_import::BundleImportFile>, Vec<String>) =
+                    match (req.zip_base64, req.files) {
+                        (Some(_), Some(_)) => {
+                            return Err(
+                                "bundle.import: exactly one of zip_base64/files must be present, got both"
+                                    .to_string(),
+                            );
+                        }
+                        (None, None) => {
+                            return Err(
+                                "bundle.import: exactly one of zip_base64/files must be present, got neither"
+                                    .to_string(),
+                            );
+                        }
+                        (Some(b64), None) => {
+                            use base64::Engine as _;
+                            let zip_bytes = base64::engine::general_purpose::STANDARD
+                                .decode(&b64)
+                                .map_err(|e| format!("bundle.import: invalid zip_base64: {e}"))?;
+                            crate::backend::bundle_import::unzip_bundle_import(&zip_bytes)
+                                .map_err(|e| format!("bundle.import: {e}"))?
+                        }
+                        (None, Some(files)) => (
+                            files
+                                .into_iter()
+                                .map(|f| crate::backend::bundle_import::BundleImportFile {
+                                    path: f.path,
+                                    content: f.content,
+                                })
+                                .collect(),
+                            Vec::new(),
+                        ),
+                    };
+
+                let parsed = crate::backend::bundle_import::parse_bundle_import(&files)
+                    .map_err(|e| format!("bundle.import: {e}"))?;
+                warnings.extend(parsed.warnings.clone());
+
+                // Account requirement resolution (§4.5) — read-only lookup
+                // by provider, purely informational. Never creates an
+                // account, never writes anything derived from a match.
+                let mut resolved_requirement_ids: Vec<String> = Vec::new();
+                let mut unresolved_requirements: Vec<serde_json::Value> = Vec::new();
+                for requirement in &parsed.requirements {
+                    let matches = wstore
+                        .identity_list(Some(&requirement.provider))
+                        .map_err(|e| format!("bundle.import: account lookup failed: {e}"))?;
+                    if matches.len() == 1 {
+                        resolved_requirement_ids.push(requirement.id.clone());
+                    } else {
+                        unresolved_requirements.push(json!({
+                            "id": requirement.id,
+                            "provider": requirement.provider,
+                            "env": requirement.env,
+                            "match_count": matches.len(),
+                        }));
+                    }
+                }
+
+                // Skills — global, not bound to any agent (mirrors
+                // skill.catalog.upsert's own is_global: true convention for
+                // a shared-resource creation path). A name conflict is a
+                // per-skill warning, not an aborted import.
+                let now = now_ms();
+                let mut imported_skill_ids: Vec<String> = Vec::new();
+                let mut skipped_skills = parsed.skipped_skills.clone();
+                for skill in &parsed.skills {
+                    let row = crate::backend::storage::Skill {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        name: skill.slug.clone(),
+                        trigger: skill.slug.clone(),
+                        skill_type: crate::backend::agent_config::SKILL_TYPE_AGENT_SKILL.to_string(),
+                        description: skill.description.clone(),
+                        content: skill.content.clone(),
+                        is_global: true,
+                        created_at: now,
+                        updated_at: now,
+                    };
+                    match wstore.skill_upsert_unique_global(&row) {
+                        Ok(()) => imported_skill_ids.push(row.id),
+                        Err(e) => {
+                            warnings.push(format!("skill \"{}\": {e}", skill.slug));
+                            skipped_skills.push(skill.slug.clone());
+                        }
+                    }
+                }
+
+                let memory = Memory {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    name: parsed.name,
+                    description: parsed.description,
+                    is_blank: false,
+                    // Never imported as global — an import must not
+                    // silently start injecting into every agent's
+                    // CLAUDE.md without explicit user action (spec §4.4).
+                    is_global: false,
+                    provider: String::new(),
+                    model: String::new(),
+                    instructions: parsed.instructions,
+                    context_files: serde_json::to_string(&parsed.context_files)
+                        .unwrap_or_else(|_| "[]".to_string()),
+                    mcp_servers: serde_json::to_string(&parsed.mcp_servers)
+                        .unwrap_or_else(|_| "[]".to_string()),
+                    skills: serde_json::to_string(&imported_skill_ids)
+                        .unwrap_or_else(|_| "[]".to_string()),
+                    sort_order: 0,
+                    created_at: now,
+                    updated_at: now,
+                };
+                id_store
+                    .bundle_memory_upsert(&memory)
+                    .map_err(|e| format!("bundle.import: {e}"))?;
+
+                broker.publish(crate::backend::wps::WaveEvent {
+                    event: "memories:changed".to_string(),
+                    scopes: vec![], sender: String::new(), persist: 0, data: None,
+                });
+                if !imported_skill_ids.is_empty() {
+                    broker.publish(crate::backend::wps::WaveEvent {
+                        event: "skills:changed".to_string(),
+                        scopes: vec![], sender: String::new(), persist: 0, data: None,
+                    });
+                }
+
+                Ok(Some(json!({
+                    "bundle_id": memory.id,
+                    "imported_skill_ids": imported_skill_ids,
+                    "skipped_skills": skipped_skills,
+                    "resolved_requirement_ids": resolved_requirement_ids,
+                    "unresolved_requirements": unresolved_requirements,
+                    "warnings": warnings,
+                })))
             })
         }),
     );
