@@ -68,16 +68,26 @@ which is why the agent works immediately after with no visible login step.
 ## 2. Why this isn't the fix for the fix — and doesn't need one
 
 The obvious question: is there already a per-account-aware read path this
-should call instead? Yes, verified directly (not inferred):
+should call instead? Partially — verified directly, but the specific RPC
+named below turned out to be the wrong one (see the correction, and §4's
+matching correction note — codex caught the same stale claim twice, once
+here and once in §4, since this section was never updated after §4 was):
 
 - `identity.ensureaccountdir` (`agentmux-srv/src/server/identity_handlers.rs:55,152-169`)
   is an **existing, already-wired RPC** taking `{ provider_id, existing_account_id }`
   and returning `{ account_id, dir }`.
-- Its handler calls `compute_and_ensure_account_dir`
+- ~~Its handler calls `compute_and_ensure_account_dir`
   (`agentmux-srv/src/server/identity_auth_dirs.rs:159-`), which resolves/creates
   **the exact same per-account dir** `inject_identity_env` reads at spawn time
   (both key off the same `account_id` → `SecretRef::OAuthConfigDir { dir }`
-  row).
+  row).~~ **Corrected:** `compute_and_ensure_account_dir` does **not** read
+  the account row — it deterministically reconstructs
+  `<identities>/<account_id>/<provider>/` from the account id alone and
+  creates it if missing. For an account whose real credential lives at a
+  non-canonical stored path, this can silently diverge from what
+  `inject_identity_env` actually reads (`secret_ref.dir`). See §4's full
+  correction note — the implemented fix uses `GetIdentityAccountCommand`
+  instead, a pure read of the stored `secret_ref`.
 - The frontend **already fetches this agent's linked account id** for this
   provider today — `launch-flow.ts:254-263`
   (`RpcApi.ListAgentIdentitiesCommand` → `links.find(l => l.provider === provider.id)?.account_id`)
@@ -87,7 +97,8 @@ should call instead? Yes, verified directly (not inferred):
 
 So this is **not** a "build a new resolution path" problem, and it does
 **not** need the not-yet-built CLI-provider slice of the Credential Broker
-(§3 below) — every piece needed already exists, just in the wrong order.
+(§3 below) — every piece needed already exists (once pointed at the right
+RPC), just in the wrong order.
 
 ## 3. Does this need the Credential Broker / reducer-consolidation work?
 
