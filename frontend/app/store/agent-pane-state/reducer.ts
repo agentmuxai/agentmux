@@ -1102,7 +1102,22 @@ export function update(
             // Gating here is the structural fix: refuse to set stale-by-
             // construction state instead of enumerating every possible way
             // to clear it after the fact.
-            if (state.lastEventMs == null || !workingFromPhase(state.turnPhase)) {
+            //
+            // reagent (round 6, PLAUSIBLE): the round-5 guard above doesn't
+            // catch a NARROWER race — a stale `compaction_started` ping can
+            // also arrive AFTER its own matching `CompactionBoundary` while
+            // the turn is STILL working (e.g. streaming new content past
+            // the compaction that already completed), since `workingFromPhase`
+            // stays true the whole time and doesn't distinguish "before" from
+            // "after" the boundary. `compaction_started` and `compact_boundary`
+            // travel over two independent transports (WPS vs. the primary
+            // NDJSON stream) with no ordering guarantee between them. Reject
+            // any start whose own timestamp is at or before the most recent
+            // known boundary — a genuinely NEW compaction must be later than
+            // the previous one's own completion.
+            const isStaleVsLastBoundary =
+                state.lastCompactionBoundaryAt != null && command.at <= state.lastCompactionBoundaryAt;
+            if (state.lastEventMs == null || !workingFromPhase(state.turnPhase) || isStaleVsLastBoundary) {
                 return { state, events: [] };
             }
             const next: AgentPaneState = {

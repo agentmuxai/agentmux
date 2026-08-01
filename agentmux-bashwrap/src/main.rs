@@ -39,6 +39,8 @@ use clap::{Parser, Subcommand};
 mod bash_wrap;
 mod hook;
 mod precompact;
+#[cfg(test)]
+mod test_env_lock;
 mod wps_client;
 
 #[derive(Parser)]

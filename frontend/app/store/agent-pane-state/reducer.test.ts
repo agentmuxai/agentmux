@@ -463,6 +463,46 @@ describe("agent-pane-state reducer", () => {
                     expect(r.state.turnPhase.lastEventMs).toBe(500);
                 }
             });
+
+            it("is a no-op when the start's own timestamp is at or before the last known CompactionBoundary (reagent, round 6)", () => {
+                // Narrower race than round 5's fix: compaction_started and
+                // compact_boundary travel over two independent transports
+                // (WPS vs. the primary NDJSON stream) with no ordering
+                // guarantee. A stale start can arrive AFTER its own
+                // matching boundary while the turn is STILL working (e.g.
+                // streaming new content past the compaction that already
+                // completed) -- workingFromPhase alone can't catch this,
+                // since it stays true the whole time.
+                const s0 = update(streaming(100), {
+                    type: "CompactionBoundary",
+                    trigger: "manual",
+                    preTokens: 50_000,
+                    postTokens: 3_000,
+                    durationMs: 9_000,
+                    at: 150,
+                }, 150).state;
+                expect(s0.lastCompactionBoundaryAt).toBe(150);
+                // Equal-to-boundary timestamp: still rejected (not strictly after).
+                const rEqual = update(s0, { type: "CompactionStarted", trigger: "manual", at: 150 }, 200);
+                expect(rEqual.state).toBe(s0);
+                expect(rEqual.state.compacting).toBeNull();
+                // Before the boundary: also rejected.
+                const rBefore = update(s0, { type: "CompactionStarted", trigger: "manual", at: 120 }, 200);
+                expect(rBefore.state.compacting).toBeNull();
+            });
+
+            it("accepts a genuinely new start whose timestamp is after the last known CompactionBoundary", () => {
+                const s0 = update(streaming(100), {
+                    type: "CompactionBoundary",
+                    trigger: "manual",
+                    preTokens: 50_000,
+                    postTokens: 3_000,
+                    durationMs: 9_000,
+                    at: 150,
+                }, 150).state;
+                const r = update(s0, { type: "CompactionStarted", trigger: "auto", at: 200 }, 200);
+                expect(r.state.compacting).toEqual({ trigger: "auto", startedAt: 200 });
+            });
         });
 
         describe("CompactionBoundary", () => {

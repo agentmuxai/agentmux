@@ -178,15 +178,14 @@ impl WpsClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
+    use crate::test_env_lock::ENV_LOCK;
 
     // `std::env::set_var` / `remove_var` mutate process-global state;
     // cargo test runs tests in parallel by default, so without a
     // serial lock these races between threads (codex P1 on PR #804).
-    // A single mutex covers every test in this module that touches
-    // the env.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-
+    // Shared with `precompact.rs`'s test module, which mutates the SAME
+    // env vars — a private per-module lock doesn't actually synchronize
+    // cross-module (Codex P2, PR #2378 round 6).
     fn clear_env() {
         std::env::remove_var("AGENTMUX_LOCAL_URL");
         std::env::remove_var("AGENTMUX_AUTH_KEY");
