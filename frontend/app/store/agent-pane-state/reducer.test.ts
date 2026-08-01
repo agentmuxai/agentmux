@@ -729,6 +729,92 @@ describe("agent-pane-state reducer", () => {
                 expect(r.state.turnPhase.kind).toBe("Idle");
                 expect(r.state.compacting).toBeNull();
             });
+
+            it("TurnStartFailed clears compacting (codex P2, round 8)", () => {
+                // A compaction_started ping can land while a NEW turn
+                // attempt is briefly Submitting (round 5's workingFromPhase
+                // gate explicitly permits Submitting) -- if that turn's own
+                // initiating RPC then fails synchronously, this arm must
+                // not leave the stale compacting state behind.
+                const s0 = ready(100);
+                const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+                expect(s1.turnPhase.kind).toBe("Submitting");
+                const s2 = update(s1, { type: "CompactionStarted", trigger: "manual", at: 120 }, 120).state;
+                expect(s2.compacting).not.toBeNull();
+                const r = update(s2, { type: "TurnStartFailed" });
+                expect(r.state.turnPhase.kind).toBe("Idle");
+                expect(r.state.compacting).toBeNull();
+            });
+        });
+
+        describe("CompactionBoundary preserves a newer compaction against an out-of-order delayed boundary (codex P2, round 8)", () => {
+            // compact_boundary (NDJSON) and compaction_started (WPS) travel
+            // over two independent transports with no ordering guarantee.
+            // If compaction N+1 has already started before a DELAYED
+            // boundary for compaction N arrives, clearing `compacting`
+            // unconditionally would wipe the genuinely active N+1 state
+            // using stale N data.
+
+            it("does NOT clear compacting when the boundary's frameTimestamp predates the current compaction's start", () => {
+                // Compaction N+1 started at t=1000 (frameTimestamp-space).
+                const s0 = update(streaming(100), {
+                    type: "CompactionStarted",
+                    trigger: "manual",
+                    at: 1_000,
+                }, 1_000).state;
+                expect(s0.compacting).toEqual({ trigger: "manual", startedAt: 1_000 });
+                // A delayed boundary for the OLDER compaction N arrives,
+                // whose own completion (frameTimestamp) was BEFORE N+1 started.
+                const r = update(s0, {
+                    type: "CompactionBoundary",
+                    trigger: "manual",
+                    preTokens: 50_000,
+                    postTokens: 3_000,
+                    durationMs: 9_000,
+                    at: 1_500,
+                    frameTimestamp: new Date(500).toISOString(),
+                }, 1_500);
+                expect(r.state.compacting).toEqual({ trigger: "manual", startedAt: 1_000 });
+                // The boundary's own data is still real and recorded.
+                expect(r.state.lastCompactionBoundaryAt).toBe(1_500);
+                expect(r.state.lastContextTokens).toBe(3_000);
+            });
+
+            it("DOES clear compacting when the boundary's frameTimestamp is at or after the current compaction's start", () => {
+                const s0 = update(streaming(100), {
+                    type: "CompactionStarted",
+                    trigger: "manual",
+                    at: 1_000,
+                }, 1_000).state;
+                const r = update(s0, {
+                    type: "CompactionBoundary",
+                    trigger: "manual",
+                    preTokens: 50_000,
+                    postTokens: 3_000,
+                    durationMs: 9_000,
+                    at: 1_500,
+                    frameTimestamp: new Date(1_200).toISOString(),
+                }, 1_500);
+                expect(r.state.compacting).toBeNull();
+            });
+
+            it("falls back to clearing when frameTimestamp is absent (can't tell, avoid a permanent stuck state)", () => {
+                const s0 = update(streaming(100), {
+                    type: "CompactionStarted",
+                    trigger: "manual",
+                    at: 1_000,
+                }, 1_000).state;
+                const r = update(s0, {
+                    type: "CompactionBoundary",
+                    trigger: "manual",
+                    preTokens: 50_000,
+                    postTokens: 3_000,
+                    durationMs: 9_000,
+                    at: 1_500,
+                    frameTimestamp: null,
+                }, 1_500);
+                expect(r.state.compacting).toBeNull();
+            });
         });
 
         describe("StreamWatchdogTick is suspended while compacting (codex P1, PR #2378 round 2)", () => {

@@ -643,13 +643,25 @@ export function update(
             };
 
         case "TurnStartFailed":
-            // Deliberately touches ONLY turnPhase — see this command's doc
+            // Deliberately touches ONLY turnPhase (+ compacting, see below)
+            // — see this command's doc
             // comment in types.ts for why TurnReset's wholesale clear is
             // wrong here (a transient send failure must not wipe
             // sessionStats/sessionTotals/lastContextTokens accumulated by
             // prior real turns in this same pane).
+            // `compacting` IS cleared, unlike the fields above: codex P2
+            // on PR #2378 (round 8) — a `compaction_started` ping can
+            // land while this (new, doomed) turn attempt is briefly
+            // Submitting (round 5's workingFromPhase gate explicitly
+            // permits Submitting), then this arm reverts to Idle without
+            // ever getting a matching CompactionBoundary for a turn that
+            // never really started — same bug class as
+            // SubmitTimeoutElapsed/InterruptTimeoutElapsed/
+            // ReconcileTurnActive above, missed here in round 4 on the
+            // (wrong) assumption that a synchronously-failed turn-start
+            // could never race a live WPS ping.
             return {
-                state: { ...state, turnPhase: { kind: "Idle" } },
+                state: { ...state, turnPhase: { kind: "Idle" }, compacting: null },
                 events: [{ type: "turn-start-failed" }],
             };
 
@@ -1135,9 +1147,27 @@ export function update(
         }
 
         case "CompactionBoundary": {
+            // Codex P2 on PR #2378 (round 8): compact_boundary and
+            // compaction_started travel over two independent transports
+            // with no ordering guarantee (same root cause as the
+            // CompactionStarted staleness guard above, mirrored here). If
+            // compaction N+1 has already started (state.compacting) before
+            // a DELAYED boundary for compaction N arrives, clearing
+            // `compacting` unconditionally would wipe the genuinely
+            // active N+1 state using stale N data. Only clear it when this
+            // boundary's own completion time is at or after the
+            // currently-tracked start — i.e. it's this same compaction (or
+            // an even older one) finishing, not a stale echo racing a
+            // newer one that's already begun. Falls back to clearing when
+            // `frameTimestamp` is unavailable/unparseable — can't tell,
+            // and a permanently-stuck "Compacting…" is worse than an
+            // occasional early clear.
+            const boundaryAt = command.frameTimestamp != null ? Date.parse(command.frameTimestamp) : NaN;
+            const preservesNewerCompaction =
+                state.compacting != null && !Number.isNaN(boundaryAt) && boundaryAt < state.compacting.startedAt;
             const next: AgentPaneState = {
                 ...state,
-                compacting: null,
+                compacting: preservesNewerCompaction ? state.compacting : null,
                 lastCompactionBoundaryAt: command.at,
                 lastContextTokens: command.postTokens,
             };
