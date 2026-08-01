@@ -183,6 +183,13 @@ export function update(
                     turnTokens: null,
                     lastEventMs: null,
                     turnPhase: nextPhase,
+                    // reagent P1 on PR #2378: a disconnect mid-compaction
+                    // (crash, network drop, reconnect race) means the
+                    // matching CompactionBoundary will never arrive to
+                    // clear this — without this, the composer strip is
+                    // stuck showing "Compacting… Ns" forever, surviving
+                    // the reconnect and every subsequent turn.
+                    compacting: null,
                 },
                 events: [
                     { type: "stream-unsubscribed", at: command.at },
@@ -576,6 +583,12 @@ export function update(
                         outcome,
                         finishedAt,
                     },
+                    // reagent P1 on PR #2378: the turn ending (however it
+                    // ended) means whatever compaction was in flight is
+                    // moot — a CompactionBoundary for it, if it ever
+                    // arrives, would be stale. See the same note on
+                    // StreamUnsubscribe above.
+                    compacting: null,
                 },
                 events: [
                     {
@@ -602,6 +615,10 @@ export function update(
                     // working/stopping cascade lives entirely on
                     // turnPhase since PR G.
                     turnPhase: { kind: "Idle" },
+                    // reagent P1 on PR #2378: same "wholesale clear"
+                    // reasoning extends to `compacting` — a reset must
+                    // not leave a stale "Compacting…" readout behind.
+                    compacting: null,
                 },
                 events: [{ type: "turn-reset" }],
             };
@@ -763,7 +780,11 @@ export function update(
                 });
             }
             return {
-                state: { ...state, turnPhase: nextPhase },
+                // reagent P1 on PR #2378: a user-requested stop must not
+                // leave a stale "Compacting…" readout running — SIGINT
+                // aborts the CLI turn (compaction included), so any
+                // CompactionBoundary for it will never arrive.
+                state: { ...state, turnPhase: nextPhase, compacting: null },
                 events,
             };
         }
