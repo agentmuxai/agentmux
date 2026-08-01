@@ -26,6 +26,21 @@ export interface CompactBoundaryData {
     preTokens: number;
     postTokens: number;
     durationMs: number;
+    /**
+     * The frame's own top-level `timestamp` field, verbatim (raw string,
+     * not parsed/reformatted) — `null` if absent or not a string. Used
+     * ONLY to build a stable node id shared with `parseHistoryLines.ts`'s
+     * own `context-compacted-${rawEvent.timestamp}` id (Codex P2, PR
+     * #2378 round 7): the live path previously used `Date.now()`, so a
+     * `compact_boundary` processed live AND later re-seen in a mount-time
+     * history range (a real race — the two requests are independent)
+     * produced two different ids for the same event, and the document
+     * store's same-id dedup couldn't merge them — the compaction showed
+     * up twice. NOT used for anything time-arithmetic (`state.at`,
+     * watchdog timestamps, etc. all still use `Date.now()` at the call
+     * site) — this is purely a dedup key.
+     */
+    frameTimestamp: string | null;
 }
 
 /**
@@ -50,5 +65,6 @@ export function parseCompactBoundaryFrame(rawEvent: unknown): CompactBoundaryDat
     if (trigger == null || preTokens == null || postTokens == null || durationMs == null) {
         return null;
     }
-    return { trigger, preTokens, postTokens, durationMs };
+    const frameTimestamp = typeof e.timestamp === "string" ? e.timestamp : null;
+    return { trigger, preTokens, postTokens, durationMs, frameTimestamp };
 }
