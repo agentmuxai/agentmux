@@ -4,7 +4,8 @@
 **Type:** Bug-fix spec
 **Scope:** `frontend/app/view/agent/hooks/useAgentControllerStatus.ts`,
 `frontend/app/view/agent/flows/launch-flow.ts`
-**Status:** Diagnosed, fix scoped — needs a go-ahead before implementation
+**Status:** Implemented (PR #2377, 5 fixup commits after codex review — see §4's
+correction note) — awaiting a live `task dev` check before merge.
 **Trigger:** User report, live-testing a `task dev` build: opening agent "Parko"
 showed a "Log in" prompt even though the agent's actual bound account was
 already authenticated — clicking "Log in" produced no visible re-auth (no
@@ -115,13 +116,64 @@ architecture. Closest are issue #678 (general identity system) and PR #2255
 (open, unrelated to this specific divergence). Worth a decision on whether to
 open one now (see §6).
 
-## 4. Proposed fix — resolve the linked account before checking, not after
+## 4. Implemented fix (updated 2026-08-01 — corrected after codex review)
 
-Move the existing `ListAgentIdentitiesCommand` lookup (`launch-flow.ts:254-263`)
-earlier, and use its result to resolve the real per-account dir *before*
-building `authEnv`, instead of only using it for post-hoc wording:
+**Status: implemented, PR #2377.** The original plan below called for
+`identity.ensureaccountdir`/`ensureAccountDir()` to resolve the linked
+account's dir. That RPC turned out to be the wrong one to reuse here — codex
+caught it during review (see the correction note at the end of this section)
+— so what actually shipped reads the account's own stored directory instead
+of reconstructing one:
 
-1. In `useAgentControllerStatus.ts` (or wherever the launch flow first has
+1. `launch-flow.ts` resolves this agent's linked `account_id` for the
+   provider up front (moved earlier from where it used to run only after
+   `needsLogin` was already true, purely for wording) — via
+   `ListAgentIdentitiesCommand`, canonicalizing both sides of the comparison
+   through `provider-id-aliases.ts`'s `canonicalProviderId` (a link row
+   persisted under a legacy alias like `claude-code` must still match).
+   When a migrated agent has BOTH a canonical and an alias row for the same
+   provider, `lastLinkedAccountId` picks the *last* canonical-equivalent
+   match — mirroring `inject_identity_env`'s own `HashMap::insert`
+   last-write-wins precedence, not the first.
+2. If a linked account exists, call `RpcApi.GetIdentityAccountCommand({id})`
+   and read `secret_ref.dir` directly when `secret_ref.backend ===
+   "oauth_config_dir"` — using it in place of `authEnv`'s generic dir for
+   both `SetMetaCommand`'s `cmd:env` and `CheckCliAuthCommand`'s `auth_env`.
+3. If no linked account exists (genuine first-time) or the lookup/read
+   fails, fall back to today's `ensureAuthDir`-based `authEnv` unchanged.
+4. The pre-existing `existingAccountIdFor` helper in
+   `useAgentControllerStatus.ts` (feeding `relogin()`/`loginViaTerminal()`/
+   `useGlobalLogin()`) had the identical strict-comparison bug — codex
+   caught this as a second call site during review. `lastLinkedAccountId`
+   was extracted into the shared `provider-id-aliases.ts` module so both
+   call sites resolve "the account this agent uses for this provider"
+   identically.
+5. Codex's review also surfaced two backend gaps this frontend fix exposed
+   (not introduced by it, but newly user-visible once the frontend started
+   recognizing alias-bound links as valid): `inject_identity_env`'s
+   def-provider gate compared raw (possibly aliased) provider strings
+   against the canonical definition provider, so an alias-only-bound agent's
+   already-successfully-injected credential was misclassified as "no account
+   bound at all" and the spawn was blocked anyway; and the OAuth expiry
+   probe (`probe_oauth_status`) only recognizes canonical provider strings,
+   so an alias-bound account's status was silently never refreshed. Both
+   fixed in `agentmux-srv/src/identity/resolver/inject.rs` alongside the
+   frontend change, canonicalizing via the existing `resolve_provider_alias`.
+
+**Correction (2026-08-01):** the original version of this section (below,
+struck through) proposed reusing `identity.ensureaccountdir` /
+`ensureAccountDir()` — the same RPC the seed-from-global recovery path uses.
+Codex caught that this RPC's underlying `compute_and_ensure_account_dir`
+**does not read the account row at all** — it deterministically reconstructs
+`<identities>/<account_id>/<provider>/` from the account id and creates it if
+missing. For an account whose real credential lives at a non-canonical
+stored path (e.g. carried forward from a bundle-era migration), that
+reconstructed path can silently diverge from what `inject_identity_env`
+actually reads (`secret_ref.dir`) — reintroducing this exact bug for that
+case. `GetIdentityAccountCommand` (step 2 above) is a pure read of the
+account's real stored `secret_ref`, with no reconstruction risk.
+
+~~1. In `useAgentControllerStatus.ts` (or wherever the launch flow first has
    `agentDefinitionId` + `provider.id` in scope), call
    `RpcApi.ListAgentIdentitiesCommand` to get this agent's linked
    `account_id` for this provider, if any.
@@ -134,41 +186,49 @@ building `authEnv`, instead of only using it for post-hoc wording:
    this is the one case where the generic default is actually correct.
 4. `launch-flow.ts:254-263`'s existing lookup becomes redundant with step 1's
    result — thread it through instead of calling
-   `ListAgentIdentitiesCommand` twice per mount.
+   `ListAgentIdentitiesCommand` twice per mount.~~
 
-This changes zero backend code — both RPCs it uses already exist and are
-already exercised elsewhere. The change is entirely in how the frontend
-sequences and reuses calls it already makes.
+This changes zero *new* backend RPC surface — `GetIdentityAccountCommand` and
+`ListAgentIdentitiesCommand` both already existed and were already exercised
+elsewhere. It does touch existing backend logic (`inject_identity_env`'s
+gate + probe canonicalization, per point 5 above), which the original plan
+didn't anticipate needing.
 
-## 5. Test plan
+## 5. Test plan (as implemented)
 
-1. Unit-test-level: a hook/flow test asserting that when
-   `ListAgentIdentitiesCommand` returns a linked account for the provider,
-   `identity.ensureaccountdir` is called with that account id and its
-   returned dir is what ends up in `authEnv` / `CheckCliAuthCommand`'s
-   `auth_env` — not `ensureAuthDir`'s.
-2. Unit-test-level: when no linked account exists, confirm the fallback to
-   `ensureAuthDir` is unchanged (no regression for genuine first-login).
-3. Live `task dev`: open an agent with an already-authenticated, explicitly
-   bound account (the exact repro condition) — confirm the pane goes
-   straight to ready, no "Log in" prompt, no notification.
-4. Live `task dev`: a genuinely first-time/unauthenticated agent still shows
-   "Log in" as before (regression check on the fallback path).
+1. `launch-flow.test.ts`: linked-account overrides the generic dir via
+   `GetIdentityAccountCommand`; falls back to generic on no-link, non-oauth
+   `secret_ref`, or a thrown lookup; matches a legacy-alias-only link;
+   prefers the last match when both a canonical and alias row exist; never
+   invokes the lookup at all for an api-key provider (`authType !==
+   "oauth"`), even one that also sets `authConfigDirEnvVar` for an unrelated
+   reason (Kimi).
+2. `provider-id-aliases.test.ts`: direct unit coverage for
+   `canonicalProviderId`/`lastLinkedAccountId`, plus a drift-guard test
+   (same idiom as `pin-consistency.test.ts`) keeping the frontend alias
+   table in sync with `agentmux-srv/src/backend/providers.rs`'s `ALIASES`.
+3. `useAgentControllerStatus.test.ts`: `relogin()` passes the alias-linked
+   `account_id` through as `existingAccountId`, not `undefined`.
+4. `inject.rs`: `inject_oauth_class_succeeds_when_the_only_binding_is_under_a_legacy_alias`
+   and `inject_oauth_class_probe_canonicalizes_a_legacy_alias_binding` cover
+   the two backend gaps from point 5 above.
+5. Live `task dev` (outstanding — see the tracking PR): open an agent with
+   an already-authenticated, explicitly bound account — confirm the pane
+   goes straight to ready, no "Log in" prompt; a genuinely first-time agent
+   still shows "Log in" as before.
 
-## 6. Open question for go-ahead
+## 6. Open question for go-ahead — resolved
 
-Two independent decisions, not coupled to each other:
-
-1. **Implement §4's fix now?** Small, self-contained, no backend changes, no
-   architecture dependency — ready to build immediately if you want to
-   proceed the same way as the Process Broker Phase B work.
-2. **Open a tracking discussion for the broader auth-architecture
-   consolidation** (analogous to #2375), so the next time a bug in this
-   family surfaces it's tracked in one place instead of re-diagnosed? This
-   fix doesn't require that discussion to exist first — it's a separate,
-   longer-horizon question about whether to formally track §6.1's "one
-   Credential Broker" work the same way Process Broker is tracked.
+§4's fix is implemented (PR #2377, still awaiting the live `task dev` check
+in §5 item 5 before merge). The second, independent question — whether to
+open a tracking discussion for the broader auth-architecture consolidation
+(analogous to #2375), so a future bug in this family is tracked in one place
+instead of re-diagnosed — remains open and unrelated to merging this fix.
+Reference issue #678 for that broader "one Credential Broker" work in the
+meantime (per direct user feedback: append there rather than opening a new
+discussion, since #678 already exists for the identity-system domain).
 
 ---
 
-*Diagnosis and fix scoping only. No files changed except this spec.*
+*Diagnosed, implemented, and code-reviewed (PR #2377) — awaiting a live
+`task dev` check before merge.*
