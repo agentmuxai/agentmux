@@ -1085,7 +1085,24 @@ export function update(
             // long compaction with no other stream output must not trip
             // the stuck-stream watchdog. No-op if the stream isn't
             // subscribed (a stray/late event after teardown).
-            if (state.lastEventMs == null) {
+            //
+            // reagent P1 on PR #2378 (round 5): also no-op unless the turn
+            // is actually in the working set (Submitting/Streaming/
+            // Interrupting). `compaction_started` arrives over a SEPARATE
+            // transport (WPS: HTTP publish -> broker -> websocket) from the
+            // primary NDJSON stream carrying TurnEnd/compact_boundary, so
+            // it can race and land AFTER that same turn's TurnEnd already
+            // fired. Every "clear compacting" fix added across rounds 1-4
+            // is itself gated on transitioning OUT of a working phase — if
+            // `compacting` gets set while the pane is already Idle/Done,
+            // none of those transitions ever fire again to clear it, and it
+            // stays orphaned until the pane's next full TurnEnd/TurnReset —
+            // the exact bug class this PR patched five separate times, just
+            // reached from the setter side instead of a missing clearer.
+            // Gating here is the structural fix: refuse to set stale-by-
+            // construction state instead of enumerating every possible way
+            // to clear it after the fact.
+            if (state.lastEventMs == null || !workingFromPhase(state.turnPhase)) {
                 return { state, events: [] };
             }
             const next: AgentPaneState = {

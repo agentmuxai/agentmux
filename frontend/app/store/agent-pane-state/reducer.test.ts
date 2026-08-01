@@ -413,8 +413,8 @@ describe("agent-pane-state reducer", () => {
 
     describe("Compaction (SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31)", () => {
         describe("CompactionStarted", () => {
-            it("sets compacting and bumps lastEventMs while subscribed", () => {
-                const s0 = ready(100);
+            it("sets compacting and bumps lastEventMs while genuinely working (Streaming)", () => {
+                const s0 = streaming(100);
                 const r = update(s0, { type: "CompactionStarted", trigger: "manual", at: 200 }, 200);
                 expect(r.state.compacting).toEqual({ trigger: "manual", startedAt: 200 });
                 expect(r.state.lastEventMs).toBe(200);
@@ -426,6 +426,33 @@ describe("agent-pane-state reducer", () => {
                 const r = update(s0, { type: "CompactionStarted", trigger: "auto", at: 200 });
                 expect(r.state).toBe(s0);
                 expect(r.events).toEqual([]);
+            });
+
+            it("is a no-op when subscribed but Idle (reagent P1, round 5)", () => {
+                // The structural fix: `compaction_started` arrives over a
+                // SEPARATE transport (WPS) from the primary NDJSON stream
+                // carrying TurnEnd/compact_boundary, so it can race and
+                // land after that same turn's TurnEnd already fired,
+                // leaving the pane subscribed-but-Idle. Setting compacting
+                // here would orphan it — nothing clears an Idle pane's
+                // compacting until the NEXT full TurnEnd/TurnReset, since
+                // every "clear compacting" fix in this PR is itself gated
+                // on transitioning OUT of a working phase. Refuse to set
+                // stale-by-construction state instead.
+                const s0 = ready(100); // subscribed, but Idle — no TurnStart
+                const r = update(s0, { type: "CompactionStarted", trigger: "manual", at: 200 }, 200);
+                expect(r.state).toBe(s0);
+                expect(r.state.compacting).toBeNull();
+                expect(r.events).toEqual([]);
+            });
+
+            it("is a no-op once the turn has already ended (Done), even while still subscribed", () => {
+                const s0 = update(streaming(100), { type: "TurnEnd", stats: null }, 150).state;
+                expect(s0.turnPhase.kind).toBe("Done");
+                expect(s0.lastEventMs).not.toBeNull();
+                const r = update(s0, { type: "CompactionStarted", trigger: "auto", at: 200 }, 200);
+                expect(r.state).toBe(s0);
+                expect(r.state.compacting).toBeNull();
             });
 
             it("refreshes a Streaming phase's own lastEventMs so the watchdog doesn't misfire", () => {
@@ -440,7 +467,7 @@ describe("agent-pane-state reducer", () => {
 
         describe("CompactionBoundary", () => {
             it("clears compacting, records lastCompactionBoundaryAt, and reconciles lastContextTokens", () => {
-                const s0 = update(ready(100), {
+                const s0 = update(streaming(100), {
                     type: "CompactionStarted",
                     trigger: "manual",
                     at: 200,
