@@ -1168,7 +1168,18 @@ export function update(
             const next: AgentPaneState = {
                 ...state,
                 compacting: preservesNewerCompaction ? state.compacting : null,
-                lastCompactionBoundaryAt: command.at,
+                // Codex P2 on PR #2378 (round 10): use this boundary's own
+                // parsed completion time, not `command.at` (the frontend's
+                // receipt wall-clock). `CompactionStarted.at` is the WPS
+                // payload's embedded true start time, not a receipt
+                // timestamp — comparing it against a delayed boundary's
+                // RECEIPT time in the isStaleVsLastBoundary check above
+                // means network/stream lag on this (older) boundary's
+                // delivery can exceed a legitimately-earlier next
+                // compaction's true start, falsely rejecting it. Falls
+                // back to `command.at` when frameTimestamp is unparseable,
+                // same as preservesNewerCompaction above.
+                lastCompactionBoundaryAt: Number.isNaN(boundaryAt) ? command.at : boundaryAt,
                 lastContextTokens: command.postTokens,
             };
             if (state.lastEventMs != null) {
