@@ -569,12 +569,32 @@ describe("agent-pane-state reducer", () => {
                 expect(r.state.compacting).toBeNull();
             });
 
-            it("RequestStop clears compacting when entering Interrupting", () => {
+            it("RequestStop deliberately does NOT clear compacting (codex P2, round 3)", () => {
+                // An earlier version of this fix cleared compacting here,
+                // per a since-superseded reagent finding — but RequestStop
+                // only sends a SIGINT, it doesn't confirm the turn actually
+                // ended. See the StopFailed test below for why eagerly
+                // clearing here was wrong.
                 const s0 = update(streaming(100), { type: "CompactionStarted", trigger: "auto", at: 150 }, 150).state;
                 expect(s0.compacting).not.toBeNull();
                 const r = update(s0, { type: "RequestStop", at: 200 }, 200);
                 expect(r.state.turnPhase.kind).toBe("Interrupting");
-                expect(r.state.compacting).toBeNull();
+                expect(r.state.compacting).not.toBeNull();
+            });
+
+            it("StopFailed rolling back to Streaming preserves compacting, since it was never actually interrupted", () => {
+                // Codex P2 on PR #2378 (round 3): if RequestStop HAD cleared
+                // compacting eagerly, this exact sequence would have lost the
+                // "Compacting…" status/timer for a compaction that kept
+                // running unaffected the whole time (the SIGINT never
+                // landed) — plus re-enabled the stream-stuck watchdog using
+                // a stale activity timestamp.
+                const s0 = update(streaming(100), { type: "CompactionStarted", trigger: "auto", at: 150 }, 150).state;
+                const s1 = update(s0, { type: "RequestStop", at: 200 }, 200).state;
+                expect(s1.turnPhase.kind).toBe("Interrupting");
+                const r = update(s1, { type: "StopFailed" }, 300);
+                expect(r.state.turnPhase.kind).toBe("Streaming");
+                expect(r.state.compacting).toEqual({ trigger: "auto", startedAt: 150 });
             });
 
             it("FailureObserved clears compacting when it ends the turn (reagent P1, round 3)", () => {

@@ -794,11 +794,22 @@ export function update(
                 });
             }
             return {
-                // reagent P1 on PR #2378: a user-requested stop must not
-                // leave a stale "Compacting…" readout running — SIGINT
-                // aborts the CLI turn (compaction included), so any
-                // CompactionBoundary for it will never arrive.
-                state: { ...state, turnPhase: nextPhase, compacting: null },
+                // Codex P2 on PR #2378 (round 3): deliberately does NOT
+                // clear `compacting` here (an earlier version of this fix
+                // did, per a since-superseded reagent finding). RequestStop
+                // only SENDS a SIGINT — it doesn't confirm the turn
+                // actually ended. If the stop fails, `StopFailed` rolls
+                // the phase back to Streaming with no way to know whether
+                // compaction resumed unaffected the whole time (the SIGINT
+                // never landed) — eagerly clearing here would have
+                // silently dropped the "Compacting…" status and its timer
+                // for a compaction that was never actually interrupted.
+                // TurnEnd/TurnReset/StreamUnsubscribe/FailureObserved
+                // already clear `compacting` on every path that actually,
+                // authoritatively ends the turn (whether the stop
+                // succeeded or the turn ended some other way) — that's
+                // sufficient; this transition doesn't need its own clear.
+                state: { ...state, turnPhase: nextPhase },
                 events,
             };
         }
