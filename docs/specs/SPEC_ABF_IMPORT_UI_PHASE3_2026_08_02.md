@@ -480,7 +480,32 @@ Implementation notes:
 **Response** — same shape as today's `bundle.import` response
 (`bundle_id`, `imported_skill_ids`, `skipped_skills`,
 `resolved_requirement_ids`, `unresolved_requirements`, `warnings`), since
-it's the same underlying write path, just filtered to the selection.
+it's the same underlying write path, just filtered to the selection —
+**with one addition**: `warnings`/`warnings_truncated` here use the
+**identical bounded-warning treatment §3.1 (round 8) applies to
+preview**, not today's unbounded `bundle.import` shape.
+
+**codex P1 on PR #2381, round 9: the round-8 warnings cap was applied to
+`preview` only — `commit`'s response still described "the same shape as
+today's `bundle.import`," i.e. unbounded.** This is worse on the commit
+side than the preview side: commit's Store writes (creating the bundle
+row, the skill rows) can **succeed**, and only *then* does response
+serialization/transmission fail against the same 64 MiB WS ceiling —
+the caller sees a failure or disconnect for an import that actually
+went through, and a plausible retry (nothing about `bundle.import.commit`
+is idempotent; it always mints a fresh bundle UUID) creates a **second,
+duplicate bundle** rather than merely losing some diagnostic text. Fix:
+apply §3.1's exact bounded-warning projection (per-warning character
+truncation, array count cap, `warnings_truncated` flag, summary entry) to
+`commit`'s response too, computed **after** the write loop completes —
+the writes themselves are already based on the full, untruncated parsed
+data; only the warnings *reported back* are capped, same as preview. This
+is exactly the kind of drift the spec's own account-requirement-resolution
+fix (§3.1's implementation notes, requirement resolution bullet) already
+called for extracting into a shared helper to prevent — implement the
+bounded-warning projection as **one function both `preview` and `commit`
+call**, not two independent copies, so a future change to the cap can't
+silently apply to only one of them again.
 
 Implementation notes:
 - For every input mode (§3.0.5, round 5), the handler resolves the input
@@ -729,6 +754,13 @@ Renders the `bundle.import.preview` response as a checklist:
   (round 8): present and equal to the true full length on every preview
   response, not just truncated ones, verified against both a short
   (non-truncated) and a long (truncated) instructions string.
+  **Commit response warnings bounded too** (round 9): the same warnings-
+  count-and-length archive used for preview's bounded-warnings test,
+  driven through `bundle.import.commit` instead, produces an equally
+  bounded `warnings`/`warnings_truncated` in the commit response — and
+  the underlying Store writes (the bundle row, any skill rows) still
+  reflect the full, untruncated parsed data regardless of what the
+  response reports back.
 - **Manual/e2e:** a sample `.abf` was generated for this purpose via
   `agentmux-srv/src/backend/bundle_export.rs`'s existing `export_bundle` +
   `zip_bundle_export` (instructions + 1 context file + 2 skills — one of
