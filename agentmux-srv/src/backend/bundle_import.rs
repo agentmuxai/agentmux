@@ -23,6 +23,166 @@ use serde_json::Value;
 
 use super::bundle_export::sanitize_context_relative_path;
 
+/// Bounds how many warnings a parse call accumulates, and how long each
+/// individual warning string may be — Phase 3 spec
+/// (`SPEC_ABF_IMPORT_UI_PHASE3_2026_08_02.md`) §3.1, round 11: the cap must
+/// live at the point warnings are actually PRODUCED, not only at a later
+/// RPC-response-serialization boundary, or a hostile archive can still
+/// force the parser itself to build an unbounded `Vec<String>` in memory
+/// before any cap ever runs. `unbounded()` preserves today's existing
+/// `bundle.import` route's real, already-shipped behavior exactly — this is
+/// a capability the parser gains, not a behavior change forced onto Phase 2's
+/// existing caller.
+#[derive(Debug, Clone, Copy)]
+pub struct WarningBudget {
+    max_count: Option<usize>,
+    max_len: Option<usize>,
+}
+
+impl WarningBudget {
+    pub fn unbounded() -> Self {
+        Self { max_count: None, max_len: None }
+    }
+
+    pub fn bounded(max_count: usize, max_len: usize) -> Self {
+        Self { max_count: Some(max_count), max_len: Some(max_len) }
+    }
+}
+
+/// Accumulates warnings against a [`WarningBudget`]. Exposes `.push(String)`
+/// so every existing `warnings.push(format!(...))` call site in this module
+/// keeps working unchanged after its binding's type changes from
+/// `Vec<String>` to this — only construction (`WarningSink::new`) and
+/// extraction (`.into_vec()`) differ.
+#[derive(Debug, Clone)]
+struct WarningSink {
+    budget: WarningBudget,
+    warnings: Vec<String>,
+    dropped: usize,
+}
+
+impl WarningSink {
+    fn new(budget: WarningBudget) -> Self {
+        Self { budget, warnings: Vec::new(), dropped: 0 }
+    }
+
+    fn push(&mut self, message: String) {
+        if let Some(max_count) = self.budget.max_count {
+            if self.warnings.len() >= max_count {
+                self.dropped += 1;
+                return;
+            }
+        }
+        let message = match self.budget.max_len {
+            Some(max_len) => truncate_display(&message, max_len),
+            None => message,
+        };
+        self.warnings.push(message);
+    }
+
+    fn into_vec(mut self) -> Vec<String> {
+        if self.dropped > 0 {
+            self.warnings.push(format!("... {} more warning(s) not shown", self.dropped));
+        }
+        self.warnings
+    }
+}
+
+/// Fixed-character truncation shared by every bounded-display projection
+/// this module (and its RPC callers, Phase 3 spec §3.1/§3.2) define —
+/// stated once so `preview` and `commit` always apply IDENTICAL bounds to
+/// the equivalent field, rather than independent per-endpoint copies
+/// drifting apart (the exact class of gap codex found and re-found across
+/// rounds 9 and 12).
+pub fn truncate_display(s: &str, max_chars: usize) -> String {
+    if s.chars().count() <= max_chars {
+        s.to_string()
+    } else {
+        let mut truncated: String = s.chars().take(max_chars).collect();
+        truncated.push_str("...");
+        truncated
+    }
+}
+
+/// Cap on `instructions_preview` (Phase 3 spec §3.1, round 5) — generous for
+/// a glance-and-decide preview; bounds worst-case JSON-escaped response size
+/// to roughly 300 KB rather than the ~300 MB a maximally-adversarial,
+/// unbounded `instructions` string could otherwise force.
+pub const MAX_INSTRUCTIONS_PREVIEW_CHARS: usize = 50_000;
+
+/// Fixed-character display cap shared by every "meant to be short" bounded
+/// field this spec defines: skill `description`/`slug` (rounds 10/12),
+/// requirement `id`/`provider`/`env` (round 11), context-file
+/// `display_path` (round 13), and bundle `description` (round 12 self-audit).
+pub const MAX_DISPLAY_FIELD_CHARS: usize = 300;
+
+/// Fixed-character display cap for an MCP server's projected `name`/
+/// `command` (Phase 3 spec §3.1, round 7) — smaller than
+/// [`MAX_DISPLAY_FIELD_CHARS`] since these are meant to be short
+/// identifiers/executable names, not free-form text.
+pub const MAX_MCP_DISPLAY_FIELD_CHARS: usize = 200;
+
+/// Bounds `instructions_preview` for the RPC response — returns
+/// `(preview, truncated, total_chars)`. The full, untruncated `instructions`
+/// value is unaffected; this only bounds what's echoed back for display
+/// (Phase 3 spec §3.1, rounds 5 and 8).
+pub fn bounded_instructions_preview(instructions: &str) -> (String, bool, usize) {
+    let total_chars = instructions.chars().count();
+    if total_chars <= MAX_INSTRUCTIONS_PREVIEW_CHARS {
+        (instructions.to_string(), false, total_chars)
+    } else {
+        (instructions.chars().take(MAX_INSTRUCTIONS_PREVIEW_CHARS).collect(), true, total_chars)
+    }
+}
+
+/// Bounded `{name, command}` projection of an MCP server's full `config`
+/// (Phase 3 spec §3.1, round 7) — the full `config` is never returned in
+/// preview/commit responses, only this small, defensively-extracted
+/// projection. Falls back to `null` for either field when absent or not a
+/// string, since MCP JSON has no required shape (§3.0).
+pub fn mcp_server_display(config: &Value) -> Value {
+    let field = |key: &str| -> Value {
+        match config.get(key).and_then(|v| v.as_str()) {
+            Some(s) => Value::String(truncate_display(s, MAX_MCP_DISPLAY_FIELD_CHARS)),
+            None => Value::Null,
+        }
+    };
+    serde_json::json!({ "name": field("name"), "command": field("command") })
+}
+
+/// Every parsed skill slug that appears more than once across the WHOLE
+/// bundle — the `"duplicate_in_bundle"` collision pass (Phase 3 spec §3.1,
+/// codex P1 round 2), computed independently of any external global-catalog
+/// state so it's pure and directly testable.
+pub fn duplicate_in_bundle_slugs(skills: &[ParsedSkill]) -> HashSet<String> {
+    let mut seen: HashSet<&str> = HashSet::new();
+    let mut dupes: HashSet<String> = HashSet::new();
+    for skill in skills {
+        if !seen.insert(skill.slug.as_str()) {
+            dupes.insert(skill.slug.clone());
+        }
+    }
+    dupes
+}
+
+/// `"none"` / `"name_conflict"` / `"duplicate_in_bundle"` — Phase 3 spec
+/// §3.1's two-pass skill collision classification. `global_slugs` is
+/// whatever the caller already fetched from `skill.catalog.list`'s
+/// underlying `skill_list_global()` (Store access lives in the RPC
+/// handler, not here — this stays a pure function so it's testable with a
+/// seeded fake global-skill list, per the spec's own §6 testing notes).
+/// Pass 1 (global catalog) takes priority over pass 2 (intra-bundle
+/// duplicate) when both apply, matching §3.1's stated precedence.
+pub fn classify_skill_collision(slug: &str, global_slugs: &HashSet<String>, in_bundle_dupes: &HashSet<String>) -> &'static str {
+    if global_slugs.contains(slug) {
+        "name_conflict"
+    } else if in_bundle_dupes.contains(slug) {
+        "duplicate_in_bundle"
+    } else {
+        "none"
+    }
+}
+
 /// One file read from an import source (zip or raw list), path relative
 /// to the bundle root. Mirrors `bundle_export::BundleExportFile`.
 #[derive(Debug, Clone)]
@@ -120,7 +280,20 @@ pub struct ParsedBundleImport {
 /// still produce a usable bundle rather than an all-or-nothing failure on
 /// e.g. one corrupt skill among five good ones.
 pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImport, String> {
-    let mut warnings: Vec<String> = Vec::new();
+    parse_bundle_import_with_budget(files, WarningBudget::unbounded())
+}
+
+/// Same as [`parse_bundle_import`], but with an explicit [`WarningBudget`]
+/// enforced at every warning-push site inside this function (Phase 3 spec
+/// §3.1, round 11) — the new `bundle.import.preview`/`.commit` RPC handlers
+/// call this directly with a tight budget; [`parse_bundle_import`] passes
+/// [`WarningBudget::unbounded`], preserving today's existing `bundle.import`
+/// route's behavior exactly.
+pub fn parse_bundle_import_with_budget(
+    files: &[BundleImportFile],
+    budget: WarningBudget,
+) -> Result<ParsedBundleImport, String> {
+    let mut warnings = WarningSink::new(budget);
 
     // §4.3.5: reject anything under accounts/ other than requirements.json
     // outright — never read, never write, never even acknowledged beyond a
@@ -518,7 +691,7 @@ pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImp
         skills,
         skipped_skills,
         requirements,
-        warnings,
+        warnings: warnings.into_vec(),
     })
 }
 
@@ -545,7 +718,7 @@ fn is_requirements_json(path: &str) -> bool {
 /// amplification effect. Reuses [`MAX_ENTRY_COUNT`] — a manifest
 /// component array legitimately needs the same "more entries than any
 /// real bundle uses" ceiling a zip archive's entry count does.
-fn capped_component_array<'a>(arr: Option<&'a Vec<Value>>, key: &str, warnings: &mut Vec<String>) -> &'a [Value] {
+fn capped_component_array<'a>(arr: Option<&'a Vec<Value>>, key: &str, warnings: &mut WarningSink) -> &'a [Value] {
     let Some(arr) = arr else { return &[] };
     let len = arr.len();
     if len > MAX_ENTRY_COUNT {
@@ -677,7 +850,7 @@ fn check_entry_size(
     safe_name: &str,
     content_len: u64,
     total_uncompressed: &mut u64,
-    warnings: &mut Vec<String>,
+    warnings: &mut WarningSink,
 ) -> Result<bool, String> {
     *total_uncompressed = total_uncompressed.saturating_add(content_len);
     if *total_uncompressed > MAX_TOTAL_UNCOMPRESSED_BYTES {
@@ -702,13 +875,22 @@ fn check_entry_size(
 /// bound), so this only needs the shared per-entry/aggregate check, no
 /// backstop-read machinery.
 pub fn enforce_raw_files_caps(files: Vec<BundleImportFile>) -> Result<(Vec<BundleImportFile>, Vec<String>), String> {
+    enforce_raw_files_caps_with_budget(files, WarningBudget::unbounded())
+}
+
+/// Same as [`enforce_raw_files_caps`], but with an explicit [`WarningBudget`]
+/// (Phase 3 spec §3.1, round 11).
+pub fn enforce_raw_files_caps_with_budget(
+    files: Vec<BundleImportFile>,
+    budget: WarningBudget,
+) -> Result<(Vec<BundleImportFile>, Vec<String>), String> {
     if files.len() > MAX_ENTRY_COUNT {
         return Err(format!(
             "{} entries exceeds the limit ({MAX_ENTRY_COUNT}) — rejecting the whole import",
             files.len()
         ));
     }
-    let mut warnings = Vec::new();
+    let mut warnings = WarningSink::new(budget);
     let mut total_uncompressed: u64 = 0;
     let mut out = Vec::new();
     for f in files {
@@ -717,7 +899,7 @@ pub fn enforce_raw_files_caps(files: Vec<BundleImportFile>) -> Result<(Vec<Bundl
             out.push(f);
         }
     }
-    Ok((out, warnings))
+    Ok((out, warnings.into_vec()))
 }
 
 /// Unpack a `.abf` zip archive into a flat file list, applying the same
@@ -738,6 +920,15 @@ pub fn enforce_raw_files_caps(files: Vec<BundleImportFile>) -> Result<(Vec<Bundl
 /// more confusing than useful, and hitting the aggregate cap at all
 /// already indicates a genuinely abusive archive rather than one bad file.
 pub fn unzip_bundle_import(zip_bytes: &[u8]) -> Result<(Vec<BundleImportFile>, Vec<String>), String> {
+    unzip_bundle_import_with_budget(zip_bytes, WarningBudget::unbounded())
+}
+
+/// Same as [`unzip_bundle_import`], but with an explicit [`WarningBudget`]
+/// (Phase 3 spec §3.1, round 11).
+pub fn unzip_bundle_import_with_budget(
+    zip_bytes: &[u8],
+    budget: WarningBudget,
+) -> Result<(Vec<BundleImportFile>, Vec<String>), String> {
     use std::io::Read;
     let cursor = std::io::Cursor::new(zip_bytes);
     let mut archive = zip::ZipArchive::new(cursor).map_err(|e| format!("not a valid zip archive: {e}"))?;
@@ -784,7 +975,7 @@ pub fn unzip_bundle_import(zip_bytes: &[u8]) -> Result<(Vec<BundleImportFile>, V
     let strip_len: Option<usize> = common_wrapper.map(|w| w.len() + 1); // +1 for the '/'
 
     let mut out = Vec::new();
-    let mut warnings = Vec::new();
+    let mut warnings = WarningSink::new(budget);
     let mut seen: HashSet<String> = HashSet::new();
     let mut total_uncompressed: u64 = 0;
     for i in 0..archive.len() {
@@ -862,7 +1053,7 @@ pub fn unzip_bundle_import(zip_bytes: &[u8]) -> Result<(Vec<BundleImportFile>, V
         };
         out.push(BundleImportFile { path: safe_name, content });
     }
-    Ok((out, warnings))
+    Ok((out, warnings.into_vec()))
 }
 
 #[cfg(test)]
@@ -1230,7 +1421,7 @@ mod tests {
         // before the read-error branch) since forging a CRC mismatch
         // through the public ZipWriter API isn't practical.
         let mut total: u64 = 0;
-        let mut warnings = Vec::new();
+        let mut warnings = WarningSink::new(WarningBudget::unbounded());
         // Simulates: read_to_end returned Err, but buf still holds
         // MAX_ENTRY_UNCOMPRESSED_BYTES bytes of real decompressed data.
         let keep = check_entry_size("corrupt.md", MAX_ENTRY_UNCOMPRESSED_BYTES, &mut total, &mut warnings);
@@ -1417,7 +1608,7 @@ mod tests {
         // the invariant is verified directly at its actual implementation
         // site instead.)
         let mut total: u64 = 0;
-        let mut warnings = Vec::new();
+        let mut warnings = WarningSink::new(WarningBudget::unbounded());
         let oversized = MAX_ENTRY_UNCOMPRESSED_BYTES + 1;
         for i in 0..5 {
             let name = format!("f{i}.md");
@@ -1428,7 +1619,7 @@ mod tests {
                 assert!(result.is_err(), "5th entry should trip the aggregate cap now that all 5 discarded entries' bytes were counted (total={total})");
             }
         }
-        assert!(warnings.iter().filter(|w| w.contains("exceeds the per-entry limit")).count() >= 4);
+        assert!(warnings.into_vec().iter().filter(|w| w.contains("exceeds the per-entry limit")).count() >= 4);
     }
 
     #[test]
@@ -1721,5 +1912,127 @@ mod tests {
         let zip_bytes = build_zip(&refs);
         let err = unzip_bundle_import(&zip_bytes).unwrap_err();
         assert!(err.contains("entries exceeds the limit"));
+    }
+
+    // ── Phase 3 shared helpers (SPEC_ABF_IMPORT_UI_PHASE3_2026_08_02.md) ──
+
+    #[test]
+    fn warning_budget_bounds_accumulation_during_parsing_itself() {
+        // codex P2, PR #2381, round 11: the cap must live at the parser's
+        // own warning-push sites, not just at a later response-boundary
+        // projection -- called directly here (not through an RPC response
+        // serializer) to prove the returned Vec is bounded regardless of
+        // any downstream projection.
+        let many_junk: Vec<Value> = (0..5_000).map(|i| serde_json::json!(i)).collect();
+        let files = vec![
+            file("armory.json", &minimal_manifest(serde_json::json!({ "instructions": many_junk }))),
+        ];
+        let result = parse_bundle_import_with_budget(&files, WarningBudget::bounded(50, 40)).unwrap();
+        assert!(result.warnings.len() <= 51, "expected at most 50 warnings plus one summary, got {}", result.warnings.len());
+        assert!(result.warnings.iter().any(|w| w.contains("more warning(s) not shown")));
+        for w in &result.warnings {
+            // truncate_display appends "..." after taking max_chars, so the
+            // hard ceiling is max_len + 3, not max_len exactly.
+            assert!(w.chars().count() <= 43, "warning exceeded the budget's max length: {w:?}");
+        }
+    }
+
+    #[test]
+    fn warning_budget_unbounded_matches_todays_existing_route_behavior() {
+        // parse_bundle_import (no budget arg) must behave identically to
+        // parse_bundle_import_with_budget(files, WarningBudget::unbounded())
+        // -- the existing bundle.import route's real, already-shipped
+        // behavior must not change.
+        let many_junk: Vec<Value> = (0..500).map(|i| serde_json::json!(i)).collect();
+        let files = vec![
+            file("armory.json", &minimal_manifest(serde_json::json!({ "instructions": many_junk.clone() }))),
+        ];
+        let a = parse_bundle_import(&files).unwrap();
+        let b = parse_bundle_import_with_budget(&files, WarningBudget::unbounded()).unwrap();
+        assert_eq!(a.warnings, b.warnings);
+        assert_eq!(a.warnings.len(), 500);
+    }
+
+    #[test]
+    fn duplicate_in_bundle_slugs_flags_only_slugs_appearing_more_than_once() {
+        let skills = vec![
+            ParsedSkill { source_dir: "skills/a".to_string(), slug: "code-review".to_string(), description: String::new(), content: String::new() },
+            ParsedSkill { source_dir: "skills/b".to_string(), slug: "code-review".to_string(), description: String::new(), content: String::new() },
+            ParsedSkill { source_dir: "skills/c".to_string(), slug: "unique".to_string(), description: String::new(), content: String::new() },
+        ];
+        let dupes = duplicate_in_bundle_slugs(&skills);
+        assert!(dupes.contains("code-review"));
+        assert!(!dupes.contains("unique"));
+        assert_eq!(dupes.len(), 1);
+    }
+
+    #[test]
+    fn classify_skill_collision_prioritizes_global_catalog_over_intra_bundle_duplicate() {
+        // Phase 3 spec §3.1: pass 1 (global catalog) takes priority over
+        // pass 2 (intra-bundle duplicate) when both apply.
+        let mut global: HashSet<String> = HashSet::new();
+        global.insert("taken".to_string());
+        let mut dupes: HashSet<String> = HashSet::new();
+        dupes.insert("taken".to_string());
+        dupes.insert("dupe-only".to_string());
+        assert_eq!(classify_skill_collision("taken", &global, &dupes), "name_conflict");
+        assert_eq!(classify_skill_collision("dupe-only", &global, &dupes), "duplicate_in_bundle");
+        assert_eq!(classify_skill_collision("free", &global, &dupes), "none");
+    }
+
+    #[test]
+    fn truncate_display_truncates_only_when_over_the_cap() {
+        assert_eq!(truncate_display("short", 100), "short");
+        let long = "a".repeat(150);
+        let truncated = truncate_display(&long, 100);
+        assert_eq!(truncated.chars().count(), 103); // 100 chars + "..."
+        assert!(truncated.ends_with("..."));
+    }
+
+    #[test]
+    fn bounded_instructions_preview_reports_truncation_and_true_total_length() {
+        let long = "x".repeat(MAX_INSTRUCTIONS_PREVIEW_CHARS + 500);
+        let (preview, truncated, total) = bounded_instructions_preview(&long);
+        assert!(truncated);
+        assert_eq!(total, MAX_INSTRUCTIONS_PREVIEW_CHARS + 500);
+        assert_eq!(preview.chars().count(), MAX_INSTRUCTIONS_PREVIEW_CHARS);
+
+        let short = "short instructions";
+        let (preview2, truncated2, total2) = bounded_instructions_preview(short);
+        assert!(!truncated2);
+        assert_eq!(total2, short.chars().count());
+        assert_eq!(preview2, short);
+    }
+
+    #[test]
+    fn mcp_server_display_never_returns_the_full_config() {
+        let config = serde_json::json!({
+            "name": "github",
+            "command": "npx",
+            "args": ["-y", "gh-mcp"],
+            "env": { "GITHUB_TOKEN": "${GITHUB_TOKEN}" },
+        });
+        let display = mcp_server_display(&config);
+        assert_eq!(display["name"], "github");
+        assert_eq!(display["command"], "npx");
+        assert!(display.get("args").is_none());
+        assert!(display.get("env").is_none());
+    }
+
+    #[test]
+    fn mcp_server_display_bounds_an_oversized_name_or_command() {
+        let oversized = "n".repeat(MAX_MCP_DISPLAY_FIELD_CHARS + 50);
+        let config = serde_json::json!({ "name": oversized, "command": "npx" });
+        let display = mcp_server_display(&config);
+        let name = display["name"].as_str().unwrap();
+        assert!(name.chars().count() <= MAX_MCP_DISPLAY_FIELD_CHARS + 3);
+    }
+
+    #[test]
+    fn mcp_server_display_falls_back_to_null_when_fields_absent_or_wrong_type() {
+        let config = serde_json::json!({ "command": 123 });
+        let display = mcp_server_display(&config);
+        assert!(display["name"].is_null());
+        assert!(display["command"].is_null());
     }
 }

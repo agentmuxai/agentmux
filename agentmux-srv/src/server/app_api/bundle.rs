@@ -288,6 +288,56 @@ fn register_bundle_export(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 }
 
+/// Read-only account-requirement resolution (spec §4.5) — one identity
+/// lookup per DISTINCT provider, not per requirement row (codex P1, PR
+/// #2379 round 4: `bundle_import.rs` bounds the requirements array length,
+/// but even at that bound many rows commonly share a handful of
+/// providers). Extracted here (Phase 3 spec §3.1's account-resolution
+/// implementation note) so the existing `bundle.import` route and the new
+/// `bundle.import.preview`/`.commit` handlers share the exact same
+/// resolution logic rather than duplicating it in a second place where it
+/// could drift.
+struct ResolvedRequirements {
+    resolved_requirement_ids: Vec<String>,
+    /// (id, provider, env, match_count) — full, untruncated values; the
+    /// RPC handler's own response construction applies the shared
+    /// bounded-display projection (Phase 3 spec §3.1, round 11) before
+    /// this is ever serialized.
+    unresolved: Vec<(String, String, String, usize)>,
+}
+
+fn resolve_account_requirements(
+    id_store: &crate::backend::storage::store::Store,
+    requirements: &[crate::backend::bundle_import::AccountRequirement],
+) -> Result<ResolvedRequirements, String> {
+    let mut resolved_requirement_ids: Vec<String> = Vec::new();
+    let mut unresolved: Vec<(String, String, String, usize)> = Vec::new();
+    let mut match_count_by_provider: std::collections::HashMap<&str, usize> =
+        std::collections::HashMap::new();
+    for requirement in requirements {
+        let match_count = match match_count_by_provider.get(requirement.provider.as_str()) {
+            Some(&n) => n,
+            None => {
+                // Codex P2, PR #2379 round 2: account CRUD routes through
+                // id_store (shared/store.db when available), not wstore
+                // (the per-channel database).
+                let n = id_store
+                    .identity_list(Some(&requirement.provider))
+                    .map_err(|e| format!("account lookup failed: {e}"))?
+                    .len();
+                match_count_by_provider.insert(requirement.provider.as_str(), n);
+                n
+            }
+        };
+        if match_count == 1 {
+            resolved_requirement_ids.push(requirement.id.clone());
+        } else {
+            unresolved.push((requirement.id.clone(), requirement.provider.clone(), requirement.env.clone(), match_count));
+        }
+    }
+    Ok(ResolvedRequirements { resolved_requirement_ids, unresolved })
+}
+
 /// `bundle.import` — ABF importer, Phase 2 of
 /// docs/specs/SPEC_ABF_V0_1_SINGLE_FILE_AND_IMPORTER_2026_08_01.md. Window-
 /// scoped like `bundle.export` (bundles aren't agent-specific). Accepts
@@ -375,46 +425,21 @@ fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // Account requirement resolution (§4.5) — read-only lookup
                 // by provider, purely informational. Never creates an
                 // account, never writes anything derived from a match.
-                let mut resolved_requirement_ids: Vec<String> = Vec::new();
-                let mut unresolved_requirements: Vec<serde_json::Value> = Vec::new();
-                // codex P1, PR #2379 round 4: query each distinct provider
-                // ONCE, not once per requirement row -- bundle_import.rs
-                // bounds the requirements array length, but even at that
-                // bound many rows commonly share a handful of providers
-                // (or an attacker can repeat one provider many times), and
-                // each identity_list call is a synchronous store query.
-                let mut match_count_by_provider: std::collections::HashMap<&str, usize> =
-                    std::collections::HashMap::new();
-                for requirement in &parsed.requirements {
-                    let match_count = match match_count_by_provider.get(requirement.provider.as_str()) {
-                        Some(&n) => n,
-                        None => {
-                            // Codex P2, PR #2379 round 2: account CRUD routes
-                            // through id_store (shared/store.db when available), not
-                            // wstore (the per-channel database) -- see identity.rs's
-                            // own handler registrations. Querying wstore here would
-                            // report zero/stale matches for accounts that actually
-                            // exist, incorrectly placing requirements in
-                            // unresolved_requirements.
-                            let n = id_store
-                                .identity_list(Some(&requirement.provider))
-                                .map_err(|e| format!("bundle.import: account lookup failed: {e}"))?
-                                .len();
-                            match_count_by_provider.insert(requirement.provider.as_str(), n);
-                            n
-                        }
-                    };
-                    if match_count == 1 {
-                        resolved_requirement_ids.push(requirement.id.clone());
-                    } else {
-                        unresolved_requirements.push(json!({
-                            "id": requirement.id,
-                            "provider": requirement.provider,
-                            "env": requirement.env,
-                            "match_count": match_count,
-                        }));
-                    }
-                }
+                // Phase 3 spec §3.1: extracted into resolve_account_requirements,
+                // shared with the new preview/commit RPC handlers.
+                let resolved = resolve_account_requirements(&id_store, &parsed.requirements)
+                    .map_err(|e| format!("bundle.import: {e}"))?;
+                let resolved_requirement_ids = resolved.resolved_requirement_ids;
+                let unresolved_requirements: Vec<serde_json::Value> = resolved
+                    .unresolved
+                    .into_iter()
+                    .map(|(id, provider, env, match_count)| json!({
+                        "id": id,
+                        "provider": provider,
+                        "env": env,
+                        "match_count": match_count,
+                    }))
+                    .collect();
 
                 // Skills — global, not bound to any agent (mirrors
                 // skill.catalog.upsert's own is_global: true convention for
