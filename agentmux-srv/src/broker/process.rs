@@ -240,6 +240,22 @@ impl ProcessBroker {
     pub fn status(&self, block_id: &str) -> ProcessStatus {
         let mut cache = self.cache.lock();
         let fresh = compute_status(block_id);
+        // Never cache (or emit a change event for) a block with no real
+        // controller — `list()`'s own callers only ever pass real,
+        // discovered block_ids (from `get_all_controllers()`), but this
+        // broker is also reachable directly with caller-supplied input via
+        // `muxspect describe` (agentmux-srv/src/server/muxspect_handlers.rs)
+        // — the first RPC-adjacent surface to call `status()` with an
+        // arbitrary string rather than one already known to exist. Without
+        // this guard, repeated queries for distinct nonexistent block_ids
+        // would grow this cache unboundedly, since `forget()` is only ever
+        // called from real controller teardown and never sees IDs that were
+        // never real to begin with (reagent + codex, independently, on
+        // PR #2380).
+        if fresh.lifecycle == Lifecycle::Unknown {
+            drop(cache);
+            return fresh;
+        }
         let changed = cache
             .get(block_id)
             .map(|prev| {
@@ -296,6 +312,14 @@ impl ProcessBroker {
     /// won't include it) while a stale cache entry lingers unreachable.
     pub fn forget(&self, block_id: &str) {
         self.cache.lock().remove(block_id);
+    }
+
+    /// Test-only: current cache size, to prove unknown/nonexistent
+    /// block_ids never get inserted (see `status()`'s own guard and the
+    /// regression test below).
+    #[cfg(test)]
+    fn cache_len(&self) -> usize {
+        self.cache.lock().len()
     }
 
     fn emit_changed(&self, status: &ProcessStatus) {
@@ -434,6 +458,22 @@ mod tests {
         let status = broker.status("no-such-block-id");
         assert_eq!(status.lifecycle, Lifecycle::Unknown);
         assert!(status.processes.is_empty());
+    }
+
+    #[test]
+    fn unknown_block_ids_are_never_cached_unbounded_growth_guard() {
+        // reagent + codex, independently, on PR #2380: `muxspect describe`
+        // is the first caller to reach `status()` with arbitrary,
+        // caller-supplied block_ids rather than ones already known to be
+        // real (list()'s own callers only ever pass IDs from
+        // get_all_controllers()). Without this guard, a loop probing
+        // distinct nonexistent block_ids would grow the cache forever,
+        // since forget() only ever fires from real controller teardown.
+        let broker = ProcessBroker::new(None);
+        for i in 0..50 {
+            let _ = broker.status(&format!("garbage-block-{i}"));
+        }
+        assert_eq!(broker.cache_len(), 0, "unknown block_ids must never be cached");
     }
 
     #[test]
