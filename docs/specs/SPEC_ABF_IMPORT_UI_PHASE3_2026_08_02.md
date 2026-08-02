@@ -473,14 +473,22 @@ Implementation notes:
     same fixed-character truncation as `description` in preview's
     `skills[]`. `source_dir` (§3.0) remains the actual selection/rename
     key regardless — nothing about matching a checkbox or a rename to the
-    right row depends on `slug`'s display length. The one interaction
-    worth being explicit about: §4.1's rename text input is pre-filled
-    from this (possibly truncated) display `slug` — that's fine, since a
-    user typing an alternate name is replacing the field's contents
-    outright, and `commit`'s `import_as` handling (§3.2) is validated
-    against the freshly-parsed, full-length slug from `source_dir`
-    regardless of what preview happened to display; nothing about the
-    actual write decision depends on the truncated display value.
+    right row depends on `slug`'s display length. `commit`'s `import_as`
+    handling (§3.2) is validated against the freshly-parsed, full-length
+    slug from `source_dir` regardless of what preview happened to
+    display; nothing about the actual write decision depends on the
+    truncated display value. **(codex P2 on PR #2381, round 14: this
+    passage previously also said §4.1's rename input is "pre-filled"
+    from this truncated `slug` and called that "fine" — corrected here.
+    It is not fine, and round 13 changed the actual UI contract:** §4.1
+    point 5 requires the rename input to **start blank**, with `slug`
+    shown only as adjacent read-only label text, precisely because a
+    pre-filled truncated value could get silently submitted as
+    `import_as` without the user ever typing anything. This passage's
+    only remaining claim is the narrower one above — the *write
+    decision* never depends on the truncated display value — not
+    anything about how the input is initialized, which §4/§4.1 alone now
+    govern.)
   - **Bundle name collision**: a name scan over existing bundles (whatever
     read method `bundle.list`'s handler already uses).
   - **Requirement resolution** (codex P2 on PR #2381): `parse_bundle_import`
