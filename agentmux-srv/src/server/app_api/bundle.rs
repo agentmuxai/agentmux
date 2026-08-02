@@ -978,7 +978,12 @@ async fn bundle_import_commit_impl(
 
                 // codex P2, PR #2381 round 11: bundle_name must actually be
                 // substituted for parsed.name, never silently ignored.
-                let bundle_name = req.bundle_name.unwrap_or_else(|| parsed.name.clone());
+                // reagentx P2, PR #2382 round 3: unlike parsed.name (bounded
+                // at parse time), a client-supplied override had no length
+                // cap at all -- bound_bundle_name closes that gap the same
+                // way for both paths (a no-op when bundle_name is already
+                // parsed.name, since that's already within the cap).
+                let bundle_name = bi::bound_bundle_name(&req.bundle_name.unwrap_or_else(|| parsed.name.clone()));
 
                 let instructions = if req.include_instructions { parsed.instructions.clone() } else { String::new() };
 
@@ -1048,7 +1053,25 @@ async fn bundle_import_commit_impl(
                 let mut imported_skill_ids: Vec<String> = Vec::new();
                 let mut skipped_skills: Vec<String> = Vec::new();
 
-                for selection in &req.include_skills {
+                // reagentx P1, PR #2382 round 3: req.include_skills is
+                // client-supplied with no length cap and no dedup by
+                // source_dir -- an unbounded/repeated array could otherwise
+                // drive an unbounded number of skill_upsert_unique_global
+                // Store writes regardless of how many skills the archive
+                // itself actually parsed to (parsed.skills is already
+                // bounded by MAX_IMPORTED_SKILLS). First occurrence wins per
+                // source_dir (matches this module's existing duplicate-
+                // reference convention elsewhere), then capped at the same
+                // MAX_IMPORTED_SKILLS the parser itself enforces.
+                let mut seen_source_dirs: std::collections::HashSet<&str> = std::collections::HashSet::new();
+                let deduped_skill_selections: Vec<&SkillSelection> = req
+                    .include_skills
+                    .iter()
+                    .filter(|s| seen_source_dirs.insert(s.source_dir.as_str()))
+                    .take(bi::MAX_IMPORTED_SKILLS)
+                    .collect();
+
+                for selection in deduped_skill_selections {
                     let Some(skill) = parsed.skills.iter().find(|s| s.source_dir == selection.source_dir) else {
                         continue; // source_dir not present in this parse -- nothing to import
                     };
@@ -1334,6 +1357,115 @@ mod import_preview_commit_tests {
         let bundle_id = resp["bundle_id"].as_str().unwrap();
         let saved = state.id_store.bundle_memory_get(bundle_id).unwrap().unwrap();
         assert_eq!(saved.name, "Renamed Bundle");
+    }
+
+    #[tokio::test]
+    async fn commit_bounds_an_oversized_bundle_name_override() {
+        // reagentx P2, PR #2382 round 3: unlike parsed.name (bounded at
+        // parse time), req.bundle_name had no length cap of its own before
+        // being used verbatim as Memory.name.
+        let state = test_state();
+        let files = vec![entry("armory.json", &manifest(serde_json::json!({})))];
+        let digest = bi::content_digest_files(&files.iter().map(|f| bi::BundleImportFile { path: f.path.clone(), content: f.content.clone() }).collect::<Vec<_>>());
+        let oversized_name = "n".repeat(bi::MAX_BUNDLE_NAME_CHARS + 500);
+        let req = CommitReq {
+            file_path: None,
+            zip_base64: None,
+            files: Some(files),
+            expected_content_digest: digest,
+            bundle_name: Some(oversized_name),
+            include_instructions: false,
+            include_context_files: vec![],
+            include_skills: vec![],
+            include_mcp_servers: vec![],
+        };
+        let resp = bundle_import_commit_impl(&state.id_store, &state.wstore, &state.broker, req).await.unwrap();
+        let bundle_id = resp["bundle_id"].as_str().unwrap();
+        let saved = state.id_store.bundle_memory_get(bundle_id).unwrap().unwrap();
+        assert_eq!(saved.name.chars().count(), bi::MAX_BUNDLE_NAME_CHARS);
+    }
+
+    #[tokio::test]
+    async fn commit_dedupes_repeated_source_dirs_in_include_skills_first_occurrence_wins() {
+        // reagentx P1, PR #2382 round 3: a client repeating the same
+        // source_dir with a different import_as each time must not drive
+        // one Store write per repetition.
+        let state = test_state();
+        let files = vec![
+            entry("armory.json", &manifest(serde_json::json!({ "skills": ["skills/deploy"] }))),
+            entry("skills/deploy/SKILL.md", &skill_md("deploy", "d", "body")),
+        ];
+        let bi_files: Vec<bi::BundleImportFile> =
+            files.iter().map(|f| bi::BundleImportFile { path: f.path.clone(), content: f.content.clone() }).collect();
+        let digest = bi::content_digest_files(&bi_files);
+        let include_skills: Vec<SkillSelection> = (0..50)
+            .map(|i| SkillSelection { source_dir: "skills/deploy".to_string(), import_as: Some(format!("deploy-{i}")) })
+            .collect();
+        let req = CommitReq {
+            file_path: None,
+            zip_base64: None,
+            files: Some(files),
+            expected_content_digest: digest,
+            bundle_name: None,
+            include_instructions: false,
+            include_context_files: vec![],
+            include_skills,
+            include_mcp_servers: vec![],
+        };
+        let resp = bundle_import_commit_impl(&state.id_store, &state.wstore, &state.broker, req).await.unwrap();
+        let imported = resp["imported_skill_ids"].as_array().unwrap();
+        assert_eq!(imported.len(), 1, "expected only the first occurrence of the repeated source_dir to be written");
+        let saved_skill = state.wstore.skill_get(imported[0].as_str().unwrap()).unwrap().unwrap();
+        assert_eq!(saved_skill.name, "deploy-0");
+    }
+
+    #[tokio::test]
+    async fn commit_caps_include_skills_at_max_imported_skills() {
+        // reagentx P1, PR #2382 round 3: an include_skills array longer
+        // than MAX_IMPORTED_SKILLS must not drive more than that many
+        // skill_upsert_unique_global write attempts. Distinct-but-bogus
+        // source_dirs (each a cheap no-op "continue") occupy the first
+        // MAX_IMPORTED_SKILLS positions; three genuinely resolvable
+        // selections are placed AFTER that boundary. If the cap truncates
+        // the selection list itself (not just deduping), those three are
+        // silently dropped -- proving the cap applies before resolution,
+        // not just as an incidental side effect of the dedup fix.
+        let state = test_state();
+        let files = vec![
+            entry("armory.json", &manifest(serde_json::json!({
+                "skills": ["skills/a", "skills/b", "skills/c"],
+            }))),
+            entry("skills/a/SKILL.md", &skill_md("a", "d", "body")),
+            entry("skills/b/SKILL.md", &skill_md("b", "d", "body")),
+            entry("skills/c/SKILL.md", &skill_md("c", "d", "body")),
+        ];
+        let bi_files: Vec<bi::BundleImportFile> =
+            files.iter().map(|f| bi::BundleImportFile { path: f.path.clone(), content: f.content.clone() }).collect();
+        let digest = bi::content_digest_files(&bi_files);
+
+        let mut include_skills: Vec<SkillSelection> = (0..bi::MAX_IMPORTED_SKILLS)
+            .map(|i| SkillSelection { source_dir: format!("skills/nonexistent-{i}"), import_as: None })
+            .collect();
+        include_skills.push(SkillSelection { source_dir: "skills/a".to_string(), import_as: None });
+        include_skills.push(SkillSelection { source_dir: "skills/b".to_string(), import_as: None });
+        include_skills.push(SkillSelection { source_dir: "skills/c".to_string(), import_as: None });
+
+        let req = CommitReq {
+            file_path: None,
+            zip_base64: None,
+            files: Some(files),
+            expected_content_digest: digest,
+            bundle_name: None,
+            include_instructions: false,
+            include_context_files: vec![],
+            include_skills,
+            include_mcp_servers: vec![],
+        };
+        let resp = bundle_import_commit_impl(&state.id_store, &state.wstore, &state.broker, req).await.unwrap();
+        assert!(
+            resp["imported_skill_ids"].as_array().unwrap().is_empty(),
+            "the three real selections beyond the MAX_IMPORTED_SKILLS boundary must be dropped by the cap, not imported"
+        );
     }
 
     #[tokio::test]

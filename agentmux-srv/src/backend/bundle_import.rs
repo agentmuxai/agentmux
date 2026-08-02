@@ -433,14 +433,12 @@ pub fn parse_bundle_import_with_budget(
         .get("name")
         .and_then(|v| v.as_str())
         .unwrap_or("imported-bundle");
-    let name = if raw_name.chars().count() > MAX_BUNDLE_NAME_CHARS {
+    if raw_name.chars().count() > MAX_BUNDLE_NAME_CHARS {
         warnings.push(format!(
             "armory.json: name exceeds {MAX_BUNDLE_NAME_CHARS} characters; truncated"
         ));
-        raw_name.chars().take(MAX_BUNDLE_NAME_CHARS).collect()
-    } else {
-        raw_name.to_string()
-    };
+    }
+    let name = bound_bundle_name(raw_name);
     let description = manifest
         .get("description")
         .and_then(|v| v.as_str())
@@ -868,7 +866,13 @@ const MAX_ACCOUNT_REQUIREMENTS: usize = 1_000;
 /// (well within the size caps) could otherwise monopolize the handler and
 /// pollute the installation's skill catalog. A real bundle needs a
 /// handful to a few dozen skills at most.
-const MAX_IMPORTED_SKILLS: usize = 200;
+///
+/// Also reused by `bundle.import.commit` (Phase 3 spec §3.2, round 3) as
+/// the cap on `include_skills`'s length — the same reasoning applies to a
+/// client-supplied selection array as to the parser's own component list:
+/// neither may drive more Store-write attempts than a real bundle could
+/// ever need.
+pub const MAX_IMPORTED_SKILLS: usize = 200;
 
 /// Maximum character length of a bundle's manifest `name`, enforced at
 /// parse time (Phase 3 spec §3.1, round 13) rather than at a later display
@@ -876,7 +880,22 @@ const MAX_IMPORTED_SKILLS: usize = 200;
 /// doesn't edit the preview's suggested value, so the canonical, bounded
 /// value must be what both `preview` and `commit` converge on from the
 /// moment parsing completes. Generous for any real bundle name.
-const MAX_BUNDLE_NAME_CHARS: usize = 200;
+pub const MAX_BUNDLE_NAME_CHARS: usize = 200;
+
+/// Bounds a bundle name to [`MAX_BUNDLE_NAME_CHARS`] via plain truncation
+/// (no ellipsis, unlike [`truncate_display`]) — this IS the canonical
+/// value, not a display abbreviation of a longer "real" one. Shared by
+/// `parse_bundle_import`'s own manifest-`name` bounding and the Phase 3
+/// `bundle.import.commit` RPC's `bundle_name` override (round 3), so a
+/// client-supplied override can't bypass the same bound `parsed.name` is
+/// already held to.
+pub fn bound_bundle_name(name: &str) -> String {
+    if name.chars().count() > MAX_BUNDLE_NAME_CHARS {
+        name.chars().take(MAX_BUNDLE_NAME_CHARS).collect()
+    } else {
+        name.to_string()
+    }
+}
 
 /// Single choke point for the per-entry/aggregate size caps, shared by
 /// BOTH intake paths (zip decompression and the raw `files` RPC list) —
