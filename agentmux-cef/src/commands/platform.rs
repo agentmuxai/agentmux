@@ -704,6 +704,30 @@ pub async fn show_open_file_dialog(
     })
 }
 
+/// File picker for Armory Bundle Format (`.abf`) files — Phase 3 of
+/// docs/specs/SPEC_ABF_IMPORT_UI_PHASE3_2026_08_02.md §4 Step 1.
+/// `show_open_file_dialog` can't be reused: it takes no filter argument and
+/// its own filter list is hard-coded to image/video/audio extensions, with
+/// no generic filter mechanism elsewhere in this module — this mirrors its
+/// shape with an `.abf` filter instead. The filter is advisory only (a
+/// non-`.abf` file picked here still just fails `unzip_bundle_import`'s
+/// "not a valid zip archive" check server-side, same as today).
+pub async fn show_open_bundle_dialog(
+    _args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let path = tokio::task::spawn_blocking(|| {
+        rfd::FileDialog::new()
+            .add_filter("Armory Bundle", &["abf"])
+            .pick_file()
+    })
+    .await
+    .map_err(|e| format!("show_open_bundle_dialog: task join error: {e}"))?;
+    Ok(match path {
+        Some(p) => serde_json::json!(p.to_string_lossy()),
+        None => serde_json::Value::Null,
+    })
+}
+
 fn extract_commented_setting_key(line: &str) -> Option<&str> {
     let trimmed = line.trim_start();
     let rest = trimmed.strip_prefix("//")?;
