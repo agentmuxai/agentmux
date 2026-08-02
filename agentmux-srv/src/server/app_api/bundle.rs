@@ -8,6 +8,16 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_bundle_self_get(engine, state);
     register_bundle_export(engine, state);
     register_bundle_import(engine, state);
+    register_bundle_import_preview(engine, state);
+    register_bundle_import_commit(engine, state);
+}
+
+/// Raw `[{path, content}]` entry shape, shared by `bundle.import`'s `files`
+/// input and the Phase 3 `bundle.import.preview`/`.commit` handlers.
+#[derive(serde::Deserialize, Default)]
+struct FileEntry {
+    path: String,
+    content: String,
 }
 
 /// Normalize a `bundle.upsert` request body into the shape the `Memory` struct
@@ -297,21 +307,27 @@ fn register_bundle_export(engine: &Arc<WshRpcEngine>, state: &AppState) {
 /// `bundle.import.preview`/`.commit` handlers share the exact same
 /// resolution logic rather than duplicating it in a second place where it
 /// could drift.
-struct ResolvedRequirements {
-    resolved_requirement_ids: Vec<String>,
-    /// (id, provider, env, match_count) — full, untruncated values; the
-    /// RPC handler's own response construction applies the shared
-    /// bounded-display projection (Phase 3 spec §3.1, round 11) before
-    /// this is ever serialized.
-    unresolved: Vec<(String, String, String, usize)>,
+/// Full, untruncated values — callers apply the shared bounded-display
+/// projection ([`bounded_display`]) to `id`/`provider`/`env` before ever
+/// serializing these into an RPC response (Phase 3 spec §3.1, round 11).
+struct RequirementResolution {
+    id: String,
+    provider: String,
+    env: String,
+    match_count: usize,
+}
+
+impl RequirementResolution {
+    fn resolved(&self) -> bool {
+        self.match_count == 1
+    }
 }
 
 fn resolve_account_requirements(
     id_store: &crate::backend::storage::store::Store,
     requirements: &[crate::backend::bundle_import::AccountRequirement],
-) -> Result<ResolvedRequirements, String> {
-    let mut resolved_requirement_ids: Vec<String> = Vec::new();
-    let mut unresolved: Vec<(String, String, String, usize)> = Vec::new();
+) -> Result<Vec<RequirementResolution>, String> {
+    let mut results: Vec<RequirementResolution> = Vec::new();
     let mut match_count_by_provider: std::collections::HashMap<&str, usize> =
         std::collections::HashMap::new();
     for requirement in requirements {
@@ -329,13 +345,25 @@ fn resolve_account_requirements(
                 n
             }
         };
-        if match_count == 1 {
-            resolved_requirement_ids.push(requirement.id.clone());
-        } else {
-            unresolved.push((requirement.id.clone(), requirement.provider.clone(), requirement.env.clone(), match_count));
-        }
+        results.push(RequirementResolution {
+            id: requirement.id.clone(),
+            provider: requirement.provider.clone(),
+            env: requirement.env.clone(),
+            match_count,
+        });
     }
-    Ok(ResolvedRequirements { resolved_requirement_ids, unresolved })
+    Ok(results)
+}
+
+/// Shared bounded-display projection (Phase 3 spec, round 12's governing
+/// rule) for every "meant to be short" field both `preview` and `commit`
+/// echo back: skill slug/description, requirement `id`/`provider`/`env`,
+/// context-file `display_path`, bundle `description`, and commit's
+/// `skipped_skills`/`resolved_requirement_ids` entries. `bundle.name` is
+/// NOT projected through this — it's bounded at parse time instead
+/// (round 13), since it's re-submitted verbatim as `bundle_name`.
+fn bounded_display(s: &str) -> String {
+    crate::backend::bundle_import::truncate_display(s, crate::backend::bundle_import::MAX_DISPLAY_FIELD_CHARS)
 }
 
 /// `bundle.import` — ABF importer, Phase 2 of
@@ -361,11 +389,6 @@ fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let wstore = wstore.clone();
             let broker = broker.clone();
             Box::pin(async move {
-                #[derive(serde::Deserialize, Default)]
-                struct FileEntry {
-                    path: String,
-                    content: String,
-                }
                 #[derive(serde::Deserialize, Default)]
                 struct Req {
                     #[serde(default)]
@@ -427,17 +450,22 @@ fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // account, never writes anything derived from a match.
                 // Phase 3 spec §3.1: extracted into resolve_account_requirements,
                 // shared with the new preview/commit RPC handlers.
+                // Today's existing route keeps its response shape exactly
+                // as before -- unbounded, matching its own already-shipped
+                // behavior. The bounded-display projection below is a
+                // Phase 3 preview/commit-only requirement.
                 let resolved = resolve_account_requirements(&id_store, &parsed.requirements)
                     .map_err(|e| format!("bundle.import: {e}"))?;
-                let resolved_requirement_ids = resolved.resolved_requirement_ids;
+                let resolved_requirement_ids: Vec<String> =
+                    resolved.iter().filter(|r| r.resolved()).map(|r| r.id.clone()).collect();
                 let unresolved_requirements: Vec<serde_json::Value> = resolved
-                    .unresolved
-                    .into_iter()
-                    .map(|(id, provider, env, match_count)| json!({
-                        "id": id,
-                        "provider": provider,
-                        "env": env,
-                        "match_count": match_count,
+                    .iter()
+                    .filter(|r| !r.resolved())
+                    .map(|r| json!({
+                        "id": r.id,
+                        "provider": r.provider,
+                        "env": r.env,
+                        "match_count": r.match_count,
                     }))
                     .collect();
 
@@ -528,8 +556,15 @@ fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     provider: String::new(),
                     model: String::new(),
                     instructions: parsed.instructions,
-                    context_files: serde_json::to_string(&parsed.context_files)
-                        .unwrap_or_else(|_| "[]".to_string()),
+                    // Phase 3 spec §3.0: ImportedContextFile gained a
+                    // stable `id` selection key alongside `path`/`content`
+                    // -- project it away before persisting, matching
+                    // `Memory.context_files`'s existing documented
+                    // `[{path, content}]` shape.
+                    context_files: serde_json::to_string(
+                        &parsed.context_files.iter().map(|cf| json!({"path": cf.path, "content": cf.content})).collect::<Vec<_>>(),
+                    )
+                    .unwrap_or_else(|_| "[]".to_string()),
                     // Phase 3 spec §3.0, round 2: `parsed.mcp_servers` is now
                     // `Vec<ParsedMcpServer>{source_path, config}` (a stable
                     // selection key alongside the raw config) — every write
@@ -585,4 +620,933 @@ fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppState) {
             })
         }),
     );
+}
+
+/// On-disk size ceiling for `file_path` input (Phase 3 spec §3.0.5, rounds
+/// 4/5) — generous headroom above `MAX_TOTAL_UNCOMPRESSED_BYTES`'s 50 MiB
+/// for compression/container overhead and imperfectly-compressed content.
+const MAX_ABF_FILE_SIZE_BYTES: u64 = 100 * 1024 * 1024;
+
+/// Reads a `file_path` input server-side (Phase 3 spec §3.0.5). Opens the
+/// path with a no-follow mechanism so a symlink fails to open at all
+/// rather than being silently resolved to its target (round 6) — one
+/// handle, one continuous read, no second path resolution for anything to
+/// race against (round 5's TOCTOU fix): metadata comes from that SAME open
+/// handle and is checked against `MAX_ABF_FILE_SIZE_BYTES` BEFORE any read
+/// (round 4); the actual read is still hard-bounded via `.take(...)`
+/// regardless of what the metadata claimed.
+fn read_abf_file_path(path: &str) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+
+    #[cfg(unix)]
+    let mut file = {
+        use std::os::unix::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(path)
+            .map_err(|e| format!("{path}: failed to open: {e}"))?
+    };
+    #[cfg(windows)]
+    let mut file = {
+        use std::os::windows::fs::OpenOptionsExt;
+        // FILE_FLAG_OPEN_REPARSE_POINT (0x0020_0000): opens a symlink/
+        // junction AS the reparse point itself, rather than transparently
+        // following it to its target — the Windows equivalent of Unix's
+        // O_NOFOLLOW, in a single atomic CreateFileW call (no separate
+        // path resolution for a TOCTOU window to open in). The metadata
+        // check immediately below then rejects the handle outright if it
+        // turns out to be a reparse point. Windows symlinks require
+        // elevated privileges to create by default, narrowing (not
+        // eliminating) the practical risk this guards against.
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(path)
+            .map_err(|e| format!("{path}: failed to open: {e}"))?
+    };
+    #[cfg(not(any(unix, windows)))]
+    let mut file = std::fs::File::open(path).map_err(|e| format!("{path}: failed to open: {e}"))?;
+
+    let metadata = file.metadata().map_err(|e| format!("{path}: failed to stat: {e}"))?;
+    #[cfg(windows)]
+    if metadata.file_type().is_symlink() {
+        return Err(format!("{path}: refusing to follow a symlink"));
+    }
+    if !metadata.is_file() {
+        return Err(format!("{path}: not a regular file"));
+    }
+    if metadata.len() > MAX_ABF_FILE_SIZE_BYTES {
+        return Err(format!(
+            "{path}: size ({} bytes) exceeds the limit ({MAX_ABF_FILE_SIZE_BYTES} bytes)",
+            metadata.len()
+        ));
+    }
+
+    let mut buf: Vec<u8> = Vec::new();
+    let mut limited = (&mut file).take(MAX_ABF_FILE_SIZE_BYTES + 1);
+    limited.read_to_end(&mut buf).map_err(|e| format!("{path}: failed to read: {e}"))?;
+    if buf.len() as u64 > MAX_ABF_FILE_SIZE_BYTES {
+        return Err(format!("{path}: exceeds the size limit while reading"));
+    }
+    Ok(buf)
+}
+
+/// Bounded warning budget shared by `bundle.import.preview`/`.commit`
+/// (Phase 3 spec §3.1, round 11) — unlike the existing `bundle.import`
+/// route's effectively-unbounded budget, preserved unchanged above.
+fn preview_commit_warning_budget() -> crate::backend::bundle_import::WarningBudget {
+    crate::backend::bundle_import::WarningBudget::bounded(200, 300)
+}
+
+/// Final combined-list bound applied to a preview/commit response's
+/// `warnings` (Phase 3 spec §3.1 round 8 / round 9's commit-response
+/// generalization) — cheap defense-in-depth over an already
+/// per-source-bounded list (each of `resolve_import_input`'s intake
+/// warnings and `parse_bundle_import_with_budget`'s own warnings is
+/// already individually bounded; concatenating two independently-bounded
+/// lists can still exceed either bound alone, so one more pass caps the
+/// combined total before it's ever serialized).
+fn bound_warnings_for_response(warnings: Vec<String>) -> (Vec<String>, bool) {
+    const MAX_COMBINED_WARNINGS: usize = 200;
+    if warnings.len() <= MAX_COMBINED_WARNINGS {
+        (warnings, false)
+    } else {
+        let mut kept: Vec<String> = warnings.into_iter().take(MAX_COMBINED_WARNINGS).collect();
+        kept.push("... additional warnings not shown".to_string());
+        (kept, true)
+    }
+}
+
+/// The outcome of resolving one of `file_path`/`zip_base64`/`files` into
+/// intake-ready files plus the Phase 3 content digest (§3.0.5) — shared by
+/// `bundle.import.preview` and `.commit` so both compute the digest
+/// identically. The mode tag baked into `content_digest` (round 7) means a
+/// plain digest-equality check at commit is sufficient to enforce "same
+/// input mode as preview" (round 6) — no separate mode field is needed.
+#[derive(Debug)]
+struct ResolvedImportInput {
+    files: Vec<crate::backend::bundle_import::BundleImportFile>,
+    intake_warnings: Vec<String>,
+    content_digest: String,
+}
+
+fn resolve_import_input(
+    file_path: Option<String>,
+    zip_base64: Option<String>,
+    files: Option<Vec<FileEntry>>,
+    warning_budget: crate::backend::bundle_import::WarningBudget,
+) -> Result<ResolvedImportInput, String> {
+    use crate::backend::bundle_import as bi;
+    let provided = [file_path.is_some(), zip_base64.is_some(), files.is_some()]
+        .iter()
+        .filter(|p| **p)
+        .count();
+    if provided != 1 {
+        return Err(format!(
+            "exactly one of file_path/zip_base64/files must be present, got {provided}"
+        ));
+    }
+    if let Some(path) = file_path {
+        let raw = read_abf_file_path(&path)?;
+        let content_digest = bi::content_digest_raw_bytes(bi::ImportInputMode::FilePath, &raw);
+        let (files, intake_warnings) = bi::unzip_bundle_import_with_budget(&raw, warning_budget)?;
+        return Ok(ResolvedImportInput { files, intake_warnings, content_digest });
+    }
+    if let Some(b64) = zip_base64 {
+        use base64::Engine as _;
+        let raw = base64::engine::general_purpose::STANDARD
+            .decode(&b64)
+            .map_err(|e| format!("invalid zip_base64: {e}"))?;
+        let content_digest = bi::content_digest_raw_bytes(bi::ImportInputMode::ZipBase64, &raw);
+        let (files, intake_warnings) = bi::unzip_bundle_import_with_budget(&raw, warning_budget)?;
+        return Ok(ResolvedImportInput { files, intake_warnings, content_digest });
+    }
+    let files = files.expect("exactly one input already validated present");
+    let raw_files: Vec<bi::BundleImportFile> = files
+        .into_iter()
+        .map(|f| bi::BundleImportFile { path: f.path, content: f.content })
+        .collect();
+    let (capped_files, intake_warnings) = bi::enforce_raw_files_caps_with_budget(raw_files, warning_budget)?;
+    let content_digest = bi::content_digest_files(&capped_files);
+    Ok(ResolvedImportInput { files: capped_files, intake_warnings, content_digest })
+}
+
+#[derive(serde::Deserialize, Default)]
+struct PreviewReq {
+    #[serde(default)]
+    file_path: Option<String>,
+    #[serde(default)]
+    zip_base64: Option<String>,
+    #[serde(default)]
+    files: Option<Vec<FileEntry>>,
+}
+
+/// `bundle.import.preview` — Phase 3 of
+/// docs/specs/SPEC_ABF_IMPORT_UI_PHASE3_2026_08_02.md §3.1. Pure parse plus
+/// read-only collision/name-collision lookups — zero Store writes. Window-
+/// scoped like the rest of `bundle.*`. Extracted from the RPC closure into
+/// a directly-callable, directly-testable function (the closure itself
+/// only deserializes the request and forwards).
+async fn bundle_import_preview_impl(
+    id_store: &crate::backend::storage::store::Store,
+    wstore: &crate::backend::storage::store::Store,
+    req: PreviewReq,
+) -> Result<serde_json::Value, String> {
+    use crate::backend::bundle_import as bi;
+
+    let resolved = resolve_import_input(req.file_path, req.zip_base64, req.files, preview_commit_warning_budget())
+        .map_err(|e| format!("bundle.import.preview: {e}"))?;
+
+    let parsed = bi::parse_bundle_import_with_budget(&resolved.files, preview_commit_warning_budget())
+        .map_err(|e| format!("bundle.import.preview: {e}"))?;
+
+    let mut all_warnings = resolved.intake_warnings;
+    all_warnings.extend(parsed.warnings);
+
+    // Skill collision detection (§3.1, two-pass).
+    let global_slugs: std::collections::HashSet<String> = wstore
+        .skill_list_global()
+        .map_err(|e| format!("bundle.import.preview: {e}"))?
+        .into_iter()
+        .map(|item| item.skill.name)
+        .collect();
+    let in_bundle_dupes = bi::duplicate_in_bundle_slugs(&parsed.skills);
+
+    let skills_json: Vec<serde_json::Value> = parsed
+        .skills
+        .iter()
+        .map(|skill| {
+            let collision = bi::classify_skill_collision(&skill.slug, &global_slugs, &in_bundle_dupes);
+            json!({
+                "source_dir": skill.source_dir,
+                "slug": bounded_display(&skill.slug),
+                "description": bounded_display(&skill.description),
+                "collision": collision,
+            })
+        })
+        .collect();
+
+    let mcp_servers_json: Vec<serde_json::Value> = parsed
+        .mcp_servers
+        .iter()
+        .map(|m| json!({
+            "source_path": m.source_path,
+            "display": bi::mcp_server_display(&m.config),
+        }))
+        .collect();
+
+    let (instructions_preview, instructions_truncated, instructions_total_chars) =
+        bi::bounded_instructions_preview(&parsed.instructions);
+
+    let context_files_json: Vec<serde_json::Value> = parsed
+        .context_files
+        .iter()
+        .map(|cf| json!({
+            "id": cf.id,
+            "display_path": bounded_display(&cf.path),
+            "size_bytes": cf.content.len(),
+        }))
+        .collect();
+
+    let resolved_requirements = resolve_account_requirements(id_store, &parsed.requirements)
+        .map_err(|e| format!("bundle.import.preview: {e}"))?;
+    let requirements_json: Vec<serde_json::Value> = resolved_requirements
+        .iter()
+        .map(|r| json!({
+            "id": bounded_display(&r.id),
+            "provider": bounded_display(&r.provider),
+            "env": bounded_display(&r.env),
+            "resolved": r.resolved(),
+            "match_count": r.match_count,
+        }))
+        .collect();
+
+    // Bundle name collision -- soft, informational (§2: bundle_memory_upsert
+    // has no name uniqueness constraint, so this never blocks).
+    let existing_names: std::collections::HashSet<String> = id_store
+        .bundle_memory_list()
+        .map_err(|e| format!("bundle.import.preview: {e}"))?
+        .into_iter()
+        .map(|b| b.name)
+        .collect();
+    let name_collision = existing_names.contains(&parsed.name);
+
+    let (warnings, warnings_truncated) = bound_warnings_for_response(all_warnings);
+
+    Ok(json!({
+        "name": parsed.name,
+        "description": bounded_display(&parsed.description),
+        "instructions_preview": instructions_preview,
+        "instructions_truncated": instructions_truncated,
+        "instructions_total_chars": instructions_total_chars,
+        "context_files": context_files_json,
+        "skills": skills_json,
+        "mcp_servers": mcp_servers_json,
+        "requirements": requirements_json,
+        "warnings": warnings,
+        "warnings_truncated": warnings_truncated,
+        "name_collision": name_collision,
+        "content_digest": resolved.content_digest,
+    }))
+}
+
+fn register_bundle_import_preview(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let id_store = state.id_store.clone();
+    let wstore = state.wstore.clone();
+    engine.register_handler(
+        COMMAND_BUNDLE_IMPORT_PREVIEW,
+        Box::new(move |data, _ctx| {
+            let id_store = id_store.clone();
+            let wstore = wstore.clone();
+            Box::pin(async move {
+                let req: PreviewReq = serde_json::from_value(data)
+                    .map_err(|e| format!("bundle.import.preview: {e}"))?;
+                Ok(Some(bundle_import_preview_impl(&id_store, &wstore, req).await?))
+            })
+        }),
+    );
+}
+
+#[derive(serde::Deserialize)]
+struct SkillSelection {
+    source_dir: String,
+    #[serde(default)]
+    import_as: Option<String>,
+}
+#[derive(serde::Deserialize, Default)]
+struct CommitReq {
+    #[serde(default)]
+    file_path: Option<String>,
+    #[serde(default)]
+    zip_base64: Option<String>,
+    #[serde(default)]
+    files: Option<Vec<FileEntry>>,
+    #[serde(default)]
+    expected_content_digest: String,
+    #[serde(default)]
+    bundle_name: Option<String>,
+    #[serde(default)]
+    include_instructions: bool,
+    #[serde(default)]
+    include_context_files: Vec<usize>,
+    #[serde(default)]
+    include_skills: Vec<SkillSelection>,
+    #[serde(default)]
+    include_mcp_servers: Vec<String>,
+}
+
+/// `bundle.import.commit` — Phase 3 §3.2. Re-resolves and re-parses the
+/// same input fresh (never trusts client-supplied preview data for
+/// anything written), rejects on a content-digest mismatch, then writes
+/// only the selected items. Shares `bundle.import`'s existing skill-write/
+/// rollback logic; the differences are selection filtering, the
+/// `bundle_name`/`import_as` overrides, and the digest gate. Extracted
+/// from the RPC closure into a directly-callable, directly-testable
+/// function (the closure itself only deserializes the request and
+/// forwards).
+async fn bundle_import_commit_impl(
+    id_store: &crate::backend::storage::store::Store,
+    wstore: &crate::backend::storage::store::Store,
+    broker: &crate::backend::wps::Broker,
+    req: CommitReq,
+) -> Result<serde_json::Value, String> {
+    use crate::backend::bundle_import as bi;
+
+                let resolved = resolve_import_input(req.file_path, req.zip_base64, req.files, preview_commit_warning_budget())
+                    .map_err(|e| format!("bundle.import.commit: {e}"))?;
+
+                // §3.0.5: reject BEFORE doing anything else on a mismatch --
+                // never a partial import against whatever content was
+                // actually given. The mode tag baked into content_digest
+                // (round 7) means this single comparison also enforces
+                // "same input mode as preview" (round 6) with no separate
+                // mode field needed.
+                if resolved.content_digest != req.expected_content_digest {
+                    return Err(
+                        "bundle.import.commit: content changed since preview (digest mismatch) — re-select and preview again"
+                            .to_string(),
+                    );
+                }
+
+                let parsed = bi::parse_bundle_import_with_budget(&resolved.files, preview_commit_warning_budget())
+                    .map_err(|e| format!("bundle.import.commit: {e}"))?;
+
+                let mut warnings = resolved.intake_warnings;
+                warnings.extend(parsed.warnings.clone());
+
+                // codex P2, PR #2381 round 11: bundle_name must actually be
+                // substituted for parsed.name, never silently ignored.
+                let bundle_name = req.bundle_name.unwrap_or_else(|| parsed.name.clone());
+
+                let instructions = if req.include_instructions { parsed.instructions.clone() } else { String::new() };
+
+                // include_context_files selects by the stable `id` (round
+                // 13), never by (truncatable) display_path.
+                let selected_context_files: Vec<serde_json::Value> = parsed
+                    .context_files
+                    .iter()
+                    .filter(|cf| req.include_context_files.contains(&cf.id))
+                    .map(|cf| json!({ "path": cf.path, "content": cf.content }))
+                    .collect();
+
+                // include_mcp_servers selects by source_path (§3.0), never
+                // by a JSON "name" field. The write path projects to
+                // .config, matching the §3.0 amendment.
+                let include_mcp: std::collections::HashSet<&str> =
+                    req.include_mcp_servers.iter().map(|s| s.as_str()).collect();
+                let selected_mcp_servers: Vec<&serde_json::Value> = parsed
+                    .mcp_servers
+                    .iter()
+                    .filter(|m| include_mcp.contains(m.source_path.as_str()))
+                    .map(|m| &m.config)
+                    .collect();
+
+                let resolved_reqs = resolve_account_requirements(id_store, &parsed.requirements)
+                    .map_err(|e| format!("bundle.import.commit: {e}"))?;
+                // codex P2, PR #2381 round 12: commit's response reuses the
+                // exact same bounded-display projection preview's
+                // equivalent fields use, via the shared bounded_display fn.
+                let resolved_requirement_ids: Vec<String> =
+                    resolved_reqs.iter().filter(|r| r.resolved()).map(|r| bounded_display(&r.id)).collect();
+                let unresolved_requirements: Vec<serde_json::Value> = resolved_reqs
+                    .iter()
+                    .filter(|r| !r.resolved())
+                    .map(|r| json!({
+                        "id": bounded_display(&r.id),
+                        "provider": bounded_display(&r.provider),
+                        "env": bounded_display(&r.env),
+                        "match_count": r.match_count,
+                    }))
+                    .collect();
+
+                // Two-pass skill collision, recomputed server-side --
+                // §4.1 point 4's "empty rename on a colliding skill = skip"
+                // rule is enforced authoritatively here, not left to a
+                // possibly-buggy/malicious client to have honored: without
+                // this, a "duplicate_in_bundle" collision (not yet in the
+                // global catalog) would let the FIRST of two same-slug
+                // skills write successfully under its own slug even with
+                // an empty rename, since skill_upsert_unique_global alone
+                // wouldn't reject it until the second attempt.
+                let global_slugs: std::collections::HashSet<String> = wstore
+                    .skill_list_global()
+                    .map_err(|e| format!("bundle.import.commit: {e}"))?
+                    .into_iter()
+                    .map(|item| item.skill.name)
+                    .collect();
+                let in_bundle_dupes = bi::duplicate_in_bundle_slugs(&parsed.skills);
+
+                let rollback_skills = |ids: &[String]| -> Vec<String> {
+                    ids.iter()
+                        .filter_map(|id| wstore.skill_delete(id).err().map(|e| format!("{id}: {e}")))
+                        .collect()
+                };
+
+                let now = now_ms();
+                let mut imported_skill_ids: Vec<String> = Vec::new();
+                let mut skipped_skills: Vec<String> = Vec::new();
+
+                for selection in &req.include_skills {
+                    let Some(skill) = parsed.skills.iter().find(|s| s.source_dir == selection.source_dir) else {
+                        continue; // source_dir not present in this parse -- nothing to import
+                    };
+                    let collision = bi::classify_skill_collision(&skill.slug, &global_slugs, &in_bundle_dupes);
+                    let non_empty_rename = selection.import_as.as_deref().filter(|s| !s.is_empty());
+
+                    if collision != "none" && non_empty_rename.is_none() {
+                        // §4.1 point 4: never silently sent through with
+                        // its original, known-conflicting slug.
+                        skipped_skills.push(bounded_display(&skill.slug));
+                        continue;
+                    }
+                    let effective_slug = non_empty_rename.map(|s| s.to_string()).unwrap_or_else(|| skill.slug.clone());
+
+                    let row = crate::backend::storage::Skill {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        name: effective_slug.clone(),
+                        trigger: effective_slug.clone(),
+                        skill_type: crate::backend::agent_config::SKILL_TYPE_AGENT_SKILL.to_string(),
+                        description: skill.description.clone(),
+                        content: skill.content.clone(),
+                        is_global: true,
+                        created_at: now,
+                        updated_at: now,
+                    };
+                    match wstore.skill_upsert_unique_global(&row) {
+                        Ok(()) => imported_skill_ids.push(row.id),
+                        Err(crate::backend::storage::error::StoreError::Other(msg))
+                            if msg.contains("already exists") =>
+                        {
+                            warnings.push(format!("skill \"{effective_slug}\": {msg}"));
+                            skipped_skills.push(bounded_display(&effective_slug));
+                        }
+                        Err(e) => {
+                            let rollback_errors = rollback_skills(&imported_skill_ids);
+                            let mut msg = format!(
+                                "bundle.import.commit: failed to create skill \"{effective_slug}\": {e}"
+                            );
+                            if !rollback_errors.is_empty() {
+                                msg.push_str(&format!(
+                                    "; additionally, rollback of {} previously-created skill(s) failed and may have left orphaned global skill row(s): {}",
+                                    rollback_errors.len(),
+                                    rollback_errors.join("; ")
+                                ));
+                            }
+                            return Err(msg);
+                        }
+                    }
+                }
+
+                let memory = Memory {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    name: bundle_name,
+                    description: parsed.description,
+                    is_blank: false,
+                    is_global: false,
+                    provider: String::new(),
+                    model: String::new(),
+                    instructions,
+                    context_files: serde_json::to_string(&selected_context_files)
+                        .unwrap_or_else(|_| "[]".to_string()),
+                    mcp_servers: serde_json::to_string(&selected_mcp_servers)
+                        .unwrap_or_else(|_| "[]".to_string()),
+                    skills: serde_json::to_string(&imported_skill_ids)
+                        .unwrap_or_else(|_| "[]".to_string()),
+                    sort_order: 0,
+                    created_at: now,
+                    updated_at: now,
+                };
+                if let Err(e) = id_store.bundle_memory_upsert(&memory) {
+                    let rollback_errors = rollback_skills(&imported_skill_ids);
+                    let mut msg = format!("bundle.import.commit: {e}");
+                    if !rollback_errors.is_empty() {
+                        msg.push_str(&format!(
+                            "; additionally, rollback of {} previously-created skill(s) failed and may have left orphaned global skill row(s): {}",
+                            rollback_errors.len(),
+                            rollback_errors.join("; ")
+                        ));
+                    }
+                    return Err(msg);
+                }
+
+                broker.publish(crate::backend::wps::WaveEvent {
+                    event: "memories:changed".to_string(),
+                    scopes: vec![], sender: String::new(), persist: 0, data: None,
+                });
+                if !imported_skill_ids.is_empty() {
+                    broker.publish(crate::backend::wps::WaveEvent {
+                        event: "skills:changed".to_string(),
+                        scopes: vec![], sender: String::new(), persist: 0, data: None,
+                    });
+                }
+
+                // codex P1, PR #2381 round 9: bounded the same as preview's
+                // response, not left unbounded like today's bundle.import.
+                let (bounded_warnings, warnings_truncated) = bound_warnings_for_response(warnings);
+
+    Ok(json!({
+        "bundle_id": memory.id,
+        "imported_skill_ids": imported_skill_ids,
+        "skipped_skills": skipped_skills,
+        "resolved_requirement_ids": resolved_requirement_ids,
+        "unresolved_requirements": unresolved_requirements,
+        "warnings": bounded_warnings,
+        "warnings_truncated": warnings_truncated,
+    }))
+}
+
+fn register_bundle_import_commit(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let id_store = state.id_store.clone();
+    let wstore = state.wstore.clone();
+    let broker = state.broker.clone();
+    engine.register_handler(
+        COMMAND_BUNDLE_IMPORT_COMMIT,
+        Box::new(move |data, _ctx| {
+            let id_store = id_store.clone();
+            let wstore = wstore.clone();
+            let broker = broker.clone();
+            Box::pin(async move {
+                let req: CommitReq = serde_json::from_value(data)
+                    .map_err(|e| format!("bundle.import.commit: {e}"))?;
+                Ok(Some(bundle_import_commit_impl(&id_store, &wstore, &broker, req).await?))
+            })
+        }),
+    );
+}
+
+#[cfg(test)]
+mod import_preview_commit_tests {
+    use super::*;
+    use crate::backend::bundle_import as bi;
+    use crate::server::tests::test_state;
+
+    fn manifest(components: serde_json::Value) -> String {
+        serde_json::to_string(&serde_json::json!({
+            "$schema": "https://docs.agentmux.ai/schemas/armory-bundle/v0.1/bundle.schema.json",
+            "name": "test-bundle",
+            "version": "0.1.0",
+            "description": "A test bundle",
+            "components": components,
+            "metadata": {},
+        }))
+        .unwrap()
+    }
+
+    fn entry(path: &str, content: &str) -> FileEntry {
+        FileEntry { path: path.to_string(), content: content.to_string() }
+    }
+
+    fn skill_md(name: &str, description: &str, body: &str) -> String {
+        crate::backend::agent_config::render_skill_md(name, description, body)
+    }
+
+    #[tokio::test]
+    async fn preview_returns_parsed_bundle_with_digest() {
+        let state = test_state();
+        let files = vec![
+            entry("armory.json", &manifest(serde_json::json!({
+                "instructions": ["instructions/AGENTS.md", "instructions/context/notes.md"],
+                "skills": ["skills/deploy"],
+            }))),
+            entry("instructions/AGENTS.md", "Be concise."),
+            entry("instructions/context/notes.md", "Extra context."),
+            entry("skills/deploy/SKILL.md", &skill_md("deploy", "Runs the checklist", "1. Test\n2. Deploy")),
+        ];
+        let req = PreviewReq { file_path: None, zip_base64: None, files: Some(files) };
+        let resp = bundle_import_preview_impl(&state.id_store, &state.wstore, req).await.unwrap();
+
+        assert_eq!(resp["name"], "test-bundle");
+        assert_eq!(resp["instructions_preview"], "Be concise.");
+        assert_eq!(resp["context_files"][0]["id"], 0);
+        assert_eq!(resp["context_files"][0]["display_path"], "notes.md");
+        assert_eq!(resp["skills"][0]["source_dir"], "skills/deploy");
+        assert_eq!(resp["skills"][0]["slug"], "deploy");
+        assert_eq!(resp["skills"][0]["collision"], "none");
+        assert!(resp["content_digest"].as_str().unwrap().len() > 0);
+        assert_eq!(resp["name_collision"], false);
+    }
+
+    #[tokio::test]
+    async fn preview_flags_name_conflict_against_existing_global_skill() {
+        let state = test_state();
+        // Seed an existing global skill named "deploy".
+        state
+            .wstore
+            .skill_upsert_unique_global(&crate::backend::storage::Skill {
+                id: "existing-1".to_string(),
+                name: "deploy".to_string(),
+                trigger: "deploy".to_string(),
+                skill_type: crate::backend::agent_config::SKILL_TYPE_AGENT_SKILL.to_string(),
+                description: "pre-existing".to_string(),
+                content: "pre-existing body".to_string(),
+                is_global: true,
+                created_at: 0,
+                updated_at: 0,
+            })
+            .unwrap();
+
+        let files = vec![
+            entry("armory.json", &manifest(serde_json::json!({ "skills": ["skills/deploy"] }))),
+            entry("skills/deploy/SKILL.md", &skill_md("deploy", "d", "body")),
+        ];
+        let req = PreviewReq { file_path: None, zip_base64: None, files: Some(files) };
+        let resp = bundle_import_preview_impl(&state.id_store, &state.wstore, req).await.unwrap();
+        assert_eq!(resp["skills"][0]["collision"], "name_conflict");
+    }
+
+    #[tokio::test]
+    async fn preview_flags_duplicate_in_bundle_when_two_parsed_skills_share_a_slug() {
+        // Phase 3 spec §3.1, codex P1 round 2: two skills within the same
+        // bundle sharing a slug that ISN'T yet global must both be flagged,
+        // not silently passed as "none".
+        let state = test_state();
+        let files = vec![
+            entry("armory.json", &manifest(serde_json::json!({
+                "skills": ["skills/code-review-v2", "skills/code-review-old"],
+            }))),
+            entry("skills/code-review-v2/SKILL.md", &skill_md("code-review", "new", "body-new")),
+            entry("skills/code-review-old/SKILL.md", &skill_md("code-review", "old", "body-old")),
+        ];
+        let req = PreviewReq { file_path: None, zip_base64: None, files: Some(files) };
+        let resp = bundle_import_preview_impl(&state.id_store, &state.wstore, req).await.unwrap();
+        let skills = resp["skills"].as_array().unwrap();
+        assert_eq!(skills.len(), 2);
+        assert!(skills.iter().all(|s| s["collision"] == "duplicate_in_bundle"));
+    }
+
+    #[tokio::test]
+    async fn commit_rejects_on_digest_mismatch_and_writes_nothing() {
+        let state = test_state();
+        let files = vec![entry("armory.json", &manifest(serde_json::json!({})))];
+        let req = CommitReq {
+            file_path: None,
+            zip_base64: None,
+            files: Some(files),
+            expected_content_digest: "not-the-real-digest".to_string(),
+            bundle_name: None,
+            include_instructions: false,
+            include_context_files: vec![],
+            include_skills: vec![],
+            include_mcp_servers: vec![],
+        };
+        let err = bundle_import_commit_impl(&state.id_store, &state.wstore, &state.broker, req)
+            .await
+            .unwrap_err();
+        assert!(err.contains("digest mismatch"));
+        assert!(state.id_store.bundle_memory_list().unwrap().iter().all(|b| b.name != "test-bundle"));
+    }
+
+    #[tokio::test]
+    async fn commit_applies_bundle_name_override_not_parsed_name() {
+        // codex P2, PR #2381 round 11: bundle_name must actually be
+        // substituted for Memory.name, never silently ignored.
+        let state = test_state();
+        let files = vec![entry("armory.json", &manifest(serde_json::json!({})))];
+        let digest = bi::content_digest_files(&files.iter().map(|f| bi::BundleImportFile { path: f.path.clone(), content: f.content.clone() }).collect::<Vec<_>>());
+        let req = CommitReq {
+            file_path: None,
+            zip_base64: None,
+            files: Some(files),
+            expected_content_digest: digest,
+            bundle_name: Some("Renamed Bundle".to_string()),
+            include_instructions: false,
+            include_context_files: vec![],
+            include_skills: vec![],
+            include_mcp_servers: vec![],
+        };
+        let resp = bundle_import_commit_impl(&state.id_store, &state.wstore, &state.broker, req).await.unwrap();
+        let bundle_id = resp["bundle_id"].as_str().unwrap();
+        let saved = state.id_store.bundle_memory_get(bundle_id).unwrap().unwrap();
+        assert_eq!(saved.name, "Renamed Bundle");
+    }
+
+    #[tokio::test]
+    async fn commit_selects_context_files_by_id_not_display_path() {
+        let state = test_state();
+        let files = vec![
+            entry("armory.json", &manifest(serde_json::json!({
+                "instructions": ["instructions/context/a.md", "instructions/context/b.md"],
+            }))),
+            entry("instructions/context/a.md", "content A"),
+            entry("instructions/context/b.md", "content B"),
+        ];
+        let bi_files: Vec<bi::BundleImportFile> =
+            files.iter().map(|f| bi::BundleImportFile { path: f.path.clone(), content: f.content.clone() }).collect();
+        let digest = bi::content_digest_files(&bi_files);
+        // Only select id 1 (b.md) -- verify a.md (id 0) is excluded.
+        let req = CommitReq {
+            file_path: None,
+            zip_base64: None,
+            files: Some(files),
+            expected_content_digest: digest,
+            bundle_name: None,
+            include_instructions: false,
+            include_context_files: vec![1],
+            include_skills: vec![],
+            include_mcp_servers: vec![],
+        };
+        let resp = bundle_import_commit_impl(&state.id_store, &state.wstore, &state.broker, req).await.unwrap();
+        let bundle_id = resp["bundle_id"].as_str().unwrap();
+        let saved = state.id_store.bundle_memory_get(bundle_id).unwrap().unwrap();
+        assert!(saved.context_files.contains("content B"));
+        assert!(!saved.context_files.contains("content A"));
+    }
+
+    #[tokio::test]
+    async fn commit_skips_colliding_skill_left_with_an_empty_rename() {
+        // §4.1 point 4: never silently sent through under its original,
+        // known-conflicting slug.
+        let state = test_state();
+        state
+            .wstore
+            .skill_upsert_unique_global(&crate::backend::storage::Skill {
+                id: "existing-1".to_string(),
+                name: "deploy".to_string(),
+                trigger: "deploy".to_string(),
+                skill_type: crate::backend::agent_config::SKILL_TYPE_AGENT_SKILL.to_string(),
+                description: "pre-existing".to_string(),
+                content: "pre-existing body".to_string(),
+                is_global: true,
+                created_at: 0,
+                updated_at: 0,
+            })
+            .unwrap();
+
+        let files = vec![
+            entry("armory.json", &manifest(serde_json::json!({ "skills": ["skills/deploy"] }))),
+            entry("skills/deploy/SKILL.md", &skill_md("deploy", "d", "body")),
+        ];
+        let bi_files: Vec<bi::BundleImportFile> =
+            files.iter().map(|f| bi::BundleImportFile { path: f.path.clone(), content: f.content.clone() }).collect();
+        let digest = bi::content_digest_files(&bi_files);
+        let req = CommitReq {
+            file_path: None,
+            zip_base64: None,
+            files: Some(files),
+            expected_content_digest: digest,
+            bundle_name: None,
+            include_instructions: false,
+            include_context_files: vec![],
+            include_skills: vec![SkillSelection { source_dir: "skills/deploy".to_string(), import_as: None }],
+            include_mcp_servers: vec![],
+        };
+        let resp = bundle_import_commit_impl(&state.id_store, &state.wstore, &state.broker, req).await.unwrap();
+        assert!(resp["imported_skill_ids"].as_array().unwrap().is_empty());
+        assert_eq!(resp["skipped_skills"][0], "deploy");
+    }
+
+    #[tokio::test]
+    async fn commit_imports_colliding_skill_under_a_non_empty_rename() {
+        let state = test_state();
+        state
+            .wstore
+            .skill_upsert_unique_global(&crate::backend::storage::Skill {
+                id: "existing-1".to_string(),
+                name: "deploy".to_string(),
+                trigger: "deploy".to_string(),
+                skill_type: crate::backend::agent_config::SKILL_TYPE_AGENT_SKILL.to_string(),
+                description: "pre-existing".to_string(),
+                content: "pre-existing body".to_string(),
+                is_global: true,
+                created_at: 0,
+                updated_at: 0,
+            })
+            .unwrap();
+
+        let files = vec![
+            entry("armory.json", &manifest(serde_json::json!({ "skills": ["skills/deploy"] }))),
+            entry("skills/deploy/SKILL.md", &skill_md("deploy", "d", "body")),
+        ];
+        let bi_files: Vec<bi::BundleImportFile> =
+            files.iter().map(|f| bi::BundleImportFile { path: f.path.clone(), content: f.content.clone() }).collect();
+        let digest = bi::content_digest_files(&bi_files);
+        let req = CommitReq {
+            file_path: None,
+            zip_base64: None,
+            files: Some(files),
+            expected_content_digest: digest,
+            bundle_name: None,
+            include_instructions: false,
+            include_context_files: vec![],
+            include_skills: vec![SkillSelection {
+                source_dir: "skills/deploy".to_string(),
+                import_as: Some("deploy-team-x".to_string()),
+            }],
+            include_mcp_servers: vec![],
+        };
+        let resp = bundle_import_commit_impl(&state.id_store, &state.wstore, &state.broker, req).await.unwrap();
+        assert_eq!(resp["imported_skill_ids"].as_array().unwrap().len(), 1);
+        let imported_id = resp["imported_skill_ids"][0].as_str().unwrap();
+        let saved_skill = state.wstore.skill_get(imported_id).unwrap().unwrap();
+        assert_eq!(saved_skill.name, "deploy-team-x");
+    }
+
+    #[tokio::test]
+    async fn commit_persists_raw_mcp_config_not_the_source_path_wrapper() {
+        // Phase 3 spec §3.0, round 2: every write site touching
+        // parsed.mcp_servers must project to .config before serializing.
+        let state = test_state();
+        let files = vec![
+            entry("armory.json", &manifest(serde_json::json!({ "mcpServers": ["mcp/github.server.json"] }))),
+            entry("mcp/github.server.json", r#"{"command":"npx","args":["-y","gh-mcp"]}"#),
+        ];
+        let bi_files: Vec<bi::BundleImportFile> =
+            files.iter().map(|f| bi::BundleImportFile { path: f.path.clone(), content: f.content.clone() }).collect();
+        let digest = bi::content_digest_files(&bi_files);
+        let req = CommitReq {
+            file_path: None,
+            zip_base64: None,
+            files: Some(files),
+            expected_content_digest: digest,
+            bundle_name: None,
+            include_instructions: false,
+            include_context_files: vec![],
+            include_skills: vec![],
+            include_mcp_servers: vec!["mcp/github.server.json".to_string()],
+        };
+        let resp = bundle_import_commit_impl(&state.id_store, &state.wstore, &state.broker, req).await.unwrap();
+        let bundle_id = resp["bundle_id"].as_str().unwrap();
+        let saved = state.id_store.bundle_memory_get(bundle_id).unwrap().unwrap();
+        let mcp_servers: serde_json::Value = serde_json::from_str(&saved.mcp_servers).unwrap();
+        assert_eq!(mcp_servers[0]["command"], "npx");
+        assert!(mcp_servers[0].get("source_path").is_none(), "must not persist the {{source_path, config}} wrapper");
+    }
+
+    #[tokio::test]
+    async fn read_abf_file_path_rejects_a_missing_path() {
+        let err = read_abf_file_path("C:\\definitely\\not\\a\\real\\path.abf").unwrap_err();
+        assert!(err.contains("failed to open") || err.contains("failed to stat"));
+    }
+
+    #[tokio::test]
+    async fn read_abf_file_path_rejects_a_directory() {
+        let dir = std::env::temp_dir();
+        let err = read_abf_file_path(dir.to_str().unwrap()).unwrap_err();
+        assert!(err.contains("not a regular file") || err.contains("failed to open"));
+    }
+
+    #[tokio::test]
+    async fn read_abf_file_path_reads_a_small_file_correctly() {
+        let path = std::env::temp_dir().join(format!("abf-test-{}.bin", std::process::id()));
+        std::fs::write(&path, b"hello abf").unwrap();
+        let result = read_abf_file_path(path.to_str().unwrap());
+        std::fs::remove_file(&path).ok();
+        assert_eq!(result.unwrap(), b"hello abf".to_vec());
+    }
+
+    #[tokio::test]
+    async fn read_abf_file_path_rejects_a_file_over_the_size_cap_via_sparse_file() {
+        // Verified via a sparse/pre-allocated file (metadata-based rejection,
+        // before any read) rather than actually writing 100MB+ to disk.
+        let path = std::env::temp_dir().join(format!("abf-test-oversized-{}.bin", std::process::id()));
+        {
+            let file = std::fs::File::create(&path).unwrap();
+            file.set_len(MAX_ABF_FILE_SIZE_BYTES + 1).unwrap();
+        }
+        let result = read_abf_file_path(path.to_str().unwrap());
+        std::fs::remove_file(&path).ok();
+        let err = result.unwrap_err();
+        assert!(err.contains("exceeds the limit"), "expected a size-limit error, got: {err}");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn read_abf_file_path_rejects_a_symlink() {
+        let target = std::env::temp_dir().join(format!("abf-symlink-target-{}.bin", std::process::id()));
+        let link = std::env::temp_dir().join(format!("abf-symlink-{}.bin", std::process::id()));
+        std::fs::write(&target, b"real content").unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        let result = read_abf_file_path(link.to_str().unwrap());
+        std::fs::remove_file(&target).ok();
+        std::fs::remove_file(&link).ok();
+        assert!(result.is_err(), "opening a symlink via file_path must fail, not silently follow it");
+    }
+
+    #[test]
+    fn bound_warnings_for_response_caps_the_combined_list() {
+        let many: Vec<String> = (0..500).map(|i| format!("warning {i}")).collect();
+        let (bounded, truncated) = bound_warnings_for_response(many);
+        assert!(truncated);
+        assert!(bounded.len() <= 201);
+        assert!(bounded.last().unwrap().contains("not shown"));
+    }
+
+    #[test]
+    fn bound_warnings_for_response_leaves_a_short_list_untouched() {
+        let few = vec!["a".to_string(), "b".to_string()];
+        let (bounded, truncated) = bound_warnings_for_response(few.clone());
+        assert!(!truncated);
+        assert_eq!(bounded, few);
+    }
+
+    #[test]
+    fn resolve_import_input_rejects_when_zero_or_multiple_inputs_given() {
+        let budget = bi::WarningBudget::unbounded();
+        let none = resolve_import_input(None, None, None, budget).unwrap_err();
+        assert!(none.contains("exactly one"));
+        let both = resolve_import_input(Some("x".to_string()), Some("y".to_string()), None, budget).unwrap_err();
+        assert!(both.contains("exactly one"));
+    }
 }

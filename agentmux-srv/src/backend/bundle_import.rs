@@ -279,6 +279,112 @@ pub struct ParsedBundleImport {
 /// matches `bundle_export.rs`'s own philosophy, and lets a lossy import
 /// still produce a usable bundle rather than an all-or-nothing failure on
 /// e.g. one corrupt skill among five good ones.
+/// Normalize every input file's path and reduce to a first-wins,
+/// deduped `(path -> content)` map — the exact effective representation
+/// `parse_bundle_import` builds internally before doing anything else.
+/// Extracted so the Phase 3 `files`-mode content digest (§3.0.5, round 6)
+/// can compute over the IDENTICAL order-resolved representation the parser
+/// itself uses, rather than a naive raw-input sort that could disagree
+/// with which entry the parser's own first-wins rule actually keeps.
+/// Enforces the accounts/ allowlist (only `accounts/requirements.json` is
+/// ever readable from that directory) the same as every other caller of
+/// this map.
+fn dedup_files_by_path<'a>(files: &'a [BundleImportFile], warnings: &mut WarningSink) -> HashMap<String, &'a str> {
+    let mut by_path: HashMap<String, &str> = HashMap::new();
+    for f in files {
+        let Some(safe_path) = sanitize_context_relative_path(&f.path) else {
+            warnings.push(format!("{}: not a safe path; skipped", f.path));
+            continue;
+        };
+        // reagent P1, PR #2379 round 4: case-insensitive on the DIRECTORY
+        // check -- sanitize_context_relative_path never case-folds, so
+        // `ACCOUNTS/secrets.json` (or any other-case variant) previously
+        // sailed past the literal lowercase `starts_with` check while a
+        // manifest reference using the identical casing would still
+        // resolve it. The exception itself stays exact-match against the
+        // canonical lowercase spelling the exporter always emits — an
+        // other-case "requirements.json" is still inside the rejected
+        // directory, just not recognized as the one allowed file.
+        if safe_path.to_ascii_lowercase().starts_with("accounts/") && safe_path != "accounts/requirements.json" {
+            warnings.push(format!(
+                "{safe_path}: rejected — only accounts/requirements.json is ever read from the accounts/ directory"
+            ));
+            continue;
+        }
+        // reagent P2, PR #2379 round 5: `unzip_bundle_import` explicitly
+        // detects and warns on a duplicate entry within a zip ("first
+        // occurrence kept"), but the raw `files` RPC list reaches this
+        // shared loop directly, bypassing that pass entirely — two input
+        // entries normalizing to the same safe_path silently resolved
+        // last-write-wins with no warning, so a caller inspecting the
+        // input couldn't tell which content actually got imported.
+        if by_path.contains_key(&safe_path) {
+            warnings.push(format!("{safe_path}: duplicate path in input; first occurrence kept"));
+            continue;
+        }
+        by_path.insert(safe_path, f.content.as_str());
+    }
+    by_path
+}
+
+/// Which of the three `bundle.import.preview`/`.commit` input fields
+/// produced a given payload — mixed into the content-digest hash domain
+/// itself (Phase 3 spec §3.0.5, round 7) so a `file_path` preview can never
+/// be satisfied by a `zip_base64` commit of the identical underlying bytes
+/// (both canonicalize to the same raw zip bytes and would otherwise hash
+/// identically), closing the gap a bare byte-digest comparison left open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImportInputMode {
+    FilePath,
+    ZipBase64,
+    Files,
+}
+
+impl ImportInputMode {
+    fn mode_byte(self) -> u8 {
+        match self {
+            ImportInputMode::FilePath => 0x01,
+            ImportInputMode::ZipBase64 => 0x02,
+            ImportInputMode::Files => 0x03,
+        }
+    }
+}
+
+/// SHA-256 content digest for `file_path`/`zip_base64` input — both
+/// canonicalize to the same thing (raw zip bytes), differentiated only by
+/// the mode tag mixed into the hash domain (§3.0.5, round 7).
+pub fn content_digest_raw_bytes(mode: ImportInputMode, zip_bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update([mode.mode_byte()]);
+    hasher.update(zip_bytes);
+    hex::encode(hasher.finalize())
+}
+
+/// SHA-256 content digest for `files`-mode input (§3.0.5, round 6) — hashes
+/// `parse_bundle_import`'s own effective, order-resolved representation
+/// ([`dedup_files_by_path`]'s normalize-then-first-wins reduction, sorted
+/// by normalized key), not the raw input array. This makes the digest
+/// order-independent for genuinely equivalent inputs while remaining
+/// sensitive to any reordering that would actually change which entry the
+/// parser's first-wins rule keeps.
+pub fn content_digest_files(files: &[BundleImportFile]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut discard = WarningSink::new(WarningBudget::unbounded());
+    let deduped = dedup_files_by_path(files, &mut discard);
+    let mut entries: Vec<(&String, &&str)> = deduped.iter().collect();
+    entries.sort_by(|a, b| a.0.cmp(b.0));
+    let mut hasher = Sha256::new();
+    hasher.update([ImportInputMode::Files.mode_byte()]);
+    for (path, content) in entries {
+        hasher.update((path.len() as u64).to_le_bytes());
+        hasher.update(path.as_bytes());
+        hasher.update((content.len() as u64).to_le_bytes());
+        hasher.update(content.as_bytes());
+    }
+    hex::encode(hasher.finalize())
+}
+
 pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImport, String> {
     parse_bundle_import_with_budget(files, WarningBudget::unbounded())
 }
@@ -321,40 +427,7 @@ pub fn parse_bundle_import_with_budget(
     // every file's path the same way regardless of source (zip or raw
     // list) before the allowlist check and before it becomes a lookup key,
     // so both intake paths enforce the same rule on the same canonical form.
-    let mut by_path: HashMap<String, &str> = HashMap::new();
-    for f in files {
-        let Some(safe_path) = sanitize_context_relative_path(&f.path) else {
-            warnings.push(format!("{}: not a safe path; skipped", f.path));
-            continue;
-        };
-        // reagent P1, PR #2379 round 4: case-insensitive on the DIRECTORY
-        // check -- sanitize_context_relative_path never case-folds, so
-        // `ACCOUNTS/secrets.json` (or any other-case variant) previously
-        // sailed past the literal lowercase `starts_with` check while a
-        // manifest reference using the identical casing would still
-        // resolve it. The exception itself stays exact-match against the
-        // canonical lowercase spelling the exporter always emits — an
-        // other-case "requirements.json" is still inside the rejected
-        // directory, just not recognized as the one allowed file.
-        if safe_path.to_ascii_lowercase().starts_with("accounts/") && safe_path != "accounts/requirements.json" {
-            warnings.push(format!(
-                "{safe_path}: rejected — only accounts/requirements.json is ever read from the accounts/ directory"
-            ));
-            continue;
-        }
-        // reagent P2, PR #2379 round 5: `unzip_bundle_import` explicitly
-        // detects and warns on a duplicate entry within a zip ("first
-        // occurrence kept"), but the raw `files` RPC list reaches this
-        // shared loop directly, bypassing that pass entirely — two input
-        // entries normalizing to the same safe_path silently resolved
-        // last-write-wins with no warning, so a caller inspecting the
-        // input couldn't tell which content actually got imported.
-        if by_path.contains_key(&safe_path) {
-            warnings.push(format!("{safe_path}: duplicate path in input; first occurrence kept"));
-            continue;
-        }
-        by_path.insert(safe_path, f.content.as_str());
-    }
+    let by_path = dedup_files_by_path(files, &mut warnings);
 
     let manifest_raw = by_path
         .get("armory.json")
@@ -2034,5 +2107,42 @@ mod tests {
         let display = mcp_server_display(&config);
         assert!(display["name"].is_null());
         assert!(display["command"].is_null());
+    }
+
+    #[test]
+    fn content_digest_raw_bytes_differs_by_mode_for_identical_bytes() {
+        // Phase 3 spec §3.0.5, round 7: file_path and zip_base64 both
+        // canonicalize to the same raw zip bytes -- without a mode tag
+        // mixed into the hash domain, a file_path preview would be
+        // satisfiable by a zip_base64 commit of the same underlying
+        // archive, defeating the round-6 same-mode-required fix.
+        let bytes = b"identical zip bytes";
+        let a = content_digest_raw_bytes(ImportInputMode::FilePath, bytes);
+        let b = content_digest_raw_bytes(ImportInputMode::ZipBase64, bytes);
+        assert_ne!(a, b);
+        // Same mode, same bytes -> identical digest, deterministically.
+        assert_eq!(a, content_digest_raw_bytes(ImportInputMode::FilePath, bytes));
+    }
+
+    #[test]
+    fn content_digest_files_is_order_independent_for_genuinely_equivalent_inputs() {
+        let a = vec![file("armory.json", "{}"), file("instructions/AGENTS.md", "Be concise.")];
+        let b = vec![file("instructions/AGENTS.md", "Be concise."), file("armory.json", "{}")];
+        assert_eq!(content_digest_files(&a), content_digest_files(&b));
+    }
+
+    #[test]
+    fn content_digest_files_changes_when_reordering_changes_the_first_wins_outcome() {
+        // codex P1, PR #2381, round 6: a naive raw-input sort would make
+        // two differently-ordered request bodies hash identically even
+        // when the parser's own first-wins rule would actually import
+        // DIFFERENT content from each (whichever happened to be first).
+        let a = vec![file("instructions/AGENTS.md", "first wins"), file("instructions/AGENTS.md", "second, discarded")];
+        let b = vec![file("instructions/AGENTS.md", "second, discarded"), file("instructions/AGENTS.md", "first wins")];
+        assert_ne!(
+            content_digest_files(&a),
+            content_digest_files(&b),
+            "reordering which entry wins the normalize-then-first-wins reduction must change the digest"
+        );
     }
 }
