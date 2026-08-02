@@ -271,14 +271,6 @@ pub struct ParsedBundleImport {
     pub warnings: Vec<String>,
 }
 
-/// Parse and validate a bundle's files into [`ParsedBundleImport`].
-/// Structural failures (missing/malformed `armory.json`) reject the whole
-/// import — `Err` — since there is nothing safe to partially write.
-/// Per-entry problems (a missing referenced file, an unsafe path, a
-/// malformed SKILL.md) degrade to a warning and that entry is skipped —
-/// matches `bundle_export.rs`'s own philosophy, and lets a lossy import
-/// still produce a usable bundle rather than an all-or-nothing failure on
-/// e.g. one corrupt skill among five good ones.
 /// Normalize every input file's path and reduce to a first-wins,
 /// deduped `(path -> content)` map — the exact effective representation
 /// `parse_bundle_import` builds internally before doing anything else.
@@ -286,9 +278,19 @@ pub struct ParsedBundleImport {
 /// can compute over the IDENTICAL order-resolved representation the parser
 /// itself uses, rather than a naive raw-input sort that could disagree
 /// with which entry the parser's own first-wins rule actually keeps.
-/// Enforces the accounts/ allowlist (only `accounts/requirements.json` is
-/// ever readable from that directory) the same as every other caller of
-/// this map.
+///
+/// Also enforces the accounts/ allowlist (§4.3.5): only
+/// `accounts/requirements.json` is ever readable from that directory,
+/// checked against every file actually present (not just what the
+/// manifest references, since a malformed bundle's `components` object
+/// isn't a trustworthy inventory of its own contents), and normalized the
+/// same way regardless of intake source (zip or raw `files` list) so
+/// neither can bypass the check with a non-canonical spelling
+/// (codex P1, PR #2379 rounds 1–2). A rejected file is excluded from the
+/// returned map entirely, not merely warned about — otherwise a
+/// `components.*` reference pointing at it (e.g.
+/// `accounts/secrets.json`) would still resolve and leak its content into
+/// the imported bundle.
 fn dedup_files_by_path<'a>(files: &'a [BundleImportFile], warnings: &mut WarningSink) -> HashMap<String, &'a str> {
     let mut by_path: HashMap<String, &str> = HashMap::new();
     for f in files {
@@ -385,6 +387,14 @@ pub fn content_digest_files(files: &[BundleImportFile]) -> String {
     hex::encode(hasher.finalize())
 }
 
+/// Parse and validate a bundle's files into [`ParsedBundleImport`].
+/// Structural failures (missing/malformed `armory.json`) reject the whole
+/// import — `Err` — since there is nothing safe to partially write.
+/// Per-entry problems (a missing referenced file, an unsafe path, a
+/// malformed SKILL.md) degrade to a warning and that entry is skipped —
+/// matches `bundle_export.rs`'s own philosophy, and lets a lossy import
+/// still produce a usable bundle rather than an all-or-nothing failure on
+/// e.g. one corrupt skill among five good ones.
 pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImport, String> {
     parse_bundle_import_with_budget(files, WarningBudget::unbounded())
 }
@@ -401,32 +411,9 @@ pub fn parse_bundle_import_with_budget(
 ) -> Result<ParsedBundleImport, String> {
     let mut warnings = WarningSink::new(budget);
 
-    // §4.3.5: reject anything under accounts/ other than requirements.json
-    // outright — never read, never write, never even acknowledged beyond a
-    // warning. Checked against every file actually present, not just what
-    // the manifest references, since a malicious/malformed bundle's
-    // `components` object is not a trustworthy inventory of its own
-    // contents.
-    //
-    // Codex P1, PR #2379: a rejected file must be excluded from `by_path`
-    // entirely, not merely warned about — otherwise a malicious bundle
-    // whose `components.instructions`/`components.mcpServers` REFERENCES
-    // `accounts/secrets.json` would still have that content looked up and
-    // folded into the imported bundle by the code below (and, on a later
-    // re-export of that same bundle, written unredacted straight into
-    // `instructions/AGENTS.md`) — defeating the accounts/ allowlist this
-    // exact loop exists to enforce.
-    // Codex P1, PR #2379 (round 2): the accounts/ allowlist check above
-    // only ever saw a ZIP entry's already-normalized path (unzip_bundle_import
-    // runs every entry through `sanitize_context_relative_path` first). The
-    // raw `files` RPC input skips that step entirely, so a spelling like
-    // `./accounts/secrets.json` or `accounts\secrets.json` doesn't match the
-    // literal `starts_with("accounts/")` check and sails through unrejected
-    // — while a manifest `components.*` entry using the exact same raw
-    // spelling still resolves it via `by_path.get(path)` below. Normalize
-    // every file's path the same way regardless of source (zip or raw
-    // list) before the allowlist check and before it becomes a lookup key,
-    // so both intake paths enforce the same rule on the same canonical form.
+    // Path normalization, first-wins dedup, and accounts/ allowlist
+    // enforcement (§4.3.5) all live in dedup_files_by_path — see its own
+    // doc comment.
     let by_path = dedup_files_by_path(files, &mut warnings);
 
     let manifest_raw = by_path

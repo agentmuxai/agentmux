@@ -35,11 +35,11 @@ function summaryLine(selection: BundleImportSelectionState): string {
     if (selection.includeContextFileIds.length > 0) {
         parts.push(`${selection.includeContextFileIds.length} context file${selection.includeContextFileIds.length === 1 ? "" : "s"}`);
     }
-    const includedSkills = selection.skills.filter((s) => s.checked && s.renameValue.trim().length >= 0);
     // A colliding-but-blank-rename row still shows as "selected" in the
     // checkbox UI but will be skipped server-side -- the summary counts
     // checked rows, matching what the user sees checked, not the final
     // server-side outcome (which the result screen reports separately).
+    const includedSkills = selection.skills.filter((s) => s.checked);
     if (includedSkills.length > 0) {
         parts.push(`${includedSkills.length} skill${includedSkills.length === 1 ? "" : "s"}`);
     }
