@@ -109,6 +109,22 @@ export interface CompactionState {
 }
 
 /**
+ * Live "at least one agent-declared long-running task is attached to this
+ * pane" state — independent of `turnPhase`. A sibling axis, not a
+ * `TurnPhase` variant: see docs/specs/SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md
+ * §2 for why (mirrors `CompactionState`'s own precedent for a concurrent-
+ * but-orthogonal concern that must survive independently of the turn
+ * lifecycle). Sourced from the dock's aggregated `PinnedActivity` list
+ * (shell/subagent/tool adapters), not raw OS process counts — see spec §4.
+ *
+ * `since` is the wall-clock ms the current unbroken "≥1 running" episode
+ * began — not reset by a second task starting while one is already live.
+ */
+export interface AttachedTaskState {
+    since: number;
+}
+
+/**
  * A classified backend failure (the `agentfailure` wave event's payload,
  * `AgentFailure` in `frontend/types/gotypes.d.ts`) currently surfaced for
  * this pane. Single source of truth for "is there an active failure" —
@@ -285,6 +301,14 @@ export interface AgentPaneState {
     /** Live "compaction in progress" state, or null. See {@link CompactionState}. */
     compacting: CompactionState | null;
     /**
+     * Live "attached long-running task" state, or null — see
+     * {@link AttachedTaskState}. Deliberately NOT cleared by any `TurnPhase`
+     * transition (TurnEnd/TurnReset/etc.): a task attached in one turn can
+     * legitimately survive into later turns, so only its own two commands
+     * (`AttachedTaskObserved`/`AttachedTaskCleared`) ever touch this field.
+     */
+    attachedTask: AttachedTaskState | null;
+    /**
      * Wall-clock ms of the most recent REAL `CompactionBoundary` event
      * (backend-sourced, exact — not the ≥50%-drop heuristic below). The
      * `TokensIn` heuristic checks this before firing its own synthetic
@@ -315,6 +339,7 @@ export const initialState = (agentId: string): AgentPaneState => ({
     detailsOpen: false,
     failure: null,
     compacting: null,
+    attachedTask: null,
     lastCompactionBoundaryAt: null,
 });
 
@@ -616,6 +641,20 @@ export type AgentPaneCommand =
            */
           frameTimestamp?: string | null;
       }
+
+    // ── Attached task axis (SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md) ──
+    /**
+     * Fires on the 0→1 transition of "≥1 PinnedActivity is `running` for
+     * this block." No-op (idempotent) if an episode is already in
+     * progress — must NOT reset `since` when a second task starts running
+     * alongside an already-running one.
+     */
+    | { type: "AttachedTaskObserved"; at: number }
+    /**
+     * Fires on the 1→0 transition — the last currently-running
+     * `PinnedActivity` for this block just ended. No-op if already null.
+     */
+    | { type: "AttachedTaskCleared" }
     ;
 
 export type AgentPaneEvent =
@@ -811,7 +850,11 @@ export type AgentPaneEvent =
      * Emitted when the waiting state ends — user submitted or started
      * typing, pane closed, or the 5-minute safety cutoff fired.
      */
-    | { type: "waiting-ended"; reason: "submitted" | "typing" | "closed" };
+    | { type: "waiting-ended"; reason: "submitted" | "typing" | "closed" }
+    /** `AttachedTaskObserved` set `state.attachedTask` (0→1 edge). */
+    | { type: "attached-task-observed"; at: number }
+    /** `AttachedTaskCleared` cleared `state.attachedTask` (1→0 edge). */
+    | { type: "attached-task-cleared" };
 
 export interface ReducerResult {
     state: AgentPaneState;
