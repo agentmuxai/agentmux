@@ -31,11 +31,25 @@ require a genuine backend split. This spec makes that split explicit:
   selected.
 
 Both RPCs are stateless request/response, like everything else in this
-engine — no server-side session or preview-caching token. The frontend holds
-the picked file's bytes in modal state and sends them to both calls; a
-multi-MB base64 payload twice is a non-issue at the sizes this format
-already caps itself to (`MAX_TOTAL_UNCOMPRESSED_BYTES` = 50MB uncompressed,
-typically far less compressed).
+engine — no server-side session or preview-caching token. **codex P1 on PR
+#2381, round 3:** an earlier draft of this spec assumed re-sending a
+base64-encoded payload on both calls was "a non-issue at the sizes this
+format already caps itself to" — that's wrong. RPC traffic (confirmed by
+tracing `frontend/app/store/rpc-client.ts` → `frontend/app/store/ws.ts` →
+`agentmux-srv/src/server/websocket.rs::handle_ws`) rides a single
+WebSocket whose message size is Axum's **unmodified default: 64 MiB**
+(`agentmux-srv/Cargo.toml` pins `axum = "0.7"` → `axum 0.7.9` →
+`tokio-tungstenite 0.24.0`, whose `WebSocketConfig::default()` sets
+`max_message_size: Some(64 << 20)`). A bundle near
+`MAX_TOTAL_UNCOMPRESSED_BYTES` (50 MiB) that doesn't compress well
+produces a zip close to that size; base64 expands it ~4/3 to ~66.7 MiB —
+over the transport ceiling — plus JSON envelope overhead on top. This is
+actually a **pre-existing Phase 2 limitation** (`bundle.import` already
+accepts `zip_base64` today with no wire-size cap, only a post-decode
+content cap), not something Phase 3 introduces — but Phase 3 is what turns
+it from a theoretical edge case into something a real UI import flow will
+routinely brush up against, and its own preview+commit design would send
+the same oversized payload **twice**. See §3.0.5 for the fix.
 
 ## 2. What can collide, and what can't (ground truth, verified against code)
 
@@ -112,11 +126,62 @@ filtered to the selected `source_path`s for commit, unfiltered for the
 existing route. This is a required part of the §3.0 amendment, not an
 implementation detail left to chance.
 
+### 3.0.5 Required transport fix: read the picked file server-side by path, not over the WebSocket
+
+**codex P1 on PR #2381, round 3** (verified against the pinned dependency
+versions — see §1): every RPC, `bundle.import.preview`/`.commit` included,
+travels one WebSocket whose message size is Axum 0.7's unmodified default
+of 64 MiB. A near-cap bundle base64-encodes to ~66.7 MiB — over that
+ceiling — and this spec's own preview-then-commit design would hit it
+**twice**.
+
+**Fix:** `bundle.import.preview` and `bundle.import.commit` both gain a
+third input option, `file_path: string` — a local filesystem path,
+resolved and read **server-side**. This is not a workaround; it's the
+natural shape for this specific flow, because the file was *already*
+local: it came from `show_open_bundle_dialog` (§4 Step 1), which returns a
+path, not bytes. Reading it server-side means the frontend never encodes
+or ships the file's bytes over RPC at all for this flow — it sends the
+path once to preview, the same path again to commit (still stateless, still
+no caching token — just a few dozen bytes instead of tens of megabytes
+each time).
+
+This mirrors an existing precedent in this exact codebase:
+`/agentmux/stream-local-file` (`agentmux-srv/src/server/mod.rs`,
+`files::handle_stream_local_file`) already reads an arbitrary server-local
+path and streams it via a dedicated HTTP route, entirely outside the WS
+RPC transport, precisely because this is a desktop app where the backend
+sidecar and the file the user just picked are on the same machine — not a
+remote server receiving an untrusted upload. `bundle.import`'s new
+`file_path` input is the same trust model, applied on the read side of a
+request instead of a dedicated streaming response.
+
+Validation for `file_path`: the path must exist and be a regular file
+(reject symlinks-to-elsewhere / directories / device files with a clear
+error, not a panic); no extension allowlist is enforced server-side beyond
+that (`show_open_bundle_dialog`'s own filter is the only `.abf` gate, and
+it's advisory — a non-.abf file server-side just fails
+`unzip_bundle_import`'s "not a valid zip archive" check same as today).
+Once read into memory, the bytes go through the **exact same**
+`unzip_bundle_import`/content-cap pipeline as `zip_base64` today — no new
+size-cap logic, just a new way to get the bytes in front of it.
+
+`zip_base64` and `files` remain valid inputs on both new RPCs (unchanged
+from today's `bundle.import`) for callers that don't have a local path —
+e.g. a bundle received over the network by some future integration. Their
+existing WS-transport exposure is a **pre-existing, separately-tracked
+Phase 2 limitation** (§1) this spec does not resolve for that input mode;
+it only ensures the flow this spec actually builds (§4's modal, which
+always has a local path in hand) never depends on it.
+
 ### 3.1 `bundle.import.preview`
 
-**Request** — identical shape to today's `bundle.import`:
+**Request** — today's `bundle.import` shape, plus `file_path` (§3.0.5,
+the one the modal actually uses):
 ```jsonc
-{ "zip_base64": "..." }   // or: { "files": [{ "path": "...", "content": "..." }] }
+{ "file_path": "C:\\Users\\...\\bundle.abf" }
+// or, unchanged from today: { "zip_base64": "..." }
+// or: { "files": [{ "path": "...", "content": "..." }] }
 ```
 
 **Response:**
@@ -201,7 +266,7 @@ Implementation notes:
 **Request** — the same file payload, plus selections:
 ```jsonc
 {
-  "zip_base64": "...",             // or files[], same as preview — re-sent, not a cache token
+  "file_path": "C:\\Users\\...\\bundle.abf",   // or zip_base64/files — same as preview (§3.1), re-sent, not a cache token
   "bundle_name": "Backend Dev Bundle (2)",   // user-editable, defaults to the parsed name
   "include_instructions": true,
   "include_context_files": ["conventions.md"],       // paths to include; omitted path = excluded
@@ -276,9 +341,12 @@ union keeps each step's props typed and testable independently.
   doesn't exist yet — out of scope here since export already has a working
   `zip_base64`-download-style path; noted only so it isn't conflated with
   this spec's needs.)
-- On selection: read the file, base64-encode, call
-  `bundle.import.preview`. Parse/validation errors (malformed zip, missing
-  `armory.json`) surface inline on this same step — don't advance.
+- On selection: call `bundle.import.preview` with `{ file_path: <the
+  picked path> }` (§3.0.5) — the frontend never reads the file's bytes or
+  base64-encodes anything itself; the path is the whole payload. Store the
+  path in modal state for the eventual `bundle.import.commit` call in step
+  3. Parse/validation errors (malformed zip, missing `armory.json`,
+  unreadable path) surface inline on this same step — don't advance.
 
 ### Step 2 — Preview & select
 
@@ -313,7 +381,7 @@ Renders the `bundle.import.preview` response as a checklist:
 - Summary line built from the current selection state (client-side count,
   no extra RPC): "Importing: instructions, 1 context file, 2 skills, 1 MCP
   server."
-- "Import" button calls `bundle.import.commit` with the file bytes +
+- "Import" button calls `bundle.import.commit` with the same `file_path` +
   selections built from step 2's checklist state. On success, close the
   modal and navigate to the new bundle (mirrors whatever "just-created
   bundle" navigation `bundle.upsert`'s own callers already do, if any
@@ -389,7 +457,10 @@ Renders the `bundle.import.preview` response as a checklist:
   config}` wrappers** (the exact round-2 gap codex found on the retained
   `bundle.import` route too — cover both write sites), and the
   pre-existing warn+skip / rollback behavior all still hold when driven
-  through a partial selection rather than "everything."
+  through a partial selection rather than "everything." Both RPCs also
+  need `file_path` input tests (§3.0.5): a valid path parses identically
+  to the equivalent `zip_base64`, and a missing/unreadable/non-file path
+  produces a clear error rather than a panic.
 - **Manual/e2e:** a sample `.abf` was generated for this purpose via
   `agentmux-srv/src/backend/bundle_export.rs`'s existing `export_bundle` +
   `zip_bundle_export` (instructions + 1 context file + 2 skills — one of
