@@ -259,13 +259,41 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                 {(() => {
                     const n = props.node() as Extract<DocumentNode, { type: "context_compacted" }>;
                     const fmt = (tok: number) => tok >= 1000 ? `${Math.round(tok / 1000)}k` : String(tok);
+                    // Real events (backend `CompactionBoundary`) carry a real
+                    // trigger + duration; the heuristic fallback (other
+                    // providers, or a missed real event) has neither. See
+                    // docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md §4.3.
+                    const triggerLabel = n.trigger === "manual"
+                        ? "you ran /compact"
+                        : n.trigger === "auto"
+                            ? "auto-compacted"
+                            : null;
+                    const durationLabel = n.durationMs != null
+                        ? ` · took ${(n.durationMs / 1000).toFixed(1)}s`
+                        : "";
                     return (
                         <div class="agent-context-compacted">
                             <div class="agent-context-compacted-label">
-                                context compacted
+                                context compacted{triggerLabel ? ` — ${triggerLabel}` : ""}
                             </div>
                             <div class="agent-context-compacted-detail">
-                                Earlier history summarized · {fmt(n.tokensBefore)} → {fmt(n.tokensAfter)} tokens
+                                Earlier history summarized · {fmt(n.tokensBefore)} → {fmt(n.tokensAfter)} tokens{durationLabel}
+                            </div>
+                        </div>
+                    );
+                })()}
+            </Show>
+            <Show when={props.node() && props.node().type === "compaction_started"}>
+                {(() => {
+                    const n = props.node() as Extract<DocumentNode, { type: "compaction_started" }>;
+                    const triggerLabel = n.trigger === "manual" ? "you ran /compact" : "context filled up";
+                    return (
+                        <div class="agent-compaction-started">
+                            <div class="agent-compaction-started-label">
+                                Compacting conversation…
+                            </div>
+                            <div class="agent-compaction-started-detail">
+                                {triggerLabel}
                             </div>
                         </div>
                     );

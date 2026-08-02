@@ -11,7 +11,8 @@
 
 import { createTranslator } from "./providers/translator-factory";
 import { ClaudeCodeStreamParser } from "./stream-parser";
-import type { DocumentNode, SessionStats } from "./types";
+import { parseCompactBoundaryFrame, contextCompactedNodeId } from "./compact-boundary";
+import type { ContextCompactedNode, DocumentNode, SessionStats } from "./types";
 
 export interface ParsedHistory {
     nodes: DocumentNode[];
@@ -81,6 +82,61 @@ export function parseHistoryLines(
 
         // Handle stderr events (unlikely in persisted history, but be safe)
         if (rawEvent.type === "stderr") continue;
+
+        // Real compaction-boundary completion data. Same raw-frame
+        // interception as useAgentStream.ts's live path (shared parsing
+        // via compact-boundary.ts) — this frame has no StreamEvent shape
+        // in the provider translator, so without this the replay pipeline
+        // silently dropped every historical compact_boundary along with
+        // its exact token/duration record (Codex P1, PR #2378 round 2).
+        if (rawEvent.type === "system" && rawEvent.subtype === "compact_boundary") {
+            // Bypassing parser.parseLine() below means the parser's
+            // currentTextNode/currentThinkingNode accumulator never sees
+            // this line — without closing it explicitly, text AFTER the
+            // boundary would keep accumulating onto the SAME node id as
+            // text BEFORE it (same bug class as Codex P1 #1104's
+            // tool_call/tool_result merge issue, just for the text
+            // accumulator instead), silently merging content across the
+            // compaction and reordering it before the compaction marker
+            // in the replayed transcript. Flushed unconditionally — even
+            // a boundary frame whose metadata fails to parse below is
+            // still a real boundary in the underlying conversation.
+            // flushPending()'s return value is discarded: those nodes are
+            // already correctly represented in `nodes` from when the
+            // per-line loop processed them.
+            parser.flushPending();
+            const data = parseCompactBoundaryFrame(rawEvent);
+            if (data) {
+                const parsedTs = typeof rawEvent.timestamp === "string" ? Date.parse(rawEvent.timestamp) : NaN;
+                const node: ContextCompactedNode = {
+                    type: "context_compacted",
+                    // Codex P2, PR #2378 round 12: shares useAgentStream.ts's
+                    // exact id-construction function (including its
+                    // content-derived fallback for the timestamp-less
+                    // case) instead of independently reimplementing it here
+                    // with a different fallback (previously nodes.length,
+                    // a batch-relative counter) — the same underlying
+                    // boundary seen live AND via a history-replay overlap
+                    // must always land on the identical id, or the
+                    // document store's same-id dedup can't merge them.
+                    id: contextCompactedNodeId(data),
+                    tokensBefore: data.preTokens,
+                    tokensAfter: data.postTokens,
+                    timestamp: Number.isNaN(parsedTs) ? 0 : parsedTs,
+                    source: "real",
+                    trigger: data.trigger,
+                    durationMs: data.durationMs,
+                };
+                const existing = indexById.get(node.id);
+                if (existing != null) {
+                    nodes[existing] = node;
+                } else {
+                    indexById.set(node.id, nodes.length);
+                    nodes.push(node);
+                }
+            }
+            continue;
+        }
 
         // Translate provider-specific envelope → StreamEvent[]
         const streamEvents = translator.translate(rawEvent);

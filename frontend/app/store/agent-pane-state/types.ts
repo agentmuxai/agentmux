@@ -96,6 +96,19 @@ export type KindBeforeDisconnect =
 export type DisconnectReason = "stream-unsubscribed" | "transport-error";
 
 /**
+ * Live "compaction in progress" state — set the instant the `PreCompact`
+ * hook's `compaction_started` WPS event lands (Tier 1 of
+ * `docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md`),
+ * cleared when the matching `compact_boundary` frame (a real
+ * `CompactionBoundary` command) arrives. `startedAt` drives the live
+ * elapsed-time counter (Tier 2) shown near the pane status chip.
+ */
+export interface CompactionState {
+    trigger: "manual" | "auto";
+    startedAt: number;
+}
+
+/**
  * A classified backend failure (the `agentfailure` wave event's payload,
  * `AgentFailure` in `frontend/types/gotypes.d.ts`) currently surfaced for
  * this pane. Single source of truth for "is there an active failure" —
@@ -269,6 +282,20 @@ export interface AgentPaneState {
      * episode). See {@link PaneFailure}.
      */
     failure: PaneFailure | null;
+    /** Live "compaction in progress" state, or null. See {@link CompactionState}. */
+    compacting: CompactionState | null;
+    /**
+     * Wall-clock ms of the most recent REAL `CompactionBoundary` event
+     * (backend-sourced, exact — not the ≥50%-drop heuristic below). The
+     * `TokensIn` heuristic checks this before firing its own synthetic
+     * `context-compacted` event, so a Claude session that just got a
+     * real boundary doesn't also get a duplicate heuristic-sourced one
+     * for the very next turn's token drop. Providers without a
+     * structured signal (codex/gemini/copilot) never set this, so the
+     * heuristic remains their only detection path. See
+     * `docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md` §4.3.
+     */
+    lastCompactionBoundaryAt: number | null;
 }
 
 export const initialState = (agentId: string): AgentPaneState => ({
@@ -287,6 +314,8 @@ export const initialState = (agentId: string): AgentPaneState => ({
     turnPhase: { kind: "Idle" },
     detailsOpen: false,
     failure: null,
+    compacting: null,
+    lastCompactionBoundaryAt: null,
 });
 
 /**
@@ -543,6 +572,50 @@ export type AgentPaneCommand =
     | { type: "DetailsExpand" }
     /** Explicitly close the log panel. Idempotent if already closed. */
     | { type: "DetailsCollapse" }
+
+    // ── Compaction (SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md) ──
+    /**
+     * The `PreCompact` hook fired — compaction has begun. Sourced from
+     * the `compaction_started` WPS event (`agentmux-bashwrap precompact`
+     * → `useCompactionStream.ts`). Sets `compacting` so the view can
+     * show a live "Compacting…" status chip + elapsed counter (Tier
+     * 1/2). Also bumps `lastEventMs` like `ProviderWaiting` does, so
+     * the stuck-stream watchdog doesn't misfire during a long
+     * compaction that produces no other stream activity.
+     */
+    | { type: "CompactionStarted"; trigger: "manual" | "auto"; at: number }
+    /**
+     * The real `compact_boundary` frame arrived — compaction finished.
+     * Sourced from the backend's `AgentEvent::CompactionBoundary`
+     * (translated 1:1 from Claude Code's stream-json `system` frame —
+     * exact data, not inferred). Clears `compacting`, records
+     * `lastCompactionBoundaryAt` (dedup guard for the `TokensIn`
+     * heuristic), and reconciles `lastContextTokens` to `postTokens` so
+     * the context-fill bar reflects the real post-compaction size
+     * immediately rather than waiting for the next `TokensIn`.
+     */
+    | {
+          type: "CompactionBoundary";
+          trigger: "manual" | "auto";
+          preTokens: number;
+          postTokens: number;
+          durationMs: number;
+          at: number;
+          /**
+           * The `compact_boundary` frame's own `timestamp` field, raw
+           * (not parsed/reformatted) — absent/`null` if the frame didn't
+           * have one (or the caller doesn't have a raw frame at all, e.g.
+           * a test constructing this command directly). Threaded through
+           * ONLY so the emitted `context-compacted` event's node id can
+           * match `parseHistoryLines.ts`'s id for the same persisted line
+           * — never used for `state.at`/watchdog purposes, which stay on
+           * `Date.now()` (Codex P2, PR #2378 round 7). Optional: every
+           * existing call site/test that doesn't have a frame to key on
+           * still type-checks unchanged; `pushContextCompactedNodes`
+           * falls back to a live timestamp when absent.
+           */
+          frameTimestamp?: string | null;
+      }
     ;
 
 export type AgentPaneEvent =
@@ -643,7 +716,25 @@ export type AgentPaneEvent =
     | { type: "tool-started"; name: string }
     | { type: "tool-ended" }
     | { type: "tokens-updated"; input: number | null; output: number | null }
-    | { type: "context-compacted"; tokensBefore: number; tokensAfter: number }
+    /**
+     * `source: "real"` — sourced from an authoritative `CompactionBoundary`
+     * event (`trigger`/`durationMs` present). `source: "heuristic"` —
+     * inferred from a ≥50%-drop in `TokensIn` (the pre-existing
+     * cross-provider fallback; `trigger`/`durationMs` absent). See
+     * `docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md` §4.3.
+     */
+    | {
+          type: "context-compacted";
+          tokensBefore: number;
+          tokensAfter: number;
+          source: "real" | "heuristic";
+          trigger?: "manual" | "auto";
+          durationMs?: number;
+          /** `source: "real"` only — see `CompactionBoundary` command's doc comment. */
+          frameTimestamp?: string | null;
+      }
+    /** `CompactionStarted` landed — compaction is in progress. */
+    | { type: "compaction-started"; trigger: "manual" | "auto" }
     | { type: "provider-waiting"; reason: "rate_limited" }
     /**
      * A failure was observed and recorded on `state.failure`. `turnWasEnded`
@@ -783,3 +874,17 @@ export const INTERRUPT_TIMEOUT_MS = 5_000;
  * stale fire against a graceful promotion to Streaming.
  */
 export const SUBMIT_TIMEOUT_MS = 30_000;
+
+/**
+ * Suppression window for the `TokensIn` ≥50%-drop compaction heuristic
+ * after a REAL `CompactionBoundary` event landed. Claude Code's
+ * `compact_boundary` frame precedes the next turn's `message_start` in
+ * the same stream, so `lastContextTokens` is normally already
+ * reconciled to `postTokens` before the heuristic's next check runs —
+ * this window is a defensive backstop against any ordering surprise or
+ * a `postTokens` that doesn't closely match the next observed
+ * `TokensIn.input`. 2 minutes comfortably covers one turn's round trip
+ * without risking suppressing a LATER, genuinely new compaction. See
+ * `docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md` §4.3.
+ */
+export const COMPACTION_HEURISTIC_SUPPRESS_MS = 120_000;

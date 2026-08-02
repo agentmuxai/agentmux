@@ -42,12 +42,14 @@ import { createTranslator } from "./providers/translator-factory";
 import type { PendingMessage, SignalPair } from "./state";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { ContextCompactedNode, DocumentNode } from "./types";
-import type { TurnPhase } from "@/app/store/agent-pane-state/types";
+import { parseCompactBoundaryFrame, contextCompactedNodeId, contextCompactedLiveTimestamp } from "./compact-boundary";
+import type { AgentPaneEvent, TurnPhase } from "@/app/store/agent-pane-state/types";
 import { getNodeIdSet } from "@/app/store/agent-document-store";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
-import { createStreamFlushQueue } from "./stream-flush-queue";
+import { createStreamFlushQueue, type StreamFlushQueue } from "./stream-flush-queue";
 import { useToolChunkStream } from "./hooks/useToolChunkStream";
 import { useShellNodeStream } from "./hooks/useShellNodeStream";
+import { useCompactionStream } from "./hooks/useCompactionStream";
 import { useTurnLifecycle } from "./hooks/useTurnLifecycle";
 import { usePendingMessageAcceptance } from "./hooks/usePendingMessageAcceptance";
 
@@ -78,6 +80,63 @@ function extractToolArg(tool: string, params: Record<string, unknown> | undefine
                 if (typeof p[k] === "string") return p[k] as string;
             }
             return undefined;
+    }
+}
+
+/**
+ * Shared node-construction for the reducer's `context-compacted` event —
+ * used by BOTH the real `CompactionBoundary` path and the `TokensIn`
+ * heuristic fallback, so the two never drift into different node shapes.
+ * `source`/`trigger`/`durationMs` come straight from the event: "real"
+ * carries all three, "heuristic" carries only `source`. See
+ * docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md §4.3.
+ */
+function pushContextCompactedNodes(
+    paneEvents: AgentPaneEvent[] | undefined,
+    queue: StreamFlushQueue,
+    hasNodeId: (id: string) => boolean,
+    addNodeId: (id: string) => void,
+): void {
+    for (const ev of paneEvents ?? []) {
+        if (ev.type !== "context-compacted") continue;
+        // Codex P2, PR #2378 round 7 (id) / round 12 (timestamp + shared
+        // helpers): a "real" event (source: "real", i.e. a genuine
+        // compact_boundary frame) is keyed and timestamped via the SAME
+        // functions parseHistoryLines.ts uses — see compact-boundary.ts's
+        // doc comments for why sharing them, not independently
+        // reimplementing the fallback logic in each file, is what actually
+        // prevents the two consumers from drifting. The heuristic path has
+        // no frame to key or time on, so it keeps its own Date.now()-based
+        // id/timestamp — nothing in history replay can ever produce a
+        // competing node for a heuristic-sourced detection to collide
+        // with, so a live-only id is fine there.
+        const id =
+            ev.source === "real"
+                ? contextCompactedNodeId({
+                      trigger: ev.trigger,
+                      preTokens: ev.tokensBefore,
+                      postTokens: ev.tokensAfter,
+                      durationMs: ev.durationMs,
+                      frameTimestamp: ev.frameTimestamp,
+                  })
+                : `context-compacted-${Date.now()}`;
+        const timestamp =
+            ev.source === "real" ? contextCompactedLiveTimestamp(ev.frameTimestamp) : Date.now();
+        const compactNode: ContextCompactedNode = {
+            type: "context_compacted",
+            id,
+            tokensBefore: ev.tokensBefore,
+            tokensAfter: ev.tokensAfter,
+            timestamp,
+            source: ev.source,
+            trigger: ev.trigger,
+            durationMs: ev.durationMs,
+        };
+        if (!hasNodeId(compactNode.id)) {
+            addNodeId(compactNode.id);
+            queue.pushNewNode(compactNode);
+            queue.scheduleFlush();
+        }
     }
 }
 
@@ -178,6 +237,7 @@ export function useAgentStream({
     // rather than scheduling their own flush.
     useToolChunkStream({ blockId, queue });
     useShellNodeStream({ blockId, queue });
+    useCompactionStream({ blockId, model, queue, hasNodeId, addNodeId });
 
     onMount(() => {
         if (!enabled || !blockId) return;
@@ -334,6 +394,48 @@ export function useAgentStream({
                     continue;
                 }
 
+                // Real compaction-boundary completion data (Tier 1/2 —
+                // docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md).
+                // Claude Code's `system`/`compact_boundary` frame arrives on this
+                // same raw stdout stream (mirrors agentmux-srv's
+                // `translator/claude.rs::handle_system_message`); intercepted here
+                // directly — like the message_start/message_delta token
+                // extraction below — rather than routed through the provider
+                // translator, which has no StreamEvent shape for it. Parsing is
+                // shared with `parseHistoryLines.ts`'s replay path via
+                // `compact-boundary.ts` (Codex P1, PR #2378 round 2) so the two
+                // can't drift on what counts as a valid frame.
+                if (rawEvent.type === "system" && rawEvent.subtype === "compact_boundary") {
+                    // Compaction happens MID-turn — flushParserPending() is
+                    // only called at finalizeTurn (useTurnLifecycle.ts), so
+                    // without an explicit flush here the parser's
+                    // currentTextNode/currentThinkingNode accumulator never
+                    // sees this line and keeps accumulating text from AFTER
+                    // the compaction onto the SAME node id as text from
+                    // BEFORE it — silently merging content across the
+                    // boundary and rendering it before the compaction
+                    // marker, live, not just on history replay (same root
+                    // cause as the parseHistoryLines.ts fix). Flushed
+                    // unconditionally, even when the metadata below fails
+                    // to parse — it's still a real boundary in the
+                    // underlying conversation.
+                    parser.flushPending();
+                    const compactBoundary = parseCompactBoundaryFrame(rawEvent);
+                    if (compactBoundary) {
+                        const paneEvents = model.dispatchPane({
+                            type: "CompactionBoundary",
+                            trigger: compactBoundary.trigger,
+                            preTokens: compactBoundary.preTokens,
+                            postTokens: compactBoundary.postTokens,
+                            durationMs: compactBoundary.durationMs,
+                            at: Date.now(),
+                            frameTimestamp: compactBoundary.frameTimestamp,
+                        });
+                        pushContextCompactedNodes(paneEvents, queue, hasNodeId, addNodeId);
+                    }
+                    continue;
+                }
+
                 // Extract live token counts from Anthropic stream events before
                 // the translator discards them. message_start carries input_tokens
                 // for this turn; message_delta carries the running output_tokens.
@@ -356,24 +458,12 @@ export function useAgentStream({
                             const modelId = inner.message?.model as string | undefined;
                             const paneEvents = model.dispatchPane({ type: "TokensIn", input: inputTok, model: modelId });
                             // Detect context compaction from the reducer's event output.
-                            // The reducer emits "context-compacted" when input tokens
-                            // drop ≥50% from a >10k baseline — the signature of compaction.
-                            for (const ev of paneEvents ?? []) {
-                                if (ev.type === "context-compacted") {
-                                    const compactNode: ContextCompactedNode = {
-                                        type: "context_compacted",
-                                        id: `context-compacted-${Date.now()}`,
-                                        tokensBefore: ev.tokensBefore,
-                                        tokensAfter: ev.tokensAfter,
-                                        timestamp: Date.now(),
-                                    };
-                                    if (!hasNodeId(compactNode.id)) {
-                                        addNodeId(compactNode.id);
-                                        queue.pushNewNode(compactNode);
-                                        queue.scheduleFlush();
-                                    }
-                                }
-                            }
+                            // Primary signal for Claude is the real CompactionBoundary
+                            // path above; this heuristic (≥50% token drop from a >10k
+                            // baseline) is suppressed by the reducer itself shortly
+                            // after a real boundary landed, and remains the ONLY signal
+                            // for providers with no structured event (codex/gemini/copilot).
+                            pushContextCompactedNodes(paneEvents, queue, hasNodeId, addNodeId);
                         }
                     } else if (inner?.type === "message_delta") {
                         const outputTok = inner.usage?.output_tokens as number | undefined;
