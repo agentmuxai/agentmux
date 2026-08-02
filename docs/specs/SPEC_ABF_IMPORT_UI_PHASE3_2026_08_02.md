@@ -61,6 +61,39 @@ an open question in §7.
 
 ## 3. RPC design
 
+### 3.0 Required Phase 2 amendment: stable per-item source IDs
+
+**codex P1 on PR #2381:** `ParsedSkill.slug` comes from SKILL.md's own
+`name:` frontmatter (`parse_skill_md`), not from the manifest directory
+reference — and `parse_bundle_import`'s skill dedup (`seen_skill_dirs`) is
+keyed on that *directory* string, not on the resulting slug. Two different
+`components.skills` directories whose SKILL.md files both declare the same
+`name:` produce two `ParsedSkill` entries with an **identical** `slug`,
+which the parser never catches (name-uniqueness is only enforced later, at
+write time, by `skill_upsert_unique_global`'s DB constraint). MCP servers
+are worse: `mcp_servers: Vec<Value>` is arbitrary parsed JSON with **no
+required `"name"` field at all** — dedup (`seen_mcp_paths`) is keyed on the
+manifest path, not on any field inside the JSON. A selection request keyed
+on `slug` or a `"name"` value therefore cannot reliably identify — or
+distinguish between — two colliding rows.
+
+**Fix, needed in `bundle_import.rs` before Phase 3 can be built, not just in
+the new RPCs:**
+- `ParsedSkill` gains a `source_dir: String` field — the exact
+  `components.skills` directory reference that produced it (already
+  computed and already unique per entry, since `seen_skill_dirs` dedups on
+  it; just not currently retained on the struct).
+- `mcp_servers` changes shape from `Vec<Value>` to
+  `Vec<ParsedMcpServer { source_path: String, config: Value }>` — same
+  idea, using the already-unique `components.mcpServers` path reference
+  that's discarded today after the `by_path` lookup.
+- Both source identifiers are **selection keys only** — everything else
+  about how skills/MCP servers get written (via slug, via raw JSON
+  respectively) is unchanged.
+
+This is a small, mechanical addition to structs that already compute these
+values and throw them away — not a re-design of the parser.
+
 ### 3.1 `bundle.import.preview`
 
 **Request** — identical shape to today's `bundle.import`:
@@ -78,11 +111,11 @@ an open question in §7.
     { "path": "conventions.md", "size_bytes": 39 }
   ],
   "skills": [
-    { "slug": "deploy-checklist", "description": "...", "collision": "none" },
-    { "slug": "code-review", "description": "...", "collision": "name_conflict" }
+    { "source_dir": "skills/deploy-checklist", "slug": "deploy-checklist", "description": "...", "collision": "none" },
+    { "source_dir": "skills/code-review-v2", "slug": "code-review", "description": "...", "collision": "name_conflict" }
   ],
   "mcp_servers": [
-    { "name": "github", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] }
+    { "source_path": "mcp/github.server.json", "config": { "name": "github", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] } }
   ],
   "requirements": [
     { "id": "req-1", "provider": "github", "env": "GITHUB_TOKEN", "resolved": false, "match_count": 0 }
@@ -92,12 +125,34 @@ an open question in §7.
 }
 ```
 
+`source_dir`/`source_path` are the §3.0 selection keys — always present,
+always unique per row, independent of whatever the row's own `slug`/JSON
+`name` field says. `config` is passed through verbatim for display; the UI
+falls back to `source_path`'s basename when `config.name` is absent.
+
 Implementation notes:
 - `parse_bundle_import` already produces everything here except
-  `collision`/`name_collision` — those are two new, cheap read-only lookups
-  the RPC handler adds: `wstore.skill_list_global()` filtered by name for
-  each parsed skill's slug, and a `id_store.bundle_memory_list()` (or
-  equivalent) name scan. Both are read-only; no new Store methods needed.
+  `collision`/`name_collision`/the requirement `resolved`/`match_count`
+  fields — three new, read-only additions the RPC handler makes:
+  - **Skill collisions**: one call to `skill.catalog.list`'s underlying
+    `wstore.skill_list_global()` (`agentmux-srv/src/server/app_api/skill.rs`,
+    `register_skill_catalog_list`), name-matched against each parsed
+    skill's slug. **Not** `skill.list` (agent-scoped, requires `agent_id`)
+    and **not** a `skill.list_global` command — that command doesn't exist
+    (codex P1 on PR #2381; corrected from an earlier draft of this spec).
+  - **Bundle name collision**: a name scan over existing bundles (whatever
+    read method `bundle.list`'s handler already uses).
+  - **Requirement resolution** (codex P2 on PR #2381): `parse_bundle_import`
+    does not resolve requirements against connected accounts — it only
+    returns the raw `id`/`provider`/`kind`/`env`/`optional` fields parsed
+    from `accounts/requirements.json` (see its own doc comment: "ready for
+    the RPC handler to resolve accounts against"). The **exact** resolution
+    logic already exists in `bundle.rs`'s current `bundle.import` handler
+    (`match_count_by_provider`, a per-provider-deduplicated
+    `id_store.identity_list` lookup — not `wstore`, per that code's own
+    round-4/5 history) and must be extracted into a shared helper both the
+    current commit-path handler and the new preview handler call, rather
+    than duplicated inline in a second place where it could drift.
 - `instructions_preview` is the full instructions string, not truncated
   server-side — truncate for display client-side if needed (keeps the RPC
   contract simple; the size cap already bounds this to something reasonable
@@ -118,10 +173,10 @@ Implementation notes:
   "include_instructions": true,
   "include_context_files": ["conventions.md"],       // paths to include; omitted path = excluded
   "include_skills": [
-    { "slug": "deploy-checklist" },
-    { "slug": "code-review", "import_as": "code-review-team-x" }   // rename to dodge a collision
+    { "source_dir": "skills/deploy-checklist" },
+    { "source_dir": "skills/code-review-v2", "import_as": "code-review-team-x" }   // rename to dodge a collision
   ],
-  "include_mcp_servers": ["github"]
+  "include_mcp_servers": ["mcp/github.server.json"]   // source_path values, not names -- see §3.0
 }
 ```
 
@@ -138,12 +193,17 @@ Implementation notes:
   result before the existing write loop runs; nothing about the write
   loop's own logic (per-skill `skill_upsert_unique_global` call,
   conflict → warn+skip, rollback on infra failure) changes.
+- `include_skills`/`include_mcp_servers` filter the freshly-parsed
+  `skills`/`mcp_servers` lists by matching each entry's `source_dir`/
+  `source_path` (§3.0) — never by `slug` or a JSON `"name"` field, which
+  aren't guaranteed unique across entries.
 - `import_as`: when present, the commit handler substitutes it for the
-  skill's own parsed slug before constructing the `Skill` row — the ONE
-  backend behavior change this spec requires beyond "parse once, write a
-  filtered subset." `ParsedSkill`'s `slug` field is otherwise always
-  derived from the SKILL.md's own `name:` frontmatter (Phase 2,
-  `parse_skill_md`); this is the first path that overrides it.
+  matched skill's own parsed slug before constructing the `Skill` row —
+  the one backend behavior change this spec requires beyond "parse once,
+  write a filtered subset" and the §3.0 struct additions. `ParsedSkill`'s
+  `slug` field is otherwise always derived from the SKILL.md's own `name:`
+  frontmatter (Phase 2, `parse_skill_md`); this is the first path that
+  overrides it.
 - Server-side re-validation of `skill_upsert_unique_global` is the
   authoritative check regardless of what the preview said — a name
   becoming taken between preview and commit (another import, another user)
@@ -169,14 +229,20 @@ union keeps each step's props typed and testable independently.
 
 - Entry point: an "Import Bundle" action in the Armory → Bundles tab,
   opening the modal at this step.
-- File picker: `getApi().showOpenFileDialog()` (the existing IPC bridge,
-  `frontend/util/cef-api.ts`), filtered to `.abf`. This is the only file-
-  selection primitive the app has today (no `<input type=file>` pattern in
-  use) — reuse it as-is, no new host-side plumbing needed for *opening* a
-  file. (Exporting a `.abf` to disk would need a `showSaveFileDialog`,
-  which doesn't exist yet — out of scope here since export already has a
-  working `zip_base64`-download-style path; noted only so it isn't
-  conflated with this spec's needs.)
+- File picker: **codex P1 on PR #2381 — `showOpenFileDialog()` cannot be
+  reused as originally specified.** It takes no arguments
+  (`frontend/util/cef-api.ts:392-394`) and its host-side handler
+  (`agentmux-cef/src/commands/platform.rs`, `show_open_file_dialog`) has a
+  hard-coded `rfd::FileDialog` filter list of image/video/audio extensions
+  only — there's no way to make it show `.abf` files through the existing
+  command. This needs a **new host-side dialog command** (e.g.
+  `show_open_bundle_dialog`, mirroring the existing command's shape but
+  with an `["abf"]` filter) plus a matching `cef-api.ts` entry — new
+  host-side plumbing, not a reuse of what's already there. (Exporting a
+  `.abf` to disk would need an analogous `show_save_*_dialog`, which also
+  doesn't exist yet — out of scope here since export already has a working
+  `zip_base64`-download-style path; noted only so it isn't conflated with
+  this spec's needs.)
 - On selection: read the file, base64-encode, call
   `bundle.import.preview`. Parse/validation errors (malformed zip, missing
   `armory.json`) surface inline on this same step — don't advance.
@@ -227,11 +293,15 @@ Renders the `bundle.import.preview` response as a checklist:
 1. Preview's `collision: "name_conflict"` is computed from a global-skill
    name lookup taken at preview time — a snapshot, not a live constraint.
 2. The modal fetches the full existing global skill-name list **once**,
-   up front (`skill.list_global`, already exists per
-   `agentmux-srv/src/server/app_api/skill.rs`) — this lets the rename text
-   input validate the user's typed alternate **client-side, instantly**
-   (grey out / inline error if the typed name is itself already taken),
-   without a round-trip per keystroke. This is advisory only.
+   up front, via **`skill.catalog.list`** — the window-scoped, no-`agent_id`
+   route Armory already uses (`register_skill_catalog_list`,
+   `agentmux-srv/src/server/app_api/skill.rs`). Not `skill.list` (requires
+   an `agent_id`, agent-scoped) and not `skill.list_global`, which doesn't
+   exist as a command (codex P1 on PR #2381; corrected from an earlier
+   draft). This lets the rename text input validate the user's typed
+   alternate **client-side, instantly** (grey out / inline error if the
+   typed name is itself already taken), without a round-trip per
+   keystroke. This is advisory only.
 3. At commit, the server is the sole authority: `skill_upsert_unique_global`
    runs its own check regardless of what the client validated. A
    client-side "looks available" name can still lose a race server-side —
@@ -251,9 +321,10 @@ Renders the `bundle.import.preview` response as a checklist:
   skip-or-rename. Silently replacing another skill's content by name is a
   much higher-risk operation (could stomp a skill the importing user
   doesn't own/didn't write) that this spec is not taking a position on.
-- **Does not add drag-and-drop file selection.** `showOpenFileDialog` is
-  the existing, proven pattern; drag-and-drop is a plausible follow-up
-  enhancement, not required for a working Phase 3.
+- **Does not add drag-and-drop file selection.** The new
+  `show_open_bundle_dialog` command (§4 Step 1) follows the existing
+  per-purpose dialog-command pattern; drag-and-drop is a plausible
+  follow-up enhancement, not required for a working Phase 3.
 - **Does not change anything about `bundle.export`** or add a "Save File"
   dialog. Export already works via the existing `zip_base64` response;
   wiring that to an actual save-to-disk action is separate, smaller scope
@@ -268,10 +339,12 @@ Renders the `bundle.import.preview` response as a checklist:
   Phase 2's style (`bundle_import.rs`'s existing test module): collision
   flags computed correctly against a seeded fake global-skill list;
   `name_collision` computed correctly against a seeded bundle-name list.
-  `bundle.import.commit` — selection filtering (only checked items get
-  written), `import_as` substitution, and the pre-existing warn+skip /
-  rollback behavior all still hold when driven through a partial
-  selection rather than "everything."
+  `bundle.import.commit` — selection filtering by `source_dir`/
+  `source_path` (only checked items get written, including the case of
+  two entries with a colliding `slug`/`name` but distinct source paths),
+  `import_as` substitution, and the pre-existing warn+skip / rollback
+  behavior all still hold when driven through a partial selection rather
+  than "everything."
 - **Manual/e2e:** a sample `.abf` was generated for this purpose via
   `agentmux-srv/src/backend/bundle_export.rs`'s existing `export_bundle` +
   `zip_bundle_export` (instructions + 1 context file + 2 skills — one of
