@@ -178,6 +178,11 @@ declare global {
          *  or null if the user cancelled. See
          *  docs/specs/SPEC_MEDIA_PANE_2026_07_26.md. */
         showOpenFileDialog(): Promise<string | null>;
+        /** Native "open file" dialog filtered to `.abf` (Armory Bundle
+         *  Format) files. Resolves to the chosen absolute path, or null if
+         *  the user cancelled. See
+         *  docs/specs/SPEC_ABF_IMPORT_UI_PHASE3_2026_08_02.md §4 Step 1. */
+        showOpenBundleDialog(): Promise<string | null>;
         captureScreenshot(rect: { x: number; y: number; width: number; height: number }): Promise<string>;
         setKeyboardChordMode: () => void;
         openAgent: (agentId: string) => Promise<void>;

@@ -273,6 +273,7 @@ async fn route_command(
         "open_external" => commands::platform::open_external(args),
         "reveal_in_file_explorer" => commands::platform::reveal_in_file_explorer(args),
         "show_open_file_dialog" => commands::platform::show_open_file_dialog(args).await,
+        "show_open_bundle_dialog" => commands::platform::show_open_bundle_dialog(args).await,
         "set_window_transparency" => commands::window::set_window_transparency(state, args),
         "set_window_opacity" => commands::window::set_window_opacity(state, args),
         "get_window_opacity" => commands::window::get_window_opacity(state, args).await,

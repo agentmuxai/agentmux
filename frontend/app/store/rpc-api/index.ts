@@ -13,6 +13,7 @@
 
 import { AgentApi } from "./agent";
 import { BlockApi } from "./block";
+import { BundleImportApi } from "./bundle";
 import { FileApi } from "./file";
 import { IdentityApi } from "./identity";
 import { McpApi } from "./mcp";
@@ -36,4 +37,5 @@ export const RpcApi = {
     ...SessionApi,
     ...McpApi,
     ...SkillApi,
+    ...BundleImportApi,
 };
