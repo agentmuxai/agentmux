@@ -35,6 +35,12 @@ pub struct BundleImportFile {
 /// `agent_config::render_skill_md`.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct ParsedSkill {
+    /// The exact `components.skills` directory reference that produced this
+    /// entry (Phase 3 spec §3.0) — a stable, always-unique selection key,
+    /// independent of `slug` (which two entries can share; see the
+    /// `"duplicate_in_bundle"` collision case). Never displayed truncated;
+    /// only used to match a preview row to a commit selection.
+    pub source_dir: String,
     /// The slug from SKILL.md's own `name` field (Agent Skills spec:
     /// must match the parent directory) — reused as both the imported
     /// skill's display name and its `trigger`. Agent-skill-type skills
@@ -44,6 +50,17 @@ pub struct ParsedSkill {
     pub slug: String,
     pub description: String,
     pub content: String,
+}
+
+/// An MCP server parsed out of a `components.mcpServers` reference — Phase
+/// 3 spec §3.0. `source_path` is the stable, always-unique selection key
+/// (the manifest path reference, distinct from whatever `"name"` field
+/// happens to appear inside `config`'s arbitrary JSON, which has no
+/// uniqueness guarantee and isn't even required to be present).
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ParsedMcpServer {
+    pub source_path: String,
+    pub config: Value,
 }
 
 /// One `accounts/requirements.json` entry — mirrors the shape
@@ -64,6 +81,13 @@ pub struct AccountRequirement {
 /// `db_bundles.context_files` stores.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct ImportedContextFile {
+    /// 0-based index within this parse's `context_files` list (Phase 3
+    /// spec §3.1, round 13) — the stable selection key `bundle.import.commit`'s
+    /// `include_context_files` uses. Deterministic and reusable across
+    /// `preview`/`commit` because `expected_content_digest` already
+    /// guarantees both calls parse identical content, so the same index
+    /// always means the same entry. Never used for display.
+    pub id: usize,
     pub path: String,
     pub content: String,
 }
@@ -80,7 +104,7 @@ pub struct ParsedBundleImport {
     pub description: String,
     pub instructions: String,
     pub context_files: Vec<ImportedContextFile>,
-    pub mcp_servers: Vec<Value>,
+    pub mcp_servers: Vec<ParsedMcpServer>,
     pub skills: Vec<ParsedSkill>,
     pub skipped_skills: Vec<String>,
     pub requirements: Vec<AccountRequirement>,
@@ -165,11 +189,25 @@ pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImp
     let manifest: Value = serde_json::from_str(manifest_raw)
         .map_err(|e| format!("armory.json: malformed JSON ({e})"))?;
 
-    let name = manifest
+    // Phase 3 spec §3.1, round 13: bound at the parse source, not at a
+    // later response boundary — `name` is re-submitted verbatim as
+    // `bundle_name` when a user doesn't edit the preview's suggested value
+    // (§3.2, round 11), so `preview` and `commit` (which independently
+    // re-parse) must converge on the identical canonical value
+    // deterministically. There is no separate "full" name anywhere for a
+    // display-only truncation to lose.
+    let raw_name = manifest
         .get("name")
         .and_then(|v| v.as_str())
-        .unwrap_or("imported-bundle")
-        .to_string();
+        .unwrap_or("imported-bundle");
+    let name = if raw_name.chars().count() > MAX_BUNDLE_NAME_CHARS {
+        warnings.push(format!(
+            "armory.json: name exceeds {MAX_BUNDLE_NAME_CHARS} characters; truncated"
+        ));
+        raw_name.chars().take(MAX_BUNDLE_NAME_CHARS).collect()
+    } else {
+        raw_name.to_string()
+    };
     let description = manifest
         .get("description")
         .and_then(|v| v.as_str())
@@ -268,6 +306,7 @@ pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImp
             if let Some(rel) = path.strip_prefix("instructions/context/") {
                 match sanitize_context_relative_path(rel) {
                     Some(safe_rel) => context_files.push(ImportedContextFile {
+                        id: context_files.len(),
                         path: safe_rel,
                         content: content.to_string(),
                     }),
@@ -324,7 +363,10 @@ pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImp
                 continue;
             };
             match parse_skill_md(content) {
-                Some(skill) => skills.push(skill),
+                Some(mut skill) => {
+                    skill.source_dir = dir.clone();
+                    skills.push(skill);
+                }
                 None => {
                     warnings.push(format!("{skill_md_path}: malformed SKILL.md frontmatter; skipped"));
                     skipped_skills.push(dir.clone());
@@ -352,7 +394,7 @@ pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImp
     // verbatim (still containing ${VAR} placeholders; resolution is the
     // RPC handler's job, §4.5).
     // ------------------------------------------------------------------
-    let mut mcp_servers: Vec<Value> = Vec::new();
+    let mut mcp_servers: Vec<ParsedMcpServer> = Vec::new();
     let mut seen_mcp_paths: HashSet<String> = HashSet::new();
     let mut duplicate_mcp_refs: u32 = 0;
     {
@@ -393,7 +435,7 @@ pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImp
                 continue;
             };
             match serde_json::from_str::<Value>(content) {
-                Ok(v) => mcp_servers.push(v),
+                Ok(config) => mcp_servers.push(ParsedMcpServer { source_path: path.clone(), config }),
                 Err(e) => warnings.push(format!("{path}: malformed JSON ({e}); skipped")),
             }
         }
@@ -540,6 +582,9 @@ fn parse_skill_md(content: &str) -> Option<ParsedSkill> {
         }
     }
     Some(ParsedSkill {
+        // Filled in by the caller (parse_bundle_import), which alone knows
+        // the components.skills directory reference that led here.
+        source_dir: String::new(),
         slug: name?,
         // Required, not defaulted: render_skill_md always writes both
         // fields (falling back to a placeholder string, never omitting
@@ -591,6 +636,14 @@ const MAX_ACCOUNT_REQUIREMENTS: usize = 1_000;
 /// pollute the installation's skill catalog. A real bundle needs a
 /// handful to a few dozen skills at most.
 const MAX_IMPORTED_SKILLS: usize = 200;
+
+/// Maximum character length of a bundle's manifest `name`, enforced at
+/// parse time (Phase 3 spec §3.1, round 13) rather than at a later display
+/// boundary — `name` is re-submitted verbatim as `bundle_name` when a user
+/// doesn't edit the preview's suggested value, so the canonical, bounded
+/// value must be what both `preview` and `commit` converge on from the
+/// moment parsing completes. Generous for any real bundle name.
+const MAX_BUNDLE_NAME_CHARS: usize = 200;
 
 /// Single choke point for the per-entry/aggregate size caps, shared by
 /// BOTH intake paths (zip decompression and the raw `files` RPC list) —
@@ -909,6 +962,7 @@ mod tests {
         let result = parse_bundle_import(&files).unwrap();
         assert_eq!(result.instructions, "Main instructions.");
         assert_eq!(result.context_files, vec![ImportedContextFile {
+            id: 0,
             path: "notes.md".to_string(),
             content: "Extra context.".to_string(),
         }]);
@@ -942,6 +996,7 @@ mod tests {
         ];
         let result = parse_bundle_import(&files).unwrap();
         assert_eq!(result.skills.len(), 1);
+        assert_eq!(result.skills[0].source_dir, "skills/deploy-checklist");
         assert_eq!(result.skills[0].slug, "deploy-checklist");
         assert_eq!(result.skills[0].description, "Runs the checklist");
         assert_eq!(result.skills[0].content, "1. Test\n2. Deploy");
@@ -984,7 +1039,8 @@ mod tests {
         ];
         let result = parse_bundle_import(&files).unwrap();
         assert_eq!(result.mcp_servers.len(), 1);
-        assert_eq!(result.mcp_servers[0]["env"]["GITHUB_TOKEN"], "${GITHUB_TOKEN}");
+        assert_eq!(result.mcp_servers[0].source_path, "mcp/github.server.json");
+        assert_eq!(result.mcp_servers[0].config["env"]["GITHUB_TOKEN"], "${GITHUB_TOKEN}");
     }
 
     #[test]
@@ -1373,6 +1429,26 @@ mod tests {
             }
         }
         assert!(warnings.iter().filter(|w| w.contains("exceeds the per-entry limit")).count() >= 4);
+    }
+
+    #[test]
+    fn bounds_an_oversized_manifest_name_at_parse_time() {
+        // Phase 3 spec §3.1, round 13: name must be bounded at the parse
+        // source (not at a later response boundary) so preview and commit
+        // -- which independently re-parse -- always converge on the exact
+        // same canonical value.
+        let oversized_name = "n".repeat(MAX_BUNDLE_NAME_CHARS + 50);
+        let manifest = serde_json::to_string(&serde_json::json!({
+            "name": oversized_name,
+            "version": "0.1.0",
+            "components": {},
+        })).unwrap();
+        let files = vec![file("armory.json", &manifest)];
+        let result_a = parse_bundle_import(&files).unwrap();
+        let result_b = parse_bundle_import(&files).unwrap();
+        assert_eq!(result_a.name.chars().count(), MAX_BUNDLE_NAME_CHARS);
+        assert_eq!(result_a.name, result_b.name, "two independent parses of the same bytes must converge on the identical truncated name");
+        assert!(result_a.warnings.iter().any(|w| w.contains("name exceeds") && w.contains("truncated")));
     }
 
     #[test]

@@ -505,8 +505,17 @@ fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     instructions: parsed.instructions,
                     context_files: serde_json::to_string(&parsed.context_files)
                         .unwrap_or_else(|_| "[]".to_string()),
-                    mcp_servers: serde_json::to_string(&parsed.mcp_servers)
-                        .unwrap_or_else(|_| "[]".to_string()),
+                    // Phase 3 spec §3.0, round 2: `parsed.mcp_servers` is now
+                    // `Vec<ParsedMcpServer>{source_path, config}` (a stable
+                    // selection key alongside the raw config) — every write
+                    // site must project to `.config` before serializing, or
+                    // this would persist the wrapper object instead of the
+                    // raw MCP config every consumer of `Memory.mcp_servers`
+                    // expects.
+                    mcp_servers: serde_json::to_string(
+                        &parsed.mcp_servers.iter().map(|m| &m.config).collect::<Vec<_>>(),
+                    )
+                    .unwrap_or_else(|_| "[]".to_string()),
                     skills: serde_json::to_string(&imported_skill_ids)
                         .unwrap_or_else(|_| "[]".to_string()),
                     sort_order: 0,
