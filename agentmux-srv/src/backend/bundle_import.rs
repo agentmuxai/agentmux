@@ -214,6 +214,7 @@ pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImp
     // content into instructions_parts once per repetition, letting a
     // sub-50MB archive expand to many gigabytes before `join`.
     let mut seen_instruction_paths: HashSet<String> = HashSet::new();
+    let mut duplicate_instruction_refs: u32 = 0;
     if let Some(paths) = components.and_then(|c| c.get("instructions")).and_then(|v| v.as_array()) {
         for path_val in paths {
             let Some(raw_path) = path_val.as_str() else {
@@ -231,8 +232,28 @@ pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImp
                 warnings.push(format!("components.instructions: \"{raw_path}\" is not a safe path; skipped"));
                 continue;
             };
+            // codex P1, PR #2379 round 6: accounts/requirements.json is
+            // intentionally IN by_path (the dedicated parser below needs
+            // to read it), but it must never be reachable through this
+            // generic lookup — a manifest listing it here would otherwise
+            // copy its raw JSON straight into `instructions`, later
+            // written unredacted to `instructions/AGENTS.md` on export.
+            if is_requirements_json(&path) {
+                warnings.push(format!(
+                    "components.instructions: \"{path}\" is the accounts/ requirements file; not readable as instructions"
+                ));
+                continue;
+            }
+            // codex P1, PR #2379 round 6: dedup already avoids cloning
+            // CONTENT per duplicate reference (round 3), but pushing one
+            // warning STRING per duplicate is itself an amplification
+            // vector — a permitted 10 MB manifest repeating one short
+            // path hundreds of thousands of times could allocate hundreds
+            // of megabytes of warning text serialized into the RPC
+            // response. Count instead; a single summary warning is pushed
+            // after the loop.
             if !seen_instruction_paths.insert(path.clone()) {
-                warnings.push(format!("components.instructions: \"{path}\" referenced more than once; duplicate skipped"));
+                duplicate_instruction_refs += 1;
                 continue;
             }
             let Some(content) = by_path.get(path.as_str()) else {
@@ -254,6 +275,11 @@ pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImp
             }
         }
     }
+    if duplicate_instruction_refs > 0 {
+        warnings.push(format!(
+            "components.instructions: {duplicate_instruction_refs} duplicate reference(s) skipped"
+        ));
+    }
     let instructions = instructions_parts.join("\n\n---\n\n");
 
     // ------------------------------------------------------------------
@@ -262,6 +288,7 @@ pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImp
     let mut skills: Vec<ParsedSkill> = Vec::new();
     let mut skipped_skills: Vec<String> = Vec::new();
     let mut seen_skill_dirs: HashSet<String> = HashSet::new();
+    let mut duplicate_skill_refs: u32 = 0;
     if let Some(dirs) = components.and_then(|c| c.get("skills")).and_then(|v| v.as_array()) {
         for dir_val in dirs {
             let Some(raw_dir) = dir_val.as_str() else {
@@ -274,8 +301,10 @@ pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImp
                 warnings.push(format!("components.skills: \"{raw_dir}\" is not a safe path; skipped"));
                 continue;
             };
+            // codex P1, PR #2379 round 6: bounded the same way as
+            // components.instructions above.
             if !seen_skill_dirs.insert(dir.clone()) {
-                warnings.push(format!("components.skills: \"{dir}\" referenced more than once; duplicate skipped"));
+                duplicate_skill_refs += 1;
                 continue;
             }
             let skill_md_path = format!("{}/SKILL.md", dir.trim_end_matches('/'));
@@ -293,6 +322,9 @@ pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImp
             }
         }
     }
+    if duplicate_skill_refs > 0 {
+        warnings.push(format!("components.skills: {duplicate_skill_refs} duplicate reference(s) skipped"));
+    }
 
     // ------------------------------------------------------------------
     // mcp servers — every path in components.mcpServers, parsed as JSON
@@ -301,6 +333,7 @@ pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImp
     // ------------------------------------------------------------------
     let mut mcp_servers: Vec<Value> = Vec::new();
     let mut seen_mcp_paths: HashSet<String> = HashSet::new();
+    let mut duplicate_mcp_refs: u32 = 0;
     if let Some(paths) = components.and_then(|c| c.get("mcpServers")).and_then(|v| v.as_array()) {
         for path_val in paths {
             let Some(raw_path) = path_val.as_str() else {
@@ -313,8 +346,20 @@ pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImp
                 warnings.push(format!("components.mcpServers: \"{raw_path}\" is not a safe path; skipped"));
                 continue;
             };
+            // codex P1, PR #2379 round 6: same rejection as
+            // components.instructions above -- requirements.json's raw
+            // content is valid JSON and would otherwise parse cleanly
+            // into an mcpServers entry, leaking it the same way.
+            if is_requirements_json(&path) {
+                warnings.push(format!(
+                    "components.mcpServers: \"{path}\" is the accounts/ requirements file; not readable as an MCP server config"
+                ));
+                continue;
+            }
+            // codex P1, PR #2379 round 6: bounded the same way as
+            // components.instructions above.
             if !seen_mcp_paths.insert(path.clone()) {
-                warnings.push(format!("components.mcpServers: \"{path}\" referenced more than once; duplicate skipped"));
+                duplicate_mcp_refs += 1;
                 continue;
             }
             let Some(content) = by_path.get(path.as_str()) else {
@@ -327,48 +372,61 @@ pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImp
             }
         }
     }
+    if duplicate_mcp_refs > 0 {
+        warnings.push(format!("components.mcpServers: {duplicate_mcp_refs} duplicate reference(s) skipped"));
+    }
 
     // ------------------------------------------------------------------
     // accounts/requirements.json — read-only input to §4.5, never written
     // anywhere as-is.
     // ------------------------------------------------------------------
     let mut requirements: Vec<AccountRequirement> = Vec::new();
-    if let Some(req_path) = components.and_then(|c| c.get("accounts")).and_then(|v| v.as_str()) {
-        if req_path != "accounts/requirements.json" {
-            warnings.push(format!(
-                "components.accounts: \"{req_path}\" is not accounts/requirements.json; ignored per the accounts/ allowlist"
-            ));
-        } else if let Some(content) = by_path.get(req_path) {
-            #[derive(Deserialize)]
-            struct RequirementsDoc {
-                #[serde(default)]
-                requirements: Vec<AccountRequirement>,
-            }
-            match serde_json::from_str::<RequirementsDoc>(content) {
-                Ok(doc) => {
-                    // codex P1, PR #2379 round 4: unbounded, the RPC
-                    // handler's per-requirement account lookup becomes a
-                    // synchronous store query per row — a permitted 10 MB
-                    // JSON entry can hold tens/hundreds of thousands of
-                    // (duplicate or distinct) requirements and keep that
-                    // handler busy for a prolonged time. Bounding here
-                    // protects the parse step itself; the handler
-                    // separately dedupes by provider so its actual query
-                    // count stays low even at this cap.
-                    if doc.requirements.len() > MAX_ACCOUNT_REQUIREMENTS {
-                        warnings.push(format!(
-                            "accounts/requirements.json: {} requirements exceeds the limit ({MAX_ACCOUNT_REQUIREMENTS}); only the first {MAX_ACCOUNT_REQUIREMENTS} are used",
-                            doc.requirements.len()
-                        ));
-                        requirements = doc.requirements.into_iter().take(MAX_ACCOUNT_REQUIREMENTS).collect();
-                    } else {
-                        requirements = doc.requirements;
-                    }
+    if let Some(raw_req_path) = components.and_then(|c| c.get("accounts")).and_then(|v| v.as_str()) {
+        // reagent P2, PR #2379 round 6: this was the one remaining
+        // manifest-reference lookup still comparing/using the raw,
+        // un-normalized string -- the same bug class round 4 fixed for
+        // components.instructions/skills/mcpServers, just missed here. A
+        // valid non-canonical spelling (e.g. "./accounts/requirements.json")
+        // failed the literal equality check, silently dropping legitimate
+        // account requirements.
+        let req_path = sanitize_context_relative_path(raw_req_path).filter(|p| is_requirements_json(p));
+        if let Some(req_path) = &req_path {
+            if let Some(content) = by_path.get(req_path.as_str()) {
+                #[derive(Deserialize)]
+                struct RequirementsDoc {
+                    #[serde(default)]
+                    requirements: Vec<AccountRequirement>,
                 }
-                Err(e) => warnings.push(format!("accounts/requirements.json: malformed JSON ({e}); ignored")),
+                match serde_json::from_str::<RequirementsDoc>(content) {
+                    Ok(doc) => {
+                        // codex P1, PR #2379 round 4: unbounded, the RPC
+                        // handler's per-requirement account lookup becomes a
+                        // synchronous store query per row — a permitted 10 MB
+                        // JSON entry can hold tens/hundreds of thousands of
+                        // (duplicate or distinct) requirements and keep that
+                        // handler busy for a prolonged time. Bounding here
+                        // protects the parse step itself; the handler
+                        // separately dedupes by provider so its actual query
+                        // count stays low even at this cap.
+                        if doc.requirements.len() > MAX_ACCOUNT_REQUIREMENTS {
+                            warnings.push(format!(
+                                "accounts/requirements.json: {} requirements exceeds the limit ({MAX_ACCOUNT_REQUIREMENTS}); only the first {MAX_ACCOUNT_REQUIREMENTS} are used",
+                                doc.requirements.len()
+                            ));
+                            requirements = doc.requirements.into_iter().take(MAX_ACCOUNT_REQUIREMENTS).collect();
+                        } else {
+                            requirements = doc.requirements;
+                        }
+                    }
+                    Err(e) => warnings.push(format!("accounts/requirements.json: malformed JSON ({e}); ignored")),
+                }
+            } else {
+                warnings.push("components.accounts references accounts/requirements.json, but it's not present in the bundle".to_string());
             }
         } else {
-            warnings.push("components.accounts references accounts/requirements.json, but it's not present in the bundle".to_string());
+            warnings.push(format!(
+                "components.accounts: \"{raw_req_path}\" is not accounts/requirements.json; ignored per the accounts/ allowlist"
+            ));
         }
     }
 
@@ -383,6 +441,19 @@ pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImp
         requirements,
         warnings,
     })
+}
+
+/// True if `path` is (case-insensitively) the one file ever read out of
+/// the accounts/ directory. Used both to allow it into `by_path` (the
+/// accounts/ allowlist above) and to REJECT it from every OTHER
+/// component category's generic lookup (codex P1, PR #2379 round 6) —
+/// components.instructions/mcpServers must never be able to pull its raw
+/// JSON content in as if it were ordinary bundle content (e.g. straight
+/// into `instructions/AGENTS.md` on a later export, or into an mcpServer
+/// entry), since only the dedicated accounts/requirements.json parser is
+/// meant to ever read it.
+fn is_requirements_json(path: &str) -> bool {
+    path.eq_ignore_ascii_case("accounts/requirements.json")
 }
 
 /// Parse a SKILL.md file (`render_skill_md`'s exact output shape, and
@@ -635,19 +706,26 @@ pub fn unzip_bundle_import(zip_bytes: &[u8]) -> Result<(Vec<BundleImportFile>, V
         // still caught (rather than trusting zip metadata alone).
         let mut limited = entry.by_ref().take(MAX_ENTRY_UNCOMPRESSED_BYTES + 1);
         let mut buf: Vec<u8> = Vec::new();
-        if let Err(e) = limited.read_to_end(&mut buf) {
+        let read_err = limited.read_to_end(&mut buf).err();
+
+        // codex P1, PR #2379 round 5/6: `check_entry_size` accounts these
+        // bytes toward the aggregate budget BEFORE deciding whether to
+        // keep the entry, unlike the previous inline checks here (which
+        // accumulated only KEPT entries' bytes). Called unconditionally
+        // here — even when the read above ultimately errored (e.g. a
+        // forged CRC on an otherwise-decompressing entry) — since
+        // `read_to_end` can leave real decompressed bytes in `buf` before
+        // returning an error; that decompression work already happened
+        // regardless of the read's outcome, and up to MAX_ENTRY_COUNT
+        // such corrupt entries must not be able to force ~10MB of work
+        // each while the aggregate counter stays untouched.
+        let keep = check_entry_size(&safe_name, buf.len() as u64, &mut total_uncompressed, &mut warnings)?;
+
+        if let Some(e) = read_err {
             warnings.push(format!("{safe_name}: failed to read entry: {e}"));
             continue;
         }
-
-        // codex P1, PR #2379 round 5: `check_entry_size` accounts these
-        // bytes toward the aggregate budget BEFORE deciding whether to
-        // keep the entry, unlike the previous inline checks here (which
-        // accumulated only KEPT entries' bytes, so an entry that failed
-        // its own per-entry cap was decompressed — real work already
-        // spent — and then discarded without ever counting against the
-        // aggregate limit).
-        if !check_entry_size(&safe_name, buf.len() as u64, &mut total_uncompressed, &mut warnings)? {
+        if !keep {
             continue;
         }
         let content = match String::from_utf8(buf) {
@@ -710,7 +788,10 @@ mod tests {
         ];
         let result = parse_bundle_import(&files).unwrap();
         assert_eq!(result.instructions, "Be concise.");
-        assert!(result.warnings.iter().any(|w| w.contains("referenced more than once")));
+        // codex P1, PR #2379 round 6: one bounded summary warning instead
+        // of one warning string per duplicate (its own amplification
+        // vector -- see the round-6 tests below).
+        assert!(result.warnings.iter().any(|w| w.contains("2 duplicate reference(s) skipped")));
     }
 
     #[test]
@@ -726,7 +807,8 @@ mod tests {
         let result = parse_bundle_import(&files).unwrap();
         assert_eq!(result.skills.len(), 1);
         assert_eq!(result.mcp_servers.len(), 1);
-        assert!(result.warnings.iter().filter(|w| w.contains("referenced more than once")).count() == 2);
+        assert!(result.warnings.iter().any(|w| w.contains("components.skills: 1 duplicate reference(s) skipped")));
+        assert!(result.warnings.iter().any(|w| w.contains("components.mcpServers: 1 duplicate reference(s) skipped")));
     }
 
     #[test]
@@ -947,6 +1029,85 @@ mod tests {
         let result = parse_bundle_import(&files).unwrap();
         assert_eq!(result.requirements.len(), MAX_ACCOUNT_REQUIREMENTS);
         assert!(result.warnings.iter().any(|w| w.contains("exceeds the limit")));
+    }
+
+    #[test]
+    fn resolves_a_non_canonical_components_accounts_reference() {
+        // reagent P2, PR #2379 round 6: components.accounts was the one
+        // remaining manifest-reference lookup still comparing the raw,
+        // un-normalized string -- the same bug class round 4 fixed for
+        // instructions/skills/mcpServers.
+        let files = vec![
+            file("armory.json", &minimal_manifest(serde_json::json!({
+                "accounts": "./accounts/requirements.json",
+            }))),
+            file("accounts/requirements.json", r#"{"requirements":[{"id":"gh-main","provider":"github","kind":"api-key","env":"GITHUB_TOKEN","optional":false}]}"#),
+        ];
+        let result = parse_bundle_import(&files).unwrap();
+        assert_eq!(result.requirements.len(), 1);
+        assert!(result.warnings.iter().all(|w| !w.contains("is not accounts/requirements.json")));
+    }
+
+    #[test]
+    fn requirements_json_is_not_readable_through_components_instructions_or_mcp_servers() {
+        // codex P1, PR #2379 round 6: accounts/requirements.json is
+        // intentionally in by_path for the dedicated parser above, but
+        // must never be reachable through the generic component lookups
+        // -- otherwise its raw content leaks into instructions (and later
+        // an export's AGENTS.md) or an mcpServers entry.
+        let files = vec![
+            file("armory.json", &minimal_manifest(serde_json::json!({
+                "instructions": ["accounts/requirements.json"],
+                "mcpServers": ["accounts/requirements.json"],
+            }))),
+            file("accounts/requirements.json", r#"{"requirements":[{"id":"gh-main","provider":"github","kind":"api-key","env":"GITHUB_TOKEN_SECRET_LEAK","optional":false}]}"#),
+        ];
+        let result = parse_bundle_import(&files).unwrap();
+        assert!(!result.instructions.contains("GITHUB_TOKEN_SECRET_LEAK"));
+        assert!(result.mcp_servers.is_empty());
+        assert!(result.warnings.iter().any(|w| w.contains("components.instructions") && w.contains("not readable as instructions")));
+        assert!(result.warnings.iter().any(|w| w.contains("components.mcpServers") && w.contains("not readable as an MCP server config")));
+    }
+
+    #[test]
+    fn duplicate_reference_warnings_are_bounded_to_one_summary_per_component_category() {
+        // codex P1, PR #2379 round 6: dedup already avoids cloning
+        // CONTENT per duplicate (round 3), but pushing one warning STRING
+        // per duplicate was itself unbounded -- a permitted 10 MB
+        // manifest repeating one short path hundreds of thousands of
+        // times could allocate hundreds of megabytes of warning text.
+        let many_dupes: Vec<Value> = (0..1_000).map(|_| serde_json::json!("instructions/AGENTS.md")).collect();
+        let files = vec![
+            file("armory.json", &minimal_manifest(serde_json::json!({ "instructions": many_dupes }))),
+            file("instructions/AGENTS.md", "Be concise."),
+        ];
+        let result = parse_bundle_import(&files).unwrap();
+        assert_eq!(result.instructions, "Be concise.");
+        assert_eq!(
+            result.warnings.iter().filter(|w| w.contains("duplicate reference(s) skipped")).count(),
+            1,
+            "expected exactly one summary warning, got: {:?}",
+            result.warnings
+        );
+        assert!(result.warnings.iter().any(|w| w.contains("999 duplicate reference(s) skipped")));
+    }
+
+    #[test]
+    fn unzip_counts_bytes_read_before_a_decompression_error_toward_the_aggregate() {
+        // codex P1, PR #2379 round 6: read_to_end can leave real
+        // decompressed bytes in `buf` even when it ultimately returns an
+        // error (e.g. a forged CRC on an otherwise-valid entry) -- that
+        // decompression work happened regardless, and must count.
+        // Directly exercises the ordering fix (check_entry_size runs
+        // before the read-error branch) since forging a CRC mismatch
+        // through the public ZipWriter API isn't practical.
+        let mut total: u64 = 0;
+        let mut warnings = Vec::new();
+        // Simulates: read_to_end returned Err, but buf still holds
+        // MAX_ENTRY_UNCOMPRESSED_BYTES bytes of real decompressed data.
+        let keep = check_entry_size("corrupt.md", MAX_ENTRY_UNCOMPRESSED_BYTES, &mut total, &mut warnings);
+        assert_eq!(keep, Ok(true), "bytes read before the error must still count");
+        assert_eq!(total, MAX_ENTRY_UNCOMPRESSED_BYTES);
     }
 
     #[test]
