@@ -21,6 +21,8 @@
 // the URL — the auth key specifically is only injected for agent-CLI-type
 // controllers today, see agentmux-srv/src/server/agent_handlers/input.rs).
 
+import { pathToFileURL } from "node:url";
+
 const USAGE = `muxspect — live process/turn-state introspection for the current AgentMux instance
 
 Usage:
@@ -82,15 +84,23 @@ function renderList(data) {
         console.log("(no controller-backed blocks in this instance)");
         return;
     }
+    // "pane_type" reflects static pane classification (is_agent_pane), NOT
+    // live turn activity — that's what `lifecycle` is for (`lifecycle_from`
+    // maps turn_active=true straight to Lifecycle::Running; see
+    // agentmux-srv/src/broker/process.rs). A column literally named "turn"
+    // showing pane-type instead of turn state was reviewed as misleading
+    // (codex P2 on PR #2380) — `list`'s ProcessStatus rows don't carry
+    // BlockControllerRuntimeStatus::turn_active at all (that needs
+    // `describe`), so this renames rather than fetching it at extra cost.
     const rows = blocks.map((b) => ({
         block_id: b.block_id,
         type: b.controller_type || "?",
         lifecycle: b.lifecycle,
-        turn: b.is_agent_pane ? "agent" : "-",
+        pane_type: b.is_agent_pane ? "agent" : "term",
         confidence: b.liveness_confidence,
         age: ageString(b.last_computed_ms),
     }));
-    const cols = ["block_id", "type", "lifecycle", "turn", "confidence", "age"];
+    const cols = ["block_id", "type", "lifecycle", "pane_type", "confidence", "age"];
     const widths = Object.fromEntries(
         cols.map((c) => [c, Math.max(c.length, ...rows.map((r) => String(r[c]).length))])
     );
@@ -129,12 +139,31 @@ function renderDescribe(data) {
     }
 }
 
-async function main() {
-    const args = process.argv.slice(2);
-    const cmd = args[0] && !args[0].startsWith("-") ? args[0] : "list";
-    const json = args.includes("--json");
+/**
+ * Split argv into `{ cmd, blockId, json, help }`, flags-and-positionals
+ * separated regardless of ordering. Flags can legally appear before OR
+ * after the positional args (both 'muxspect describe --json <id>' and
+ * 'muxspect --json describe <id>' are natural to type) — filtering them out
+ * first, then reading command/args positionally, is what makes both orders
+ * work; indexing into the raw, flag-interspersed argv (the original
+ * implementation) silently ran 'list' instead of 'describe' — or picked up
+ * a flag string as the block_id — depending on where the flag landed
+ * (reagent P2 on PR #2380). Exported (pure, no I/O) for
+ * muxspect.test.mjs.
+ */
+export function parseArgs(argv) {
+    const json = argv.includes("--json");
+    const help = argv.includes("--help") || argv.includes("-h");
+    const positional = argv.filter((a) => !a.startsWith("-"));
+    const cmd = positional[0] ?? "list";
+    const blockId = positional[1];
+    return { cmd, blockId, json, help };
+}
 
-    if (cmd === "help" || args.includes("--help") || args.includes("-h")) {
+async function main() {
+    const { cmd, blockId, json, help } = parseArgs(process.argv.slice(2));
+
+    if (cmd === "help" || help) {
         console.log(USAGE);
         return;
     }
@@ -149,7 +178,6 @@ async function main() {
     }
 
     if (cmd === "describe") {
-        const blockId = args[1];
         if (!blockId) fail("describe requires a block_id — 'muxspect describe <block_id>'");
         const data = await apiGet(url, authKey, `/api/v1/muxspect/describe?block_id=${encodeURIComponent(blockId)}`);
         if (json) console.log(JSON.stringify(data, null, 2));
@@ -158,7 +186,6 @@ async function main() {
     }
 
     if (cmd === "watch") {
-        const blockId = args[1];
         if (!blockId) fail("watch requires a block_id — 'muxspect watch <block_id>'");
         console.log(`watching ${blockId} — Ctrl+C to stop\n`);
         for (;;) {
@@ -173,4 +200,9 @@ async function main() {
     fail(`unknown command '${cmd}' — 'muxspect help' for usage`);
 }
 
-main().catch((e) => fail(e?.message ?? String(e)));
+// Only run when executed directly (`node muxspect.mjs ...`) — importing this
+// module (muxspect.test.mjs imports `parseArgs`) must not trigger a live
+// network call / `process.exit`.
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+    main().catch((e) => fail(e?.message ?? String(e)));
+}

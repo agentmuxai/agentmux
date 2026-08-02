@@ -52,21 +52,21 @@ pub async fn handle_muxspect_describe(
             .into_response();
     }
 
+    // `process_status` (via `ProcessBroker::compute_status`) already reads
+    // the process-tracker registry once for both `processes` and
+    // `liveness_confidence` — a second, independent read here could race a
+    // process starting/exiting between the two calls and return two
+    // contradictory snapshots in one response (codex P2 on PR #2380).
+    // Derive everything from this one snapshot instead of reading twice.
     let process_status = state.process_broker.status(&q.block_id);
     let controller_status = crate::backend::blockcontroller::get_block_controller_status(&q.block_id);
-    let processes = state.process_tracker.list_block(&q.block_id);
-    let tracking_confidence = match state.process_tracker.confidence_of(&q.block_id) {
-        crate::backend::process_tracker::TrackingConfidence::High => "high",
-        crate::backend::process_tracker::TrackingConfidence::BestEffort => "best_effort",
-        crate::backend::process_tracker::TrackingConfidence::None => "none",
-    };
 
     Json(json!({
         "block_id": q.block_id,
-        "process_status": process_status,
+        "process_status": &process_status,
         "controller_status": controller_status,
-        "processes": processes,
-        "tracking_confidence": tracking_confidence,
+        "processes": &process_status.processes,
+        "tracking_confidence": process_status.liveness_confidence,
     }))
     .into_response()
 }
