@@ -215,7 +215,12 @@ pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImp
     // sub-50MB archive expand to many gigabytes before `join`.
     let mut seen_instruction_paths: HashSet<String> = HashSet::new();
     let mut duplicate_instruction_refs: u32 = 0;
-    if let Some(paths) = components.and_then(|c| c.get("instructions")).and_then(|v| v.as_array()) {
+    {
+        let paths = capped_component_array(
+            components.and_then(|c| c.get("instructions")).and_then(|v| v.as_array()),
+            "instructions",
+            &mut warnings,
+        );
         for path_val in paths {
             let Some(raw_path) = path_val.as_str() else {
                 warnings.push("components.instructions: non-string entry skipped".to_string());
@@ -289,7 +294,12 @@ pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImp
     let mut skipped_skills: Vec<String> = Vec::new();
     let mut seen_skill_dirs: HashSet<String> = HashSet::new();
     let mut duplicate_skill_refs: u32 = 0;
-    if let Some(dirs) = components.and_then(|c| c.get("skills")).and_then(|v| v.as_array()) {
+    {
+        let dirs = capped_component_array(
+            components.and_then(|c| c.get("skills")).and_then(|v| v.as_array()),
+            "skills",
+            &mut warnings,
+        );
         for dir_val in dirs {
             let Some(raw_dir) = dir_val.as_str() else {
                 warnings.push("components.skills: non-string entry skipped".to_string());
@@ -325,6 +335,17 @@ pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImp
     if duplicate_skill_refs > 0 {
         warnings.push(format!("components.skills: {duplicate_skill_refs} duplicate reference(s) skipped"));
     }
+    // codex P1, PR #2379 round 7: bounds the RPC handler's WRITE side --
+    // see MAX_IMPORTED_SKILLS's doc comment. The truncated skills still
+    // count as "skipped" for reporting purposes, matching every other
+    // skip reason in this loop.
+    if skills.len() > MAX_IMPORTED_SKILLS {
+        warnings.push(format!(
+            "components.skills: {} skills exceeds the import limit ({MAX_IMPORTED_SKILLS}); only the first {MAX_IMPORTED_SKILLS} are imported",
+            skills.len()
+        ));
+        skipped_skills.extend(skills.split_off(MAX_IMPORTED_SKILLS).into_iter().map(|s| s.slug));
+    }
 
     // ------------------------------------------------------------------
     // mcp servers — every path in components.mcpServers, parsed as JSON
@@ -334,7 +355,12 @@ pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImp
     let mut mcp_servers: Vec<Value> = Vec::new();
     let mut seen_mcp_paths: HashSet<String> = HashSet::new();
     let mut duplicate_mcp_refs: u32 = 0;
-    if let Some(paths) = components.and_then(|c| c.get("mcpServers")).and_then(|v| v.as_array()) {
+    {
+        let paths = capped_component_array(
+            components.and_then(|c| c.get("mcpServers")).and_then(|v| v.as_array()),
+            "mcpServers",
+            &mut warnings,
+        );
         for path_val in paths {
             let Some(raw_path) = path_val.as_str() else {
                 warnings.push("components.mcpServers: non-string entry skipped".to_string());
@@ -381,52 +407,63 @@ pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImp
     // anywhere as-is.
     // ------------------------------------------------------------------
     let mut requirements: Vec<AccountRequirement> = Vec::new();
-    if let Some(raw_req_path) = components.and_then(|c| c.get("accounts")).and_then(|v| v.as_str()) {
-        // reagent P2, PR #2379 round 6: this was the one remaining
-        // manifest-reference lookup still comparing/using the raw,
-        // un-normalized string -- the same bug class round 4 fixed for
-        // components.instructions/skills/mcpServers, just missed here. A
-        // valid non-canonical spelling (e.g. "./accounts/requirements.json")
-        // failed the literal equality check, silently dropping legitimate
-        // account requirements.
-        let req_path = sanitize_context_relative_path(raw_req_path).filter(|p| is_requirements_json(p));
-        if let Some(req_path) = &req_path {
-            if let Some(content) = by_path.get(req_path.as_str()) {
-                #[derive(Deserialize)]
-                struct RequirementsDoc {
-                    #[serde(default)]
-                    requirements: Vec<AccountRequirement>,
-                }
-                match serde_json::from_str::<RequirementsDoc>(content) {
-                    Ok(doc) => {
-                        // codex P1, PR #2379 round 4: unbounded, the RPC
-                        // handler's per-requirement account lookup becomes a
-                        // synchronous store query per row — a permitted 10 MB
-                        // JSON entry can hold tens/hundreds of thousands of
-                        // (duplicate or distinct) requirements and keep that
-                        // handler busy for a prolonged time. Bounding here
-                        // protects the parse step itself; the handler
-                        // separately dedupes by provider so its actual query
-                        // count stays low even at this cap.
-                        if doc.requirements.len() > MAX_ACCOUNT_REQUIREMENTS {
-                            warnings.push(format!(
-                                "accounts/requirements.json: {} requirements exceeds the limit ({MAX_ACCOUNT_REQUIREMENTS}); only the first {MAX_ACCOUNT_REQUIREMENTS} are used",
-                                doc.requirements.len()
-                            ));
-                            requirements = doc.requirements.into_iter().take(MAX_ACCOUNT_REQUIREMENTS).collect();
-                        } else {
-                            requirements = doc.requirements;
-                        }
+    if let Some(accounts_val) = components.and_then(|c| c.get("accounts")) {
+        // reagent P2, PR #2379 round 7: every other component category
+        // (instructions/skills/mcpServers non-string entries, an
+        // unrecognized `version`) pushes an explicit warning when the
+        // manifest's value has the wrong shape — this one silently
+        // dropped a non-string `accounts` value with no warning at all,
+        // inconsistent with the module's own "warn, don't silently drop"
+        // philosophy.
+        if let Some(raw_req_path) = accounts_val.as_str() {
+            // reagent P2, PR #2379 round 6: this was the one remaining
+            // manifest-reference lookup still comparing/using the raw,
+            // un-normalized string -- the same bug class round 4 fixed for
+            // components.instructions/skills/mcpServers, just missed here. A
+            // valid non-canonical spelling (e.g. "./accounts/requirements.json")
+            // failed the literal equality check, silently dropping legitimate
+            // account requirements.
+            let req_path = sanitize_context_relative_path(raw_req_path).filter(|p| is_requirements_json(p));
+            if let Some(req_path) = &req_path {
+                if let Some(content) = by_path.get(req_path.as_str()) {
+                    #[derive(Deserialize)]
+                    struct RequirementsDoc {
+                        #[serde(default)]
+                        requirements: Vec<AccountRequirement>,
                     }
-                    Err(e) => warnings.push(format!("accounts/requirements.json: malformed JSON ({e}); ignored")),
+                    match serde_json::from_str::<RequirementsDoc>(content) {
+                        Ok(doc) => {
+                            // codex P1, PR #2379 round 4: unbounded, the RPC
+                            // handler's per-requirement account lookup becomes a
+                            // synchronous store query per row — a permitted 10 MB
+                            // JSON entry can hold tens/hundreds of thousands of
+                            // (duplicate or distinct) requirements and keep that
+                            // handler busy for a prolonged time. Bounding here
+                            // protects the parse step itself; the handler
+                            // separately dedupes by provider so its actual query
+                            // count stays low even at this cap.
+                            if doc.requirements.len() > MAX_ACCOUNT_REQUIREMENTS {
+                                warnings.push(format!(
+                                    "accounts/requirements.json: {} requirements exceeds the limit ({MAX_ACCOUNT_REQUIREMENTS}); only the first {MAX_ACCOUNT_REQUIREMENTS} are used",
+                                    doc.requirements.len()
+                                ));
+                                requirements = doc.requirements.into_iter().take(MAX_ACCOUNT_REQUIREMENTS).collect();
+                            } else {
+                                requirements = doc.requirements;
+                            }
+                        }
+                        Err(e) => warnings.push(format!("accounts/requirements.json: malformed JSON ({e}); ignored")),
+                    }
+                } else {
+                    warnings.push("components.accounts references accounts/requirements.json, but it's not present in the bundle".to_string());
                 }
             } else {
-                warnings.push("components.accounts references accounts/requirements.json, but it's not present in the bundle".to_string());
+                warnings.push(format!(
+                    "components.accounts: \"{raw_req_path}\" is not accounts/requirements.json; ignored per the accounts/ allowlist"
+                ));
             }
         } else {
-            warnings.push(format!(
-                "components.accounts: \"{raw_req_path}\" is not accounts/requirements.json; ignored per the accounts/ allowlist"
-            ));
+            warnings.push("components.accounts: non-string value skipped".to_string());
         }
     }
 
@@ -454,6 +491,29 @@ pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImp
 /// meant to ever read it.
 fn is_requirements_json(path: &str) -> bool {
     path.eq_ignore_ascii_case("accounts/requirements.json")
+}
+
+/// Bounds a manifest component array's length BEFORE any per-entry
+/// processing happens, so one cap protects every warning a per-entry
+/// loop can produce (non-string entries, unsafe paths, not-found
+/// lookups, malformed content, ...) at once — codex P1, PR #2379 round
+/// 7: round 6 bounded only the "duplicate reference" warning
+/// specifically; a manifest filled with non-string junk values hit an
+/// entirely different (still unbounded) warning path for the same
+/// amplification effect. Reuses [`MAX_ENTRY_COUNT`] — a manifest
+/// component array legitimately needs the same "more entries than any
+/// real bundle uses" ceiling a zip archive's entry count does.
+fn capped_component_array<'a>(arr: Option<&'a Vec<Value>>, key: &str, warnings: &mut Vec<String>) -> &'a [Value] {
+    let Some(arr) = arr else { return &[] };
+    let len = arr.len();
+    if len > MAX_ENTRY_COUNT {
+        warnings.push(format!(
+            "components.{key}: {len} entries exceeds the limit ({MAX_ENTRY_COUNT}); only the first {MAX_ENTRY_COUNT} are used"
+        ));
+        &arr[..MAX_ENTRY_COUNT]
+    } else {
+        arr.as_slice()
+    }
 }
 
 /// Parse a SKILL.md file (`render_skill_md`'s exact output shape, and
@@ -519,6 +579,18 @@ const MAX_ENTRY_COUNT: usize = 10_000;
 /// unbounded, could otherwise drive a synchronous store query for every
 /// row.
 const MAX_ACCOUNT_REQUIREMENTS: usize = 1_000;
+
+/// Maximum number of skills actually imported (i.e. written to the Store)
+/// from a single bundle. `MAX_ENTRY_COUNT`/`capped_component_array` bound
+/// how many `components.skills` entries are even LOOKED AT, but codex P1
+/// (PR #2379 round 7) points out that's still far too high a ceiling for
+/// the RPC handler's write side: importing up to that many skills means
+/// up to that many separate synchronous Store transactions, each creating
+/// a permanent, globally-visible skill row — a compact malicious archive
+/// (well within the size caps) could otherwise monopolize the handler and
+/// pollute the installation's skill catalog. A real bundle needs a
+/// handful to a few dozen skills at most.
+const MAX_IMPORTED_SKILLS: usize = 200;
 
 /// Single choke point for the per-entry/aggregate size caps, shared by
 /// BOTH intake paths (zip decompression and the raw `files` RPC list) —
@@ -1108,6 +1180,68 @@ mod tests {
         let keep = check_entry_size("corrupt.md", MAX_ENTRY_UNCOMPRESSED_BYTES, &mut total, &mut warnings);
         assert_eq!(keep, Ok(true), "bytes read before the error must still count");
         assert_eq!(total, MAX_ENTRY_UNCOMPRESSED_BYTES);
+    }
+
+    #[test]
+    fn components_accounts_non_string_value_gets_an_explicit_warning() {
+        // reagent P2, PR #2379 round 7: every other component category
+        // warns on a malformed value; this one used to silently drop it.
+        let files = vec![
+            file("armory.json", &minimal_manifest(serde_json::json!({
+                "accounts": ["not", "a", "string"],
+            }))),
+        ];
+        let result = parse_bundle_import(&files).unwrap();
+        assert!(result.requirements.is_empty());
+        assert!(result.warnings.iter().any(|w| w.contains("components.accounts") && w.contains("non-string value")));
+    }
+
+    #[test]
+    fn caps_malformed_component_entries_before_they_can_amplify_into_unbounded_warnings() {
+        // codex P1, PR #2379 round 7: round 6 bounded the "duplicate
+        // reference" warning specifically; a manifest filled with
+        // non-string junk hits a DIFFERENT (still unbounded, until this
+        // fix) warning path for the same amplification effect.
+        // capped_component_array truncates the array itself before any
+        // per-entry processing, so this must produce at most one
+        // "exceeds the limit" warning plus MAX_ENTRY_COUNT "non-string
+        // entry" warnings -- not one per array element.
+        let many_junk: Vec<Value> = (0..MAX_ENTRY_COUNT + 500).map(|i| serde_json::json!(i)).collect();
+        let files = vec![
+            file("armory.json", &minimal_manifest(serde_json::json!({ "instructions": many_junk }))),
+        ];
+        let result = parse_bundle_import(&files).unwrap();
+        assert!(result.warnings.iter().any(|w| w.contains("components.instructions") && w.contains("exceeds the limit")));
+        let non_string_warnings = result.warnings.iter().filter(|w| w.contains("non-string entry skipped")).count();
+        assert_eq!(non_string_warnings, MAX_ENTRY_COUNT, "expected exactly the capped count, got {non_string_warnings}");
+    }
+
+    #[test]
+    fn caps_the_number_of_skills_actually_imported_from_a_single_bundle() {
+        // codex P1, PR #2379 round 7: MAX_ENTRY_COUNT bounds how many
+        // components.skills entries are even looked at, but that's still
+        // far too high a ceiling for the RPC handler's write side --
+        // each imported skill becomes a separate synchronous Store
+        // transaction creating a permanent global row.
+        let n = MAX_IMPORTED_SKILLS + 50;
+        let mut manifest_skills: Vec<Value> = Vec::new();
+        let mut skill_files: Vec<BundleImportFile> = Vec::new();
+        for i in 0..n {
+            let dir = format!("skills/s{i}");
+            manifest_skills.push(serde_json::json!(dir));
+            skill_files.push(file(
+                &format!("{dir}/SKILL.md"),
+                &format!("---\nname: \"s{i}\"\ndescription: \"d\"\n---\n\nbody"),
+            ));
+        }
+        let mut files = vec![
+            file("armory.json", &minimal_manifest(serde_json::json!({ "skills": manifest_skills }))),
+        ];
+        files.extend(skill_files);
+        let result = parse_bundle_import(&files).unwrap();
+        assert_eq!(result.skills.len(), MAX_IMPORTED_SKILLS);
+        assert_eq!(result.skipped_skills.len(), 50);
+        assert!(result.warnings.iter().any(|w| w.contains("exceeds the import limit")));
     }
 
     #[test]
