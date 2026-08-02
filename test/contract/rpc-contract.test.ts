@@ -296,6 +296,8 @@ const KNOWN_REGISTERED_UNDECLARED = [
     "bundle.export",
     "bundle.get",
     "bundle.import",
+    "bundle.import.commit",
+    "bundle.import.preview",
     "bundle.list",
     "bundle.self.get",
     "bundle.upsert",
