@@ -157,11 +157,29 @@ remote server receiving an untrusted upload. `bundle.import`'s new
 request instead of a dedicated streaming response.
 
 Validation for `file_path`: the path must exist and be a regular file
-(reject symlinks-to-elsewhere / directories / device files with a clear
-error, not a panic); no extension allowlist is enforced server-side beyond
-that (`show_open_bundle_dialog`'s own filter is the only `.abf` gate, and
-it's advisory — a non-.abf file server-side just fails
+(reject directories / device files with a clear error, not a panic); no
+extension allowlist is enforced server-side beyond that
+(`show_open_bundle_dialog`'s own filter is the only `.abf` gate, and it's
+advisory — a non-.abf file server-side just fails
 `unzip_bundle_import`'s "not a valid zip archive" check same as today).
+
+**codex P2 on PR #2381, round 6: "open the file, then check its
+metadata" (as fixed in round 5, below) does NOT reject symlinks.**
+`std::fs::File::open` transparently follows a symlink and hands back a
+handle to — and metadata describing — the **target**, not the symlink
+itself; there is no point in that sequence where "this path was a
+symlink" is ever visible to check. Round 4's stated requirement to reject
+symlinks was therefore never actually enforced by round 5's fix. **Fix:
+open with an explicit no-follow flag**, atomically, so a symlink fails to
+open at all rather than being silently resolved — `OpenOptionsExt::
+custom_flags(O_NOFOLLOW)` on Unix (`std::os::unix::fs::OpenOptionsExt`);
+the equivalent Windows mechanism needs confirming against this crate's
+actual target platforms at implementation time (Windows symlinks require
+elevated privileges to create by default, which narrows but doesn't
+eliminate the risk — do not skip the check on the assumption it does).
+This still composes with round 5's single-handle size check below: one
+no-follow open call, then metadata + bounded read from that same handle,
+still no second path resolution.
 
 **codex P1 on PR #2381, round 4: the on-disk size must be checked BEFORE
 reading, not after.** `unzip_bundle_import`'s caps (`MAX_ENTRY_COUNT`,
@@ -220,19 +238,49 @@ contract applies uniformly to all three input modes, not just
   - `zip_base64` → hash of the **decoded** raw zip bytes (not the base64
     text itself, so identical zip content produces the same digest
     regardless of transport encoding).
-  - `files` → a **deterministic** hash independent of array order (codex's
-    own suggestion): sort entries by `path` ascending, then feed
-    `len(path) || path || len(content) || content` (length-prefixed, to
-    avoid ambiguous concatenation) for each entry, in that sorted order,
-    into the hash.
+  - `files` → **codex P1 on PR #2381, round 6: naively sorting the raw
+    input by path is wrong.** An earlier draft did exactly that — but
+    `parse_bundle_import`'s own `by_path` construction (Phase 2, round 4)
+    *normalizes* each path first and, for two entries that normalize to
+    the same key (e.g. `"armory.json"` and `"./armory.json"`), keeps
+    **whichever appears first in the input array** and discards the rest
+    with a warning. A naive path-sort can make two *differently-ordered*
+    request bodies hash identically while the parser would actually
+    import *different* content from each (whichever happened to be
+    first) — defeating the entire point of the digest. **Fix: hash the
+    parser's own effective, order-resolved representation, not the raw
+    input.** Run the same normalize-then-first-wins reduction
+    `parse_bundle_import` already performs to build its deduped map,
+    *then* sort that deduped map by its normalized key and feed
+    `len(normalized_path) || normalized_path || len(content) || content`
+    for each surviving (winning) entry, in that sorted order, into the
+    hash. This makes the digest a true reflection of "what will actually
+    be imported" — order-independent for genuinely equivalent inputs,
+    but sensitive to any input-array reordering that would actually
+    change the parser's first-wins outcome. (This only reads
+    `bundle_import.rs`'s existing normalize-then-dedup logic to compute a
+    digest; it does not change that logic's own already-merged,
+    already-reviewed first-wins behavior — that stays exactly as PR
+    #2379 shipped it.)
 - `commit`'s request **always** requires `expected_content_digest`,
   compared against a freshly-recomputed digest of whatever `commit`
-  itself was given (which may differ in *shape* from what `preview` saw —
-  e.g. preview used `file_path`, commit resends `files` — but must produce
-  the **identical digest value**, i.e. the identical underlying bytes) —
-  a mismatch is a hard rejection (the same "re-select and preview again"
-  error as before), never a partial/best-effort import, for any input
-  mode.
+  itself was given, using the identical per-mode canonicalization above.
+  **codex P2 on PR #2381, round 6: commit must use the SAME input mode
+  preview used.** An earlier draft claimed a preview/commit pair could
+  freely mix input modes (e.g. preview via `file_path`, commit via
+  `files`) as long as the digest matched — but `file_path`/`zip_base64`
+  hash **raw zip bytes** while `files` hashes a **canonicalized list of
+  already-extracted entries**; these are structurally different
+  representations that never produce equal digests for the same
+  underlying content, so that claim was actually unimplementable, not
+  merely undocumented. **Fix: commit must supply the same input field
+  (`file_path`/`zip_base64`/`files`) preview used** — the modal's own
+  flow (§4) always uses `file_path` for both calls anyway, so this is a
+  restriction on a capability nothing actually needs, not a loss of
+  function. A mode mismatch, or a same-mode digest mismatch, both produce
+  the identical hard-rejection error (the "re-select and preview again"
+  message) — the API doesn't need to distinguish the two cases for the
+  caller, only refuse to proceed on either.
 
 `zip_base64` and `files` remain valid inputs on both new RPCs (unchanged
 from today's `bundle.import`) for callers that don't have a local path —
@@ -577,13 +625,25 @@ Renders the `bundle.import.preview` response as a checklist:
   file, modifying it, then committing with the stale digest),
   `zip_base64` (commit with a digest that doesn't match the decoded
   bytes), and `files` (commit with a digest computed over a different
-  canonical ordering/content — also covers that the `files` digest is
-  genuinely order-independent: two equivalent-but-differently-ordered
-  file lists must produce the SAME digest). `instructions_preview` is
-  capped at `MAX_INSTRUCTIONS_PREVIEW_CHARS` with `instructions_truncated:
-  true` set when a real bundle's instructions exceed it, and the
-  committed bundle's actual `instructions` field is unaffected by the
-  preview cap (round 5).
+  canonical ordering/content). **`files` digest correctness specifically**
+  (round 6): two arrays that reorder *genuinely equivalent, non-colliding*
+  entries must hash identically; but two arrays that reorder entries with
+  a normalized-path collision — where reordering would change *which*
+  entry the parser's first-wins rule actually keeps — must hash
+  **differently**, proving the digest reflects `parse_bundle_import`'s
+  real dedup outcome rather than a naive raw-input sort (the exact round-6
+  gap codex found). **Commit mode-mismatch** (round 6): a commit whose
+  input field (`file_path`/`zip_base64`/`files`) differs from what
+  preview used is rejected with the same hard error as a digest mismatch,
+  never silently accepted. **Symlink rejection** (round 6): a `file_path`
+  pointing at a symlink is rejected outright, not silently followed to
+  its target — this needs a platform-appropriate test (Unix: an actual
+  symlink via `std::os::unix::fs::symlink`; confirm the Windows
+  equivalent at implementation time per §3.0.5's own note there).
+  `instructions_preview` is capped at `MAX_INSTRUCTIONS_PREVIEW_CHARS`
+  with `instructions_truncated: true` set when a real bundle's
+  instructions exceed it, and the committed bundle's actual
+  `instructions` field is unaffected by the preview cap (round 5).
 - **Manual/e2e:** a sample `.abf` was generated for this purpose via
   `agentmux-srv/src/backend/bundle_export.rs`'s existing `export_bundle` +
   `zip_bundle_export` (instructions + 1 context file + 2 skills — one of
