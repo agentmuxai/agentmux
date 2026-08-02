@@ -20,6 +20,7 @@
 import { For, onCleanup, Show, type JSX } from "solid-js";
 
 import { PrimitiveListDetail } from "@/app/element/primitive-list-detail";
+import { useModalLayer } from "@/app/element/modal-layer";
 import { type MemoryDraft, MemoryViewModel } from "./memory-model";
 
 import "./memory-view.scss";
@@ -38,6 +39,39 @@ interface MemoryManagerBodyProps {
  */
 export const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
     const { model } = props;
+    const modalLayer = useModalLayer();
+
+    // Starts the 3-step ABF import chain (SPEC_ABF_IMPORT_UI_PHASE3_2026_08_02.md
+    // §4) -- each step's request builds the next via modalLayer.replace(),
+    // mirroring the install→launch chain precedent. The commit RPC
+    // publishes `memories:changed`, which this model already subscribes
+    // to, so the newly-imported bundle appears in the list with no extra
+    // glue here.
+    const handleImportBundle = () => {
+        modalLayer.open({
+            kind: "bundle-import-select",
+            onPreviewed: (filePath, preview) => {
+                modalLayer.replace({
+                    kind: "bundle-import-preview",
+                    filePath,
+                    preview,
+                    onNext: (selection) => {
+                        modalLayer.replace({
+                            kind: "bundle-import-confirm",
+                            filePath,
+                            contentDigest: preview.content_digest,
+                            bundleDisplayName: selection.bundleName,
+                            selection,
+                            onImported: () => modalLayer.close(),
+                            onCancel: modalLayer.close,
+                        });
+                    },
+                    onCancel: modalLayer.close,
+                });
+            },
+            onCancel: modalLayer.close,
+        });
+    };
 
     // Clicking a list item SELECTS the memory so the read-only detail
     // view appears (including for the blank singleton, which can't be
@@ -102,6 +136,9 @@ export const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element =>
             <div class="memory-view-rail-header">
                 <button class="memory-view-new-btn" onClick={handleNew}>
                     + New Preset
+                </button>
+                <button class="memory-view-new-btn" onClick={handleImportBundle}>
+                    Import Bundle
                 </button>
             </div>
             <ul class="memory-view-list">
