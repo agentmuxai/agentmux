@@ -325,7 +325,7 @@ the one the modal actually uses):
   "description": "...",
   "instructions_preview": "Be concise. Prefer existing patterns...",
   "context_files": [
-    { "path": "conventions.md", "size_bytes": 39 }
+    { "id": 0, "display_path": "conventions.md", "size_bytes": 39 }
   ],
   "skills": [
     { "source_dir": "skills/deploy-checklist", "slug": "deploy-checklist", "description": "...", "collision": "none" },
@@ -378,10 +378,53 @@ Implementation notes:
   `context_files[].path` (confirmed against `sanitize_context_relative_path`:
   it normalizes and rejects unsafe paths but never caps component or
   total length, and `capped_component_array`/`MAX_ENTRY_COUNT` bound the
-  *number* of context files, not any one path's length). Both get the
-  same fixed-character truncation as every other display-only field
-  above; full values are what commit's write path and `sanitize_context_relative_path`
-  itself actually use, unaffected by the preview-side truncation.
+  *number* of context files, not any one path's length).
+
+  **codex P2 on PR #2381, round 13: truncating `context_files[].path` for
+  display breaks selection, unlike skills' `slug`.** `include_context_files`
+  (§3.2) is a list of *paths*, matched against the freshly-parsed FULL
+  paths at commit — but a truncated `path` in preview is the only value
+  the frontend has to build that list from, so a checked row whose path
+  exceeded the cap would submit the shortened value, fail to match
+  anything server-side, and be **silently dropped from the import** with
+  no error. Skills don't have this problem because `source_dir` (the
+  actual selection key) and `slug` (the truncatable display value) are
+  already two separate fields (§3.0) — `context_files` never got that
+  same split. **Fix: give context files the identical split.** Each
+  entry gains a stable `id` (its 0-based index within *this* parse's
+  `context_files` list — deterministic and reusable across `preview` and
+  `commit` precisely because `expected_content_digest` already guarantees
+  both calls parse identical content, so the same index always means the
+  same entry); `path` is renamed `display_path` and stays bounded/
+  truncated exactly as before, now purely for rendering. `commit`'s
+  `include_context_files` becomes a list of `id` values, not paths — the
+  frontend never needs the full untruncated path for anything, closing
+  the gap the same way `source_dir` already does for skills, without
+  needing to preserve a "full path" anywhere client-side at all.
+
+  **codex P2 on PR #2381, round 13: truncating `name` for *display only*
+  is unsafe here, unlike `description`.** §4 Step 2 pre-fills the
+  editable bundle-name field from preview's `name` and, if the user makes
+  no edit, submits that same value back as `bundle_name` — which round
+  11's fix now genuinely applies verbatim to `Memory.name`. If `name`
+  were truncated for display only while "the full value" is used
+  somewhere else, a user who never touches the field would silently
+  import under a shortened name, since the frontend was never given the
+  full value to preserve. **Fix: bound `name` at the parse source, not at
+  the response boundary.** `parse_bundle_import` itself truncates an
+  oversized manifest `name` (with a warning, matching the existing
+  "warn, don't silently guess" fallback already used when `name` is
+  absent) — so the *canonical* name, from the moment parsing completes,
+  is already the bounded value, identically for both `preview` (which
+  displays it) and `commit` (which re-parses independently and would
+  derive the identical canonical name if `bundle_name` were somehow
+  omitted). There is no separate "real, longer" name floating around
+  anywhere for the truncated display value to lose — genuinely
+  pathological manifest names aren't a legitimate case worth preserving
+  byte-for-byte, unlike free-form content such as `description`/
+  `instructions`. `description` keeps the simpler response-boundary
+  truncation from earlier in this list — it's pure display, never
+  re-submitted by the user, so it doesn't share this failure mode.
 - `parse_bundle_import` already produces everything here except
   `collision`/`name_collision`/the requirement `resolved`/`match_count`
   fields — three new, read-only additions the RPC handler makes:
@@ -546,7 +589,7 @@ Implementation notes:
   "expected_content_digest": "8f14e45f...",    // required for EVERY input mode (§3.0.5, round 5); commit rejects on any mismatch
   "bundle_name": "Backend Dev Bundle (2)",   // user-editable, defaults to the parsed name
   "include_instructions": true,
-  "include_context_files": ["conventions.md"],       // paths to include; omitted path = excluded
+  "include_context_files": [0],       // context_files[].id values to include (round 13 -- not paths; see §3.1); omitted id = excluded
   "include_skills": [
     { "source_dir": "skills/deploy-checklist" },
     { "source_dir": "skills/code-review-v2", "import_as": "code-review-team-x" }   // rename to dodge a collision
@@ -658,7 +701,10 @@ Implementation notes:
 - `include_skills`/`include_mcp_servers` filter the freshly-parsed
   `skills`/`mcp_servers` lists by matching each entry's `source_dir`/
   `source_path` (§3.0) — never by `slug` or a JSON `"name"` field, which
-  aren't guaranteed unique across entries.
+  aren't guaranteed unique across entries. `include_context_files` filters
+  by `id` (§3.1, round 13) — the 0-based index within this parse's
+  `context_files` list, never by `display_path`, which is truncated for
+  display and can't be relied on to round-trip byte-for-byte.
 - `import_as`: when present, the commit handler substitutes it for the
   matched skill's own parsed slug before constructing the `Skill` row —
   the one backend behavior change this spec requires beyond "parse once,
@@ -734,10 +780,12 @@ Renders the `bundle.import.preview` response as a checklist:
   default. A skill whose `collision` is `"name_conflict"` (already exists
   in the global catalog) or `"duplicate_in_bundle"` (another row in this
   same import shares its slug) shows a collision badge — worded
-  differently per reason — and switches its row to a text input pre-filled
-  with the slug, where the user types an alternate name to import under
-  (empty = skip on commit — same effect as unchecking). This is the one
-  item type with real collision UX; see §4.1.
+  differently per reason — and switches its row to an **empty** text
+  input (the original `slug` shown alongside as read-only label text, not
+  as the input's value — round 13, §4.1 point 5), where the user types an
+  alternate name to import under (empty at commit = skip, same effect as
+  unchecking). This is the one item type with real collision UX; see
+  §4.1.
 - **MCP servers** — one checkbox per server (name + command), checked by
   default. No collision UI — per §2, there's nothing for these to collide
   with under the current backend design.
@@ -795,6 +843,24 @@ Renders the `bundle.import.preview` response as a checklist:
 4. Leaving a colliding skill's rename field empty and its checkbox checked
    is treated as "skip this skill" at commit (equivalent to unchecking) —
    never silently sent through with its original, known-conflicting slug.
+5. **codex P2 on PR #2381, round 13: the rename input must start empty,
+   not pre-filled with `slug`.** An earlier draft pre-filled the rename
+   text input with the skill's (possibly truncated, round 12) display
+   `slug` — for a skill whose *real* slug exceeds the truncation cap,
+   that pre-filled value is neither the true original name nor a
+   deliberate replacement, yet importing without editing the field would
+   submit it as `import_as` regardless: a colliding skill silently
+   renamed to a **truncated prefix** of its own name, rather than being
+   skipped or genuinely renamed. Point 4's "empty = skip" rule also can't
+   distinguish "user left the pre-fill untouched" from "user
+   deliberately typed nothing" once the field starts non-empty. **Fix:
+   the rename input starts blank.** The skill's (possibly truncated)
+   `slug` is shown as adjacent read-only label/placeholder text — context
+   for what's colliding, not a value ever submitted unedited. Point 4's
+   rule (empty at commit time = skip) now has no ambiguous case: a
+   colliding row is either left blank (skip) or has something the user
+   actually typed (`import_as`), never a server-supplied default that
+   happens to look non-empty.
 
 ## 5. What this spec deliberately does not do
 
@@ -923,13 +989,33 @@ Renders the `bundle.import.preview` response as a checklist:
   bounded values in `commit`'s response as `preview`'s equivalent fields
   — proving the shared-helper requirement actually holds, not just that
   each endpoint independently happens to cap its own fields the same
-  way. **Bundle name/description/context-file paths bounded** (round 12
-  self-audit): a bundle whose manifest `name`/`description` or a
-  `context_files[]` entry's `path` exceeds the truncation cap produces a
-  bounded value in preview's response, while the actual bundle row
-  (`Memory.name`/`description`) and the actual persisted context file
-  path are written from the full, untruncated parsed values at commit
-  time.
+  way. **Bundle description/context-file content bounded** (round 12
+  self-audit): a bundle whose manifest `description` exceeds the
+  truncation cap produces a bounded value in preview's response, while
+  the actual `Memory.description` is written from the full, untruncated
+  parsed value at commit time; a `context_files[]` entry's actual
+  persisted content/path is likewise unaffected by `display_path`'s
+  truncation. **`name` is bounded at parse time, identically for preview
+  and commit** (round 13 correction of round 12's initial approach): a
+  manifest `name` exceeding the length cap produces the *same* truncated
+  value from `parse_bundle_import` whether called by `preview` or by
+  `commit` (re-parsing independently) — proving there's no separate
+  "full" name anywhere for a display-only truncation to lose, and that a
+  commit whose `bundle_name` was never edited from preview's suggestion
+  still imports under a name consistent with what preview showed.
+  **Context-file selection survives truncation** (round 13): a
+  `context_files[]` entry whose `display_path` was truncated is still
+  correctly included/excluded via `include_context_files`'s `id` value —
+  proving selection doesn't silently drop truncated-path entries the way
+  an earlier draft's path-based selection would have. **Skill rename
+  input never auto-submits a truncated slug** (round 13): committing a
+  colliding skill's row with its rename field left exactly as the UI
+  presents it (no `import_as`, or an empty one) results in that skill
+  being skipped, never imported under a truncated version of its own
+  slug — this needs an explicit test that a *non-empty but unedited*
+  scenario cannot occur given the "starts blank" UI change, i.e. that the
+  wire contract has no way to represent "the default" as distinct from
+  "the user typed this," by construction.
 - **Manual/e2e:** a sample `.abf` was generated for this purpose via
   `agentmux-srv/src/backend/bundle_export.rs`'s existing `export_bundle` +
   `zip_bundle_export` (instructions + 1 context file + 2 skills — one of
