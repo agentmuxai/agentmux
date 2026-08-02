@@ -323,12 +323,19 @@ fn redact_mcp_entry(entry: &Value) -> (Value, Vec<String>) {
     (redacted, redacted_names)
 }
 
-/// Validate a context-file's relative path is safe to place under
-/// `instructions/context/` in an exported bundle: non-empty, not absolute,
-/// no drive letter, no `..` traversal component. Pure string validation
-/// (no filesystem access) so [`export_bundle`] can stay a pure function.
-/// Returns `None` for anything that fails; callers skip that entry.
-fn sanitize_context_relative_path(path: &str) -> Option<String> {
+/// Validate a relative path is safe to place under a bundle export/import
+/// root: non-empty, not absolute, no drive letter, no `..` traversal
+/// component. Pure string validation (no filesystem access) so
+/// [`export_bundle`] can stay a pure function. Returns `None` for anything
+/// that fails; callers skip that entry.
+///
+/// `pub(crate)` (not private) so `bundle_import.rs` can reuse the exact
+/// same check on the way IN — an untrusted `.abf` file needs this defense
+/// at least as much as export needs it on the way out, and a single shared
+/// implementation means the two can never drift apart on what counts as
+/// safe (see `docs/specs/SPEC_ABF_V0_1_SINGLE_FILE_AND_IMPORTER_2026_08_01.md`
+/// §4.3.4).
+pub(crate) fn sanitize_context_relative_path(path: &str) -> Option<String> {
     if path.is_empty() {
         return None;
     }
