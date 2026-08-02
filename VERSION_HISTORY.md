@@ -1,5 +1,24 @@
 # AgentMux Version History
 
+## 0.54.8 — 2026-08-02
+
+- feat(muxbus): same-host cross-channel reactive delivery (Tier 2b, issue #1916)
+- docs(specs): archive 2 superseded specs (DOC-008, DOC-009)
+- feat(srv): enforce cross-process session lease on host-mode agent turns
+- fix(agent): transparently retry a stale --resume session id on a persistent controller's first message
+- fix(agent): backfill cross-channel agent definitions before instance create, filter legacy identity sentinels
+- fix(agent-pane): pin scroll from content ResizeObserver, not an itemized signal whitelist
+- fix(agent-stream): require real explanation text before ending a persistent-mode turn
+- fix(agent): suppress the visible error bubble a stale --resume retry leaves behind
+- fix(agent-composer): two-line responsive layout for narrow panes
+- refactor(agent): replace ad-hoc resume-retry fields with an explicit event-driven state machine
+- fix(agent-auth): mount-time auth check resolves the linked account's own dir, not the generic default
+- feat(agent): detect and surface context compaction in real time
+- feat(armory): ABF single-file (.abf zip) format + importer (Phase 2)
+- feat(muxspect): new live process/turn-state introspection tool, Phase 1 (current-instance only)
+- feat(armory): ABF import UI (Phase 3) -- selective import + collision handling
+
+
 ## 0.54.7 — 2026-07-29
 
 - feat(telemetry): [wave-turn] diagnostic logging for the turn-phase state machine + watchdog reasoning
