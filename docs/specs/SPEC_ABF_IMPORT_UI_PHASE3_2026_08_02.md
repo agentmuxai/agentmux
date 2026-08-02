@@ -282,6 +282,24 @@ contract applies uniformly to all three input modes, not just
   message) — the API doesn't need to distinguish the two cases for the
   caller, only refuse to proceed on either.
 
+  **codex P2 on PR #2381, round 7: stating the "same mode" requirement in
+  prose doesn't enforce it — the digest itself has to carry that
+  information, or nothing actually checks it.** `file_path` and
+  `zip_base64` both canonicalize to the exact same thing (the raw zip
+  bytes), so a `file_path` preview and a `zip_base64` commit of the same
+  underlying archive produce an **identical** `content_digest` — the
+  round-6 fix's own stated mode-mismatch case would silently pass a bare
+  byte-digest comparison, exactly the scenario it was meant to reject.
+  **Fix: mix a mode tag into the hash domain itself**, so the digest is a
+  function of `(mode, canonical bytes)`, not bytes alone — hash
+  `mode_byte || canonical_representation` where `mode_byte` is a fixed,
+  distinct constant per input type (`0x01` for `file_path`, `0x02` for
+  `zip_base64`, `0x03` for `files`). Two different modes now produce
+  different digests for the identical underlying content by construction,
+  closing the gap without adding a separate mode field for the mismatch
+  check to drift from — the digest comparison alone is sufficient again,
+  as originally intended.
+
 `zip_base64` and `files` remain valid inputs on both new RPCs (unchanged
 from today's `bundle.import`) for callers that don't have a local path —
 e.g. a bundle received over the network by some future integration. Their
@@ -315,7 +333,7 @@ the one the modal actually uses):
     { "source_dir": "skills/code-review-old", "slug": "code-review", "description": "...", "collision": "duplicate_in_bundle" }
   ],
   "mcp_servers": [
-    { "source_path": "mcp/github.server.json", "config": { "name": "github", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] } }
+    { "source_path": "mcp/github.server.json", "display": { "name": "github", "command": "npx" } }
   ],
   "requirements": [
     { "id": "req-1", "provider": "github", "env": "GITHUB_TOKEN", "resolved": false, "match_count": 0 }
@@ -329,8 +347,25 @@ the one the modal actually uses):
 
 `source_dir`/`source_path` are the §3.0 selection keys — always present,
 always unique per row, independent of whatever the row's own `slug`/JSON
-`name` field says. `config` is passed through verbatim for display; the UI
-falls back to `source_path`'s basename when `config.name` is absent.
+`name` field says. **codex P2 on PR #2381, round 7: `mcp_servers[].config`
+must not be returned verbatim in preview.** An earlier draft passed the
+full parsed `config` JSON through for display — but a parser-accepted
+bundle can put a large share of its content budget into an MCP server's
+JSON blob (arbitrary content, no size limit beyond the shared aggregate
+cap), so returning every full `config` risks the same "supposedly
+lightweight response actually approaches the aggregate cap" problem
+`instructions_preview`'s own cap (below) already exists to prevent — the
+modal only ever displays a server's name and command, never the full
+config. **Fix:** preview returns a bounded `display` projection instead
+of `config` — `{ name: string | null, command: string | null }`,
+extracted defensively from whatever fields happen to be present (MCP
+JSON has no required shape, per §3.0), each truncated to a small fixed
+character cap (e.g. 200 chars) so even a maliciously oversized `name`/
+`command` string can't reintroduce the problem. The UI falls back to
+`source_path`'s basename when `display.name` is absent. The full,
+untruncated `config` is never lost — it's read from the freshly-parsed
+source at commit time (§3.2), exactly like `instructions`'s own full
+value; only the preview response is bounded.
 
 Implementation notes:
 - `parse_bundle_import` already produces everything here except
@@ -644,6 +679,16 @@ Renders the `bundle.import.preview` response as a checklist:
   with `instructions_truncated: true` set when a real bundle's
   instructions exceed it, and the committed bundle's actual
   `instructions` field is unaffected by the preview cap (round 5).
+  **Digest mode-binding** (round 7): a `file_path` preview and a
+  `zip_base64` commit of the exact same underlying archive bytes must
+  produce **different** `content_digest`/`expected_content_digest`
+  values (proving the mode tag is actually mixed into the hash, not just
+  documented as a requirement) and the commit must be rejected. **MCP
+  preview projection** (round 7): `mcp_servers[].display` never contains
+  the full `config` — only bounded `name`/`command` strings — even when
+  the source MCP JSON is large or has an oversized `name`/`command`
+  value; the full `config` still reaches the write path correctly at
+  commit time, unaffected by the preview projection.
 - **Manual/e2e:** a sample `.abf` was generated for this purpose via
   `agentmux-srv/src/backend/bundle_export.rs`'s existing `export_bundle` +
   `zip_bundle_export` (instructions + 1 context file + 2 skills — one of
