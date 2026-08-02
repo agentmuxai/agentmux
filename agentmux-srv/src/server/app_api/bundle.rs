@@ -7,6 +7,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_bundle_delete(engine, state);
     register_bundle_self_get(engine, state);
     register_bundle_export(engine, state);
+    register_bundle_import(engine, state);
 }
 
 /// Normalize a `bundle.upsert` request body into the shape the `Memory` struct
@@ -282,6 +283,271 @@ fn register_bundle_export(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     obj.insert("warnings".to_string(), json!(all_warnings));
                 }
                 Ok(Some(result))
+            })
+        }),
+    );
+}
+
+/// `bundle.import` — ABF importer, Phase 2 of
+/// docs/specs/SPEC_ABF_V0_1_SINGLE_FILE_AND_IMPORTER_2026_08_01.md. Window-
+/// scoped like `bundle.export` (bundles aren't agent-specific). Accepts
+/// EITHER `zip_base64` (a `.abf` archive, mirroring `bundle.export`'s own
+/// `zip_base64` response field) OR `files` (a raw `[{path, content}]`
+/// list) — exactly one must be present. Hands the bytes to the pure
+/// `bundle_import` module for parsing/validation, then owns every Store
+/// side-effect: creates the bundle row, creates one global Skill row per
+/// parsed skill, and performs READ-ONLY account-requirement lookups
+/// (never creates an account, never writes a secret anywhere — see the
+/// spec's §4.5 correction for why this stopped short of "resolving"
+/// placeholders in place).
+fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let id_store = state.id_store.clone();
+    let wstore = state.wstore.clone();
+    let broker = state.broker.clone();
+    engine.register_handler(
+        COMMAND_BUNDLE_IMPORT,
+        Box::new(move |data, _ctx| {
+            let id_store = id_store.clone();
+            let wstore = wstore.clone();
+            let broker = broker.clone();
+            Box::pin(async move {
+                #[derive(serde::Deserialize, Default)]
+                struct FileEntry {
+                    path: String,
+                    content: String,
+                }
+                #[derive(serde::Deserialize, Default)]
+                struct Req {
+                    #[serde(default)]
+                    zip_base64: Option<String>,
+                    #[serde(default)]
+                    files: Option<Vec<FileEntry>>,
+                }
+                let req: Req = serde_json::from_value(data)
+                    .map_err(|e| format!("bundle.import: {e}"))?;
+
+                let (files, mut warnings): (Vec<crate::backend::bundle_import::BundleImportFile>, Vec<String>) =
+                    match (req.zip_base64, req.files) {
+                        (Some(_), Some(_)) => {
+                            return Err(
+                                "bundle.import: exactly one of zip_base64/files must be present, got both"
+                                    .to_string(),
+                            );
+                        }
+                        (None, None) => {
+                            return Err(
+                                "bundle.import: exactly one of zip_base64/files must be present, got neither"
+                                    .to_string(),
+                            );
+                        }
+                        (Some(b64), None) => {
+                            use base64::Engine as _;
+                            let zip_bytes = base64::engine::general_purpose::STANDARD
+                                .decode(&b64)
+                                .map_err(|e| format!("bundle.import: invalid zip_base64: {e}"))?;
+                            crate::backend::bundle_import::unzip_bundle_import(&zip_bytes)
+                                .map_err(|e| format!("bundle.import: {e}"))?
+                        }
+                        (None, Some(files)) => {
+                            // reagent P1, PR #2379 round 5: the raw `files`
+                            // list previously skipped straight to
+                            // parse_bundle_import with zero size/count
+                            // enforcement, even though the spec treats it as
+                            // an equally untrusted alternate ingestion path
+                            // to zip_base64 — bypassing every zip-bomb/DoS
+                            // defense the zip path enforces.
+                            let raw_files: Vec<crate::backend::bundle_import::BundleImportFile> = files
+                                .into_iter()
+                                .map(|f| crate::backend::bundle_import::BundleImportFile {
+                                    path: f.path,
+                                    content: f.content,
+                                })
+                                .collect();
+                            crate::backend::bundle_import::enforce_raw_files_caps(raw_files)
+                                .map_err(|e| format!("bundle.import: {e}"))?
+                        }
+                    };
+
+                let parsed = crate::backend::bundle_import::parse_bundle_import(&files)
+                    .map_err(|e| format!("bundle.import: {e}"))?;
+                warnings.extend(parsed.warnings.clone());
+
+                // Account requirement resolution (§4.5) — read-only lookup
+                // by provider, purely informational. Never creates an
+                // account, never writes anything derived from a match.
+                let mut resolved_requirement_ids: Vec<String> = Vec::new();
+                let mut unresolved_requirements: Vec<serde_json::Value> = Vec::new();
+                // codex P1, PR #2379 round 4: query each distinct provider
+                // ONCE, not once per requirement row -- bundle_import.rs
+                // bounds the requirements array length, but even at that
+                // bound many rows commonly share a handful of providers
+                // (or an attacker can repeat one provider many times), and
+                // each identity_list call is a synchronous store query.
+                let mut match_count_by_provider: std::collections::HashMap<&str, usize> =
+                    std::collections::HashMap::new();
+                for requirement in &parsed.requirements {
+                    let match_count = match match_count_by_provider.get(requirement.provider.as_str()) {
+                        Some(&n) => n,
+                        None => {
+                            // Codex P2, PR #2379 round 2: account CRUD routes
+                            // through id_store (shared/store.db when available), not
+                            // wstore (the per-channel database) -- see identity.rs's
+                            // own handler registrations. Querying wstore here would
+                            // report zero/stale matches for accounts that actually
+                            // exist, incorrectly placing requirements in
+                            // unresolved_requirements.
+                            let n = id_store
+                                .identity_list(Some(&requirement.provider))
+                                .map_err(|e| format!("bundle.import: account lookup failed: {e}"))?
+                                .len();
+                            match_count_by_provider.insert(requirement.provider.as_str(), n);
+                            n
+                        }
+                    };
+                    if match_count == 1 {
+                        resolved_requirement_ids.push(requirement.id.clone());
+                    } else {
+                        unresolved_requirements.push(json!({
+                            "id": requirement.id,
+                            "provider": requirement.provider,
+                            "env": requirement.env,
+                            "match_count": match_count,
+                        }));
+                    }
+                }
+
+                // Skills — global, not bound to any agent (mirrors
+                // skill.catalog.upsert's own is_global: true convention for
+                // a shared-resource creation path). A genuine name
+                // conflict (the ONLY intentional business error
+                // `skill_upsert_unique_global` returns —
+                // `StoreError::Other` containing "already exists") is a
+                // per-skill warning, not an aborted import. Codex P2, PR
+                // #2379: any OTHER error (locked/corrupt store, I/O
+                // failure) previously hit this same arm and was silently
+                // treated as a skip too — turning an infrastructure
+                // failure into an apparently-successful lossy import.
+                // Only the confirmed-conflict shape is swallowed; anything
+                // else aborts the whole RPC.
+                // codex P2, PR #2379 round 4: rollback previously discarded
+                // every skill_delete error via `let _ = ...`, so if the SAME
+                // failing store also rejects the cleanup deletes, previously-
+                // inserted global skills could silently survive an RPC that
+                // reports failure. No transaction primitive exists on Store
+                // today, so full atomicity is out of scope here; surfacing
+                // the rollback failure instead of swallowing it is the fix
+                // that fits — the caller at least learns cleanup itself may
+                // not have fully succeeded.
+                let rollback_skills = |ids: &[String]| -> Vec<String> {
+                    ids.iter()
+                        .filter_map(|id| wstore.skill_delete(id).err().map(|e| format!("{id}: {e}")))
+                        .collect()
+                };
+
+                let now = now_ms();
+                let mut imported_skill_ids: Vec<String> = Vec::new();
+                let mut skipped_skills = parsed.skipped_skills.clone();
+                for skill in &parsed.skills {
+                    let row = crate::backend::storage::Skill {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        name: skill.slug.clone(),
+                        trigger: skill.slug.clone(),
+                        skill_type: crate::backend::agent_config::SKILL_TYPE_AGENT_SKILL.to_string(),
+                        description: skill.description.clone(),
+                        content: skill.content.clone(),
+                        is_global: true,
+                        created_at: now,
+                        updated_at: now,
+                    };
+                    match wstore.skill_upsert_unique_global(&row) {
+                        Ok(()) => imported_skill_ids.push(row.id),
+                        Err(crate::backend::storage::error::StoreError::Other(msg))
+                            if msg.contains("already exists") =>
+                        {
+                            warnings.push(format!("skill \"{}\": {msg}", skill.slug));
+                            skipped_skills.push(skill.slug.clone());
+                        }
+                        Err(e) => {
+                            // Codex P2, PR #2379: roll back every skill this
+                            // loop already created before propagating —
+                            // otherwise an infra failure partway through
+                            // leaves orphaned global skill rows (bound to
+                            // no bundle, but visible/bindable by any agent)
+                            // behind a failed RPC.
+                            let rollback_errors = rollback_skills(&imported_skill_ids);
+                            let mut msg = format!(
+                                "bundle.import: failed to create skill \"{}\": {e}",
+                                skill.slug
+                            );
+                            if !rollback_errors.is_empty() {
+                                msg.push_str(&format!(
+                                    "; additionally, rollback of {} previously-created skill(s) failed and may have left orphaned global skill row(s): {}",
+                                    rollback_errors.len(),
+                                    rollback_errors.join("; ")
+                                ));
+                            }
+                            return Err(msg);
+                        }
+                    }
+                }
+
+                let memory = Memory {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    name: parsed.name,
+                    description: parsed.description,
+                    is_blank: false,
+                    // Never imported as global — an import must not
+                    // silently start injecting into every agent's
+                    // CLAUDE.md without explicit user action (spec §4.4).
+                    is_global: false,
+                    provider: String::new(),
+                    model: String::new(),
+                    instructions: parsed.instructions,
+                    context_files: serde_json::to_string(&parsed.context_files)
+                        .unwrap_or_else(|_| "[]".to_string()),
+                    mcp_servers: serde_json::to_string(&parsed.mcp_servers)
+                        .unwrap_or_else(|_| "[]".to_string()),
+                    skills: serde_json::to_string(&imported_skill_ids)
+                        .unwrap_or_else(|_| "[]".to_string()),
+                    sort_order: 0,
+                    created_at: now,
+                    updated_at: now,
+                };
+                if let Err(e) = id_store.bundle_memory_upsert(&memory) {
+                    // Codex P2, PR #2379: same rollback as above — the
+                    // skills this RPC just created must not survive a
+                    // failed bundle creation as orphaned global rows.
+                    let rollback_errors = rollback_skills(&imported_skill_ids);
+                    let mut msg = format!("bundle.import: {e}");
+                    if !rollback_errors.is_empty() {
+                        msg.push_str(&format!(
+                            "; additionally, rollback of {} previously-created skill(s) failed and may have left orphaned global skill row(s): {}",
+                            rollback_errors.len(),
+                            rollback_errors.join("; ")
+                        ));
+                    }
+                    return Err(msg);
+                }
+
+                broker.publish(crate::backend::wps::WaveEvent {
+                    event: "memories:changed".to_string(),
+                    scopes: vec![], sender: String::new(), persist: 0, data: None,
+                });
+                if !imported_skill_ids.is_empty() {
+                    broker.publish(crate::backend::wps::WaveEvent {
+                        event: "skills:changed".to_string(),
+                        scopes: vec![], sender: String::new(), persist: 0, data: None,
+                    });
+                }
+
+                Ok(Some(json!({
+                    "bundle_id": memory.id,
+                    "imported_skill_ids": imported_skill_ids,
+                    "skipped_skills": skipped_skills,
+                    "resolved_requirement_ids": resolved_requirement_ids,
+                    "unresolved_requirements": unresolved_requirements,
+                    "warnings": warnings,
+                })))
             })
         }),
     );
