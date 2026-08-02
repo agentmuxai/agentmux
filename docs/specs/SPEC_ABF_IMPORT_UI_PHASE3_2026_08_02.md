@@ -339,8 +339,10 @@ the one the modal actually uses):
     { "id": "req-1", "provider": "github", "env": "GITHUB_TOKEN", "resolved": false, "match_count": 0 }
   ],
   "warnings": [ "components.instructions: ... skipped" ],
+  "warnings_truncated": false,   // true if the warnings list itself was capped (§3.1, round 8)
   "name_collision": false,   // true if an existing bundle already has this exact name (soft, informational)
   "instructions_truncated": false,   // true if instructions_preview was cut short (§3.1)
+  "instructions_total_chars": 27,   // full (untruncated) instructions length, always present (§3.1, round 8)
   "content_digest": "8f14e45f..."   // SHA-256, canonical per input mode; required back at commit for EVERY input mode (§3.0.5, round 5)
 }
 ```
@@ -425,6 +427,32 @@ Implementation notes:
   *preview* response only; the *committed* bundle's `instructions` field
   is written from the full, untruncated parsed value at commit time,
   exactly as today.
+  - **codex P2 on PR #2381, round 8:** the spec promised that "N
+    characters total" note but never actually specified a field carrying
+    the count — `instructions_preview` alone can't yield it once the
+    remainder has been discarded server-side. Fix: response always
+    includes `instructions_total_chars` (the full, untruncated character
+    count — present regardless of whether truncation happened, so the
+    modal can show it unconditionally rather than branching on
+    `instructions_truncated` for two different pieces of information).
+- **codex P1 on PR #2381, round 8: `warnings` itself was never bounded,
+  the same unbounded-response class as `instructions_preview` (round 5)
+  and `mcp_servers[].config` (round 7).** An `.abf` containing thousands
+  of unsafe/malformed entries (`MAX_ENTRY_COUNT` allows up to 10,000)
+  makes `unzip_bundle_import`/`parse_bundle_import` push one warning
+  string per bad entry, each embedding the entry's own raw name — and zip
+  entry names aren't length-capped anywhere in this module, so the
+  accumulated (and then JSON-escaped) warning text could reach hundreds
+  of megabytes, blowing the same 64 MiB WS ceiling on the way out that
+  the other two caps exist to prevent. **Fix:** cap both dimensions —
+  each individual warning string truncated to a fixed character limit
+  (e.g. 500 chars, with a `"..."` suffix when cut), and the array itself
+  capped to a fixed count (e.g. the first 100), with
+  `warnings_truncated: true` and a final summary entry ("N more warnings
+  not shown") appended when either cap is hit. Mirrors the "bounded
+  array + count summary" shape `bundle_import.rs` already uses for its
+  own duplicate-reference warnings (Phase 2 round 7) — same pattern,
+  applied at the RPC response boundary instead of within the parser.
 - Same `MAX_ENTRY_COUNT`/`MAX_ENTRY_UNCOMPRESSED_BYTES`/
   `MAX_TOTAL_UNCOMPRESSED_BYTES`/`MAX_ACCOUNT_REQUIREMENTS`/
   `MAX_IMPORTED_SKILLS` caps from Phase 2 apply unchanged — preview reuses
@@ -541,8 +569,9 @@ Renders the `bundle.import.preview` response as a checklist:
 - **Instructions** — single checkbox ("Include instructions"), checked by
   default, with a collapsible preview of `instructions_preview`. When
   `instructions_truncated` is true, an inline note ("preview truncated —
-  the full instructions are still imported") makes clear this is a
-  display limit, not a loss of content (§3.1).
+  `instructions_total_chars` characters total, the full instructions are
+  still imported") makes clear this is a display limit, not a loss of
+  content (§3.1).
 - **Context files** — one checkbox per file (path + size), checked by
   default.
 - **Skills** — one checkbox per skill (slug + description), checked by
@@ -559,7 +588,10 @@ Renders the `bundle.import.preview` response as a checklist:
 - **Account requirements** — read-only summary, no checkboxes ("Depends on
   N account(s): github (resolved), openai (not connected)"). Always
   included; nothing is written from this list regardless.
-- Any `warnings` from the parse: a dismissible banner, not blocking.
+- Any `warnings` from the parse: a dismissible banner, not blocking. When
+  `warnings_truncated` is true, the banner's own final entry ("N more
+  warnings not shown") is enough — no separate UI treatment needed (§3.1,
+  round 8).
 
 ### Step 3 — Confirm & import
 
@@ -688,7 +720,15 @@ Renders the `bundle.import.preview` response as a checklist:
   the full `config` — only bounded `name`/`command` strings — even when
   the source MCP JSON is large or has an oversized `name`/`command`
   value; the full `config` still reaches the write path correctly at
-  commit time, unaffected by the preview projection.
+  commit time, unaffected by the preview projection. **Bounded warnings**
+  (round 8): an archive with more than the warnings-array count cap worth
+  of unsafe/malformed entries produces a response with `warnings_truncated:
+  true`, at most the capped count of entries, and no individual warning
+  string longer than its character cap — even when constructed from
+  entries with deliberately oversized raw names. **`instructions_total_chars`**
+  (round 8): present and equal to the true full length on every preview
+  response, not just truncated ones, verified against both a short
+  (non-truncated) and a long (truncated) instructions string.
 - **Manual/e2e:** a sample `.abf` was generated for this purpose via
   `agentmux-srv/src/backend/bundle_export.rs`'s existing `export_bundle` +
   `zip_bundle_export` (instructions + 1 context file + 2 skills — one of
