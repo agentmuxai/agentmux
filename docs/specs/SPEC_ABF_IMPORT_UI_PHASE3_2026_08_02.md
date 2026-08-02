@@ -171,50 +171,76 @@ being read — they do nothing to bound the file-path intake step itself. A
 `file_path` pointing at a multi-gigabyte file (the picker's extension
 filter is advisory, and this is server-side validation regardless of what
 picked it) would be fully read into memory before any of those checks
-ever run, since there's no size gate on the read call itself. Fix: call
-`std::fs::metadata(path)` and reject with a clear error if the on-disk
-size exceeds **`MAX_ABF_FILE_SIZE_BYTES` (100 MiB — generous headroom
-above `MAX_TOTAL_UNCOMPRESSED_BYTES`'s 50 MiB for compression overhead,
-container overhead, and imperfectly-compressed content, while still
-bounding the read to a fixed, sane amount regardless of what's inside)**
-— *before* the file is opened for reading at all. This is a cheap
-metadata-only syscall, the same "cheap check first" pattern
-`unzip_bundle_import`'s own declared-size pre-filter already uses
-one layer down.
+ever run, since there's no size gate on the read call itself.
+
+**codex P2 on PR #2381, round 5: a separate metadata-check-then-open is
+itself a TOCTOU gap.** An earlier draft of this fix called
+`std::fs::metadata(path)` and then, on a *later*, *separate* call,
+re-resolved the same path to actually read it — leaving a window where
+another local process could grow or replace the file in between,
+defeating the size bound entirely. **Fix: open the file exactly ONCE and
+never re-resolve the path.** `std::fs::File::open(path)` first; call
+`.metadata()` on **that open handle** (not a fresh path lookup) and reject
+if it exceeds `MAX_ABF_FILE_SIZE_BYTES` (100 MiB — generous headroom above
+`MAX_TOTAL_UNCOMPRESSED_BYTES`'s 50 MiB for compression/container overhead
+and imperfectly-compressed content); then read from that same handle
+through a bounded reader that rejects one byte past the cap regardless of
+what the metadata claimed — `handle.take(MAX_ABF_FILE_SIZE_BYTES + 1)`,
+the identical hard-backstop-read pattern `unzip_bundle_import`'s own
+per-entry decompression already uses one layer down (`bundle_import.rs`'s
+`check_entry_size` / the `entry.by_ref().take(...)` call it guards). One
+handle, one continuous read, no second path resolution for anything to
+race against.
 
 Once past that gate, the read bytes go through the **exact same**
 `unzip_bundle_import`/content-cap pipeline as `zip_base64` today — no
 change to that pipeline's own logic, just a new, bounded way to get bytes
 in front of it.
 
-**codex P1 on PR #2381, round 4: commit must be bound to the exact bytes
-preview showed, not just the same path.** A `file_path` is a live pointer
-to a mutable resource — the file on disk can be overwritten between the
-preview call and the commit call (another process, the user re-saving
-over the same filename, etc.), and `source_dir`/`source_path` (§3.0) don't
-protect against this: a replacement archive can keep identical source
-paths while changing every skill's body, the instructions, or an MCP
-server's executable config, and the user would never know they're
-importing something other than what they reviewed. Fix: `preview`'s
-response gains a `content_digest` field (SHA-256 of the raw file bytes,
-hex-encoded, computed once during the same read that already happens for
-parsing — no extra I/O). `commit`'s request, **when using `file_path`**,
-must include `expected_content_digest` set to that value; the handler
-re-reads the file, re-hashes it, and rejects the commit outright (a clear
-"the bundle changed since preview — re-select the file and try again"
-error, not a partial/best-effort import) if the digests don't match. This
-requirement is specific to `file_path`: `zip_base64`/`files` callers
-already hold the bytes themselves and re-send the identical payload on
-both calls by construction, so there's nothing that can drift between
-their preview and commit — no digest needed for those two modes.
+**codex P1 on PR #2381, round 4 (generalized per codex P2, round 5):
+commit must be bound to the exact bytes preview showed, for every input
+mode, not just `file_path`.** A `file_path` is a live pointer to a mutable
+resource — the file on disk can be overwritten between the preview call
+and the commit call — and `source_dir`/`source_path` (§3.0) don't protect
+against this: a replacement archive can keep identical source paths while
+changing every skill's body, the instructions, or an MCP server's
+executable config. The original round-4 fix scoped the digest requirement
+to `file_path` only, reasoning that `zip_base64`/`files` callers "already
+hold the bytes and resend them by construction" — codex round 5 correctly
+points out that's an assumption about caller behavior the API does
+nothing to enforce; a caller can rebuild, edit, or accidentally substitute
+its payload between the two calls just as easily. **Fix: the digest
+contract applies uniformly to all three input modes, not just
+`file_path`.**
+
+- `preview`'s response **always** includes `content_digest` — SHA-256,
+  hex-encoded, over a canonical representation of whatever input was
+  given:
+  - `file_path` → hash of the raw file bytes read (round 4, unchanged).
+  - `zip_base64` → hash of the **decoded** raw zip bytes (not the base64
+    text itself, so identical zip content produces the same digest
+    regardless of transport encoding).
+  - `files` → a **deterministic** hash independent of array order (codex's
+    own suggestion): sort entries by `path` ascending, then feed
+    `len(path) || path || len(content) || content` (length-prefixed, to
+    avoid ambiguous concatenation) for each entry, in that sorted order,
+    into the hash.
+- `commit`'s request **always** requires `expected_content_digest`,
+  compared against a freshly-recomputed digest of whatever `commit`
+  itself was given (which may differ in *shape* from what `preview` saw —
+  e.g. preview used `file_path`, commit resends `files` — but must produce
+  the **identical digest value**, i.e. the identical underlying bytes) —
+  a mismatch is a hard rejection (the same "re-select and preview again"
+  error as before), never a partial/best-effort import, for any input
+  mode.
 
 `zip_base64` and `files` remain valid inputs on both new RPCs (unchanged
 from today's `bundle.import`) for callers that don't have a local path —
 e.g. a bundle received over the network by some future integration. Their
-existing WS-transport exposure is a **pre-existing, separately-tracked
-Phase 2 limitation** (§1) this spec does not resolve for that input mode;
-it only ensures the flow this spec actually builds (§4's modal, which
-always has a local path in hand) never depends on it.
+existing WS-transport exposure (§1's own limit) is a **pre-existing,
+separately-tracked Phase 2 limitation** this spec does not resolve for
+those input modes; it only ensures the flow this spec actually builds
+(§4's modal, which always has a local path in hand) never depends on it.
 
 ### 3.1 `bundle.import.preview`
 
@@ -248,7 +274,8 @@ the one the modal actually uses):
   ],
   "warnings": [ "components.instructions: ... skipped" ],
   "name_collision": false,   // true if an existing bundle already has this exact name (soft, informational)
-  "content_digest": "8f14e45f..."   // SHA-256 of the raw file bytes; required back at commit when file_path was used (§3.0.5)
+  "instructions_truncated": false,   // true if instructions_preview was cut short (§3.1)
+  "content_digest": "8f14e45f..."   // SHA-256, canonical per input mode; required back at commit for EVERY input mode (§3.0.5, round 5)
 }
 ```
 
@@ -294,10 +321,27 @@ Implementation notes:
     round-4/5 history) and must be extracted into a shared helper both the
     current commit-path handler and the new preview handler call, rather
     than duplicated inline in a second place where it could drift.
-- `instructions_preview` is the full instructions string, not truncated
-  server-side — truncate for display client-side if needed (keeps the RPC
-  contract simple; the size cap already bounds this to something reasonable
-  in the worst case).
+- **codex P1 on PR #2381, round 5:** an earlier draft returned the full
+  instructions string untruncated, reasoning "the size cap already bounds
+  this to something reasonable" — that's the wrong cap to reason from. A
+  parser-accepted bundle can put nearly all of its
+  `MAX_TOTAL_UNCOMPRESSED_BYTES` (50 MiB) budget into `instructions`
+  alone, and JSON string-escaping can expand pathological content (NUL
+  bytes, control characters — each becomes a 6-character `\u00XX`
+  escape) up to 6×, so the RESPONSE could approach ~300 MiB — which
+  would itself blow the same 64 MiB WS ceiling §3.0.5 just fixed on the
+  request side, just on the way back out instead. Fix:
+  `instructions_preview` is capped server-side to a fixed
+  `MAX_INSTRUCTIONS_PREVIEW_CHARS` (50,000 characters — generous for a
+  glance-and-decide preview; real instructions are almost always a few KB
+  to a few tens of KB, and this bounds worst-case JSON-escaped output to
+  ~300 KB, not ~300 MB). When truncated, the response's
+  `instructions_truncated` field is `true` and the modal shows an
+  "instructions truncated for preview — N characters total" note rather
+  than silently presenting a partial document as complete. This caps the
+  *preview* response only; the *committed* bundle's `instructions` field
+  is written from the full, untruncated parsed value at commit time,
+  exactly as today.
 - Same `MAX_ENTRY_COUNT`/`MAX_ENTRY_UNCOMPRESSED_BYTES`/
   `MAX_TOTAL_UNCOMPRESSED_BYTES`/`MAX_ACCOUNT_REQUIREMENTS`/
   `MAX_IMPORTED_SKILLS` caps from Phase 2 apply unchanged — preview reuses
@@ -310,7 +354,7 @@ Implementation notes:
 ```jsonc
 {
   "file_path": "C:\\Users\\...\\bundle.abf",   // or zip_base64/files — same as preview (§3.1), re-sent, not a cache token
-  "expected_content_digest": "8f14e45f...",    // required when file_path is used (§3.0.5); commit rejects if the file changed since preview
+  "expected_content_digest": "8f14e45f...",    // required for EVERY input mode (§3.0.5, round 5); commit rejects on any mismatch
   "bundle_name": "Backend Dev Bundle (2)",   // user-editable, defaults to the parsed name
   "include_instructions": true,
   "include_context_files": ["conventions.md"],       // paths to include; omitted path = excluded
@@ -328,13 +372,15 @@ Implementation notes:
 it's the same underlying write path, just filtered to the selection.
 
 Implementation notes:
-- When `file_path` is used, the handler reads the file, hashes it, and
-  compares against `expected_content_digest` **before** doing anything
-  else (§3.0.5) — a mismatch is a hard rejection with a clear "re-select
-  and preview again" error, not a partial import against whatever the
-  file currently contains. The same on-disk `MAX_ABF_FILE_SIZE_BYTES`
-  check from preview applies here too, independently (commit re-reads the
-  file from scratch; it never trusts preview's prior read).
+- For every input mode (§3.0.5, round 5), the handler resolves the input
+  to bytes, hashes them, and compares against `expected_content_digest`
+  **before** doing anything else — a mismatch is a hard rejection with a
+  clear "re-select/re-fetch and preview again" error, not a partial
+  import against whatever content was actually given. When `file_path` is
+  used, the same on-disk `MAX_ABF_FILE_SIZE_BYTES` check (via the
+  single-handle open-then-bounded-read pattern, §3.0.5) applies here too,
+  independently — commit re-reads the file from scratch; it never trusts
+  preview's prior read or size check.
 - The commit handler re-runs `parse_bundle_import` (or reuses a shared
   internal parse helper) against the freshly-sent bytes — it does **not**
   trust client-supplied preview data for anything that gets written. The
@@ -410,7 +456,10 @@ Renders the `bundle.import.preview` response as a checklist:
   exists") with a one-click suggested alternate (`"<name> (2)"`,
   incrementing) — never blocking, since the backend allows duplicates.
 - **Instructions** — single checkbox ("Include instructions"), checked by
-  default, with a collapsible preview of `instructions_preview`.
+  default, with a collapsible preview of `instructions_preview`. When
+  `instructions_truncated` is true, an inline note ("preview truncated —
+  the full instructions are still imported") makes clear this is a
+  display limit, not a loss of content (§3.1).
 - **Context files** — one checkbox per file (path + size), checked by
   default.
 - **Skills** — one checkbox per skill (slug + description), checked by
@@ -518,12 +567,23 @@ Renders the `bundle.import.preview` response as a checklist:
   need `file_path` input tests (§3.0.5, round 4): a valid path parses
   identically to the equivalent `zip_base64`; a missing/unreadable/
   non-file path produces a clear error rather than a panic; a file whose
-  on-disk size exceeds `MAX_ABF_FILE_SIZE_BYTES` is rejected before being
-  read (verifiable via a sparse/pre-allocated file rather than actually
-  writing 100MB+ to disk in a test); and `bundle.import.commit` rejects
-  with a clear error — no write happens — when `expected_content_digest`
-  doesn't match the file's current on-disk content (simulate by preview-ing
-  one file, then modifying it, then committing with the stale digest).
+  on-disk size exceeds `MAX_ABF_FILE_SIZE_BYTES` is rejected via the
+  single-handle open-then-bounded-read (§3.0.5, round 5 — not a separate
+  metadata call), verifiable via a sparse/pre-allocated file rather than
+  actually writing 100MB+ to disk in a test. `bundle.import.commit`
+  rejects with a clear error — no write happens — when
+  `expected_content_digest` doesn't match, for **all three input modes**
+  (round 5 generalization): `file_path` (simulate by preview-ing one
+  file, modifying it, then committing with the stale digest),
+  `zip_base64` (commit with a digest that doesn't match the decoded
+  bytes), and `files` (commit with a digest computed over a different
+  canonical ordering/content — also covers that the `files` digest is
+  genuinely order-independent: two equivalent-but-differently-ordered
+  file lists must produce the SAME digest). `instructions_preview` is
+  capped at `MAX_INSTRUCTIONS_PREVIEW_CHARS` with `instructions_truncated:
+  true` set when a real bundle's instructions exceed it, and the
+  committed bundle's actual `instructions` field is unaffected by the
+  preview cap (round 5).
 - **Manual/e2e:** a sample `.abf` was generated for this purpose via
   `agentmux-srv/src/backend/bundle_export.rs`'s existing `export_bundle` +
   `zip_bundle_export` (instructions + 1 context file + 2 skills — one of
