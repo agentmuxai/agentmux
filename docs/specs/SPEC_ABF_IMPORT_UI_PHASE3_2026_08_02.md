@@ -162,9 +162,51 @@ error, not a panic); no extension allowlist is enforced server-side beyond
 that (`show_open_bundle_dialog`'s own filter is the only `.abf` gate, and
 it's advisory — a non-.abf file server-side just fails
 `unzip_bundle_import`'s "not a valid zip archive" check same as today).
-Once read into memory, the bytes go through the **exact same**
-`unzip_bundle_import`/content-cap pipeline as `zip_base64` today — no new
-size-cap logic, just a new way to get the bytes in front of it.
+
+**codex P1 on PR #2381, round 4: the on-disk size must be checked BEFORE
+reading, not after.** `unzip_bundle_import`'s caps (`MAX_ENTRY_COUNT`,
+`MAX_ENTRY_UNCOMPRESSED_BYTES`, `MAX_TOTAL_UNCOMPRESSED_BYTES`) all apply
+to *decompressed content*, evaluated only once the zip is already open and
+being read — they do nothing to bound the file-path intake step itself. A
+`file_path` pointing at a multi-gigabyte file (the picker's extension
+filter is advisory, and this is server-side validation regardless of what
+picked it) would be fully read into memory before any of those checks
+ever run, since there's no size gate on the read call itself. Fix: call
+`std::fs::metadata(path)` and reject with a clear error if the on-disk
+size exceeds **`MAX_ABF_FILE_SIZE_BYTES` (100 MiB — generous headroom
+above `MAX_TOTAL_UNCOMPRESSED_BYTES`'s 50 MiB for compression overhead,
+container overhead, and imperfectly-compressed content, while still
+bounding the read to a fixed, sane amount regardless of what's inside)**
+— *before* the file is opened for reading at all. This is a cheap
+metadata-only syscall, the same "cheap check first" pattern
+`unzip_bundle_import`'s own declared-size pre-filter already uses
+one layer down.
+
+Once past that gate, the read bytes go through the **exact same**
+`unzip_bundle_import`/content-cap pipeline as `zip_base64` today — no
+change to that pipeline's own logic, just a new, bounded way to get bytes
+in front of it.
+
+**codex P1 on PR #2381, round 4: commit must be bound to the exact bytes
+preview showed, not just the same path.** A `file_path` is a live pointer
+to a mutable resource — the file on disk can be overwritten between the
+preview call and the commit call (another process, the user re-saving
+over the same filename, etc.), and `source_dir`/`source_path` (§3.0) don't
+protect against this: a replacement archive can keep identical source
+paths while changing every skill's body, the instructions, or an MCP
+server's executable config, and the user would never know they're
+importing something other than what they reviewed. Fix: `preview`'s
+response gains a `content_digest` field (SHA-256 of the raw file bytes,
+hex-encoded, computed once during the same read that already happens for
+parsing — no extra I/O). `commit`'s request, **when using `file_path`**,
+must include `expected_content_digest` set to that value; the handler
+re-reads the file, re-hashes it, and rejects the commit outright (a clear
+"the bundle changed since preview — re-select the file and try again"
+error, not a partial/best-effort import) if the digests don't match. This
+requirement is specific to `file_path`: `zip_base64`/`files` callers
+already hold the bytes themselves and re-send the identical payload on
+both calls by construction, so there's nothing that can drift between
+their preview and commit — no digest needed for those two modes.
 
 `zip_base64` and `files` remain valid inputs on both new RPCs (unchanged
 from today's `bundle.import`) for callers that don't have a local path —
@@ -205,7 +247,8 @@ the one the modal actually uses):
     { "id": "req-1", "provider": "github", "env": "GITHUB_TOKEN", "resolved": false, "match_count": 0 }
   ],
   "warnings": [ "components.instructions: ... skipped" ],
-  "name_collision": false   // true if an existing bundle already has this exact name (soft, informational)
+  "name_collision": false,   // true if an existing bundle already has this exact name (soft, informational)
+  "content_digest": "8f14e45f..."   // SHA-256 of the raw file bytes; required back at commit when file_path was used (§3.0.5)
 }
 ```
 
@@ -267,6 +310,7 @@ Implementation notes:
 ```jsonc
 {
   "file_path": "C:\\Users\\...\\bundle.abf",   // or zip_base64/files — same as preview (§3.1), re-sent, not a cache token
+  "expected_content_digest": "8f14e45f...",    // required when file_path is used (§3.0.5); commit rejects if the file changed since preview
   "bundle_name": "Backend Dev Bundle (2)",   // user-editable, defaults to the parsed name
   "include_instructions": true,
   "include_context_files": ["conventions.md"],       // paths to include; omitted path = excluded
@@ -284,6 +328,13 @@ Implementation notes:
 it's the same underlying write path, just filtered to the selection.
 
 Implementation notes:
+- When `file_path` is used, the handler reads the file, hashes it, and
+  compares against `expected_content_digest` **before** doing anything
+  else (§3.0.5) — a mismatch is a hard rejection with a clear "re-select
+  and preview again" error, not a partial import against whatever the
+  file currently contains. The same on-disk `MAX_ABF_FILE_SIZE_BYTES`
+  check from preview applies here too, independently (commit re-reads the
+  file from scratch; it never trusts preview's prior read).
 - The commit handler re-runs `parse_bundle_import` (or reuses a shared
   internal parse helper) against the freshly-sent bytes — it does **not**
   trust client-supplied preview data for anything that gets written. The
@@ -343,10 +394,12 @@ union keeps each step's props typed and testable independently.
   this spec's needs.)
 - On selection: call `bundle.import.preview` with `{ file_path: <the
   picked path> }` (§3.0.5) — the frontend never reads the file's bytes or
-  base64-encodes anything itself; the path is the whole payload. Store the
-  path in modal state for the eventual `bundle.import.commit` call in step
-  3. Parse/validation errors (malformed zip, missing `armory.json`,
-  unreadable path) surface inline on this same step — don't advance.
+  base64-encodes anything itself; the path is the whole payload. Store
+  both the path **and** the response's `content_digest` in modal state for
+  the eventual `bundle.import.commit` call in step 3 (§3.0.5's
+  digest-binding requirement). Parse/validation errors (malformed zip,
+  missing `armory.json`, unreadable path, oversized file) surface inline
+  on this same step — don't advance.
 
 ### Step 2 — Preview & select
 
@@ -381,13 +434,17 @@ Renders the `bundle.import.preview` response as a checklist:
 - Summary line built from the current selection state (client-side count,
   no extra RPC): "Importing: instructions, 1 context file, 2 skills, 1 MCP
   server."
-- "Import" button calls `bundle.import.commit` with the same `file_path` +
-  selections built from step 2's checklist state. On success, close the
-  modal and navigate to the new bundle (mirrors whatever "just-created
-  bundle" navigation `bundle.upsert`'s own callers already do, if any
-  exists — otherwise a toast + the new bundle appearing in the Bundles
-  list is sufficient). On a partial failure (e.g. a skill got skipped
-  server-side because of a last-second name conflict), surface the
+- "Import" button calls `bundle.import.commit` with the same `file_path`
+  + the `content_digest` stashed from step 1 (as `expected_content_digest`,
+  §3.0.5) + selections built from step 2's checklist state. A digest
+  mismatch (the file changed since preview) surfaces as a distinct,
+  clearly-worded error directing the user back to step 1 — not a generic
+  failure. On success, close the modal and navigate to the new bundle
+  (mirrors whatever "just-created bundle" navigation `bundle.upsert`'s own
+  callers already do, if any exists — otherwise a toast + the new bundle
+  appearing in the Bundles list is sufficient). On a partial failure (e.g.
+  a skill got skipped server-side because of a last-second name conflict),
+  surface the
   response's `warnings`/`skipped_skills` — this is a real, expected
   outcome under the race described in §3.2, not an error state.
 
@@ -458,9 +515,15 @@ Renders the `bundle.import.preview` response as a checklist:
   `bundle.import` route too — cover both write sites), and the
   pre-existing warn+skip / rollback behavior all still hold when driven
   through a partial selection rather than "everything." Both RPCs also
-  need `file_path` input tests (§3.0.5): a valid path parses identically
-  to the equivalent `zip_base64`, and a missing/unreadable/non-file path
-  produces a clear error rather than a panic.
+  need `file_path` input tests (§3.0.5, round 4): a valid path parses
+  identically to the equivalent `zip_base64`; a missing/unreadable/
+  non-file path produces a clear error rather than a panic; a file whose
+  on-disk size exceeds `MAX_ABF_FILE_SIZE_BYTES` is rejected before being
+  read (verifiable via a sparse/pre-allocated file rather than actually
+  writing 100MB+ to disk in a test); and `bundle.import.commit` rejects
+  with a clear error — no write happens — when `expected_content_digest`
+  doesn't match the file's current on-disk content (simulate by preview-ing
+  one file, then modifying it, then committing with the stale digest).
 - **Manual/e2e:** a sample `.abf` was generated for this purpose via
   `agentmux-srv/src/backend/bundle_export.rs`'s existing `export_bundle` +
   `zip_bundle_export` (instructions + 1 context file + 2 skills — one of
