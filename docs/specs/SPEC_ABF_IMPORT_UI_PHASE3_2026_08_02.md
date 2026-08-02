@@ -393,6 +393,23 @@ Implementation notes:
        the UI can word the hint differently — "another skill in this
        import uses this name" vs. "already exists in your library" — the
        resolution is the same either way, see §4.1).
+  - **codex P2 on PR #2381, round 10: `skills[].description` must be
+    bounded too**, the same class of gap as `instructions_preview`
+    (round 5), `mcp_servers[].config`/`display` (round 7), and `warnings`
+    (rounds 8–9) — a fourth field nobody had capped yet. SKILL.md's
+    frontmatter `description` field has no length limit of its own; with
+    up to `MAX_IMPORTED_SKILLS` (200) skills and up to
+    `MAX_ENTRY_UNCOMPRESSED_BYTES` (10 MiB) allowed per entry, a bundle
+    that devotes most of its content budget to descriptions rather than
+    bodies could still return tens of megabytes of description text.
+    Unlike `instructions_preview` (one long free-form field worth showing
+    a "truncated — N total characters" note for), skill descriptions are
+    meant to be short one-line summaries by Agent Skills convention — a
+    straightforward fixed-character truncation (e.g. 300 chars, with an
+    ellipsis when cut, no separate boolean/total-count field needed) is
+    proportionate here rather than replicating `instructions_preview`'s
+    full truncation-metadata pattern. The full, untruncated description
+    is unaffected at commit time, same as every other preview-only cap.
   - **Bundle name collision**: a name scan over existing bundles (whatever
     read method `bundle.list`'s handler already uses).
   - **Requirement resolution** (codex P2 on PR #2381): `parse_bundle_import`
@@ -760,7 +777,11 @@ Renders the `bundle.import.preview` response as a checklist:
   bounded `warnings`/`warnings_truncated` in the commit response — and
   the underlying Store writes (the bundle row, any skill rows) still
   reflect the full, untruncated parsed data regardless of what the
-  response reports back.
+  response reports back. **Bounded skill descriptions** (round 10): a
+  skill whose SKILL.md `description` frontmatter exceeds the truncation
+  cap gets a shortened `description` in preview's `skills[]`, and the
+  full description is still what's actually written to the `Skill` row
+  at commit time.
 - **Manual/e2e:** a sample `.abf` was generated for this purpose via
   `agentmux-srv/src/backend/bundle_export.rs`'s existing `export_bundle` +
   `zip_bundle_export` (instructions + 1 context file + 2 skills — one of
