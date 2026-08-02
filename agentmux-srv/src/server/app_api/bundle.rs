@@ -348,16 +348,24 @@ fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             crate::backend::bundle_import::unzip_bundle_import(&zip_bytes)
                                 .map_err(|e| format!("bundle.import: {e}"))?
                         }
-                        (None, Some(files)) => (
-                            files
+                        (None, Some(files)) => {
+                            // reagent P1, PR #2379 round 5: the raw `files`
+                            // list previously skipped straight to
+                            // parse_bundle_import with zero size/count
+                            // enforcement, even though the spec treats it as
+                            // an equally untrusted alternate ingestion path
+                            // to zip_base64 — bypassing every zip-bomb/DoS
+                            // defense the zip path enforces.
+                            let raw_files: Vec<crate::backend::bundle_import::BundleImportFile> = files
                                 .into_iter()
                                 .map(|f| crate::backend::bundle_import::BundleImportFile {
                                     path: f.path,
                                     content: f.content,
                                 })
-                                .collect(),
-                            Vec::new(),
-                        ),
+                                .collect();
+                            crate::backend::bundle_import::enforce_raw_files_caps(raw_files)
+                                .map_err(|e| format!("bundle.import: {e}"))?
+                        }
                     };
 
                 let parsed = crate::backend::bundle_import::parse_bundle_import(&files)
