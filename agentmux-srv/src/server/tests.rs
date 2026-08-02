@@ -1296,6 +1296,13 @@ async fn muxspect_list_returns_full_process_status_collection() {
     let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert!(json["blocks"].is_array(), "response has a blocks array");
+    // Every row must carry the complete `is_agent` classification, not just
+    // the raw `is_agent_pane` flag a naive consumer might reimplement
+    // incorrectly for subprocess/persistent/acp controllers (codex P2 on
+    // PR #2380).
+    for block in json["blocks"].as_array().unwrap() {
+        assert!(block.get("is_agent").is_some(), "row is missing is_agent: {block}");
+    }
 }
 
 /// `GET /api/v1/muxspect/list` rejects a request with no/wrong auth key —
@@ -1339,7 +1346,13 @@ async fn muxspect_describe_composes_status_for_an_unknown_block() {
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(json["block_id"], "no-such-block");
     assert_eq!(json["process_status"]["lifecycle"], "unknown");
+    assert_eq!(json["is_agent"], false);
     assert_eq!(json["controller_status"], serde_json::Value::Null);
+    // `process_status.controller_status` must agree with the top-level
+    // field — both must come from the SAME snapshot, not two independent
+    // reads that could observe different controller states (codex P2 on
+    // PR #2380).
+    assert_eq!(json["process_status"]["controller_status"], json["controller_status"]);
     assert_eq!(json["tracking_confidence"], "none");
     assert!(json["processes"].as_array().unwrap().is_empty());
 }

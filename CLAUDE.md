@@ -206,9 +206,11 @@ Full reference: `docs/MUXLOG.md`.
 
 `muxlog` is history (log files on disk); for **live** state — is this block's
 controller actually running right now, what's its process tree — use
-`muxspect` (`muxspect list`, `muxspect describe <block_id>`), its sibling
-tool. Only queries the instance you're already inside (Phase 1 — no
-cross-instance support yet). Full reference: `docs/MUXSPECT.md`.
+`muxspect`, its sibling tool. Only queries the instance you're already
+inside (Phase 1 — no cross-instance support yet). **The bare `muxspect`
+shell function doesn't work from a tool-spawned shell yet (known gap,
+reagent P1 on PR #2380)** — call the core directly instead:
+`node ~/.agentmux/shell/muxspect.mjs list`. Full reference: `docs/MUXSPECT.md`.
 
 ---
 

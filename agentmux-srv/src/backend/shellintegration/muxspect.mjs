@@ -34,9 +34,21 @@ Usage:
   muxspect watch <block_id>       poll 'describe' every 2s until Ctrl+C
   muxspect help                   this message
 
-Requires $AGENTMUX_LOCAL_URL and $AGENTMUX_AUTH_KEY in the environment —
-already present in any agent pane. Not a general-purpose cross-instance tool
-yet: this only ever queries the instance you're already inside.`;
+Requires $AGENTMUX_LOCAL_URL and $AGENTMUX_AUTH_KEY in the environment.
+
+IMPORTANT (reagent P1 on PR #2380): the bare 'muxspect' shell FUNCTION is
+only defined in INTERACTIVE terminal panes (it's sourced from the shell
+rcfile), but those panes only get $AGENTMUX_LOCAL_URL, not
+$AGENTMUX_AUTH_KEY — so the function loads there but auth fails. Agent-CLI
+tool calls (the primary intended use — an agent inspecting its own running
+instance) get BOTH env vars, but tool-spawned shells don't source the
+rcfile, so the 'muxspect' function isn't defined there either. Until a
+Phase 2 fix wires this up properly, the ONLY invocation that reliably works
+today is calling the deployed core directly by path (same caveat muxlog
+itself documents for tool-spawned subshells):
+  node ~/.agentmux/shell/muxspect.mjs list
+See docs/specs/SPEC_MUXSPECT_LIVE_INTROSPECTION_TOOL_2026_08_01.md for the
+full story and the planned fix.`;
 
 function fail(msg) {
     console.error(`muxspect: ${msg}`);
@@ -84,19 +96,26 @@ function renderList(data) {
         console.log("(no controller-backed blocks in this instance)");
         return;
     }
-    // "pane_type" reflects static pane classification (is_agent_pane), NOT
-    // live turn activity — that's what `lifecycle` is for (`lifecycle_from`
-    // maps turn_active=true straight to Lifecycle::Running; see
+    // "pane_type" reflects static pane classification, NOT live turn
+    // activity — that's what `lifecycle` is for (`lifecycle_from` maps
+    // turn_active=true straight to Lifecycle::Running; see
     // agentmux-srv/src/broker/process.rs). A column literally named "turn"
     // showing pane-type instead of turn state was reviewed as misleading
     // (codex P2 on PR #2380) — `list`'s ProcessStatus rows don't carry
     // BlockControllerRuntimeStatus::turn_active at all (that needs
     // `describe`), so this renames rather than fetching it at extra cost.
+    //
+    // Uses the server-computed `is_agent` field, NOT the raw
+    // `is_agent_pane` flag — subprocess/persistent/acp controllers can
+    // report `is_agent_pane: false` even though those controller types are
+    // always agents; reimplementing that classification rule in JS instead
+    // of reusing ProcessStatus::is_agent() mislabeled exactly those three
+    // types as "term" (codex P2 on PR #2380, second round).
     const rows = blocks.map((b) => ({
         block_id: b.block_id,
         type: b.controller_type || "?",
         lifecycle: b.lifecycle,
-        pane_type: b.is_agent_pane ? "agent" : "term",
+        pane_type: b.is_agent ? "agent" : "term",
         confidence: b.liveness_confidence,
         age: ageString(b.last_computed_ms),
     }));
@@ -116,7 +135,7 @@ function renderDescribe(data) {
     console.log(`block_id:            ${data.block_id}`);
     console.log(`lifecycle:           ${ps.lifecycle ?? "unknown"}  (computed ${ageString(ps.last_computed_ms)} ago)`);
     console.log(`controller_type:     ${ps.controller_type || "(no controller)"}`);
-    console.log(`is_agent_pane:       ${ps.is_agent_pane ?? false}`);
+    console.log(`is_agent:            ${data.is_agent ?? false}  (raw is_agent_pane: ${ps.is_agent_pane ?? false})`);
     console.log(`liveness_confidence: ${ps.liveness_confidence ?? "none"}`);
     console.log(`tracking_confidence: ${data.tracking_confidence}`);
     if (cs) {

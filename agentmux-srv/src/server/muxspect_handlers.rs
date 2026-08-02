@@ -23,8 +23,26 @@ use super::AppState;
 /// `GET /api/v1/muxspect/list` — every controller-backed block's current
 /// `ProcessStatus`, full detail (unlike `agent.tracked-blocks`, which
 /// intentionally returns only `block_ids` for its Swarm-pane contract).
+/// Each row also carries `is_agent` — `ProcessStatus::is_agent()`'s complete
+/// classification rule (subprocess/persistent/acp are ALWAYS agents
+/// regardless of `is_agent_pane`, which only applies to shell/cmd) — so
+/// consumers don't reimplement that rule themselves (codex P2 on PR #2380:
+/// the CLI's own naive `is_agent_pane`-only rendering mislabeled exactly
+/// those three controller types).
 pub async fn handle_muxspect_list(State(state): State<AppState>) -> impl IntoResponse {
-    let blocks = state.process_broker.list();
+    let blocks: Vec<serde_json::Value> = state
+        .process_broker
+        .list()
+        .into_iter()
+        .map(|status| {
+            let is_agent = status.is_agent();
+            let mut value = serde_json::to_value(&status).unwrap_or_default();
+            if let Some(obj) = value.as_object_mut() {
+                obj.insert("is_agent".to_string(), json!(is_agent));
+            }
+            value
+        })
+        .collect();
     Json(json!({ "blocks": blocks })).into_response()
 }
 
@@ -53,18 +71,22 @@ pub async fn handle_muxspect_describe(
     }
 
     // `process_status` (via `ProcessBroker::compute_status`) already reads
-    // the process-tracker registry once for both `processes` and
-    // `liveness_confidence` — a second, independent read here could race a
-    // process starting/exiting between the two calls and return two
-    // contradictory snapshots in one response (codex P2 on PR #2380).
-    // Derive everything from this one snapshot instead of reading twice.
+    // BOTH the process-tracker registry (for `processes`/
+    // `liveness_confidence`) AND the controller's `BlockControllerRuntimeStatus`
+    // (carried on `process_status.controller_status`) in one pass. A second,
+    // independent read of either would risk a process starting/exiting or a
+    // turn starting/finishing between the two calls, returning two
+    // contradictory snapshots in one response (codex P2 on PR #2380, twice —
+    // once for the process list, once for the controller status). Derive
+    // everything from this one snapshot instead of reading twice.
     let process_status = state.process_broker.status(&q.block_id);
-    let controller_status = crate::backend::blockcontroller::get_block_controller_status(&q.block_id);
+    let is_agent = process_status.is_agent();
 
     Json(json!({
         "block_id": q.block_id,
         "process_status": &process_status,
-        "controller_status": controller_status,
+        "is_agent": is_agent,
+        "controller_status": &process_status.controller_status,
         "processes": &process_status.processes,
         "tracking_confidence": process_status.liveness_confidence,
     }))
