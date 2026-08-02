@@ -87,12 +87,30 @@ the new RPCs:**
   `Vec<ParsedMcpServer { source_path: String, config: Value }>` — same
   idea, using the already-unique `components.mcpServers` path reference
   that's discarded today after the `by_path` lookup.
-- Both source identifiers are **selection keys only** — everything else
-  about how skills/MCP servers get written (via slug, via raw JSON
-  respectively) is unchanged.
+- Both source identifiers are **selection keys only** — the actual
+  persisted *content* (the skill's slug/description/body, the MCP
+  server's raw JSON config) is unchanged.
 
 This is a small, mechanical addition to structs that already compute these
 values and throw them away — not a re-design of the parser.
+
+**codex P1 on PR #2381, round 2:** changing `mcp_servers`'s element type
+breaks the existing write path silently if not called out explicitly.
+Today, `bundle.rs`'s `bundle.import` handler does
+`mcp_servers: serde_json::to_string(&parsed.mcp_servers)...` — serializing
+the parsed value **directly** into `Memory.mcp_servers`. Once that value
+is `Vec<ParsedMcpServer>` instead of `Vec<Value>`, that line would
+literally persist `{source_path, config}` wrapper objects instead of raw
+MCP configs, corrupting every bundle imported this way (every consumer of
+`Memory.mcp_servers` — the agent-launch config builder, `bundle.export`'s
+own re-export path — expects the raw config shape). **Every write site
+that touches `parsed.mcp_servers` after this amendment (the retained,
+now-unfiltered `bundle.import` route AND the new
+`bundle.import.commit` handler) must project to `.config` before
+serializing** — e.g. `parsed.mcp_servers.iter().map(|m| &m.config).collect::<Vec<_>>()`,
+filtered to the selected `source_path`s for commit, unfiltered for the
+existing route. This is a required part of the §3.0 amendment, not an
+implementation detail left to chance.
 
 ### 3.1 `bundle.import.preview`
 
@@ -112,7 +130,8 @@ values and throw them away — not a re-design of the parser.
   ],
   "skills": [
     { "source_dir": "skills/deploy-checklist", "slug": "deploy-checklist", "description": "...", "collision": "none" },
-    { "source_dir": "skills/code-review-v2", "slug": "code-review", "description": "...", "collision": "name_conflict" }
+    { "source_dir": "skills/code-review-v2", "slug": "code-review", "description": "...", "collision": "name_conflict" },
+    { "source_dir": "skills/code-review-old", "slug": "code-review", "description": "...", "collision": "duplicate_in_bundle" }
   ],
   "mcp_servers": [
     { "source_path": "mcp/github.server.json", "config": { "name": "github", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] } }
@@ -134,12 +153,26 @@ Implementation notes:
 - `parse_bundle_import` already produces everything here except
   `collision`/`name_collision`/the requirement `resolved`/`match_count`
   fields — three new, read-only additions the RPC handler makes:
-  - **Skill collisions**: one call to `skill.catalog.list`'s underlying
-    `wstore.skill_list_global()` (`agentmux-srv/src/server/app_api/skill.rs`,
-    `register_skill_catalog_list`), name-matched against each parsed
-    skill's slug. **Not** `skill.list` (agent-scoped, requires `agent_id`)
-    and **not** a `skill.list_global` command — that command doesn't exist
-    (codex P1 on PR #2381; corrected from an earlier draft of this spec).
+  - **Skill collisions**: `collision` is computed in two passes, not one
+    (codex P1 on PR #2381, round 2 — the first draft only checked the
+    global catalog, so two skills *within the same bundle* sharing a slug
+    that happens not to already be global were both marked `"none"`,
+    letting the user check both; commit would then write the first and
+    silently warn+skip the second with no rename ever offered):
+    1. **Against the existing catalog**: one call to `skill.catalog.list`'s
+       underlying `wstore.skill_list_global()`
+       (`agentmux-srv/src/server/app_api/skill.rs`,
+       `register_skill_catalog_list`), name-matched against each parsed
+       skill's slug → `"name_conflict"`. **Not** `skill.list` (agent-scoped,
+       requires `agent_id`) and **not** a `skill.list_global` command —
+       that command doesn't exist (codex P1 on PR #2381, round 1).
+    2. **Within the bundle itself**: group the parsed skill list by `slug`;
+       every entry whose slug appears more than once, and that wasn't
+       already flagged `"name_conflict"` in pass 1, is flagged
+       `"duplicate_in_bundle"` instead (distinct from `"name_conflict"` so
+       the UI can word the hint differently — "another skill in this
+       import uses this name" vs. "already exists in your library" — the
+       resolution is the same either way, see §4.1).
   - **Bundle name collision**: a name scan over existing bundles (whatever
     read method `bundle.list`'s handler already uses).
   - **Requirement resolution** (codex P2 on PR #2381): `parse_bundle_import`
@@ -260,11 +293,13 @@ Renders the `bundle.import.preview` response as a checklist:
 - **Context files** — one checkbox per file (path + size), checked by
   default.
 - **Skills** — one checkbox per skill (slug + description), checked by
-  default. A skill with `collision: "name_conflict"` shows a collision
-  badge and switches its row to a text input pre-filled with the slug,
-  where the user types an alternate name to import under (empty = skip on
-  commit — same effect as unchecking). This is the one item type with real
-  collision UX; see §4.1.
+  default. A skill whose `collision` is `"name_conflict"` (already exists
+  in the global catalog) or `"duplicate_in_bundle"` (another row in this
+  same import shares its slug) shows a collision badge — worded
+  differently per reason — and switches its row to a text input pre-filled
+  with the slug, where the user types an alternate name to import under
+  (empty = skip on commit — same effect as unchecking). This is the one
+  item type with real collision UX; see §4.1.
 - **MCP servers** — one checkbox per server (name + command), checked by
   default. No collision UI — per §2, there's nothing for these to collide
   with under the current backend design.
@@ -290,18 +325,23 @@ Renders the `bundle.import.preview` response as a checklist:
 
 ### 4.1 Skill collision resolution, precisely
 
-1. Preview's `collision: "name_conflict"` is computed from a global-skill
-   name lookup taken at preview time — a snapshot, not a live constraint.
+1. Preview's `collision` (`"name_conflict"` / `"duplicate_in_bundle"`) is
+   computed by the two-pass logic in §3.1 — a snapshot at preview time,
+   not a live constraint.
 2. The modal fetches the full existing global skill-name list **once**,
    up front, via **`skill.catalog.list`** — the window-scoped, no-`agent_id`
    route Armory already uses (`register_skill_catalog_list`,
    `agentmux-srv/src/server/app_api/skill.rs`). Not `skill.list` (requires
    an `agent_id`, agent-scoped) and not `skill.list_global`, which doesn't
    exist as a command (codex P1 on PR #2381; corrected from an earlier
-   draft). This lets the rename text input validate the user's typed
-   alternate **client-side, instantly** (grey out / inline error if the
-   typed name is itself already taken), without a round-trip per
-   keystroke. This is advisory only.
+   draft). A typed rename is validated **client-side, instantly** against
+   the **union** of that fetched global list and the current in-progress
+   slugs/renames of every *other* selected skill row in this same preview
+   (codex P1 on PR #2381, round 2 — validating against the global list
+   alone would let a user "resolve" a `duplicate_in_bundle` collision by
+   typing a name that just collides with a third row in the same import
+   instead), recomputed live as any row's checkbox/rename changes. This is
+   advisory only.
 3. At commit, the server is the sole authority: `skill_upsert_unique_global`
    runs its own check regardless of what the client validated. A
    client-side "looks available" name can still lose a race server-side —
@@ -338,13 +378,18 @@ Renders the `bundle.import.preview` response as a checklist:
 - **Backend:** `bundle.import.preview` — pure-function-level tests mirror
   Phase 2's style (`bundle_import.rs`'s existing test module): collision
   flags computed correctly against a seeded fake global-skill list;
-  `name_collision` computed correctly against a seeded bundle-name list.
-  `bundle.import.commit` — selection filtering by `source_dir`/
-  `source_path` (only checked items get written, including the case of
-  two entries with a colliding `slug`/`name` but distinct source paths),
-  `import_as` substitution, and the pre-existing warn+skip / rollback
-  behavior all still hold when driven through a partial selection rather
-  than "everything."
+  `name_collision` computed correctly against a seeded bundle-name list;
+  **`"duplicate_in_bundle"` specifically** — two parsed skills sharing a
+  slug that is NOT in the global catalog both get flagged, not silently
+  passed as `"none"` (the exact round-2 gap codex found). `bundle.import.commit`
+  — selection filtering by `source_dir`/`source_path` (only checked items
+  get written, including the case of two entries with a colliding
+  `slug`/`name` but distinct source paths), `import_as` substitution, **MCP
+  server persistence writing raw `config` values, not `{source_path,
+  config}` wrappers** (the exact round-2 gap codex found on the retained
+  `bundle.import` route too — cover both write sites), and the
+  pre-existing warn+skip / rollback behavior all still hold when driven
+  through a partial selection rather than "everything."
 - **Manual/e2e:** a sample `.abf` was generated for this purpose via
   `agentmux-srv/src/backend/bundle_export.rs`'s existing `export_bundle` +
   `zip_bundle_export` (instructions + 1 context file + 2 skills — one of
