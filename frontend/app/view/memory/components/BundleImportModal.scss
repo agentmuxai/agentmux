@@ -1,0 +1,194 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Shared styling for the three ABF import modal steps (BundleImportSelect/
+// Preview/ConfirmModal.tsx). Reuses the app's shared .modal-panel-* shell
+// classes; everything here is scoped under .bundle-import-*.
+
+.bundle-import-select-body,
+.bundle-import-preview-body,
+.bundle-import-confirm-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-height: 60vh;
+    overflow-y: auto;
+}
+
+.bundle-import-select-status {
+    opacity: 0.75;
+}
+
+.bundle-import-select-error,
+.bundle-import-error {
+    color: var(--color-error, #e5484d);
+    white-space: pre-wrap;
+}
+
+.bundle-import-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.bundle-import-field-label {
+    font-weight: 600;
+    opacity: 0.85;
+}
+
+.bundle-import-input {
+    padding: 6px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--color-border, #444);
+    background: var(--color-input-bg, transparent);
+}
+
+.bundle-import-hint {
+    font-size: 0.85em;
+    opacity: 0.75;
+}
+
+.bundle-import-hint-warn {
+    color: var(--color-warning, #f5a524);
+    opacity: 1;
+}
+
+.bundle-import-link-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--color-accent, #4d9de5);
+    text-decoration: underline;
+    cursor: pointer;
+    font: inherit;
+}
+
+.bundle-import-section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.bundle-import-section-title {
+    font-size: 0.95em;
+    font-weight: 600;
+    margin: 0;
+    opacity: 0.85;
+}
+
+.bundle-import-checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.bundle-import-item-name {
+    font-weight: 500;
+}
+
+.bundle-import-item-name-readonly {
+    opacity: 0.6;
+    text-decoration: line-through;
+    font-size: 0.9em;
+}
+
+.bundle-import-item-meta {
+    opacity: 0.6;
+    font-size: 0.85em;
+    margin-left: auto;
+}
+
+.bundle-import-item-description {
+    margin: 0 0 0 24px;
+    font-size: 0.85em;
+    opacity: 0.75;
+}
+
+.bundle-import-skill-row {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.bundle-import-skill-collision {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.bundle-import-collision-badge {
+    font-size: 0.75em;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: var(--color-warning-bg, rgba(245, 165, 36, 0.15));
+    color: var(--color-warning, #f5a524);
+}
+
+.bundle-import-rename-input {
+    flex: 1;
+    min-width: 160px;
+    padding: 4px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--color-border, #444);
+    background: var(--color-input-bg, transparent);
+}
+
+.bundle-import-instructions-preview {
+    margin-left: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.bundle-import-instructions-text {
+    max-height: 200px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    font-size: 0.85em;
+    padding: 8px;
+    border-radius: 4px;
+    background: var(--color-code-bg, rgba(128, 128, 128, 0.1));
+}
+
+.bundle-import-requirements-summary {
+    font-size: 0.9em;
+    opacity: 0.85;
+}
+
+.bundle-import-warnings-banner {
+    position: relative;
+    padding: 8px 28px 8px 8px;
+    border-radius: 4px;
+    background: var(--color-warning-bg, rgba(245, 165, 36, 0.1));
+    font-size: 0.85em;
+}
+
+.bundle-import-warning-line {
+    opacity: 0.85;
+}
+
+.bundle-import-warnings-dismiss {
+    position: absolute;
+    top: 4px;
+    right: 6px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 1.1em;
+    opacity: 0.6;
+
+    &:hover {
+        opacity: 1;
+    }
+}
+
+.bundle-import-summary-line {
+    font-weight: 500;
+}
+
+.bundle-import-result {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
