@@ -145,6 +145,17 @@ pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImp
             ));
             continue;
         }
+        // reagent P2, PR #2379 round 5: `unzip_bundle_import` explicitly
+        // detects and warns on a duplicate entry within a zip ("first
+        // occurrence kept"), but the raw `files` RPC list reaches this
+        // shared loop directly, bypassing that pass entirely — two input
+        // entries normalizing to the same safe_path silently resolved
+        // last-write-wins with no warning, so a caller inspecting the
+        // input couldn't tell which content actually got imported.
+        if by_path.contains_key(&safe_path) {
+            warnings.push(format!("{safe_path}: duplicate path in input; first occurrence kept"));
+            continue;
+        }
         by_path.insert(safe_path, f.content.as_str());
     }
 
@@ -172,7 +183,14 @@ pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImp
         warnings.push("armory.json: no $schema field present".to_string());
     }
     match manifest.get("version").and_then(|v| v.as_str()) {
-        Some(v) if v.starts_with("0.1") => {}
+        // codex P2, PR #2379 round 5: a bare prefix match treated "0.10.0"
+        // and "0.1garbage" as recognized v0.1.x versions too — this
+        // warning is the only signal that potentially incompatible
+        // semantics are being accepted for an importer that deliberately
+        // proceeds with unknown versions anyway, so it must actually
+        // distinguish "0.1", "0.1.x" from anything merely starting with
+        // the same three characters.
+        Some(v) if v == "0.1" || v.starts_with("0.1.") => {}
         Some(other) => warnings.push(format!(
             "armory.json: version \"{other}\" is not a recognized ABF v0.1.x version; importing anyway"
         )),
@@ -431,6 +449,81 @@ const MAX_ENTRY_COUNT: usize = 10_000;
 /// row.
 const MAX_ACCOUNT_REQUIREMENTS: usize = 1_000;
 
+/// Single choke point for the per-entry/aggregate size caps, shared by
+/// BOTH intake paths (zip decompression and the raw `files` RPC list) —
+/// reagent P1 / codex P1, PR #2379 round 5. Two separate gaps motivated
+/// unifying this instead of patching each path independently:
+///
+/// - The raw `files` RPC branch previously ran NO size/count checks at
+///   all, even though the spec explicitly treats it as an equally
+///   untrusted alternate ingestion path to the zip — a hostile bundle
+///   submitted via `files` instead of `zip_base64` bypassed every
+///   zip-bomb/DoS defense this module had built for the zip path alone.
+/// - Even on the zip path, an entry whose ACTUAL decompressed size
+///   exceeds the per-entry cap was decompressed (paying the full
+///   MAX_ENTRY_UNCOMPRESSED_BYTES-sized read) and then skipped WITHOUT
+///   ever counting that work toward the aggregate budget — so up to
+///   MAX_ENTRY_COUNT such entries could force on the order of
+///   MAX_ENTRY_COUNT * MAX_ENTRY_UNCOMPRESSED_BYTES of real decompression
+///   work while the aggregate cap never tripped.
+///
+/// This function accounts `content_len` toward the aggregate budget
+/// UNCONDITIONALLY, before deciding whether the entry itself is kept —
+/// closing the second gap structurally (every byte actually processed
+/// counts, whether or not the entry is ultimately retained) — and both
+/// intake paths call it, closing the first gap by construction (there is
+/// no path left that skips this check).
+///
+/// Returns `Ok(true)` to keep the entry, `Ok(false)` to skip it (a
+/// warning has already been pushed), or `Err` to reject the whole import
+/// (aggregate cap exceeded).
+fn check_entry_size(
+    safe_name: &str,
+    content_len: u64,
+    total_uncompressed: &mut u64,
+    warnings: &mut Vec<String>,
+) -> Result<bool, String> {
+    *total_uncompressed = total_uncompressed.saturating_add(content_len);
+    if *total_uncompressed > MAX_TOTAL_UNCOMPRESSED_BYTES {
+        return Err(format!(
+            "aggregate decompressed size exceeds the total limit ({MAX_TOTAL_UNCOMPRESSED_BYTES} bytes) — rejecting the whole import"
+        ));
+    }
+    if content_len > MAX_ENTRY_UNCOMPRESSED_BYTES {
+        warnings.push(format!(
+            "{safe_name}: size ({content_len} bytes) exceeds the per-entry limit ({MAX_ENTRY_UNCOMPRESSED_BYTES} bytes); skipped"
+        ));
+        return Ok(false);
+    }
+    Ok(true)
+}
+
+/// Applies [`check_entry_size`]'s caps (plus [`MAX_ENTRY_COUNT`]) to the
+/// raw `files` RPC intake path — the path `unzip_bundle_import` never
+/// covers (reagent P1, PR #2379 round 5). Unlike zip entries, a raw
+/// file's `content` is already fully materialized (no separate
+/// declared-vs-actual distinction, no incremental decompression to
+/// bound), so this only needs the shared per-entry/aggregate check, no
+/// backstop-read machinery.
+pub fn enforce_raw_files_caps(files: Vec<BundleImportFile>) -> Result<(Vec<BundleImportFile>, Vec<String>), String> {
+    if files.len() > MAX_ENTRY_COUNT {
+        return Err(format!(
+            "{} entries exceeds the limit ({MAX_ENTRY_COUNT}) — rejecting the whole import",
+            files.len()
+        ));
+    }
+    let mut warnings = Vec::new();
+    let mut total_uncompressed: u64 = 0;
+    let mut out = Vec::new();
+    for f in files {
+        let keep = check_entry_size(&f.path, f.content.len() as u64, &mut total_uncompressed, &mut warnings)?;
+        if keep {
+            out.push(f);
+        }
+    }
+    Ok((out, warnings))
+}
+
 /// Unpack a `.abf` zip archive into a flat file list, applying the same
 /// path-safety check as everywhere else in this module to every entry
 /// name before it's trusted (§4.3.4) — a zip's own internal paths are
@@ -546,21 +639,16 @@ pub fn unzip_bundle_import(zip_bytes: &[u8]) -> Result<(Vec<BundleImportFile>, V
             warnings.push(format!("{safe_name}: failed to read entry: {e}"));
             continue;
         }
-        if buf.len() as u64 > MAX_ENTRY_UNCOMPRESSED_BYTES {
-            warnings.push(format!(
-                "{safe_name}: actual decompressed size exceeds the per-entry limit ({MAX_ENTRY_UNCOMPRESSED_BYTES} bytes), despite a smaller declared size; skipped"
-            ));
-            continue;
-        }
 
-        // Aggregate cap enforced against ACTUAL bytes read, not the
-        // declared size — the only value that can't be lied about by the
-        // archive's own metadata.
-        total_uncompressed = total_uncompressed.saturating_add(buf.len() as u64);
-        if total_uncompressed > MAX_TOTAL_UNCOMPRESSED_BYTES {
-            return Err(format!(
-                "zip archive: aggregate decompressed size exceeds the total limit ({MAX_TOTAL_UNCOMPRESSED_BYTES} bytes) — rejecting the whole import"
-            ));
+        // codex P1, PR #2379 round 5: `check_entry_size` accounts these
+        // bytes toward the aggregate budget BEFORE deciding whether to
+        // keep the entry, unlike the previous inline checks here (which
+        // accumulated only KEPT entries' bytes, so an entry that failed
+        // its own per-entry cap was decompressed — real work already
+        // spent — and then discarded without ever counting against the
+        // aggregate limit).
+        if !check_entry_size(&safe_name, buf.len() as u64, &mut total_uncompressed, &mut warnings)? {
+            continue;
         }
         let content = match String::from_utf8(buf) {
             Ok(s) => s,
@@ -859,6 +947,137 @@ mod tests {
         let result = parse_bundle_import(&files).unwrap();
         assert_eq!(result.requirements.len(), MAX_ACCOUNT_REQUIREMENTS);
         assert!(result.warnings.iter().any(|w| w.contains("exceeds the limit")));
+    }
+
+    #[test]
+    fn treats_a_version_that_merely_starts_with_0_1_as_unrecognized() {
+        // codex P2, PR #2379 round 5: "0.10.0" and "0.1garbage" both start
+        // with "0.1" but are not the 0.1.x family the importer actually
+        // recognizes.
+        for bad_version in ["0.10.0", "0.1garbage"] {
+            let manifest = serde_json::to_string(&serde_json::json!({
+                "name": "test-bundle",
+                "version": bad_version,
+                "components": {},
+            })).unwrap();
+            let files = vec![file("armory.json", &manifest)];
+            let result = parse_bundle_import(&files).unwrap();
+            assert!(
+                result.warnings.iter().any(|w| w.contains("not a recognized")),
+                "expected a warning for version {bad_version:?}, got: {:?}",
+                result.warnings
+            );
+        }
+    }
+
+    #[test]
+    fn recognizes_bare_0_1_with_no_patch_component() {
+        let manifest = serde_json::to_string(&serde_json::json!({
+            "name": "test-bundle",
+            "version": "0.1",
+            "components": {},
+        })).unwrap();
+        let files = vec![file("armory.json", &manifest)];
+        let result = parse_bundle_import(&files).unwrap();
+        assert!(result.warnings.iter().all(|w| !w.contains("not a recognized")));
+    }
+
+    #[test]
+    fn a_raw_files_duplicate_path_resolves_to_the_first_occurrence_with_a_warning() {
+        // reagent P2, PR #2379 round 5: unzip_bundle_import already warns
+        // on a duplicate zip entry; the raw files list reaches by_path
+        // construction directly, bypassing that pass, so it previously
+        // silently resolved last-write-wins with no warning at all.
+        let files = vec![
+            file("armory.json", &minimal_manifest(serde_json::json!({
+                "instructions": ["instructions/AGENTS.md"],
+            }))),
+            file("instructions/AGENTS.md", "first"),
+            file("instructions/AGENTS.md", "second -- should never be used"),
+        ];
+        let result = parse_bundle_import(&files).unwrap();
+        assert_eq!(result.instructions, "first");
+        assert!(result.warnings.iter().any(|w| w.contains("instructions/AGENTS.md") && w.contains("duplicate path")));
+    }
+
+    // ── raw `files` intake path now shares the zip path's size/count caps
+    // (reagent P1, PR #2379 round 5) ──────────────────────────────────
+
+    #[test]
+    fn enforce_raw_files_caps_rejects_more_entries_than_the_count_cap() {
+        let files: Vec<BundleImportFile> = (0..=MAX_ENTRY_COUNT)
+            .map(|i| file(&format!("f{i}.md"), "x"))
+            .collect();
+        let err = enforce_raw_files_caps(files).unwrap_err();
+        assert!(err.contains("entries exceeds the limit"));
+    }
+
+    #[test]
+    fn enforce_raw_files_caps_skips_a_single_oversized_entry_with_a_warning() {
+        let oversized = "a".repeat(MAX_ENTRY_UNCOMPRESSED_BYTES as usize + 1);
+        let files = vec![file("armory.json", "{}"), file("big.md", &oversized)];
+        let (kept, warnings) = enforce_raw_files_caps(files).unwrap();
+        assert!(kept.iter().any(|f| f.path == "armory.json"));
+        assert!(!kept.iter().any(|f| f.path == "big.md"));
+        assert!(warnings.iter().any(|w| w.contains("big.md") && w.contains("exceeds the per-entry limit")));
+    }
+
+    #[test]
+    fn enforce_raw_files_caps_rejects_the_whole_import_over_the_aggregate_cap() {
+        let each = "a".repeat((MAX_ENTRY_UNCOMPRESSED_BYTES as f64 * 0.9) as usize);
+        let files = vec![
+            file("a.md", &each), file("b.md", &each), file("c.md", &each),
+            file("d.md", &each), file("e.md", &each), file("f.md", &each),
+        ];
+        let err = enforce_raw_files_caps(files).unwrap_err();
+        assert!(err.contains("aggregate decompressed size exceeds"));
+    }
+
+    #[test]
+    fn enforce_raw_files_caps_counts_a_discarded_oversized_entrys_bytes_toward_the_aggregate() {
+        // codex P1, PR #2379 round 5: an entry too large to KEEP must
+        // still count toward the aggregate budget -- otherwise many such
+        // entries can each force per-entry-cap-sized work while never
+        // tripping the aggregate limit. Five entries just over the
+        // per-entry cap (~10.5MB each) sum to ~52.5MB > the 50MB
+        // aggregate cap, even though every single one is discarded rather
+        // than kept.
+        let oversized = "a".repeat((MAX_ENTRY_UNCOMPRESSED_BYTES as f64 * 1.05) as usize);
+        let files = vec![
+            file("a.md", &oversized), file("b.md", &oversized), file("c.md", &oversized),
+            file("d.md", &oversized), file("e.md", &oversized),
+        ];
+        let err = enforce_raw_files_caps(files).unwrap_err();
+        assert!(err.contains("aggregate decompressed size exceeds"));
+    }
+
+    #[test]
+    fn check_entry_size_accounts_bytes_toward_the_aggregate_even_when_the_entry_is_discarded() {
+        // codex P1, PR #2379 round 5: directly exercises the shared
+        // choke point both unzip_bundle_import (after its backstop read)
+        // and enforce_raw_files_caps call -- an entry too large to KEEP
+        // must still count toward the aggregate budget first, or many
+        // discarded oversized entries could each force per-entry-cap-
+        // sized work while the aggregate cap never trips. (A zip-level
+        // reproduction would need to forge a declared size that
+        // UNDERSTATES real content while still reaching this function --
+        // the `zip` crate reads declared size from the central directory,
+        // not the local file header this module can cheaply patch, so
+        // the invariant is verified directly at its actual implementation
+        // site instead.)
+        let mut total: u64 = 0;
+        let mut warnings = Vec::new();
+        let oversized = MAX_ENTRY_UNCOMPRESSED_BYTES + 1;
+        for i in 0..5 {
+            let name = format!("f{i}.md");
+            let result = check_entry_size(&name, oversized, &mut total, &mut warnings);
+            if i < 4 {
+                assert_eq!(result, Ok(false), "entry {i} should be discarded (not an error) with total={total}");
+            } else {
+                assert!(result.is_err(), "5th entry should trip the aggregate cap now that all 5 discarded entries' bytes were counted (total={total})");
+            }
+        }
+        assert!(warnings.iter().filter(|w| w.contains("exceeds the per-entry limit")).count() >= 4);
     }
 
     #[test]
