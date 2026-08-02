@@ -423,6 +423,21 @@ Implementation notes:
     round-4/5 history) and must be extracted into a shared helper both the
     current commit-path handler and the new preview handler call, rather
     than duplicated inline in a second place where it could drift.
+  - **codex P2 on PR #2381, round 11: `requirements[]`'s `id`/`provider`/
+    `env` strings must be bounded too** — a fifth field in the same class
+    as skill descriptions (round 10). `MAX_ACCOUNT_REQUIREMENTS` (1,000)
+    bounds the *count* of requirements and `MAX_ENTRY_UNCOMPRESSED_BYTES`
+    (10 MiB) bounds `accounts/requirements.json`'s own file size, but
+    neither bounds the length of an *individual field* within it — a
+    valid 10 MiB requirements document could concentrate its content into
+    oversized `id`/`provider`/`env` strings across up to 1,000 entries,
+    and control-character JSON escaping compounds that the same way it
+    does for `instructions_preview`. Fix: each of these three fields gets
+    the same fixed-character truncation as skill descriptions when
+    included in preview's `requirements[]`; the full, untruncated values
+    are what the existing `id_store.identity_list` resolution and the
+    commit write path actually use — this only bounds what's echoed back
+    for display.
 - **codex P1 on PR #2381, round 5:** an earlier draft returned the full
   instructions string untruncated, reasoning "the size cap already bounds
   this to something reasonable" — that's the wrong cap to reason from. A
@@ -461,15 +476,33 @@ Implementation notes:
   entry names aren't length-capped anywhere in this module, so the
   accumulated (and then JSON-escaped) warning text could reach hundreds
   of megabytes, blowing the same 64 MiB WS ceiling on the way out that
-  the other two caps exist to prevent. **Fix:** cap both dimensions —
-  each individual warning string truncated to a fixed character limit
-  (e.g. 500 chars, with a `"..."` suffix when cut), and the array itself
-  capped to a fixed count (e.g. the first 100), with
-  `warnings_truncated: true` and a final summary entry ("N more warnings
-  not shown") appended when either cap is hit. Mirrors the "bounded
-  array + count summary" shape `bundle_import.rs` already uses for its
-  own duplicate-reference warnings (Phase 2 round 7) — same pattern,
-  applied at the RPC response boundary instead of within the parser.
+  the other two caps exist to prevent.
+
+  **codex P2 on PR #2381, round 11: capping only at the RPC response
+  boundary is too late — the fix must live at the parser's own
+  warning-push sites, not just at serialization.** The round-8 design
+  (as originally written: "applied at the RPC response boundary instead
+  of within the parser") still lets `unzip_bundle_import`/
+  `parse_bundle_import` build the ENTIRE unbounded `Vec<String>` — every
+  full, untruncated warning, for every one of up to 10,000 entries — in
+  memory first; only *after* that complete (potentially hundreds-of-MB)
+  allocation finishes does a response-boundary projection trim it down.
+  The backend can exhaust memory/time building the full list long before
+  any capping ever runs. **Fix: enforce the cap where warnings are
+  actually produced.** `parse_bundle_import`/`unzip_bundle_import`/
+  `enforce_raw_files_caps` accept an explicit, optional warning-budget
+  parameter (max individual string length + max total count) instead of
+  pushing directly into a bare, unbounded `Vec<String>`; once the budget
+  is exhausted, further warnings are dropped (with a trailing summary
+  entry) at the moment they'd be produced, not retained-then-trimmed.
+  **The existing `bundle.import` route passes an effectively-unbounded
+  budget** (matching today's real, already-shipped, already-reviewed
+  behavior exactly — this is a capability the parser gains, not a
+  behavior change forced onto Phase 2's existing caller); the new
+  `preview`/`commit` handlers pass the tight budget from the round-8
+  design. One shared enforcement point, two different budgets per
+  caller — not "cap everything, always" and not "cap only after the
+  fact."
 - Same `MAX_ENTRY_COUNT`/`MAX_ENTRY_UNCOMPRESSED_BYTES`/
   `MAX_TOTAL_UNCOMPRESSED_BYTES`/`MAX_ACCOUNT_REQUIREMENTS`/
   `MAX_IMPORTED_SKILLS` caps from Phase 2 apply unchanged — preview reuses
@@ -512,14 +545,21 @@ the caller sees a failure or disconnect for an import that actually
 went through, and a plausible retry (nothing about `bundle.import.commit`
 is idempotent; it always mints a fresh bundle UUID) creates a **second,
 duplicate bundle** rather than merely losing some diagnostic text. Fix:
-apply §3.1's exact bounded-warning projection (per-warning character
-truncation, array count cap, `warnings_truncated` flag, summary entry) to
-`commit`'s response too, computed **after** the write loop completes —
-the writes themselves are already based on the full, untruncated parsed
-data; only the warnings *reported back* are capped, same as preview. This
-is exactly the kind of drift the spec's own account-requirement-resolution
-fix (§3.1's implementation notes, requirement resolution bullet) already
-called for extracting into a shared helper to prevent — implement the
+apply §3.1's bounded-warning treatment to `commit`'s response too — the
+same warning-budget parameter §3.1's round-11 revision (above) has the
+parse call itself enforce, so `commit`'s call into `parse_bundle_import`/
+`unzip_bundle_import` is *already* producing a bounded list before the
+write loop ever starts, not after. The write loop then appends its own,
+separate, small number of additional warnings (skill-conflict
+"already exists" messages — bounded by `MAX_IMPORTED_SKILLS`, 200, far
+below the parse-time danger zone of up to 10,000 unsafe entries), and one
+final pass applies the same per-warning-length/array-count bound to the
+*combined* list before serializing the response — now a cheap
+consistency/defense-in-depth step over an already-small input, not the
+primary defense. This is exactly the kind of drift the spec's own
+account-requirement-resolution fix (§3.1's implementation notes,
+requirement resolution bullet) already called for extracting into a
+shared helper to prevent — implement the
 bounded-warning projection as **one function both `preview` and `commit`
 call**, not two independent copies, so a future change to the cap can't
 silently apply to only one of them again.
@@ -538,9 +578,25 @@ Implementation notes:
   internal parse helper) against the freshly-sent bytes — it does **not**
   trust client-supplied preview data for anything that gets written. The
   selections (`include_*`) are a filter applied to the freshly-parsed
-  result before the existing write loop runs; nothing about the write
-  loop's own logic (per-skill `skill_upsert_unique_global` call,
-  conflict → warn+skip, rollback on infra failure) changes.
+  result before the existing write loop runs; the write loop's own
+  per-item logic (per-skill `skill_upsert_unique_global` call, conflict →
+  warn+skip, rollback on infra failure) is otherwise unchanged.
+- **codex P2 on PR #2381, round 11: `bundle_name` must actually be
+  substituted — an earlier draft never said so, so the write loop as
+  described would keep constructing `Memory.name` from `parsed.name`
+  regardless of what the request's `bundle_name` said.** This makes the
+  entire rename-before-import UX (§4 Step 2's editable name field, and
+  its one-click `"<name> (2)"` suggestion for a soft name collision)
+  silently inert — every import would keep the archive's original name no
+  matter what the user typed or accepted. **Fix: the commit handler uses
+  the request's `bundle_name` for `Memory.name` when constructing the
+  bundle row — never `parsed.name` directly** (mirrors `import_as`'s
+  override of a skill's parsed slug, immediately below, which already got
+  this right for skills specifically; `bundle_name` needs the identical
+  treatment at the bundle level). `bundle_name` defaults to the parsed
+  name client-side when the field is first populated (§3.1's `name`), so
+  a commit that never edited the suggested value still round-trips
+  correctly — it isn't optional at the wire level, just pre-filled.
 - `include_skills`/`include_mcp_servers` filter the freshly-parsed
   `skills`/`mcp_servers` lists by matching each entry's `source_dir`/
   `source_path` (§3.0) — never by `slug` or a JSON `"name"` field, which
@@ -781,7 +837,24 @@ Renders the `bundle.import.preview` response as a checklist:
   skill whose SKILL.md `description` frontmatter exceeds the truncation
   cap gets a shortened `description` in preview's `skills[]`, and the
   full description is still what's actually written to the `Skill` row
-  at commit time.
+  at commit time. **Bounded requirement fields** (round 11): a
+  requirement with an oversized `id`/`provider`/`env` string gets
+  truncated versions of those three fields in preview's `requirements[]`,
+  while the full values are what the existing account-resolution lookup
+  and the commit write path actually use. **`bundle_name` is actually
+  applied** (round 11): a commit whose `bundle_name` differs from the
+  archive's own parsed name produces a `Memory` row with the
+  **requested** name, not the archive's original one — the exact
+  functional gap codex found (an earlier draft's write loop would have
+  silently ignored the field). **Warnings capped during accumulation, not
+  just at the response boundary** (round 11): an archive with thousands
+  of unsafe entries must not cause `parse_bundle_import`/
+  `unzip_bundle_import` themselves to allocate the full unbounded warning
+  list — this needs a test at the *parser* level (not just the RPC
+  response level) proving the budget parameter actually bounds
+  accumulation during parsing, e.g. asserting the returned `Vec<String>`
+  length/total-bytes never exceeds the budget even when called directly,
+  independent of any response-boundary projection.
 - **Manual/e2e:** a sample `.abf` was generated for this purpose via
   `agentmux-srv/src/backend/bundle_export.rs`'s existing `export_bundle` +
   `zip_bundle_export` (instructions + 1 context file + 2 skills — one of
