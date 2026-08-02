@@ -861,6 +861,21 @@ pub fn spawn_background_subsystems(
         tracing::warn!("media file watcher not started; media panes will not live-update on new/changed files");
     }
 
+    // Deploy shell integration scripts (muxlog.mjs/muxspect.mjs + rcfiles)
+    // unconditionally at startup, not opportunistically from a specific
+    // controller's spawn path. Previously the only call site was
+    // `ShellController::start`'s interactive (empty-command) branch
+    // (`blockcontroller/shell/lifecycle.rs`) — a user whose first-ever pane
+    // in a fresh data dir is an Agent pane (persistent/subprocess/acp, which
+    // never hits that branch) would never get the scripts deployed at all,
+    // so even muxspect's own documented `node ~/.agentmux/shell/muxspect.mjs`
+    // direct-path fallback would ENOENT (codex P1 on PR #2380 — a latent gap
+    // in muxlog's identical deployment mechanism that PR newly depends on).
+    // `deploy_scripts` is idempotent (skips if its version marker already
+    // matches), so calling it here in addition to the existing call site is
+    // safe, not a double-write race.
+    backend::shellintegration::deploy_scripts(&backend::base::get_home_dir().join(".agentmux"));
+
     // Config watcher (created before sysinfo loop so it can read telemetry:interval)
     let config_watcher = Arc::new(wconfig::ConfigWatcher::with_config(wconfig::build_default_config()));
 

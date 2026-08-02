@@ -89,6 +89,21 @@ function muxlog
     end
 end
 
+# ─── muxspect ───────────────────────────────────────────────────────────────
+# Live process/turn-state introspection for the CURRENT instance (muxlog's
+# live-state sibling). Delegates to the shared Node core (muxspect.mjs).
+# `muxspect help` for usage. No non-Node fallback: introspection needs a real
+# authenticated HTTP call.
+set -g _agentmux_muxspect_js (dirname (status -f))/../muxspect.mjs
+function muxspect
+    if command -q node; and test -f "$_agentmux_muxspect_js"
+        node "$_agentmux_muxspect_js" $argv
+        return
+    end
+    echo "muxspect: Node unavailable or core missing at $_agentmux_muxspect_js" >&2
+    return 1
+end
+
 function _agentmux_si_prompt --on-event fish_prompt
     _agentmux_si_osc7
     _agentmux_si_agent_env
