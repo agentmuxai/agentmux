@@ -22,6 +22,10 @@ export const WpsEvent = {
     AgentFailure: "agentfailure",
     ShellNodeCreate: "shell_node_create",
     ShellChunk: "shell_chunk",
+    // Published by the `PreCompact` hook (`agentmux-bashwrap precompact`) the
+    // instant Claude Code begins compacting — see
+    // docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md §4.2.
+    CompactionStarted: "compaction_started",
     BlockActivity: "block:activity",
     // Fired when a file open in at least one editor/preview tab changes on
     // disk. Payload: `{ path }` — a wake signal only, no content; handlers

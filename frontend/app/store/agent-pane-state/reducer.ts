@@ -36,6 +36,7 @@ import {
     AgentPaneCommand,
     AgentPaneEvent,
     AgentPaneState,
+    COMPACTION_HEURISTIC_SUPPRESS_MS,
     INTERRUPT_TIMEOUT_MS,
     KindBeforeDisconnect,
     LIVENESS_RECOVERY_MS,
@@ -182,6 +183,13 @@ export function update(
                     turnTokens: null,
                     lastEventMs: null,
                     turnPhase: nextPhase,
+                    // reagent P1 on PR #2378: a disconnect mid-compaction
+                    // (crash, network drop, reconnect race) means the
+                    // matching CompactionBoundary will never arrive to
+                    // clear this — without this, the composer strip is
+                    // stuck showing "Compacting… Ns" forever, surviving
+                    // the reconnect and every subsequent turn.
+                    compacting: null,
                 },
                 events: [
                     { type: "stream-unsubscribed", at: command.at },
@@ -274,6 +282,20 @@ export function update(
             // covers "no event seen yet" — same field since PR G
             // dropped the redundant `streaming.active` boolean).
             if (state.lastEventMs == null) {
+                return { state, events: [] };
+            }
+            // Codex P1 on PR #2378 (round 2): CompactionStarted only bumps
+            // lastEventMs ONCE, at the moment compaction begins — it isn't
+            // re-bumped on every tick while compaction is still running.
+            // The captured real example (spec doc §2) took ~232s: past
+            // STUCK_THRESHOLD_MS (45s) alone that's a cosmetic false
+            // "stream-stuck" warning, but past LIVENESS_RECOVERY_MS (180s)
+            // it would force-demote a perfectly healthy, actively-
+            // compacting Streaming turn to Idle out from under it. Suspend
+            // the watchdog entirely for as long as `compacting` is set —
+            // CompactionBoundary (or any of the other lifecycle events that
+            // clear `compacting`, see the tests above) re-arms it.
+            if (state.compacting != null) {
                 return { state, events: [] };
             }
             const idleSinceMs = command.nowMs - state.lastEventMs;
@@ -411,6 +433,11 @@ export function update(
                     currentToolArg: null,
                     turnTokens: null,
                     turnPhase: { kind: "Idle" },
+                    // Same reasoning as the other authoritative terminal
+                    // transitions above: the backend has just confirmed
+                    // there is no active turn, so whatever compaction the
+                    // frontend still thought was in flight is stale.
+                    compacting: null,
                 },
                 events: [{ type: "turn-inactive-reconciled", at: command.at }],
             };
@@ -575,6 +602,12 @@ export function update(
                         outcome,
                         finishedAt,
                     },
+                    // reagent P1 on PR #2378: the turn ending (however it
+                    // ended) means whatever compaction was in flight is
+                    // moot — a CompactionBoundary for it, if it ever
+                    // arrives, would be stale. See the same note on
+                    // StreamUnsubscribe above.
+                    compacting: null,
                 },
                 events: [
                     {
@@ -601,18 +634,34 @@ export function update(
                     // working/stopping cascade lives entirely on
                     // turnPhase since PR G.
                     turnPhase: { kind: "Idle" },
+                    // reagent P1 on PR #2378: same "wholesale clear"
+                    // reasoning extends to `compacting` — a reset must
+                    // not leave a stale "Compacting…" readout behind.
+                    compacting: null,
                 },
                 events: [{ type: "turn-reset" }],
             };
 
         case "TurnStartFailed":
-            // Deliberately touches ONLY turnPhase — see this command's doc
+            // Deliberately touches ONLY turnPhase (+ compacting, see below)
+            // — see this command's doc
             // comment in types.ts for why TurnReset's wholesale clear is
             // wrong here (a transient send failure must not wipe
             // sessionStats/sessionTotals/lastContextTokens accumulated by
             // prior real turns in this same pane).
+            // `compacting` IS cleared, unlike the fields above: codex P2
+            // on PR #2378 (round 8) — a `compaction_started` ping can
+            // land while this (new, doomed) turn attempt is briefly
+            // Submitting (round 5's workingFromPhase gate explicitly
+            // permits Submitting), then this arm reverts to Idle without
+            // ever getting a matching CompactionBoundary for a turn that
+            // never really started — same bug class as
+            // SubmitTimeoutElapsed/InterruptTimeoutElapsed/
+            // ReconcileTurnActive above, missed here in round 4 on the
+            // (wrong) assumption that a synchronously-failed turn-start
+            // could never race a live WPS ping.
             return {
-                state: { ...state, turnPhase: { kind: "Idle" } },
+                state: { ...state, turnPhase: { kind: "Idle" }, compacting: null },
                 events: [{ type: "turn-start-failed" }],
             };
 
@@ -671,12 +720,26 @@ export function update(
             // non-trivial baseline. Compaction typically drops 80–95%;
             // normal turn-to-turn growth is monotonically increasing.
             // AgentMux /clear is frontend-only and does not affect tokens.
+            //
+            // Backstop only for Claude: a REAL `CompactionBoundary` event
+            // (exact backend data, not inferred) already fired its own
+            // `context-compacted` and reconciled `lastContextTokens` to
+            // `postTokens` — suppress this heuristic within the window
+            // below so the same boundary doesn't produce two events.
+            // Providers without a structured signal (codex/gemini/copilot)
+            // never set `lastCompactionBoundaryAt`, so the heuristic stays
+            // fully active for them. See
+            // docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md §4.3.
             const prev = state.lastContextTokens;
-            if (prev != null && prev > 10_000 && command.input < prev * 0.5) {
+            const suppressedByRealBoundary =
+                state.lastCompactionBoundaryAt != null
+                && nowMs - state.lastCompactionBoundaryAt < COMPACTION_HEURISTIC_SUPPRESS_MS;
+            if (!suppressedByRealBoundary && prev != null && prev > 10_000 && command.input < prev * 0.5) {
                 events.push({
                     type: "context-compacted",
                     tokensBefore: prev,
                     tokensAfter: command.input,
+                    source: "heuristic",
                 });
             }
             return { state: nextState, events };
@@ -748,6 +811,21 @@ export function update(
                 });
             }
             return {
+                // Codex P2 on PR #2378 (round 3): deliberately does NOT
+                // clear `compacting` here (an earlier version of this fix
+                // did, per a since-superseded reagent finding). RequestStop
+                // only SENDS a SIGINT — it doesn't confirm the turn
+                // actually ended. If the stop fails, `StopFailed` rolls
+                // the phase back to Streaming with no way to know whether
+                // compaction resumed unaffected the whole time (the SIGINT
+                // never landed) — eagerly clearing here would have
+                // silently dropped the "Compacting…" status and its timer
+                // for a compaction that was never actually interrupted.
+                // TurnEnd/TurnReset/StreamUnsubscribe/FailureObserved
+                // already clear `compacting` on every path that actually,
+                // authoritatively ends the turn (whether the stop
+                // succeeded or the turn ended some other way) — that's
+                // sufficient; this transition doesn't need its own clear.
                 state: { ...state, turnPhase: nextPhase },
                 events,
             };
@@ -807,6 +885,15 @@ export function update(
                         outcome: "interrupted",
                         finishedAt: command.at,
                     },
+                    // reagent + codex P1 on PR #2378 (round 4): a fifth
+                    // authoritative terminal transition, same bug class as
+                    // the four already fixed. Round 3 deliberately stopped
+                    // RequestStop from clearing `compacting` (so it survives
+                    // a failed stop attempt) — but if the interrupt instead
+                    // TIMES OUT here, that IS an authoritative end of the
+                    // turn, same as TurnEnd/TurnReset/StreamUnsubscribe/
+                    // FailureObserved, and must clear it the same way.
+                    compacting: null,
                 },
                 events: [{ type: "interrupt-timed-out", at: command.at }],
             };
@@ -844,6 +931,14 @@ export function update(
                         outcome: "errored",
                         finishedAt: command.at,
                     },
+                    // Same reasoning as InterruptTimeoutElapsed above:
+                    // realistically compaction only happens once Streaming
+                    // has started, so `compacting` shouldn't be set while
+                    // still Submitting — but CompactionStarted's own
+                    // handling doesn't gate on phase kind, so clear it here
+                    // too for the same defensive completeness reagent/codex
+                    // asked for on the other bounded-timeout arm.
+                    compacting: null,
                 },
                 events: [{ type: "submit-timed-out", at: command.at }],
             };
@@ -973,6 +1068,15 @@ export function update(
                     currentToolArg: turnWasEnded ? null : state.currentToolArg,
                     turnTokens: turnWasEnded ? null : state.turnTokens,
                     failure: { data: command.failure, at: command.at },
+                    // reagent P1 on PR #2378 (round 3): a failure classification
+                    // ends the turn the same way TurnEnd/TurnReset/RequestStop/
+                    // StreamUnsubscribe do — same "whatever compaction was in
+                    // flight is now moot" reasoning as those, just reached via
+                    // an error instead of a clean transition. Without this, a
+                    // failure observed mid-compaction (e.g. the CLI erroring out
+                    // partway through) reproduces the exact stuck-"Compacting…"
+                    // bug this PR already fixed for the other four transitions.
+                    compacting: turnWasEnded ? null : state.compacting,
                 },
                 events: [
                     { type: "failure-observed", code: command.failure.code, turnWasEnded },
@@ -985,6 +1089,130 @@ export function update(
             return {
                 state: { ...state, failure: null },
                 events: [{ type: "failure-cleared" }],
+            };
+        }
+
+        case "CompactionStarted": {
+            // Mirrors ProviderWaiting's "observable activity" bump — a
+            // long compaction with no other stream output must not trip
+            // the stuck-stream watchdog. No-op if the stream isn't
+            // subscribed (a stray/late event after teardown).
+            //
+            // reagent P1 on PR #2378 (round 5): also no-op unless the turn
+            // is actually in the working set (Submitting/Streaming/
+            // Interrupting). `compaction_started` arrives over a SEPARATE
+            // transport (WPS: HTTP publish -> broker -> websocket) from the
+            // primary NDJSON stream carrying TurnEnd/compact_boundary, so
+            // it can race and land AFTER that same turn's TurnEnd already
+            // fired. Every "clear compacting" fix added across rounds 1-4
+            // is itself gated on transitioning OUT of a working phase — if
+            // `compacting` gets set while the pane is already Idle/Done,
+            // none of those transitions ever fire again to clear it, and it
+            // stays orphaned until the pane's next full TurnEnd/TurnReset —
+            // the exact bug class this PR patched five separate times, just
+            // reached from the setter side instead of a missing clearer.
+            // Gating here is the structural fix: refuse to set stale-by-
+            // construction state instead of enumerating every possible way
+            // to clear it after the fact.
+            //
+            // reagent (round 6, PLAUSIBLE): the round-5 guard above doesn't
+            // catch a NARROWER race — a stale `compaction_started` ping can
+            // also arrive AFTER its own matching `CompactionBoundary` while
+            // the turn is STILL working (e.g. streaming new content past
+            // the compaction that already completed), since `workingFromPhase`
+            // stays true the whole time and doesn't distinguish "before" from
+            // "after" the boundary. `compaction_started` and `compact_boundary`
+            // travel over two independent transports (WPS vs. the primary
+            // NDJSON stream) with no ordering guarantee between them. Reject
+            // any start whose own timestamp is at or before the most recent
+            // known boundary — a genuinely NEW compaction must be later than
+            // the previous one's own completion.
+            const isStaleVsLastBoundary =
+                state.lastCompactionBoundaryAt != null && command.at <= state.lastCompactionBoundaryAt;
+            if (state.lastEventMs == null || !workingFromPhase(state.turnPhase) || isStaleVsLastBoundary) {
+                return { state, events: [] };
+            }
+            const next: AgentPaneState = {
+                ...state,
+                lastEventMs: command.at,
+                compacting: { trigger: command.trigger, startedAt: command.at },
+            };
+            if (next.turnPhase.kind === "Streaming") {
+                next.turnPhase = { ...next.turnPhase, lastEventMs: command.at };
+            }
+            return {
+                state: next,
+                events: [{ type: "compaction-started", trigger: command.trigger }],
+            };
+        }
+
+        case "CompactionBoundary": {
+            // Codex P2 on PR #2378 (round 8): compact_boundary and
+            // compaction_started travel over two independent transports
+            // with no ordering guarantee (same root cause as the
+            // CompactionStarted staleness guard above, mirrored here). If
+            // compaction N+1 has already started (state.compacting) before
+            // a DELAYED boundary for compaction N arrives, clearing
+            // `compacting` unconditionally would wipe the genuinely
+            // active N+1 state using stale N data. Only clear it when this
+            // boundary's own completion time is at or after the
+            // currently-tracked start — i.e. it's this same compaction (or
+            // an even older one) finishing, not a stale echo racing a
+            // newer one that's already begun. Falls back to clearing when
+            // `frameTimestamp` is unavailable/unparseable — can't tell,
+            // and a permanently-stuck "Compacting…" is worse than an
+            // occasional early clear.
+            const boundaryAt = command.frameTimestamp != null ? Date.parse(command.frameTimestamp) : NaN;
+            const preservesNewerCompaction =
+                state.compacting != null && !Number.isNaN(boundaryAt) && boundaryAt < state.compacting.startedAt;
+            const next: AgentPaneState = {
+                ...state,
+                compacting: preservesNewerCompaction ? state.compacting : null,
+                // Codex P2 on PR #2378 (round 10): use this boundary's own
+                // parsed completion time, not `command.at` (the frontend's
+                // receipt wall-clock). `CompactionStarted.at` is the WPS
+                // payload's embedded true start time, not a receipt
+                // timestamp — comparing it against a delayed boundary's
+                // RECEIPT time in the isStaleVsLastBoundary check above
+                // means network/stream lag on this (older) boundary's
+                // delivery can exceed a legitimately-earlier next
+                // compaction's true start, falsely rejecting it. Falls
+                // back to `command.at` when frameTimestamp is unparseable,
+                // same as preservesNewerCompaction above.
+                lastCompactionBoundaryAt: Number.isNaN(boundaryAt) ? command.at : boundaryAt,
+                // reagent P2 on PR #2378 (round 11): gated the same way as
+                // `compacting` above. When this boundary belongs to an
+                // OLDER compaction that's finishing after a newer one has
+                // already started (preservesNewerCompaction), its
+                // postTokens describes a context-fill state that's already
+                // stale -- overwriting the live lastContextTokens with it
+                // would show a smaller/incorrect reading while the newer
+                // compaction is still confirmed in flight. The
+                // context-compacted event below still reports this
+                // boundary's own true tokens (accurate historical record
+                // of what that specific compaction did); only the live
+                // state gate changes here.
+                lastContextTokens: preservesNewerCompaction ? state.lastContextTokens : command.postTokens,
+            };
+            if (state.lastEventMs != null) {
+                next.lastEventMs = command.at;
+                if (next.turnPhase.kind === "Streaming") {
+                    next.turnPhase = { ...next.turnPhase, lastEventMs: command.at };
+                }
+            }
+            return {
+                state: next,
+                events: [
+                    {
+                        type: "context-compacted",
+                        tokensBefore: command.preTokens,
+                        tokensAfter: command.postTokens,
+                        source: "real",
+                        trigger: command.trigger,
+                        durationMs: command.durationMs,
+                        frameTimestamp: command.frameTimestamp,
+                    },
+                ],
             };
         }
 

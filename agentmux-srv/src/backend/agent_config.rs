@@ -146,12 +146,17 @@ pub fn build_config_files(
     // ----------------------------------------------------------------
     // Write .claude/hooks.json — always includes a PreToolUse:Bash
     // entry pointing at `agentmux-bashwrap hook` so the streaming
-    // wrapper is invoked for every Bash tool call. User-provided
-    // hooks (from content_map["hooks"]) are merged on top, with the
-    // user's entries winning on key collisions, EXCEPT that our
-    // PreToolUse entries are always appended to any user
-    // PreToolUse array so streaming stays on regardless. See
-    // docs/specs/SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §5.
+    // wrapper is invoked for every Bash tool call, plus two
+    // PreCompact entries (matcher "manual" / "auto") pointing at
+    // `agentmux-bashwrap precompact` so a live "compaction started"
+    // signal reaches the sidecar. User-provided hooks (from
+    // content_map["hooks"]) are merged on top, with the user's
+    // entries winning on key collisions, EXCEPT that our PreToolUse
+    // and PreCompact entries are always appended to any user array
+    // for those keys so streaming / compaction visibility stay on
+    // regardless. See docs/specs/SPEC_STREAMING_BASH_RUNNER_2026_05_11.md
+    // §5 and docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md
+    // §4.2.
     // ----------------------------------------------------------------
     let user_hooks = content_map.get("hooks").map(|s| s.as_str());
     let user_settings = content_map.get("settings").map(|s| s.as_str());
@@ -356,13 +361,46 @@ pub fn skills_to_agent_skills(
         .collect()
 }
 
+/// Merge a user-supplied `settings.json`-level hook-array (`PreToolUse`
+/// or `PreCompact`) with whatever is already staged in `hooks_obj`
+/// under `key` (our auto-injected entries, possibly already carrying
+/// legacy `content_map["hooks"]`-merged user entries from the earlier
+/// pass in [`build_settings_with_hooks`]). User entries are PREPENDED
+/// so their matchers/gates get first refusal; AgentMux's own entries
+/// always stay last. A non-array value is warned and dropped rather
+/// than silently discarded — same discipline as every other branch in
+/// this function (reagent P1 on PR #813).
+fn prepend_user_hook_array(
+    hooks_obj: &mut serde_json::Map<String, Value>,
+    key: &str,
+    user_value: Value,
+) {
+    match user_value {
+        Value::Array(mut user_arr) => {
+            if let Some(Value::Array(ours)) = hooks_obj.remove(key) {
+                user_arr.extend(ours);
+            }
+            hooks_obj.insert(key.to_string(), Value::Array(user_arr));
+        }
+        _ => {
+            tracing::warn!(
+                "agent_config: user settings.hooks.{key} is not an array; dropped"
+            );
+        }
+    }
+}
+
 /// Build `.claude/settings.json` content with the auto-injected
-/// PreToolUse Bash hook (under the `"hooks"` key) that redirects
-/// Bash invocations into the streaming wrapper
-/// (`agentmux-bashwrap exec`). User-supplied settings.json (from
-/// the agent's `content_map["settings"]`) is parsed and merged at
-/// the top level; user-supplied legacy hooks content (from
-/// `content_map["hooks"]`) is merged into `settings.hooks`.
+/// PreToolUse Bash hook and PreCompact hooks (under the `"hooks"`
+/// key). PreToolUse redirects Bash invocations into the streaming
+/// wrapper (`agentmux-bashwrap exec`); PreCompact (two entries,
+/// matcher `"manual"` / `"auto"`) pings the sidecar the instant
+/// compaction starts (`agentmux-bashwrap precompact`) — see
+/// `docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md`
+/// §4.2. User-supplied settings.json (from the agent's
+/// `content_map["settings"]`) is parsed and merged at the top level;
+/// user-supplied legacy hooks content (from `content_map["hooks"]`)
+/// is merged into `settings.hooks`.
 ///
 /// **File location matters.** Claude Code reads project hooks from
 /// `<project>/.claude/settings.json` under the `"hooks"` key.
@@ -387,8 +425,35 @@ pub fn build_settings_with_hooks(
             }
         ]
     });
+    // `PreCompact` requires an explicit `matcher` (`"manual"` or
+    // `"auto"`) — Claude Code has no confirmed wildcard-all value for
+    // this hook — so two separate entries are registered, each with a
+    // different static `--trigger=` argv baked in so the binary knows
+    // which fired without needing it from stdin (PreCompact's stdin
+    // payload carries no `trigger` field; see `precompact.rs`). See
+    // `docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md`
+    // §4.2.
+    let agentmux_precompact_manual = json!({
+        "matcher": "manual",
+        "hooks": [
+            {
+                "type": "command",
+                "command": "agentmux-bashwrap precompact --trigger=manual"
+            }
+        ]
+    });
+    let agentmux_precompact_auto = json!({
+        "matcher": "auto",
+        "hooks": [
+            {
+                "type": "command",
+                "command": "agentmux-bashwrap precompact --trigger=auto"
+            }
+        ]
+    });
     let mut hooks_obj = serde_json::Map::new();
     let mut pretooluse_entries: Vec<Value> = Vec::new();
+    let mut precompact_entries: Vec<Value> = Vec::new();
 
     // Start with user hooks if present + parseable. Parse failures or
     // non-Object top-levels are logged at WARN so the diagnostic trail
@@ -404,6 +469,14 @@ pub fn build_settings_with_hooks(
                         } else {
                             tracing::warn!(
                                 "agent_config: user hooks.PreToolUse is not an array; dropped"
+                            );
+                        }
+                    } else if k == "PreCompact" {
+                        if let Value::Array(arr) = v {
+                            precompact_entries.extend(arr);
+                        } else {
+                            tracing::warn!(
+                                "agent_config: user hooks.PreCompact is not an array; dropped"
                             );
                         }
                     } else {
@@ -425,10 +498,14 @@ pub fn build_settings_with_hooks(
             }
         }
     }
-    // Append our entry last so user matchers (deny rules etc.) get a chance to
-    // short-circuit before our rewrite.
+    // Append our entries last so user matchers (deny rules etc.) get a chance
+    // to short-circuit before our rewrite / observation hooks. PreCompact
+    // gets both matcher entries, in matcher order (manual, then auto).
     pretooluse_entries.push(agentmux_pretooluse);
     hooks_obj.insert("PreToolUse".to_string(), Value::Array(pretooluse_entries));
+    precompact_entries.push(agentmux_precompact_manual);
+    precompact_entries.push(agentmux_precompact_auto);
+    hooks_obj.insert("PreCompact".to_string(), Value::Array(precompact_entries));
 
     // Build the settings.json object: start from user-supplied settings.json
     // (if any), then overlay our hooks key. User keys other than `hooks`
@@ -455,31 +532,24 @@ pub fn build_settings_with_hooks(
         }
     }
     // Merge: any existing hooks key from user settings is merged with our
-    // additions. For PreToolUse specifically, user matchers from
-    // settings.json are PREPENDED (not dropped) so they short-circuit
-    // before our auto-injected agentmux-bashwrap entry — same ordering
-    // rule we apply to legacy content_map["hooks"] PreToolUse entries.
-    // For other event types (PostToolUse, Stop, etc.) we keep user's
-    // entries verbatim. Reagent P1 on PR #813 (the `continue` was a
-    // silent drop — caught a real merge bug).
+    // additions. For PreToolUse and PreCompact specifically, user matchers
+    // from settings.json are PREPENDED (not dropped) so they short-circuit
+    // before our auto-injected entries — same ordering rule we apply to
+    // legacy content_map["hooks"] entries for these two keys. For other
+    // event types (PostToolUse, Stop, etc.) we keep user's entries
+    // verbatim. Reagent P1 on PR #813 (the `continue` was a silent drop —
+    // caught a real merge bug); PreCompact is deliberately folded into the
+    // same array-merge discipline rather than the generic `or_insert`
+    // below, or a user-supplied PreCompact entry would hit that path and
+    // be silently and permanently dropped the moment PreCompact became
+    // auto-injected too — the exact bug class this file already guards
+    // PreToolUse against. See
+    // `docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md`
+    // §4.2.
     if let Some(Value::Object(existing_hooks)) = settings_obj.get("hooks").cloned() {
         for (k, v) in existing_hooks {
-            if k == "PreToolUse" {
-                if let Value::Array(user_pretooluse) = v {
-                    // Prepend user PreToolUse so their matchers run
-                    // first; our auto-injected entry stays last.
-                    if let Some(Value::Array(ours)) = hooks_obj.remove("PreToolUse") {
-                        let mut merged = user_pretooluse;
-                        merged.extend(ours);
-                        hooks_obj.insert("PreToolUse".to_string(), Value::Array(merged));
-                    } else {
-                        hooks_obj.insert("PreToolUse".to_string(), Value::Array(user_pretooluse));
-                    }
-                } else {
-                    tracing::warn!(
-                        "agent_config: user settings.hooks.PreToolUse is not an array; dropped"
-                    );
-                }
+            if k == "PreToolUse" || k == "PreCompact" {
+                prepend_user_hook_array(&mut hooks_obj, &k, v);
                 continue;
             }
             hooks_obj.entry(k).or_insert(v);
@@ -1173,6 +1243,102 @@ mod tests {
                 .iter()
                 .any(|e| e["matcher"].as_str().unwrap_or("").contains("Bash")),
             "auto-injected PreToolUse:Bash must still be present"
+        );
+    }
+
+    #[test]
+    fn test_build_config_files_settings_merges_user_precompact_hooks() {
+        // SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md §4.2:
+        // PreCompact becomes auto-injected (two entries, matcher
+        // "manual"/"auto") the same way PreToolUse already is. This is
+        // the exact regression class PR #813's PreToolUse fix guards
+        // against — a user-supplied PreCompact entry (from the legacy
+        // content_map["hooks"] path) must survive the merge, not get
+        // silently and permanently dropped by the generic
+        // `hooks_obj.entry(k).or_insert(v)` path once PreCompact stops
+        // being "just another key".
+        let mut content_map = HashMap::new();
+        content_map.insert(
+            "hooks".to_string(),
+            r#"{"PreCompact":[{"matcher":"manual","hooks":[{"type":"command","command":"my-precompact-audit"}]}]}"#
+                .to_string(),
+        );
+        let files = build_config_files(&content_map, &[], "Aria", "agent-1", "aria", "/tmp/aria");
+        let settings = files
+            .iter()
+            .find(|f| f.filename == ".claude/settings.json")
+            .expect("settings.json emitted");
+        let parsed: Value = serde_json::from_str(&settings.content).unwrap();
+        let pre_compact = parsed["hooks"]["PreCompact"]
+            .as_array()
+            .expect("PreCompact is an array");
+        assert_eq!(
+            pre_compact.len(),
+            3,
+            "expected user entry + 2 auto-injected (manual, auto) entries, got {pre_compact:?}"
+        );
+        assert!(
+            pre_compact
+                .iter()
+                .any(|e| e["hooks"][0]["command"].as_str() == Some("my-precompact-audit")),
+            "user-supplied PreCompact entry must survive the merge"
+        );
+        assert!(
+            pre_compact.iter().any(|e| e["hooks"][0]["command"].as_str()
+                == Some("agentmux-bashwrap precompact --trigger=manual")),
+            "auto-injected PreCompact manual entry must still be present"
+        );
+        assert!(
+            pre_compact.iter().any(|e| e["hooks"][0]["command"].as_str()
+                == Some("agentmux-bashwrap precompact --trigger=auto")),
+            "auto-injected PreCompact auto entry must still be present"
+        );
+    }
+
+    #[test]
+    fn test_build_config_files_settings_json_merges_user_precompact_hooks() {
+        // Same regression as above, but exercising the OTHER merge
+        // branch: a user-supplied PreCompact entry living in
+        // settings.json's own `"hooks"` key (content_map["settings"])
+        // rather than the legacy content_map["hooks"] path. Both
+        // branches in `build_settings_with_hooks` needed the fix.
+        let mut content_map = HashMap::new();
+        content_map.insert(
+            "settings".to_string(),
+            r#"{"hooks":{"PreCompact":[{"matcher":"auto","hooks":[{"type":"command","command":"my-settings-precompact"}]}]}}"#
+                .to_string(),
+        );
+        let files = build_config_files(&content_map, &[], "Aria", "agent-1", "aria", "/tmp/aria");
+        let settings = files
+            .iter()
+            .find(|f| f.filename == ".claude/settings.json")
+            .expect("settings.json emitted");
+        let parsed: Value = serde_json::from_str(&settings.content).unwrap();
+        let pre_compact = parsed["hooks"]["PreCompact"]
+            .as_array()
+            .expect("PreCompact is an array");
+        assert!(
+            pre_compact
+                .iter()
+                .any(|e| e["hooks"][0]["command"].as_str() == Some("my-settings-precompact")),
+            "user-supplied settings.json PreCompact entry must survive the merge"
+        );
+        assert!(
+            pre_compact.iter().any(|e| e["hooks"][0]["command"].as_str()
+                == Some("agentmux-bashwrap precompact --trigger=manual")),
+            "auto-injected PreCompact manual entry must still be present"
+        );
+        assert!(
+            pre_compact.iter().any(|e| e["hooks"][0]["command"].as_str()
+                == Some("agentmux-bashwrap precompact --trigger=auto")),
+            "auto-injected PreCompact auto entry must still be present"
+        );
+        // Settings-level user entries PREPEND before AgentMux's own, per
+        // this merge path's ordering rule (mirrors PreToolUse).
+        assert_eq!(
+            pre_compact[0]["hooks"][0]["command"].as_str(),
+            Some("my-settings-precompact"),
+            "user PreCompact entries must prepend before AgentMux's own"
         );
     }
 

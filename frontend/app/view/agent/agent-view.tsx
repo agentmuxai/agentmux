@@ -450,6 +450,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 detailsOpen: a.detailsOpenAtom[1],
                 currentToolArg: a.currentToolArgAtom[1],
                 failure: a.failureAtom[1],
+                compacting: a.compactingAtom[1],
             },
         });
         registerAgentActivity(model.blockId, a.turnPhaseAtom[0]);
@@ -1843,6 +1844,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 blockAtom={block}
                 providerId={provider()?.id ?? ""}
                 agentMode={block()?.meta?.["agentMode"] as string | undefined}
+                compacting={agentAtoms().compactingAtom[0]()}
             />
 
             <div class="agent-composer-region">

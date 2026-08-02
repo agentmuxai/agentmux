@@ -108,6 +108,29 @@ pub enum AgentEvent {
     Error {
         message: String,
     },
+    /// Context compaction completed. Sourced from Claude Code's
+    /// `type: "system", subtype: "compact_boundary"` stream-json
+    /// frame — exact data, not a heuristic. See
+    /// `docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md`
+    /// §2/§4.1 for the full design rationale and the source frame
+    /// shape this is translated from.
+    CompactionBoundary {
+        trigger: CompactionTrigger,
+        pre_tokens: u64,
+        post_tokens: u64,
+        cumulative_dropped_tokens: u64,
+        duration_ms: u64,
+    },
+}
+
+/// How compaction was triggered. `Auto` = context filled up and
+/// Claude Code compacted automatically; `Manual` = the user (or the
+/// agent itself) ran `/compact`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CompactionTrigger {
+    Auto,
+    Manual,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -270,6 +293,41 @@ mod tests {
             }
             _ => panic!("expected Done variant"),
         }
+    }
+
+    #[test]
+    fn agent_event_compaction_boundary_shape() {
+        let ev = AgentEvent::CompactionBoundary {
+            trigger: CompactionTrigger::Manual,
+            pre_tokens: 783_887,
+            post_tokens: 11_775,
+            cumulative_dropped_tokens: 772_112,
+            duration_ms: 231_606,
+        };
+        let v = serde_json::to_value(&ev).unwrap();
+        assert_eq!(
+            v,
+            json!({
+                "type": "compaction_boundary",
+                "trigger": "manual",
+                "preTokens": 783_887,
+                "postTokens": 11_775,
+                "cumulativeDroppedTokens": 772_112,
+                "durationMs": 231_606
+            })
+        );
+    }
+
+    #[test]
+    fn compaction_trigger_serializes_snake_case() {
+        assert_eq!(
+            serde_json::to_value(CompactionTrigger::Auto).unwrap(),
+            json!("auto")
+        );
+        assert_eq!(
+            serde_json::to_value(CompactionTrigger::Manual).unwrap(),
+            json!("manual")
+        );
     }
 
     #[test]

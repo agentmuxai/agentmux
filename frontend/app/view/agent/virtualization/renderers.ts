@@ -16,6 +16,7 @@ import type { Component } from "solid-js";
 import type {
     AgentErrorNode,
     AgentMessageNode,
+    CompactionStartedNode,
     ContextCompactedNode,
     DocumentNode,
     DocumentState,
@@ -182,6 +183,8 @@ export const STREAMING_CAPABLE: Record<NodeKind, boolean> = {
     shell: false,
     agent_error: false, // fixed-content inline error — not a streaming node
     context_compacted: false,
+    // One-shot announcement (the PreCompact hook fires once) — not chunked.
+    compaction_started: false,
     // Arrives as a single complete user_message event, not chunk-by-chunk.
     jekt_message: false,
 };
@@ -200,6 +203,10 @@ export interface RendererComponents {
      *  registry placeholder so NodeRendererRegistry stays exhaustive. */
     AgentError: Component<{ node: AgentErrorNode; state: DocumentState }>;
     ContextCompacted: Component<{ node: ContextCompactedNode; state: DocumentState }>;
+    /** compaction_started nodes are rendered inline in DocumentRow (like
+     *  agent_error) — this slot is a registry placeholder so
+     *  NodeRendererRegistry stays exhaustive. */
+    CompactionStarted: Component<{ node: CompactionStartedNode; state: DocumentState }>;
 }
 
 /**
@@ -254,6 +261,11 @@ export function buildRendererRegistry(components: RendererComponents): NodeRende
             estimatedSize: (_node: ContextCompactedNode) => 48,
             isStreamingCapable: STREAMING_CAPABLE.context_compacted,
         },
+        compaction_started: {
+            component: components.CompactionStarted,
+            estimatedSize: (_node: CompactionStartedNode) => 32,
+            isStreamingCapable: STREAMING_CAPABLE.compaction_started,
+        },
     };
 }
 
@@ -273,6 +285,7 @@ export function estimateNode(node: DocumentNode, state: DocumentState): number {
         case "shell": return estimateShell(node, state);
         case "agent_error":       return 64;
         case "context_compacted": return 48;
+        case "compaction_started": return 32;
     }
 }
 
@@ -312,6 +325,7 @@ export function estimateNodeForState(
             case "shell":         return SHELL_COLLAPSED_PX;
             case "agent_error":       return 64;
             case "context_compacted": return 48;
+            case "compaction_started": return 32;
         }
     }
     // expanded
@@ -325,5 +339,6 @@ export function estimateNodeForState(
         case "shell":             return SHELL_EXPANDED_PX;
         case "agent_error":       return 64;
         case "context_compacted": return 48;
+        case "compaction_started": return 32;
     }
 }

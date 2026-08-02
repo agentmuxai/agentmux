@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { buildConfigFiles, deriveSlug, renderSkillMd, sanitizeTrigger, uniqueSkillSlug } from "./agent-config-builder";
+import { buildConfigFiles, buildSettingsWithHooks, deriveSlug, renderSkillMd, sanitizeTrigger, uniqueSkillSlug } from "./agent-config-builder";
 
 function makeSkill(over: Partial<AgentSkill> = {}): AgentSkill {
     return {
@@ -173,5 +173,64 @@ describe("buildConfigFiles — skill materialization", () => {
     it("skips skills with empty content regardless of format", () => {
         const files = buildConfigFiles({}, [makeSkill({ content: "" })]);
         expect(files.some((f) => f.path.includes("deploy"))).toBe(false);
+    });
+});
+
+describe("buildSettingsWithHooks — PreCompact auto-injection", () => {
+    // SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md §4.2 / Codex P1
+    // on PR #2378: this TS mirror originally lagged the Rust builder
+    // (agentmux-srv/src/backend/agent_config.rs) by one hook type, so
+    // agents launched through the standard picker (which calls
+    // buildConfigFiles -> buildSettingsWithHooks, not the Rust path)
+    // never got PreCompact installed and the live "compaction started"
+    // signal could never fire for them. These tests mirror the Rust
+    // suite's PreCompact coverage exactly.
+
+    it("always injects both PreToolUse and PreCompact (manual + auto) with no user hooks", () => {
+        const json = buildSettingsWithHooks(undefined, undefined);
+        const parsed = JSON.parse(json!);
+        expect(parsed.hooks.PreToolUse).toHaveLength(1);
+        expect(parsed.hooks.PreToolUse[0].hooks[0].command).toBe("agentmux-bashwrap hook");
+
+        const preCompact = parsed.hooks.PreCompact;
+        expect(preCompact).toHaveLength(2);
+        expect(preCompact.map((e: any) => e.matcher)).toEqual(["manual", "auto"]);
+        expect(preCompact[0].hooks[0].command).toBe("agentmux-bashwrap precompact --trigger=manual");
+        expect(preCompact[1].hooks[0].command).toBe("agentmux-bashwrap precompact --trigger=auto");
+    });
+
+    it("preserves a user-supplied PreCompact entry from legacy content_map hooks, appending ours after", () => {
+        const userHooks = JSON.stringify({
+            PreCompact: [{ matcher: "manual", hooks: [{ type: "command", command: "my-precompact-audit" }] }],
+        });
+        const json = buildSettingsWithHooks(undefined, userHooks);
+        const preCompact = JSON.parse(json!).hooks.PreCompact;
+        expect(preCompact).toHaveLength(3);
+        expect(preCompact[0].hooks[0].command).toBe("my-precompact-audit");
+        expect(preCompact.map((e: any) => e.hooks[0].command)).toContain("agentmux-bashwrap precompact --trigger=manual");
+        expect(preCompact.map((e: any) => e.hooks[0].command)).toContain("agentmux-bashwrap precompact --trigger=auto");
+    });
+
+    it("preserves a user-supplied PreCompact entry from settings.json's own hooks key, prepending it before ours", () => {
+        const userSettings = JSON.stringify({
+            hooks: { PreCompact: [{ matcher: "auto", hooks: [{ type: "command", command: "my-settings-precompact" }] }] },
+        });
+        const json = buildSettingsWithHooks(userSettings, undefined);
+        const preCompact = JSON.parse(json!).hooks.PreCompact;
+        expect(preCompact).toHaveLength(3);
+        // Settings-level user entries PREPEND before AgentMux's own, per
+        // this merge path's ordering rule (mirrors PreToolUse).
+        expect(preCompact[0].hooks[0].command).toBe("my-settings-precompact");
+        expect(preCompact.map((e: any) => e.hooks[0].command)).toContain("agentmux-bashwrap precompact --trigger=manual");
+        expect(preCompact.map((e: any) => e.hooks[0].command)).toContain("agentmux-bashwrap precompact --trigger=auto");
+    });
+
+    it("does not silently drop a non-array user PreCompact value", () => {
+        const userHooks = JSON.stringify({ PreCompact: "not-an-array" });
+        const json = buildSettingsWithHooks(undefined, userHooks);
+        const preCompact = JSON.parse(json!).hooks.PreCompact;
+        // Malformed user value is dropped (warned), but AgentMux's own
+        // two entries must still be present.
+        expect(preCompact).toHaveLength(2);
     });
 });

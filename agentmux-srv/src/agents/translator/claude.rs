@@ -33,6 +33,13 @@
 //!   whose `response` is the explicit `result.result` field if
 //!   present, otherwise the accumulated text from streamed
 //!   text_deltas.
+//! - `system.subtype=compact_boundary` — emits
+//!   `AgentEvent::CompactionBoundary` with the exact trigger/token/
+//!   duration data from `compactMetadata`. Other `system` subtypes
+//!   are still discarded. See
+//!   `docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md`
+//!   §4.1 — this used to be silently dropped as an unhandled
+//!   `system` frame.
 //!
 //! Unknown frame types and malformed shapes produce an empty `Vec`
 //! rather than panicking — the runner falls back to whatever the
@@ -50,7 +57,7 @@ use std::collections::HashMap;
 
 use serde_json::{Map, Value};
 
-use super::super::types::{AgentEvent, AgentTurn, TokenCounts};
+use super::super::types::{AgentEvent, AgentTurn, CompactionTrigger, TokenCounts};
 use super::Translator;
 
 #[derive(Debug, Default)]
@@ -104,6 +111,7 @@ impl Translator for ClaudeTranslator {
             "user" => handle_user_message(self, &frame, &mut out),
             "assistant" => handle_assistant_message(self, &frame, &mut out),
             "result" => handle_result(self, &frame, &mut out),
+            "system" => handle_system_message(self, &frame, &mut out),
             _ => {}
         }
         out
@@ -313,6 +321,50 @@ fn handle_result(t: &mut ClaudeTranslator, frame: &Value, out: &mut Vec<AgentEve
     out.push(AgentEvent::Done {
         response,
         transcript,
+    });
+}
+
+/// `type: "system"` frames cover several subtypes; today we only act
+/// on `compact_boundary` (see
+/// `docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md`
+/// §4.1). Any other subtype — or a `compact_boundary` frame missing
+/// `compactMetadata` / carrying malformed fields — produces no event
+/// rather than a bad one, matching this file's existing philosophy
+/// (see the module doc comment).
+fn handle_system_message(_t: &mut ClaudeTranslator, frame: &Value, out: &mut Vec<AgentEvent>) {
+    if frame.get("subtype").and_then(|v| v.as_str()) != Some("compact_boundary") {
+        return;
+    }
+    let Some(meta) = frame.get("compactMetadata") else {
+        return;
+    };
+    let Some(trigger) = meta.get("trigger").and_then(|v| v.as_str()).and_then(|s| match s {
+        "auto" => Some(CompactionTrigger::Auto),
+        "manual" => Some(CompactionTrigger::Manual),
+        _ => None, // unrecognized trigger string — don't guess, skip the event
+    }) else {
+        return;
+    };
+    let Some(pre_tokens) = meta.get("preTokens").and_then(|v| v.as_u64()) else {
+        return;
+    };
+    let Some(post_tokens) = meta.get("postTokens").and_then(|v| v.as_u64()) else {
+        return;
+    };
+    let Some(cumulative_dropped_tokens) =
+        meta.get("cumulativeDroppedTokens").and_then(|v| v.as_u64())
+    else {
+        return;
+    };
+    let Some(duration_ms) = meta.get("durationMs").and_then(|v| v.as_u64()) else {
+        return;
+    };
+    out.push(AgentEvent::CompactionBoundary {
+        trigger,
+        pre_tokens,
+        post_tokens,
+        cumulative_dropped_tokens,
+        duration_ms,
     });
 }
 
@@ -578,6 +630,112 @@ mod tests {
         assert!(t.translate(json!({ "type": "system" })).is_empty());
         assert!(t.translate(json!({ "type": "stream_event", "event": { "type": "message_stop" } })).is_empty());
         assert!(t.translate(json!({ "type": "stream_event", "event": { "type": "message_delta" } })).is_empty());
+    }
+
+    // ── system / compact_boundary (SPEC_COMPACTION_DETECTION_AND_HANDLING) ──
+
+    fn compact_boundary_frame(trigger: &str) -> Value {
+        // Real example frame captured from a live session (see the spec
+        // doc §2) — includes the extra fields (`preCompactDiscoveredTools`,
+        // `preservedSegment`) that the translator ignores.
+        json!({
+            "type": "system",
+            "subtype": "compact_boundary",
+            "content": "Conversation compacted",
+            "level": "info",
+            "compactMetadata": {
+                "trigger": trigger,
+                "preTokens": 783_887,
+                "postTokens": 11_775,
+                "cumulativeDroppedTokens": 772_112,
+                "durationMs": 231_606,
+                "preCompactDiscoveredTools": ["Bash", "Edit"],
+                "preservedSegment": {
+                    "headUuid": "h1",
+                    "anchorUuid": "a1",
+                    "tailUuid": "t1"
+                }
+            },
+            "timestamp": "2026-07-21T17:55:35.500Z"
+        })
+    }
+
+    #[test]
+    fn compact_boundary_manual_emits_compaction_boundary() {
+        let mut t = ClaudeTranslator::new();
+        let events = t.translate(compact_boundary_frame("manual"));
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            AgentEvent::CompactionBoundary {
+                trigger,
+                pre_tokens,
+                post_tokens,
+                cumulative_dropped_tokens,
+                duration_ms,
+            } => {
+                assert_eq!(*trigger, CompactionTrigger::Manual);
+                assert_eq!(*pre_tokens, 783_887);
+                assert_eq!(*post_tokens, 11_775);
+                assert_eq!(*cumulative_dropped_tokens, 772_112);
+                assert_eq!(*duration_ms, 231_606);
+            }
+            other => panic!("expected CompactionBoundary, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn compact_boundary_auto_trigger_maps_correctly() {
+        let mut t = ClaudeTranslator::new();
+        let events = t.translate(compact_boundary_frame("auto"));
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            AgentEvent::CompactionBoundary { trigger, .. } => {
+                assert_eq!(*trigger, CompactionTrigger::Auto);
+            }
+            other => panic!("expected CompactionBoundary, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn system_frame_with_unrelated_subtype_returns_empty() {
+        // Only `compact_boundary` is handled specifically — every other
+        // `system` subtype still falls through to no-op.
+        let mut t = ClaudeTranslator::new();
+        assert!(t
+            .translate(json!({ "type": "system", "subtype": "other_thing" }))
+            .is_empty());
+    }
+
+    #[test]
+    fn compact_boundary_missing_metadata_returns_empty() {
+        let mut t = ClaudeTranslator::new();
+        assert!(t
+            .translate(json!({ "type": "system", "subtype": "compact_boundary" }))
+            .is_empty());
+    }
+
+    #[test]
+    fn compact_boundary_malformed_field_returns_empty_not_panic() {
+        let mut t = ClaudeTranslator::new();
+        let events = t.translate(json!({
+            "type": "system",
+            "subtype": "compact_boundary",
+            "compactMetadata": {
+                "trigger": "manual",
+                "preTokens": "not-a-number",
+                "postTokens": 11_775,
+                "cumulativeDroppedTokens": 772_112,
+                "durationMs": 231_606
+            }
+        }));
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn compact_boundary_unrecognized_trigger_returns_empty() {
+        let mut t = ClaudeTranslator::new();
+        let events = t.translate(compact_boundary_frame("something_new"));
+        assert!(events.is_empty());
     }
 
     #[test]
