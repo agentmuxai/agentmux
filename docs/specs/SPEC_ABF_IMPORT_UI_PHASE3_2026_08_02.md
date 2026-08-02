@@ -370,6 +370,18 @@ source at commit time (§3.2), exactly like `instructions`'s own full
 value; only the preview response is bounded.
 
 Implementation notes:
+- **Found during this spec's own proactive re-audit after round 12 (not
+  a codex finding) — two more fields in the identical unbounded class:**
+  `name`/`description` (the bundle-level manifest fields — confirmed
+  against `parse_bundle_import`'s actual code: `manifest.get("name")`/
+  `.get("description")` have no length check at all) and
+  `context_files[].path` (confirmed against `sanitize_context_relative_path`:
+  it normalizes and rejects unsafe paths but never caps component or
+  total length, and `capped_component_array`/`MAX_ENTRY_COUNT` bound the
+  *number* of context files, not any one path's length). Both get the
+  same fixed-character truncation as every other display-only field
+  above; full values are what commit's write path and `sanitize_context_relative_path`
+  itself actually use, unaffected by the preview-side truncation.
 - `parse_bundle_import` already produces everything here except
   `collision`/`name_collision`/the requirement `resolved`/`match_count`
   fields — three new, read-only additions the RPC handler makes:
@@ -410,6 +422,22 @@ Implementation notes:
     proportionate here rather than replicating `instructions_preview`'s
     full truncation-metadata pattern. The full, untruncated description
     is unaffected at commit time, same as every other preview-only cap.
+  - **codex P2 on PR #2381, round 12: `skills[].slug` needed the identical
+    treatment and was missed** — `parse_skill_md` places no length limit
+    on SKILL.md's `name:` frontmatter either, so a bundle with several
+    oversized `name` values could still return tens of megabytes via
+    `slug` even with `description` already capped. Fix: `slug` gets the
+    same fixed-character truncation as `description` in preview's
+    `skills[]`. `source_dir` (§3.0) remains the actual selection/rename
+    key regardless — nothing about matching a checkbox or a rename to the
+    right row depends on `slug`'s display length. The one interaction
+    worth being explicit about: §4.1's rename text input is pre-filled
+    from this (possibly truncated) display `slug` — that's fine, since a
+    user typing an alternate name is replacing the field's contents
+    outright, and `commit`'s `import_as` handling (§3.2) is validated
+    against the freshly-parsed, full-length slug from `source_dir`
+    regardless of what preview happened to display; nothing about the
+    actual write decision depends on the truncated display value.
   - **Bundle name collision**: a name scan over existing bundles (whatever
     read method `bundle.list`'s handler already uses).
   - **Requirement resolution** (codex P2 on PR #2381): `parse_bundle_import`
@@ -531,8 +559,30 @@ Implementation notes:
 (`bundle_id`, `imported_skill_ids`, `skipped_skills`,
 `resolved_requirement_ids`, `unresolved_requirements`, `warnings`), since
 it's the same underlying write path, just filtered to the selection —
-**with one addition**: `warnings`/`warnings_truncated` here use the
-**identical bounded-warning treatment §3.1 (round 8) applies to
+**with one governing rule (codex P2 on PR #2381, round 12, generalizing
+round 9's warnings-specific fix): every bounded-display projection this
+spec defines for `preview` applies identically, by the same shared
+helper, to the equivalent field in `commit`'s response.** Round 9 already
+had to catch and fix this once for `warnings` specifically (applied to
+`preview` only, forgotten for `commit`); round 12 found the same drift
+recurring for `skipped_skills` (skill names can be as long as `slug`,
+round 12's own finding, if the parser accepted them before the write
+loop hit a collision) and for `resolved_requirement_ids`/
+`unresolved_requirements` (the same unbounded `id`/`provider`/`env`
+fields §3.1's round-11 fix bounds in `preview`, never bounded here).
+Stating this as one rule instead of patching each field independently
+again is deliberate — see the shared-helper note at the end of this
+subsection. Concretely: `skipped_skills` entries and
+`unresolved_requirements`' `id`/`provider`/`env` values get the same
+fixed-character truncation `preview` already applies to the equivalent
+data (skill names via `slug`'s truncation, requirement fields via
+§3.1's round-11 truncation); `resolved_requirement_ids` gets the same
+treatment for consistency, even though a resolved requirement's `id` is
+less likely to be pathologically long in practice. None of this affects
+what was actually written — `bundle_id` and the underlying Store rows are
+already committed by the time these projections run; only what's echoed
+back is bounded. `warnings`/`warnings_truncated` additionally use the
+**identical bounded-warning treatment §3.1 (round 8/11) applies to
 preview**, not today's unbounded `bundle.import` shape.
 
 **codex P1 on PR #2381, round 9: the round-8 warnings cap was applied to
@@ -559,10 +609,18 @@ consistency/defense-in-depth step over an already-small input, not the
 primary defense. This is exactly the kind of drift the spec's own
 account-requirement-resolution fix (§3.1's implementation notes,
 requirement resolution bullet) already called for extracting into a
-shared helper to prevent — implement the
-bounded-warning projection as **one function both `preview` and `commit`
-call**, not two independent copies, so a future change to the cap can't
-silently apply to only one of them again.
+shared helper to prevent. **codex P2 on PR #2381, round 12: generalize
+this beyond warnings.** Implement every bounded-display projection this
+spec defines — instructions truncation, MCP display projection, skill
+description/slug truncation, requirement field truncation, and the
+warnings budget — as **shared functions `preview` and `commit` both
+call**, never independent per-endpoint copies. This is the second time a
+"fixed in preview, forgotten in commit" gap has had to be found and
+patched a round later (`warnings` in round 9, `skipped_skills`/
+`resolved_requirement_ids`/`unresolved_requirements` in round 12,
+directly above) — a shared-function requirement stated once, up front,
+for every projection this spec defines is what actually closes that
+class of drift, rather than continuing to re-discover it field by field.
 
 Implementation notes:
 - For every input mode (§3.0.5, round 5), the handler resolves the input
@@ -854,7 +912,24 @@ Renders the `bundle.import.preview` response as a checklist:
   response level) proving the budget parameter actually bounds
   accumulation during parsing, e.g. asserting the returned `Vec<String>`
   length/total-bytes never exceeds the budget even when called directly,
-  independent of any response-boundary projection.
+  independent of any response-boundary projection. **Bounded skill
+  slugs** (round 12): the same treatment as skill descriptions, applied
+  to `slug` — and the rename flow (§4.1) still works end-to-end when a
+  skill's true slug is longer than the truncation cap (the commit
+  `import_as` path is validated against the full-length parsed slug, not
+  the truncated display value). **Commit response reuses preview's
+  bounds** (round 12): an archive whose skipped skills or unresolved
+  requirements would carry oversized display fields produces the same
+  bounded values in `commit`'s response as `preview`'s equivalent fields
+  — proving the shared-helper requirement actually holds, not just that
+  each endpoint independently happens to cap its own fields the same
+  way. **Bundle name/description/context-file paths bounded** (round 12
+  self-audit): a bundle whose manifest `name`/`description` or a
+  `context_files[]` entry's `path` exceeds the truncation cap produces a
+  bounded value in preview's response, while the actual bundle row
+  (`Memory.name`/`description`) and the actual persisted context file
+  path are written from the full, untruncated parsed values at commit
+  time.
 - **Manual/e2e:** a sample `.abf` was generated for this purpose via
   `agentmux-srv/src/backend/bundle_export.rs`'s existing `export_bundle` +
   `zip_bundle_export` (instructions + 1 context file + 2 skills — one of
