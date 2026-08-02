@@ -296,6 +296,23 @@ Until one of these lands, `docs/MUXSPECT.md`, `CLAUDE.md`, and
 direct-path invocation instead of overselling shell-function convenience
 that doesn't apply yet.
 
+**Follow-up finding, same review (codex P1, next round):** the direct-path
+fallback above isn't reliably available either — `deploy_scripts` (which
+writes `muxlog.mjs`/`muxspect.mjs` to `<data_dir>/shell/`) had exactly one
+runtime call site, `ShellController::start`'s interactive (empty-command)
+branch — a user whose first-ever pane in a fresh data dir is an Agent pane
+(persistent/subprocess/acp, which never takes that branch) would never get
+either script deployed at all. A **pre-existing gap in `muxlog`'s own
+deployment mechanism** this PR newly depends on, not something introduced
+here. **Fixed**: `deploy_scripts` is now also called unconditionally at srv
+startup (`bootstrap.rs::spawn_background_subsystems`), before any block can
+be created — idempotent (skips if its version marker already matches), so
+this is additive, not a behavior change to the existing call site. The
+direct-path fallback (§7.1's own recommendation above) is now always
+available regardless of what pane type the user opens first; the shell
+*function*'s unreachability (the original finding) is unchanged and still
+needs one of the two candidates above.
+
 ---
 
 ## 8. Decisions (resolved 2026-08-01)
