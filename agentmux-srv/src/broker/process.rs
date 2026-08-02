@@ -90,6 +90,14 @@ pub struct ProcessStatus {
     pub controller_type: String,
     pub is_agent_pane: bool,
     pub last_computed_ms: u64,
+    /// The raw `BlockControllerRuntimeStatus` `compute_status` already reads
+    /// to derive `lifecycle`/`is_agent_pane` above — exposed so callers that
+    /// want the finer-grained fields (`shellprocstatus`, `spawn_ts_ms`,
+    /// `turn_active` itself, not just the `lifecycle` it was folded into)
+    /// don't have to read the controller registry a second time and risk a
+    /// second, possibly-inconsistent snapshot (codex P2 on PR #2380 — the
+    /// `muxspect describe` route originally did exactly that).
+    pub controller_status: Option<BlockControllerRuntimeStatus>,
 }
 
 impl ProcessStatus {
@@ -102,6 +110,7 @@ impl ProcessStatus {
             controller_type: String::new(),
             is_agent_pane: false,
             last_computed_ms: now_ms(),
+            controller_status: None,
         }
     }
 
@@ -181,6 +190,7 @@ fn compute_status(block_id: &str) -> ProcessStatus {
             controller_type: controller.controller_type().to_string(),
             is_agent_pane: status.is_agent_pane,
             last_computed_ms: now_ms(),
+            controller_status: Some(status),
         },
         _ => ProcessStatus::unknown(block_id),
     }
@@ -334,6 +344,7 @@ mod tests {
             controller_type: controller_type.to_string(),
             is_agent_pane,
             last_computed_ms: 0,
+            controller_status: None,
         }
     }
 

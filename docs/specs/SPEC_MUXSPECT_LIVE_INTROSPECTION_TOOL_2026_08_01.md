@@ -260,6 +260,42 @@ already exists elsewhere, this tool doesn't duplicate it), and full Activity
 Dock/renderer-state introspection (§5.3 — CEF's own devtools protocol is the
 right tool for that, not a `muxspect` feature).
 
+### 7.1 Known gap: the shell function is unreachable exactly where it matters most (reagent P1 on PR #2380)
+
+Discovered during review, confirmed empirically (`type muxspect` → not found
+in an actual agent tool-call shell): the bare `muxspect` shell function only
+loads in an **interactive** terminal pane (sourced from the rcfile at PTY
+spawn) — but per §5.2's own research, those panes carry
+`$AGENTMUX_LOCAL_URL` WITHOUT `$AGENTMUX_AUTH_KEY` (only agent-CLI-type
+controller spawns get the key, via `agent_handlers/input.rs`). Agent tool
+calls (this session's own primary motivating use case) get both env vars,
+but tool-spawned shells (`bash -c "..."` style, no `--rcfile`) don't source
+the integration script at all, so the function isn't defined there either.
+Net result: the convenient `muxspect ...` invocation doesn't actually work
+in EITHER context today — only the fully-qualified
+`node ~/.agentmux/shell/muxspect.mjs ...` (which this PR verified works end
+to end) does.
+
+**Fix deferred, not attempted in this PR** — two candidates, both requiring
+more careful, separate scoping than a drive-by fixup:
+
+1. Wire a `muxspect` launcher into whatever mechanism already adds
+   AgentMux-managed tool dirs to an agent-CLI subprocess's `PATH` (see
+   `shell/lifecycle.rs`'s "Wire AgentMux-managed tool dirs into the agent's
+   PATH" comment) — makes bare `muxspect` callable exactly where the auth
+   key already exists, no new env propagation needed.
+2. Propagate `$AGENTMUX_AUTH_KEY` into interactive shell panes too (not
+   just agent-CLI spawns) — **not recommended without independent
+   security review**: that key currently authorizes every `/api/v1/*`
+   route, not just the two read-only `muxspect` ones, so widening its
+   propagation to every plain terminal pane is a real scope-of-access
+   change, not a documentation fix.
+
+Until one of these lands, `docs/MUXSPECT.md`, `CLAUDE.md`, and
+`muxspect.mjs`'s own `--help` text all point users/agents at the
+direct-path invocation instead of overselling shell-function convenience
+that doesn't apply yet.
+
 ---
 
 ## 8. Decisions (resolved 2026-08-01)

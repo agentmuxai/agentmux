@@ -18,15 +18,26 @@ terminal (bash / zsh / pwsh / fish), delegating to a small Node core
 
 ## Quick start
 
+> **Known gap (reagent P1 on PR #2380, not yet fixed):** the bare `muxspect`
+> shell function only loads in an *interactive* terminal pane (sourced from
+> the shell rcfile) — but those panes carry `$AGENTMUX_LOCAL_URL` without
+> `$AGENTMUX_AUTH_KEY`, so the function loads but auth fails. Agent-CLI tool
+> calls (the primary intended use) get both env vars, but tool-spawned
+> shells don't source the rcfile, so the function isn't defined there
+> either — empirically confirmed (`type muxspect` → not found) in an actual
+> agent tool-call shell. **Until this is fixed, call the deployed core
+> directly instead of the shell function:**
+
 ```bash
-muxspect                        # same as 'muxspect list'
-muxspect list                   # summary of every controller-backed block
-muxspect describe <block_id>    # full detail for one block
-muxspect watch <block_id>       # poll 'describe' every 2s until Ctrl+C
-muxspect help                   # full usage
+node ~/.agentmux/shell/muxspect.mjs list
+node ~/.agentmux/shell/muxspect.mjs describe <block_id>
+node ~/.agentmux/shell/muxspect.mjs watch <block_id>
+node ~/.agentmux/shell/muxspect.mjs help
 ```
 
-Add `--json` to `list`/`describe` for structured output.
+Add `--json` to `list`/`describe` for structured output. Once the shell
+function actually works everywhere it's meant to, bare `muxspect ...` will
+work too — the wire protocol and commands are identical either way.
 
 ## What it can and can't see
 
