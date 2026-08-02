@@ -10,9 +10,11 @@
  * this panel makes no RPC calls of its own.
  */
 
-import { createSignal, For, Show, type JSX } from "solid-js";
+import { createSignal, For, onMount, Show, type JSX } from "solid-js";
 
 import { Button } from "@/element/button";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import type { BundleImportSelectionState, BundleImportSkillSelectionState } from "@/app/element/modal-layer";
 
 interface BundleImportPreviewModalPanelProps {
@@ -46,14 +48,24 @@ export const BundleImportPreviewModalPanel = (
     );
     const [warningsDismissed, setWarningsDismissed] = createSignal(false);
 
+    // §4.1 point 2: the modal fetches the full existing global skill-name
+    // list ONCE, up front, via skill.catalog.list -- not just the subset
+    // preview.skills already flagged "name_conflict" against itself (a
+    // rename to some OTHER, unrelated existing global skill name would
+    // otherwise show no client-side warning and silently be skipped at
+    // commit, since skill_upsert_unique_global still rejects it there).
+    const [globalSlugs, setGlobalSlugs] = createSignal<Set<string>>(new Set());
+    onMount(() => {
+        void RpcApi.SkillCatalogListCommand(TabRpcClient, {})
+            .then((items) => setGlobalSlugs(new Set(items.map((i) => i.name))))
+            .catch(() => {}); // advisory only -- a failed fetch just means no client-side hint; commit is still authoritative.
+    });
+
     // Live union of the global catalog + every OTHER selected skill's
     // current slug/rename (§4.1 point 2) -- advisory client-side check
     // only; skill_upsert_unique_global is the real authority at commit.
     const takenSlugsFor = (sourceDir: string): Set<string> => {
-        const taken = new Set<string>();
-        for (const s of preview.skills) {
-            if (s.collision === "name_conflict") taken.add(s.slug);
-        }
+        const taken = new Set<string>(globalSlugs());
         for (const row of skills()) {
             if (row.sourceDir === sourceDir || !row.checked) continue;
             const other = preview.skills.find((s) => s.source_dir === row.sourceDir);

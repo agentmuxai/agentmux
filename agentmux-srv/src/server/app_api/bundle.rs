@@ -1079,7 +1079,21 @@ async fn bundle_import_commit_impl(
                         Err(crate::backend::storage::error::StoreError::Other(msg))
                             if msg.contains("already exists") =>
                         {
-                            warnings.push(format!("skill \"{effective_slug}\": {msg}"));
+                            // codex P2, PR #2382 round 2: effective_slug can be
+                            // the caller-supplied import_as, which has no
+                            // length bound anywhere before this point (unlike
+                            // a parsed skill.slug, implicitly bounded by the
+                            // per-entry decompression cap) -- and msg's own
+                            // text embeds the identical unbounded value a
+                            // second time (StoreError::Other's own format!
+                            // interpolates skill.name). Use a fixed message
+                            // instead of msg's text (its only informative
+                            // content, "already exists", is already implied by
+                            // the branch guard) and the shared bounded_display
+                            // projection every other warning in this handler
+                            // already uses, closing both unbounded paths at
+                            // once rather than truncating msg's text in place.
+                            warnings.push(format!("skill \"{}\": already exists", bounded_display(&effective_slug)));
                             skipped_skills.push(bounded_display(&effective_slug));
                         }
                         Err(e) => {
@@ -1441,6 +1455,82 @@ mod import_preview_commit_tests {
         let imported_id = resp["imported_skill_ids"][0].as_str().unwrap();
         let saved_skill = state.wstore.skill_get(imported_id).unwrap().unwrap();
         assert_eq!(saved_skill.name, "deploy-team-x");
+    }
+
+    #[tokio::test]
+    async fn commit_bounds_an_oversized_import_as_in_the_already_exists_warning() {
+        // codex P2, PR #2382 round 2: effective_slug (from caller-supplied
+        // import_as) has no length bound before reaching the "already
+        // exists" warning push -- unlike a parsed skill.slug, which is at
+        // least implicitly bounded by the per-entry decompression cap.
+        // StoreError::Other's own message text ALSO embeds the identical
+        // unbounded value a second time.
+        let state = test_state();
+        let oversized_name = "n".repeat(bi::MAX_DISPLAY_FIELD_CHARS + 500);
+        state
+            .wstore
+            .skill_upsert_unique_global(&crate::backend::storage::Skill {
+                id: "existing-1".to_string(),
+                name: "deploy".to_string(),
+                trigger: "deploy".to_string(),
+                skill_type: crate::backend::agent_config::SKILL_TYPE_AGENT_SKILL.to_string(),
+                description: "pre-existing".to_string(),
+                content: "pre-existing body".to_string(),
+                is_global: true,
+                created_at: 0,
+                updated_at: 0,
+            })
+            .unwrap();
+        state
+            .wstore
+            .skill_upsert_unique_global(&crate::backend::storage::Skill {
+                id: "existing-2".to_string(),
+                name: oversized_name.clone(),
+                trigger: oversized_name.clone(),
+                skill_type: crate::backend::agent_config::SKILL_TYPE_AGENT_SKILL.to_string(),
+                description: "pre-existing".to_string(),
+                content: "pre-existing body".to_string(),
+                is_global: true,
+                created_at: 0,
+                updated_at: 0,
+            })
+            .unwrap();
+
+        let files = vec![
+            entry("armory.json", &manifest(serde_json::json!({ "skills": ["skills/deploy"] }))),
+            entry("skills/deploy/SKILL.md", &skill_md("deploy", "d", "body")),
+        ];
+        let bi_files: Vec<bi::BundleImportFile> =
+            files.iter().map(|f| bi::BundleImportFile { path: f.path.clone(), content: f.content.clone() }).collect();
+        let digest = bi::content_digest_files(&bi_files);
+        let req = CommitReq {
+            file_path: None,
+            zip_base64: None,
+            files: Some(files),
+            expected_content_digest: digest,
+            bundle_name: None,
+            include_instructions: false,
+            include_context_files: vec![],
+            include_skills: vec![SkillSelection {
+                source_dir: "skills/deploy".to_string(),
+                import_as: Some(oversized_name),
+            }],
+            include_mcp_servers: vec![],
+        };
+        let resp = bundle_import_commit_impl(&state.id_store, &state.wstore, &state.broker, req).await.unwrap();
+        assert!(resp["imported_skill_ids"].as_array().unwrap().is_empty());
+        let warnings = resp["warnings"].as_array().unwrap();
+        assert!(!warnings.is_empty(), "expected an already-exists warning");
+        for w in warnings {
+            let s = w.as_str().unwrap();
+            assert!(
+                s.chars().count() <= bi::MAX_DISPLAY_FIELD_CHARS + 3 + 40,
+                "warning not bounded ({} chars): {s:?}",
+                s.chars().count()
+            );
+        }
+        let skipped = resp["skipped_skills"][0].as_str().unwrap();
+        assert!(skipped.chars().count() <= bi::MAX_DISPLAY_FIELD_CHARS + 3);
     }
 
     #[tokio::test]
