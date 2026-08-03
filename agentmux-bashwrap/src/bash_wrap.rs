@@ -44,7 +44,7 @@ use anyhow::{Context, Result, anyhow};
 use clap::Parser;
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use serde::Serialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -73,6 +73,193 @@ pub struct Args {
     /// omitted, chunks publish unscoped.
     #[arg(long)]
     pub block_id: Option<String>,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cwd persistence across one-shot `exec` invocations
+//
+// Every Bash tool call the PreToolUse hook rewrites spawns a brand-new,
+// disposable `agentmux-bashwrap exec` process (see main.rs's module doc —
+// there is no daemon). Historically the inner bash's starting directory was
+// seeded from `std::env::current_dir()`, i.e. THIS process's own inherited
+// cwd, which is always the agent's fixed home directory (nothing in this
+// process tree ever chdirs it). A `cd` run by the wrapped command only ever
+// affected that one throwaway inner bash; the moment it exited, the change
+// was gone, and the NEXT call started over at the same fixed directory again
+// — every time, not intermittently. Claude Code's own Bash tool expects `cd`
+// continuity across calls within a session and (at least on Windows, where
+// this rewrite always applies) surfaces the mismatch as a
+// "Shell cwd was reset to ..." notice on effectively every call. See
+// docs/retro/RETRO_BASH_CWD_RESET_NOTICE_WINDOWS_2026_08_02.md for the full
+// investigation.
+//
+// The fix: persist the shell's ending `$PWD` to a small per-agent state file
+// after each call, and restore it as the starting directory of the next
+// call. This doesn't change what Claude Code itself believes (that's opaque,
+// out of process) but it does make the ACTUAL directory a `cd` in one Bash
+// call leaves the agent in survive to the next call, which is the part that
+// was silently broken.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Env var bashwrap sets on the *child* bash process (never interpolated
+/// into the script text, so no path-quoting concerns) pointing at the state
+/// file `append_cwd_capture`'s appended script writes the ending `$PWD` to.
+const CWD_STATE_ENV: &str = "AGENTMUX_BASHWRAP_CWD_STATE";
+
+/// Optional override of the state file's own path, read from bashwrap's own
+/// process env (distinct from `CWD_STATE_ENV`, which bashwrap sets rather
+/// than reads). Exists so tests can point persistence at a tempdir instead
+/// of a real agent's `~/.agentmux` state, and as an escape hatch for manual
+/// debugging.
+const CWD_STATE_FILE_OVERRIDE_ENV: &str = "AGENTMUX_BASHWRAP_CWD_STATE_FILE";
+
+/// Resolves the cwd-persistence file location and any previously-restored
+/// starting directory once per `exec` invocation.
+struct CwdState {
+    /// Where the ending `$PWD` gets written after this command runs, for the
+    /// *next* `exec` invocation to pick up. `None` if we couldn't resolve a
+    /// location or create its parent dir — persistence is then simply
+    /// skipped for this call (never a hard failure; falls back to today's
+    /// pre-fix behavior).
+    path: Option<PathBuf>,
+    /// The directory to actually start this command's shell in: the
+    /// previously-persisted directory if one was found and still exists,
+    /// otherwise this process's own (fixed, inherited) cwd — the same
+    /// default used before this fix existed.
+    start_dir: Option<PathBuf>,
+}
+
+impl CwdState {
+    fn load() -> Self {
+        let mut path = cwd_state_path();
+        if let Some(dir) = path.as_deref().and_then(Path::parent) {
+            if let Err(e) = std::fs::create_dir_all(dir) {
+                tracing::warn!(
+                    target: "bashwrap",
+                    error = %e,
+                    dir = %dir.display(),
+                    "failed to create cwd-state dir; cwd persistence disabled for this call",
+                );
+                // reagentx P2 (re-review): the log line above claims
+                // persistence is disabled, but `path` used to stay `Some`
+                // here regardless — restore_cwd below would still attempt
+                // (and silently fail) a read, and the child would still get
+                // CWD_STATE_ENV pointed at a directory that doesn't exist,
+                // so append_cwd_capture's write would silently fail on
+                // every single call forever instead of being skipped once,
+                // as documented. Actually clear it so both sides honor the
+                // "disabled" contract `path`'s own doc comment promises.
+                path = None;
+            }
+        }
+        let start_dir = path
+            .as_deref()
+            .and_then(restore_cwd)
+            .or_else(|| std::env::current_dir().ok());
+        Self { path, start_dir }
+    }
+}
+
+/// Per-*instance* state file path. Keyed by `AGENTMUX_INSTANCE_SLUG` — set by
+/// `agent-model.ts` to a per-launch slug that also seeds that instance's own
+/// unique working directory (`${agentmuxHome()}/agents/${instanceSlug}`) —
+/// NOT `AGENTMUX_AGENT_ID`, which is the definition-wide slug shared by every
+/// named instance launched from the same agent definition (codex P1 on this
+/// PR: keying by `AGENTMUX_AGENT_ID` made two concurrently-running instances
+/// of the same definition silently share one cwd file, so one instance's
+/// `cd` could redirect the other's next command into the wrong worktree).
+/// Falls back to `AGENTMUX_AGENT_ID` for older callers that only set that,
+/// then to a sanitized form of this process's own cwd (always the instance's
+/// fixed home directory either way) for the rare case neither is set, e.g. a
+/// manual invocation outside AgentMux.
+fn cwd_state_path() -> Option<PathBuf> {
+    if let Ok(over) = std::env::var(CWD_STATE_FILE_OVERRIDE_ENV) {
+        if !over.is_empty() {
+            return Some(PathBuf::from(over));
+        }
+    }
+    let dir = dirs::home_dir()?
+        .join(".agentmux")
+        .join("state")
+        .join("bashwrap-cwd");
+    let non_empty = |s: String| (!s.is_empty()).then_some(s);
+    let key = std::env::var("AGENTMUX_INSTANCE_SLUG")
+        .ok()
+        .and_then(non_empty)
+        .or_else(|| std::env::var("AGENTMUX_AGENT_ID").ok().and_then(non_empty))
+        .or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .map(|p| p.to_string_lossy().into_owned())
+        })?;
+    Some(dir.join(format!("{}.cwd", sanitize_state_key(&key))))
+}
+
+/// Filesystem-safe form of an arbitrary key for use as a filename component.
+fn sanitize_state_key(raw: &str) -> String {
+    raw.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+/// Read back a previously-persisted cwd, if the file exists, is non-empty,
+/// and still names a real directory (it may not — the directory could have
+/// been deleted since, or this is the first call for this agent).
+fn restore_cwd(state_path: &Path) -> Option<PathBuf> {
+    let contents = std::fs::read_to_string(state_path).ok()?;
+    let trimmed = contents.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let path = PathBuf::from(trimmed);
+    path.is_dir().then_some(path)
+}
+
+/// Appends bookkeeping to `command_block` that (1) captures its real exit
+/// code before running anything else, (2) persists the shell's ending
+/// `$PWD` to `$AGENTMUX_BASHWRAP_CWD_STATE` if that env var is set (skipped
+/// entirely otherwise — e.g. when `CwdState::path` was `None`), written via
+/// a temp-file-then-rename so a mid-write crash can't leave a half-written
+/// state file, and (3) re-exits with the captured code so this bookkeeping
+/// never changes the command's real exit status. `command_block` must be a
+/// brace group or bare command, not something that already ends in its own
+/// `exit`.
+///
+/// The temp file is suffixed with `$$` (this bash's own PID), not a fixed
+/// name — reagentx P2 on this PR: two Bash tool calls for the same
+/// agent/instance can run concurrently (Claude issues parallel tool calls),
+/// and a shared fixed temp name meant two concurrent writers could
+/// interleave writes to the *same* temp file before either renamed it,
+/// corrupting the persisted cwd. Per-PID temp names make each writer's
+/// temp-then-rename independent; the only remaining race is which
+/// completed rename lands last, which is an inherent, expected ambiguity
+/// for genuinely concurrent `cd`s (no different from two parallel shells
+/// racing to `cd` a shared session) — not data corruption.
+fn append_cwd_capture(command_block: &str) -> String {
+    // `pwd` alone prints MSYS-style paths under Git Bash (`/c/Users/...`),
+    // which Rust's `std::fs`/`Path::is_dir()` on native Windows can't
+    // resolve (it looks for a literal `\c\Users\...` under the current
+    // drive root). `-W` is Git Bash's own flag for "print the Windows-
+    // native form instead" (`C:/Users/...`), which both `restore_cwd`'s
+    // `is_dir()` check and `cmd.cwd()`/`cmd.current_dir()` understand
+    // correctly. Not a POSIX `pwd` flag — Unix has no such mismatch to
+    // work around, so plain `pwd` is correct there.
+    let pwd_cmd = if cfg!(windows) { "pwd -W" } else { "pwd" };
+    format!(
+        "{command_block}\n\
+__agentmux_bashwrap_rc=$?\n\
+if [ -n \"${CWD_STATE_ENV}\" ]; then\n\
+  __agentmux_bashwrap_cwd_tmp=\"${CWD_STATE_ENV}.tmp.$$\"\n\
+  {pwd_cmd} > \"$__agentmux_bashwrap_cwd_tmp\" 2>/dev/null && mv -f \"$__agentmux_bashwrap_cwd_tmp\" \"${CWD_STATE_ENV}\" 2>/dev/null\n\
+fi\n\
+exit $__agentmux_bashwrap_rc"
+    )
 }
 
 /// Cap the model-visible head/tail sections of the aggregated blob.
@@ -660,7 +847,11 @@ async fn run_via_pty(
     // fd 0 (the console) stays open, so children see EOF and ConPTY never
     // fires ctrl-c. The leading newline terminates the group list cleanly
     // regardless of how `command` ends (trailing comment, no newline, etc.).
-    cmd.arg(format!("{{\n{}\n}} </dev/null", command));
+    let cwd_state = CwdState::load();
+    // Wrapped a second time by `append_cwd_capture` so the ending `$PWD`
+    // survives this disposable process — see the cwd-persistence block
+    // above `Args` for why that's necessary.
+    cmd.arg(append_cwd_capture(&format!("{{\n{}\n}} </dev/null", command)));
 
     // Disable pagers. The PTY above deliberately makes the child see
     // `isatty(stdout) == true` so external tools stay line-buffered (see
@@ -720,8 +911,11 @@ async fn run_via_pty(
             "PATH fix-up for child bash (no login-shell startup needed)",
         );
     }
-    if let Ok(cwd) = std::env::current_dir() {
-        cmd.cwd(cwd);
+    if let Some(dir) = &cwd_state.start_dir {
+        cmd.cwd(dir);
+    }
+    if let Some(state_path) = &cwd_state.path {
+        cmd.env(CWD_STATE_ENV, state_path);
     }
 
     let child = pair
@@ -899,9 +1093,12 @@ async fn run_via_pipes(
     buffered: Arc<Mutex<Vec<u8>>>,
     bash: &std::path::Path,
 ) -> Result<i32> {
+    // Same cwd-persistence rationale as run_via_pty — see the block above
+    // `Args`.
+    let cwd_state = CwdState::load();
     let mut cmd = Command::new(bash);
     cmd.arg("-c")
-        .arg(command)
+        .arg(append_cwd_capture(command))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -913,6 +1110,12 @@ async fn run_via_pipes(
         // docs/retro/RETRO_BASHWRAP_PAGER_HANG_LEAK_2026_07_14.md.
         .env("GIT_PAGER", "cat")
         .env("PAGER", "cat");
+    if let Some(dir) = &cwd_state.start_dir {
+        cmd.current_dir(dir);
+    }
+    if let Some(state_path) = &cwd_state.path {
+        cmd.env(CWD_STATE_ENV, state_path);
+    }
     // Windows only: bash.exe is a console-subsystem binary, so spawning it
     // without CREATE_NO_WINDOW pops a new visible (and orphaned-looking)
     // console window for every fallback exec — this path only runs when
@@ -1929,6 +2132,353 @@ mod tests {
     #[test]
     fn rejects_malformed_b64() {
         assert!(decode_command("not-valid-base64===").is_err());
+    }
+
+    // ── cwd persistence tests ───────────────────────────────────────────────
+    // See docs/retro/RETRO_BASH_CWD_RESET_NOTICE_WINDOWS_2026_08_02.md for
+    // the bug this exists to fix: each `exec` invocation used to always seed
+    // its inner bash's cwd from this process's own (fixed) cwd, silently
+    // discarding whatever directory a previous call's `cd` left the agent
+    // in.
+
+    /// Unique-per-call scratch directory under the OS temp dir, so parallel
+    /// test runs (cargo's default) never share state. Mirrors the marker-tag
+    /// pattern `run_via_pty_kills_idle_child_and_returns_promptly` already
+    /// uses for the same reason.
+    fn unique_temp_dir(tag: &str) -> PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "agentmux-bashwrap-test-{tag}-{}-{n}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).expect("create unique temp dir");
+        dir
+    }
+
+    #[test]
+    fn sanitize_state_key_replaces_unsafe_chars() {
+        assert_eq!(sanitize_state_key("agent3-0630k"), "agent3-0630k");
+        assert_eq!(sanitize_state_key("Agent With Spaces"), "Agent_With_Spaces");
+        assert_eq!(sanitize_state_key(r"C:\Users\asafe"), "C__Users_asafe");
+    }
+
+    #[test]
+    fn cwd_state_path_honors_explicit_override() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let scratch = unique_temp_dir("override");
+        let target = scratch.join("explicit.cwd");
+        unsafe {
+            std::env::set_var(CWD_STATE_FILE_OVERRIDE_ENV, &target);
+        }
+        let resolved = cwd_state_path();
+        unsafe {
+            std::env::remove_var(CWD_STATE_FILE_OVERRIDE_ENV);
+        }
+        let _ = std::fs::remove_dir_all(&scratch);
+        assert_eq!(resolved, Some(target));
+    }
+
+    /// Save-and-restore guard for an env var, so tests can freely
+    /// set/remove it and always leave the ambient environment exactly as
+    /// they found it, even on an early return or panic mid-test — every
+    /// cwd-state-key test needs this for at least `AGENTMUX_AGENT_ID` and
+    /// `AGENTMUX_INSTANCE_SLUG` simultaneously, so a bespoke prev/restore
+    /// dance per test (the pattern used elsewhere in this file for a single
+    /// var) would otherwise multiply combinatorially.
+    struct EnvVarGuard {
+        key: &'static str,
+        prev: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let prev = std::env::var(key).ok();
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self { key, prev }
+        }
+
+        fn unset(key: &'static str) -> Self {
+            let prev = std::env::var(key).ok();
+            unsafe {
+                std::env::remove_var(key);
+            }
+            Self { key, prev }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.prev {
+                    Some(v) => std::env::set_var(self.key, v),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn cwd_state_path_derives_from_agent_id_when_no_override_or_instance_slug() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _override = EnvVarGuard::unset(CWD_STATE_FILE_OVERRIDE_ENV);
+        let _instance = EnvVarGuard::unset("AGENTMUX_INSTANCE_SLUG");
+        let _agent = EnvVarGuard::set("AGENTMUX_AGENT_ID", "Test-Agent-42");
+
+        let resolved = cwd_state_path().expect("home dir should resolve in any test environment");
+        assert!(resolved.ends_with("Test-Agent-42.cwd"), "{resolved:?}");
+        assert!(resolved.to_string_lossy().contains(".agentmux"));
+    }
+
+    /// codex P1 on this PR: keying solely by `AGENTMUX_AGENT_ID` (the
+    /// definition-wide slug) made two concurrently-running *instances* of
+    /// the same agent definition share one cwd file — a `cd` in instance A
+    /// would redirect instance B's next command into A's directory, even
+    /// though each instance has its own distinct working directory. The
+    /// fix: prefer `AGENTMUX_INSTANCE_SLUG` (per-launch, unique per running
+    /// instance — see `agent-model.ts`) whenever it's set.
+    #[test]
+    fn cwd_state_path_prefers_instance_slug_over_agent_id() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _override = EnvVarGuard::unset(CWD_STATE_FILE_OVERRIDE_ENV);
+        let _agent = EnvVarGuard::set("AGENTMUX_AGENT_ID", "shared-definition-slug");
+        let _instance_a = EnvVarGuard::set("AGENTMUX_INSTANCE_SLUG", "shared-definition-slug-20260101-000000");
+
+        let resolved_a =
+            cwd_state_path().expect("home dir should resolve in any test environment");
+        assert!(
+            resolved_a.ends_with("shared-definition-slug-20260101-000000.cwd"),
+            "{resolved_a:?}"
+        );
+
+        // A second, concurrently-running instance of the SAME definition
+        // (same AGENTMUX_AGENT_ID, different AGENTMUX_INSTANCE_SLUG) must
+        // resolve to a DIFFERENT file.
+        let _instance_b = EnvVarGuard::set("AGENTMUX_INSTANCE_SLUG", "shared-definition-slug-20260101-000001");
+        let resolved_b =
+            cwd_state_path().expect("home dir should resolve in any test environment");
+        assert_ne!(resolved_a, resolved_b);
+        assert!(
+            resolved_b.ends_with("shared-definition-slug-20260101-000001.cwd"),
+            "{resolved_b:?}"
+        );
+    }
+
+    /// reagentx re-review finding: when the state dir can't be created,
+    /// `CwdState::load()` used to leave `path` as `Some` anyway, so
+    /// `restore_cwd` and the child's write would both silently keep failing
+    /// against a directory that doesn't exist on every subsequent call,
+    /// instead of cleanly disabling persistence once as the doc comment
+    /// promises. Forces the failure by pointing the override at a path
+    /// whose *parent* is a plain file, not a directory — `create_dir_all`
+    /// cannot create a directory there.
+    #[test]
+    fn cwd_state_load_clears_path_when_state_dir_cannot_be_created() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let scratch = unique_temp_dir("uncreatable-parent");
+        let blocking_file = scratch.join("not-a-directory");
+        std::fs::write(&blocking_file, b"blocks create_dir_all").unwrap();
+        let unreachable_state_file = blocking_file.join("state.cwd");
+
+        let _override = EnvVarGuard::set(
+            CWD_STATE_FILE_OVERRIDE_ENV,
+            unreachable_state_file.to_str().unwrap(),
+        );
+        let state = CwdState::load();
+        let _ = std::fs::remove_dir_all(&scratch);
+
+        assert_eq!(
+            state.path, None,
+            "path must be cleared (not just logged-as-disabled) when its parent dir can't be created"
+        );
+        assert!(state.start_dir.is_some(), "must still fall back to a start dir");
+    }
+
+    #[test]
+    fn restore_cwd_none_when_file_missing() {
+        let scratch = unique_temp_dir("missing");
+        let missing = scratch.join("does-not-exist.cwd");
+        assert_eq!(restore_cwd(&missing), None);
+        let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    #[test]
+    fn restore_cwd_none_when_persisted_dir_no_longer_exists() {
+        let scratch = unique_temp_dir("stale");
+        let state_file = scratch.join("state.cwd");
+        let gone = scratch.join("deleted-dir");
+        std::fs::create_dir_all(&gone).unwrap();
+        std::fs::write(&state_file, gone.to_string_lossy().as_bytes()).unwrap();
+        std::fs::remove_dir_all(&gone).unwrap();
+        assert_eq!(restore_cwd(&state_file), None);
+        let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    #[test]
+    fn restore_cwd_some_when_persisted_dir_exists() {
+        let scratch = unique_temp_dir("valid");
+        let state_file = scratch.join("state.cwd");
+        std::fs::write(&state_file, scratch.to_string_lossy().as_bytes()).unwrap();
+        assert_eq!(restore_cwd(&state_file), Some(scratch.clone()));
+        let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    #[test]
+    fn restore_cwd_ignores_blank_file() {
+        let scratch = unique_temp_dir("blank");
+        let state_file = scratch.join("state.cwd");
+        std::fs::write(&state_file, b"   \n").unwrap();
+        assert_eq!(restore_cwd(&state_file), None);
+        let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    #[test]
+    fn append_cwd_capture_preserves_exit_code_and_gates_on_env() {
+        let script = append_cwd_capture("false");
+        // The real command's exit code must survive the appended
+        // bookkeeping regardless of whether the state env var is set.
+        assert!(script.contains("__agentmux_bashwrap_rc=$?"));
+        assert!(script.trim_end().ends_with("exit $__agentmux_bashwrap_rc"));
+        // The write is gated on the env var being non-empty, and uses a
+        // per-PID temp-then-rename so a crash mid-write can't corrupt the
+        // file, and two concurrent invocations never write the same temp
+        // file (reagentx P2 on this PR).
+        assert!(script.contains(&format!("-n \"${CWD_STATE_ENV}\"")));
+        assert!(script.contains(&format!("${CWD_STATE_ENV}.tmp.$$")));
+        assert!(script.contains("mv -f"));
+    }
+
+    /// reagentx P2 on this PR: a fixed (non-unique) temp filename meant two
+    /// concurrent Bash tool calls for the same instance could both write to
+    /// the *same* temp file before either renamed it, corrupting the
+    /// persisted cwd with interleaved bytes. Proves two real, genuinely
+    /// concurrent writers (via `$$`, each process's own PID) never
+    /// interleave — the file always ends up as one writer's complete,
+    /// valid output, never a mix of both.
+    #[tokio::test]
+    async fn run_via_pipes_concurrent_writers_never_corrupt_state_file() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let scratch = unique_temp_dir("e2e-concurrent");
+        let state_file = scratch.join("state.cwd");
+        let dir_a = scratch.join("dir-a");
+        let dir_b = scratch.join("dir-b");
+        std::fs::create_dir_all(&dir_a).unwrap();
+        std::fs::create_dir_all(&dir_b).unwrap();
+
+        let _override =
+            EnvVarGuard::set(CWD_STATE_FILE_OVERRIDE_ENV, state_file.to_str().unwrap());
+
+        let bash = locate_bash().expect("locate_bash for test — same dependency the whole binary needs");
+        let args_a = Args {
+            tool_id: "test-concurrent-a".to_string(),
+            b64_cmd: String::new(),
+            block_id: None,
+        };
+        let args_b = Args {
+            tool_id: "test-concurrent-b".to_string(),
+            b64_cmd: String::new(),
+            block_id: None,
+        };
+        let cd_a = format!("cd \"{}\"", dir_a.display());
+        let cd_b = format!("cd \"{}\"", dir_b.display());
+        let buffered_a = Arc::new(tokio::sync::Mutex::new(Vec::<u8>::new()));
+        let buffered_b = Arc::new(tokio::sync::Mutex::new(Vec::<u8>::new()));
+
+        let (status_a, status_b) = tokio::join!(
+            run_via_pipes(&args_a, &cd_a, None, buffered_a, &bash),
+            run_via_pipes(&args_b, &cd_b, None, buffered_b, &bash),
+        );
+        assert_eq!(status_a.unwrap(), 0);
+        assert_eq!(status_b.unwrap(), 0);
+
+        // Whichever writer's rename landed last, the file must contain
+        // exactly ONE valid, complete directory path — never a truncated
+        // or interleaved mix of both writers' output.
+        let final_contents = std::fs::read_to_string(&state_file).unwrap();
+        let trimmed = final_contents.trim();
+        let a_str = dir_a.to_string_lossy();
+        let b_str = dir_b.to_string_lossy();
+        assert!(
+            trimmed.ends_with(dir_a.file_name().unwrap().to_str().unwrap())
+                || trimmed.ends_with(dir_b.file_name().unwrap().to_str().unwrap()),
+            "expected a clean write of either {a_str:?} or {b_str:?}, got {trimmed:?}"
+        );
+        assert!(
+            !trimmed.contains('\n'),
+            "a corrupted/interleaved write would likely contain embedded newlines: {trimmed:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    /// End-to-end proof of the actual fix: running a `cd` in one `exec`
+    /// invocation must change the starting directory of the *next*
+    /// invocation, via the persisted state file — not just leave a
+    /// same-process illusion of persistence.
+    #[tokio::test]
+    async fn run_via_pipes_persists_cwd_across_invocations() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let scratch = unique_temp_dir("e2e-pipes");
+        let state_file = scratch.join("state.cwd");
+        let target_dir = scratch.join("moved-here");
+        std::fs::create_dir_all(&target_dir).unwrap();
+
+        let prev = std::env::var(CWD_STATE_FILE_OVERRIDE_ENV).ok();
+        unsafe {
+            std::env::set_var(CWD_STATE_FILE_OVERRIDE_ENV, &state_file);
+        }
+
+        let bash = locate_bash().expect("locate_bash for test — same dependency the whole binary needs");
+        let args = Args {
+            tool_id: "test-cwd-persist".to_string(),
+            b64_cmd: String::new(),
+            block_id: None,
+        };
+
+        // Call 1: cd into target_dir. Nothing about this process's own env
+        // changes — the fix must work purely through the state file.
+        let cd_cmd = format!("cd \"{}\"", target_dir.display());
+        let buffered1 = Arc::new(tokio::sync::Mutex::new(Vec::<u8>::new()));
+        let status1 = run_via_pipes(&args, &cd_cmd, None, buffered1, &bash)
+            .await
+            .expect("call 1 should succeed");
+        assert_eq!(status1, 0, "cd should succeed");
+
+        // Call 2: a fresh, unrelated invocation with no cd of its own —
+        // `pwd` should report target_dir, proving the restored starting
+        // directory came from call 1's persisted state, not from this
+        // process's own (unchanged) cwd.
+        let buffered2 = Arc::new(tokio::sync::Mutex::new(Vec::<u8>::new()));
+        let status2 = run_via_pipes(&args, "pwd", None, buffered2.clone(), &bash)
+            .await
+            .expect("call 2 should succeed");
+        assert_eq!(status2, 0);
+
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var(CWD_STATE_FILE_OVERRIDE_ENV, v),
+                None => std::env::remove_var(CWD_STATE_FILE_OVERRIDE_ENV),
+            }
+        }
+
+        let pwd_output = String::from_utf8_lossy(&buffered2.lock().await).trim().to_string();
+        let expected_name = target_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap()
+            .to_string();
+        let _ = std::fs::remove_dir_all(&scratch);
+
+        // Compare by trailing path component only — Windows `pwd` under Git
+        // Bash reports an MSYS-style path (`/c/...`), not the Windows-style
+        // path this test constructed the `cd` from.
+        assert!(
+            pwd_output.ends_with(&expected_name),
+            "expected pwd output to end in {expected_name:?}, got {pwd_output:?}"
+        );
     }
 
     #[test]
