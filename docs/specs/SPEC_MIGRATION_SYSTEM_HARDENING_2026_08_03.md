@@ -17,15 +17,25 @@ Verified directly against the live databases (`objects.db` for channel `local-ma
 
 **This is a recurrence of an already-diagnosed, still-unfixed issue.** See `agent1-stuck-error-retro.md` (2026-08-02/03, this workspace) for the original incident — a *different* Agent1 pane (block `e913dc16-...`, channel `agent1-06309`) hit the identical symptom the day before. Same agent **definition** id both times (`938e343c-98b2-417a-8d74-787e0a501e97`) — definitions are global (`0006_definitions_global`), shared across channels, so a broken definition follows the agent into every new channel it's launched in until the definition itself is fixed.
 
-**Confirmed facts:**
+**Correction #2 (post-review):** the paragraphs below originally claimed Agent1's stray `github` identity link disqualified it from `0017_ambient_login_grandfather`'s ambient-login grandfathering, leaving it in fail-by-default mode with no usable `claude` credential. **That mechanism is wrong**, caught in review and independently re-verified: `agentmux-srv/src/identity/resolver/provider.rs:53` classifies `"github"` as `ProviderClass::ApiKey`, and `m0017`'s own doc comment is explicit that only **OAuth-class** links disqualify an agent from grandfathering — "Api-key-class links (e.g. a github PAT) do NOT count... must be grandfathered, not broken." Direct query of this channel's `db_agents` table confirms `938e343c-...` (Agent1) has `use_ambient_login = 1` — it **was** correctly grandfathered, exactly as the migration's logic dictates. The original claim conflated this incident with the prior day's retro without re-verifying the specific disqualification rule against source.
+
+**Confirmed facts (re-verified):**
 - `db_agents` / `db_agent_definitions` in this channel's `objects.db` are correctly populated: 11 rows each, including `938e343c-...` (Agent1) and `8e5f7b6d-...` (AgentX), with matching `db_agent_instances` rows. `0007_agents_consolidate` ran correctly here — not the bug.
-- The shared store's `db_agent_identity_links` (61 rows total) shows AgentX with the normal three links (`claude`, `github`, `kimi`) — but **Agent1 has exactly one link, for `github`, pointing at `acct-agenty-github-1782788341` ("AgentY GitHub")** — no `claude` link. Identical shape to the prior incident's finding.
-- `0017_ambient_login_grandfather` applied in this channel at `2026-08-03T07:36:12.428Z` (confirmed in `db_migrations`). Per the prior retro's analysis of that migration: an agent with *any* identity link is left in fail-by-default mode rather than grandfathered to ambient login. Agent1's stray `github` link is enough to disqualify it — so it has no usable `claude` credential and its spawn is refused before a process is ever created.
-- `muxspect describe 7943f67e-594c-4289-a61c-ecff68a0302d` (today's Agent1 block) confirms the shape: `shellprocstatus: init`, `spawn_ts_ms: (never spawned)`, `processes (0): none tracked` — a pre-spawn refusal, not a post-spawn crash. Matches the prior incident's `muxspect` signature exactly.
+- The shared store's `db_agent_identity_links` (61 rows total) shows AgentX with the normal three links (`claude`, `github`, `kimi`) — Agent1 has exactly one, for `github`, pointing at `acct-agenty-github-1782788341` ("AgentY GitHub") — no `claude` link. Same shape as the prior day's retro, but (per the correction above) this shape does **not** by itself explain a spawn refusal, since `github` doesn't gate the grandfather decision.
+- Agent1's `db_agents.use_ambient_login = 1` (AgentX's is `0`, i.e. managed) — confirmed grandfathered, not fail-by-default.
+- `muxspect describe 7943f67e-594c-4289-a61c-ecff68a0302d`, re-run with a newer build of the tool than was available earlier in this investigation (it now surfaces a `last_error` field that an earlier check of the same block did not show — the tool appears to have gained this during the session, matching the Phase-1.5 extension proposed in `REPORT_MUXSPECT_SPAWN_REFUSAL_DIAGNOSIS_EXTENSION_2026_08_03.md`), gives the actual, authoritative answer directly from Agent1's own persisted output rather than inference:
+  ```
+  last_error:
+    message: [AgentMux] no credentials for claude: the bound account was deleted
+             or is unresolvable. Bind an account for this provider in the Armory.
+    source:  identity
+    age:     200m
+  ```
+  This is a real identity/credential failure (confirming the general shape of both this incident and the prior day's retro — a `claude`-provider credential problem), but the *precise* mechanism by which an ambient-login agent ends up with "no credentials for claude" isn't fully traced in this doc — plausibly the ambient fallback itself resolves to a now-invalid or missing local CLI login state rather than a `db_agent_identity_links` row at all, since Agent1 has no `claude` link to begin with (ambient or not). Flagged as needing a proper trace through `identity/resolver/inject.rs`'s ambient-login path rather than guessed at further here.
 
-**A genuinely new, secondary finding from today (not in the prior retro):** the `FOREIGN KEY constraint failed` warning that triggered this whole investigation is real but is a **separate, non-blocking bug**, not Agent1's blocker. This channel's per-channel `db_accounts` table has **zero rows** — accounts live only in the shared store. Every one of the shared store's identity-link account IDs (e.g. `a1990489-...` for AgentX's `claude` link, `acct-agenty-github-...` for Agent1's stray `github` link) fails the `account_id REFERENCES db_accounts(id)` FK check when something (a frontend flow labeled `linkagentidentity`, "direct identity link write-through") tries to mirror it into the channel-local table. This fires for **any** agent's identity link in this channel, not just Agent1's — it's caught and logged as `WARN`, so it doesn't block spawning, but it means the per-channel `db_accounts` mirror is silently never populated. Worth its own fix (Phase 0e below) but it is a red herring for Agent1's actual failure.
+**The `FOREIGN KEY constraint failed` warning that originally triggered this whole investigation is a separate, non-blocking bug**, not confirmed as Agent1's blocker (and per the above, likely unrelated to it). This channel's per-channel `db_accounts` table has **zero rows** — accounts live only in the shared store. Every one of the shared store's identity-link account IDs fails the `account_id REFERENCES db_accounts(id)` FK check when something (a frontend flow labeled `linkagentidentity`, "direct identity link write-through") tries to mirror it into the channel-local table. This fires for **any** agent's identity link in this channel — it's caught and logged as `WARN`, non-fatal. Still worth its own fix (Phase 0e below).
 
-**Fix for Agent1:** identical to the prior retro's recommendation, still not applied — bind a `claude` provider account (e.g. the shared `Claude (personal)` account, `a1990489-6de6-484a-9e20-83688c641524`, the same one AgentX uses) to definition `938e343c-98b2-417a-8d74-787e0a501e97`. This is a write to the shared identity-links table that every running agent depends on, so — same as the prior retro — I'm not making this write unilaterally; flagging it for an explicit go-ahead. **Correction from the original draft:** the UI path for this is not "Settings → Identity" (there is no Settings page for it) — it's the command **"Identity & Memory"** (command id `app:identity`), which opens a pane called the **Armory**, with an **Accounts** tab.
+**Fix for Agent1:** the tool's own error message says it directly — "Bind an account for this provider in the Armory" — so bind a `claude` provider account (e.g. the shared `Claude (personal)` account, `a1990489-6de6-484a-9e20-83688c641524`) to definition `938e343c-98b2-417a-8d74-787e0a501e97`. I do not have a verified exact UI click-path for *linking an account to a specific agent definition* — I asserted one earlier in this investigation ("Settings → Identity," then corrected to "Identity & Memory → Armory → Accounts tab") and neither has been confirmed against the actual binding flow; this repo's own `CLAUDE.md` states the per-agent Identity tab is **read-only** ("No create/edit/delete/bind/unbind; new agent identities are created from the launch flow directly") — meaning the binding this agent needs may not happen through Armory at all. This is a write to shared identity state every running agent depends on, so — same as the prior retro — not making it unilaterally; flagging for an explicit go-ahead with the caveat that the exact mechanism (launch-flow-driven vs. an Armory action) needs confirming first, not assumed from doc comments a third time.
 
 **New Phase 0e (added to the hardening plan in Part 3):** mirror `db_accounts` into per-channel stores (or stop attempting the per-channel write-through and rely solely on the shared store, if the per-channel copy isn't actually load-bearing for anything — needs a call from whoever owns the identity write-through code) so this FK warning stops firing on every identity-link sync, for every agent, in every channel.
 
@@ -113,17 +123,19 @@ This walks through how mechanism B's design *could* produce a silent, marker-say
 | `0005_registry_source_bases` | Global | `.backfilled_source_bases` (bool) | |
 | `0006_definitions_global` | Global | `.migrated_definitions` (versioned, mechanism C) | Best-designed marker in the codebase |
 | `0007_agents_consolidate` | Channel | `migration_agents_consolidate_v1.flag` (bool, content ignored) | **The incident** |
-| `0008_default_bundle` | Channel | — | Now a documented no-op (Phase 4c of `SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md`) |
+| `0008_default_bundle` | Global | — | Now a documented no-op (Phase 4c of `SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md`) |
 | `0009_transcript_backfill` | Global | — | |
 | `0010_session_ids` | Global | — | |
 | `0011_shared_store_backfill` | Global | — | Gates whether `id_store` binds to shared vs. per-channel store |
 | `0012_dedup_identity_accounts` | Global | — | |
-| `0013_agent_direct_bindings` | Channel | — | |
-| `0014_agent_direct_bindings_rerun` | Channel | — | Existence of a `_rerun` migration is itself a signal that `0013` shipped with a bug once already |
-| `0015_seed_starter_skills` | Global | — | |
-| `0016_seed_starter_mcp_servers` | Global | — | |
-| `0017_ambient_login_grandfather` | Global | — | |
-| `0018_ambient_login_registry` | Global | — | |
+| `0013_agent_direct_bindings` | Global | — | |
+| `0014_agent_direct_bindings_rerun` | Global | — | Existence of a `_rerun` migration is itself a signal that `0013` shipped with a bug once already |
+| `0015_seed_starter_skills` | Channel | — | |
+| `0016_seed_starter_mcp_servers` | Channel | — | |
+| `0017_ambient_login_grandfather` | Channel | — | Per-channel pass over that channel's `db_agents` rows; see Part 0 for the actual disqualification rule (OAuth-class links only — corrected after an initial wrong claim here) |
+| `0018_ambient_login_registry` | Global | — | Sibling pass for the global JSON registry, sharing `oauth_linked_agent_ids` with `0017` so the two can't disagree |
+
+*(This table was corrected after review — five of nineteen scopes were originally listed backwards. Every row above is re-verified directly against each migration's `fn scope()` in `1899c5ed`.)*
 
 Plus, outside the framework entirely: `backend/storage/migrations.rs` (raw SQL DDL — table creation/rename, separately versioned by nothing but `CREATE TABLE IF NOT EXISTS` idempotency).
 
@@ -257,7 +269,7 @@ Goal: address F7 and 1.4. This is the one phase that isn't purely mechanical —
 
 Superseded by Part 0's direct verification: `db_agents`/`db_agent_definitions`/`db_agent_instances` in `local-main-b28b7a-9172ff88` are correctly populated — **no marker deletion, DB surgery, or migration re-run is needed or appropriate here.** The instance isn't broken at the data layer at all.
 
-The actual fix is an identity-link change, not a migration-recovery action: bind a `claude` account to agent definition `938e343c-98b2-417a-8d74-787e0a501e97` (Agent1), same as recommended in `agent1-stuck-error-retro.md` the day before. This is a shared-store write affecting every channel Agent1 runs in, not a local `objects.db` fix — do it once via the "Identity & Memory" command → Armory → Accounts tab (or an equivalent admin action) rather than per-channel.
+The actual fix is an identity-link change, not a migration-recovery action: bind a `claude` account to agent definition `938e343c-98b2-417a-8d74-787e0a501e97` (Agent1) — per `muxspect`'s own persisted error message, "Bind an account for this provider in the Armory." This is a shared-store write affecting every channel Agent1 runs in, not a local `objects.db` fix — do it once, not per-channel. The exact UI mechanism for binding an account *to an agent* (as opposed to managing accounts themselves in Armory) is not verified in this doc — see Part 0's caveat.
 
 Separately, low-priority: the `db_accounts`-empty-per-channel FK warning (§0e) is cosmetic today (swallowed, non-blocking) and doesn't need manual intervention — it's a Phase-0e code fix, not a per-instance recovery step. Same for the stale status-bar migration count (§0f) — refreshing/restarting clears the display even before the code fix ships.
 
