@@ -357,6 +357,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                         disable={expanded() || !hasAnyPeekContent()}
                         delayMs={150}
                         placement="bottom"
+                        edgeToEdge
                         divClassName="agent-tool-name-tooltip-anchor"
                         content={
                             <div class="agent-node-peek-tooltip">

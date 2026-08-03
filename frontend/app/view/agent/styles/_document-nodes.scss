@@ -1794,15 +1794,16 @@
 // nested. Replaces the old, narrower .agent-tool-cmd-tooltip (11px,
 // cramped) — SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md §2.2a: sized to
 // read as comfortably as a native browser tooltip, not as a shrunk-down
-// technical readout. The outer Tooltip component (tooltip.tsx) already
-// supplies box chrome (bg/border/shadow/px-2 py-1 text-xs) — these rules
-// override the inherited text-xs sizing and add breathing room between
-// lines, same content-level-override approach the old rule already used.
+// technical readout.
+//
+// The box itself renders edge-to-edge (tooltip.tsx's `edgeToEdge` prop —
+// see .agent-tooltip-edge-to-edge below) rather than as a floating chip, so
+// this inner content no longer needs a max-width cap; it's free to use
+// whatever width the flush-to-pane-edges box gives it.
 .agent-node-peek-tooltip {
     display: flex;
     flex-direction: column;
     gap: 4px;
-    max-width: 420px;
     padding: 2px;
 }
 
@@ -1820,4 +1821,18 @@
     font-size: 13px;
     line-height: 1.6;
     color: var(--main-text-color);
+}
+
+// Edge-to-edge Tooltip box chrome (tooltip.tsx's `edgeToEdge` prop) — flush
+// to the agent pane's left/right edges and top-aligned with the hovered
+// line, so no rounded corners on the sides (would look wrong flush against
+// the pane edge) and horizontal padding instead lives here rather than on
+// .agent-node-peek-tooltip, matching the pane's own content gutter.
+.agent-tooltip-edge-to-edge {
+    background: var(--panel-bg-color, var(--main-bg-color));
+    border-top: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border-color);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+    padding: var(--space-1) var(--space-2);
+    z-index: 50;
 }

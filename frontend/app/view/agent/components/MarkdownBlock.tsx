@@ -140,6 +140,7 @@ export const MarkdownBlock = (props: MarkdownBlockProps): JSX.Element => {
                         <Tooltip
                             placement="bottom"
                             delayMs={150}
+                            edgeToEdge
                             divClassName="agent-markdown-block thinking-block"
                             content={
                                 <div class="agent-node-peek-tooltip">

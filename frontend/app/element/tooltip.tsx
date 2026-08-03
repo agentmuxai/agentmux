@@ -25,6 +25,18 @@ interface TooltipProps {
     divOnClick?: (e: MouseEvent) => void;
     /** Show/hide delay in ms. Defaults to 300 (existing behavior). */
     delayMs?: number;
+    /**
+     * Render as a full-width band flush to the nearest `.agent-view`
+     * ancestor's left/right edges, top-aligned with the anchor itself,
+     * instead of a floating chip offset near the anchor. `placement` and
+     * the offset/flip/shift middleware are ignored in this mode — the
+     * position is fully deterministic from two `getBoundingClientRect()`
+     * reads, no computePosition needed. Used by the transcript node peek
+     * tooltip (ToolBlock.tsx / MarkdownBlock.tsx) to match the composer
+     * strip's "Session Context" hover styling. Defaults to false (existing
+     * floating-chip behavior, used by every other Tooltip caller).
+     */
+    edgeToEdge?: boolean;
 }
 
 function TooltipInner(props: TooltipProps): JSX.Element {
@@ -49,6 +61,22 @@ function TooltipInner(props: TooltipProps): JSX.Element {
 
     const updatePosition = async () => {
         if (!referenceEl || !floatingEl) return;
+        if (props.edgeToEdge) {
+            // Deterministic band, not a floating-ui placement: flush to the
+            // agent pane's left/right edges, top-aligned with the anchor
+            // itself. `getBoundingClientRect()` already returns real
+            // viewport-pixel coordinates under CSS `zoom` (verified
+            // elsewhere in this codebase — AgentDocumentVirtualList.tsx),
+            // and `position: fixed` needs no scroll-offset math on top of
+            // that, so no floating-ui middleware is involved here.
+            const paneEl = referenceEl.closest<HTMLElement>(".agent-view") ?? referenceEl;
+            const paneRect = paneEl.getBoundingClientRect();
+            const anchorRect = referenceEl.getBoundingClientRect();
+            setFloatingStyle(
+                `position:fixed;left:${paneRect.left}px;top:${anchorRect.top}px;width:${paneRect.width}px`
+            );
+            return;
+        }
         const pos = await computePosition(referenceEl, floatingEl, {
             placement,
             middleware: [offset(10), flip(), shift({ padding: 12 })],
@@ -138,9 +166,11 @@ function TooltipInner(props: TooltipProps): JSX.Element {
                     <div
                         ref={registerFloating}
                         style={`${floatingStyle()};opacity:${isVisible() ? 1 : 0};transition:opacity 200ms ease`}
-                        class={cn(
-                            "bg-gray-800 border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl z-50"
-                        )}
+                        class={
+                            props.edgeToEdge
+                                ? "agent-tooltip-edge-to-edge"
+                                : cn("bg-gray-800 border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl z-50")
+                        }
                         data-pane-overlay
                     >
                         {props.content}
