@@ -1788,25 +1788,15 @@
     }
 }
 
-// Node hover-peek tooltip content (ToolBlock.tsx's Tooltip over
-// .agent-tool-name, MarkdownBlock.tsx's over a thinking clump). Portal-
-// rendered outside the row, so these are standalone top-level rules, not
-// nested. Replaces the old, narrower .agent-tool-cmd-tooltip (11px,
-// cramped) — SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md §2.2a: sized to
-// read as comfortably as a native browser tooltip, not as a shrunk-down
-// technical readout.
-//
-// The box itself renders edge-to-edge (tooltip.tsx's `edgeToEdge` prop —
-// see .agent-tooltip-edge-to-edge below) rather than as a floating chip, so
-// this inner content no longer needs a max-width cap; it's free to use
-// whatever width the flush-to-pane-edges box gives it.
-.agent-node-peek-tooltip {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding: 2px;
-}
-
+// Node hover-peek overlay (ToolBlock.tsx's row-level overlay over
+// .agent-tool-block, MarkdownBlock.tsx's over a thinking clump's
+// .agent-thinking-peek-anchor wrapper). Plain in-DOM absolute positioning —
+// NOT a floating-ui Portal tooltip — mirroring UserMessageBlock.tsx's
+// "Session context" hover-to-peek exactly (same hover-anchor.ts direction-
+// picking helpers, same visual treatment). Replaces the old, narrower
+// .agent-tool-cmd-tooltip (11px, cramped) — SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md
+// §2.2a: sized to read as comfortably as a native browser tooltip, not as a
+// shrunk-down technical readout.
 .agent-node-peek-tooltip-meta {
     font-size: 13px;
     line-height: 1.4;
@@ -1823,16 +1813,38 @@
     color: var(--main-text-color);
 }
 
-// Edge-to-edge Tooltip box chrome (tooltip.tsx's `edgeToEdge` prop) — flush
-// to the agent pane's left/right edges and top-aligned with the hovered
-// line, so no rounded corners on the sides (would look wrong flush against
-// the pane edge) and horizontal padding instead lives here rather than on
-// .agent-node-peek-tooltip, matching the pane's own content gutter.
-.agent-tooltip-edge-to-edge {
-    background: var(--panel-bg-color, var(--main-bg-color));
-    border-top: 1px solid var(--border-color);
-    border-bottom: 1px solid var(--border-color);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
-    padding: var(--space-1) var(--space-2);
-    z-index: 50;
+// The overlay box: `left: 0; right: 0` spans the hovered row's own width
+// (edge-to-edge of the pane), `top: 100%` / `bottom: 100%` sits it flush
+// against the row with no offset gap — identical mechanism to
+// .agent-user-message-content--overlay-below/above above, styled the same
+// way (opaque background, border, drop shadow) so every hover-to-peek
+// surface in the transcript reads consistently. Requires the row it's
+// nested in to be `position: relative` (.agent-tool-block already is;
+// .agent-thinking-peek-anchor declares it below).
+.agent-node-peek-overlay {
+    position: absolute;
+    left: 0;
+    right: 0;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    background-color: var(--block-bg-solid-color, var(--main-bg-color));
+    border: 1px solid var(--border-color);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    padding: var(--space-0-5) var(--space-1);
+}
+.agent-node-peek-overlay--below {
+    top: 100%;
+}
+.agent-node-peek-overlay--above {
+    bottom: 100%;
+}
+
+// Positioning context for MarkdownBlock.tsx's thinking-clump peek overlay
+// (ToolBlock.tsx's equivalent, .agent-tool-block, already declares this).
+.agent-thinking-peek-anchor {
+    position: relative;
 }

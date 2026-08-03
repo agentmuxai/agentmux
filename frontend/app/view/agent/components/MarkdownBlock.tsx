@@ -5,13 +5,28 @@
  * MarkdownBlock - Renders markdown content from agent output
  */
 
+import clsx from "clsx";
 import { Markdown } from "@/app/element/markdown";
-import { Tooltip } from "@/app/element/tooltip";
 import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
 import { formatExactTime, formatTimeAgo } from "@/util/format-time";
 import { createEffect, createMemo, createSignal, onCleanup, Show, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 import type { MarkdownNode } from "../types";
+import {
+    findScrollContainerRect,
+    maxOverlayHeight,
+    pickExpandDirection,
+    type ExpandDirection,
+} from "./hover-anchor";
+
+// 150ms enter-delay matches UserMessageBlock's hover-to-peek — prevents
+// accidental expansions during fast scroll-throughs.
+const PEEK_ENTER_DELAY_MS = 150;
+
+// Conservative height estimate for direction selection — the peek overlay
+// is just 1-2 short metadata lines, nowhere near UserMessageBlock's multi-kB
+// startup body estimate.
+const PEEK_OVERLAY_ESTIMATE_PX = 80;
 
 interface MarkdownBlockProps {
     node: MarkdownNode;
@@ -114,6 +129,38 @@ export const MarkdownBlock = (props: MarkdownBlockProps): JSX.Element => {
         return count > 0 ? `~${formatCompactNumber(count)} tok (est.)` : null;
     });
 
+    // Peek overlay — a plain `position: absolute` child of this row, NOT a
+    // floating-ui Portal tooltip. Mirrors UserMessageBlock.tsx's "Session
+    // context" hover-to-peek exactly (see that file + hover-anchor.ts):
+    // `left: 0; right: 0` spans the row's own width (edge-to-edge of the
+    // pane), `top: 100%` / `bottom: 100%` sits it flush against the row with
+    // no offset gap, and direction flips upward near the pane's bottom.
+    const [expandDirection, setExpandDirection] = createSignal<ExpandDirection>("below");
+    const [overlayMaxHeight, setOverlayMaxHeight] = createSignal<number | null>(null);
+    let peekEnterTimer: ReturnType<typeof setTimeout> | undefined;
+    let rowEl: HTMLDivElement | undefined;
+
+    const handlePeekEnter = () => {
+        clearTimeout(peekEnterTimer);
+        peekEnterTimer = setTimeout(() => {
+            if (rowEl) {
+                const rect = rowEl.getBoundingClientRect();
+                const container = findScrollContainerRect(rowEl);
+                const rowV = { top: rect.top, bottom: rect.bottom };
+                const dir = pickExpandDirection(rowV, container, PEEK_OVERLAY_ESTIMATE_PX);
+                setExpandDirection(dir);
+                setOverlayMaxHeight(maxOverlayHeight(rowV, container, dir));
+            }
+            setIsPeeking(true);
+        }, PEEK_ENTER_DELAY_MS);
+    };
+    const handlePeekLeave = () => {
+        clearTimeout(peekEnterTimer);
+        setIsPeeking(false);
+        setOverlayMaxHeight(null);
+    };
+    onCleanup(() => clearTimeout(peekEnterTimer));
+
     return (
         <Show
             when={isCanceled()}
@@ -133,28 +180,33 @@ export const MarkdownBlock = (props: MarkdownBlockProps): JSX.Element => {
                     }
                 >
                     <div
+                        ref={(el) => (rowEl = el)}
                         class="agent-thinking-peek-anchor"
-                        onMouseEnter={() => setIsPeeking(true)}
-                        onMouseLeave={() => setIsPeeking(false)}
+                        onMouseEnter={handlePeekEnter}
+                        onMouseLeave={handlePeekLeave}
                     >
-                        <Tooltip
-                            placement="bottom"
-                            delayMs={150}
-                            edgeToEdge
-                            divClassName="agent-markdown-block thinking-block"
-                            content={
-                                <div class="agent-node-peek-tooltip">
-                                    <Show when={peekTimeText()}>
-                                        <div class="agent-node-peek-tooltip-meta">{peekTimeText()}</div>
-                                    </Show>
-                                    <Show when={peekEstimateText()}>
-                                        <div class="agent-node-peek-tooltip-meta">{peekEstimateText()}</div>
-                                    </Show>
-                                </div>
-                            }
-                        >
+                        <div class="agent-markdown-block thinking-block">
                             <Markdown text={view().text} highlight={view().highlight} scrollable={false} />
-                        </Tooltip>
+                        </div>
+                        {/* Peek overlay — see ToolBlock.tsx's identical pattern
+                            and hover-anchor.ts. Not gated on `expanded()` here —
+                            thinking clumps have no pin/expand state to collide with. */}
+                        <Show when={isPeeking() && (peekTimeText() || peekEstimateText())}>
+                            <div
+                                class={clsx("agent-node-peek-overlay", {
+                                    "agent-node-peek-overlay--below": expandDirection() === "below",
+                                    "agent-node-peek-overlay--above": expandDirection() === "above",
+                                })}
+                                style={overlayMaxHeight() != null ? { "max-height": `${overlayMaxHeight()}px` } : undefined}
+                            >
+                                <Show when={peekTimeText()}>
+                                    <div class="agent-node-peek-tooltip-meta">{peekTimeText()}</div>
+                                </Show>
+                                <Show when={peekEstimateText()}>
+                                    <div class="agent-node-peek-tooltip-meta">{peekEstimateText()}</div>
+                                </Show>
+                            </div>
+                        </Show>
                     </div>
                 </Show>
             }

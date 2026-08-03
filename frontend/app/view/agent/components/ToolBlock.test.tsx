@@ -156,66 +156,81 @@ describe("ToolBlock — panel mode", () => {
     // static text only (the bare command), no expansion, suppressed once
     // the panel is already expanded. See ToolBlock.tsx's header comment.
     describe("command tooltip", () => {
-        // Real hovering crosses BOTH the outer isPeeking-tracking span
-        // (added for reagent P2 on PR #2392 — drives peekTimeText's live
-        // "ago" text independent of Tooltip's own internal hover state) and
-        // the inner Tooltip-owned anchor div. jsdom's fireEvent doesn't
-        // simulate real cursor movement through nested elements, so tests
-        // fire both explicitly to match what a physical hover actually does.
+        // The peek overlay is a plain `position: absolute` child of this row
+        // (ToolBlock.tsx's handlePeekEnter + hover-anchor.ts) — NOT a
+        // floating-ui Portal tooltip — so it renders inside `container`, not
+        // `document.body`. A real 150ms enter-delay gates its DOM presence
+        // (mirrors UserMessageBlock.tsx's "Session context" hover-to-peek),
+        // so these tests use fake timers and advance past it.
         const hoverToolName = (container: HTMLElement) => {
-            const outer = container.querySelector(".agent-tool-name-peek-anchor") as HTMLElement;
-            const inner = container.querySelector(".agent-tool-name-tooltip-anchor") as HTMLElement;
-            fireEvent.mouseEnter(outer);
-            fireEvent.mouseEnter(inner);
+            const anchor = container.querySelector(".agent-tool-name-peek-anchor") as HTMLElement;
+            fireEvent.mouseEnter(anchor);
+            vi.advanceTimersByTime(200);
         };
 
         it("collapsed: hovering the name shows the bare command, not the decorated summary", () => {
-            const { container, unmount } = render(() => (
-                <ToolBlock node={baseTool} pinned={false} onTogglePin={() => {}} />
-            ));
-            expect(container.querySelector(".agent-tool-name-tooltip-anchor")).not.toBeNull();
-            hoverToolName(container);
-            const tip = document.body.querySelector(".agent-node-peek-tooltip-body");
-            expect(tip).not.toBeNull();
-            expect(tip!.textContent).toBe("ls"); // bare params.command, not "Bash ls"
-            unmount();
+            vi.useFakeTimers();
+            try {
+                const { container } = render(() => (
+                    <ToolBlock node={baseTool} pinned={false} onTogglePin={() => {}} />
+                ));
+                expect(container.querySelector(".agent-tool-name-peek-anchor")).not.toBeNull();
+                hoverToolName(container);
+                const tip = container.querySelector(".agent-node-peek-tooltip-body");
+                expect(tip).not.toBeNull();
+                expect(tip!.textContent).toBe("ls"); // bare params.command, not "Bash ls"
+            } finally {
+                vi.useRealTimers();
+            }
         });
 
         // SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md §2.3 — the peek
-        // tooltip gains time + estimated-token lines above the bare command.
+        // overlay gains time + estimated-token lines above the bare command.
         it("shows exact time + time-ago + an estimated token count when the node has a timestamp", () => {
             const timed: ToolNode = { ...baseTool, timestamp: Date.now() - 65_000 };
-            const { container, unmount } = render(() => (
-                <ToolBlock node={timed} pinned={false} onTogglePin={() => {}} />
-            ));
-            hoverToolName(container);
-            const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
-            expect(metaLines.length).toBe(2);
-            expect(metaLines[0].textContent).toMatch(/\d{2}:\d{2}:\d{2} · 1m ago/);
-            expect(metaLines[1].textContent).toMatch(/~\d+ tok \(est\.\)/);
-            unmount();
+            vi.useFakeTimers();
+            try {
+                const { container } = render(() => (
+                    <ToolBlock node={timed} pinned={false} onTogglePin={() => {}} />
+                ));
+                hoverToolName(container);
+                const metaLines = container.querySelectorAll(".agent-node-peek-tooltip-meta");
+                expect(metaLines.length).toBe(2);
+                expect(metaLines[0].textContent).toMatch(/\d{2}:\d{2}:\d{2} · 1m ago/);
+                expect(metaLines[1].textContent).toMatch(/~\d+ tok \(est\.\)/);
+            } finally {
+                vi.useRealTimers();
+            }
         });
 
         it("shows no time line when the node has no timestamp", () => {
             const untimed: ToolNode = { ...baseTool, timestamp: undefined };
-            const { container, unmount } = render(() => (
-                <ToolBlock node={untimed} pinned={false} onTogglePin={() => {}} />
-            ));
-            hoverToolName(container);
-            const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
-            // Still one line: the token estimate (params always give SOME text).
-            expect(metaLines.length).toBe(1);
-            expect(metaLines[0].textContent).toMatch(/~\d+ tok \(est\.\)/);
-            unmount();
+            vi.useFakeTimers();
+            try {
+                const { container } = render(() => (
+                    <ToolBlock node={untimed} pinned={false} onTogglePin={() => {}} />
+                ));
+                hoverToolName(container);
+                const metaLines = container.querySelectorAll(".agent-node-peek-tooltip-meta");
+                // Still one line: the token estimate (params always give SOME text).
+                expect(metaLines.length).toBe(1);
+                expect(metaLines[0].textContent).toMatch(/~\d+ tok \(est\.\)/);
+            } finally {
+                vi.useRealTimers();
+            }
         });
 
-        it("expanded (pinned): hovering the name shows no tooltip — command is visible in the panel already", () => {
-            const { container, unmount } = render(() => (
-                <ToolBlock node={baseTool} pinned={true} onTogglePin={() => {}} />
-            ));
-            hoverToolName(container);
-            expect(document.body.querySelector(".agent-node-peek-tooltip")).toBeNull();
-            unmount();
+        it("expanded (pinned): hovering the name shows no overlay — command is visible in the panel already", () => {
+            vi.useFakeTimers();
+            try {
+                const { container } = render(() => (
+                    <ToolBlock node={baseTool} pinned={true} onTogglePin={() => {}} />
+                ));
+                hoverToolName(container);
+                expect(container.querySelector(".agent-node-peek-overlay")).toBeNull();
+            } finally {
+                vi.useRealTimers();
+            }
         });
 
         // reagent P2 on PR #2392: this used to assert NO tooltip at all for a
@@ -225,76 +240,84 @@ describe("ToolBlock — panel mode", () => {
         // a peek now DOES show here — just without a body line.
         it("a tool kind with no extractable detail (e.g. an untyped tool) still shows a peek with time/estimate, but no body line", () => {
             const opaque: ToolNode = { ...baseTool, tool: "Other", params: {}, timestamp: Date.now() };
-            const { container, unmount } = render(() => (
-                <ToolBlock node={opaque} pinned={false} onTogglePin={() => {}} />
-            ));
-            hoverToolName(container);
-            expect(document.body.querySelector(".agent-node-peek-tooltip")).not.toBeNull();
-            expect(document.body.querySelector(".agent-node-peek-tooltip-body")).toBeNull();
-            const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
-            expect(metaLines.length).toBe(2); // time + estimate, both independent of cmdText()
-            unmount();
+            vi.useFakeTimers();
+            try {
+                const { container } = render(() => (
+                    <ToolBlock node={opaque} pinned={false} onTogglePin={() => {}} />
+                ));
+                hoverToolName(container);
+                expect(container.querySelector(".agent-node-peek-overlay")).not.toBeNull();
+                expect(container.querySelector(".agent-node-peek-tooltip-body")).toBeNull();
+                const metaLines = container.querySelectorAll(".agent-node-peek-tooltip-meta");
+                expect(metaLines.length).toBe(2); // time + estimate, both independent of cmdText()
+            } finally {
+                vi.useRealTimers();
+            }
         });
 
-        it("a tool with no cmdText, no timestamp, and no estimable content shows no tooltip at all", () => {
-            // Only reachable in principle (estimateTokenCount("{}") is always
-            // > 0 in practice — JSON.stringify({}) is never empty) — kept as
-            // a defensive proof that `disable` still suppresses correctly
-            // when hasAnyPeekContent() really is false, using a fully empty
-            // node the type doesn't normally produce live.
-            const trulyEmpty: ToolNode = { ...baseTool, tool: "Other", params: {}, timestamp: undefined };
+        it("a tool with no cmdText but SOME estimable content still shows the overlay", () => {
             // estimateTokenCount(JSON.stringify({}) + "") = ceil(2/4) = 1 > 0,
-            // so this specific case still shows the estimate — documenting
-            // that "truly nothing" is essentially unreachable via real data,
-            // not asserting a null tooltip here.
-            const { container, unmount } = render(() => (
-                <ToolBlock node={trulyEmpty} pinned={false} onTogglePin={() => {}} />
-            ));
-            hoverToolName(container);
-            expect(document.body.querySelector(".agent-node-peek-tooltip")).not.toBeNull();
-            unmount();
+            // so an "Other" tool with empty params still has an estimate —
+            // documenting that "truly nothing to show" is essentially
+            // unreachable via real data, not asserting a null overlay here.
+            const trulyEmpty: ToolNode = { ...baseTool, tool: "Other", params: {}, timestamp: undefined };
+            vi.useFakeTimers();
+            try {
+                const { container } = render(() => (
+                    <ToolBlock node={trulyEmpty} pinned={false} onTogglePin={() => {}} />
+                ));
+                hoverToolName(container);
+                expect(container.querySelector(".agent-node-peek-overlay")).not.toBeNull();
+            } finally {
+                vi.useRealTimers();
+            }
         });
 
         // ToolBlock instances are reused across status transitions via
         // index-based virtualization (no remount) -- these two assert the
-        // suppression is reactive to a live `disable` change on an
-        // ALREADY-MOUNTED instance, not just correct on first render. A
-        // naive `if (props.disable)` early-return inside Tooltip's
-        // component body would commit whichever branch was true at mount
-        // and never re-select — these catch that regression.
-        it("shows the tooltip once a running tool completes, with the cursor already stationary over it (no second mouseenter)", () => {
+        // suppression is reactive to a live status/pin change on an
+        // ALREADY-MOUNTED instance, not just correct on first render.
+        it("shows the overlay once a running tool completes, with the cursor already stationary over it (no second mouseenter)", () => {
             // The scenario a naive implementation misses: the user's cursor
-            // never moves, only `disable` (derived from the tool's own
-            // status) changes out from under it. If the anchor's hover
+            // never moves, only the tool's own status (and hence
+            // `expanded()`) changes out from under it. If the anchor's hover
             // handling only acted inside the mouseenter/mouseleave handlers
             // themselves, this would require a SECOND mouseenter that never
             // comes in real usage — a stationary cursor doesn't generate one
             // just because an unrelated prop changed.
             const [node, setNode] = createSignal<ToolNode>({ ...baseTool, status: "running" });
-            const { container, unmount } = render(() => (
-                <ToolBlock node={node()} pinned={false} onTogglePin={() => {}} />
-            ));
-            const anchor = container.querySelector(".agent-tool-name-tooltip-anchor") as HTMLElement;
-            fireEvent.mouseEnter(anchor); // cursor arrives while still running (disabled, panel expanded)
-            expect(document.body.querySelector(".agent-node-peek-tooltip")).toBeNull();
-            setNode({ ...baseTool, status: "success" }); // completes; cursor never moves
-            const tip = document.body.querySelector(".agent-node-peek-tooltip-body");
-            expect(tip).not.toBeNull();
-            expect(tip!.textContent).toBe("ls");
-            unmount();
+            vi.useFakeTimers();
+            try {
+                const { container } = render(() => (
+                    <ToolBlock node={node()} pinned={false} onTogglePin={() => {}} />
+                ));
+                const anchor = container.querySelector(".agent-tool-name-peek-anchor") as HTMLElement;
+                fireEvent.mouseEnter(anchor); // cursor arrives while still running (panel auto-expanded)
+                vi.advanceTimersByTime(200);
+                expect(container.querySelector(".agent-node-peek-overlay")).toBeNull();
+                setNode({ ...baseTool, status: "success" }); // completes; cursor never moves
+                const tip = container.querySelector(".agent-node-peek-tooltip-body");
+                expect(tip).not.toBeNull();
+                expect(tip!.textContent).toBe("ls");
+            } finally {
+                vi.useRealTimers();
+            }
         });
 
-        it("hides the tooltip the instant an already-hovered tool gets pinned open, with no mouseleave", () => {
+        it("hides the overlay the instant an already-hovered tool gets pinned open, with no mouseleave", () => {
             const [pinned, setPinned] = createSignal(false);
-            const { container, unmount } = render(() => (
-                <ToolBlock node={baseTool} pinned={pinned()} onTogglePin={() => {}} />
-            ));
-            const anchor = container.querySelector(".agent-tool-name-tooltip-anchor") as HTMLElement;
-            fireEvent.mouseEnter(anchor);
-            expect(document.body.querySelector(".agent-node-peek-tooltip")).not.toBeNull();
-            setPinned(true); // user clicks elsewhere to pin the panel open; cursor stays put
-            expect(document.body.querySelector(".agent-node-peek-tooltip")).toBeNull();
-            unmount();
+            vi.useFakeTimers();
+            try {
+                const { container } = render(() => (
+                    <ToolBlock node={baseTool} pinned={pinned()} onTogglePin={() => {}} />
+                ));
+                hoverToolName(container);
+                expect(container.querySelector(".agent-node-peek-overlay")).not.toBeNull();
+                setPinned(true); // user clicks elsewhere to pin the panel open; cursor stays put
+                expect(container.querySelector(".agent-node-peek-overlay")).toBeNull();
+            } finally {
+                vi.useRealTimers();
+            }
         });
     });
 
