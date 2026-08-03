@@ -278,6 +278,17 @@ pub(super) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, 
 /// See SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md Part 2.
 pub(super) const EVENT_EDITOR_OPEN_FILE_REQUEST: &str = "editor:open_file_request";
 
+/// Persist a handful of open-file requests per block (`Broker::subscribe`'s
+/// replay-on-subscribe, `agentmux-srv/src/backend/wps.rs:206-239`) rather
+/// than firing with `persist: 0`. Closes a real race (codex P1 on PR #2404):
+/// a just-created Editor block may not have finished mounting its
+/// `EditorViewModel` (and installing this event's subscription) by the time
+/// a second back-to-back `OpenEditor` call reuses it — with `persist: 0` that
+/// second call's request would be published to zero subscribers and silently
+/// lost. A small positive count also survives *several* such back-to-back
+/// calls arriving before the pane ever mounts, not just one.
+const OPEN_FILE_REQUEST_PERSIST_COUNT: usize = 20;
+
 /// If the calling agent (identified by its own block id, `caller_block_id`)
 /// already has an Editor pane open in its own tab, push `file` into that
 /// pane as a new tab instead of creating another Editor pane. Returns
@@ -304,7 +315,7 @@ pub(super) fn maybe_reuse_editor_pane(
         event: EVENT_EDITOR_OPEN_FILE_REQUEST.to_string(),
         scopes: vec![format!("block:{}", existing.oid)],
         sender: String::new(),
-        persist: 0,
+        persist: OPEN_FILE_REQUEST_PERSIST_COUNT,
         data: Some(json!({ "path": file })),
     });
 
