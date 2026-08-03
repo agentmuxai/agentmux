@@ -1,8 +1,10 @@
 # Plan — fix MuxBus token persistence on Windows (Credential Manager 2560-byte cap)
 
 **Date:** 2026-08-03
-**Status:** implemented; §3's original per-field split was live-tested and
-found insufficient, superseded by §3's chunking design (see §6)
+**Status:** implemented and live-verified working (§7). Took three live
+iterations to land: §3's per-field split wasn't sufficient (§6), and the
+first chunking attempt's size budget was itself wrong due to a char/byte
+mixup in the `keyring` crate's own error message (§7).
 **Context:** live-debugged on channel `local-main-b28b7a-9172ff88` (this
 machine, Windows) while checking whether GitHub PR-review jekt notifications
 were reaching that instance via the muxbus GitHub consumer
@@ -165,4 +167,32 @@ same field, and the existing rollback-on-later-failure logic
 in a call, not just one entry per field.
 
 Re-verification of this revision (same dev instance, fresh `muxbus.login`)
-is in progress — not yet confirmed. Update this section once done.
+hit the **exact same error a third time** — see §7. Chunking itself wasn't
+the missing piece; the chunk-size budget was.
+
+## 7. Third round: the char/byte mixup in `keyring`'s own error message
+
+With `MAX_CHUNK_LEN = 1800`, the same live dev instance produced the same
+"longer than platform limit of 2560 chars" error again. Traced into the
+vendored `keyring` crate source (`keyring-2.3.3/src/windows.rs:182`):
+
+```rust
+if password.encode_utf16().count() * 2 > CRED_MAX_CREDENTIAL_BLOB_SIZE as usize {
+```
+
+`CRED_MAX_CREDENTIAL_BLOB_SIZE` is 2560 **bytes** — the real Win32
+`CredWrite` limit. Windows credential blobs are UTF-16, 2 bytes/unit, so the
+check is really `chars * 2 > 2560`, i.e. `chars > 1280`. But the error text
+built in `error.rs:72` prints that same 2560 constant as if it were the char
+limit — `"Attribute '{name}' is longer than platform limit of {len} chars"`
+with `len = CRED_MAX_CREDENTIAL_BLOB_SIZE`, not `/ 2`. The crate's own error
+message is off by 2x for this platform. `MAX_CHUNK_LEN = 1800` chars was
+therefore ~40% over the *real* limit (1280) while looking like it had ~30%
+headroom under the limit as reported.
+
+**Fix:** dropped `MAX_CHUNK_LEN` to 1000 (well under 1280, real margin this
+time). Re-verified on the same live dev instance: `muxbus.login` succeeded
+and stayed connected — log shows `auth.broker.fresh: credential is fresh`
+and `cloud_subscriber: WebSocket connected`, no `failed to save
+credentials`, no further `token expired, skipping injection`. Confirmed
+fixed.

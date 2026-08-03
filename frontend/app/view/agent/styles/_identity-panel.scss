@@ -187,11 +187,38 @@
 }
 
 .agent-identity-error {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-1);
     font-size: 11px;
     color: var(--error-color);
     padding: var(--space-1) var(--space-1-5);
     background: color-mix(in srgb, var(--error-color) 10%, transparent);
     border-radius: 0;
+}
+
+.agent-identity-error-text {
+    flex: 1;
+    min-width: 0;
+    // Long errors (e.g. a wrapped keychain error) wrap and, past a few
+    // lines, scroll instead of pushing the rest of the panel around.
+    overflow-wrap: anywhere;
+    max-height: 4.5em;
+    overflow-y: auto;
+}
+
+.agent-identity-error-copy-btn {
+    flex: 0 0 auto;
+    background: transparent;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    padding: 2px 4px;
+    opacity: 0.7;
+
+    &:hover {
+        opacity: 1;
+    }
 }
 
 .agent-identity-unsaved {
