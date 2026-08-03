@@ -24,6 +24,7 @@ import { useTick } from "@/app/hook/useTick";
 import { compactionThreshold } from "@/app/store/agent-pane-state/context-window";
 import type { CompactionState } from "@/app/store/agent-pane-state/types";
 import { formatCompactNumber, formatExactNumber } from "@/util/format-count";
+import { formatElapsedCompact } from "@/util/format-time";
 import { Show, createEffect, createMemo, createSignal, type JSX } from "solid-js";
 import type { SessionStats, TurnTokens } from "../types";
 import { AgentRuntimeDropup } from "./AgentRuntimeDropup";
@@ -33,11 +34,6 @@ import { RuntimeBadge } from "./RuntimeBadge";
 
 function fmtTokens(t: TurnTokens): string {
     return `↑${formatCompactNumber(t.input)} ↓${formatCompactNumber(t.output)}`;
-}
-
-function fmtElapsed(ms: number): string {
-    const s = Math.floor(ms / 1000);
-    return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
 type CtxBand = "low" | "mid" | "high" | "critical";
@@ -148,19 +144,19 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
 
     const rightText = createMemo((): string => {
         if (props.compacting) {
-            return `Compacting…  ${fmtElapsed(compactingElapsedMs())}`;
+            return `Compacting…  ${formatElapsedCompact(compactingElapsedMs())}`;
         }
         const parts: string[] = [];
         if (props.loading) {
             if (props.turnTokens) parts.push(fmtTokens(props.turnTokens));
-            parts.push(fmtElapsed(elapsedMs()));
+            parts.push(formatElapsedCompact(elapsedMs()));
         } else if (props.sessionTotals) {
             const s = props.sessionTotals;
             if (s.input_tokens != null || s.output_tokens != null) {
                 parts.push(fmtTokens({ input: s.input_tokens ?? 0, output: s.output_tokens ?? 0 }));
             }
             if (s.duration_ms != null) {
-                parts.push(fmtElapsed(s.duration_ms));
+                parts.push(formatElapsedCompact(s.duration_ms));
             }
         }
         return parts.join("  ·  ");
