@@ -35,6 +35,7 @@
 
 import { createMemo, createSignal, onCleanup, type Accessor } from "solid-js";
 import { getApi, getBlockMetaKeyAtom, staticTabId } from "@/app/store/global";
+import { sleep } from "@/util/util";
 import { RpcApi } from "@/app/store/rpc-api";
 import { BlockService } from "@/app/store/services";
 import * as WOS from "@/app/store/wos";
@@ -615,7 +616,7 @@ export function useAgentControllerStatus(
                     const deadline = Date.now() + 5 * 60 * 1000;
                     setLaunchPhase({ kind: "waiting-for-login-completion", deadlineMs: deadline });
                     while (!loginCancelled && Date.now() < deadline && !authenticated) {
-                        await new Promise<void>((r) => setTimeout(r, 2000));
+                        await sleep(2000);
                         if (loginCancelled) break;
                         try {
                             const recheck = await RpcApi.CheckCliAuthCommand(TabRpcClient, {

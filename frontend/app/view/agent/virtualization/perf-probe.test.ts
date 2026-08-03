@@ -11,6 +11,7 @@
  */
 
 import { beforeEach, describe, expect, it } from "vitest";
+import { sleep } from "@/util/util";
 import {
     agentPerfStore,
     ESTIMATOR_MISS_THRESHOLD,
@@ -168,7 +169,7 @@ describe("markRowMount", () => {
 
     it("returns a closer that records duration on call", async () => {
         const close = markRowMount("markdown");
-        await new Promise<void>((r) => setTimeout(r, 5));
+        await sleep(5);
         close();
         const snap = agentPerfStore.snapshot();
         const q = snap.rowMountByKind.get("markdown");
@@ -193,7 +194,7 @@ describe("markDispatch", () => {
 
     it("returns a closer that records duration on call", async () => {
         const close = markDispatch("layout");
-        await new Promise<void>((r) => setTimeout(r, 5));
+        await sleep(5);
         close();
         const snap = agentPerfStore.snapshot();
         const q = snap.dispatchByKind.get("layout");
