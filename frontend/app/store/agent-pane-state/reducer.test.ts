@@ -2632,6 +2632,70 @@ describe("agent-pane-state reducer", () => {
         });
     });
 
+    // SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md — a sibling axis to
+    // TurnPhase for "is there a live agent-declared long-running task
+    // attached to this pane," independent of turn state.
+    describe("Attached task axis (AttachedTaskObserved / AttachedTaskCleared)", () => {
+        it("initial state: attachedTask null", () => {
+            const s = mk();
+            expect(s.attachedTask).toBeNull();
+        });
+
+        it("AttachedTaskObserved sets attachedTask with the given timestamp", () => {
+            const s = mk();
+            const r = update(s, { type: "AttachedTaskObserved", at: 100 });
+            expect(r.state.attachedTask).toEqual({ since: 100 });
+            expect(r.events).toEqual([{ type: "attached-task-observed", at: 100 }]);
+        });
+
+        it("AttachedTaskObserved is idempotent — a second task starting doesn't reset `since`", () => {
+            let s = mk();
+            s = update(s, { type: "AttachedTaskObserved", at: 100 }).state;
+            const r = update(s, { type: "AttachedTaskObserved", at: 200 });
+            expect(r.state).toBe(s); // same-ref no-op
+            expect(r.state.attachedTask).toEqual({ since: 100 });
+            expect(r.events).toEqual([]);
+        });
+
+        it("AttachedTaskCleared clears an active episode", () => {
+            let s = mk();
+            s = update(s, { type: "AttachedTaskObserved", at: 100 }).state;
+            const r = update(s, { type: "AttachedTaskCleared" });
+            expect(r.state.attachedTask).toBeNull();
+            expect(r.events).toEqual([{ type: "attached-task-cleared" }]);
+        });
+
+        it("AttachedTaskCleared is idempotent when already null", () => {
+            const s = mk();
+            const r = update(s, { type: "AttachedTaskCleared" });
+            expect(r.state).toBe(s);
+            expect(r.events).toEqual([]);
+        });
+
+        it("survives TurnEnd/TurnReset — a task attached in one turn can outlive it", () => {
+            let s = ready(100);
+            s = update(s, { type: "AttachedTaskObserved", at: 150 }).state;
+            s = update(s, { type: "TurnStart", at: 200 }).state;
+            s = update(s, { type: "TurnEnd", stats: null }).state;
+            expect(s.attachedTask).toEqual({ since: 150 });
+            s = update(s, { type: "TurnReset" }).state;
+            expect(s.attachedTask).toEqual({ since: 150 });
+        });
+
+        it("survives ReconcileTurnActive / FailureObserved — orthogonal to every turn-lifecycle arm", () => {
+            let s = ready(100);
+            s = update(s, { type: "AttachedTaskObserved", at: 150 }).state;
+            s = update(s, { type: "ReconcileTurnActive", at: 200, active: true }).state;
+            expect(s.attachedTask).toEqual({ since: 150 });
+            s = update(s, {
+                type: "FailureObserved",
+                failure: { code: "rate_limited", title: "Rate limited" } as AgentFailure,
+                at: 300,
+            }).state;
+            expect(s.attachedTask).toEqual({ since: 150 });
+        });
+    });
+
     // SPEC_AGENT_PANE_UNIFIED_FAILURE_REDUCER_2026_07_06.md — folds
     // useAgentFailure's local failure state into the reducer so a backend
     // failure classification unconditionally ends a working turn, instead

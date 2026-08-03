@@ -1236,6 +1236,22 @@ export function update(
                 events: [],
             };
         }
+
+        // ── Attached task axis (SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md) ──
+        case "AttachedTaskObserved": {
+            if (state.attachedTask) return { state, events: [] };
+            return {
+                state: { ...state, attachedTask: { since: command.at } },
+                events: [{ type: "attached-task-observed", at: command.at }],
+            };
+        }
+        case "AttachedTaskCleared": {
+            if (!state.attachedTask) return { state, events: [] };
+            return {
+                state: { ...state, attachedTask: null },
+                events: [{ type: "attached-task-cleared" }],
+            };
+        }
     }
 }
 
