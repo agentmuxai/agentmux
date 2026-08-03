@@ -32,6 +32,12 @@ export const WpsEvent = {
     // re-fetch via ReadEditorFileCommand. See
     // docs/specs/SPEC_EDITOR_LIVE_FILE_RELOAD_2026_07_18.md.
     EditorFileChanged: "editor:file_changed",
+    // Fired when the backend wants an already-mounted Editor pane to open an
+    // additional file as a new tab, instead of a new OpenEditor call always
+    // spawning a second Editor pane. Payload: `{ path }`; the handler calls
+    // the pane's own existing `openFile(path)`. See
+    // docs/specs/SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md.
+    EditorOpenFileRequest: "editor:open_file_request",
     // Fired when a file matching a Media pane's extension filter is
     // created/modified in a directory it's watching. Payload: `{ path }` —
     // a wake signal only. See docs/specs/SPEC_MEDIA_PANE_2026_07_26.md.

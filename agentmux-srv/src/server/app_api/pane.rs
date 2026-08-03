@@ -270,6 +270,58 @@ pub(super) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, 
     Ok(meta)
 }
 
+/// WPS event asking an already-mounted Editor pane to open an additional
+/// file as a new tab. Payload is `{ path }` — the frontend's `EditorViewModel`
+/// calls its own existing `openFile(path)` on receipt, so pin-if-existing/
+/// language-detection/RPC-load all apply unchanged. Scoped `block:<id>`,
+/// matching `EVENT_EDITOR_FILE_CHANGED`'s existing shape exactly.
+/// See SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md Part 2.
+pub(super) const EVENT_EDITOR_OPEN_FILE_REQUEST: &str = "editor:open_file_request";
+
+/// If the calling agent (identified by its own block id, `caller_block_id`)
+/// already has an Editor pane open in its own tab, push `file` into that
+/// pane as a new tab instead of creating another Editor pane. Returns
+/// `Ok(None)` when there's no existing Editor pane to reuse (or the caller's
+/// tab can't be resolved) — the normal create-new-block path handles that
+/// case unchanged.
+pub(super) fn maybe_reuse_editor_pane(
+    wstore: &Store,
+    broker: &crate::backend::wps::Broker,
+    caller_block_id: &str,
+    file: &str,
+) -> Result<Option<PaneOpenResult>, String> {
+    let tab_id = match super::resolve_tab_id_for_block(wstore, caller_block_id) {
+        Ok(id) => id,
+        Err(_) => return Ok(None), // caller's own block isn't in any known tab — fall through
+    };
+
+    let existing = match super::find_editor_block(wstore, &tab_id)? {
+        Some(block) => block,
+        None => return Ok(None),
+    };
+
+    broker.publish(crate::backend::wps::WaveEvent {
+        event: EVENT_EDITOR_OPEN_FILE_REQUEST.to_string(),
+        scopes: vec![format!("block:{}", existing.oid)],
+        sender: String::new(),
+        persist: 0,
+        data: Some(json!({ "path": file })),
+    });
+
+    tracing::info!(
+        block_id = %existing.oid,
+        tab_id = %tab_id,
+        "pane.open: reused existing editor pane instead of creating a new one"
+    );
+
+    Ok(Some(PaneOpenResult {
+        block_id: existing.oid,
+        tab_id,
+        view: "editor".to_string(),
+        created: false,
+    }))
+}
+
 /// Translate `split_direction` + `split_reference_block_id` into the backend
 /// layout action triple. Returns `(actiontype, targetblockid, position)`.
 /// Falls back to a plain `insert` if direction/reference are missing.

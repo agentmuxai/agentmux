@@ -176,6 +176,7 @@ export class EditorViewModel implements ViewModel {
     // the same path from this same pane is idempotent.
     private _watchedPathByTab = new Map<string, string>();
     private _unsubFileChanged: () => void = () => {};
+    private _unsubOpenFileRequest: () => void = () => {};
 
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
@@ -217,6 +218,20 @@ export class EditorViewModel implements ViewModel {
             handler: (event) => {
                 const path = (event as any)?.data?.path as string | undefined;
                 if (path) void this._handleExternalFileChanged(path);
+            },
+        });
+
+        // Pane-reuse: the backend pushes this when an OpenEditor call for a
+        // file finds this pane already open in the calling agent's own tab,
+        // instead of creating a second Editor pane (SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md
+        // Part 2). Reuses the same openFile() path a file-tree click uses —
+        // pin-if-existing/language-detection/RPC-load all apply unchanged.
+        this._unsubOpenFileRequest = waveEventSubscribe({
+            eventType: WpsEvent.EditorOpenFileRequest,
+            scope: makeORef("block", blockId),
+            handler: (event) => {
+                const path = (event as any)?.data?.path as string | undefined;
+                if (path) void this.openFile(path);
             },
         });
 
@@ -1103,6 +1118,7 @@ export class EditorViewModel implements ViewModel {
 
     dispose(): void {
         this._unsubFileChanged();
+        this._unsubOpenFileRequest();
         for (const tabId of [...this._watchedPathByTab.keys()]) this._unwatchTab(tabId);
         _instanceHandlers.delete(this._globalHandler);
         this._eventSubscribers.clear();
