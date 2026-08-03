@@ -93,6 +93,11 @@ contract exactly.
   exists because the Editor pane has a file-tree sidebar
   (`editor:tree_expanded` meta); the Media pane has no tree UI, so there's
   no equivalent state to expose.
+- No gallery/EDL/transport-bar/watcher changes to `media.tsx` — the one
+  frontend change this spec does make (§3 below) is limited to the pane's
+  header-title fallback, added only because this spec's own tool
+  description otherwise promises a default that doesn't exist (see
+  "Corrections from automated review" below); it is not a step toward v2/v3.
 
 ## Design
 
@@ -152,17 +157,75 @@ tree_expanded: None, floating, url: None, ... }` and POSTing to
 `{local_url}/api/v1/pane/open` — same endpoint `OpenEditor` already uses,
 now valid for `view: "media"` once §1 lands.
 
-Register `OPEN_MEDIA_TOOL` in the `defs` array used to build the MCP
-`tools/list` response (`main.rs:1719-1725`'s list, alongside
-`OPEN_EDITOR_TOOL`) and in the `open_editor` deserialization block
-(`main.rs:481`'s pattern) so the tool is actually advertised to callers.
+Parse it alongside the other tool consts (`let open_media: Value =
+serde_json::from_str(OPEN_MEDIA_TOOL).expect("static json");`, `main.rs:510`
+area) and add `open_media` to **both** of the two independent places a tool
+must be listed — confirmed by reading both, not assumed to be one shared
+list (see "Corrections from automated review" below):
 
-### 3. Frontend: no change
+1. **The actual production registration** — the hand-written array literal
+   inside the `json!({...})` response built by the `"tools/list" => { ... }`
+   match arm, `main.rs:513`
+   (`"result": { "tools": [shell, shell_stop, ..., open_editor, ..., identity_validate] }`).
+   This is what MCP clients actually receive; omitting `open_media` here
+   means the tool is implemented but undiscoverable.
+2. **The test-side `defs` array**, `main.rs:1719-1747`
+   (`all_tool_defs_are_valid_json_with_names`) — a separate, independently
+   maintained list that validates every tool const is well-formed JSON with
+   a `name`/`inputSchema`, and pins the total count via
+   `assert_eq!(defs.len(), 26, ...)`. This array does **not** drive
+   production behavior and would keep passing at the old count even if
+   step 1 above were skipped — it catches a malformed def, not a missing
+   registration. Add `OPEN_MEDIA_TOOL` here too (bumping the asserted count
+   to 27) for the JSON-validity coverage, but do not treat updating this
+   array as a substitute for updating the real list in step 1.
 
-Per Research above, `MediaViewModel`/`media.tsx` already does everything
-needed once `media:path` meta is set at block-creation time — the same
-`onMount` path a human's "Open File" dialog pick exercises today. This spec
-is purely additive plumbing on the agent-facing side.
+### 3. Frontend: minimal `viewName` fallback (so the tool's own promised default works)
+
+`MediaViewModel` needs one small addition: a path-derived `viewName`,
+mirroring `EditorViewModel`'s existing pattern exactly
+(`frontend/app/view/editor/editor-model.ts:290-296`, `useBlockAtom` wrapping
+a `createMemo` over the tracked file-path signal, falling back to a static
+label — `"Editor"` there — when no path is set yet):
+
+```ts
+this.viewName = useBlockAtom(blockId, "media-view-name", () =>
+    createMemo<string>(() => {
+        const p = displayPath();
+        return p ? basenameOf(p) : "Media";
+    }),
+);
+```
+
+(`basenameOf` — a small new helper alongside the existing `dirnameOf`, or
+the tail-end of `dirnameOf`'s own split logic reused.) This is the one
+frontend change this spec makes, scoped narrowly to the header-title
+fallback `OpenMedia`'s own description promises — not a step toward v2/v3's
+larger `media.tsx` work (see the Non-goals entry added above).
+
+## Corrections from automated review (Codex, pre-merge)
+
+Both real, confirmed by reading the exact lines named, not assumed correct
+from the finding alone:
+
+1. **Registration site was wrong.** The original draft of Design §2 pointed
+   only at `main.rs:1719-1725` — that array is `#[cfg(test)]`-gated unit-test
+   data, not the production `tools/list` handler. The actual response is a
+   separate hand-written array literal at `main.rs:513`. Fixed above: both
+   locations are now named, with the production one (§2 point 1) called out
+   as the one that actually matters for discoverability, and the test array
+   (§2 point 2) kept only for its own JSON-validity/count-pinning purpose.
+2. **Tool description promised an unbuilt default.** `OPEN_MEDIA_TOOL`'s
+   `title` property description ("defaults to the file name") was copied
+   from `OPEN_EDITOR_TOOL` without checking that the underlying default
+   exists for Media too. It doesn't: `EditorViewModel.viewName` derives the
+   tab title from the file path (`editor-model.ts:290-296`); `MediaViewModel`
+   has no `viewName` at all (confirmed via grep — zero matches), so every
+   default-titled `OpenMedia` pane would show the generic "Media" label,
+   indistinguishable from any other. Fixed by adding the minimal `viewName`
+   fallback in Design §3 above, rather than just softening the description —
+   the default is a small, real usability need (multiple review panes open
+   at once), not scope worth cutting.
 
 ## Open questions
 
@@ -189,6 +252,9 @@ is purely additive plumbing on the agent-facing side.
 | `agentmux-srv/src/server/app_api/pane.rs:211-258` | `build_pane_meta` — add the `"media"` match arm (§1); the actual server-side gap, not just a missing MCP tool |
 | `agentmux-mcp/src/main.rs:208-222` | `OPEN_EDITOR_TOOL` — pattern `OPEN_MEDIA_TOOL` copies |
 | `agentmux-mcp/src/main.rs:794-847`(ish) | `"OpenEditor"` handler arm — pattern the new `"OpenMedia"` arm copies |
-| `agentmux-mcp/src/main.rs:1719-1725` | `tools/list` registration array — add `OPEN_MEDIA_TOOL` |
-| `frontend/app/view/media/media.tsx:24,169-197` | Confirmed unchanged — already reads `media:path` meta on mount; the target this spec's backend arm populates |
+| `agentmux-mcp/src/main.rs:513` | **The actual `tools/list` production registration** — add `open_media` to this array. Missing this is the P1 Codex finding; the tool would exist but be undiscoverable without it |
+| `agentmux-mcp/src/main.rs:1719-1747` | Test-only `defs` array + count assertion — add `OPEN_MEDIA_TOOL`, bump `assert_eq!` to 27. Validity/count coverage only, not a substitute for `main.rs:513` |
+| `frontend/app/view/media/media.tsx:24,169-197` | `media:path` meta read on mount — confirmed unchanged, the target this spec's backend arm populates |
+| `frontend/app/view/media/media.tsx` (new) | Add `viewName` (§3) — fixes the P2 Codex finding (tool description promised a file-name default title that didn't exist) |
+| `frontend/app/view/editor/editor-model.ts:290-296` | `EditorViewModel.viewName` — the exact pattern §3's `MediaViewModel.viewName` mirrors |
 | `docs/specs/SPEC_MEDIA_PANE_2026_07_26.md` | v1 — this spec adds an agent entry point to the pane it defines, no other change |
