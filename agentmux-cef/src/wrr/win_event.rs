@@ -234,6 +234,24 @@ static WATCHDOG_ARMED: std::sync::atomic::AtomicBool =
 /// an invisible zombie instance for long.
 const QUIT_WATCHDOG_GRACE: std::time::Duration = std::time::Duration::from_millis(3000);
 
+/// Bound on how many extra watchdog cycles the "reducer shows a live,
+/// non-draining window" desync gets before the code falls back to trusting
+/// the OS signal alone (docs/plans/PLAN_WRR_QUIT_WATCHDOG_LAG_RETRY_2026_08_03.md).
+/// Worst-case added grace is `WATCHDOG_LAG_RETRIES_MAX * QUIT_WATCHDOG_GRACE`,
+/// and only when a live, non-draining window is genuinely still registered —
+/// bounded so this stays "quit a few seconds late with a loud log", not a
+/// regression toward the invisible-zombie failure mode Step D exists to avoid.
+const WATCHDOG_LAG_RETRIES_MAX: u32 = 3;
+
+/// Consecutive re-arm cycles already granted to the `registered > 0 &&
+/// !draining` desync flavor (as opposed to the pre-existing `draining &&
+/// registered == 0` "post-drain debris" re-arm, which is unbounded by
+/// design — see its own comment in `QuitWatchdogRecheckTask::execute`).
+/// Reset to 0 whenever the watchdog stands down cleanly (a window is
+/// OS-visible again) or ultimately fires (fresh budget for next time).
+static WATCHDOG_LAG_RETRY_COUNT: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(0);
+
 /// X-coordinate below which a top-level window is an off-screen warm-pool member
 /// (created at -32000), not a real user window. Mirrors
 /// `commands::window::lifecycle::OFFSCREEN_POOL_THRESHOLD_X`.
@@ -290,6 +308,52 @@ unsafe fn count_visible_user_windows() -> usize {
     ctx.count
 }
 
+/// Diagnostic-only: enumerate every app-class top-level window belonging to
+/// this process — regardless of visibility — and log hwnd/class/title/
+/// visible/iconic/rect for each. Called only from the watchdog's anomalous
+/// paths (a lag re-arm or the final quit-fire, PLAN_WRR_QUIT_WATCHDOG_LAG_RETRY_2026_08_03.md),
+/// never from the per-WINEVENT hot path, so the extra `EnumWindows` pass here
+/// doesn't matter. Turns the old "reducer desync, investigate" log line —
+/// which told you the *counts* disagreed but nothing about which window the
+/// reducer thought was still alive or what state the OS actually saw it in —
+/// into something a future investigation can actually use.
+unsafe fn diag_dump_app_windows(context: &str) {
+    use windows_sys::Win32::Foundation::{BOOL, LPARAM};
+    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+    use windows_sys::Win32::UI::WindowsAndMessaging::EnumWindows;
+
+    unsafe extern "system" fn enum_cb(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        let pid_target = lparam as u32;
+        let mut pid: u32 = 0;
+        GetWindowThreadProcessId(hwnd, &mut pid);
+        if pid != pid_target {
+            return 1;
+        }
+        let class = read_class_name(hwnd);
+        if !classify::is_app_class(&class) {
+            return 1;
+        }
+        let title = read_window_text(hwnd);
+        let visible = IsWindowVisible(hwnd) != 0;
+        let iconic = IsIconic(hwnd) != 0;
+        let rect = read_window_rect(hwnd);
+        tracing::warn!(
+            target: "wrr",
+            "[wrr] diag hwnd={:#x} class={} title={:?} visible={} iconic={} rect={:?}",
+            hwnd as u64, class, title, visible, iconic, rect
+        );
+        1
+    }
+
+    let pid = GetCurrentProcessId();
+    tracing::warn!(
+        target: "wrr",
+        "[wrr] diag dump ({}) — enumerating all app-class windows for pid={}",
+        context, pid
+    );
+    EnumWindows(Some(enum_cb), pid as LPARAM);
+}
+
 /// Pure decision extracted for unit testing (SPEC_WRR_QUIT_FALSE_POSITIVE_2026_07_08.md).
 ///
 /// Requires BOTH the OS-level `EnumWindows` count (`visible`) AND the reducer's own
@@ -329,6 +393,20 @@ fn should_quit_on_last_window(armed: bool, draining: bool, visible: usize, regis
 /// flavors are the failure mode Step D's watchdog exists to bound.
 fn is_reducer_lagging_os(armed: bool, draining: bool, visible: usize, registered: usize) -> bool {
     armed && visible == 0 && (registered > 0 || !draining)
+}
+
+/// Pure decision (PLAN_WRR_QUIT_WATCHDOG_LAG_RETRY_2026_08_03.md): should the
+/// watchdog grant one more re-arm cycle to the "reducer shows a live,
+/// non-draining window" desync flavor, instead of trusting the OS `visible ==
+/// 0` snapshot immediately? `registered > 0 && !draining` is the least
+/// ambiguous "do NOT quit" signal the reducer can produce — a window nobody
+/// has asked to close. `retries_used` is how many re-arms this flavor has
+/// already been granted (0 on its first watchdog fire). The
+/// `registered == 0 && !draining` flavor (a genuinely missed `request_drain`
+/// consumption site — no live window to protect) is deliberately excluded:
+/// it has nothing to wait for, so it still fires on the first cycle.
+fn should_extend_lag_retry(registered: usize, draining: bool, retries_used: u32) -> bool {
+    registered > 0 && !draining && retries_used < WATCHDOG_LAG_RETRIES_MAX
 }
 
 /// Step D — bounded fallback so a missed `UnregisterBrowser` path degrades to
@@ -413,6 +491,7 @@ cef::wrap_task! {
                     arm_quit_watchdog(registered);
                     return;
                 }
+                WATCHDOG_LAG_RETRY_COUNT.store(0, SeqCst);
                 tracing::info!(
                     target: "wrr",
                     "[wrr] quit watchdog: {} window(s) visible again — stand down",
@@ -420,18 +499,49 @@ cef::wrap_task! {
                 );
                 return;
             }
+            // PLAN_WRR_QUIT_WATCHDOG_LAG_RETRY_2026_08_03.md: `registered > 0
+            // && !draining` means the reducer still shows a live window that
+            // nobody has asked to close — the least ambiguous "do NOT quit"
+            // signal it can produce. A single 3s grace period isn't always
+            // enough to ride out a burst of window-pool HWND churn (drag/
+            // tear-off pool refill) landing in the same window as a pane
+            // close, which is exactly what a transient `EnumWindows` misread
+            // looks like (SPEC_WRR_QUIT_FALSE_POSITIVE_2026_07_08.md §2).
+            // Grant this flavor a few bounded extra cycles before falling
+            // back to trusting the OS signal — the `registered == 0`
+            // flavor (a genuinely missed request_drain consumption site, no
+            // live window to protect) still falls through immediately below.
+            let retries_used = WATCHDOG_LAG_RETRY_COUNT.load(SeqCst);
+            if should_extend_lag_retry(registered, draining, retries_used) {
+                let retries = WATCHDOG_LAG_RETRY_COUNT.fetch_add(1, SeqCst) + 1;
+                tracing::warn!(
+                    target: "wrr",
+                    "[wrr] quit watchdog: 0 visible for {}ms but registered={} draining=false (live window, not draining) — re-arming ({}/{})",
+                    QUIT_WATCHDOG_GRACE.as_millis(),
+                    registered,
+                    retries,
+                    WATCHDOG_LAG_RETRIES_MAX
+                );
+                unsafe { diag_dump_app_windows("lag re-arm") };
+                arm_quit_watchdog(registered);
+                return;
+            }
+            WATCHDOG_LAG_RETRY_COUNT.store(0, SeqCst);
             if QUIT_INITIATED.swap(true, SeqCst) {
                 return;
             }
             // Trusting the OS signal alone (the pre-Step-B behavior). The
             // state logged here is a live bug report: registered > 0 means
-            // some close path failed to dispatch UnregisterBrowser;
-            // !draining means a request_drain consumption site was missed
-            // (Phase 2's sites, or a new close path) — find it.
+            // some close path failed to dispatch UnregisterBrowser (and the
+            // lag-retry budget above is now exhausted); !draining means a
+            // request_drain consumption site was missed (Phase 2's sites, or
+            // a new close path) — find it.
+            unsafe { diag_dump_app_windows("quit fire") };
             tracing::warn!(
                 target: "wrr",
-                "[wrr] quit watchdog fired: 0 visible for {}ms but reducer disagrees (registered={} draining={}) — quitting on OS signal alone (reducer desync, investigate)",
+                "[wrr] quit watchdog fired: 0 visible for {}ms (retries={}) but reducer disagrees (registered={} draining={}) — quitting on OS signal alone (reducer desync, investigate)",
                 QUIT_WATCHDOG_GRACE.as_millis(),
+                retries_used,
                 registered,
                 draining
             );
@@ -569,6 +679,40 @@ mod should_quit_tests {
         assert!(!is_reducer_lagging_os(true, false, 3, 1));
         // …or before any user window was ever shown (startup).
         assert!(!is_reducer_lagging_os(false, false, 0, 1));
+    }
+
+    #[test]
+    fn lag_retry_extends_for_live_nondraining_window_under_budget() {
+        use super::{should_extend_lag_retry, WATCHDOG_LAG_RETRIES_MAX};
+        // The exact desync this fix targets: a real, non-draining window is
+        // still registered — extend as long as the budget isn't exhausted.
+        assert!(should_extend_lag_retry(1, false, 0));
+        assert!(should_extend_lag_retry(1, false, WATCHDOG_LAG_RETRIES_MAX - 1));
+    }
+
+    #[test]
+    fn lag_retry_stops_once_budget_exhausted() {
+        use super::{should_extend_lag_retry, WATCHDOG_LAG_RETRIES_MAX};
+        assert!(!should_extend_lag_retry(1, false, WATCHDOG_LAG_RETRIES_MAX));
+        assert!(!should_extend_lag_retry(1, false, WATCHDOG_LAG_RETRIES_MAX + 5));
+    }
+
+    #[test]
+    fn lag_retry_does_not_extend_once_draining() {
+        use super::should_extend_lag_retry;
+        // Once the reducer has decided to drain, this is a different flavor
+        // (handled by the draining && registered == 0 re-arm above, or a
+        // clean quit) — not this desync.
+        assert!(!should_extend_lag_retry(1, true, 0));
+    }
+
+    #[test]
+    fn lag_retry_does_not_extend_with_no_live_window() {
+        use super::should_extend_lag_retry;
+        // registered == 0 && !draining is a genuinely missed request_drain
+        // consumption site — there's no live window to protect, so it
+        // should still fire on the first cycle, same as before this fix.
+        assert!(!should_extend_lag_retry(0, false, 0));
     }
 }
 
