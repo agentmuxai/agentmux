@@ -47,12 +47,7 @@ import type { BashResult, EditResult, GlobResult, GrepResult, WriteResult } from
 import type { ToolNode } from "../types";
 import { ToolBlockOverlay } from "./ToolBlockOverlay";
 import { extractToolDetail } from "../stream-parser";
-import {
-    findScrollContainerRect,
-    maxOverlayHeight,
-    pickExpandDirection,
-    type ExpandDirection,
-} from "./hover-anchor";
+import { PeekOverlay } from "./PeekOverlay";
 
 /**
  * Ref callback that plays a one-shot fade-in animation ONLY on a genuine
@@ -334,39 +329,24 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
         cmdText() !== "" || props.node.timestamp != null || peekEstimateText() != null
     );
 
-    // Peek overlay — a plain `position: absolute` child of this row
-    // (`.agent-tool-block`, already the containing block for the tool
-    // preview panel below), NOT a floating-ui Portal tooltip. Mirrors
-    // UserMessageBlock.tsx's "Session context" hover-to-peek exactly: the
-    // overlay's `left: 0; right: 0` naturally spans the row's own width
-    // (edge-to-edge of the pane), and `top: 100%` / `bottom: 100%` sits it
-    // flush against the row with no offset gap. Direction is picked via the
-    // same `hover-anchor.ts` pure functions UserMessageBlock uses, so a row
-    // near the bottom of the pane flips the overlay upward instead of
-    // rendering clipped.
-    const [expandDirection, setExpandDirection] = createSignal<ExpandDirection>("below");
-    const [overlayMaxHeight, setOverlayMaxHeight] = createSignal<number | null>(null);
+    // Peek overlay — Portal-rendered (see PeekOverlay.tsx's doc comment for
+    // why: each virtualized row is its own CSS stacking context, so a plain
+    // `position: absolute` child can never paint above a LATER row no
+    // matter its z-index — confirmed live via CDP, the next row's own
+    // content painted over it). Styled and positioned like
+    // UserMessageBlock.tsx's "Session context" hover-to-peek (flush to the
+    // row's edges, no gap), reusing the same `hover-anchor.ts` direction
+    // logic — just rendered outside the row's subtree instead of inside it.
     let peekEnterTimer: ReturnType<typeof setTimeout> | undefined;
     let rowEl: HTMLDivElement | undefined;
 
     const handlePeekEnter = () => {
         clearTimeout(peekEnterTimer);
-        peekEnterTimer = setTimeout(() => {
-            if (rowEl) {
-                const rect = rowEl.getBoundingClientRect();
-                const container = findScrollContainerRect(rowEl);
-                const rowV = { top: rect.top, bottom: rect.bottom };
-                const dir = pickExpandDirection(rowV, container, PEEK_OVERLAY_ESTIMATE_PX);
-                setExpandDirection(dir);
-                setOverlayMaxHeight(maxOverlayHeight(rowV, container, dir));
-            }
-            setIsPeeking(true);
-        }, PEEK_ENTER_DELAY_MS);
+        peekEnterTimer = setTimeout(() => setIsPeeking(true), PEEK_ENTER_DELAY_MS);
     };
     const handlePeekLeave = () => {
         clearTimeout(peekEnterTimer);
         setIsPeeking(false);
-        setOverlayMaxHeight(null);
     };
     onCleanup(() => clearTimeout(peekEnterTimer));
 
@@ -449,29 +429,25 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
             </div>
             {/* Peek overlay — SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md,
                 styled to match UserMessageBlock.tsx's "Session context"
-                hover-to-peek exactly (see hover-anchor.ts). Suppressed once
-                the panel is already expanded, since the command/time are
-                visible in context there — same `disable` condition the old
+                hover-to-peek (see PeekOverlay.tsx). Suppressed once the
+                panel is already expanded, since the command/time are
+                visible in context there — same condition the old
                 Tooltip-based version used. */}
-            <Show when={isPeeking() && hasAnyPeekContent() && !expanded()}>
-                <div
-                    class={clsx("agent-node-peek-overlay", {
-                        "agent-node-peek-overlay--below": expandDirection() === "below",
-                        "agent-node-peek-overlay--above": expandDirection() === "above",
-                    })}
-                    style={overlayMaxHeight() != null ? { "max-height": `${overlayMaxHeight()}px` } : undefined}
-                >
-                    <Show when={peekTimeText()}>
-                        <div class="agent-node-peek-tooltip-meta">{peekTimeText()}</div>
-                    </Show>
-                    <Show when={peekEstimateText()}>
-                        <div class="agent-node-peek-tooltip-meta">{peekEstimateText()}</div>
-                    </Show>
-                    <Show when={cmdText()}>
-                        <div class="agent-node-peek-tooltip-body">{cmdText()}</div>
-                    </Show>
-                </div>
-            </Show>
+            <PeekOverlay
+                show={isPeeking() && hasAnyPeekContent() && !expanded()}
+                rowEl={() => rowEl}
+                estimateHeightPx={PEEK_OVERLAY_ESTIMATE_PX}
+            >
+                <Show when={peekTimeText()}>
+                    <div class="agent-node-peek-tooltip-meta">{peekTimeText()}</div>
+                </Show>
+                <Show when={peekEstimateText()}>
+                    <div class="agent-node-peek-tooltip-meta">{peekEstimateText()}</div>
+                </Show>
+                <Show when={cmdText()}>
+                    <div class="agent-node-peek-tooltip-body">{cmdText()}</div>
+                </Show>
+            </PeekOverlay>
             {/* Panel — three render modes per `panelMode()`:
              *
              *   hidden  → `.agent-tool-panel--hidden` (off).

@@ -5,19 +5,13 @@
  * MarkdownBlock - Renders markdown content from agent output
  */
 
-import clsx from "clsx";
 import { Markdown } from "@/app/element/markdown";
 import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
 import { formatExactTime, formatTimeAgo } from "@/util/format-time";
 import { createEffect, createMemo, createSignal, onCleanup, Show, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 import type { MarkdownNode } from "../types";
-import {
-    findScrollContainerRect,
-    maxOverlayHeight,
-    pickExpandDirection,
-    type ExpandDirection,
-} from "./hover-anchor";
+import { PeekOverlay } from "./PeekOverlay";
 
 // 150ms enter-delay matches UserMessageBlock's hover-to-peek — prevents
 // accidental expansions during fast scroll-throughs.
@@ -129,35 +123,22 @@ export const MarkdownBlock = (props: MarkdownBlockProps): JSX.Element => {
         return count > 0 ? `~${formatCompactNumber(count)} tok (est.)` : null;
     });
 
-    // Peek overlay — a plain `position: absolute` child of this row, NOT a
-    // floating-ui Portal tooltip. Mirrors UserMessageBlock.tsx's "Session
-    // context" hover-to-peek exactly (see that file + hover-anchor.ts):
-    // `left: 0; right: 0` spans the row's own width (edge-to-edge of the
-    // pane), `top: 100%` / `bottom: 100%` sits it flush against the row with
-    // no offset gap, and direction flips upward near the pane's bottom.
-    const [expandDirection, setExpandDirection] = createSignal<ExpandDirection>("below");
-    const [overlayMaxHeight, setOverlayMaxHeight] = createSignal<number | null>(null);
+    // Peek overlay — Portal-rendered (see PeekOverlay.tsx's doc comment for
+    // why: each virtualized row is its own CSS stacking context, so a plain
+    // `position: absolute` child can never paint above a LATER row no
+    // matter its z-index). Styled and positioned like UserMessageBlock.tsx's
+    // "Session context" hover-to-peek, reusing the same `hover-anchor.ts`
+    // direction logic — just rendered outside the row's subtree.
     let peekEnterTimer: ReturnType<typeof setTimeout> | undefined;
     let rowEl: HTMLDivElement | undefined;
 
     const handlePeekEnter = () => {
         clearTimeout(peekEnterTimer);
-        peekEnterTimer = setTimeout(() => {
-            if (rowEl) {
-                const rect = rowEl.getBoundingClientRect();
-                const container = findScrollContainerRect(rowEl);
-                const rowV = { top: rect.top, bottom: rect.bottom };
-                const dir = pickExpandDirection(rowV, container, PEEK_OVERLAY_ESTIMATE_PX);
-                setExpandDirection(dir);
-                setOverlayMaxHeight(maxOverlayHeight(rowV, container, dir));
-            }
-            setIsPeeking(true);
-        }, PEEK_ENTER_DELAY_MS);
+        peekEnterTimer = setTimeout(() => setIsPeeking(true), PEEK_ENTER_DELAY_MS);
     };
     const handlePeekLeave = () => {
         clearTimeout(peekEnterTimer);
         setIsPeeking(false);
-        setOverlayMaxHeight(null);
     };
     onCleanup(() => clearTimeout(peekEnterTimer));
 
@@ -189,24 +170,21 @@ export const MarkdownBlock = (props: MarkdownBlockProps): JSX.Element => {
                             <Markdown text={view().text} highlight={view().highlight} scrollable={false} />
                         </div>
                         {/* Peek overlay — see ToolBlock.tsx's identical pattern
-                            and hover-anchor.ts. Not gated on `expanded()` here —
-                            thinking clumps have no pin/expand state to collide with. */}
-                        <Show when={isPeeking() && (peekTimeText() || peekEstimateText())}>
-                            <div
-                                class={clsx("agent-node-peek-overlay", {
-                                    "agent-node-peek-overlay--below": expandDirection() === "below",
-                                    "agent-node-peek-overlay--above": expandDirection() === "above",
-                                })}
-                                style={overlayMaxHeight() != null ? { "max-height": `${overlayMaxHeight()}px` } : undefined}
-                            >
-                                <Show when={peekTimeText()}>
-                                    <div class="agent-node-peek-tooltip-meta">{peekTimeText()}</div>
-                                </Show>
-                                <Show when={peekEstimateText()}>
-                                    <div class="agent-node-peek-tooltip-meta">{peekEstimateText()}</div>
-                                </Show>
-                            </div>
-                        </Show>
+                            and PeekOverlay.tsx. Not gated on an `expanded()`
+                            check here — thinking clumps have no pin/expand
+                            state to collide with. */}
+                        <PeekOverlay
+                            show={isPeeking() && (peekTimeText() != null || peekEstimateText() != null)}
+                            rowEl={() => rowEl}
+                            estimateHeightPx={PEEK_OVERLAY_ESTIMATE_PX}
+                        >
+                            <Show when={peekTimeText()}>
+                                <div class="agent-node-peek-tooltip-meta">{peekTimeText()}</div>
+                            </Show>
+                            <Show when={peekEstimateText()}>
+                                <div class="agent-node-peek-tooltip-meta">{peekEstimateText()}</div>
+                            </Show>
+                        </PeekOverlay>
                     </div>
                 </Show>
             }

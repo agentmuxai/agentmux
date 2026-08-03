@@ -1788,12 +1788,19 @@
     }
 }
 
-// Node hover-peek overlay (ToolBlock.tsx's row-level overlay over
-// .agent-tool-block, MarkdownBlock.tsx's over a thinking clump's
-// .agent-thinking-peek-anchor wrapper). Plain in-DOM absolute positioning —
-// NOT a floating-ui Portal tooltip — mirroring UserMessageBlock.tsx's
-// "Session context" hover-to-peek exactly (same hover-anchor.ts direction-
-// picking helpers, same visual treatment). Replaces the old, narrower
+// Node hover-peek overlay (ToolBlock.tsx / MarkdownBlock.tsx via
+// PeekOverlay.tsx). Portal-rendered at document.body, NOT a plain in-DOM
+// absolute child of the row — see PeekOverlay.tsx's doc comment: each
+// virtualized row (.agent-document-row) is its own CSS stacking context
+// (contain: layout + a transform), so a z-index inside one row can never
+// out-rank a LATER SIBLING row's own subtree; a plain absolute overlay
+// would render UNDER the next row's opaque background instead of over it
+// (confirmed live via CDP elementFromPoint). Portal-rendering escapes that
+// entirely. Visual treatment still mirrors UserMessageBlock.tsx's "Session
+// context" hover-to-peek (opaque background, border, drop shadow) so every
+// hover-to-peek surface in the transcript reads consistently — only the
+// positioning mechanism differs (fixed + JS-computed left/top/width instead
+// of absolute + top/bottom: 100%). Replaces the old, narrower
 // .agent-tool-cmd-tooltip (11px, cramped) — SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md
 // §2.2a: sized to read as comfortably as a native browser tooltip, not as a
 // shrunk-down technical readout.
@@ -1813,19 +1820,11 @@
     color: var(--main-text-color);
 }
 
-// The overlay box: `left: 0; right: 0` spans the hovered row's own width
-// (edge-to-edge of the pane), `top: 100%` / `bottom: 100%` sits it flush
-// against the row with no offset gap — identical mechanism to
-// .agent-user-message-content--overlay-below/above above, styled the same
-// way (opaque background, border, drop shadow) so every hover-to-peek
-// surface in the transcript reads consistently. Requires the row it's
-// nested in to be `position: relative` (.agent-tool-block already is;
-// .agent-thinking-peek-anchor declares it below).
+// Visual chrome only — position/left/top/width/max-height are all set
+// inline by PeekOverlay.tsx (computed per-hover from the anchored row's
+// live getBoundingClientRect()).
 .agent-node-peek-overlay {
-    position: absolute;
-    left: 0;
-    right: 0;
-    z-index: 10;
+    z-index: 50;
     display: flex;
     flex-direction: column;
     gap: 4px;
@@ -1835,16 +1834,4 @@
     border: 1px solid var(--border-color);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
     padding: var(--space-0-5) var(--space-1);
-}
-.agent-node-peek-overlay--below {
-    top: 100%;
-}
-.agent-node-peek-overlay--above {
-    bottom: 100%;
-}
-
-// Positioning context for MarkdownBlock.tsx's thinking-clump peek overlay
-// (ToolBlock.tsx's equivalent, .agent-tool-block, already declares this).
-.agent-thinking-peek-anchor {
-    position: relative;
 }

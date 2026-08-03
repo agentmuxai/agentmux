@@ -156,12 +156,12 @@ describe("ToolBlock — panel mode", () => {
     // static text only (the bare command), no expansion, suppressed once
     // the panel is already expanded. See ToolBlock.tsx's header comment.
     describe("command tooltip", () => {
-        // The peek overlay is a plain `position: absolute` child of this row
-        // (ToolBlock.tsx's handlePeekEnter + hover-anchor.ts) — NOT a
-        // floating-ui Portal tooltip — so it renders inside `container`, not
-        // `document.body`. A real 150ms enter-delay gates its DOM presence
-        // (mirrors UserMessageBlock.tsx's "Session context" hover-to-peek),
-        // so these tests use fake timers and advance past it.
+        // The peek overlay is Portal-rendered at document.body (PeekOverlay.tsx
+        // — escapes each virtualized row's own CSS stacking context, see that
+        // file's doc comment), so it lives in `document.body`, not `container`.
+        // A real 150ms enter-delay gates its DOM presence (mirrors
+        // UserMessageBlock.tsx's "Session context" hover-to-peek), so these
+        // tests use fake timers and advance past it.
         const hoverToolName = (container: HTMLElement) => {
             const anchor = container.querySelector(".agent-tool-name-peek-anchor") as HTMLElement;
             fireEvent.mouseEnter(anchor);
@@ -176,7 +176,7 @@ describe("ToolBlock — panel mode", () => {
                 ));
                 expect(container.querySelector(".agent-tool-name-peek-anchor")).not.toBeNull();
                 hoverToolName(container);
-                const tip = container.querySelector(".agent-node-peek-tooltip-body");
+                const tip = document.body.querySelector(".agent-node-peek-tooltip-body");
                 expect(tip).not.toBeNull();
                 expect(tip!.textContent).toBe("ls"); // bare params.command, not "Bash ls"
             } finally {
@@ -194,7 +194,7 @@ describe("ToolBlock — panel mode", () => {
                     <ToolBlock node={timed} pinned={false} onTogglePin={() => {}} />
                 ));
                 hoverToolName(container);
-                const metaLines = container.querySelectorAll(".agent-node-peek-tooltip-meta");
+                const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
                 expect(metaLines.length).toBe(2);
                 expect(metaLines[0].textContent).toMatch(/\d{2}:\d{2}:\d{2} · 1m ago/);
                 expect(metaLines[1].textContent).toMatch(/~\d+ tok \(est\.\)/);
@@ -211,7 +211,7 @@ describe("ToolBlock — panel mode", () => {
                     <ToolBlock node={untimed} pinned={false} onTogglePin={() => {}} />
                 ));
                 hoverToolName(container);
-                const metaLines = container.querySelectorAll(".agent-node-peek-tooltip-meta");
+                const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
                 // Still one line: the token estimate (params always give SOME text).
                 expect(metaLines.length).toBe(1);
                 expect(metaLines[0].textContent).toMatch(/~\d+ tok \(est\.\)/);
@@ -227,7 +227,7 @@ describe("ToolBlock — panel mode", () => {
                     <ToolBlock node={baseTool} pinned={true} onTogglePin={() => {}} />
                 ));
                 hoverToolName(container);
-                expect(container.querySelector(".agent-node-peek-overlay")).toBeNull();
+                expect(document.body.querySelector(".agent-node-peek-overlay")).toBeNull();
             } finally {
                 vi.useRealTimers();
             }
@@ -246,9 +246,9 @@ describe("ToolBlock — panel mode", () => {
                     <ToolBlock node={opaque} pinned={false} onTogglePin={() => {}} />
                 ));
                 hoverToolName(container);
-                expect(container.querySelector(".agent-node-peek-overlay")).not.toBeNull();
-                expect(container.querySelector(".agent-node-peek-tooltip-body")).toBeNull();
-                const metaLines = container.querySelectorAll(".agent-node-peek-tooltip-meta");
+                expect(document.body.querySelector(".agent-node-peek-overlay")).not.toBeNull();
+                expect(document.body.querySelector(".agent-node-peek-tooltip-body")).toBeNull();
+                const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
                 expect(metaLines.length).toBe(2); // time + estimate, both independent of cmdText()
             } finally {
                 vi.useRealTimers();
@@ -267,7 +267,7 @@ describe("ToolBlock — panel mode", () => {
                     <ToolBlock node={trulyEmpty} pinned={false} onTogglePin={() => {}} />
                 ));
                 hoverToolName(container);
-                expect(container.querySelector(".agent-node-peek-overlay")).not.toBeNull();
+                expect(document.body.querySelector(".agent-node-peek-overlay")).not.toBeNull();
             } finally {
                 vi.useRealTimers();
             }
@@ -294,9 +294,9 @@ describe("ToolBlock — panel mode", () => {
                 const anchor = container.querySelector(".agent-tool-name-peek-anchor") as HTMLElement;
                 fireEvent.mouseEnter(anchor); // cursor arrives while still running (panel auto-expanded)
                 vi.advanceTimersByTime(200);
-                expect(container.querySelector(".agent-node-peek-overlay")).toBeNull();
+                expect(document.body.querySelector(".agent-node-peek-overlay")).toBeNull();
                 setNode({ ...baseTool, status: "success" }); // completes; cursor never moves
-                const tip = container.querySelector(".agent-node-peek-tooltip-body");
+                const tip = document.body.querySelector(".agent-node-peek-tooltip-body");
                 expect(tip).not.toBeNull();
                 expect(tip!.textContent).toBe("ls");
             } finally {
@@ -312,9 +312,9 @@ describe("ToolBlock — panel mode", () => {
                     <ToolBlock node={baseTool} pinned={pinned()} onTogglePin={() => {}} />
                 ));
                 hoverToolName(container);
-                expect(container.querySelector(".agent-node-peek-overlay")).not.toBeNull();
+                expect(document.body.querySelector(".agent-node-peek-overlay")).not.toBeNull();
                 setPinned(true); // user clicks elsewhere to pin the panel open; cursor stays put
-                expect(container.querySelector(".agent-node-peek-overlay")).toBeNull();
+                expect(document.body.querySelector(".agent-node-peek-overlay")).toBeNull();
             } finally {
                 vi.useRealTimers();
             }

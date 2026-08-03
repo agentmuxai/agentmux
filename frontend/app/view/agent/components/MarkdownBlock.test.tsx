@@ -35,13 +35,12 @@ describe("MarkdownBlock — regular text (unaffected)", () => {
 });
 
 describe("MarkdownBlock — thinking-clump peek tooltip", () => {
-    // The peek overlay is a plain `position: absolute` child of
-    // .agent-thinking-peek-anchor (MarkdownBlock.tsx's handlePeekEnter +
-    // hover-anchor.ts) — NOT a floating-ui Portal tooltip — so it renders
-    // inside `container`, not `document.body`. A real 150ms enter-delay
-    // gates its DOM presence (mirrors UserMessageBlock.tsx's "Session
-    // context" hover-to-peek), so these tests use fake timers and advance
-    // past it.
+    // The peek overlay is Portal-rendered at document.body (PeekOverlay.tsx
+    // — escapes each virtualized row's own CSS stacking context, see that
+    // file's doc comment), so it lives in `document.body`, not `container`.
+    // A real 150ms enter-delay gates its DOM presence (mirrors
+    // UserMessageBlock.tsx's "Session context" hover-to-peek), so these
+    // tests use fake timers and advance past it.
     const hoverThinkingBlock = (container: HTMLElement) => {
         const anchor = container.querySelector(".agent-thinking-peek-anchor") as HTMLElement;
         fireEvent.mouseEnter(anchor);
@@ -55,7 +54,7 @@ describe("MarkdownBlock — thinking-clump peek tooltip", () => {
             const { container } = render(() => <MarkdownBlock node={timed} />);
             expect(container.querySelector(".thinking-block")).not.toBeNull();
             hoverThinkingBlock(container);
-            const metaLines = container.querySelectorAll(".agent-node-peek-tooltip-meta");
+            const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
             expect(metaLines.length).toBe(2);
             expect(metaLines[0].textContent).toMatch(/\d{2}:\d{2}:\d{2} · 1m ago/);
             expect(metaLines[1].textContent).toMatch(/~\d+ tok \(est\.\)/);
@@ -70,7 +69,7 @@ describe("MarkdownBlock — thinking-clump peek tooltip", () => {
         try {
             const { container } = render(() => <MarkdownBlock node={untimed} />);
             hoverThinkingBlock(container);
-            const metaLines = container.querySelectorAll(".agent-node-peek-tooltip-meta");
+            const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
             expect(metaLines.length).toBe(1);
             expect(metaLines[0].textContent).toMatch(/~\d+ tok \(est\.\)/);
         } finally {
@@ -83,7 +82,7 @@ describe("MarkdownBlock — thinking-clump peek tooltip", () => {
         const { container } = render(() => <MarkdownBlock node={timed} />);
         // No hover fired — peekTimeText's memo must short-circuit before
         // reading peekTick(), so the overlay shows nothing yet.
-        const metaLines = container.querySelectorAll(".agent-node-peek-tooltip-meta");
+        const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
         expect(metaLines.length).toBe(0);
         expect(container.querySelector(".thinking-block")).not.toBeNull();
     });
