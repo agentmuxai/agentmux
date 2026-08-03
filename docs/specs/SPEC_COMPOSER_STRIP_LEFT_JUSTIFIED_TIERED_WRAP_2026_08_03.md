@@ -49,9 +49,11 @@ flagged directly:
    and starts at the strip's left edge on every line, including wrapped
    ones.
 2. **Wrap up to 3 levels before shedding content.** Let the browser reflow
-   content onto additional lines as needed — capped at 3 — before falling
-   back to hiding informational content (auth tag, then process badge) or
-   compacting the runtime controls trigger.
+   content onto additional lines as needed — normally 1-3, see the
+   "revised during review" note below — before falling back to hiding
+   informational content (auth tag, then process badge) or compacting the
+   runtime controls trigger. **Never clip or overlap** — this is the harder
+   requirement and the one that changed the design mid-review (§6).
 
 ## Design (as implemented)
 
@@ -76,9 +78,9 @@ width-keyed rule required for the wrapping itself.
     row-gap: 2px;
     column-gap: var(--space-2);
     min-height: 28px;
-    max-height: 84px;   // ~3 lines — the cap
-    overflow: hidden;   // a 4th line would clip; shed queries below prevent
-                         // real content from ever reaching one
+    // No max-height/overflow:hidden — see §6, this was in the first
+    // version of the fix and removed after review found it could clip
+    // Shell again once the zones below wrap internally.
     ...
 }
 ```
@@ -91,23 +93,25 @@ keep `min-width: 0` so the runtime-trigger max-width cap can still shrink
 the controls zone under real pressure. No `justify-content: center` or
 `justify-self: end` remains anywhere in the file.
 
-### 3. Height cap = the "3 levels"
+### 3. No hard line cap — see §6
 
-There's no discrete per-line breakpoint list — `flex-wrap` reflows
-automatically at whatever width the content needs. The tiering that matters
-is the **height cap**: `max-height: 84px` (~3 lines at this font-size/
-padding) with `overflow: hidden`, so the strip can grow from 1 → 2 → 3
-lines as needed but never past that into unbounded vertical growth that
-would eat space from the transcript above it.
+The first version of this fix added `max-height: 84px; overflow: hidden`
+(~3 lines) to enforce "up to 3 levels" as a hard ceiling. Review found this
+reintroduced clipping once `.agent-composer-strip-controls`/`-right` could
+also wrap internally (§6), so the cap was removed: `flex-wrap` reflows
+content onto as many lines as it actually needs, with no upper bound
+enforced by CSS. In practice the shed-content queries below keep real
+content to ~1-3 lines by shrinking/hiding it as width drops; "3 levels" is
+the normal-case outcome of that shedding, not a mechanism that clips a 4th
+line into existence.
 
 ### 4. Shed order — revised breakpoints, informational-first (unchanged principle)
 
 The 07-30 shed breakpoints (auth `≤300px`, process badge `≤260px`, controls
 cap `≤220px`) were tuned for a layout with only 2 available lines. With 3
 lines available — in the worst case, one zone per line — the right zone
-(badge + ctx + auth + Shell, none of which wrap internally) has much more
-total width budget before it needs to shed anything, so the breakpoints
-move narrower:
+(badge + ctx + auth + Shell) has much more total width budget before it
+needs to shed anything, so the breakpoints move narrower:
 
 ```scss
 @container agent-pane (max-width: 220px) {
@@ -141,11 +145,52 @@ narrow, wrapped pane it may be the sole item on its own line, left-justified
 like every other line. This is the expected consequence of Goal 1, not a
 regression.
 
+## 6. Revised during review (PR #2393)
+
+Two rounds of automated review on the PR found real problems in the first
+version of this fix — both are the same underlying tension (a hard clip
+boundary vs. content that can legitimately need more room) resurfacing at
+a different layer:
+
+1. **Codex (P1):** `.agent-composer-strip-right` moved as a single,
+   non-internally-wrapping flex item. When it landed alone on a wrapped
+   line narrower than its full content (badge + ctx + auth + Shell), the
+   strip's `overflow: hidden` clipped the trailing **Shell button** —
+   breaking the "Shell always reachable" invariant from
+   `SPEC_COMPOSER_STRIP_RESPONSIVE_ARCHITECTURE_2026_07_02.md`/
+   `SPEC_COMPOSER_STRIP_TWO_LINE_RESPONSIVE_2026_07_30.md`. Same latent risk
+   on `.agent-composer-strip-controls` (a long resolved model name before
+   the `≤150px` trigger cap applies).
+   **Fix:** both zones gained their own `flex-wrap: wrap`, so a zone's
+   content reflows onto an internal sub-line instead of overflowing past
+   the strip's edge.
+2. **ReAgent (P2), on the fix above:** adding internal wrap converts
+   *horizontal* overflow into *vertical* growth — which competes with the
+   outer strip's `max-height: 84px; overflow: hidden` from §1/§3. If two
+   zones each need an internal sub-line at once (e.g. controls wraps the
+   HOST/SANDBOX tag under a long model name while right zone wraps Shell
+   under badge+ctx+auth, at the same narrow width), total height can
+   exceed 84px and the outer `overflow: hidden` clips Shell again — same
+   failure mode, triggered by height instead of width, and not covered by
+   the "not performed" live-verification caveat below (it's a structural
+   interaction, not a tuning issue).
+   **Fix:** removed `max-height`/`overflow: hidden` from
+   `.agent-composer-strip` entirely (§3). There is no longer any
+   mechanism in this component that can clip content; the shed-content
+   queries are the only thing keeping real-world height to ~1-3 lines, and
+   they do so by shrinking/hiding content, not by force.
+
+Net effect: "up to three levels" is now the *expected outcome* of the shed
+order under normal content, not a *ceiling enforced by clipping*. That's a
+one-word-sounding but real distinction — the goal was always "never
+overlay/clip," and enforcing a numeric line cap via `overflow: hidden` was
+in tension with that from the start once any sub-component could also wrap.
+
 ## Files changed
 
 | File | Change |
 |---|---|
-| `frontend/app/view/agent/styles/_composer-strip.scss` | `.agent-composer-strip`: grid (+ 07-30's `≤480px` 2-row swap) → permanent wrapping flex, left-justified, `max-height`/`overflow:hidden` cap at ~3 lines. Removed `grid-area`/`justify-self` from all three zones. Shed queries (auth/badge/controls-cap) moved from `300/260/220px` to `220/180/150px` to match the extra line of headroom. |
+| `frontend/app/view/agent/styles/_composer-strip.scss` | `.agent-composer-strip`: grid (+ 07-30's `≤480px` 2-row swap) → permanent wrapping flex, left-justified, no height cap (see §6). Removed `grid-area`/`justify-self` from all three zones. `.agent-composer-strip-controls`/`-right` gained their own `flex-wrap: wrap` (§6, Codex P1). Shed queries (auth/badge/controls-cap) moved from `300/260/220px` to `220/180/150px` to match the extra line of headroom. |
 | `frontend/app/view/agent/components/AgentComposerStrip.tsx` | No structural change — updated stale comments referencing the old centered-grid design to describe the new left-justified flow. |
 
 ## Verification performed
@@ -157,11 +202,14 @@ regression.
 - `npx vitest run frontend/app/view/agent` — 72 files / 954 tests passed
   (no test exercises this component's layout directly; this is a
   no-regression check, not layout coverage).
+- Two rounds of automated PR review (Codex, ReAgent) — findings applied,
+  see §6.
 - **Not performed:** a live `task dev` visual check of the actual wrap/shed
   behavior at real pane widths. The breakpoint values above are estimated,
   not measured — resize a real agent pane through ~250px → ~120px and
-  confirm: (a) stats/right zone wrap onto line 2/3 with no clipping or
-  overlap with the textarea below, (b) content is always left-justified at
-  every width, (c) the shed order (auth → process badge → controls cap)
-  fires in that order and only as a last resort, (d) resizing back to full
-  width returns cleanly to one line with no leftover height.
+  confirm: (a) content wraps (outer and, if needed, internal) with no
+  clipping or overlap with the textarea below, (b) content is always
+  left-justified at every width, (c) the shed order (auth → process badge
+  → controls cap) fires in that order and only as a last resort, (d)
+  resizing back to full width returns cleanly to one line with no leftover
+  height.

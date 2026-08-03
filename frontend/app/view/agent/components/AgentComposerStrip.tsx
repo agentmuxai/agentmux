@@ -4,7 +4,8 @@
 /**
  * AgentComposerStrip — status row that sits directly above the textarea in
  * the agent pane composer region. Left-justified, wrapping onto additional
- * lines (capped at 3) rather than clipping when the pane narrows — see
+ * lines (no hard cap — see _composer-strip.scss's file header) rather than
+ * clipping when the pane narrows — see
  * docs/specs/SPEC_COMPOSER_STRIP_LEFT_JUSTIFIED_TIERED_WRAP_2026_08_03.md.
  *
  * In flow order:
