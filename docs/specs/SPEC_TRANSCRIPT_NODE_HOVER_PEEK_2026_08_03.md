@@ -1,6 +1,6 @@
 # Spec: hover-to-peek on tool calls and thinking clumps
 
-**Status:** Design — open questions resolved (§4), ready to implement first (before `SPEC_PER_NODE_TOKEN_ACCOUNTING_2026_08_03.md`). Not yet implemented.
+**Status:** Implemented (PR #2392) — tool calls + thinking clumps per the original trigger below, PLUS regular user-input messages, added in a follow-up round of the same PR per explicit user request ("we also need it for user input nodes", 2026-08-03). See §2.5's scope note and §6, updated accordingly — this is no longer scoped to exactly two node kinds. Positioning also changed from the originally-planned "reuse the Session Context Tooltip-component code" to a new shared `PeekOverlay.tsx` (Portal-rendered, top-anchored to the entry) — the virtualized transcript's per-row CSS stacking contexts made a plain in-DOM absolute overlay (what "Session Context" originally did) paint UNDER later rows instead of over them; see that file's doc comment.
 **Trigger (verbatim):** "we want to introduce hover to peek on each entry in the agent pane (each tool call, and each clump of thinking) .. we already have a 'Session Context' line that shows up, can u reuse that code? for all we want the time (and time ago) and the best stats like estimate token cost and other stuff you can think of. on tool calls, we want the time and the word-wrapped tool call in the hover peek."
 
 ## 0. Read this first — this is the third pass at broadly this idea
@@ -135,9 +135,9 @@ Bash: npm run build --workspace=frontend ...
 ### 2.5 Explicit non-goals / guardrails (carried forward from the two rejection specs)
 
 - **No hover-triggered expand/collapse, anywhere.** The tooltip is read-only; clicking to pin/expand remains the only way to open a node's full panel.
-- **No new generic per-row hover strip.** Nothing absolute-positioned floating over line content on a bare row hover — every tooltip here is anchored to one specific, already-existing element (tool-name span, thinking-block header).
+- **No new GENERIC per-row hover strip.** This still holds — nothing hovers on a BARE row regardless of kind. Every peek surface is anchored to one specific, already-existing, kind-aware element (tool-name span, thinking-block wrapper, user-message row), with kind-specific content (time/estimate/command for tools, time/estimate for thinking, time/estimate/+full-body-on-hover for user messages). `PeekOverlay.tsx` is a SHARED RENDERING MECHANISM (Portal + top-anchored positioning) reused across those three specific surfaces, not a single generic overlay applied uniformly to every row — that distinction is the one this bullet exists to protect.
 - **No fabricated exact token/cost.** Anything token/cost-shaped is a clearly-labeled estimate (`~`, `(est.)`) until/unless Phase 2 (§6) instrumentation lands.
-- **Scoped to exactly two node kinds** — tool calls and thinking clumps, per the literal request. Not extending hover to regular assistant text, user messages, or section headers in this pass.
+- ~~Scoped to exactly two node kinds~~ — **superseded** (2026-08-03 follow-up): extended to regular user-input messages per explicit user request ("we also need it for user input nodes"). Section headers and other node kinds remain out of scope; see §6.
 
 ## 3. Files touched (this phase)
 
@@ -167,5 +167,5 @@ Bash: npm run build --workspace=frontend ...
 ## 6. Out of scope / follow-up phases
 
 - **True per-node token/cost** via diffing `TurnTokens` at node boundaries — real instrumentation change, own phase, only worth it if the chars÷4 estimate (§2.4/§4.2) turns out to be unsatisfying in practice.
-- **Extending hover-peek to other node kinds** (regular assistant text, user messages, sections, shell blocks) — not requested; would need its own pass through the same "does this repeat a killed pattern" lens.
+- ~~Extending hover-peek to other node kinds (regular assistant text, user messages, sections, shell blocks) — not requested~~ — **user messages done** (2026-08-03 follow-up, explicit request). Regular assistant text, section headers, and shell blocks remain out of scope; extending to those would still need its own pass through the same "does this repeat a killed pattern" lens.
 - **Upgrading `AgentComposerStrip`'s tooltip** to the shared `Tooltip` component (§4.3) — nice-to-have, not core.

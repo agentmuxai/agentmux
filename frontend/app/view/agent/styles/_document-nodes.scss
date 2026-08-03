@@ -245,11 +245,18 @@
                 transition: color 150ms ease;
             }
 
-            // Tooltip wrapper div sits between the flex row and the actual
-            // text — takes over the flex-sizing role the <span> used to
-            // have directly, so the ellipsis-clip math below still works
-            // unchanged with one extra element in between.
-            .agent-tool-name-tooltip-anchor {
+            // Peek-anchor wrapper span sits between the flex row and the
+            // actual text — takes over the flex-sizing role the <span>
+            // used to have directly, so the ellipsis-clip math below still
+            // works unchanged with one extra element in between. reagent
+            // P1 (4 rounds, PR #2392): this rule targeted the OLD
+            // Tooltip-component wrapper class (`.agent-tool-name-tooltip-
+            // anchor`), orphaned when ToolBlock.tsx moved to the isPeeking-
+            // tracking span (`.agent-tool-name-peek-anchor`) for the
+            // Portal-based PeekOverlay migration — long tool names grew
+            // the row instead of eliding, crowding out the duration badge/
+            // result pill/live-tail.
+            .agent-tool-name-peek-anchor {
                 flex: 1 1 auto;
                 min-width: 0;
                 overflow: hidden;
