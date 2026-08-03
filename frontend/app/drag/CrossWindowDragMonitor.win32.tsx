@@ -165,7 +165,7 @@ function CrossWindowDragMonitor(): JSX.Element {
             // after an out-of-window HTML5 drag, breaking subsequent mousedown delivery.
             getApi().releaseDragCapture().catch(() => {});
 
-            await new Promise((r) => setTimeout(r, 50));
+            await sleep(50);
             await handleCrossWindowDragEnd(payload, windowLabelRef, grabOffsetSnapshot);
         };
 
