@@ -17,7 +17,6 @@ import {
     EMPTY_FILTERED,
     EMPTY_GLOBAL,
     FETCH_ERROR,
-    formatRelative,
     MyAgentsList,
 } from "./MyAgentsList";
 
@@ -375,20 +374,6 @@ describe("MyAgentsList — fetch error (retro-my-agents-fresh-channel-regression
     });
 });
 
-describe("formatRelative", () => {
-    it("returns 'just now' for sub-minute deltas", () => {
-        expect(formatRelative(1_000_000, 1_000_000 - 30_000)).toBe("just now");
-    });
-    it("returns 'Xm ago' for sub-hour deltas", () => {
-        expect(formatRelative(10_000_000, 10_000_000 - 5 * 60_000)).toBe("5m ago");
-    });
-    it("returns 'Xh ago' for sub-day deltas", () => {
-        expect(formatRelative(100_000_000, 100_000_000 - 3 * 3_600_000)).toBe("3h ago");
-    });
-    it("returns 'Xd ago' for multi-day deltas", () => {
-        expect(formatRelative(1_000_000_000, 1_000_000_000 - 2 * 86_400_000)).toBe("2d ago");
-    });
-    it("returns '' for zero", () => {
-        expect(formatRelative(Date.now(), 0)).toBe("");
-    });
-});
+// formatRelative was migrated to frontend/util/format-time.ts's formatTimeAgo
+// (SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md §2.2) — its tests moved with
+// it, see format-time.test.ts.
