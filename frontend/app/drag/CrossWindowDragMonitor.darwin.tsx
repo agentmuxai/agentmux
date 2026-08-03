@@ -9,6 +9,7 @@
  */
 
 import { atoms, getApi } from "@/store/global";
+import { sleep } from "@/util/async";
 import { invokeCommand } from "@/app/platform/ipc";
 import { WorkspaceService } from "@/app/store/services";
 import { getLayoutModelForStaticTab, LayoutTreeActionType, LayoutTreeDeleteNodeAction } from "@/layout/index";
@@ -244,7 +245,7 @@ async function performTearOff(
         } catch (e) {
             const msg = String(e);
             if (msg.includes("currently closing")) {
-                await new Promise<void>((r) => setTimeout(r, 350));
+                await sleep(350);
                 try {
                     await invokeCommand<{ window_label: string }>("open_floating_pane_window", {
                         pane_id: payload.blockId,

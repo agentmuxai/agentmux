@@ -19,6 +19,7 @@
  */
 
 import { RpcApi } from "@/app/store/rpc-api";
+import { sleep } from "@/util/async";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { persistAndLinkAccount, runProviderLogin } from "../../flows/run-provider-login";
 import type { SlashCommand, SlashCommandContext, SlashResult } from "../types";
@@ -158,7 +159,7 @@ export const loginCommand: SlashCommand = {
                     let authenticated = false;
                     const deadline = Date.now() + 5 * 60 * 1000;
                     while (Date.now() < deadline && !authenticated) {
-                        await new Promise<void>((r) => setTimeout(r, 2000));
+                        await sleep(2000);
                         try {
                             const recheck = await RpcApi.CheckCliAuthCommand(TabRpcClient, {
                                 cli_path: cliPath,
