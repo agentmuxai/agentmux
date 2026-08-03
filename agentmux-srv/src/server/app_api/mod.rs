@@ -88,7 +88,7 @@ pub async fn open_pane(state: &AppState, cmd: CommandPaneOpenData) -> Result<Pan
             (cmd.split_reference_block_id.as_deref(), cmd.file.as_deref())
         {
             if let Some(result) =
-                pane::maybe_reuse_editor_pane(&wstore, &state.broker, caller_block_id, file)?
+                pane::maybe_reuse_editor_pane(state, caller_block_id, file, cmd.focus).await?
             {
                 return Ok(result);
             }
@@ -1433,6 +1433,16 @@ mod pane_open_reducer_tests {
         assert!(!reused.created, "must reuse the existing Editor pane, not create a second one");
         assert_eq!(reused.block_id, first_editor.block_id);
         assert_eq!(reused.tab_id, tab_id);
+
+        // Regression for reagent P1 on PR #2404: focus (the OpenEditor
+        // default, cmd.focus == None -> unwrap_or(true)) must still be
+        // applied on the reuse path, not silently dropped.
+        let s = state.srv_state.lock().await;
+        assert_eq!(
+            s.tabs.get(&tab_id).unwrap().focused_node_id,
+            first_editor.block_id,
+            "reusing an existing editor pane must still focus its tab, same as the create path"
+        );
     }
 
     /// Regression for reagent P1 on PR #2404: `EditorViewModel.openToTheSide`/

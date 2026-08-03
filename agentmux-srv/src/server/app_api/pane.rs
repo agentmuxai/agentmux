@@ -295,12 +295,19 @@ const OPEN_FILE_REQUEST_PERSIST_COUNT: usize = 20;
 /// `Ok(None)` when there's no existing Editor pane to reuse (or the caller's
 /// tab can't be resolved) — the normal create-new-block path handles that
 /// case unchanged.
-pub(super) fn maybe_reuse_editor_pane(
-    wstore: &Store,
-    broker: &crate::backend::wps::Broker,
+///
+/// `focus` mirrors `open_pane`'s own `cmd.focus.unwrap_or(true)` default
+/// (reagent P1 on PR #2404: the reuse path returns before the create path's
+/// `focused` layout-action logic ever runs, so without this the reused
+/// pane's tab would silently never become the layout's focused node — every
+/// other `pane.open` caller gets `focus` honored, reuse must too).
+pub(super) async fn maybe_reuse_editor_pane(
+    state: &AppState,
     caller_block_id: &str,
     file: &str,
+    focus: Option<bool>,
 ) -> Result<Option<PaneOpenResult>, String> {
+    let wstore = &state.wstore;
     let tab_id = match super::resolve_tab_id_for_block(wstore, caller_block_id) {
         Ok(id) => id,
         Err(_) => return Ok(None), // caller's own block isn't in any known tab — fall through
@@ -311,13 +318,34 @@ pub(super) fn maybe_reuse_editor_pane(
         None => return Ok(None),
     };
 
-    broker.publish(crate::backend::wps::WaveEvent {
+    state.broker.publish(crate::backend::wps::WaveEvent {
         event: EVENT_EDITOR_OPEN_FILE_REQUEST.to_string(),
         scopes: vec![format!("block:{}", existing.oid)],
         sender: String::new(),
         persist: OPEN_FILE_REQUEST_PERSIST_COUNT,
         data: Some(json!({ "path": file })),
     });
+
+    // Bring the reused pane's tab into layout focus, same default as the
+    // create-new-block path. Best-effort, matching this file's other
+    // reducer-dispatch error handling (a focus failure shouldn't fail the
+    // whole reuse — the file still opens as a tab either way).
+    if focus.unwrap_or(true) {
+        let focus_events = crate::server::service::dispatch_to_reducer(
+            state,
+            agentmux_common::ipc::Command::SetFocusedNode {
+                tab_id: tab_id.clone(),
+                node_id: existing.oid.clone(),
+            },
+        )
+        .await;
+        for ev in &focus_events {
+            if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, wstore) {
+                tracing::warn!("pane.open: reuse: SetFocusedNode wstore apply failed: {e}");
+            }
+        }
+        crate::server::service::publish_events(state, &focus_events);
+    }
 
     tracing::info!(
         block_id = %existing.oid,
