@@ -288,7 +288,18 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // today (see SPEC_PER_NODE_TOKEN_ACCOUNTING_2026_08_03.md for the real,
     // Claude-only derivation planned as a follow-up) — this is a client-side
     // chars÷4 estimate, always labeled "(est.)".
+    //
+    // isPeeking tracks REAL hover state over the tooltip anchor (set by the
+    // wrapping span below), independent of Tooltip's own internal isHovering
+    // (not exposed to callers). reagent P2 on PR #2392: peekTimeText used to
+    // read peekTick() unconditionally, so every mounted ToolBlock — every
+    // completed tool row in a whole transcript — subscribed to the shared 1s
+    // ticker forever, not just the one actually being hovered right now.
+    // Short-circuiting before peekTick() means only genuinely-hovered rows
+    // subscribe.
+    const [isPeeking, setIsPeeking] = createSignal(false);
     const peekTimeText = createMemo(() => {
+        if (!isPeeking()) return null;
         peekTick(); // re-run every second so "ago" stays live while hovered
         const ts = props.node.timestamp;
         if (ts == null) return null;
@@ -299,6 +310,16 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
         const count = estimateTokenCount(text);
         return count > 0 ? `~${formatCompactNumber(count)} tok (est.)` : null;
     });
+    // Raw-data existence check for `disable` below — deliberately NOT reading
+    // peekTimeText()/peekEstimateText() themselves, since peekTimeText is
+    // gated behind isPeeking() (only resolves to a real value once hover
+    // already started). Using the ticking memos here would make `disable`
+    // circularly depend on hover having already begun, defeating its own
+    // purpose of deciding whether hover should open anything in the first
+    // place.
+    const hasAnyPeekContent = createMemo(() =>
+        cmdText() !== "" || props.node.timestamp != null || peekEstimateText() != null
+    );
 
     return (
         <div
@@ -320,25 +341,40 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
         >
             <div class="agent-tool-summary" onClick={props.onTogglePin}>
                 <span class="agent-tool-status-icon">{statusIcon()}</span>
-                <Tooltip
-                    disable={expanded() || !cmdText()}
-                    delayMs={150}
-                    placement="bottom"
-                    divClassName="agent-tool-name-tooltip-anchor"
-                    content={
-                        <div class="agent-node-peek-tooltip">
-                            <Show when={peekTimeText()}>
-                                <div class="agent-node-peek-tooltip-meta">{peekTimeText()}</div>
-                            </Show>
-                            <Show when={peekEstimateText()}>
-                                <div class="agent-node-peek-tooltip-meta">{peekEstimateText()}</div>
-                            </Show>
-                            <div class="agent-node-peek-tooltip-body">{cmdText()}</div>
-                        </div>
-                    }
+                <span
+                    class="agent-tool-name-peek-anchor"
+                    onMouseEnter={() => setIsPeeking(true)}
+                    onMouseLeave={() => setIsPeeking(false)}
                 >
-                    <span class="agent-tool-name">{props.node.summary}</span>
-                </Tooltip>
+                    <Tooltip
+                        // reagent P2 on PR #2392: this used to gate on
+                        // `!cmdText()` alone, so any tool normalized to "Other"
+                        // (MCP tools, WebSearch/WebFetch, custom skills —
+                        // extractToolDetail returns "" for all of them) got NO
+                        // peek tooltip at all, even though the time/estimate
+                        // lines don't depend on cmdText() and could still show.
+                        // Only suppress when there's truly nothing to show.
+                        disable={expanded() || !hasAnyPeekContent()}
+                        delayMs={150}
+                        placement="bottom"
+                        divClassName="agent-tool-name-tooltip-anchor"
+                        content={
+                            <div class="agent-node-peek-tooltip">
+                                <Show when={peekTimeText()}>
+                                    <div class="agent-node-peek-tooltip-meta">{peekTimeText()}</div>
+                                </Show>
+                                <Show when={peekEstimateText()}>
+                                    <div class="agent-node-peek-tooltip-meta">{peekEstimateText()}</div>
+                                </Show>
+                                <Show when={cmdText()}>
+                                    <div class="agent-node-peek-tooltip-body">{cmdText()}</div>
+                                </Show>
+                            </div>
+                        }
+                    >
+                        <span class="agent-tool-name">{props.node.summary}</span>
+                    </Tooltip>
+                </span>
                 <Show when={props.node.duration}>
                     <span class="agent-tool-duration">({props.node.duration.toFixed(1)}s)</span>
                 </Show>
