@@ -357,17 +357,6 @@ function basename(path: string): string {
 }
 
 /**
- * Truncate a string to a maximum length with ellipsis
- */
-function truncate(str: string, maxLength: number): string {
-    if (isBlank(str) || str.length <= maxLength) {
-        return str;
-    }
-
-    return str.slice(0, maxLength) + "...";
-}
-
-/**
  * Determine if auto-title should be used for a block
  * Checks block metadata for auto-generation flag
  */

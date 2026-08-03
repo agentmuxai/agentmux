@@ -15,6 +15,7 @@ import { ObjectService } from "@/app/store/services";
 import { fireAndForget } from "@/util/util";
 import { formatCompactNumber } from "@/util/format-count";
 import { formatElapsedCompact } from "@/util/format-time";
+import { abbreviateText } from "@/util/format-text";
 import { MicButton } from "@/app/element/MicButton";
 import type { AgentViewModel } from "../agent-model";
 import type { SlashCommand } from "../commands/types";
@@ -42,12 +43,7 @@ function fmtTokens(t: TurnTokens): string {
 
 /** Truncate tool arg to `max` chars, left-truncating file paths to preserve filename. */
 function abbreviateArg(s: string, max: number): string {
-    if (s.length <= max) return s;
-    // For paths (contain / or \), keep the tail (filename) end.
-    if (s.includes("/") || s.includes("\\")) {
-        return "…" + s.slice(-(max - 1));
-    }
-    return s.slice(0, max - 1) + "…";
+    return abbreviateText(s, max, { pathAware: true });
 }
 
 interface AgentWorkingRowProps {
