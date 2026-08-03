@@ -6,9 +6,16 @@
  */
 
 import { Markdown } from "@/app/element/markdown";
-import clsx from "clsx";
-import { createEffect, createSignal, onCleanup, Show, type JSX } from "solid-js";
+import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
+import { formatExactTime, formatTimeAgo } from "@/util/format-time";
+import { createEffect, createMemo, createSignal, onCleanup, Show, type JSX } from "solid-js";
+import { useTick } from "@/app/hook/useTick";
 import type { MarkdownNode } from "../types";
+import { PeekOverlay } from "./PeekOverlay";
+
+// 150ms enter-delay matches UserMessageBlock's hover-to-peek — prevents
+// accidental expansions during fast scroll-throughs.
+const PEEK_ENTER_DELAY_MS = 150;
 
 interface MarkdownBlockProps {
     node: MarkdownNode;
@@ -75,23 +82,105 @@ export const MarkdownBlock = (props: MarkdownBlockProps): JSX.Element => {
         if (trailing) clearTimeout(trailing);
     });
 
+    // Thinking-clump peek tooltip (SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md
+    // §2.4). Mirrors ToolBlock.tsx's time + estimate pattern exactly. No
+    // duration line — deriving one from the next node's timestamp needs a new
+    // prop threaded down through the virtualization list's windowed-rows/
+    // streaming-buffer machinery (AgentDocumentVirtualList.tsx), which is
+    // performance-critical and carefully tuned; deferred as a follow-up
+    // rather than risked here for a nice-to-have (§4 resolution 1 of that
+    // spec still calls for it eventually).
+    // reagent P2 on PR #2392 (1st round): short-circuit BEFORE reading
+    // `peekTick()` for every non-thinking block (the far more common node
+    // kind) — a memo only subscribes to what it actually reads during a
+    // given run, so returning early here means regular assistant text never
+    // subscribes to the shared 1s ticker at all, instead of silently
+    // recomputing a value nothing ever renders.
+    //
+    // reagent P2 on PR #2392 (3rd round): the thinking-kind check alone
+    // isn't enough — every MOUNTED thinking clump still called peekTick()
+    // regardless of hover state, the same defect ToolBlock.tsx fixed via an
+    // explicit isPeeking signal. Mirror that fix here: only read peekTick()
+    // while this block is actually being hovered.
+    const peekTick = useTick(1000);
+    const [isPeeking, setIsPeeking] = createSignal(false);
+    const peekTimeText = createMemo(() => {
+        if (!props.node.metadata?.thinking) return null;
+        if (!isPeeking()) return null;
+        peekTick();
+        const ts = props.node.timestamp;
+        if (ts == null) return null;
+        return `${formatExactTime(ts)} · ${formatTimeAgo(ts)}`;
+    });
+    const peekEstimateText = createMemo(() => {
+        if (!props.node.metadata?.thinking) return null;
+        const count = estimateTokenCount(props.node.content);
+        return count > 0 ? `~${formatCompactNumber(count)} tok (est.)` : null;
+    });
+
+    // Peek overlay — Portal-rendered (see PeekOverlay.tsx's doc comment for
+    // why: each virtualized row is its own CSS stacking context, so a plain
+    // `position: absolute` child can never paint above a LATER row no
+    // matter its z-index). Styled and positioned like UserMessageBlock.tsx's
+    // "Session context" hover-to-peek, reusing the same `hover-anchor.ts`
+    // direction logic — just rendered outside the row's subtree.
+    let peekEnterTimer: ReturnType<typeof setTimeout> | undefined;
+    let rowEl: HTMLDivElement | undefined;
+
+    const handlePeekEnter = () => {
+        clearTimeout(peekEnterTimer);
+        peekEnterTimer = setTimeout(() => setIsPeeking(true), PEEK_ENTER_DELAY_MS);
+    };
+    const handlePeekLeave = () => {
+        clearTimeout(peekEnterTimer);
+        setIsPeeking(false);
+    };
+    onCleanup(() => clearTimeout(peekEnterTimer));
+
     return (
         <Show
             when={isCanceled()}
             fallback={
-                <div
-                    class={clsx("agent-markdown-block", {
-                        "thinking-block": props.node.metadata?.thinking,
-                    })}
+                <Show
+                    when={props.node.metadata?.thinking}
+                    fallback={
+                        <div class="agent-markdown-block">
+                            {/* scrollable={false}: agent markdown streams (reactive). With
+                                scrollable, OverlayScrollbars relocates SolidJS's children into
+                                its viewport, so the next streaming reconcile calls replaceChild
+                                on a node it has moved → the long-standing replaceChild crash
+                                (#1326). Per-block scroll is also wrong inside the virtualized
+                                document, which owns the scroll. */}
+                            <Markdown text={view().text} highlight={view().highlight} scrollable={false} />
+                        </div>
+                    }
                 >
-                    {/* scrollable={false}: agent markdown streams (reactive). With
-                        scrollable, OverlayScrollbars relocates SolidJS's children into
-                        its viewport, so the next streaming reconcile calls replaceChild
-                        on a node it has moved → the long-standing replaceChild crash
-                        (#1326). Per-block scroll is also wrong inside the virtualized
-                        document, which owns the scroll. */}
-                    <Markdown text={view().text} highlight={view().highlight} scrollable={false} />
-                </div>
+                    <div
+                        ref={(el) => (rowEl = el)}
+                        class="agent-thinking-peek-anchor"
+                        onMouseEnter={handlePeekEnter}
+                        onMouseLeave={handlePeekLeave}
+                    >
+                        <div class="agent-markdown-block thinking-block">
+                            <Markdown text={view().text} highlight={view().highlight} scrollable={false} />
+                        </div>
+                        {/* Peek overlay — see ToolBlock.tsx's identical pattern
+                            and PeekOverlay.tsx. Not gated on an `expanded()`
+                            check here — thinking clumps have no pin/expand
+                            state to collide with. */}
+                        <PeekOverlay
+                            show={isPeeking() && (peekTimeText() != null || peekEstimateText() != null)}
+                            rowEl={() => rowEl}
+                        >
+                            <Show when={peekTimeText()}>
+                                <div class="agent-node-peek-tooltip-meta">{peekTimeText()}</div>
+                            </Show>
+                            <Show when={peekEstimateText()}>
+                                <div class="agent-node-peek-tooltip-meta">{peekEstimateText()}</div>
+                            </Show>
+                        </PeekOverlay>
+                    </div>
+                </Show>
             }
         >
             <div class="agent-markdown-block markdown-canceled">

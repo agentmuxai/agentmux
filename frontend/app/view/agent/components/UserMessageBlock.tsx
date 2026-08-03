@@ -9,32 +9,30 @@
  *   - **Regular user input** (`isStartup` false / undefined): always
  *     expanded inline. `<pre>` content uses `white-space: pre` so
  *     long lines scroll horizontally inside the bubble. Highest-
- *     contrast user-input color via `--user-input-color`.
+ *     contrast user-input color via `--user-input-color`. Also gets a
+ *     hover-to-peek time/estimate overlay (PeekOverlay), same as tool
+ *     calls and thinking clumps — 2026-08-03 user request.
  *
  *   - **Startup injection, not pinned, not hovering**: collapsed.
  *     Only the summary `<button>` renders.
  *
- *   - **Startup injection, hovering (transient)**: body renders as
- *     a `position: absolute` overlay anchored to the summary,
- *     EITHER above (`bottom: 100%`) OR below (`top: 100%`),
- *     depending on `pickExpandDirection()`. The summary's screen-Y
- *     never changes — the cursor stays exactly where it was when
- *     the hover timer fired. See
- *     `docs/specs/SPEC_STARTUP_HOVER_EXPANSION_ANCHOR_2026_05_24.md`.
+ *   - **Startup injection, hovering (transient)**: body renders via
+ *     PeekOverlay — Portal-rendered at document.body, anchored to the
+ *     TOP edge of the summary row (2026-08-03 user feedback: "when it
+ *     appears we need it to appear at the top of the entry"). This
+ *     used to be a plain `position: absolute` child of `.agent-user-
+ *     message` picking above/below via `pickExpandDirection()`; that
+ *     had the same virtualized-row stacking-context bug PeekOverlay.tsx
+ *     was built to fix for ToolBlock/MarkdownBlock (confirmed live via
+ *     CDP — a later row's own content painted over this overlay too).
+ *     See `docs/specs/SPEC_STARTUP_HOVER_EXPANSION_ANCHOR_2026_05_24.md`
+ *     for the original anchor-to-summary design this superseded.
  *
  *   - **Startup injection, pinned**: body renders in normal
  *     document flow below the summary. Persistent commitment to
  *     the expanded form; the virtualizer remeasures the row to
  *     its new height (estimated by `estimateUnwrappedTextHeight`
  *     in `renderers.ts`). Option B from the spec §4.2.
- *
- * Why mouseleave doesn't fire when the cursor crosses from
- * summary into the absolute body: per the MDN spec, `mouseleave`
- * fires only when the pointer has exited the element AND ALL OF
- * ITS DESCENDANTS — and "descendants" is the DOM tree, NOT visual
- * containment. The absolute body is still a DOM child of
- * `.agent-user-message`, so cursor moves between summary and
- * body keep `hovering` true with no jitter and no `safePolygon`.
  *
  * SolidJS reactivity note: props are accessed via `props.X`
  * (never destructured). Pin toggles mutate
@@ -44,15 +42,13 @@
  */
 
 import clsx from "clsx";
-import { Show, createSignal, onCleanup, type JSX } from "solid-js";
+import { Show, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
 import type { UserMessageNode } from "../types";
 import { LinkifiedText } from "@/app/element/linkified-text";
-import {
-    findScrollContainerRect,
-    maxOverlayHeight,
-    pickExpandDirection,
-    type ExpandDirection,
-} from "./hover-anchor";
+import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
+import { formatExactTime, formatTimeAgo } from "@/util/format-time";
+import { useTick } from "@/app/hook/useTick";
+import { PeekOverlay } from "./PeekOverlay";
 
 interface UserMessageBlockProps {
     node: UserMessageNode;
@@ -68,73 +64,18 @@ interface UserMessageBlockProps {
 // expansions during fast scroll-throughs.
 const HOVER_ENTER_DELAY_MS = 150;
 
-// Conservative estimate of the rendered body height for direction
-// selection. The startup payload is typically 4-12kB of Markdown;
-// at 24px line-height + average line density, ~400px is realistic.
-// The pure-function `pickExpandDirection` handles the "fits-neither"
-// case gracefully if this is wrong; this is just a hint for the
-// flip decision. Over-estimating slightly biases toward "above" in
-// near-bottom rows, which is the desirable conservative direction.
-const STARTUP_BODY_ESTIMATE_PX = 400;
-
 export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
     const [hovering, setHovering] = createSignal(false);
-    const [expandDirection, setExpandDirection] = createSignal<ExpandDirection>("below");
-    // Pixel cap on the overlay's height, computed per hover from
-    // the chosen-side container space so the overlay's own
-    // `overflow-y: auto` activates inside the pane bounds even when
-    // the body is taller than either side. `null` means no cap
-    // applied (greenfield or non-overlay render).
-    const [overlayMaxHeight, setOverlayMaxHeight] = createSignal<number | null>(null);
     let enterTimer: ReturnType<typeof setTimeout> | undefined;
     let rootEl: HTMLDivElement | undefined;
 
     const handleMouseEnter = () => {
         clearTimeout(enterTimer);
-        enterTimer = setTimeout(() => {
-            // Capture the summary's position and the nearest scroll
-            // container's bounds ONCE at expand-time. Direction
-            // stays fixed for the duration of this hover (no resize
-            // listener, no re-evaluation — per spec §5.2). Next
-            // mouseenter re-evaluates.
-            //
-            // Using the scroll container's rect (not
-            // `window.innerHeight`) is essential when the agent
-            // pane lives in a clipped region — a summary near the
-            // pane's bottom can be far from the window's bottom
-            // (codex P1 round 2 on PR #1021).
-            if (rootEl) {
-                const summaryEl = rootEl.querySelector<HTMLElement>(
-                    ".agent-user-message-summary",
-                );
-                if (summaryEl) {
-                    const rect = summaryEl.getBoundingClientRect();
-                    const container = findScrollContainerRect(summaryEl);
-                    const summaryV = { top: rect.top, bottom: rect.bottom };
-                    const dir = pickExpandDirection(
-                        summaryV,
-                        container,
-                        STARTUP_BODY_ESTIMATE_PX,
-                    );
-                    setExpandDirection(dir);
-                    // Cap the overlay's height to the chosen side's
-                    // container space so its own `overflow-y: auto`
-                    // activates inside the pane (vs the pane
-                    // clipping the overlay and the tail being
-                    // unreachable). Codex P2 round 2 on PR #1021.
-                    setOverlayMaxHeight(maxOverlayHeight(summaryV, container, dir));
-                }
-            }
-            setHovering(true);
-        }, HOVER_ENTER_DELAY_MS);
+        enterTimer = setTimeout(() => setHovering(true), HOVER_ENTER_DELAY_MS);
     };
     const handleMouseLeave = () => {
         clearTimeout(enterTimer);
         setHovering(false);
-        // Clear cap so the next hover recomputes from a fresh
-        // measurement; stale values would matter if the pane has
-        // resized between hovers.
-        setOverlayMaxHeight(null);
     };
     onCleanup(() => clearTimeout(enterTimer));
 
@@ -144,11 +85,10 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
     const expanded = (): boolean =>
         !collapsible() || props.pinned || hovering();
 
-    /** Render mode for the body — drives DOM positioning + CSS classes:
+    /** Render mode for the body:
      *
      *   - `flow`    — normal document flow (regular input + pinned startup).
-     *   - `overlay` — `position: absolute`, anchored to summary, direction
-     *                 from `expandDirection()`.
+     *   - `overlay` — PeekOverlay, Portal-rendered, top-anchored to the row.
      *   - `hidden`  — body not rendered.
      */
     const bodyMode = (): "flow" | "overlay" | "hidden" => {
@@ -157,6 +97,76 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
         if (hovering()) return "overlay";
         return "hidden";
     };
+
+    // Peek metadata (time + token estimate) for regular (non-startup) user
+    // input — same treatment ToolBlock.tsx / MarkdownBlock.tsx already have.
+    // Startup-injection rows show their full body on hover instead (via
+    // bodyMode() === "overlay" above) rather than a metadata summary, so
+    // this is gated to the non-collapsible case only.
+    const peekTick = useTick(1000);
+    const [isPeeking, setIsPeeking] = createSignal(false);
+    const peekTimeText = createMemo(() => {
+        if (collapsible() || !isPeeking()) return null;
+        peekTick(); // re-run every second so "ago" stays live while hovered
+        const ts = props.node.timestamp;
+        if (ts == null) return null;
+        return `${formatExactTime(ts)} · ${formatTimeAgo(ts)}`;
+    });
+    const peekEstimateText = createMemo(() => {
+        if (collapsible()) return null;
+        const count = estimateTokenCount(props.node.message);
+        return count > 0 ? `~${formatCompactNumber(count)} tok (est.)` : null;
+    });
+    let peekEnterTimer: ReturnType<typeof setTimeout> | undefined;
+    const handlePeekEnter = () => {
+        clearTimeout(peekEnterTimer);
+        peekEnterTimer = setTimeout(() => setIsPeeking(true), HOVER_ENTER_DELAY_MS);
+    };
+    const handlePeekLeave = () => {
+        clearTimeout(peekEnterTimer);
+        setIsPeeking(false);
+    };
+    onCleanup(() => clearTimeout(peekEnterTimer));
+
+    // Shared between the flow-mode in-DOM render and the Portal-rendered
+    // PeekOverlay — same pin/unpin button + message body in both.
+    const bodyContent = () => (
+        <>
+            {/* Top-right action button. Two glyphs:
+             *    📌 — pin (hovered, not yet pinned).
+             *    ✕  — unpin (currently pinned).
+             *
+             * stopPropagation so the click doesn't bubble
+             * to ancestors (no outer handlers today, but
+             * defensive for future additions). */}
+            <Show when={collapsible()}>
+                <button
+                    type="button"
+                    class={clsx({
+                        "agent-user-message-unpin": props.pinned,
+                        "agent-user-message-pin": !props.pinned,
+                    })}
+                    title={
+                        props.pinned
+                            ? "Collapse session context"
+                            : "Pin session context open"
+                    }
+                    aria-label={
+                        props.pinned
+                            ? "Collapse session context"
+                            : "Pin session context open"
+                    }
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        props.onTogglePin();
+                    }}
+                >
+                    {props.pinned ? "✕" : "📌"}
+                </button>
+            </Show>
+            <pre><LinkifiedText text={props.node.message} /></pre>
+        </>
+    );
 
     return (
         <div
@@ -167,8 +177,8 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
                 "agent-user-message--expanded": collapsible() && expanded(),
                 "agent-user-message--pinned": collapsible() && props.pinned,
             })}
-            onMouseEnter={collapsible() ? handleMouseEnter : undefined}
-            onMouseLeave={collapsible() ? handleMouseLeave : undefined}
+            onMouseEnter={collapsible() ? handleMouseEnter : handlePeekEnter}
+            onMouseLeave={collapsible() ? handleMouseLeave : handlePeekLeave}
         >
             {/* Summary is always present (when collapsible) so the
              *  ARIA/keyboard surface is stable. We hide it via CSS
@@ -176,8 +186,7 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
              *  takes over the row's identity in that mode.
              *
              *  When in overlay mode, the summary stays visible at
-             *  its normal 32px height — the body floats above or
-             *  below it. */}
+             *  its normal 32px height — the body floats above it. */}
             <Show when={collapsible()}>
                 <button
                     type="button"
@@ -195,55 +204,35 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
                     </span>
                 </button>
             </Show>
-            <Show when={bodyMode() !== "hidden"}>
-                <div
-                    class={clsx("agent-user-message-content", {
-                        "agent-user-message-content--flow": bodyMode() === "flow",
-                        "agent-user-message-content--overlay-below":
-                            bodyMode() === "overlay" && expandDirection() === "below",
-                        "agent-user-message-content--overlay-above":
-                            bodyMode() === "overlay" && expandDirection() === "above",
-                    })}
-                    style={
-                        bodyMode() === "overlay" && overlayMaxHeight() !== null
-                            ? { "max-height": `${overlayMaxHeight()}px` }
-                            : undefined
-                    }
-                >
-                    {/* Top-right action button. Two glyphs:
-                     *    📌 — pin (hovered, not yet pinned).
-                     *    ✕  — unpin (currently pinned).
-                     *
-                     * stopPropagation so the click doesn't bubble
-                     * to ancestors (no outer handlers today, but
-                     * defensive for future additions). */}
-                    <Show when={collapsible()}>
-                        <button
-                            type="button"
-                            class={clsx({
-                                "agent-user-message-unpin": props.pinned,
-                                "agent-user-message-pin": !props.pinned,
-                            })}
-                            title={
-                                props.pinned
-                                    ? "Collapse session context"
-                                    : "Pin session context open"
-                            }
-                            aria-label={
-                                props.pinned
-                                    ? "Collapse session context"
-                                    : "Pin session context open"
-                            }
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                props.onTogglePin();
-                            }}
-                        >
-                            {props.pinned ? "✕" : "📌"}
-                        </button>
-                    </Show>
-                    <pre><LinkifiedText text={props.node.message} /></pre>
+            <Show when={bodyMode() === "flow"}>
+                <div class="agent-user-message-content agent-user-message-content--flow">
+                    {bodyContent()}
                 </div>
+            </Show>
+            <PeekOverlay
+                show={bodyMode() === "overlay"}
+                rowEl={() => rootEl}
+                class="agent-user-message-peek-overlay"
+            >
+                <div class="agent-user-message-content">
+                    {bodyContent()}
+                </div>
+            </PeekOverlay>
+            {/* Peek metadata overlay for regular (non-startup) input —
+                time + token estimate, no body (the message is already
+                always visible in flow above). */}
+            <Show when={!collapsible()}>
+                <PeekOverlay
+                    show={isPeeking() && (peekTimeText() != null || peekEstimateText() != null)}
+                    rowEl={() => rootEl}
+                >
+                    <Show when={peekTimeText()}>
+                        <div class="agent-node-peek-tooltip-meta">{peekTimeText()}</div>
+                    </Show>
+                    <Show when={peekEstimateText()}>
+                        <div class="agent-node-peek-tooltip-meta">{peekEstimateText()}</div>
+                    </Show>
+                </PeekOverlay>
             </Show>
         </div>
     );
