@@ -5,6 +5,7 @@ import { createResource, createSignal, For, onCleanup, onMount, Show, type JSX }
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { abbreviateText } from "@/util/format-text";
 import { BLOCK_KINDS, blockMeta } from "./block-registry";
 import type { DroneViewModel } from "./drone-model";
 import type { BlockKind, FlowNode } from "./drone-types";
@@ -584,9 +585,7 @@ function nodeSummary(n: FlowNode): string {
     }
 }
 
-function truncate(s: string, max = 40): string {
-    return s.length > max ? s.slice(0, max - 1) + "…" : s;
-}
+const truncate = (s: string, max = 40): string => abbreviateText(s, max);
 
 // ── Port + edge geometry ──────────────────────────────────────────────
 // Node body is NODE_W wide; ports sit on the left (inputs) and right
