@@ -316,12 +316,15 @@
 // grid-template-areas tier it landed only ever bought a 2nd line).
 //
 // What still needs a width-keyed rule is the *last-resort* shed order
-// below, for widths where even 3 lines — one zone per line, in the worst
-// case — leaves the right zone's own content (badge, ctx, auth, Shell; none
-// of which wrap internally) too wide for its single line. Content and
-// Shell stay visible at every tier — ctx is the one safety signal in this
-// bar (compaction proximity), Shell is the strip's one real action — so
-// shedding starts with the least essential, informational-only items.
+// below, for widths where even 3 outer lines — one zone per line, in the
+// worst case — plus the right zone's own internal wrap (badge, ctx, auth,
+// Shell can now reflow onto a sub-line of their own, see above) isn't
+// enough headroom to keep the strip within its 3-line cap without
+// resorting to an extra sub-line per zone. Content and Shell stay visible
+// at every tier — ctx is the one safety signal in this bar (compaction
+// proximity), Shell is the strip's one real action — so shedding starts
+// with the least essential, informational-only items, trimming content
+// before the internal wrap needs to add sub-lines at all.
 // Breakpoints are estimated from content width (right zone ≈ badge 28px +
 // ctx 50px + auth 70px + Shell 40px + 3 gaps ≈ 220px), not measured DOM
 // output — confirm against real rendered widths in `task dev` and adjust.
