@@ -185,16 +185,19 @@ No cross-process locking exists at the migration-runner level — `Store::conn` 
 
 For prioritizing Part 3, the failure modes found:
 
+**Note:** Part 0 confirms this specific incident's actual cause was an identity/credential issue (see the muxspect `last_error` finding), not F1/F2/F3 — the marker/data-loss hypothesis was disproven by direct SQL verification. F1/F2/F3 remain real, independently-verified gaps in the codebase (worth fixing regardless — see Part 3), just not what happened here. The "Caused this incident?" column below reflects that correction.
+
 | # | Failure mode | Caused this incident? | Severity |
 |---|---|---|---|
-| F1 | Existence-only marker treated as proof of completion, content/effect never re-validated | Yes (primary) | High — silent data loss disguised as success |
-| F2 | `m0000_bootstrap` stamps `db_migrations` from marker existence with zero data verification | Yes (primary or contributing) | High — same failure, but bypasses the migration's own logic entirely |
-| F3 | Stale FK reference (`db_agent_identity_links` → `db_agent_definitions` instead of `db_agents`) | Possibly contributing | Medium — needs direct confirmation against the broken instance |
+| F1 | Existence-only marker treated as proof of completion, content/effect never re-validated | No (disproven — `db_agents` was correctly populated) | High — silent data loss disguised as success, a real latent risk |
+| F2 | `m0000_bootstrap` stamps `db_migrations` from marker existence with zero data verification | No (same disproof as F1) | High — same latent risk, bypasses the migration's own logic entirely |
+| F3 | Stale FK reference (`db_agent_identity_links` → `db_agent_definitions` instead of `db_agents`) | No (confirmed — `agent_id` referenced a real, existing row) | Low — downgraded per Part 3 Phase 0d; still worth a one-time audit, not urgent |
 | F4 | Migration failure is non-fatal at startup (`tracing::warn!`, boot continues) | No (this incident produced no `Err`, it "succeeded") but is the general-case version of the same risk class | High — turns any future migration bug into a silent one |
-| F5 | No post-hoc verification / "migration doctor" | Enabled F1/F2 to go undetected | High — this is why the bug shipped invisibly |
+| F5 | No post-hoc verification / "migration doctor" | No — but would have caught F1/F2 *if* they had occurred; unrelated to this incident's actual cause | High — closing this gap is still valuable independent of this incident |
 | F6 | No cross-process locking | No | Medium — latent |
 | F7 | Stalled multi-phase refactor (Phase 3b/3c incomplete, tracking doc stale) | No, but is the reason `0007` still exists in its fragile Phase-3a-only form at all | Medium — structural risk multiplier |
 | F8 | Stale, sticky status-bar cache (`pending_migrations` only set-on-positive, never cleared-on-zero) | No, but produces false "still broken" signals after the fact | Low-Medium — misdiagnosis risk, not data risk |
+| F9 | Ambient-login agent (`use_ambient_login=1`) still fails with "no credentials for claude" — mechanism not fully traced (see Part 0) | Yes — this incident's actual, still-not-fully-explained cause | High — this is the real bug; not yet root-caused to a specific code path in this doc |
 
 ---
 
