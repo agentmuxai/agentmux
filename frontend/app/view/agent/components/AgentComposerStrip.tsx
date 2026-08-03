@@ -23,6 +23,7 @@
 import { useTick } from "@/app/hook/useTick";
 import { compactionThreshold } from "@/app/store/agent-pane-state/context-window";
 import type { CompactionState } from "@/app/store/agent-pane-state/types";
+import { formatCompactNumber, formatExactNumber } from "@/util/format-count";
 import { Show, createEffect, createMemo, createSignal, type JSX } from "solid-js";
 import type { SessionStats, TurnTokens } from "../types";
 import { AgentRuntimeDropup } from "./AgentRuntimeDropup";
@@ -31,17 +32,12 @@ import { RuntimeBadge } from "./RuntimeBadge";
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function fmtTokens(t: TurnTokens): string {
-    const fmt = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
-    return `↑${fmt(t.input)} ↓${fmt(t.output)}`;
+    return `↑${formatCompactNumber(t.input)} ↓${formatCompactNumber(t.output)}`;
 }
 
 function fmtElapsed(ms: number): string {
     const s = Math.floor(ms / 1000);
     return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
-}
-
-function fmtK(n: number): string {
-    return `${Math.round(n / 100) / 10}k`;
 }
 
 type CtxBand = "low" | "mid" | "high" | "critical";
@@ -56,13 +52,13 @@ function ctxBand(tokens: number, contextWindow: number): CtxBand {
 
 function contextTitle(tokens: number, contextWindow: number | undefined): string {
     if (contextWindow == null) {
-        return `Context: ${tokens.toLocaleString()} tokens`;
+        return `Context: ${formatExactNumber(tokens)} tokens`;
     }
     const pct = ((tokens / contextWindow) * 100).toFixed(1);
     return (
-        `Context window: ${tokens.toLocaleString()} / ${contextWindow.toLocaleString()} tokens (${pct}%)\n` +
+        `Context window: ${formatExactNumber(tokens)} / ${formatExactNumber(contextWindow)} tokens (${pct}%)\n` +
         `This is the total conversation history sent to the model on each turn.\n` +
-        `Auto-compacts around ${compactionThreshold(contextWindow).toLocaleString()} tokens.`
+        `Auto-compacts around ${formatExactNumber(compactionThreshold(contextWindow))} tokens.`
     );
 }
 
@@ -188,8 +184,8 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         const t = props.contextTokens;
         const w = props.contextWindow;
         if (t == null || t <= 0) return null;
-        if (w == null) return `${fmtK(t)} ctx`;
-        return `${fmtK(t)} / ${fmtK(w)}`;
+        if (w == null) return `${formatCompactNumber(t)} ctx`;
+        return `${formatCompactNumber(t)} / ${formatCompactNumber(w)}`;
     };
 
     return (

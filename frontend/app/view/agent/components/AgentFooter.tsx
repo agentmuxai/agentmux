@@ -13,6 +13,7 @@ import { makeORef } from "@/app/store/wos";
 import { atoms } from "@/app/store/global";
 import { ObjectService } from "@/app/store/services";
 import { fireAndForget } from "@/util/util";
+import { formatCompactNumber } from "@/util/format-count";
 import { MicButton } from "@/app/element/MicButton";
 import type { AgentViewModel } from "../agent-model";
 import type { SlashCommand } from "../commands/types";
@@ -34,8 +35,7 @@ function fmtElapsed(ms: number): string {
 }
 
 function fmtTokens(t: TurnTokens): string {
-    const fmt = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
-    return `\u2191${fmt(t.input)} \u2193${fmt(t.output)}`;
+    return `\u2191${formatCompactNumber(t.input)} \u2193${formatCompactNumber(t.output)}`;
 }
 
 // ── AgentWorkingRow ───────────────────────────────────────────────────────────

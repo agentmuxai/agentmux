@@ -14,6 +14,7 @@ import { getBlockTurnPhase } from "@/app/store/agentActivity";
 import { WorkspaceService } from "@/app/store/services";
 import { recordTurn } from "@/app/store/token-usage";
 import { useTick } from "@/app/hook/useTick";
+import { formatCompactNumber } from "@/util/format-count";
 import "./swarm-view.scss";
 
 // Navigate to the pane for a given block ID, switching tabs and windows as needed.
@@ -217,9 +218,7 @@ export function subagentDisplayStatus(sub: ActiveSubagent, parentAgentStatus: "r
 
 // ── Agent root row ───────────────────────────────────────────────────────
 
-function fmtCtx(tokens: number): string {
-    return `${Math.round(tokens / 100) / 10}k`;
-}
+const fmtCtx = formatCompactNumber;
 
 function AgentRow({
     node,
