@@ -77,7 +77,7 @@ function CrossWindowDragMonitor(): JSX.Element {
             const dropX = e.screenX;
             const dropY = e.screenY;
 
-            await new Promise((r) => setTimeout(r, 50));
+            await sleep(50);
             await handleCrossWindowDragEnd(payload, windowLabelRef, dropX, dropY);
         };
 
