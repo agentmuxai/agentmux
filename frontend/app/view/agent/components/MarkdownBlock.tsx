@@ -17,11 +17,6 @@ import { PeekOverlay } from "./PeekOverlay";
 // accidental expansions during fast scroll-throughs.
 const PEEK_ENTER_DELAY_MS = 150;
 
-// Conservative height estimate for direction selection — the peek overlay
-// is just 1-2 short metadata lines, nowhere near UserMessageBlock's multi-kB
-// startup body estimate.
-const PEEK_OVERLAY_ESTIMATE_PX = 80;
-
 interface MarkdownBlockProps {
     node: MarkdownNode;
 }
@@ -176,7 +171,6 @@ export const MarkdownBlock = (props: MarkdownBlockProps): JSX.Element => {
                         <PeekOverlay
                             show={isPeeking() && (peekTimeText() != null || peekEstimateText() != null)}
                             rowEl={() => rowEl}
-                            estimateHeightPx={PEEK_OVERLAY_ESTIMATE_PX}
                         >
                             <Show when={peekTimeText()}>
                                 <div class="agent-node-peek-tooltip-meta">{peekTimeText()}</div>

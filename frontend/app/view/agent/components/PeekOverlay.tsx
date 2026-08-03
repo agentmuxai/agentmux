@@ -2,28 +2,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * PeekOverlay — Portal-rendered hover-to-peek panel, styled and positioned
- * like UserMessageBlock.tsx's "Session context" collapsed-row overlay
- * (flush to the row's left/right edges, no gap above/below), but rendered
- * OUTSIDE the virtualized transcript's per-row DOM subtree.
+ * PeekOverlay — Portal-rendered hover-to-peek panel, anchored to the TOP
+ * edge of the hovered entry (per 2026-08-03 user feedback: "when it appears
+ * we need it to appear at the top of the entry") and flush to its left/
+ * right edges, but rendered OUTSIDE the virtualized transcript's per-row
+ * DOM subtree.
  *
  * Why not a plain `position: absolute` child of the row (what
- * UserMessageBlock.tsx itself does)? Each row in the virtualized document
+ * UserMessageBlock.tsx's own overlay used to do, before it was migrated
+ * onto this component)? Each row in the virtualized document
  * (`.agent-document-row`) carries `contain: layout` and a `transform`
  * (identity matrix, but any non-`none` transform still counts) — both
  * independently force a NEW STACKING CONTEXT per CSS spec. A `z-index`
  * inside one row's stacking context can never out-rank a LATER SIBLING
  * row's entire subtree, no matter how high the number: sibling stacking
- * contexts stack strictly by DOM order. Since a chat transcript has no gap
- * between adjacent rows, any "below" overlay taller than 0 necessarily
- * paints into the space the next row occupies — and that row's own opaque
- * background then paints OVER it, on the very next frame, because it's a
- * later DOM sibling in its own isolated context. Confirmed live via CDP:
- * `elementFromPoint` at the overlay's own screen coordinates returned the
- * NEXT row's `.paragraph` node, not the overlay itself. (This is very
- * likely a latent bug in UserMessageBlock's own overlay too — just rarely
- * triggered there, since a collapsed startup row isn't hovered as often or
- * as densely as tool calls are throughout a long transcript.)
+ * contexts stack strictly by DOM order. Confirmed live via CDP:
+ * `elementFromPoint` at the overlay's own screen coordinates returned a
+ * LATER row's own content, not the overlay itself.
  *
  * Portal-rendering escapes every row's stacking context (renders at
  * `document.body`, in the root stacking context), so this always paints
@@ -33,38 +28,50 @@
  * `getBoundingClientRect()` viewport coordinates — already zoom-safe (CSS
  * `zoom`, not `transform: scale()`, per AgentDocumentVirtualList.tsx's own
  * CDP-verified comments) — and floating-ui's `autoUpdate` keeps it synced
- * on scroll/resize without hand-rolling scroll listeners. No offset/flip/
- * shift middleware: direction (above/below) and height-capping come from
- * `hover-anchor.ts`'s pure functions, the same ones UserMessageBlock.tsx
- * uses, not floating-ui's own placement logic.
+ * on scroll/resize without hand-rolling scroll listeners.
+ *
+ * Positioning is deliberately single-direction (top-anchored, growing
+ * downward over the entry) rather than the above/below picker
+ * hover-anchor.ts's `pickExpandDirection` provides — that picker exists for
+ * UserMessageBlock's IN-FLOW body preview, which needs to dodge screen
+ * edges since it can be tall (a multi-kB startup payload). This overlay is
+ * always a couple of short metadata lines, and the explicit ask is for it
+ * to sit at the entry's own top rather than floating below/above it, so
+ * there's no direction to pick — height is simply capped to the space
+ * between the entry's top and the scroll container's bottom.
  */
 
+import clsx from "clsx";
 import { autoUpdate } from "@floating-ui/dom";
 import { createSignal, createEffect, onCleanup, Show, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
-import {
-    findScrollContainerRect,
-    maxOverlayHeight,
-    pickExpandDirection,
-} from "./hover-anchor";
+import { findScrollContainerRect } from "./hover-anchor";
 
 interface PeekOverlayProps {
     /** Whether the overlay should be mounted right now. */
     show: boolean;
     /**
-     * Getter for the hovered row this overlay is anchored to (its left/
-     * right edges + top/bottom, per hover-anchor.ts's direction picking).
-     * A getter, not a plain value — the row's own `ref` callback assigns
-     * the caller's local `let rowEl` variable AFTER this component's props
-     * are first evaluated, so a plain value would freeze at `undefined`
-     * forever. `() => rowEl` re-reads the caller's closure on every call.
+     * Getter for the hovered row this overlay is anchored to. A getter, not
+     * a plain value — the row's own `ref` callback assigns the caller's
+     * local `let rowEl` variable AFTER this component's props are first
+     * evaluated, so a plain value would freeze at `undefined` forever.
+     * `() => rowEl` re-reads the caller's closure on every call.
      */
     rowEl: () => HTMLElement | undefined;
-    /** Conservative estimated overlay height, for direction selection —
-     *  see hover-anchor.ts's `pickExpandDirection` bodyEstimate param. */
-    estimateHeightPx: number;
+    /**
+     * Extra class appended alongside the base `.agent-node-peek-overlay`
+     * chrome — for callers whose content needs its own distinct visual
+     * identity (e.g. UserMessageBlock.tsx's accent-bordered "Session
+     * context" preview) without forking the whole component.
+     */
+    class?: string;
     children?: JSX.Element;
 }
+
+// Reserved space at the scroll container's bottom edge so the overlay's
+// own `overflow-y: auto` never sits flush against the pane border — same
+// rationale as hover-anchor.ts's `maxOverlayHeight` margin default.
+const BOTTOM_MARGIN_PX = 4;
 
 export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
     const [floatingStyle, setFloatingStyle] = createSignal<JSX.CSSProperties>({
@@ -81,17 +88,13 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
         if (!row) return;
         const rect = row.getBoundingClientRect();
         const container = findScrollContainerRect(row);
-        const rowV = { top: rect.top, bottom: rect.bottom };
-        const dir = pickExpandDirection(rowV, container, props.estimateHeightPx);
-        const cap = maxOverlayHeight(rowV, container, dir);
+        const cap = Math.max(0, container.bottom - rect.top - BOTTOM_MARGIN_PX);
         setFloatingStyle({
             position: "fixed",
             left: `${rect.left}px`,
+            top: `${rect.top}px`,
             width: `${rect.width}px`,
             "max-height": `${cap}px`,
-            ...(dir === "below"
-                ? { top: `${rect.bottom}px` }
-                : { bottom: `${window.innerHeight - rect.top}px` }),
         });
     };
 
@@ -119,7 +122,11 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
     return (
         <Show when={props.show}>
             <Portal>
-                <div ref={registerFloating} class="agent-node-peek-overlay" style={floatingStyle()}>
+                <div
+                    ref={registerFloating}
+                    class={clsx("agent-node-peek-overlay", props.class)}
+                    style={floatingStyle()}
+                >
                     {props.children}
                 </div>
             </Portal>

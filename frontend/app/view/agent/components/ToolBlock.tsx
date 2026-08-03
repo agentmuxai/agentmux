@@ -118,11 +118,6 @@ const PREVIEW_ZOOM_MAX = 2.0;
 // accidental expansions during fast scroll-throughs.
 const PEEK_ENTER_DELAY_MS = 150;
 
-// Conservative height estimate for direction selection — the peek overlay
-// is just 1-3 short metadata lines plus (sometimes) one command line,
-// nowhere near UserMessageBlock's multi-kB startup body estimate.
-const PEEK_OVERLAY_ESTIMATE_PX = 100;
-
 export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // Drives the peek tooltip's live "time ago" text (§2.3 of
     // SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md). Unconditional, same
@@ -436,7 +431,6 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
             <PeekOverlay
                 show={isPeeking() && hasAnyPeekContent() && !expanded()}
                 rowEl={() => rowEl}
-                estimateHeightPx={PEEK_OVERLAY_ESTIMATE_PX}
             >
                 <Show when={peekTimeText()}>
                     <div class="agent-node-peek-tooltip-meta">{peekTimeText()}</div>
