@@ -79,10 +79,30 @@ fn chunk_value(value: &str) -> Vec<&str> {
         .collect()
 }
 
-fn read_chunk_count(field_key: &str) -> usize {
+/// A previous, longer value at a field could in principle need many chunks;
+/// no real Cognito token comes remotely close (`MAX_PLAUSIBLE_CHUNKS *
+/// MAX_CHUNK_LEN` = 32,000 chars). Used only as `muxbus_clear`'s fallback
+/// deletion bound when the real count can't be read (see its call site) —
+/// `secret_store::delete` on a non-existent entry is a no-op success, so
+/// scanning past the real count there is harmless, just wasted calls.
+const MAX_PLAUSIBLE_CHUNKS: usize = 32;
+
+/// `Ok(0)` means the `:count` entry genuinely doesn't exist (field never
+/// written under the chunked layout). `Err` means the read itself failed —
+/// reagent P1: a prior version of this collapsed both into the same `0`,
+/// which `muxbus_clear` used to bound its per-field deletion loop
+/// (`for i in 0..count`) — a transient read failure made that loop delete
+/// NOTHING, while the field's `:count` key was still deleted unconditionally
+/// right after, so logout appeared to succeed while the real token chunks
+/// were silently orphaned in the OS keychain. Callers must not treat `Err`
+/// as "0 chunks."
+fn read_chunk_count(field_key: &str) -> Result<usize, StoreError> {
     match secret_store::get_optional(&count_key(field_key)) {
-        Ok(Some(v)) => v.parse().unwrap_or(0),
-        _ => 0,
+        Ok(Some(v)) => v
+            .parse::<usize>()
+            .map_err(|e| StoreError::Other(format!("muxbus: corrupted chunk count for {field_key}: {e}"))),
+        Ok(None) => Ok(0),
+        Err(e) => Err(StoreError::Other(format!("muxbus: keychain read failed: {e}"))),
     }
 }
 
@@ -160,7 +180,12 @@ impl PriorKeychainState {
 fn write_chunked_field(field_key: &str, value: &str) -> Result<Vec<(String, PriorKeychainState)>, StoreError> {
     let new_chunks = chunk_value(value);
     let new_count = new_chunks.len();
-    let old_count = read_chunk_count(field_key);
+    // Propagate a genuine read failure rather than assuming 0 — silently
+    // treating "couldn't read the old count" as "there were no stale
+    // trailing chunks" would skip cleaning up real leftover chunk data from
+    // a previous, longer value (same class of bug as the read_chunk_count
+    // doc comment describes for muxbus_clear).
+    let old_count = read_chunk_count(field_key)?;
 
     let mut priors: Vec<(String, PriorKeychainState)> = Vec::with_capacity(new_count.max(old_count) + 1);
     let rollback = |priors: &[(String, PriorKeychainState)]| {
@@ -635,7 +660,27 @@ impl Store {
         // chance to run before logout.
         for field in [FIELD_ACCESS, FIELD_REFRESH, FIELD_ID] {
             let fk = field_key(field);
-            let count = read_chunk_count(&fk);
+            // A count-read failure must NOT be treated as "0 chunks" (see
+            // read_chunk_count's doc comment) — that would delete nothing
+            // here while still unconditionally deleting the `:count` key
+            // below, orphaning the real token chunks in the OS keychain
+            // while logout appears to have succeeded. Fall back to
+            // scanning a generous bound instead: `secret_store::delete` on
+            // a non-existent entry is a no-op success, so deleting past
+            // the real count is harmless — it guarantees actual cleanup
+            // even when the count itself is unreadable.
+            let count = match read_chunk_count(&fk) {
+                Ok(n) => n,
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        field = %fk,
+                        "muxbus_clear: couldn't read this field's chunk count — falling back to a \
+                         bounded scan so real token chunks still get deleted"
+                    );
+                    MAX_PLAUSIBLE_CHUNKS
+                }
+            };
             for i in 0..count {
                 let _ = secret_store::delete(&chunk_key(&fk, i));
             }
