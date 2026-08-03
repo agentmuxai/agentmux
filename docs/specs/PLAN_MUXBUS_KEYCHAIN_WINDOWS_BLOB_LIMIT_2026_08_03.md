@@ -253,3 +253,27 @@ check, not about lock acquisition; `allow_migration` still gates every
 actual write, `muxbus_is_fresh` still performs none. Verified no deadlock:
 `cargo test -p agentmux-srv --bin agentmux-srv muxbus` (15 tests, including
 `cloud_subscriber`'s own suite) passes.
+
+## 10. Review finding: cross-field write not atomic across a process crash (P2, fixed)
+
+reagent's third pass, after §9's lock fixed the *same-process concurrent
+read* case, flagged the remaining *cross-process-crash* case: each field's
+own chunks+count are individually self-consistent (`write_chunked_field`'s
+internal chunk+rollback atomicity), but `write_split_tokens` writes the
+three fields sequentially with no lock surviving a process kill. A crash
+between two fields' writes leaves one field holding its OLD value next to
+the other two fields' fresh values — each field individually well-formed,
+so `read_split_tokens`'s existing "all three present vs. some missing"
+check doesn't catch it, and the result silently pairs tokens from two
+different login sessions/accounts.
+
+**Fix:** `write_split_tokens` now generates one `new_generation()` stamp
+(nanosecond wall-clock, unique enough in practice) per call and passes it
+to all three `write_chunked_field` calls, which each write it to their own
+`<field>:gen` entry alongside their chunks/count. `read_split_tokens`
+requires all three fields' generation stamps to match before accepting the
+set as valid; a mismatch (or a missing `:gen` on an otherwise-complete
+field) is treated the same as "not yet migrated," falling through to the
+legacy sources or ultimately requiring a fresh login — the safe failure
+mode, instead of silently mixing sessions. `muxbus_clear` deletes the
+`:gen` entry alongside each field's chunks/count on logout.

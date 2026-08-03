@@ -63,6 +63,32 @@ fn count_key(field_key: &str) -> String {
     format!("{field_key}:count")
 }
 
+fn generation_key(field_key: &str) -> String {
+    format!("{field_key}:gen")
+}
+
+/// A per-write identifier stamped onto all three fields by a single
+/// `write_split_tokens` call, so `read_split_tokens` can detect a torn
+/// write ACROSS a process crash — not the concurrent-read-in-one-process
+/// case `muxbus_load_impl`'s lock already covers, but a kill signal
+/// landing mid-write, between one field's `write_chunked_field` call
+/// completing and the next one starting (reagent P2: each field is
+/// individually self-consistent, per `write_chunked_field`'s own
+/// chunk+rollback atomicity, but with no lock surviving the process
+/// there's nothing to stop the OLD stale value for the not-yet-reached
+/// field from still being present when the other two ARE the fresh ones —
+/// silently reconstructing a token set that pairs pieces from two
+/// different login sessions). High-resolution wall-clock nanos is unique
+/// enough for this purpose in practice; a formal UUID would work too but
+/// adds a dependency for no real benefit here.
+fn new_generation() -> String {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos()
+        .to_string()
+}
+
 /// Pure chunking split — no keychain I/O — so the boundary math is testable
 /// without touching the real OS keychain. A token's bytes are always ASCII
 /// in practice (JWTs / opaque base64url strings), so splitting on byte
@@ -172,12 +198,20 @@ impl PriorKeychainState {
 /// everything this call touched if any single write/delete fails partway
 /// through — otherwise a partial failure would leave a mix of old and new
 /// chunks, silently corrupting the reconstructed value on the next read.
+/// Also writes `generation` to this field's `:gen` entry — same value
+/// across all three fields for one `write_split_tokens` call, checked by
+/// `read_split_tokens` to detect a write torn by a process crash (see
+/// `new_generation`'s doc comment).
 ///
 /// On success, returns the PRE-call state of every entry touched (chunks +
-/// count), so a caller doing more work of its own afterward
+/// count + generation), so a caller doing more work of its own afterward
 /// (`write_split_tokens` covering a sibling field, or `muxbus_save`'s SQL
 /// write) can roll all of it back together if that later step fails too.
-fn write_chunked_field(field_key: &str, value: &str) -> Result<Vec<(String, PriorKeychainState)>, StoreError> {
+fn write_chunked_field(
+    field_key: &str,
+    value: &str,
+    generation: &str,
+) -> Result<Vec<(String, PriorKeychainState)>, StoreError> {
     let new_chunks = chunk_value(value);
     let new_count = new_chunks.len();
     // Propagate a genuine read failure rather than assuming 0 — silently
@@ -234,16 +268,28 @@ fn write_chunked_field(field_key: &str, value: &str) -> Result<Vec<(String, Prio
     }
     priors.push((ck, prior));
 
+    let gk = generation_key(field_key);
+    let prior = PriorKeychainState::capture(&gk);
+    if let Err(e) = secret_store::put(&gk, generation) {
+        rollback(&priors);
+        return Err(StoreError::Other(format!("muxbus: keychain write failed: {e}")));
+    }
+    priors.push((gk, prior));
+
     Ok(priors)
 }
 
-/// Read `field_key`'s value back from its chunk entries. `Ok(None)` means no
-/// `:count` entry exists yet (this field was never written under the
-/// chunked layout — caller falls through to the legacy-blob /
-/// legacy-plaintext sources). `Err` means a read genuinely failed, or the
-/// chunk state is internally inconsistent (a chunk went missing between the
-/// count write and now) — not just "no entry".
-fn read_chunked_field(field_key: &str) -> Result<Option<String>, StoreError> {
+/// Read `field_key`'s value + generation stamp back from its chunk entries.
+/// `Ok(None)` means no `:count` entry exists yet (this field was never
+/// written under the chunked layout — caller falls through to the
+/// legacy-blob / legacy-plaintext sources). `Err` means a read genuinely
+/// failed, or the chunk state is internally inconsistent (a chunk went
+/// missing between the count write and now) — not just "no entry". A
+/// missing `:gen` entry on an otherwise-complete field is treated as a read
+/// failure too, not defaulted to some sentinel — see `read_split_tokens`,
+/// which needs a REAL generation to compare across fields, not a value
+/// that would spuriously "match" another field's own missing generation.
+fn read_chunked_field(field_key: &str) -> Result<Option<(String, String)>, StoreError> {
     let count = match secret_store::get_optional(&count_key(field_key)) {
         Ok(Some(v)) => v.parse::<usize>().map_err(|e| {
             StoreError::Other(format!("muxbus: corrupted chunk count for {field_key}: {e}"))
@@ -263,7 +309,16 @@ fn read_chunked_field(field_key: &str) -> Result<Option<String>, StoreError> {
             Err(e) => return Err(StoreError::Other(format!("muxbus: keychain read failed: {e}"))),
         }
     }
-    Ok(Some(value))
+    let generation = match secret_store::get_optional(&generation_key(field_key)) {
+        Ok(Some(g)) => g.to_string(),
+        Ok(None) => {
+            return Err(StoreError::Other(format!(
+                "muxbus: missing generation stamp for {field_key} — keychain state is inconsistent"
+            )));
+        }
+        Err(e) => return Err(StoreError::Other(format!("muxbus: keychain read failed: {e}"))),
+    };
+    Ok(Some((value, generation)))
 }
 
 /// Write all three token fields, each independently chunked
@@ -276,6 +331,7 @@ fn read_chunked_field(field_key: &str) -> Result<Option<String>, StoreError> {
 /// fields) so `muxbus_save`'s SQL-write failure branch can roll all of it
 /// back together too.
 fn write_split_tokens(tokens: &MuxBusTokens) -> Result<Vec<(String, PriorKeychainState)>, StoreError> {
+    let generation = new_generation();
     let fields: [(String, &str); 3] = [
         (field_key(FIELD_ACCESS), tokens.access_token.as_str()),
         (field_key(FIELD_REFRESH), tokens.refresh_token.as_str()),
@@ -283,7 +339,7 @@ fn write_split_tokens(tokens: &MuxBusTokens) -> Result<Vec<(String, PriorKeychai
     ];
     let mut all_priors: Vec<(String, PriorKeychainState)> = Vec::new();
     for (key, value) in fields {
-        match write_chunked_field(&key, value) {
+        match write_chunked_field(&key, value, &generation) {
             Ok(priors) => all_priors.extend(priors),
             Err(e) => {
                 for (done_key, done_prior) in &all_priors {
@@ -316,11 +372,30 @@ fn read_split_tokens() -> Result<Option<MuxBusTokens>, StoreError> {
 
     match (access, refresh, id) {
         (None, None, None) => Ok(None),
-        (Some(access_token), Some(refresh_token), Some(id_token)) => Ok(Some(MuxBusTokens {
-            access_token,
-            refresh_token,
-            id_token,
-        })),
+        (Some((access_token, gen_a)), Some((refresh_token, gen_r)), Some((id_token, gen_i))) => {
+            // reagent P2: write_split_tokens's own writes are individually
+            // consistent per-field (write_chunked_field's chunk+rollback
+            // atomicity) but not atomic ACROSS fields — a process kill
+            // between two fields' writes can leave one field's stale OLD
+            // value sitting next to the other two fields' fresh values,
+            // each independently well-formed, silently pairing tokens from
+            // two different login sessions. All three fields' generation
+            // stamps only match when they came from the SAME
+            // write_split_tokens call — a mismatch means a torn write.
+            if gen_a == gen_r && gen_r == gen_i {
+                Ok(Some(MuxBusTokens {
+                    access_token,
+                    refresh_token,
+                    id_token,
+                }))
+            } else {
+                tracing::warn!(
+                    "muxbus: split keychain entries have mismatched generation stamps (a torn \
+                     write from an interrupted save) — treating as not-yet-migrated"
+                );
+                Ok(None)
+            }
+        }
         _ => {
             // Shouldn't happen in normal operation — write_split_tokens
             // writes/rolls-back all three fields together — but could
@@ -698,6 +773,7 @@ impl Store {
                 let _ = secret_store::delete(&chunk_key(&fk, i));
             }
             let _ = secret_store::delete(&count_key(&fk));
+            let _ = secret_store::delete(&generation_key(&fk));
         }
         let _ = secret_store::delete(LEGACY_BLOB_KEYCHAIN_ID);
         {
