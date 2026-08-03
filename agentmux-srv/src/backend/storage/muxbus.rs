@@ -36,14 +36,24 @@ fn field_key(field: &str) -> String {
 /// per field) turned out NOT to be sufficient: live-tested against a real
 /// Cognito login, the exact same "Attribute 'password' is longer than
 /// platform limit of 2560 chars" error still fired — a single token field
-/// can itself exceed 2560 bytes depending on the app client's token content
+/// can itself exceed the cap depending on the app client's token content
 /// (custom claims, refresh token length), not just the three combined. So
-/// each field is further chunked into as many <2560-byte entries as it
-/// takes, tracked by an explicit `<field>:count` entry (`write_chunked_field`
-/// / `read_chunked_field` below) — this holds regardless of any individual
+/// each field is further chunked into as many entries as it takes, tracked
+/// by an explicit `<field>:count` entry (`write_chunked_field` /
+/// `read_chunked_field` below) — this holds regardless of any individual
 /// token's real-world size, instead of relying on an assumption about it.
-/// Conservative margin below the actual 2560-byte cap, not a tight fit.
-const MAX_CHUNK_LEN: usize = 1800;
+///
+/// A second live test with a 1800-char budget hit the SAME error again —
+/// the `keyring` crate's Windows backend checks
+/// `password.encode_utf16().count() * 2 > CRED_MAX_CREDENTIAL_BLOB_SIZE`
+/// (2560 *bytes*), but its own error message reports that raw byte count as
+/// if it were a char limit ("longer than platform limit of 2560 chars").
+/// Since Windows stores the value as UTF-16 (2 bytes/char), the real
+/// character budget is `CRED_MAX_CREDENTIAL_BLOB_SIZE / 2` = 1280, not 2560
+/// — `keyring-2.3.3/src/windows.rs:182` vs. its own error text at
+/// `error.rs:72`. 1800 was 40% over that real limit. Budget well under 1280
+/// here, not just under the misleading 2560 the error text implies.
+const MAX_CHUNK_LEN: usize = 1000;
 
 fn chunk_key(field_key: &str, index: usize) -> String {
     format!("{field_key}:{index}")
@@ -676,19 +686,24 @@ mod tests {
         assert_ne!(access, LEGACY_BLOB_KEYCHAIN_ID);
     }
 
-    /// Regression guard for BOTH bugs this file has fixed in sequence: the
-    /// original combined-blob-exceeds-2560-bytes bug, and the follow-up
-    /// found live-testing the first fix (a single field's own token can
-    /// ALSO exceed 2560 bytes — see PLAN_MUXBUS_KEYCHAIN_WINDOWS_BLOB_LIMIT_2026_08_03.md).
-    /// Doesn't exercise the real OS keychain (not available in CI); asserts
-    /// the pure chunking math instead: every chunk of an oversized value
-    /// stays under the cap, and concatenating them reconstructs the
-    /// original exactly — the actual guarantee `write_chunked_field` /
-    /// `read_chunked_field` depend on, independent of any assumption about
-    /// real-world Cognito token sizes.
+    /// Regression guard for every bug this file has fixed in sequence: the
+    /// original combined-blob-exceeds-2560-bytes bug, the follow-up found
+    /// live-testing the first fix (a single field's own token can ALSO
+    /// exceed the cap), and the real character limit being HALF the
+    /// byte constant the `keyring` crate's error message reports (Windows
+    /// stores the value as UTF-16 — see PLAN_MUXBUS_KEYCHAIN_WINDOWS_BLOB_LIMIT_2026_08_03.md
+    /// §6-§7). Doesn't exercise the real OS keychain (not available in CI);
+    /// asserts the pure chunking math instead: every chunk of an oversized
+    /// value stays under the REAL char limit (not the misleading one from
+    /// the error text), and concatenating them reconstructs the original
+    /// exactly.
     #[test]
     fn chunk_value_keeps_every_chunk_under_windows_credential_blob_limit_and_reconstructs() {
-        const WINDOWS_CRED_BLOB_LIMIT: usize = 2560;
+        // `keyring` checks `password.encode_utf16().count() * 2 >
+        // CRED_MAX_CREDENTIAL_BLOB_SIZE` (2560 bytes) — so the real char
+        // budget for an all-ASCII (1 UTF-16 unit each) token is half that.
+        const WINDOWS_CRED_BLOB_BYTE_LIMIT: usize = 2560;
+        const WINDOWS_CRED_CHAR_LIMIT: usize = WINDOWS_CRED_BLOB_BYTE_LIMIT / 2;
 
         // Larger than even the old *combined* blob would have been —
         // proves this doesn't just move the limit, it removes it.
@@ -697,7 +712,7 @@ mod tests {
         let chunks = chunk_value(&oversized_token);
         assert!(chunks.len() > 1, "a value this large must actually split");
         for chunk in &chunks {
-            assert!(chunk.len() < WINDOWS_CRED_BLOB_LIMIT);
+            assert!(chunk.len() < WINDOWS_CRED_CHAR_LIMIT);
         }
         assert_eq!(chunks.concat(), oversized_token);
     }
