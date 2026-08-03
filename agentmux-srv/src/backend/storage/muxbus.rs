@@ -13,6 +13,25 @@ use crate::identity::secret_store;
 /// shared with the broker's credential id, see `crate::muxbus::CREDENTIAL_ID`.
 const MUXBUS_KEYCHAIN_ID: &str = crate::muxbus::CREDENTIAL_ID;
 
+/// Legacy (pre-2026-08-03) single-entry key holding all three tokens as one
+/// JSON blob. Windows Credential Manager caps a single entry's blob at 2560
+/// bytes (`CRED_MAX_CREDENTIAL_BLOB_SIZE`) — a Cognito `id_token` alone can
+/// approach that, and combined with `access_token`+`refresh_token` reliably
+/// exceeds it (see `docs/specs/PLAN_MUXBUS_KEYCHAIN_WINDOWS_BLOB_LIMIT_2026_08_03.md`).
+/// macOS/Linux have no comparable cap, so existing users there may still
+/// have a valid entry under this old key — kept only as a one-time
+/// migration source (`muxbus_load_tokens`); every new write goes to the
+/// three per-field keys below instead.
+const LEGACY_BLOB_KEYCHAIN_ID: &str = MUXBUS_KEYCHAIN_ID;
+
+const FIELD_ACCESS: &str = "access";
+const FIELD_REFRESH: &str = "refresh";
+const FIELD_ID: &str = "id";
+
+fn field_key(field: &str) -> String {
+    format!("{MUXBUS_KEYCHAIN_ID}:{field}")
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct MuxBusCredentials {
     pub cognito_domain: String,
@@ -25,7 +44,9 @@ pub struct MuxBusCredentials {
     pub user_sub: String,
 }
 
-/// The actual secret material, serialized into the OS keychain entry.
+/// The actual secret material. Every field is written to its own keychain
+/// entry (`field_key`); this struct only groups them for callers and for
+/// deserializing the legacy combined-blob format during migration.
 /// Everything else on `MuxBusCredentials` is non-secret metadata and stays
 /// in SQLite, matching how `SecretRef::Keychain` accounts already split
 /// pointer-metadata (DB) from plaintext (keychain) elsewhere in this codebase.
@@ -34,6 +55,114 @@ struct MuxBusTokens {
     access_token: String,
     refresh_token: String,
     id_token: String,
+}
+
+/// What a keychain entry held immediately before a write to it, so a later
+/// failure (the SQL write in `muxbus_save`, or a sibling field's write in
+/// `write_split_tokens`) can be rolled back to that exact prior state.
+/// Three-way, not a bool: reagent P1 on #2260 caught a first version of this
+/// that collapsed `Ok(None)` ("genuinely no prior entry") and `Err` ("the
+/// read itself failed, prior state UNKNOWN") into the same `None`, so an
+/// unrelated transient read failure would make the rollback branch delete a
+/// real, valid, previously-stored credential it simply couldn't read —
+/// turning a transient glitch into a forced full re-login. `Unknown` gets
+/// neither restore nor delete: we truly don't know what was there, so the
+/// only safe move is to leave whatever the write just wrote and log loudly.
+enum PriorKeychainState {
+    Existed(zeroize::Zeroizing<String>),
+    Absent,
+    Unknown,
+}
+
+impl PriorKeychainState {
+    fn capture(key: &str) -> Self {
+        match secret_store::get_optional(key) {
+            Ok(Some(v)) => PriorKeychainState::Existed(v),
+            Ok(None) => PriorKeychainState::Absent,
+            Err(_) => PriorKeychainState::Unknown,
+        }
+    }
+
+    fn restore(&self, key: &str) -> Result<(), String> {
+        match self {
+            PriorKeychainState::Existed(old) => secret_store::put(key, old.as_str()),
+            PriorKeychainState::Absent => secret_store::delete(key),
+            PriorKeychainState::Unknown => Ok(()),
+        }
+    }
+}
+
+/// Write all three token fields to their split keychain entries. On a
+/// mid-way failure, rolls back whichever fields this call already wrote
+/// (to their pre-call state) before returning — otherwise a partial failure
+/// would leave the three entries holding a mix of old and new tokens, which
+/// is worse than either the old or the new set alone.
+///
+/// On success, returns each field's PRE-call state so a caller that goes on
+/// to do more work of its own (`muxbus_save`'s SQL write) can roll all three
+/// back together if that later step fails too.
+fn write_split_tokens(tokens: &MuxBusTokens) -> Result<Vec<(String, PriorKeychainState)>, StoreError> {
+    let fields: [(String, &str); 3] = [
+        (field_key(FIELD_ACCESS), tokens.access_token.as_str()),
+        (field_key(FIELD_REFRESH), tokens.refresh_token.as_str()),
+        (field_key(FIELD_ID), tokens.id_token.as_str()),
+    ];
+    let mut priors: Vec<(String, PriorKeychainState)> = Vec::with_capacity(fields.len());
+    for (key, value) in fields {
+        let prior = PriorKeychainState::capture(&key);
+        if let Err(e) = secret_store::put(&key, value) {
+            for (done_key, done_prior) in &priors {
+                if let Err(re) = done_prior.restore(done_key) {
+                    tracing::warn!(
+                        error = %re,
+                        key = %done_key,
+                        "muxbus: rollback after a partial split-token write failure also failed \
+                         for this field — keychain may now hold a stale value for it"
+                    );
+                }
+            }
+            return Err(StoreError::Other(format!("muxbus: keychain write failed: {e}")));
+        }
+        priors.push((key, prior));
+    }
+    Ok(priors)
+}
+
+/// Read the three split-entry tokens. `Ok(None)` means none of the three
+/// exist yet (not migrated to this layout — caller falls through to the
+/// legacy-blob / legacy-plaintext sources). `Err` means a read itself
+/// failed (locked keychain, no Secret Service daemon, permission denied —
+/// not just "no entry"), which the caller may still recover from via a
+/// legacy fallback.
+fn read_split_tokens() -> Result<Option<MuxBusTokens>, StoreError> {
+    let access = secret_store::get_optional(&field_key(FIELD_ACCESS))
+        .map_err(|e| StoreError::Other(format!("muxbus: keychain read failed: {e}")))?;
+    let refresh = secret_store::get_optional(&field_key(FIELD_REFRESH))
+        .map_err(|e| StoreError::Other(format!("muxbus: keychain read failed: {e}")))?;
+    let id = secret_store::get_optional(&field_key(FIELD_ID))
+        .map_err(|e| StoreError::Other(format!("muxbus: keychain read failed: {e}")))?;
+
+    match (access, refresh, id) {
+        (None, None, None) => Ok(None),
+        (Some(a), Some(r), Some(i)) => Ok(Some(MuxBusTokens {
+            access_token: a.to_string(),
+            refresh_token: r.to_string(),
+            id_token: i.to_string(),
+        })),
+        _ => {
+            // Shouldn't happen in normal operation — write_split_tokens
+            // writes/rolls-back all three together — but could follow an
+            // interrupted write from a prior crash. Treat as "not yet on
+            // the split layout" so the caller falls through to the
+            // legacy-blob / legacy-plaintext migration paths rather than
+            // silently serving a token set with missing fields.
+            tracing::warn!(
+                "muxbus: inconsistent split keychain entries (some present, some absent) — \
+                 treating as not-yet-migrated"
+            );
+            Ok(None)
+        }
+    }
 }
 
 impl MuxBusCredentials {
@@ -78,25 +207,22 @@ impl Store {
             .unwrap_or(false)
     }
 
-    /// `allow_migration` gates the lazy-migration self-heal write below —
-    /// `false` for `muxbus_is_fresh`'s side-effect-free contract, `true`
-    /// for the normal `muxbus_load` path. When migration is disallowed and
-    /// only the legacy plaintext columns have data, they're read and
-    /// returned directly (same as the transient-keychain-failure fallback
-    /// already does) without ever touching the keychain or SQL columns.
+    /// `allow_migration` gates the lazy-migration self-heal writes in
+    /// `muxbus_load_tokens` below — `false` for `muxbus_is_fresh`'s
+    /// side-effect-free contract, `true` for the normal `muxbus_load` path.
     fn muxbus_load_impl(&self, allow_migration: bool) -> Result<Option<MuxBusCredentials>, StoreError> {
-        // reagent P1 on #2260: the migration branch below reads the
-        // keychain, then (on a cache miss) writes fresh tokens to it and
-        // updates SQL — the same read-then-write shape `muxbus_save`
+        // reagent P1 on #2260: the migration branches in `muxbus_load_tokens`
+        // read the keychain, then (on a cache miss) write fresh tokens to it
+        // and update SQL — the same read-then-write shape `muxbus_save`
         // guards with this lock. Without it here too, a concurrent
-        // muxbus_save (e.g. the broker's refresh closure) can commit a
-        // real refresh between this thread's stale SQL read and its own
-        // keychain write, so the migration then overwrites the
-        // freshly-refreshed keychain blob with old pre-migration plaintext
-        // — SQL metadata paired with a stale, possibly-already-rotated
-        // refresh_token. Only taken when migration is actually possible
-        // (`allow_migration`); `muxbus_is_fresh`'s read-only path never
-        // writes anything, so it needs no lock.
+        // muxbus_save (e.g. the broker's refresh closure) can commit a real
+        // refresh between this thread's stale SQL read and its own keychain
+        // write, so the migration then overwrites the freshly-refreshed
+        // keychain entries with old pre-migration data — SQL metadata
+        // paired with a stale, possibly-already-rotated refresh_token. Only
+        // taken when migration is actually possible (`allow_migration`);
+        // `muxbus_is_fresh`'s read-only path never writes anything, so it
+        // needs no lock.
         let _migration_guard = if allow_migration {
             Some(self.muxbus_save_lock.lock().unwrap())
         } else {
@@ -128,92 +254,7 @@ impl Store {
         };
         let (cognito_domain, client_id, legacy_access, legacy_refresh, legacy_id, expires_at, user_email, user_sub) = row;
 
-        // reagent P1 on #2260: the old code collapsed EVERY keychain-read
-        // failure (locked, no Secret Service daemon, permission denied — not
-        // just "no entry stored") into the same branch as "no credential at
-        // all," so a transient storage failure silently looked like a full
-        // logout. get_optional distinguishes the two: `Ok(None)` really
-        // means no entry exists; `Err` means the read itself failed.
-        let tokens = match secret_store::get_optional(MUXBUS_KEYCHAIN_ID) {
-            Ok(Some(blob)) => {
-                // reagent P2: a corrupted/unparseable keychain blob used to
-                // silently collapse to MuxBusTokens::default() via
-                // unwrap_or_default() — presenting as a full logout instead
-                // of surfacing that something is actually corrupted,
-                // inconsistent with this same match's handling of real
-                // keychain READ errors below (which correctly propagates).
-                // A malformed blob here means something wrote bad data, not
-                // "no credential" — treat it the same way: a real error.
-                serde_json::from_str::<MuxBusTokens>(&blob).map_err(|e| {
-                    StoreError::Other(format!("muxbus: stored keychain blob is corrupted: {e}"))
-                })?
-            }
-            Ok(None) if !legacy_access.is_empty() && allow_migration => {
-                // Lazy migration: this row predates keychain-backed storage.
-                // Use the plaintext columns this one time, and self-heal by
-                // writing them into the keychain + blanking the SQL columns
-                // so every subsequent load hits the keychain path instead.
-                let tokens = MuxBusTokens {
-                    access_token: legacy_access,
-                    refresh_token: legacy_refresh,
-                    id_token: legacy_id,
-                };
-                match serde_json::to_string(&tokens) {
-                    Ok(blob) if secret_store::put(MUXBUS_KEYCHAIN_ID, &blob).is_ok() => {
-                        let conn = self.conn.lock().unwrap();
-                        let _ = conn.execute(
-                            "UPDATE db_muxbus_credentials
-                             SET access_token = '', refresh_token = '', id_token = ''
-                             WHERE id = 'global'",
-                            [],
-                        );
-                    }
-                    _ => {
-                        tracing::warn!(
-                            "muxbus: keychain write failed during lazy migration — \
-                             leaving plaintext columns in place for now"
-                        );
-                    }
-                }
-                tokens
-            }
-            // Migration disallowed (muxbus_is_fresh's side-effect-free
-            // contract) but legacy plaintext columns still have the data —
-            // read-only, same values a migration would have written, just
-            // without touching the keychain or SQL columns to get there.
-            Ok(None) if !legacy_access.is_empty() => MuxBusTokens {
-                access_token: legacy_access,
-                refresh_token: legacy_refresh,
-                id_token: legacy_id,
-            },
-            Ok(None) => MuxBusTokens::default(),
-            Err(e) if !legacy_access.is_empty() => {
-                // Keychain is transiently broken, but the legacy plaintext
-                // columns are still sitting right there — serve from them
-                // rather than hard-failing when we actually have usable
-                // data. Deliberately do NOT attempt the self-heal write in
-                // this branch: writing to a keychain we just confirmed is
-                // failing would just fail again, noisily, for no benefit.
-                tracing::warn!(
-                    error = %e,
-                    "muxbus: keychain read failed, falling back to legacy plaintext columns"
-                );
-                MuxBusTokens {
-                    access_token: legacy_access,
-                    refresh_token: legacy_refresh,
-                    id_token: legacy_id,
-                }
-            }
-            Err(e) => {
-                // No legacy fallback available either — this IS a real
-                // failure, not "no credentials stored." Propagate it so
-                // callers (e.g. cloud_subscriber's has_stored_creds check)
-                // don't mistake a transient storage failure for a full
-                // logout and park indefinitely waiting for a fresh login
-                // that was never actually needed.
-                return Err(StoreError::Other(format!("muxbus: keychain read failed: {e}")));
-            }
-        };
+        let tokens = self.muxbus_load_tokens(allow_migration, &legacy_access, &legacy_refresh, &legacy_id)?;
 
         Ok(Some(MuxBusCredentials {
             cognito_domain,
@@ -225,6 +266,120 @@ impl Store {
             user_email,
             user_sub,
         }))
+    }
+
+    /// Resolve the three token fields, checking sources in order:
+    /// 1. the current split-entry keychain layout (fast path),
+    /// 2. the legacy (pre-2026-08-03) single combined-blob keychain entry —
+    ///    migrated in place to the split layout when found,
+    /// 3. legacy plaintext SQL columns from rows that predate keychain
+    ///    storage entirely — migrated in place to the split layout too.
+    /// A keychain READ failure at any step falls back to the legacy
+    /// plaintext SQL columns when they have data, same as the pre-split-entry
+    /// code did — a transient storage failure must not present as a full
+    /// logout when we still have usable data sitting right there.
+    fn muxbus_load_tokens(
+        &self,
+        allow_migration: bool,
+        legacy_access: &str,
+        legacy_refresh: &str,
+        legacy_id: &str,
+    ) -> Result<MuxBusTokens, StoreError> {
+        let legacy_plaintext = || MuxBusTokens {
+            access_token: legacy_access.to_string(),
+            refresh_token: legacy_refresh.to_string(),
+            id_token: legacy_id.to_string(),
+        };
+
+        match read_split_tokens() {
+            Ok(Some(tokens)) => return Ok(tokens),
+            Ok(None) => {} // not yet on the split layout — check legacy sources below
+            Err(e) => {
+                if !legacy_access.is_empty() {
+                    tracing::warn!(
+                        error = %e,
+                        "muxbus: keychain read failed, falling back to legacy plaintext columns"
+                    );
+                    return Ok(legacy_plaintext());
+                }
+                return Err(e);
+            }
+        }
+
+        match secret_store::get_optional(LEGACY_BLOB_KEYCHAIN_ID) {
+            Ok(Some(blob)) => {
+                // reagent P2: a corrupted/unparseable keychain blob used to
+                // silently collapse to MuxBusTokens::default() via
+                // unwrap_or_default() — presenting as a full logout instead
+                // of surfacing that something is actually corrupted. A
+                // malformed blob here means something wrote bad data, not
+                // "no credential" — treat it the same way a real read error
+                // is treated: propagate it.
+                let tokens: MuxBusTokens = serde_json::from_str(&blob).map_err(|e| {
+                    StoreError::Other(format!("muxbus: stored keychain blob is corrupted: {e}"))
+                })?;
+                if allow_migration {
+                    match write_split_tokens(&tokens) {
+                        Ok(_) => {
+                            let _ = secret_store::delete(LEGACY_BLOB_KEYCHAIN_ID);
+                        }
+                        Err(_) => {
+                            tracing::warn!(
+                                "muxbus: keychain write failed migrating the legacy combined-blob \
+                                 entry to split entries — leaving the old entry in place for now"
+                            );
+                        }
+                    }
+                }
+                return Ok(tokens);
+            }
+            Ok(None) => {}
+            Err(e) => {
+                if !legacy_access.is_empty() {
+                    tracing::warn!(
+                        error = %e,
+                        "muxbus: keychain read failed, falling back to legacy plaintext columns"
+                    );
+                    return Ok(legacy_plaintext());
+                }
+                return Err(StoreError::Other(format!("muxbus: keychain read failed: {e}")));
+            }
+        }
+
+        // Migration disallowed (muxbus_is_fresh's side-effect-free contract)
+        // but legacy plaintext columns still have the data — read-only, same
+        // values a migration would have written, just without touching the
+        // keychain or SQL columns to get there.
+        if !legacy_access.is_empty() {
+            let tokens = legacy_plaintext();
+            if allow_migration {
+                // Lazy migration: this row predates keychain-backed storage.
+                // Use the plaintext columns this one time, and self-heal by
+                // writing them into the split keychain entries + blanking
+                // the SQL columns so every subsequent load hits the
+                // keychain path instead.
+                match write_split_tokens(&tokens) {
+                    Ok(_) => {
+                        let conn = self.conn.lock().unwrap();
+                        let _ = conn.execute(
+                            "UPDATE db_muxbus_credentials
+                             SET access_token = '', refresh_token = '', id_token = ''
+                             WHERE id = 'global'",
+                            [],
+                        );
+                    }
+                    Err(_) => {
+                        tracing::warn!(
+                            "muxbus: keychain write failed during lazy migration — \
+                             leaving plaintext columns in place for now"
+                        );
+                    }
+                }
+            }
+            return Ok(tokens);
+        }
+
+        Ok(MuxBusTokens::default())
     }
 
     pub fn muxbus_save(&self, creds: &MuxBusCredentials) -> Result<(), StoreError> {
@@ -256,40 +411,16 @@ impl Store {
             refresh_token: creds.refresh_token.clone(),
             id_token: creds.id_token.clone(),
         };
-        let blob = serde_json::to_string(&tokens)?;
 
-        // Captured so a SQL failure below can restore the keychain to
-        // exactly what it held before this call (reagent P2 on #2260):
-        // without this, a keychain write that succeeds followed by a SQL
-        // write that then fails (e.g. a transient lock) leaves the FRESH
-        // tokens paired with the OLD SQL metadata (expires_at/user_email —
-        // that INSERT never committed, so it's untouched), a mismatch that
-        // previously only self-healed on the next successful save.
-        //
-        // Three-way, not a bool: reagent P1 caught a first version of this
-        // that collapsed `Ok(None)` ("genuinely no prior entry") and `Err`
-        // ("the read itself failed, prior state UNKNOWN") into the same
-        // `None`, so an unrelated transient read failure would make the
-        // rollback branch below `delete()` a real, valid, previously-stored
-        // credential it simply couldn't read — turning a transient glitch
-        // into a forced full re-login. `Unknown` gets neither restore nor
-        // delete: we truly don't know what was there, so the only safe
-        // move is to leave whatever `put(&blob)` just wrote and log loudly,
-        // same as the pre-existing self-heals-next-save behavior for this
-        // one sub-case specifically.
-        enum PriorKeychainState {
-            Existed(zeroize::Zeroizing<String>),
-            Absent,
-            Unknown,
-        }
-        let previous = match secret_store::get_optional(MUXBUS_KEYCHAIN_ID) {
-            Ok(Some(blob)) => PriorKeychainState::Existed(blob),
-            Ok(None) => PriorKeychainState::Absent,
-            Err(_) => PriorKeychainState::Unknown,
-        };
-
-        secret_store::put(MUXBUS_KEYCHAIN_ID, &blob)
-            .map_err(|e| StoreError::Other(format!("muxbus: keychain write failed: {e}")))?;
+        // Writes all three split entries, rolling back among themselves on
+        // a mid-way failure; returns each field's pre-call state so the SQL
+        // failure branch below can roll all three back together too if the
+        // SQL write itself then fails (reagent P2 on #2260: without this, a
+        // keychain write that succeeds followed by a SQL write that then
+        // fails — e.g. a transient lock — leaves the FRESH tokens paired
+        // with the OLD SQL metadata, a mismatch that previously only
+        // self-healed on the next successful save).
+        let priors = write_split_tokens(&tokens)?;
 
         let sql_result = {
             let conn = self.conn.lock().unwrap();
@@ -308,36 +439,15 @@ impl Store {
             )
         };
         if let Err(e) = sql_result {
-            match previous {
-                PriorKeychainState::Existed(old) => {
-                    if let Err(re) = secret_store::put(MUXBUS_KEYCHAIN_ID, &old) {
-                        tracing::warn!(
-                            error = %re,
-                            sql_error = %e,
-                            "muxbus_save: SQL write failed AND restoring the prior keychain blob \
-                             also failed — keychain may now hold fresh tokens with no matching \
-                             SQL metadata until the next successful save"
-                        );
-                    }
-                }
-                PriorKeychainState::Absent => {
-                    if let Err(de) = secret_store::delete(MUXBUS_KEYCHAIN_ID) {
-                        tracing::warn!(
-                            error = %de,
-                            sql_error = %e,
-                            "muxbus_save: SQL write failed AND rolling back the keychain write \
-                             also failed — keychain may now hold fresh tokens with no matching \
-                             SQL metadata until the next successful save"
-                        );
-                    }
-                }
-                PriorKeychainState::Unknown => {
+            for (key, prior) in &priors {
+                if let Err(re) = prior.restore(key) {
                     tracing::warn!(
+                        error = %re,
                         sql_error = %e,
-                        "muxbus_save: SQL write failed after a keychain write whose prior state \
-                         couldn't be read — leaving the just-written tokens in place rather than \
-                         risk deleting a real credential; SQL metadata may be stale until the \
-                         next successful save"
+                        key = %key,
+                        "muxbus_save: SQL write failed AND restoring this field's prior keychain \
+                         state also failed — keychain may now hold a fresh token for it with no \
+                         matching SQL metadata until the next successful save"
                     );
                 }
             }
@@ -372,8 +482,13 @@ impl Store {
         // against each other for.
         let _clear_guard = self.muxbus_save_lock.lock().unwrap();
         // Best-effort — a missing/inaccessible keychain entry must not block
-        // clearing the (still-useful) SQL row.
-        let _ = secret_store::delete(MUXBUS_KEYCHAIN_ID);
+        // clearing the (still-useful) SQL row. Clears both the current
+        // split-entry layout and the legacy combined-blob key, in case a
+        // migration never got the chance to run before logout.
+        let _ = secret_store::delete(&field_key(FIELD_ACCESS));
+        let _ = secret_store::delete(&field_key(FIELD_REFRESH));
+        let _ = secret_store::delete(&field_key(FIELD_ID));
+        let _ = secret_store::delete(LEGACY_BLOB_KEYCHAIN_ID);
         {
             let conn = self.conn.lock().unwrap();
             conn.execute("DELETE FROM db_muxbus_credentials WHERE id = 'global'", [])?;
@@ -393,6 +508,8 @@ mod tests {
 
     #[test]
     fn tokens_json_round_trips() {
+        // Legacy combined-blob shape — still needed to deserialize an old
+        // single-entry keychain value during one-time migration.
         let tokens = MuxBusTokens {
             access_token: "at".to_string(),
             refresh_token: "rt".to_string(),
@@ -403,5 +520,50 @@ mod tests {
         assert_eq!(back.access_token, "at");
         assert_eq!(back.refresh_token, "rt");
         assert_eq!(back.id_token, "it");
+    }
+
+    #[test]
+    fn field_key_is_namespaced_and_distinct_per_field() {
+        let access = field_key(FIELD_ACCESS);
+        let refresh = field_key(FIELD_REFRESH);
+        let id = field_key(FIELD_ID);
+        assert_eq!(access, "muxbus:global:access");
+        assert_eq!(refresh, "muxbus:global:refresh");
+        assert_eq!(id, "muxbus:global:id");
+        assert_ne!(access, LEGACY_BLOB_KEYCHAIN_ID);
+    }
+
+    /// Regression guard for the bug this split-entry layout fixes: on
+    /// Windows, a single Credential Manager entry is capped at 2560 bytes
+    /// (see PLAN_MUXBUS_KEYCHAIN_WINDOWS_BLOB_LIMIT_2026_08_03.md). This
+    /// can't exercise the real OS keychain in CI, but it does assert that a
+    /// combined blob realistic enough to trigger the original bug is, once
+    /// split into three fields, comfortably under that cap per field — i.e.
+    /// the fix's core premise actually holds for representative Cognito
+    /// token sizes.
+    #[test]
+    fn split_fields_individually_fit_under_windows_credential_blob_limit() {
+        const WINDOWS_CRED_BLOB_LIMIT: usize = 2560;
+
+        // Representative sizes: Cognito access/id tokens are JWTs (three
+        // base64 segments); refresh tokens are opaque but similarly sized.
+        let access_token = "a".repeat(1100);
+        let refresh_token = "r".repeat(1400);
+        let id_token = "i".repeat(1200);
+
+        let combined = MuxBusTokens {
+            access_token: access_token.clone(),
+            refresh_token: refresh_token.clone(),
+            id_token: id_token.clone(),
+        };
+        let combined_blob = serde_json::to_string(&combined).unwrap();
+        // The bug this fix addresses: the OLD combined-blob layout exceeds
+        // the limit for these representative sizes.
+        assert!(combined_blob.len() > WINDOWS_CRED_BLOB_LIMIT);
+
+        // The fix: each field, written to its own entry, does not.
+        assert!(access_token.len() < WINDOWS_CRED_BLOB_LIMIT);
+        assert!(refresh_token.len() < WINDOWS_CRED_BLOB_LIMIT);
+        assert!(id_token.len() < WINDOWS_CRED_BLOB_LIMIT);
     }
 }
