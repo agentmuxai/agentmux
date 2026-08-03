@@ -127,15 +127,17 @@ Same audit method applied to other common "format a primitive for display" shape
 
 This one isn't purely mechanical — two visually distinct conventions are already live in the product (prose-style "3m 5s" in the composer strip/footer vs. clock-style "3:05" in dock/activity rows). Proposed: `frontend/util/format-time.ts` exporting **both** as separately named functions — `formatElapsedCompact` (prose form) and `formatElapsedClock` (mm:ss form, with the missing floor guard added to the one copy that lacks it) — rather than forcing one convention on every call site. Still closes the real bug in this group: `PersistentShellBlock.tsx`'s copy can format a negative duration (e.g. a clock-skew edge case) into something like `"-1:05"`; the other two clock-style copies already guard against it.
 
-### 7.2 String truncate/abbreviate — 3 copies, inconsistent ellipsis + one has real smarts worth keeping
+### 7.2 String truncate/abbreviate — 3 copies, one dead, one design correction made during implementation
 
 | File | Function | Behavior |
 |---|---|---|
-| `block/autotitle.ts:362-368` | `truncate` | Right-truncate, appends literal `"..."` (three ASCII dots) |
-| `view/drone/drone-view.tsx:587-589` | `truncate` | Right-truncate, appends real `"…"` ellipsis char, default `max=40` |
-| `view/agent/components/AgentFooter.tsx:48-55` | `abbreviateArg` | Right-truncate for plain strings, but **left-truncates path-like strings** (containing `/`/`\`) to preserve the filename — the most capable of the three |
+| `block/autotitle.ts:362-368` | `truncate` | Right-truncate, appends literal `"..."` (three ASCII dots) — **confirmed dead code**: not exported, zero call sites anywhere in the file. Deleted outright rather than migrated. |
+| `view/drone/drone-view.tsx:587-589` | `truncate` | Right-truncate, appends real `"…"` ellipsis char, default `max=40` — actually in use (4 call sites: agent task, API URL, condition expr, response template) |
+| `view/agent/components/AgentFooter.tsx:48-55` | `abbreviateArg` | Right-truncate for plain strings, but **left-truncates path-like strings** (containing `/`/`\`) to preserve the filename |
 
-The literal `"..."` vs. real `"…"` split is a small but visible inconsistency (three characters vs. one — different string length, different look in a monospace UI). Proposed: `frontend/util/format-text.ts` exporting `abbreviateText(s, max)` — `AgentFooter.tsx`'s path-aware logic generalized as the one canonical implementation (its behavior is a strict superset: plain strings truncate the same way the other two already do, paths additionally get the smarter tail-preserving treatment) — and migrate all three call sites to it, standardizing on the real `"…"` character.
+**Correction made during implementation**: the first draft of `abbreviateText` auto-detected `/`/`\` in ANY input string and left-truncated it, framed as a "strict superset" of `drone-view.tsx`'s behavior. That's wrong — `drone-view.tsx`'s inputs are URLs, boolean expressions, and templates, not file paths; a `/` in `https://api.example.com/v1/users` is incidental, and left-truncating it to preserve the *tail* would hide the more useful host+path prefix instead of the query-string tail. Caught before shipping by tracing `drone-view.tsx`'s actual call sites rather than trusting the "superset" framing.
+
+Fixed: `abbreviateText(s, max, opts?: { pathAware?: boolean })` — `pathAware` defaults `false` (matching `drone-view.tsx`'s and the dead `autotitle.ts` copy's original plain-truncate behavior), and only `AgentFooter.tsx` (whose inputs are genuinely file paths / shell command args) opts in with `{ pathAware: true }`. `drone-view.tsx` migrates with zero behavior change beyond the already-correct ellipsis character it was already using; only `AgentFooter.tsx`'s call sites keep the smarter path-aware treatment.
 
 ### 7.3 `sleep(ms)` — no shared helper, 12 inline copies of the same promise
 
