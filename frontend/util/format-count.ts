@@ -47,3 +47,18 @@ export function formatCompactNumber(n: number): string {
 export function formatExactNumber(n: number): string {
     return n.toLocaleString();
 }
+
+/**
+ * Rough client-side token-count estimate from raw text length — the
+ * standard chars÷4 ratio for English/code text. No backend/instrumentation
+ * changes; used where real per-node token accounting isn't available (every
+ * node today — see docs/specs/SPEC_PER_NODE_TOKEN_ACCOUNTING_2026_08_03.md
+ * for the real, derived alternative that supersedes this for Claude panes
+ * once built). Callers MUST label output from this as an estimate (e.g.
+ * "~340 tok (est.)") — never present it as real API-reported usage.
+ *
+ * See docs/specs/SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md §2.2/§1.4.
+ */
+export function estimateTokenCount(text: string): number {
+    return Math.ceil(text.length / 4);
+}

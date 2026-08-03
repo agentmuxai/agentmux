@@ -163,9 +163,39 @@ describe("ToolBlock — panel mode", () => {
             const anchor = container.querySelector(".agent-tool-name-tooltip-anchor") as HTMLElement;
             expect(anchor).not.toBeNull();
             fireEvent.mouseEnter(anchor);
-            const tip = document.body.querySelector(".agent-tool-cmd-tooltip");
+            const tip = document.body.querySelector(".agent-node-peek-tooltip-body");
             expect(tip).not.toBeNull();
             expect(tip!.textContent).toBe("ls"); // bare params.command, not "Bash ls"
+            unmount();
+        });
+
+        // SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md §2.3 — the peek
+        // tooltip gains time + estimated-token lines above the bare command.
+        it("shows exact time + time-ago + an estimated token count when the node has a timestamp", () => {
+            const timed: ToolNode = { ...baseTool, timestamp: Date.now() - 65_000 };
+            const { container, unmount } = render(() => (
+                <ToolBlock node={timed} pinned={false} onTogglePin={() => {}} />
+            ));
+            const anchor = container.querySelector(".agent-tool-name-tooltip-anchor") as HTMLElement;
+            fireEvent.mouseEnter(anchor);
+            const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
+            expect(metaLines.length).toBe(2);
+            expect(metaLines[0].textContent).toMatch(/\d{2}:\d{2}:\d{2} · 1m ago/);
+            expect(metaLines[1].textContent).toMatch(/~\d+ tok \(est\.\)/);
+            unmount();
+        });
+
+        it("shows no time line when the node has no timestamp", () => {
+            const untimed: ToolNode = { ...baseTool, timestamp: undefined };
+            const { container, unmount } = render(() => (
+                <ToolBlock node={untimed} pinned={false} onTogglePin={() => {}} />
+            ));
+            const anchor = container.querySelector(".agent-tool-name-tooltip-anchor") as HTMLElement;
+            fireEvent.mouseEnter(anchor);
+            const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
+            // Still one line: the token estimate (params always give SOME text).
+            expect(metaLines.length).toBe(1);
+            expect(metaLines[0].textContent).toMatch(/~\d+ tok \(est\.\)/);
             unmount();
         });
 
@@ -175,7 +205,7 @@ describe("ToolBlock — panel mode", () => {
             ));
             const anchor = container.querySelector(".agent-tool-name-tooltip-anchor") as HTMLElement;
             fireEvent.mouseEnter(anchor);
-            expect(document.body.querySelector(".agent-tool-cmd-tooltip")).toBeNull();
+            expect(document.body.querySelector(".agent-node-peek-tooltip")).toBeNull();
             unmount();
         });
 
@@ -186,7 +216,7 @@ describe("ToolBlock — panel mode", () => {
             ));
             const anchor = container.querySelector(".agent-tool-name-tooltip-anchor") as HTMLElement;
             fireEvent.mouseEnter(anchor);
-            expect(document.body.querySelector(".agent-tool-cmd-tooltip")).toBeNull();
+            expect(document.body.querySelector(".agent-node-peek-tooltip")).toBeNull();
             unmount();
         });
 
@@ -211,9 +241,9 @@ describe("ToolBlock — panel mode", () => {
             ));
             const anchor = container.querySelector(".agent-tool-name-tooltip-anchor") as HTMLElement;
             fireEvent.mouseEnter(anchor); // cursor arrives while still running (disabled, panel expanded)
-            expect(document.body.querySelector(".agent-tool-cmd-tooltip")).toBeNull();
+            expect(document.body.querySelector(".agent-node-peek-tooltip")).toBeNull();
             setNode({ ...baseTool, status: "success" }); // completes; cursor never moves
-            const tip = document.body.querySelector(".agent-tool-cmd-tooltip");
+            const tip = document.body.querySelector(".agent-node-peek-tooltip-body");
             expect(tip).not.toBeNull();
             expect(tip!.textContent).toBe("ls");
             unmount();
@@ -226,9 +256,9 @@ describe("ToolBlock — panel mode", () => {
             ));
             const anchor = container.querySelector(".agent-tool-name-tooltip-anchor") as HTMLElement;
             fireEvent.mouseEnter(anchor);
-            expect(document.body.querySelector(".agent-tool-cmd-tooltip")).not.toBeNull();
+            expect(document.body.querySelector(".agent-node-peek-tooltip")).not.toBeNull();
             setPinned(true); // user clicks elsewhere to pin the panel open; cursor stays put
-            expect(document.body.querySelector(".agent-tool-cmd-tooltip")).toBeNull();
+            expect(document.body.querySelector(".agent-node-peek-tooltip")).toBeNull();
             unmount();
         });
     });

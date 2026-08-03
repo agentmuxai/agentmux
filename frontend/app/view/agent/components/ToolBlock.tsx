@@ -41,6 +41,8 @@
 import clsx from "clsx";
 import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
+import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
+import { formatExactTime, formatTimeAgo } from "@/util/format-time";
 import type { BashResult, EditResult, GlobResult, GrepResult, WriteResult } from "../types";
 import type { ToolNode } from "../types";
 import { ToolBlockOverlay } from "./ToolBlockOverlay";
@@ -113,6 +115,13 @@ const PREVIEW_ZOOM_MIN = 0.7;
 const PREVIEW_ZOOM_MAX = 2.0;
 
 export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
+    // Drives the peek tooltip's live "time ago" text (§2.3 of
+    // SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md). Unconditional, same
+    // low-cost precedent as ToolElapsedTicker above — not gated on whether
+    // the tooltip is actually open, since Tooltip doesn't expose that state
+    // to its caller.
+    const peekTick = useTick(1000);
+
     // Independent font-scale for the tool preview panel. Ctrl+Scroll inside the
     // panel zooms only the preview; the pane-level zoom (block.meta["term:zoom"])
     // is unaffected. Ephemeral — not persisted to block meta.
@@ -274,6 +283,23 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // when there's nothing tool-kind-specific to show.
     const cmdText = createMemo(() => extractToolDetail(props.node.tool, (props.node.params as Record<string, any>) ?? {}));
 
+    // Peek-tooltip time + estimate lines (SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md
+    // §2.3). Real API-reported token/cost data doesn't exist per-tool-call
+    // today (see SPEC_PER_NODE_TOKEN_ACCOUNTING_2026_08_03.md for the real,
+    // Claude-only derivation planned as a follow-up) — this is a client-side
+    // chars÷4 estimate, always labeled "(est.)".
+    const peekTimeText = createMemo(() => {
+        peekTick(); // re-run every second so "ago" stays live while hovered
+        const ts = props.node.timestamp;
+        if (ts == null) return null;
+        return `${formatExactTime(ts)} · ${formatTimeAgo(ts)}`;
+    });
+    const peekEstimateText = createMemo(() => {
+        const text = JSON.stringify(props.node.params ?? {}) + JSON.stringify(props.node.result ?? "");
+        const count = estimateTokenCount(text);
+        return count > 0 ? `~${formatCompactNumber(count)} tok (est.)` : null;
+    });
+
     return (
         <div
             class={clsx("agent-tool-block", {
@@ -299,7 +325,17 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                     delayMs={150}
                     placement="bottom"
                     divClassName="agent-tool-name-tooltip-anchor"
-                    content={<div class="agent-tool-cmd-tooltip">{cmdText()}</div>}
+                    content={
+                        <div class="agent-node-peek-tooltip">
+                            <Show when={peekTimeText()}>
+                                <div class="agent-node-peek-tooltip-meta">{peekTimeText()}</div>
+                            </Show>
+                            <Show when={peekEstimateText()}>
+                                <div class="agent-node-peek-tooltip-meta">{peekEstimateText()}</div>
+                            </Show>
+                            <div class="agent-node-peek-tooltip-body">{cmdText()}</div>
+                        </div>
+                    }
                 >
                     <span class="agent-tool-name">{props.node.summary}</span>
                 </Tooltip>

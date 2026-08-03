@@ -1788,16 +1788,36 @@
     }
 }
 
-// Tool-command hover tooltip content (ToolBlock.tsx's Tooltip over
-// .agent-tool-name). Portal-rendered outside .agent-tool-block, so this is
-// a standalone top-level rule, not nested. Unlike the collapsed row's
-// single-line ellipsis clip, this shows the FULL command, word-wrapped —
-// that's the point of the tooltip.
-.agent-tool-cmd-tooltip {
-    max-width: 480px;
+// Node hover-peek tooltip content (ToolBlock.tsx's Tooltip over
+// .agent-tool-name, MarkdownBlock.tsx's over a thinking clump). Portal-
+// rendered outside the row, so these are standalone top-level rules, not
+// nested. Replaces the old, narrower .agent-tool-cmd-tooltip (11px,
+// cramped) — SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md §2.2a: sized to
+// read as comfortably as a native browser tooltip, not as a shrunk-down
+// technical readout. The outer Tooltip component (tooltip.tsx) already
+// supplies box chrome (bg/border/shadow/px-2 py-1 text-xs) — these rules
+// override the inherited text-xs sizing and add breathing room between
+// lines, same content-level-override approach the old rule already used.
+.agent-node-peek-tooltip {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-width: 420px;
+    padding: 2px;
+}
+
+.agent-node-peek-tooltip-meta {
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--secondary-text-color);
+    white-space: nowrap;
+}
+
+.agent-node-peek-tooltip-body {
     white-space: pre-wrap;
     overflow-wrap: break-word;
     font-family: var(--fixed-font, monospace);
-    font-size: 11px;
-    line-height: 1.5;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--main-text-color);
 }

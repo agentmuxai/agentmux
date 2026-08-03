@@ -6,8 +6,11 @@
  */
 
 import { Markdown } from "@/app/element/markdown";
-import clsx from "clsx";
-import { createEffect, createSignal, onCleanup, Show, type JSX } from "solid-js";
+import { Tooltip } from "@/app/element/tooltip";
+import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
+import { formatExactTime, formatTimeAgo } from "@/util/format-time";
+import { createEffect, createMemo, createSignal, onCleanup, Show, type JSX } from "solid-js";
+import { useTick } from "@/app/hook/useTick";
 import type { MarkdownNode } from "../types";
 
 interface MarkdownBlockProps {
@@ -75,23 +78,62 @@ export const MarkdownBlock = (props: MarkdownBlockProps): JSX.Element => {
         if (trailing) clearTimeout(trailing);
     });
 
+    // Thinking-clump peek tooltip (SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md
+    // §2.4). Mirrors ToolBlock.tsx's time + estimate pattern exactly. No
+    // duration line — deriving one from the next node's timestamp needs a new
+    // prop threaded down through the virtualization list's windowed-rows/
+    // streaming-buffer machinery (AgentDocumentVirtualList.tsx), which is
+    // performance-critical and carefully tuned; deferred as a follow-up
+    // rather than risked here for a nice-to-have (§4 resolution 1 of that
+    // spec still calls for it eventually).
+    const peekTick = useTick(1000);
+    const peekTimeText = createMemo(() => {
+        peekTick();
+        const ts = props.node.timestamp;
+        if (ts == null) return null;
+        return `${formatExactTime(ts)} · ${formatTimeAgo(ts)}`;
+    });
+    const peekEstimateText = createMemo(() => {
+        const count = estimateTokenCount(props.node.content);
+        return count > 0 ? `~${formatCompactNumber(count)} tok (est.)` : null;
+    });
+
     return (
         <Show
             when={isCanceled()}
             fallback={
-                <div
-                    class={clsx("agent-markdown-block", {
-                        "thinking-block": props.node.metadata?.thinking,
-                    })}
+                <Show
+                    when={props.node.metadata?.thinking}
+                    fallback={
+                        <div class="agent-markdown-block">
+                            {/* scrollable={false}: agent markdown streams (reactive). With
+                                scrollable, OverlayScrollbars relocates SolidJS's children into
+                                its viewport, so the next streaming reconcile calls replaceChild
+                                on a node it has moved → the long-standing replaceChild crash
+                                (#1326). Per-block scroll is also wrong inside the virtualized
+                                document, which owns the scroll. */}
+                            <Markdown text={view().text} highlight={view().highlight} scrollable={false} />
+                        </div>
+                    }
                 >
-                    {/* scrollable={false}: agent markdown streams (reactive). With
-                        scrollable, OverlayScrollbars relocates SolidJS's children into
-                        its viewport, so the next streaming reconcile calls replaceChild
-                        on a node it has moved → the long-standing replaceChild crash
-                        (#1326). Per-block scroll is also wrong inside the virtualized
-                        document, which owns the scroll. */}
-                    <Markdown text={view().text} highlight={view().highlight} scrollable={false} />
-                </div>
+                    <Tooltip
+                        placement="bottom"
+                        delayMs={150}
+                        divClassName="agent-markdown-block thinking-block"
+                        content={
+                            <div class="agent-node-peek-tooltip">
+                                <Show when={peekTimeText()}>
+                                    <div class="agent-node-peek-tooltip-meta">{peekTimeText()}</div>
+                                </Show>
+                                <Show when={peekEstimateText()}>
+                                    <div class="agent-node-peek-tooltip-meta">{peekEstimateText()}</div>
+                                </Show>
+                            </div>
+                        }
+                    >
+                        <Markdown text={view().text} highlight={view().highlight} scrollable={false} />
+                    </Tooltip>
+                </Show>
             }
         >
             <div class="agent-markdown-block markdown-canceled">

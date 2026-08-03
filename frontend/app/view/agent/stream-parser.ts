@@ -184,7 +184,7 @@ export class ClaudeCodeStreamParser {
     private currentAgentId?: string;
     // Mutable node objects for accumulated text/thinking — content is appended in-place
     private currentTextNode: { type: "markdown"; id: string; content: string } | null = null;
-    private currentThinkingNode: { type: "markdown"; id: string; content: string; metadata: { thinking: true } } | null = null;
+    private currentThinkingNode: { type: "markdown"; id: string; content: string; timestamp?: number; metadata: { thinking: true } } | null = null;
 
     /**
      * `skipIds` accepts either a static `ReadonlySet<string>` (for
@@ -385,7 +385,13 @@ export class ClaudeCodeStreamParser {
     private thinkingToNode(event: ThinkingEvent): DocumentNode {
         this.currentTextNode = null;
         if (!this.currentThinkingNode) {
-            this.currentThinkingNode = { type: "markdown", id: this.nextIdOf("node"), content: event.content, metadata: { thinking: true } };
+            // Stamped only on first creation of the clump — this is when the
+            // clump started, not when it was last extended. Matches
+            // toolCallToNode()'s Date.now() convention. See
+            // docs/specs/SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md §2.4:
+            // this was a real gap — thinking clumps never got a timestamp at
+            // all before, unlike every other node kind.
+            this.currentThinkingNode = { type: "markdown", id: this.nextIdOf("node"), content: event.content, timestamp: Date.now(), metadata: { thinking: true } };
         } else {
             this.currentThinkingNode = { ...this.currentThinkingNode, content: this.currentThinkingNode.content + event.content };
         }
