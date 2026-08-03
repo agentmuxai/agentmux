@@ -150,12 +150,18 @@ impl CwdState {
     }
 }
 
-/// Per-agent state file path. Keyed by `AGENTMUX_AGENT_ID` (set by
-/// agentmux-srv on every agent spawn — already relied on elsewhere in this
-/// file, see `log_relevant_env`) so concurrent agents on the same machine
-/// never share state. Falls back to a sanitized form of this process's own
-/// cwd (always the agent's fixed home directory) for the rare case the env
-/// var is absent, e.g. a manual invocation outside AgentMux.
+/// Per-*instance* state file path. Keyed by `AGENTMUX_INSTANCE_SLUG` — set by
+/// `agent-model.ts` to a per-launch slug that also seeds that instance's own
+/// unique working directory (`${agentmuxHome()}/agents/${instanceSlug}`) —
+/// NOT `AGENTMUX_AGENT_ID`, which is the definition-wide slug shared by every
+/// named instance launched from the same agent definition (codex P1 on this
+/// PR: keying by `AGENTMUX_AGENT_ID` made two concurrently-running instances
+/// of the same definition silently share one cwd file, so one instance's
+/// `cd` could redirect the other's next command into the wrong worktree).
+/// Falls back to `AGENTMUX_AGENT_ID` for older callers that only set that,
+/// then to a sanitized form of this process's own cwd (always the instance's
+/// fixed home directory either way) for the rare case neither is set, e.g. a
+/// manual invocation outside AgentMux.
 fn cwd_state_path() -> Option<PathBuf> {
     if let Ok(over) = std::env::var(CWD_STATE_FILE_OVERRIDE_ENV) {
         if !over.is_empty() {
@@ -166,9 +172,11 @@ fn cwd_state_path() -> Option<PathBuf> {
         .join(".agentmux")
         .join("state")
         .join("bashwrap-cwd");
-    let key = std::env::var("AGENTMUX_AGENT_ID")
+    let non_empty = |s: String| (!s.is_empty()).then_some(s);
+    let key = std::env::var("AGENTMUX_INSTANCE_SLUG")
         .ok()
-        .filter(|s| !s.is_empty())
+        .and_then(non_empty)
+        .or_else(|| std::env::var("AGENTMUX_AGENT_ID").ok().and_then(non_empty))
         .or_else(|| {
             std::env::current_dir()
                 .ok()
@@ -212,6 +220,17 @@ fn restore_cwd(state_path: &Path) -> Option<PathBuf> {
 /// never changes the command's real exit status. `command_block` must be a
 /// brace group or bare command, not something that already ends in its own
 /// `exit`.
+///
+/// The temp file is suffixed with `$$` (this bash's own PID), not a fixed
+/// name — reagentx P2 on this PR: two Bash tool calls for the same
+/// agent/instance can run concurrently (Claude issues parallel tool calls),
+/// and a shared fixed temp name meant two concurrent writers could
+/// interleave writes to the *same* temp file before either renamed it,
+/// corrupting the persisted cwd. Per-PID temp names make each writer's
+/// temp-then-rename independent; the only remaining race is which
+/// completed rename lands last, which is an inherent, expected ambiguity
+/// for genuinely concurrent `cd`s (no different from two parallel shells
+/// racing to `cd` a shared session) — not data corruption.
 fn append_cwd_capture(command_block: &str) -> String {
     // `pwd` alone prints MSYS-style paths under Git Bash (`/c/Users/...`),
     // which Rust's `std::fs`/`Path::is_dir()` on native Windows can't
@@ -226,7 +245,8 @@ fn append_cwd_capture(command_block: &str) -> String {
         "{command_block}\n\
 __agentmux_bashwrap_rc=$?\n\
 if [ -n \"${CWD_STATE_ENV}\" ]; then\n\
-  {pwd_cmd} > \"${CWD_STATE_ENV}.tmp\" 2>/dev/null && mv -f \"${CWD_STATE_ENV}.tmp\" \"${CWD_STATE_ENV}\" 2>/dev/null\n\
+  __agentmux_bashwrap_cwd_tmp=\"${CWD_STATE_ENV}.tmp.$$\"\n\
+  {pwd_cmd} > \"$__agentmux_bashwrap_cwd_tmp\" 2>/dev/null && mv -f \"$__agentmux_bashwrap_cwd_tmp\" \"${CWD_STATE_ENV}\" 2>/dev/null\n\
 fi\n\
 exit $__agentmux_bashwrap_rc"
     )
@@ -2150,29 +2170,91 @@ mod tests {
         assert_eq!(resolved, Some(target));
     }
 
+    /// Save-and-restore guard for an env var, so tests can freely
+    /// set/remove it and always leave the ambient environment exactly as
+    /// they found it, even on an early return or panic mid-test — every
+    /// cwd-state-key test needs this for at least `AGENTMUX_AGENT_ID` and
+    /// `AGENTMUX_INSTANCE_SLUG` simultaneously, so a bespoke prev/restore
+    /// dance per test (the pattern used elsewhere in this file for a single
+    /// var) would otherwise multiply combinatorially.
+    struct EnvVarGuard {
+        key: &'static str,
+        prev: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let prev = std::env::var(key).ok();
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self { key, prev }
+        }
+
+        fn unset(key: &'static str) -> Self {
+            let prev = std::env::var(key).ok();
+            unsafe {
+                std::env::remove_var(key);
+            }
+            Self { key, prev }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.prev {
+                    Some(v) => std::env::set_var(self.key, v),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
+
     #[test]
-    fn cwd_state_path_derives_from_agent_id_when_no_override() {
+    fn cwd_state_path_derives_from_agent_id_when_no_override_or_instance_slug() {
         let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let prev_override = std::env::var(CWD_STATE_FILE_OVERRIDE_ENV).ok();
-        let prev_agent = std::env::var("AGENTMUX_AGENT_ID").ok();
-        unsafe {
-            std::env::remove_var(CWD_STATE_FILE_OVERRIDE_ENV);
-            std::env::set_var("AGENTMUX_AGENT_ID", "Test-Agent-42");
-        }
-        let resolved = cwd_state_path();
-        unsafe {
-            match prev_override {
-                Some(v) => std::env::set_var(CWD_STATE_FILE_OVERRIDE_ENV, v),
-                None => std::env::remove_var(CWD_STATE_FILE_OVERRIDE_ENV),
-            }
-            match prev_agent {
-                Some(v) => std::env::set_var("AGENTMUX_AGENT_ID", v),
-                None => std::env::remove_var("AGENTMUX_AGENT_ID"),
-            }
-        }
-        let resolved = resolved.expect("home dir should resolve in any test environment");
+        let _override = EnvVarGuard::unset(CWD_STATE_FILE_OVERRIDE_ENV);
+        let _instance = EnvVarGuard::unset("AGENTMUX_INSTANCE_SLUG");
+        let _agent = EnvVarGuard::set("AGENTMUX_AGENT_ID", "Test-Agent-42");
+
+        let resolved = cwd_state_path().expect("home dir should resolve in any test environment");
         assert!(resolved.ends_with("Test-Agent-42.cwd"), "{resolved:?}");
         assert!(resolved.to_string_lossy().contains(".agentmux"));
+    }
+
+    /// codex P1 on this PR: keying solely by `AGENTMUX_AGENT_ID` (the
+    /// definition-wide slug) made two concurrently-running *instances* of
+    /// the same agent definition share one cwd file — a `cd` in instance A
+    /// would redirect instance B's next command into A's directory, even
+    /// though each instance has its own distinct working directory. The
+    /// fix: prefer `AGENTMUX_INSTANCE_SLUG` (per-launch, unique per running
+    /// instance — see `agent-model.ts`) whenever it's set.
+    #[test]
+    fn cwd_state_path_prefers_instance_slug_over_agent_id() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _override = EnvVarGuard::unset(CWD_STATE_FILE_OVERRIDE_ENV);
+        let _agent = EnvVarGuard::set("AGENTMUX_AGENT_ID", "shared-definition-slug");
+        let _instance_a = EnvVarGuard::set("AGENTMUX_INSTANCE_SLUG", "shared-definition-slug-20260101-000000");
+
+        let resolved_a =
+            cwd_state_path().expect("home dir should resolve in any test environment");
+        assert!(
+            resolved_a.ends_with("shared-definition-slug-20260101-000000.cwd"),
+            "{resolved_a:?}"
+        );
+
+        // A second, concurrently-running instance of the SAME definition
+        // (same AGENTMUX_AGENT_ID, different AGENTMUX_INSTANCE_SLUG) must
+        // resolve to a DIFFERENT file.
+        let _instance_b = EnvVarGuard::set("AGENTMUX_INSTANCE_SLUG", "shared-definition-slug-20260101-000001");
+        let resolved_b =
+            cwd_state_path().expect("home dir should resolve in any test environment");
+        assert_ne!(resolved_a, resolved_b);
+        assert!(
+            resolved_b.ends_with("shared-definition-slug-20260101-000001.cwd"),
+            "{resolved_b:?}"
+        );
     }
 
     #[test]
@@ -2220,11 +2302,76 @@ mod tests {
         // bookkeeping regardless of whether the state env var is set.
         assert!(script.contains("__agentmux_bashwrap_rc=$?"));
         assert!(script.trim_end().ends_with("exit $__agentmux_bashwrap_rc"));
-        // The write is gated on the env var being non-empty, and uses
-        // temp-then-rename so a crash mid-write can't corrupt the file.
+        // The write is gated on the env var being non-empty, and uses a
+        // per-PID temp-then-rename so a crash mid-write can't corrupt the
+        // file, and two concurrent invocations never write the same temp
+        // file (reagentx P2 on this PR).
         assert!(script.contains(&format!("-n \"${CWD_STATE_ENV}\"")));
-        assert!(script.contains(&format!("${CWD_STATE_ENV}.tmp")));
+        assert!(script.contains(&format!("${CWD_STATE_ENV}.tmp.$$")));
         assert!(script.contains("mv -f"));
+    }
+
+    /// reagentx P2 on this PR: a fixed (non-unique) temp filename meant two
+    /// concurrent Bash tool calls for the same instance could both write to
+    /// the *same* temp file before either renamed it, corrupting the
+    /// persisted cwd with interleaved bytes. Proves two real, genuinely
+    /// concurrent writers (via `$$`, each process's own PID) never
+    /// interleave — the file always ends up as one writer's complete,
+    /// valid output, never a mix of both.
+    #[tokio::test]
+    async fn run_via_pipes_concurrent_writers_never_corrupt_state_file() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let scratch = unique_temp_dir("e2e-concurrent");
+        let state_file = scratch.join("state.cwd");
+        let dir_a = scratch.join("dir-a");
+        let dir_b = scratch.join("dir-b");
+        std::fs::create_dir_all(&dir_a).unwrap();
+        std::fs::create_dir_all(&dir_b).unwrap();
+
+        let _override =
+            EnvVarGuard::set(CWD_STATE_FILE_OVERRIDE_ENV, state_file.to_str().unwrap());
+
+        let bash = locate_bash().expect("locate_bash for test — same dependency the whole binary needs");
+        let args_a = Args {
+            tool_id: "test-concurrent-a".to_string(),
+            b64_cmd: String::new(),
+            block_id: None,
+        };
+        let args_b = Args {
+            tool_id: "test-concurrent-b".to_string(),
+            b64_cmd: String::new(),
+            block_id: None,
+        };
+        let cd_a = format!("cd \"{}\"", dir_a.display());
+        let cd_b = format!("cd \"{}\"", dir_b.display());
+        let buffered_a = Arc::new(tokio::sync::Mutex::new(Vec::<u8>::new()));
+        let buffered_b = Arc::new(tokio::sync::Mutex::new(Vec::<u8>::new()));
+
+        let (status_a, status_b) = tokio::join!(
+            run_via_pipes(&args_a, &cd_a, None, buffered_a, &bash),
+            run_via_pipes(&args_b, &cd_b, None, buffered_b, &bash),
+        );
+        assert_eq!(status_a.unwrap(), 0);
+        assert_eq!(status_b.unwrap(), 0);
+
+        // Whichever writer's rename landed last, the file must contain
+        // exactly ONE valid, complete directory path — never a truncated
+        // or interleaved mix of both writers' output.
+        let final_contents = std::fs::read_to_string(&state_file).unwrap();
+        let trimmed = final_contents.trim();
+        let a_str = dir_a.to_string_lossy();
+        let b_str = dir_b.to_string_lossy();
+        assert!(
+            trimmed.ends_with(dir_a.file_name().unwrap().to_str().unwrap())
+                || trimmed.ends_with(dir_b.file_name().unwrap().to_str().unwrap()),
+            "expected a clean write of either {a_str:?} or {b_str:?}, got {trimmed:?}"
+        );
+        assert!(
+            !trimmed.contains('\n'),
+            "a corrupted/interleaved write would likely contain embedded newlines: {trimmed:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&scratch);
     }
 
     /// End-to-end proof of the actual fix: running a `cd` in one `exec`

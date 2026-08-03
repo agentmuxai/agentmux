@@ -160,6 +160,29 @@ Bash tool call, which is the part that was silently broken. Verified end-to-end,
 `agentmux-bashwrap.exe` twice in a row and confirming the second, independent process reports the
 directory the first one `cd`'d into.
 
+### 6.1 PR review follow-ups
+
+Two real issues surfaced during review of the PR that implemented §6, both fixed in the same PR:
+
+- **Wrong key scope (codex P1).** The first version keyed the state file by `AGENTMUX_AGENT_ID`,
+  which is the agent *definition's* stable slug — shared by every named instance launched from the
+  same definition (`frontend/app/view/agent/agent-model.ts`). Two concurrently-running instances of
+  one definition would have silently shared a single cwd file, so one instance's `cd` could redirect
+  the other's next command into the wrong worktree. Fixed by preferring `AGENTMUX_INSTANCE_SLUG` (the
+  per-launch slug that also seeds that instance's own unique working directory), falling back to
+  `AGENTMUX_AGENT_ID` only if the instance slug is unset.
+- **Concurrent-write corruption (reagentx P2).** The first version wrote to a fixed `<state>.tmp`
+  temp file before renaming it into place. Claude can issue parallel Bash tool calls, so two
+  concurrent `exec` invocations for the same instance could both write to that same temp file before
+  either renamed it, corrupting the persisted cwd with interleaved bytes. Fixed by suffixing the temp
+  file with `$$` (the wrapping bash's own PID), so concurrent writers never share a temp file — the
+  only remaining race is which completed rename lands last, which is an inherent, expected ambiguity
+  for genuinely concurrent `cd`s (same as two parallel real shells racing to `cd` a shared session),
+  not data corruption. Covered by a new
+  `run_via_pipes_concurrent_writers_never_corrupt_state_file` test that runs two real, concurrent
+  `run_via_pipes` invocations against the same state file and asserts the result is always one
+  writer's complete output, never a mix of both.
+
 ## Key files
 
 | File | Role |
