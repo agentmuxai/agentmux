@@ -14,6 +14,7 @@
 import clsx from "clsx";
 import { For, Show, createMemo, createSignal, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
+import { formatElapsedClock } from "@/util/format-time";
 import { capChars, createChunkCapper, createSpinnerCollapser, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
 import { LinkifiedText } from "@/app/element/linkified-text";
@@ -33,19 +34,12 @@ const KIND_CLASS: Record<string, string> = {
     system: "agent-tool-log-line--system",
 };
 
-function formatElapsed(ms: number): string {
-    const totalSec = Math.floor(ms / 1000);
-    const m = Math.floor(totalSec / 60);
-    const s = totalSec % 60;
-    return `${m}:${String(s).padStart(2, "0")}`;
-}
-
 export const PersistentShellBlock = (props: PersistentShellBlockProps): JSX.Element => {
     const tick = useTick(1000);
 
     const elapsed = createMemo(() => {
         const end = props.node.exitedAt ?? (tick(), Date.now());
-        return formatElapsed(end - props.node.spawnedAt);
+        return formatElapsedClock(end - props.node.spawnedAt);
     });
 
     const lastLine = createMemo((): string | undefined => {
