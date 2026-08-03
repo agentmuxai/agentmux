@@ -143,6 +143,36 @@ attempted here.
 `docs/MUXSPECT.md`'s "what it can and can't see" section now documents
 `last_error` alongside the existing lifecycle/process-tree/staleness bullets.
 
+### 3.5 Fixed during review: two of the four sources weren't actually persisted (codex P1)
+
+`classify_last_error_source` names four sources — `identity`,
+`container_spawn` (exec + ensure_running), `host_spawn` — but two of the
+four underlying construction sites (`agent_handlers/input.rs`'s container
+`ensure_running` failure, `subprocess/host_spawn.rs`'s queued-message-drain
+failure) were passing `None` for `handle_append_block_file`'s filestore
+argument, meaning those two frames were only ever live-broadcast, never
+durably written to `output`. `last_error_frame` only reads the persisted
+file, so `describe`/`list` could never have surfaced either of them after
+the live moment passed — silently contradicting §3.3's own claim that this
+"isn't identity-specific, it's the general signal for the whole app."
+
+Both call sites already had an `Arc<FileStore>`/`Option<Arc<FileStore>>`
+in scope (`filestore_gate` in `input.rs`, matching the identity-gate frame
+a few lines above it; a new `filestore_wait` clone added alongside
+`host_spawn.rs`'s other `_wait`-suffixed clones, matching the module's own
+existing naming convention) — both fixed to pass it through, exactly
+mirroring the pattern the identity-gate and container-`exec` call sites
+already used correctly. No new test added for either failure path directly
+(simulating a real Docker `ensure_running` failure or a lease-conflict
+queued-message failure would need mocking scaffolding that doesn't
+currently exist in these modules, disproportionate to a 2-line wiring
+fix) — the underlying persist mechanism itself
+(`handle_append_block_file`'s `Some`-vs-`None` behavior) already has
+direct unit coverage (`shell/tests.rs`'s
+`test_handle_append_block_file_writes_to_filestore` and siblings), and
+both fixes compile under the exact same call shape already proven at the
+other two, always-correct sites.
+
 ## 4. What this would have caught
 
 Re-running the actual incident with this change live:

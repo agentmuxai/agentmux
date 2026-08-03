@@ -504,6 +504,13 @@ impl SubprocessController {
         let event_bus_wait = self.event_bus.clone();
         let lease_store_wait = self.lease_store.clone();
         let claimed_lease_wait = claimed_lease;
+        // For the queued-message-drain failure frame below — must be
+        // PERSISTED, not just live-broadcast (codex P1 on PR #2390: the
+        // call below previously passed None despite its own comment
+        // claiming parity with input.rs's persisted identity/container
+        // frames, so muxspect's last_error_frame could never see it after
+        // the live moment passed).
+        let filestore_wait = self.filestore.clone();
         tokio::spawn(async move {
             // Classified failure cause, surfaced to the pane after the readers drain.
             let mut run_failure: Option<crate::agents::failure::AgentFailure> = None;
@@ -741,7 +748,7 @@ impl SubprocessController {
                                 &block_id_wait,
                                 SUBPROCESS_OUTPUT_SUBJECT,
                                 format!("{error_frame}\n").as_bytes(),
-                                None,
+                                filestore_wait.as_ref(),
                                 None,
                             );
                         }

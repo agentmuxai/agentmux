@@ -384,12 +384,19 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                                 "subtype": "error_during_execution",
                                 "error": {"message": format!("[AgentMux] container ensure_running failed: {e}")}
                             }).to_string();
+                            // Some(&filestore_gate): PERSIST, not just live-broadcast —
+                            // same requirement as the identity spawn-gate frame above
+                            // (reagent P1, PR #2164 round 2). Previously passed None
+                            // here despite the comment above claiming parity with that
+                            // path — codex P1 on PR #2390: muxspect's last_error_frame
+                            // (which reads only the persisted `output` file) could
+                            // never see this failure after the live moment passed.
                             crate::backend::blockcontroller::shell::handle_append_block_file(
                                 &broker,
                                 &cmd.blockid,
                                 crate::backend::blockcontroller::subprocess::SUBPROCESS_OUTPUT_SUBJECT,
                                 format!("{error_frame}\n").as_bytes(),
-                                None,
+                                Some(&filestore_gate),
                                 None,
                             );
                             return Err(format!("container ensure_running failed: {e}"));
