@@ -2,13 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AgentComposerStrip — slim 28-32px status row that sits directly above
- * the textarea in the agent pane composer region.
+ * AgentComposerStrip — status row that sits directly above the textarea in
+ * the agent pane composer region. Left-justified, wrapping onto additional
+ * lines (capped at 3) rather than clipping when the pane narrows — see
+ * docs/specs/SPEC_COMPOSER_STRIP_LEFT_JUSTIFIED_TIERED_WRAP_2026_08_03.md.
  *
- * LEFT:   AgentRuntimeDropup (single Mode · Model · Effort trigger)
- * CENTER: tokens (↑in ↓out) · elapsed — true-centered in the bar
- * RIGHT:  ⚙N process badge · context text (12.1k / 64k) · Shell toggle
- *         (Shell is rightmost — SPEC_COMPOSER_STRIP_LAYOUT_MIC_CENTER_MODEL_DEFAULTS_2026_07_10.md)
+ * In flow order:
+ *   1. AgentRuntimeDropup (single Mode · Model · Effort trigger) + HOST/SANDBOX tag
+ *   2. tokens (↑in ↓out) · elapsed
+ *   3. ⚙N process badge · context text (12.1k / 64k) · auth tag · Shell toggle
  *
  * The strip bar itself is not clickable. "Shell" is the sole toggle for
  * the details drawer (the AgentShellSubblock terminal — activity-log lines
@@ -211,11 +213,13 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                 </Show>
             </span>
 
-            {/* Center zone — token/elapsed stats, true-centered in the bar via
-                the grid's middle column (see _composer-strip.scss). The
-                wrapper span always renders (even with no stats yet) so the
-                grid keeps 3 children and the right zone stays in the
-                rightmost column instead of sliding into the middle one. */}
+            {/* Stats zone — token/elapsed stats. Left-justified in flow (no
+                longer true-centered, see _composer-strip.scss), sitting
+                right after the controls zone or wrapping onto its own line
+                when there isn't room for both. The wrapper span always
+                renders (even with no stats yet) so this zone's presence in
+                the flow order — and therefore where the right zone wraps
+                to — stays stable whether or not stats are populated yet. */}
             <span class="agent-composer-strip-stats-zone">
                 <Show when={rightText()}>
                     <span
@@ -227,8 +231,10 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                 </Show>
             </span>
 
-            {/* Right zone — process badge + context text + Shell toggle, in
-                that order so Shell is the rightmost element in the bar. */}
+            {/* Right zone — process badge + context text + auth tag + Shell
+                toggle, in that order. Shell still lands rightmost on a wide
+                pane (last in a left-filling line); on a wrapped line it
+                starts at that line's left margin like everything else. */}
             <span class="agent-composer-strip-right">
                 <Show when={(props.processCount ?? 0) > 0}>
                     <button
