@@ -131,7 +131,7 @@ struct CwdState {
 
 impl CwdState {
     fn load() -> Self {
-        let path = cwd_state_path();
+        let mut path = cwd_state_path();
         if let Some(dir) = path.as_deref().and_then(Path::parent) {
             if let Err(e) = std::fs::create_dir_all(dir) {
                 tracing::warn!(
@@ -140,6 +140,16 @@ impl CwdState {
                     dir = %dir.display(),
                     "failed to create cwd-state dir; cwd persistence disabled for this call",
                 );
+                // reagentx P2 (re-review): the log line above claims
+                // persistence is disabled, but `path` used to stay `Some`
+                // here regardless — restore_cwd below would still attempt
+                // (and silently fail) a read, and the child would still get
+                // CWD_STATE_ENV pointed at a directory that doesn't exist,
+                // so append_cwd_capture's write would silently fail on
+                // every single call forever instead of being skipped once,
+                // as documented. Actually clear it so both sides honor the
+                // "disabled" contract `path`'s own doc comment promises.
+                path = None;
             }
         }
         let start_dir = path
@@ -2255,6 +2265,36 @@ mod tests {
             resolved_b.ends_with("shared-definition-slug-20260101-000001.cwd"),
             "{resolved_b:?}"
         );
+    }
+
+    /// reagentx re-review finding: when the state dir can't be created,
+    /// `CwdState::load()` used to leave `path` as `Some` anyway, so
+    /// `restore_cwd` and the child's write would both silently keep failing
+    /// against a directory that doesn't exist on every subsequent call,
+    /// instead of cleanly disabling persistence once as the doc comment
+    /// promises. Forces the failure by pointing the override at a path
+    /// whose *parent* is a plain file, not a directory — `create_dir_all`
+    /// cannot create a directory there.
+    #[test]
+    fn cwd_state_load_clears_path_when_state_dir_cannot_be_created() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let scratch = unique_temp_dir("uncreatable-parent");
+        let blocking_file = scratch.join("not-a-directory");
+        std::fs::write(&blocking_file, b"blocks create_dir_all").unwrap();
+        let unreachable_state_file = blocking_file.join("state.cwd");
+
+        let _override = EnvVarGuard::set(
+            CWD_STATE_FILE_OVERRIDE_ENV,
+            unreachable_state_file.to_str().unwrap(),
+        );
+        let state = CwdState::load();
+        let _ = std::fs::remove_dir_all(&scratch);
+
+        assert_eq!(
+            state.path, None,
+            "path must be cleared (not just logged-as-disabled) when its parent dir can't be created"
+        );
+        assert!(state.start_dir.is_some(), "must still fall back to a start dir");
     }
 
     #[test]
