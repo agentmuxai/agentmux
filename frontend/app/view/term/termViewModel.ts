@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Block } from "@/app/block/block";
-import { sleep } from "@/util/async";
 import { BlockNodeModel } from "@/app/block/blocktypes";
 import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { appHandleKeyDown } from "@/app/store/keymodel";
@@ -29,7 +28,7 @@ import {
 } from "@/store/global";
 import * as services from "@/store/services";
 import * as keyutil from "@/util/keyutil";
-import { boundNumber, createSignalAtom, stringToBase64 } from "@/util/util";
+import { boundNumber, createSignalAtom, sleep, stringToBase64 } from "@/util/util";
 import type { SignalAtom } from "@/util/util";
 import { createMemo, createSignal } from "solid-js";
 

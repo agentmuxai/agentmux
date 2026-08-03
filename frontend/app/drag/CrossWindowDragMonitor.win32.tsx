@@ -21,7 +21,7 @@
  */
 
 import { atoms, getApi } from "@/store/global";
-import { sleep } from "@/util/async";
+import { sleep } from "@/util/util";
 import { WorkspaceService } from "@/app/store/services";
 import { getLayoutModelForStaticTab, LayoutTreeActionType, LayoutTreeDeleteNodeAction } from "@/layout/index";
 import { invokeCommand } from "@/app/platform/ipc";

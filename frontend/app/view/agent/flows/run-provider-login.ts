@@ -77,7 +77,7 @@
 
 import { getApi } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
-import { sleep } from "@/util/async";
+import { sleep } from "@/util/util";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import * as WOS from "@/app/store/wos";
 import { forceProviderLogin, type ForceLoginParams } from "./force-login";

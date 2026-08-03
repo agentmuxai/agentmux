@@ -22,7 +22,7 @@
  */
 
 import { getApi } from "@/app/store/global";
-import { sleep } from "@/util/async";
+import { sleep } from "@/util/util";
 import type { LogFn } from "../types";
 
 export async function seedGlobalLogin(

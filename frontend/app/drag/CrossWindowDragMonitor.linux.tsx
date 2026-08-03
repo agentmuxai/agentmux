@@ -9,7 +9,7 @@
  */
 
 import { atoms, getApi } from "@/store/global";
-import { sleep } from "@/util/async";
+import { sleep } from "@/util/util";
 import { WorkspaceService } from "@/app/store/services";
 import { Logger } from "@/util/logger";
 import { openTearOffWindow, measureSourcePaneSize, measureMotherResize } from "./tear-off-pool-helper";

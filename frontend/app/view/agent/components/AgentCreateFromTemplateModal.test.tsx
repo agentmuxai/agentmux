@@ -16,7 +16,7 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { sleep } from "@/util/async";
+import { sleep } from "@/util/util";
 
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {

@@ -35,7 +35,7 @@
 
 import { createMemo, createSignal, onCleanup, type Accessor } from "solid-js";
 import { getApi, getBlockMetaKeyAtom, staticTabId } from "@/app/store/global";
-import { sleep } from "@/util/async";
+import { sleep } from "@/util/util";
 import { RpcApi } from "@/app/store/rpc-api";
 import { BlockService } from "@/app/store/services";
 import * as WOS from "@/app/store/wos";
