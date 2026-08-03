@@ -843,8 +843,8 @@ export class LayoutModel {
     /**
      * Callback to update pending node sizes when a resize handle is dragged.
      */
-    onResizeMove(resizeHandle: ResizeHandleProps, x: number, y: number) {
-        onResizeMoveImpl(this, resizeHandle, x, y);
+    onResizeMove(resizeHandle: ResizeHandleProps, x: number, y: number, groupResize: boolean = false) {
+        onResizeMoveImpl(this, resizeHandle, x, y, groupResize);
     }
 
     /**
