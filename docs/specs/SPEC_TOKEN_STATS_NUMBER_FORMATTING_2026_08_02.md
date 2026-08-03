@@ -141,9 +141,15 @@ Fixed: `abbreviateText(s, max, opts?: { pathAware?: boolean })` — `pathAware` 
 
 **Second correction, caught by reagent on PR #2387's review (P1)**: the first implementation of the `pathAware` opt-in went too far the other way — it made `pathAware: true` left-truncate *unconditionally*, dropping the original `/`/`\` content check entirely. `AgentFooter.tsx`'s `currentToolArg` isn't always a path (Bash flags, grep patterns, etc.), so this silently reversed the truncation direction for every non-path tool arg, a regression the PR's own description claimed not to introduce and that `format-text.test.ts` didn't yet cover. Fixed: `pathAware` now only *enables* the content check (`opts?.pathAware && (s.includes("/") || s.includes("\\"))`) rather than bypassing it — exactly reproducing `AgentFooter.tsx`'s original per-string behavior. Added a regression test for a non-path arg with `pathAware: true` set.
 
-### 7.3 `sleep(ms)` — no shared helper, 12 inline copies of the same promise
+### 7.3 `sleep(ms)` — 12 inline copies, PLUS an already-exported-but-unused 13th, PLUS a wider tail not fully closed
 
-`grep -rn "new Promise<void>((r) => setTimeout(r"` across `frontend/app` returns **12 hits** (poll loops in `useAgentControllerStatus.ts`'s login-recovery flows, retry loops elsewhere) — the identical `new Promise<void>((r) => setTimeout(r, ms))` expression, inlined every time instead of extracted once. Proposed: `frontend/util/async.ts` exporting `export const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));`, migrate all 12 call sites. Purely mechanical, no behavior question (unlike §7.1) — every inline copy is already identical.
+`grep -rn "new Promise<void>((r) => setTimeout(r"` across `frontend/app` returns **12 hits** (poll loops in `useAgentControllerStatus.ts`'s login-recovery flows, retry loops elsewhere) — the identical `new Promise<void>((r) => setTimeout(r, ms))` expression, inlined every time instead of extracted once.
+
+**Third correction, caught by reagent's re-review on PR #2388 (P2, after the fixup commit)**: the `<void>`-anchored grep above was itself too narrow — `CrossWindowDragMonitor.{darwin,linux,win32}.tsx` (already touched by this PR for their 350ms case) each had a SIBLING, untyped `new Promise((r) => setTimeout(r, 50))` a few lines away that the original pattern missed entirely. Fixed: migrated all 3 sibling sites too (`sleep(50)`, reusing the same import already added to those files).
+
+**Known-remaining tail, deliberately left out of this PR's scope**: re-sweeping with a looser pattern (`new Promise[^(]*\(\([a-zA-Z]*\) => setTimeout\(`) after the above fix still surfaces duplicates in files this PR never otherwise touches: `frontend/app/platform/ipc.ts:17` has its OWN named wrapper (`const delay = (ms) => new Promise(...)`) — a third parallel name for the same concept, alongside `util.ts`'s `sleep` and this PR's now-removed `async.ts`; `pane-overlay.ts:201`, `tab-presets.ts:92`, and `termwrap.ts:329` each have one more inline copy; `command-source.test.ts`, `auth-flow-controller.test.ts`, and `useAgentCommands.test.ts` (3 occurrences) have test-local ones. None of these are in files this PR already edits, so pulling them in now would grow a PR reagent already reviewed twice into a much larger, differently-scoped diff. Flagged here rather than silently left for someone to rediscover — worth a small follow-up PR.
+
+**Correction, caught by reagent on PR #2388's review (P2)**: the first implementation added a brand-new `frontend/util/async.ts` without checking whether a shared `sleep` already existed. One did — `frontend/util/util.ts:313` already defines and exports `sleep(ms)` (identical body), just with **zero real call sites anywhere** (only its own now-added test used it). The 12-copy count undercounted the actual duplication by missing this 13th, already-shared-but-unconsumed instance. Fixed: deleted the new `async.ts`/`async.test.ts`, repointed all 12 call sites at the existing `@/util/util`'s `sleep` instead, and added the test coverage `sleep` never had (scoped `frontend/util/util.test.ts`, not a full test file for that large grab-bag module).
 
 ### 7.4 Checked and already fine — no action needed
 
@@ -154,13 +160,13 @@ Fixed: `abbreviateText(s, max, opts?: { pathAware?: boolean })` — `pathAware` 
 
 ### 7.5 Revised scope if this becomes one PR
 
-Four new files under the existing `frontend/util/` convention, each with its own focused test file:
+Three new files under the existing `frontend/util/` convention, each with its own focused test file, plus one existing-but-unused export finally wired up:
 
-| New file | Exports | Replaces |
+| File | Exports | Replaces |
 |---|---|---|
-| `format-count.ts` | `formatCompactNumber`, `formatExactNumber` | 7 copies (§2/§3) |
-| `format-time.ts` | `formatElapsedCompact`, `formatElapsedClock` | 5 copies (§7.1) |
-| `format-text.ts` | `abbreviateText` | 3 copies (§7.2) |
-| `async.ts` | `sleep` | 12 inline copies (§7.3) |
+| `format-count.ts` (new) | `formatCompactNumber`, `formatExactNumber` | 7 copies (§2/§3) |
+| `format-time.ts` (new) | `formatElapsedCompact`, `formatElapsedClock` | 5 copies (§7.1) |
+| `format-text.ts` (new) | `abbreviateText` | 3 copies (§7.2) |
+| `util.ts` (existing, `sleep` finally consumed) | `sleep` | 12 inline copies + itself was unused (§7.3) |
 
 Recommend sequencing as separate, small PRs in roughly this order (count-formatting first, since it's the one already fully scoped in §1-§6) rather than one large mixed-concern PR — each is independently reviewable and none depend on the others.

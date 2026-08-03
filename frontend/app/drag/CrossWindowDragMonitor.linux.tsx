@@ -9,6 +9,7 @@
  */
 
 import { atoms, getApi } from "@/store/global";
+import { sleep } from "@/util/util";
 import { WorkspaceService } from "@/app/store/services";
 import { Logger } from "@/util/logger";
 import { openTearOffWindow, measureSourcePaneSize, measureMotherResize } from "./tear-off-pool-helper";
@@ -73,7 +74,7 @@ function CrossWindowDragMonitor(): JSX.Element {
             const dropX = e.screenX;
             const dropY = e.screenY;
 
-            await new Promise((r) => setTimeout(r, 50));
+            await sleep(50);
             await handleCrossWindowDragEnd(payload, windowLabelRef, dropX, dropY);
         };
 
@@ -269,7 +270,7 @@ async function performTearOff(
         } catch (err) {
             const msg = String(err);
             if (msg.includes("currently closing")) {
-                await new Promise<void>((r) => setTimeout(r, 350));
+                await sleep(350);
                 try {
                     await invokeCommand<{ window_label: string }>("open_floating_pane_window", {
                         pane_id: payload.blockId,
