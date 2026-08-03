@@ -25,6 +25,14 @@ describe("abbreviateText", () => {
         expect(abbreviateText(String.raw`C:\proj\file.ts`, 9, { pathAware: true })).toBe(String.raw`…\file.ts`);
     });
 
+    it("still right-truncates a non-path string even with pathAware: true (reagent P1, PR #2387)", () => {
+        // pathAware only enables the / \ check — it must not force every
+        // input through left-truncation. AgentFooter.tsx's real inputs
+        // include non-path tool args (grep patterns, Bash flags, etc.).
+        expect(abbreviateText("--verbose --no-color --max-count=100", 15, { pathAware: true }))
+            .toBe("--verbose --no…");
+    });
+
     it("uses the real ellipsis character, not three literal dots", () => {
         const result = abbreviateText("a very long message that overflows", 10);
         expect(result).toContain("…");
