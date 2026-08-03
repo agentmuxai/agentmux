@@ -11,7 +11,7 @@
  */
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { sleep } from "@/util/async";
+import { sleep } from "@/util/util";
 import {
     agentPerfStore,
     ESTIMATOR_MISS_THRESHOLD,

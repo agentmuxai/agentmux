@@ -16,7 +16,7 @@
 
 import { createRoot, type Owner } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { sleep } from "@/util/async";
+import { sleep } from "@/util/util";
 
 vi.mock("@/app/store/rpc-api", () => {
     const RpcApi = {

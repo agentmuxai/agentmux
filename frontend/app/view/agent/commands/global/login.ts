@@ -19,7 +19,7 @@
  */
 
 import { RpcApi } from "@/app/store/rpc-api";
-import { sleep } from "@/util/async";
+import { sleep } from "@/util/util";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { persistAndLinkAccount, runProviderLogin } from "../../flows/run-provider-login";
 import type { SlashCommand, SlashCommandContext, SlashResult } from "../types";
