@@ -2695,7 +2695,7 @@ impl PersistentSubprocessController {
                     // treat this failed attempt as the real end of the
                     // user's turn before the retry's own fresh "running"
                     // status ever lands. reagentx/codex never reviewed this
-                    // controller type in PR #2338 (see docs/retros/
+                    // controller type in PR #2338 (see docs/retro/
                     // RETRO_STALE_RESUME_SESSION_ID_ACROSS_CHANNELS_2026_07_29.md).
                     for effect in effects {
                         match effect {

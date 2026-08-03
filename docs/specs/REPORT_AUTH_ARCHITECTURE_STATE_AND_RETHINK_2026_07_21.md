@@ -10,6 +10,8 @@ running live today). PR #2255 (`agenta/login-single-point-enforcement-clean`, **
 this writing) reworks part of this system; its changes are described separately in §3 and never blended
 into the "current state" sections, since it isn't real yet.
 
+> **Staleness note (2026-08-03):** PR #2255 has since merged (`95d2cfe7`, "single-point login enforcement for oauth providers"). Every "open, unmerged — not real yet" qualifier below (§3 heading, §4 intro, and inline mentions) is now describing shipped, current behavior, not a proposal — re-read §3 as "what changed" rather than "what would change." Table/column names throughout may also predate the `db_identity_accounts` → `db_accounts` rename; cross-check against current code before relying on schema specifics.
+
 **Implementation status (updated same day):** Phases A–C of §6's target architecture shipped as PRs
 #2260, #2262, #2263. Phase D (the device-flow shim) was **not built** — a dedicated feasibility spike
 found it's not viable for any of the three target providers (Anthropic, OpenAI, Gemini). See §8 for the

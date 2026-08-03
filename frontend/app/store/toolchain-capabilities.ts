@@ -15,7 +15,7 @@
  * the Toolchain widget could report Docker "installed" while the
  * create-agent modal greyed out the Container option as "Docker not
  * detected," on the same machine, at the same moment. See
- * docs/retros/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md.
+ * docs/retro/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md.
  *
  * This module fixes that by being the only place that decides, per
  * `CoreTool.checkKind` (toolchain-catalog.ts), which backend primitive
