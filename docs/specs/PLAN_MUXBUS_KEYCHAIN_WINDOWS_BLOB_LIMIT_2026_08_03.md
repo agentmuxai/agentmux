@@ -1,10 +1,8 @@
 # Plan — fix MuxBus token persistence on Windows (Credential Manager 2560-byte cap)
 
 **Date:** 2026-08-03
-**Status:** implemented and live-verified working (§7). Took three live
-iterations to land: §3's per-field split wasn't sufficient (§6), and the
-first chunking attempt's size budget was itself wrong due to a char/byte
-mixup in the `keyring` crate's own error message (§7).
+**Status:** implemented, live-verified working (§7), and a P1 review finding
+on the chunking design fixed (§8).
 **Context:** live-debugged on channel `local-main-b28b7a-9172ff88` (this
 machine, Windows) while checking whether GitHub PR-review jekt notifications
 were reaching that instance via the muxbus GitHub consumer
@@ -196,3 +194,34 @@ and stayed connected — log shows `auth.broker.fresh: credential is fresh`
 and `cloud_subscriber: WebSocket connected`, no `failed to save
 credentials`, no further `token expired, skipping injection`. Confirmed
 fixed.
+
+## 8. Review finding: `read_chunk_count` swallowed read errors (P1, fixed)
+
+reagent flagged (twice — unaddressed after the first flag on the prior
+commit) that `read_chunk_count` collapsed a genuine keychain read *error*
+into the same `0` result as "no `:count` entry exists yet." Two real
+consequences:
+
+- **`muxbus_clear` (logout):** used the count to bound `for i in 0..count {
+  delete(chunk_key) }`. A transient count-read failure → `count = 0` → the
+  loop deletes nothing — but the `:count` key itself is still deleted
+  unconditionally right after. Logout appears to succeed while the real
+  access/refresh/id token chunks are silently orphaned in the OS keychain —
+  a genuine secret-hygiene bug, not just a logic nit.
+- **`write_chunked_field`:** the same swallowed error meant a transient
+  failure reading the *old* count skipped clearing stale trailing chunks
+  left over from a previous, longer value.
+
+**Fix:** `read_chunk_count` now returns `Result<usize, StoreError>`,
+distinguishing "no entry" (`Ok(0)`) from "read failed" (`Err`).
+`write_chunked_field` propagates the error via `?` rather than assuming 0 —
+consistent with this file's established rule (see `PriorKeychainState`'s own
+doc comment) that a real read failure must never be silently treated as
+"nothing was there." `muxbus_clear` can't simply propagate (logout is
+documented best-effort — a keychain problem must not block clearing the SQL
+row), so instead it falls back to scanning a generous bound
+(`MAX_PLAUSIBLE_CHUNKS = 32`, i.e. 32,000 chars — no real Cognito token
+comes remotely close) when the real count can't be read.
+`secret_store::delete` on a non-existent entry is already a no-op success,
+so over-scanning past the real count is harmless; it guarantees actual
+cleanup instead of silently skipping it.
