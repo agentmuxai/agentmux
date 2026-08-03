@@ -98,26 +98,43 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
         });
     };
 
+    // reagent P1 on PR #2392: the RAF below used to be un-cancellable and
+    // `floatingEl` was never reset, so a rapid hover→leave (very reachable
+    // given the 150ms enter-delay that mounts this Portal, followed by a
+    // mouseleave within the same animation frame) let a stale RAF fire
+    // AFTER the `<Show>` had already unmounted this div — `floatingEl`
+    // still pointed at the detached node, `row` was still valid, so
+    // `autoUpdate(row, floatingEl, update)` ran anyway and registered
+    // scroll/resize listeners nothing would ever clean up, since the
+    // owning `onCleanup` (which only fires once per component-level
+    // unmount, not per `show` toggle) had already run with
+    // `cleanupAutoUpdate` still `null` at that point. Registering
+    // `onCleanup` HERE, synchronously inside the ref callback, attaches
+    // it to THIS specific `<Show>` branch's own reactive scope — it fires
+    // on every unmount of this div (whether from `show` flipping false or
+    // the whole component unmounting), 1:1 with `registerFloating`'s own
+    // mounts, so there's no toggle-without-matching-cleanup gap left.
     const registerFloating = (el: HTMLElement) => {
         floatingEl = el;
-        requestAnimationFrame(() => {
+        const rafId = requestAnimationFrame(() => {
             const row = props.rowEl();
             if (!row || !floatingEl) return;
             cleanupAutoUpdate?.();
             cleanupAutoUpdate = autoUpdate(row, floatingEl, update);
+        });
+        onCleanup(() => {
+            cancelAnimationFrame(rafId);
+            cleanupAutoUpdate?.();
+            cleanupAutoUpdate = null;
+            floatingEl = undefined;
         });
     };
 
     createEffect(() => {
         if (props.show) {
             update();
-        } else {
-            cleanupAutoUpdate?.();
-            cleanupAutoUpdate = null;
         }
     });
-
-    onCleanup(() => cleanupAutoUpdate?.());
 
     return (
         <Show when={props.show}>
