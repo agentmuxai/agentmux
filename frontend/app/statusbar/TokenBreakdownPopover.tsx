@@ -17,6 +17,7 @@ import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { computeMenuPosition } from "@/app/util/menu-position";
 import { ConfirmModal } from "@/element/modal";
 import { getCliCatalogEntry } from "@/app/view/agent/defaults/cli-catalog";
+import { formatCompactNumber } from "@/util/format-count";
 import {
     getBreakdown,
     getSessionStartAt,
@@ -25,12 +26,6 @@ import {
     tokenUsageState,
     type ServiceRow,
 } from "@/store/token-usage";
-
-function formatTokenCount(n: number): string {
-    if (n < 1000) return String(n);
-    if (n < 10_000) return `${(n / 1000).toFixed(1)}k`;
-    return `${Math.round(n / 1000)}k`;
-}
 
 function formatSessionStartTime(epochMs: number): string {
     const d = new Date(epochMs);
@@ -155,10 +150,10 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
                                     </span>
                                     <span class="token-usage-breakdown-row-counts">
                                         <span class="token-usage-indicator-arrow">↑</span>
-                                        {formatTokenCount(row.input)}
+                                        {formatCompactNumber(row.input)}
                                         {" "}
                                         <span class="token-usage-indicator-arrow">↓</span>
-                                        {formatTokenCount(row.output)}
+                                        {formatCompactNumber(row.output)}
                                     </span>
                                 </div>
                             )}
@@ -167,10 +162,10 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
                             <span class="token-usage-breakdown-row-name">Total</span>
                             <span class="token-usage-breakdown-row-counts">
                                 <span class="token-usage-indicator-arrow">↑</span>
-                                {formatTokenCount(total().input)}
+                                {formatCompactNumber(total().input)}
                                 {" "}
                                 <span class="token-usage-indicator-arrow">↓</span>
-                                {formatTokenCount(total().output)}
+                                {formatCompactNumber(total().output)}
                             </span>
                         </div>
                     </div>

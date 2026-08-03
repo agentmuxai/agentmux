@@ -23,6 +23,7 @@ import { ToolBlock } from "../components/ToolBlock";
 import { UserMessageBlock } from "../components/UserMessageBlock";
 import type { DocumentNode, DocumentState, ShellNode, UserMessageNode } from "../types";
 import { markRowMount } from "./perf-probe";
+import { formatCompactNumber } from "@/util/format-count";
 
 export interface DocumentRowProps {
     /**
@@ -258,7 +259,7 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
             <Show when={props.node() && props.node().type === "context_compacted"}>
                 {(() => {
                     const n = props.node() as Extract<DocumentNode, { type: "context_compacted" }>;
-                    const fmt = (tok: number) => tok >= 1000 ? `${Math.round(tok / 1000)}k` : String(tok);
+                    const fmt = formatCompactNumber;
                     // Real events (backend `CompactionBoundary`) carry a real
                     // trigger + duration; the heuristic fallback (other
                     // providers, or a missed real event) has neither. See
