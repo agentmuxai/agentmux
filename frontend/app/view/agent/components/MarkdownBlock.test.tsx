@@ -35,12 +35,23 @@ describe("MarkdownBlock — regular text (unaffected)", () => {
 });
 
 describe("MarkdownBlock — thinking-clump peek tooltip", () => {
+    // reagent P2 on PR #2392 (3rd round): peekTick() is now gated behind an
+    // isPeeking signal driven by the outer .agent-thinking-peek-anchor div
+    // (not Tooltip's own internal, unexposed hover state on .thinking-block),
+    // mirroring ToolBlock.tsx's fix. A real cursor crosses both nested
+    // elements, so tests fire mouseEnter on both.
+    const hoverThinkingBlock = (container: HTMLElement) => {
+        const outer = container.querySelector(".agent-thinking-peek-anchor") as HTMLElement;
+        const inner = container.querySelector(".thinking-block") as HTMLElement;
+        fireEvent.mouseEnter(outer);
+        fireEvent.mouseEnter(inner);
+    };
+
     it("shows exact time + time-ago + an estimated token count when the node has a timestamp", () => {
         const timed: MarkdownNode = { ...thinkingNode, timestamp: Date.now() - 65_000 };
         const { container, unmount } = render(() => <MarkdownBlock node={timed} />);
-        const anchor = container.querySelector(".thinking-block") as HTMLElement;
-        expect(anchor).not.toBeNull();
-        fireEvent.mouseEnter(anchor);
+        expect(container.querySelector(".thinking-block")).not.toBeNull();
+        hoverThinkingBlock(container);
         const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
         expect(metaLines.length).toBe(2);
         expect(metaLines[0].textContent).toMatch(/\d{2}:\d{2}:\d{2} · 1m ago/);
@@ -51,11 +62,21 @@ describe("MarkdownBlock — thinking-clump peek tooltip", () => {
     it("shows only the estimate line when the node has no timestamp", () => {
         const untimed: MarkdownNode = { ...thinkingNode, timestamp: undefined };
         const { container, unmount } = render(() => <MarkdownBlock node={untimed} />);
-        const anchor = container.querySelector(".thinking-block") as HTMLElement;
-        fireEvent.mouseEnter(anchor);
+        hoverThinkingBlock(container);
         const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
         expect(metaLines.length).toBe(1);
         expect(metaLines[0].textContent).toMatch(/~\d+ tok \(est\.\)/);
+        unmount();
+    });
+
+    it("does not subscribe to the shared ticker before being hovered", () => {
+        const timed: MarkdownNode = { ...thinkingNode, timestamp: Date.now() - 65_000 };
+        const { container, unmount } = render(() => <MarkdownBlock node={timed} />);
+        // No hover fired — peekTimeText's memo must short-circuit before
+        // reading peekTick(), so the tooltip shows nothing yet.
+        const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
+        expect(metaLines.length).toBe(0);
+        expect(container.querySelector(".thinking-block")).not.toBeNull();
         unmount();
     });
 

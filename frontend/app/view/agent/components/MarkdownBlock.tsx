@@ -86,15 +86,23 @@ export const MarkdownBlock = (props: MarkdownBlockProps): JSX.Element => {
     // performance-critical and carefully tuned; deferred as a follow-up
     // rather than risked here for a nice-to-have (§4 resolution 1 of that
     // spec still calls for it eventually).
-    // reagent P2 on PR #2392: short-circuit BEFORE reading `peekTick()` for
-    // every non-thinking block (the far more common node kind) — a memo
-    // only subscribes to what it actually reads during a given run, so
-    // returning early here means regular assistant text never subscribes to
-    // the shared 1s ticker at all, instead of silently recomputing a value
-    // nothing ever renders.
+    // reagent P2 on PR #2392 (1st round): short-circuit BEFORE reading
+    // `peekTick()` for every non-thinking block (the far more common node
+    // kind) — a memo only subscribes to what it actually reads during a
+    // given run, so returning early here means regular assistant text never
+    // subscribes to the shared 1s ticker at all, instead of silently
+    // recomputing a value nothing ever renders.
+    //
+    // reagent P2 on PR #2392 (3rd round): the thinking-kind check alone
+    // isn't enough — every MOUNTED thinking clump still called peekTick()
+    // regardless of hover state, the same defect ToolBlock.tsx fixed via an
+    // explicit isPeeking signal. Mirror that fix here: only read peekTick()
+    // while this block is actually being hovered.
     const peekTick = useTick(1000);
+    const [isPeeking, setIsPeeking] = createSignal(false);
     const peekTimeText = createMemo(() => {
         if (!props.node.metadata?.thinking) return null;
+        if (!isPeeking()) return null;
         peekTick();
         const ts = props.node.timestamp;
         if (ts == null) return null;
@@ -124,23 +132,29 @@ export const MarkdownBlock = (props: MarkdownBlockProps): JSX.Element => {
                         </div>
                     }
                 >
-                    <Tooltip
-                        placement="bottom"
-                        delayMs={150}
-                        divClassName="agent-markdown-block thinking-block"
-                        content={
-                            <div class="agent-node-peek-tooltip">
-                                <Show when={peekTimeText()}>
-                                    <div class="agent-node-peek-tooltip-meta">{peekTimeText()}</div>
-                                </Show>
-                                <Show when={peekEstimateText()}>
-                                    <div class="agent-node-peek-tooltip-meta">{peekEstimateText()}</div>
-                                </Show>
-                            </div>
-                        }
+                    <div
+                        class="agent-thinking-peek-anchor"
+                        onMouseEnter={() => setIsPeeking(true)}
+                        onMouseLeave={() => setIsPeeking(false)}
                     >
-                        <Markdown text={view().text} highlight={view().highlight} scrollable={false} />
-                    </Tooltip>
+                        <Tooltip
+                            placement="bottom"
+                            delayMs={150}
+                            divClassName="agent-markdown-block thinking-block"
+                            content={
+                                <div class="agent-node-peek-tooltip">
+                                    <Show when={peekTimeText()}>
+                                        <div class="agent-node-peek-tooltip-meta">{peekTimeText()}</div>
+                                    </Show>
+                                    <Show when={peekEstimateText()}>
+                                        <div class="agent-node-peek-tooltip-meta">{peekEstimateText()}</div>
+                                    </Show>
+                                </div>
+                            }
+                        >
+                            <Markdown text={view().text} highlight={view().highlight} scrollable={false} />
+                        </Tooltip>
+                    </div>
                 </Show>
             }
         >
