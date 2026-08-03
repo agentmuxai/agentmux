@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Block } from "@/app/block/block";
+import { sleep } from "@/util/async";
 import { BlockNodeModel } from "@/app/block/blocktypes";
 import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { appHandleKeyDown } from "@/app/store/keymodel";
@@ -428,7 +429,7 @@ class TermViewModel implements ViewModel {
                     sendWSCommand(cmd);
                 }
                 if (!isLast) {
-                    await new Promise<void>((r) => setTimeout(r, TermViewModel.PASTE_CHUNK_DELAY_MS));
+                    await sleep(TermViewModel.PASTE_CHUNK_DELAY_MS);
                 }
             }
         } finally {

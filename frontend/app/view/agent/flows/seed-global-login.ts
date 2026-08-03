@@ -22,6 +22,7 @@
  */
 
 import { getApi } from "@/app/store/global";
+import { sleep } from "@/util/async";
 import type { LogFn } from "../types";
 
 export async function seedGlobalLogin(
@@ -86,7 +87,7 @@ export async function pollForGlobalLoginSeed(
     const silentLog: LogFn = () => {};
     while (performance.now() < deadline) {
         if (isCancelled()) return false;
-        await new Promise<void>((r) => setTimeout(r, pollMs));
+        await sleep(pollMs);
         if (isCancelled()) return false;
         if (await seedGlobalLogin(providerId, silentLog, configDir)) return true;
     }
