@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // AgentComposerStrip — status row above the textarea, left-justified and
-// wrapping onto additional lines (capped at 3) instead of clipping or
-// overlapping the textarea below when the pane narrows. In flow order:
+// wrapping onto additional lines instead of clipping or overlapping the
+// textarea below when the pane narrows. In flow order:
 //   1. AgentRuntimeDropup (single Mode · Model · Effort trigger) + HOST/SANDBOX tag
 //   2. token/elapsed stats
 //   3. process badge · context text · auth tag · Shell toggle
@@ -15,6 +15,18 @@
 // SPEC_COMPOSER_STRIP_LAYOUT_MIC_CENTER_MODEL_DEFAULTS_2026_07_10.md and the
 // two-row grid-template-areas tier from
 // SPEC_COMPOSER_STRIP_TWO_LINE_RESPONSIVE_2026_07_30.md).
+//
+// No max-height/overflow:hidden cap: an earlier revision capped this at
+// ~3 lines, but .agent-composer-strip-controls/-right can *also* wrap
+// internally (below) so a zone doesn't get clipped when it alone doesn't
+// fit its wrapped line — and a height cap paired with internal wrapping
+// reintroduces the exact bug it was meant to fix (two zones each needing
+// their own sub-line can together exceed the cap, clipping Shell again,
+// just via the vertical axis instead of the horizontal one — reagent P2,
+// PR #2393). The shed-content queries further down keep real-world content
+// to ~1-3 lines by shrinking/hiding informational content as width drops;
+// growing taller than that is only possible in combinations those queries
+// don't cover, and growing is always preferable to silently clipping Shell.
 
 @use "../../../mixins.scss";
 
@@ -27,9 +39,6 @@
     row-gap: 2px;
     column-gap: var(--space-2);
     min-height: 28px;
-    max-height: 84px; // ~3 lines at this font-size/padding — the shed-content
-                       // queries below exist so real content never needs a 4th
-    overflow: hidden;
     padding: var(--space-1) var(--space-2);
     font-size: 11px;
     line-height: 1.4;
@@ -306,9 +315,11 @@
 
 // ── Responsive tiers ─────────────────────────────────────────────────────
 // The wrap itself needs no width-keyed rules — `flex-wrap: wrap` on
-// `.agent-composer-strip` reflows controls/stats/right onto additional
-// lines automatically as the pane narrows, always left-justified, up to
-// the 3-line cap set above. That alone is the fix for the clipping/overlap
+// `.agent-composer-strip` (outer lines) plus on `-controls`/`-right`
+// (internal sub-lines) reflows content onto additional lines automatically
+// as the pane narrows, always left-justified, with no hard cap — see the
+// file-header comment for why there's no `max-height`/`overflow:hidden`
+// here. That alone is the fix for the clipping/overlap
 // `SPEC_COMPOSER_STRIP_TWO_LINE_RESPONSIVE_2026_07_30.md` documented (the
 // grid this replaced had no wrap path at all — its `@container modal-mount`
 // rules never matched the docked pane's own `agent-pane` container, so
@@ -316,15 +327,14 @@
 // grid-template-areas tier it landed only ever bought a 2nd line).
 //
 // What still needs a width-keyed rule is the *last-resort* shed order
-// below, for widths where even 3 outer lines — one zone per line, in the
-// worst case — plus the right zone's own internal wrap (badge, ctx, auth,
-// Shell can now reflow onto a sub-line of their own, see above) isn't
-// enough headroom to keep the strip within its 3-line cap without
-// resorting to an extra sub-line per zone. Content and Shell stay visible
-// at every tier — ctx is the one safety signal in this bar (compaction
-// proximity), Shell is the strip's one real action — so shedding starts
-// with the least essential, informational-only items, trimming content
-// before the internal wrap needs to add sub-lines at all.
+// below — not to prevent clipping (nothing clips now) but to keep the
+// strip's real-world height to ~1-3 lines instead of growing tall enough
+// to noticeably eat into the transcript above it. Content and Shell stay
+// visible at every tier — ctx is the one safety signal in this bar
+// (compaction proximity), Shell is the strip's one real action — so
+// shedding starts with the least essential, informational-only items,
+// trimming content before either zone would otherwise need an internal
+// sub-line.
 // Breakpoints are estimated from content width (right zone ≈ badge 28px +
 // ctx 50px + auth 70px + Shell 40px + 3 gaps ≈ 220px), not measured DOM
 // output — confirm against real rendered widths in `task dev` and adjust.
