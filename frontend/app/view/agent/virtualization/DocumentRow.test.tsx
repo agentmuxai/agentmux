@@ -129,7 +129,7 @@ describe("DocumentRow — compaction nodes", () => {
         renderRow(realCompactedNode());
         expect(screen.getByText(/context compacted/i)).toBeInTheDocument();
         expect(screen.getByText(/you ran \/compact/i)).toBeInTheDocument();
-        expect(screen.getByText(/100k → 5k tokens/i)).toBeInTheDocument();
+        expect(screen.getByText(/100k → 5\.0k tokens/i)).toBeInTheDocument();
         expect(screen.getByText(/took 12\.3s/i)).toBeInTheDocument();
     });
 
@@ -144,7 +144,7 @@ describe("DocumentRow — compaction nodes", () => {
         expect(screen.queryByText(/you ran \/compact/i)).toBeNull();
         expect(screen.queryByText(/auto-compacted/i)).toBeNull();
         expect(screen.queryByText(/took/i)).toBeNull();
-        expect(screen.getByText(/60k → 4k tokens/i)).toBeInTheDocument();
+        expect(screen.getByText(/60k → 4\.0k tokens/i)).toBeInTheDocument();
     });
 
     it("compaction_started renders the in-progress announcement, distinct from context_compacted", () => {
