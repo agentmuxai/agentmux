@@ -111,6 +111,13 @@ function renderList(data) {
     // always agents; reimplementing that classification rule in JS instead
     // of reusing ProcessStatus::is_agent() mislabeled exactly those three
     // types as "term" (codex P2 on PR #2380, second round).
+    // "last_error" — the last thing that happened to this block was an
+    // unrecovered spawn/execution error (muxspect_handlers.rs's
+    // last_error_frame). Distinct from lifecycle/confidence (liveness): a
+    // block can be `lifecycle: unknown` for perfectly healthy reasons
+    // (idle, never opened) — this column is what disambiguates "idle"
+    // from "wedged, fix available" at a glance, which is the whole point
+    // (docs/reports/REPORT_MUXSPECT_SPAWN_REFUSAL_DIAGNOSIS_EXTENSION_2026_08_03.md §3.2).
     const rows = blocks.map((b) => ({
         block_id: b.block_id,
         type: b.controller_type || "?",
@@ -118,8 +125,9 @@ function renderList(data) {
         pane_type: b.is_agent ? "agent" : "term",
         confidence: b.liveness_confidence,
         age: ageString(b.last_computed_ms),
+        last_error: b.last_error ? `yes (${ageString(b.last_error.written_ms)})` : "-",
     }));
-    const cols = ["block_id", "type", "lifecycle", "pane_type", "confidence", "age"];
+    const cols = ["block_id", "type", "lifecycle", "pane_type", "confidence", "age", "last_error"];
     const widths = Object.fromEntries(
         cols.map((c) => [c, Math.max(c.length, ...rows.map((r) => String(r[c]).length))])
     );
@@ -155,6 +163,18 @@ function renderDescribe(data) {
         for (const p of processes) {
             console.log(`  pid=${p.pid}  rss=${Math.round(p.rss_bytes / 1024)}KB  ${p.command || "(unknown command)"}`);
         }
+    }
+    // The actual "why" for a block with no live controller/process — see
+    // muxspect_handlers.rs's last_error_frame. Printed last, since it's
+    // usually the answer someone's here for precisely when everything
+    // above it is empty.
+    if (data.last_error) {
+        console.log(`\nlast_error:`);
+        console.log(`  message: ${data.last_error.message}`);
+        console.log(`  source:  ${data.last_error.source}`);
+        console.log(`  age:     ${ageString(data.last_error.written_ms)}`);
+    } else {
+        console.log(`\nlast_error:           (none)`);
     }
 }
 

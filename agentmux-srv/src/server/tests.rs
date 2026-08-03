@@ -1373,3 +1373,78 @@ async fn muxspect_describe_requires_block_id() {
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
+
+/// `describe` on a block with NO controller (the exact "diagnostically
+/// empty" state `muxspect_describe_composes_status_for_an_unknown_block`
+/// pins above) must now also surface WHY, when the reason is knowable: a
+/// persisted `error_during_execution` frame as the last line of the
+/// block's own output — the durable signal `agent_handlers/input.rs`
+/// already writes for exactly this case (identity-gate spawn refusal,
+/// container-spawn failure, etc.). See
+/// `docs/reports/REPORT_MUXSPECT_SPAWN_REFUSAL_DIAGNOSIS_EXTENSION_2026_08_03.md`
+/// — this is the change that closes the gap the report was written about.
+#[tokio::test]
+async fn muxspect_describe_surfaces_last_error_for_a_wedged_block() {
+    use crate::backend::storage::filestore::{FileMeta, FileOpts};
+
+    let state = test_state();
+    let filestore = state.filestore.clone();
+    filestore
+        .make_file("wedged-block", "output", FileMeta::new(), FileOpts::default())
+        .unwrap();
+    let error_line = serde_json::json!({
+        "type": "result",
+        "is_error": true,
+        "subtype": "error_during_execution",
+        "error": {"message": "[AgentMux] no credentials for claude: bind an account for this provider in the Armory."}
+    })
+    .to_string();
+    filestore
+        .write_file("wedged-block", "output", format!("{error_line}\n").as_bytes())
+        .unwrap();
+
+    let app = build_router(state);
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri("/api/v1/muxspect/describe?block_id=wedged-block")
+        .header("X-AuthKey", "test-secret-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    // Still correctly reports no live controller — this block never had one.
+    assert_eq!(json["process_status"]["lifecycle"], "unknown");
+    assert_eq!(json["controller_status"], serde_json::Value::Null);
+    // ...but is no longer diagnostically empty about why.
+    assert_eq!(
+        json["last_error"]["message"],
+        "[AgentMux] no credentials for claude: bind an account for this provider in the Armory."
+    );
+    assert_eq!(json["last_error"]["source"], "identity");
+    assert!(json["last_error"]["written_ms"].as_u64().unwrap() > 0);
+}
+
+/// A block with no `output` file at all (never opened, or genuinely
+/// healthy) must report `last_error: null`, not error or fabricate one —
+/// this is the common case and must stay silent.
+#[tokio::test]
+async fn muxspect_describe_last_error_is_null_for_a_block_with_no_output() {
+    let state = test_state();
+    let app = build_router(state);
+
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri("/api/v1/muxspect/describe?block_id=never-opened")
+        .header("X-AuthKey", "test-secret-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["last_error"], serde_json::Value::Null);
+}
