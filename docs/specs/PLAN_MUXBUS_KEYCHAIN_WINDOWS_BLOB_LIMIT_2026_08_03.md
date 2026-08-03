@@ -1,7 +1,8 @@
 # Plan — fix MuxBus token persistence on Windows (Credential Manager 2560-byte cap)
 
 **Date:** 2026-08-03
-**Status:** proposed → implementing in this same PR
+**Status:** implemented; §3's original per-field split was live-tested and
+found insufficient, superseded by §3's chunking design (see §6)
 **Context:** live-debugged on channel `local-main-b28b7a-9172ff88` (this
 machine, Windows) while checking whether GitHub PR-review jekt notifications
 were reaching that instance via the muxbus GitHub consumer
@@ -95,13 +96,17 @@ the existing `PriorKeychainState::{Existed,Absent,Unknown}` logic — apply
 that logic three times (once per field) rather than inventing new rollback
 semantics.
 
-### Known residual limit
+### Known residual limit (superseded — see §6)
 
 If any *single* token itself exceeds ~2560 bytes on Windows, the write for
 that one field will still fail — but the error will now name exactly which
 field, rather than obscuring it inside a combined blob. Not fixing this
 further here: real-world Cognito tokens don't approach that size
 individually, only combined.
+
+**This assumption was wrong** — see §6. The residual limit isn't just a
+named-but-unfixed edge case; it reproduced immediately on the very first
+live test.
 
 ## 4. Testing
 
@@ -125,3 +130,39 @@ individually, only combined.
 - Any change to `CREDENTIAL_ID` itself or the broker scheduler.
 - General "keychain write failure has no fallback" hardening beyond this one
   call site — flagged here for awareness, not addressed.
+
+## 6. Live test found the §3 design insufficient — chunking instead
+
+Verified in an isolated `task dev` instance (`agent2-fix-muxbus-keychain-windows-blob-limit`
+channel — separate data dir from the live channel this bug was found on, so
+testing it couldn't disrupt the running session). A real `muxbus.login`
+against this account produced the **exact same error** as before the
+per-field split:
+
+```
+muxbus.login: failed to save credentials
+error: muxbus: keychain write failed: keychain write failed:
+       Attribute 'password' is longer than platform limit of 2560 chars
+```
+
+This wasn't the multi-channel/multi-process angle it first looked like (the
+keychain keys were already global across every channel *before* this fix
+too — that's unchanged and intentional, MuxBus is one human login shared by
+every local instance). It's that §3's assumption — "real-world Cognito
+tokens don't approach 2560 bytes individually" — was simply wrong for this
+account: at least one of the three fields (most likely `id_token`, which
+carries this account's custom claims) exceeds 2560 bytes **on its own**.
+
+**Revised fix:** each of the three fields (`muxbus:global:access` /
+`:refresh` / `:id`) is now further chunked into as many `<field>:0`,
+`<field>:1`, … entries as needed (each safely under the cap, 1800-byte
+budget vs. the 2560-byte limit), tracked by a `<field>:count` entry. This
+removes the size assumption entirely rather than moving it — holds for any
+token size, not just "sizes we've observed so far." `write_chunked_field`
+also clears trailing chunks left over from a previous, longer value at the
+same field, and the existing rollback-on-later-failure logic
+(`PriorKeychainState`) now composes across every chunk + count entry touched
+in a call, not just one entry per field.
+
+Re-verification of this revision (same dev instance, fresh `muxbus.login`)
+is in progress — not yet confirmed. Update this section once done.

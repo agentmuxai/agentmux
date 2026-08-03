@@ -20,8 +20,8 @@ const MUXBUS_KEYCHAIN_ID: &str = crate::muxbus::CREDENTIAL_ID;
 /// exceeds it (see `docs/specs/PLAN_MUXBUS_KEYCHAIN_WINDOWS_BLOB_LIMIT_2026_08_03.md`).
 /// macOS/Linux have no comparable cap, so existing users there may still
 /// have a valid entry under this old key — kept only as a one-time
-/// migration source (`muxbus_load_tokens`); every new write goes to the
-/// three per-field keys below instead.
+/// migration source (`muxbus_load_tokens`); every new write goes through
+/// the chunked per-field layout below instead.
 const LEGACY_BLOB_KEYCHAIN_ID: &str = MUXBUS_KEYCHAIN_ID;
 
 const FIELD_ACCESS: &str = "access";
@@ -30,6 +30,50 @@ const FIELD_ID: &str = "id";
 
 fn field_key(field: &str) -> String {
     format!("{MUXBUS_KEYCHAIN_ID}:{field}")
+}
+
+/// A first fix attempt (splitting the combined blob into one keychain entry
+/// per field) turned out NOT to be sufficient: live-tested against a real
+/// Cognito login, the exact same "Attribute 'password' is longer than
+/// platform limit of 2560 chars" error still fired — a single token field
+/// can itself exceed 2560 bytes depending on the app client's token content
+/// (custom claims, refresh token length), not just the three combined. So
+/// each field is further chunked into as many <2560-byte entries as it
+/// takes, tracked by an explicit `<field>:count` entry (`write_chunked_field`
+/// / `read_chunked_field` below) — this holds regardless of any individual
+/// token's real-world size, instead of relying on an assumption about it.
+/// Conservative margin below the actual 2560-byte cap, not a tight fit.
+const MAX_CHUNK_LEN: usize = 1800;
+
+fn chunk_key(field_key: &str, index: usize) -> String {
+    format!("{field_key}:{index}")
+}
+
+fn count_key(field_key: &str) -> String {
+    format!("{field_key}:count")
+}
+
+/// Pure chunking split — no keychain I/O — so the boundary math is testable
+/// without touching the real OS keychain. A token's bytes are always ASCII
+/// in practice (JWTs / opaque base64url strings), so splitting on byte
+/// boundaries never lands mid-character; `unwrap_or("")` is a defensive
+/// fallback only, not an expected path.
+fn chunk_value(value: &str) -> Vec<&str> {
+    if value.is_empty() {
+        return vec![""];
+    }
+    value
+        .as_bytes()
+        .chunks(MAX_CHUNK_LEN)
+        .map(|c| std::str::from_utf8(c).unwrap_or(""))
+        .collect()
+}
+
+fn read_chunk_count(field_key: &str) -> usize {
+    match secret_store::get_optional(&count_key(field_key)) {
+        Ok(Some(v)) => v.parse().unwrap_or(0),
+        _ => 0,
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -92,72 +136,165 @@ impl PriorKeychainState {
     }
 }
 
-/// Write all three token fields to their split keychain entries. On a
-/// mid-way failure, rolls back whichever fields this call already wrote
-/// (to their pre-call state) before returning — otherwise a partial failure
-/// would leave the three entries holding a mix of old and new tokens, which
-/// is worse than either the old or the new set alone.
+/// Write `value` to `field_key` as one or more chunk entries (each under
+/// `MAX_CHUNK_LEN`) plus a `:count` entry, clearing any stale trailing
+/// chunks left over from a previous, longer value at this key. Rolls back
+/// everything this call touched if any single write/delete fails partway
+/// through — otherwise a partial failure would leave a mix of old and new
+/// chunks, silently corrupting the reconstructed value on the next read.
 ///
-/// On success, returns each field's PRE-call state so a caller that goes on
-/// to do more work of its own (`muxbus_save`'s SQL write) can roll all three
-/// back together if that later step fails too.
+/// On success, returns the PRE-call state of every entry touched (chunks +
+/// count), so a caller doing more work of its own afterward
+/// (`write_split_tokens` covering a sibling field, or `muxbus_save`'s SQL
+/// write) can roll all of it back together if that later step fails too.
+fn write_chunked_field(field_key: &str, value: &str) -> Result<Vec<(String, PriorKeychainState)>, StoreError> {
+    let new_chunks = chunk_value(value);
+    let new_count = new_chunks.len();
+    let old_count = read_chunk_count(field_key);
+
+    let mut priors: Vec<(String, PriorKeychainState)> = Vec::with_capacity(new_count.max(old_count) + 1);
+    let rollback = |priors: &[(String, PriorKeychainState)]| {
+        for (key, prior) in priors {
+            if let Err(re) = prior.restore(key) {
+                tracing::warn!(
+                    error = %re,
+                    key = %key,
+                    "muxbus: rollback after a partial chunked-field write failure also failed \
+                     for this entry — keychain may now hold a stale value for it"
+                );
+            }
+        }
+    };
+
+    for (i, chunk) in new_chunks.iter().enumerate() {
+        let key = chunk_key(field_key, i);
+        let prior = PriorKeychainState::capture(&key);
+        if let Err(e) = secret_store::put(&key, chunk) {
+            rollback(&priors);
+            return Err(StoreError::Other(format!("muxbus: keychain write failed: {e}")));
+        }
+        priors.push((key, prior));
+    }
+
+    // A previous, longer value left trailing chunks beyond the new count —
+    // clear them, or a future read would append stale old data past the
+    // new count boundary... except reads stop at `count`, so leftover
+    // chunks are actually inert. Clear them anyway: cheap, and avoids ever
+    // depending on that "reads ignore trailing chunks" invariant holding.
+    for i in new_count..old_count {
+        let key = chunk_key(field_key, i);
+        let prior = PriorKeychainState::capture(&key);
+        if let Err(e) = secret_store::delete(&key) {
+            rollback(&priors);
+            return Err(StoreError::Other(format!("muxbus: keychain write failed: {e}")));
+        }
+        priors.push((key, prior));
+    }
+
+    let ck = count_key(field_key);
+    let prior = PriorKeychainState::capture(&ck);
+    if let Err(e) = secret_store::put(&ck, &new_count.to_string()) {
+        rollback(&priors);
+        return Err(StoreError::Other(format!("muxbus: keychain write failed: {e}")));
+    }
+    priors.push((ck, prior));
+
+    Ok(priors)
+}
+
+/// Read `field_key`'s value back from its chunk entries. `Ok(None)` means no
+/// `:count` entry exists yet (this field was never written under the
+/// chunked layout — caller falls through to the legacy-blob /
+/// legacy-plaintext sources). `Err` means a read genuinely failed, or the
+/// chunk state is internally inconsistent (a chunk went missing between the
+/// count write and now) — not just "no entry".
+fn read_chunked_field(field_key: &str) -> Result<Option<String>, StoreError> {
+    let count = match secret_store::get_optional(&count_key(field_key)) {
+        Ok(Some(v)) => v.parse::<usize>().map_err(|e| {
+            StoreError::Other(format!("muxbus: corrupted chunk count for {field_key}: {e}"))
+        })?,
+        Ok(None) => return Ok(None),
+        Err(e) => return Err(StoreError::Other(format!("muxbus: keychain read failed: {e}"))),
+    };
+    let mut value = String::new();
+    for i in 0..count {
+        match secret_store::get_optional(&chunk_key(field_key, i)) {
+            Ok(Some(chunk)) => value.push_str(&chunk),
+            Ok(None) => {
+                return Err(StoreError::Other(format!(
+                    "muxbus: missing chunk {i}/{count} for {field_key} — keychain state is inconsistent"
+                )));
+            }
+            Err(e) => return Err(StoreError::Other(format!("muxbus: keychain read failed: {e}"))),
+        }
+    }
+    Ok(Some(value))
+}
+
+/// Write all three token fields, each independently chunked
+/// (`write_chunked_field`). On a later field's failure, rolls back every
+/// entry every earlier field in this call already wrote — otherwise a
+/// partial failure would leave the three fields holding a mix of old and
+/// new tokens, which is worse than either the old or the new set alone.
+///
+/// On success, returns every entry's PRE-call state (across all three
+/// fields) so `muxbus_save`'s SQL-write failure branch can roll all of it
+/// back together too.
 fn write_split_tokens(tokens: &MuxBusTokens) -> Result<Vec<(String, PriorKeychainState)>, StoreError> {
     let fields: [(String, &str); 3] = [
         (field_key(FIELD_ACCESS), tokens.access_token.as_str()),
         (field_key(FIELD_REFRESH), tokens.refresh_token.as_str()),
         (field_key(FIELD_ID), tokens.id_token.as_str()),
     ];
-    let mut priors: Vec<(String, PriorKeychainState)> = Vec::with_capacity(fields.len());
+    let mut all_priors: Vec<(String, PriorKeychainState)> = Vec::new();
     for (key, value) in fields {
-        let prior = PriorKeychainState::capture(&key);
-        if let Err(e) = secret_store::put(&key, value) {
-            for (done_key, done_prior) in &priors {
-                if let Err(re) = done_prior.restore(done_key) {
-                    tracing::warn!(
-                        error = %re,
-                        key = %done_key,
-                        "muxbus: rollback after a partial split-token write failure also failed \
-                         for this field — keychain may now hold a stale value for it"
-                    );
+        match write_chunked_field(&key, value) {
+            Ok(priors) => all_priors.extend(priors),
+            Err(e) => {
+                for (done_key, done_prior) in &all_priors {
+                    if let Err(re) = done_prior.restore(done_key) {
+                        tracing::warn!(
+                            error = %re,
+                            key = %done_key,
+                            "muxbus: rollback after a partial split-token write failure also failed \
+                             for this entry — keychain may now hold a stale value for it"
+                        );
+                    }
                 }
+                return Err(e);
             }
-            return Err(StoreError::Other(format!("muxbus: keychain write failed: {e}")));
         }
-        priors.push((key, prior));
     }
-    Ok(priors)
+    Ok(all_priors)
 }
 
-/// Read the three split-entry tokens. `Ok(None)` means none of the three
-/// exist yet (not migrated to this layout — caller falls through to the
-/// legacy-blob / legacy-plaintext sources). `Err` means a read itself
-/// failed (locked keychain, no Secret Service daemon, permission denied —
-/// not just "no entry"), which the caller may still recover from via a
-/// legacy fallback.
+/// Read the three split-entry (chunked) tokens. `Ok(None)` means none of the
+/// three fields exist yet (not migrated to this layout — caller falls
+/// through to the legacy-blob / legacy-plaintext sources). `Err` means a
+/// read itself failed (locked keychain, no Secret Service daemon,
+/// permission denied — not just "no entry"), which the caller may still
+/// recover from via a legacy fallback.
 fn read_split_tokens() -> Result<Option<MuxBusTokens>, StoreError> {
-    let access = secret_store::get_optional(&field_key(FIELD_ACCESS))
-        .map_err(|e| StoreError::Other(format!("muxbus: keychain read failed: {e}")))?;
-    let refresh = secret_store::get_optional(&field_key(FIELD_REFRESH))
-        .map_err(|e| StoreError::Other(format!("muxbus: keychain read failed: {e}")))?;
-    let id = secret_store::get_optional(&field_key(FIELD_ID))
-        .map_err(|e| StoreError::Other(format!("muxbus: keychain read failed: {e}")))?;
+    let access = read_chunked_field(&field_key(FIELD_ACCESS))?;
+    let refresh = read_chunked_field(&field_key(FIELD_REFRESH))?;
+    let id = read_chunked_field(&field_key(FIELD_ID))?;
 
     match (access, refresh, id) {
         (None, None, None) => Ok(None),
-        (Some(a), Some(r), Some(i)) => Ok(Some(MuxBusTokens {
-            access_token: a.to_string(),
-            refresh_token: r.to_string(),
-            id_token: i.to_string(),
+        (Some(access_token), Some(refresh_token), Some(id_token)) => Ok(Some(MuxBusTokens {
+            access_token,
+            refresh_token,
+            id_token,
         })),
         _ => {
             // Shouldn't happen in normal operation — write_split_tokens
-            // writes/rolls-back all three together — but could follow an
-            // interrupted write from a prior crash. Treat as "not yet on
-            // the split layout" so the caller falls through to the
+            // writes/rolls-back all three fields together — but could
+            // follow an interrupted write from a prior crash. Treat as "not
+            // yet on the split layout" so the caller falls through to the
             // legacy-blob / legacy-plaintext migration paths rather than
             // silently serving a token set with missing fields.
             tracing::warn!(
-                "muxbus: inconsistent split keychain entries (some present, some absent) — \
+                "muxbus: inconsistent split keychain entries (some fields present, some absent) — \
                  treating as not-yet-migrated"
             );
             Ok(None)
@@ -482,12 +619,18 @@ impl Store {
         // against each other for.
         let _clear_guard = self.muxbus_save_lock.lock().unwrap();
         // Best-effort — a missing/inaccessible keychain entry must not block
-        // clearing the (still-useful) SQL row. Clears both the current
-        // split-entry layout and the legacy combined-blob key, in case a
-        // migration never got the chance to run before logout.
-        let _ = secret_store::delete(&field_key(FIELD_ACCESS));
-        let _ = secret_store::delete(&field_key(FIELD_REFRESH));
-        let _ = secret_store::delete(&field_key(FIELD_ID));
+        // clearing the (still-useful) SQL row. Clears every chunk + the
+        // count entry for each of the three current-layout fields, plus the
+        // legacy combined-blob key, in case a migration never got the
+        // chance to run before logout.
+        for field in [FIELD_ACCESS, FIELD_REFRESH, FIELD_ID] {
+            let fk = field_key(field);
+            let count = read_chunk_count(&fk);
+            for i in 0..count {
+                let _ = secret_store::delete(&chunk_key(&fk, i));
+            }
+            let _ = secret_store::delete(&count_key(&fk));
+        }
         let _ = secret_store::delete(LEGACY_BLOB_KEYCHAIN_ID);
         {
             let conn = self.conn.lock().unwrap();
@@ -533,37 +676,42 @@ mod tests {
         assert_ne!(access, LEGACY_BLOB_KEYCHAIN_ID);
     }
 
-    /// Regression guard for the bug this split-entry layout fixes: on
-    /// Windows, a single Credential Manager entry is capped at 2560 bytes
-    /// (see PLAN_MUXBUS_KEYCHAIN_WINDOWS_BLOB_LIMIT_2026_08_03.md). This
-    /// can't exercise the real OS keychain in CI, but it does assert that a
-    /// combined blob realistic enough to trigger the original bug is, once
-    /// split into three fields, comfortably under that cap per field — i.e.
-    /// the fix's core premise actually holds for representative Cognito
-    /// token sizes.
+    /// Regression guard for BOTH bugs this file has fixed in sequence: the
+    /// original combined-blob-exceeds-2560-bytes bug, and the follow-up
+    /// found live-testing the first fix (a single field's own token can
+    /// ALSO exceed 2560 bytes — see PLAN_MUXBUS_KEYCHAIN_WINDOWS_BLOB_LIMIT_2026_08_03.md).
+    /// Doesn't exercise the real OS keychain (not available in CI); asserts
+    /// the pure chunking math instead: every chunk of an oversized value
+    /// stays under the cap, and concatenating them reconstructs the
+    /// original exactly — the actual guarantee `write_chunked_field` /
+    /// `read_chunked_field` depend on, independent of any assumption about
+    /// real-world Cognito token sizes.
     #[test]
-    fn split_fields_individually_fit_under_windows_credential_blob_limit() {
+    fn chunk_value_keeps_every_chunk_under_windows_credential_blob_limit_and_reconstructs() {
         const WINDOWS_CRED_BLOB_LIMIT: usize = 2560;
 
-        // Representative sizes: Cognito access/id tokens are JWTs (three
-        // base64 segments); refresh tokens are opaque but similarly sized.
-        let access_token = "a".repeat(1100);
-        let refresh_token = "r".repeat(1400);
-        let id_token = "i".repeat(1200);
+        // Larger than even the old *combined* blob would have been —
+        // proves this doesn't just move the limit, it removes it.
+        let oversized_token = "i".repeat(6000);
 
-        let combined = MuxBusTokens {
-            access_token: access_token.clone(),
-            refresh_token: refresh_token.clone(),
-            id_token: id_token.clone(),
-        };
-        let combined_blob = serde_json::to_string(&combined).unwrap();
-        // The bug this fix addresses: the OLD combined-blob layout exceeds
-        // the limit for these representative sizes.
-        assert!(combined_blob.len() > WINDOWS_CRED_BLOB_LIMIT);
+        let chunks = chunk_value(&oversized_token);
+        assert!(chunks.len() > 1, "a value this large must actually split");
+        for chunk in &chunks {
+            assert!(chunk.len() < WINDOWS_CRED_BLOB_LIMIT);
+        }
+        assert_eq!(chunks.concat(), oversized_token);
+    }
 
-        // The fix: each field, written to its own entry, does not.
-        assert!(access_token.len() < WINDOWS_CRED_BLOB_LIMIT);
-        assert!(refresh_token.len() < WINDOWS_CRED_BLOB_LIMIT);
-        assert!(id_token.len() < WINDOWS_CRED_BLOB_LIMIT);
+    #[test]
+    fn chunk_value_small_input_is_a_single_chunk() {
+        assert_eq!(chunk_value("short-token"), vec!["short-token"]);
+    }
+
+    #[test]
+    fn chunk_value_empty_string_is_one_empty_chunk() {
+        // Not zero chunks — `read_chunked_field` needs a `:count` of at
+        // least 1 to distinguish "field written as empty" from "field never
+        // written at all" (`Ok(None)`).
+        assert_eq!(chunk_value(""), vec![""]);
     }
 }
