@@ -225,3 +225,31 @@ comes remotely close) when the real count can't be read.
 `secret_store::delete` on a non-existent entry is already a no-op success,
 so over-scanning past the real count is harmless; it guarantees actual
 cleanup instead of silently skipping it.
+
+## 9. Review finding: chunked writes broke the lock-free read path (P1, fixed)
+
+reagent's next review pass on §8's fix caught a second, independent bug
+introduced by chunking itself (not by anything in §8): `muxbus_is_fresh`
+(called via `muxbus_load_impl(false)`, deliberately lock-free per the
+existing `RefreshScheduler::register` contract) can run concurrently with a
+`muxbus_save`/`muxbus_clear` write. With the OLD single combined-blob
+layout that was safe — the OS keychain writes one entry atomically, so an
+unlocked concurrent read could only ever see fully-old or fully-new data.
+The chunked layout replaced that one atomic write with several sequential,
+non-atomic ones (`write_chunked_field` puts chunk 0, chunk 1, …, clears
+stale trailing chunks, then updates `:count`, no lock held from the
+reader's side). An unlocked read landing mid-write can now see a torn mix
+of old and new chunks for a multi-chunk token — every individual
+`get_optional` still succeeds, so nothing errors, it just silently
+reconstructs a corrupted string.
+
+**Fix:** `muxbus_load_impl` now takes `muxbus_save_lock` unconditionally
+(previously only when `allow_migration`), serializing every read against
+`muxbus_save`/`muxbus_clear`'s writes. This does NOT reintroduce the
+original concern that made `muxbus_is_fresh` lock-free in the first place
+(reagent P2 on #2260) — that was about an unexpected *write* (a lazy-
+migration self-heal) happening inside a nominally read-only freshness
+check, not about lock acquisition; `allow_migration` still gates every
+actual write, `muxbus_is_fresh` still performs none. Verified no deadlock:
+`cargo test -p agentmux-srv --bin agentmux-srv muxbus` (15 tests, including
+`cloud_subscriber`'s own suite) passes.

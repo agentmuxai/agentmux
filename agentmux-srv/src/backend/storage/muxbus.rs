@@ -359,18 +359,21 @@ impl Store {
         self.muxbus_load_impl(true)
     }
 
-    /// Side-effect-free freshness check: valid, non-empty access token that
-    /// isn't nearing expiry. Safe for `RefreshScheduler::register`'s
-    /// `is_fresh` closure (reagent P2 on #2260: that closure was calling the
-    /// full `muxbus_load`, whose lazy-migration branch below can perform a
-    /// keychain write + SQL update for a legacy row — violating
-    /// `register`'s own documented "must be cheap and side-effect-free"
-    /// contract, called as it is under the per-id lock on every
-    /// `ensure_fresh`/sweep tick). Any error (including a genuinely
-    /// corrupted keychain blob) is treated as "not fresh" rather than
-    /// propagated — a freshness *check* has no error channel to propagate
-    /// through, and "not fresh" just means the broker will attempt a
-    /// refresh, which surfaces the real problem through THAT path instead.
+    /// Side-effect-free (no keychain/SQL WRITE, see `allow_migration` below)
+    /// freshness check: valid, non-empty access token that isn't nearing
+    /// expiry. Safe for `RefreshScheduler::register`'s `is_fresh` closure,
+    /// called as it is under the per-id lock on every `ensure_fresh`/sweep
+    /// tick — the concern that closure must avoid (reagent P2 on #2260) is
+    /// an unexpected WRITE happening inside a nominally read-only check,
+    /// not lock acquisition itself; `muxbus_load_impl` below still takes
+    /// `muxbus_save_lock` (reagent P1 on this PR — see its comment) purely
+    /// to serialize this read against a concurrent writer, with no side
+    /// effect of its own performed while holding it. Any error (including a
+    /// genuinely corrupted keychain entry) is treated as "not fresh" rather
+    /// than propagated — a freshness *check* has no error channel to
+    /// propagate through, and "not fresh" just means the broker will
+    /// attempt a refresh, which surfaces the real problem through THAT path
+    /// instead.
     pub fn muxbus_is_fresh(&self) -> bool {
         self.muxbus_load_impl(false)
             .ok()
@@ -379,27 +382,37 @@ impl Store {
             .unwrap_or(false)
     }
 
-    /// `allow_migration` gates the lazy-migration self-heal writes in
-    /// `muxbus_load_tokens` below — `false` for `muxbus_is_fresh`'s
-    /// side-effect-free contract, `true` for the normal `muxbus_load` path.
+    /// `allow_migration` gates only the lazy-migration self-heal WRITES in
+    /// `muxbus_load_tokens` below (`false` for `muxbus_is_fresh`'s
+    /// side-effect-free contract, `true` for the normal `muxbus_load`
+    /// path) — it does NOT gate the lock below, which every call takes.
     fn muxbus_load_impl(&self, allow_migration: bool) -> Result<Option<MuxBusCredentials>, StoreError> {
-        // reagent P1 on #2260: the migration branches in `muxbus_load_tokens`
-        // read the keychain, then (on a cache miss) write fresh tokens to it
-        // and update SQL — the same read-then-write shape `muxbus_save`
-        // guards with this lock. Without it here too, a concurrent
-        // muxbus_save (e.g. the broker's refresh closure) can commit a real
-        // refresh between this thread's stale SQL read and its own keychain
-        // write, so the migration then overwrites the freshly-refreshed
-        // keychain entries with old pre-migration data — SQL metadata
-        // paired with a stale, possibly-already-rotated refresh_token. Only
-        // taken when migration is actually possible (`allow_migration`);
-        // `muxbus_is_fresh`'s read-only path never writes anything, so it
-        // needs no lock.
-        let _migration_guard = if allow_migration {
-            Some(self.muxbus_save_lock.lock().unwrap())
-        } else {
-            None
-        };
+        // reagent P1 on #2260 (write-vs-write race) + reagent P1 on this PR
+        // (torn read): held for the ENTIRE keychain-read sequence, not just
+        // when `allow_migration` is true. Two independent reasons this must
+        // be unconditional now:
+        //  1. (#2260) The migration branches in `muxbus_load_tokens` read
+        //     the keychain, then (on a cache miss) write fresh tokens to it
+        //     and update SQL — without this lock, a concurrent `muxbus_save`
+        //     could commit a real refresh between this thread's stale SQL
+        //     read and its own keychain write, so the migration then
+        //     overwrites the freshly-refreshed keychain entries with old
+        //     pre-migration data.
+        //  2. (this PR) Each field's tokens now live across MULTIPLE
+        //     keychain entries (`write_chunked_field`'s chunks + `:count`),
+        //     written sequentially with no atomicity across them — unlike
+        //     the single combined-blob write this replaced, which the OS
+        //     keychain wrote atomically. An UNLOCKED concurrent read
+        //     landing mid-write (previously safe when `allow_migration` was
+        //     `false`, i.e. every `muxbus_is_fresh` call) can now read a mix
+        //     of old and new chunks for a multi-chunk token and silently
+        //     reconstruct a CORRUPTED string — every individual
+        //     `get_optional` call still succeeds, so nothing errors, it's
+        //     just wrong data. Locking here doesn't reintroduce a write
+        //     side effect (see `muxbus_is_fresh`'s own doc comment above);
+        //     it only serializes this read against `muxbus_save`/
+        //     `muxbus_clear`'s writes, which already take the same lock.
+        let _migration_guard = self.muxbus_save_lock.lock().unwrap();
         let row = {
             let conn = self.conn.lock().unwrap();
             let mut stmt = conn.prepare(
