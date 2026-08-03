@@ -194,17 +194,31 @@ impl PriorKeychainState {
 
 /// Write `value` to `field_key` as one or more chunk entries (each under
 /// `MAX_CHUNK_LEN`) plus a `:count` entry, clearing any stale trailing
-/// chunks left over from a previous, longer value at this key. Rolls back
-/// everything this call touched if any single write/delete fails partway
-/// through — otherwise a partial failure would leave a mix of old and new
-/// chunks, silently corrupting the reconstructed value on the next read.
-/// Also writes `generation` to this field's `:gen` entry — same value
-/// across all three fields for one `write_split_tokens` call, checked by
-/// `read_split_tokens` to detect a write torn by a process crash (see
-/// `new_generation`'s doc comment).
+/// chunks left over from a previous, longer value at this key, and stamps
+/// `generation` (same value across all three fields for one
+/// `write_split_tokens` call — see `new_generation`'s doc comment) on this
+/// field's `:gen` entry. Rolls back everything this call touched if any
+/// single write/delete fails partway through.
 ///
-/// On success, returns the PRE-call state of every entry touched (chunks +
-/// count + generation), so a caller doing more work of its own afterward
+/// Write order matters here beyond just "rollback on failure" (reagent P1:
+/// a prior version wrote chunks, then cleared stale trailing chunks, then
+/// updated `:count`, then `:gen`, in that order — a process CRASH between
+/// the chunk-write and the trailing-chunk-delete left `:count` still
+/// pointing at the OLD larger count while the leading chunks already held
+/// NEW content; on restart `read_chunked_field` would read exactly
+/// `old_count` chunks — none technically missing, so no error — silently
+/// reconstructing a spliced new-prefix/old-suffix value that's neither the
+/// old nor the new token, with `:gen` untouched so `read_split_tokens`'s
+/// cross-field generation check never even saw a mismatch to catch). This
+/// version deletes `:gen` FIRST, before touching any chunk content, and
+/// writes the fresh `generation` value LAST, only once chunks + `:count`
+/// are fully consistent — `read_chunked_field` already treats a missing
+/// `:gen` on an otherwise-populated field as an error, so a crash ANYWHERE
+/// in between now makes this field unambiguously detectable as torn,
+/// rather than silently reconstructible.
+///
+/// On success, returns the PRE-call state of every entry touched (`:gen`,
+/// chunks, `:count`), so a caller doing more work of its own afterward
 /// (`write_split_tokens` covering a sibling field, or `muxbus_save`'s SQL
 /// write) can roll all of it back together if that later step fails too.
 fn write_chunked_field(
@@ -221,7 +235,7 @@ fn write_chunked_field(
     // doc comment describes for muxbus_clear).
     let old_count = read_chunk_count(field_key)?;
 
-    let mut priors: Vec<(String, PriorKeychainState)> = Vec::with_capacity(new_count.max(old_count) + 1);
+    let mut priors: Vec<(String, PriorKeychainState)> = Vec::with_capacity(new_count.max(old_count) + 2);
     let rollback = |priors: &[(String, PriorKeychainState)]| {
         for (key, prior) in priors {
             if let Err(re) = prior.restore(key) {
@@ -234,6 +248,19 @@ fn write_chunked_field(
             }
         }
     };
+
+    // Invalidate this field before touching any chunk content — see the
+    // doc comment above for why this specific ordering is load-bearing.
+    // The captured `gen_prior` (this field's TRUE pre-call `:gen` state) is
+    // what a later rollback restores to, whether the failure happens here,
+    // mid-chunk-write, or in the final `:gen` write at the bottom of this
+    // function — there is deliberately only ONE priors entry for this key.
+    let gk = generation_key(field_key);
+    let gen_prior = PriorKeychainState::capture(&gk);
+    if let Err(e) = secret_store::delete(&gk) {
+        return Err(StoreError::Other(format!("muxbus: keychain write failed: {e}")));
+    }
+    priors.push((gk.clone(), gen_prior));
 
     for (i, chunk) in new_chunks.iter().enumerate() {
         let key = chunk_key(field_key, i);
@@ -268,13 +295,16 @@ fn write_chunked_field(
     }
     priors.push((ck, prior));
 
-    let gk = generation_key(field_key);
-    let prior = PriorKeychainState::capture(&gk);
+    // Write the fresh generation LAST — only once chunks + :count are fully
+    // consistent. This is what makes the field valid (readable) again; the
+    // `gk` rollback entry already pushed above (this field's true pre-call
+    // state) is reused if THIS write itself fails, not a fresh capture —
+    // capturing now would wrongly record "Absent" (we deleted it ourselves
+    // above) as what to roll back to.
     if let Err(e) = secret_store::put(&gk, generation) {
         rollback(&priors);
         return Err(StoreError::Other(format!("muxbus: keychain write failed: {e}")));
     }
-    priors.push((gk, prior));
 
     Ok(priors)
 }

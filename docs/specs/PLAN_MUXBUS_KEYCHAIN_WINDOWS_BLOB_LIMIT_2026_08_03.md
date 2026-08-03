@@ -277,3 +277,38 @@ field) is treated the same as "not yet migrated," falling through to the
 legacy sources or ultimately requiring a fresh login — the safe failure
 mode, instead of silently mixing sessions. `muxbus_clear` deletes the
 `:gen` entry alongside each field's chunks/count on logout.
+
+## 11. Review finding: within-field write still not crash-safe (P1, fixed)
+
+reagent's fourth pass caught that §10's fix didn't go far enough:
+`write_chunked_field`'s own internal write order was still chunks → clear
+stale trailing chunks → `:count` → `:gen`, LAST. A crash specifically
+between the new-chunk-write loop finishing and the trailing-chunk-delete
+loop finishing leaves `:count` still pointing at the OLD (larger) count,
+while the leading chunk indices already hold NEW content and the trailing
+ones still hold OLD content. On restart, `read_chunked_field` reads exactly
+`old_count` chunks — none technically missing, so no error — silently
+splicing a new-prefix/old-suffix value that is neither the previous nor
+the new token. Because the crash lands before `:gen` is reached, this
+field's generation stamp is untouched, so §10's cross-field equality check
+never even sees a mismatch.
+
+**Fix:** reordered `write_chunked_field` to delete `:gen` FIRST — before
+touching any chunk content — and write the fresh `generation` value LAST,
+only once the chunks and `:count` are fully consistent. `read_chunked_field`
+already treats a missing `:gen` on an otherwise-populated field as an error
+("keychain state is inconsistent"); with this reorder, a crash ANYWHERE
+between the delete and the final write leaves the field in exactly that
+detectable state, instead of a silently-reconstructible splice. The single
+`PriorKeychainState` captured for `:gen` before the initial delete is
+reused for the final write's own rollback path too (not re-captured, which
+would incorrectly record "Absent" — the state WE just deleted it to — as
+what a later failure should roll back to).
+
+Live-verified once more end to end on the same dev instance after this
+change: a fresh `muxbus.login` correctly rejected the OLD pre-generation-
+stamp session (`"missing generation stamp... keychain state is
+inconsistent"` — the intended, safe detection, not a bug) and required
+re-login; the fresh login then succeeded (`PKCE login succeeded` →
+`auth.broker.fresh: credential is fresh` → `cloud_subscriber: WebSocket
+connected`).
