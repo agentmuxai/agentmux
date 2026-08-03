@@ -1,5 +1,13 @@
 # AgentMux Version History
 
+## 0.54.9 — 2026-08-02
+
+- fix(frontend): consolidate 7 duplicated token-count formatters, add k/m/b rollover
+- fix(frontend): consolidate 5 duplicated elapsed-time formatters, fix negative-duration gap
+- fix(frontend): consolidate string-truncation formatters, remove dead code
+- fix(frontend): consolidate 12 duplicated sleep-promise expressions into a shared helper
+
+
 ## 0.54.8 — 2026-08-02
 
 - feat(muxbus): same-host cross-channel reactive delivery (Tier 2b, issue #1916)
