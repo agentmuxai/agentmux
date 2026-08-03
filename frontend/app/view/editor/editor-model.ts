@@ -1023,7 +1023,7 @@ export class EditorViewModel implements ViewModel {
                     meta: {
                         view: "editor",
                         file: filePath,
-                        ...(isMarkdown ? { "editor:tree_expanded": false, "editor:source_hidden": true } : {}),
+                        ...(isMarkdown ? { "editor:tree_expanded": false } : {}),
                     },
                 },
                 null,
