@@ -65,7 +65,7 @@ This is the shape every retirement should take — explicit date, explicit reaso
 
 `docs/README.md` (the closest thing to a top-level index) is itself stale in three separate, verifiable ways: it references `docs-internal/`, which **does not exist anywhere in the repo** (confirmed: `git ls-tree -r | grep -i docs-internal` → empty); it lists only 9 of ~20 real subdirectories; and its claim that "approved specs live in the top-level `specs/` directory" is the *inverse* of actual practice (57 new specs went to `docs/specs/` vs. 13 to `specs/` since 2026-06-25, per the prior audit).
 
-`docs/specs/INDEX.md`, the curated table-of-contents specifically for specs, is frozen since roughly 2026-06-18 and has **zero entries** for Armory, the reducer-stack audit, the migration framework, muxspect, or ABF — i.e., it's missing essentially the entire last six weeks of architecture work, while still being the document positioned as "the current canonical spec for X."
+`docs/specs/INDEX.md`, the curated table-of-contents specifically for specs, was created 2026-06-18 (`65aba07f`) and has received exactly one touch since — 2026-07-12 (`d3016154`), a mechanical path-rewrite fixing cross-references for docs that were archived that day, not a content refresh — and has **zero entries** for Armory, the reducer-stack audit, the migration framework, muxspect, or ABF — i.e., it's missing essentially the entire last six weeks of architecture work, while still being the document positioned as "the current canonical spec for X."
 
 ### 1.5 This has already been audited twice, unfixed both times
 
