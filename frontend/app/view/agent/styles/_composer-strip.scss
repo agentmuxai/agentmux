@@ -51,6 +51,14 @@
 
 .agent-composer-strip-controls {
     display: flex;
+    // Internal wrap, not just the outer strip's — a zone that only ever
+    // moves as one atomic flex item can still be wider than the line it
+    // lands on (e.g. a long resolved model name before the ≤150px trigger
+    // cap applies), and the strip's own `overflow: hidden` would silently
+    // clip whatever doesn't fit instead of reflowing it. Reagent P1 (PR
+    // #2393): the equivalent gap on .agent-composer-strip-right could clip
+    // the Shell toggle itself — same fix applied to both zones.
+    flex-wrap: wrap;
     align-items: center;
     gap: var(--space-1);
     // A flex item's default min-width is `auto` (its content's intrinsic
@@ -197,6 +205,14 @@
 
 .agent-composer-strip-right {
     display: flex;
+    // Internal wrap so Shell (the last, and only real actionable, item in
+    // this zone) reflows onto its own line instead of being clipped by the
+    // strip's `overflow: hidden` when the zone lands on a wrapped line
+    // narrower than its full content (badge + ctx + auth + Shell) — the
+    // shed-content queries below reduce that content as width shrinks, but
+    // shouldn't be the only thing standing between "fits" and "Shell is
+    // silently unreachable." Reagent P1, PR #2393.
+    flex-wrap: wrap;
     align-items: center;
     gap: var(--space-1-5);
     min-width: 0;
