@@ -294,12 +294,10 @@ apply unchanged.
 
 ### 4. Wire it into `open_pane`'s `"editor"` branch
 
-In `agentmux-srv/src/server/app_api/mod.rs`'s `open_pane` (or a new
-branch specifically for `view == "editor"`, before the existing
-`CreateBlock` docked path at line ~129): when `cmd.split_reference_block_id`
-is present (this is already the calling agent's own block id, per
-`agentmux-mcp/src/main.rs`'s `OpenEditor` handler — no new field needed to
-identify "the caller"):
+In `agentmux-srv/src/server/app_api/mod.rs`'s `open_pane`, before the
+existing `CreateBlock` docked path: when `cmd.view == "editor"`,
+`cmd.reuse_editor_pane == Some(true)` (§5 below — explicit opt-in, not
+inferred), and `cmd.floating != Some(true)`:
 
 1. `resolve_tab_id_for_block(&wstore, split_reference_block_id)` → the
    agent's real tab_id (replaces relying on `resolve_tab_id`'s
@@ -313,28 +311,31 @@ identify "the caller"):
 4. If `None`: fall through to today's unchanged behavior (create a new
    block, split next to the agent's pane).
 
-This keeps the change scoped to the `"editor"` view specifically — `term`,
-`browser`, etc. are unaffected, and a caller that explicitly wants a second,
-separate Editor pane can still get one (open question below).
+### 5. Explicit `reuse_editor_pane` opt-in (not inferred)
+
+**Corrected from this plan's original draft** — see "Corrections from
+automated review" below for why an inferred trigger (e.g. "meta absent")
+is unsafe. `CommandPaneOpenData`/`PaneOpenRequest` gain a new
+`reuse_editor_pane: Option<bool>` field. Only `agentmux-mcp`'s `OpenEditor`
+tool handler sets it (`Some(true)`); every other `pane.open` caller
+(`EditorViewModel.openToTheSide`/`openInTerminal`, the widget-bar preset
+path, etc.) leaves it `None`, so reuse never triggers for them.
 
 ## Open questions
 
-1. **Opt-out.** Should `OpenEditor` gain an explicit flag (e.g.
-   `new_pane: true`) for a caller that genuinely wants a second, separate
-   Editor pane even when one is already open in the tab? Leans toward yes —
-   cheap to add, avoids surprising a caller who deliberately wants a
-   side-by-side diff view of two files — but not required for the first
-   version of this feature.
+1. ~~**Opt-out.**~~ **Resolved as opt-IN, not opt-out** — see §5. The
+   original framing ("should a caller be able to opt out of reuse") had it
+   backwards: reuse needs to be something only the intended caller
+   (`OpenEditor`) asks for, not something every `pane.open` caller gets by
+   default and has to escape.
 2. **Focus/visibility of the reused pane.** `OpenEditor`'s existing
-   `focus: true` behavior (line ~173 of `mod.rs`) is only defined for the
-   newly-created-block path (a layout-insert action with a "focused" flag).
-   No equivalent "bring this existing, already-docked pane into view and
-   make its new tab active" primitive was confirmed to exist during this
-   research — needs a small follow-up check (likely just `SetActiveTab`-
-   style pane-focus, but not verified against exact code before this plan
-   was written). If the reused pane is already visible in the currently
-   active tab (the common case — same tab the agent lives in), this may be
-   a non-issue in practice; worth confirming rather than assuming.
+   `focus: true` behavior is only defined for the newly-created-block path
+   (a layout-insert action with a "focused" flag). No equivalent "bring this
+   existing, already-docked pane into view and make its new tab active"
+   primitive was confirmed to exist — if the reused pane is already visible
+   in the currently active tab (the common case — same tab the agent lives
+   in), this may be a non-issue in practice; worth confirming rather than
+   assuming, but not blocking for v1.
 3. **Multiple editor blocks in one tab.** If a tab somehow has more than one
    Editor-view block (e.g. from the pre-existing `openInNewTab`
    "open to the side" flow, `editor-model.ts:1011-1034`, which deliberately
@@ -343,12 +344,58 @@ separate Editor pane can still get one (open question below).
    drag/split), `find_editor_block` as sketched returns the first match by
    `blockids` order. Fine for v1; not spec'd further here.
 
+## Corrections from automated review (reagent + codex, pre-merge)
+
+All four confirmed real, against the actual code, before fixing — not
+assumed correct from the finding alone:
+
+1. **Trigger was inferred, not explicit — collided with existing callers.**
+   The original draft above triggered reuse whenever `cmd.meta.is_none()`
+   (paired with `view == "editor"` and a `split_reference_block_id`). Both
+   `EditorViewModel.openToTheSide` and `openInTerminal`
+   (`frontend/app/view/editor/editor-model.ts:958-984`) call the same
+   generic `pane.open` RPC with `split_reference_block_id: this.blockId` —
+   their OWN block, used purely for split placement — and no `meta`. The
+   original condition would have matched that shape too, silently
+   redirecting "Open to the Side" into the calling pane itself instead of
+   creating the requested second pane. Fixed with the explicit
+   `reuse_editor_pane` opt-in (§5), set only by `OpenEditor`.
+2. **Floating requests could be swallowed into a reused docked pane.** The
+   reuse check originally ran before the `floating` branch, so
+   `OpenEditor(file, floating: true)` with an existing Editor pane already
+   in the tab would silently open the file in the *docked* pane instead of
+   creating the requested floating window. Fixed by excluding
+   `cmd.floating == Some(true)` from the reuse condition (§4).
+3. **`persist: 0` lost requests under a real race.** Two back-to-back
+   `OpenEditor` calls: the first creates the Editor block, but its frontend
+   `EditorViewModel` may not have mounted (and subscribed to
+   `EVENT_EDITOR_OPEN_FILE_REQUEST`) by the time the second call reuses that
+   block — publishing with `persist: 0` to zero subscribers silently drops
+   the second file. Fixed using the broker's existing replay-on-subscribe
+   mechanism (`Broker::subscribe`, `agentmux-srv/src/backend/wps.rs:206-239`)
+   — `persist: 20` instead of `0`, so a late-subscribing `EditorViewModel`
+   still receives it. Not a new mechanism; reuses the same pattern already
+   proven for live-log streaming's identical race.
+4. **Wrong-tab fallback wasn't just theoretical — reproduced by a test.**
+   When reuse doesn't apply (no existing pane, or a floating request), the
+   code fell through to `resolve_tab_id`'s "first workspace's active tab"
+   fallback, discarding the tab already correctly resolved via
+   `split_reference_block_id` for the reuse check. A new regression test
+   for the floating case concretely failed against this before the fix
+   ("tab not found in reducer state"). Fixed by deriving the tab from
+   `split_reference_block_id` generally (§4's step 1, now applied to the
+   non-reuse fallback too) whenever no explicit `tab_id` is given — this
+   benefits every `pane.open` caller that specifies a relative block, not
+   just the editor-reuse path.
+
 ## Files (anticipated — this plan does not implement)
 
 | File | Relevance |
 |------|-----------|
-| `agentmux-srv/src/server/app_api/mod.rs` | New `resolve_tab_id_for_block`, new `find_editor_block`, both mirroring `find_agent_block`/`resolve_tab_id`'s existing shape; `open_pane`'s `"editor"` branch gains the reuse-or-create decision |
-| `agentmux-srv/src/backend/editor_file_watcher.rs` | New `EVENT_EDITOR_OPEN_FILE_REQUEST` const + publish call, mirroring `EVENT_EDITOR_FILE_CHANGED`'s existing shape exactly |
+| `agentmux-srv/src/server/app_api/mod.rs` | New `resolve_tab_id_for_block`, new `find_editor_block`, both mirroring `find_agent_block`/`resolve_tab_id`'s existing shape; `open_pane`'s tab-resolution and `"editor"` branch gain the reuse-or-create decision |
+| `agentmux-srv/src/server/app_api/pane.rs` | New `maybe_reuse_editor_pane` + `EVENT_EDITOR_OPEN_FILE_REQUEST` const, published with `persist: 20` (§5's correction) |
+| `agentmux-srv/src/backend/rpc_types/block.rs`, `agentmux-common/src/api_types.rs` | New `reuse_editor_pane: Option<bool>` field on `CommandPaneOpenData`/`PaneOpenRequest` (§5) |
+| `agentmux-mcp/src/main.rs` | `OpenEditor` handler sets `reuse_editor_pane: Some(true)` — the only caller that does |
 | `frontend/app/store/wps-events.ts` | New `EditorOpenFileRequest` entry |
 | `frontend/app/view/editor/editor-model.ts:214-221` | New twin WPS subscription calling `this.openFile(path)`, alongside the existing `EditorFileChanged` one |
 | `agentmux-srv/src/server/app_api/agent_open.rs:84` | Precedent this design's reuse-detection directly mirrors |
