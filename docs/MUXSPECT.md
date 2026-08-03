@@ -50,6 +50,20 @@ independent view of process/turn state. Concretely it can see:
 - The OS process tree tracked for a block (PID, command, RSS)
 - How stale each of the above is (`last_computed_ms`) and how confidently
   it's tracked on this platform (`liveness_confidence`)
+- **`last_error`** — if the very last line ever written to a block's own
+  transcript is a persisted `error_during_execution` frame (a spawn that
+  was refused before any process/controller existed — a bad identity
+  link, a container that wouldn't start, etc.), `describe` and `list` both
+  surface it directly: the message, a best-effort `source` tag, and when
+  it was written. This is what a block with `lifecycle: unknown` and zero
+  processes actually means — "healthy, idle" and "permanently wedged,
+  actionable fix available" look identical without it. Added to close
+  exactly that gap after a real incident where `muxspect describe` came
+  back diagnostically empty on a wedged agent — see
+  `docs/reports/REPORT_MUXSPECT_SPAWN_REFUSAL_DIAGNOSIS_EXTENSION_2026_08_03.md`.
+  Not a live/independent error tracker — it's a second reader over the
+  same durable frame the pane's own error bubble already comes from, so it
+  can never drift from what the UI shows.
 
 It **cannot** see the Agent pane's Activity Dock — that's pure in-renderer
 SolidJS state, never persisted or exposed via any RPC, by design (not an
