@@ -250,9 +250,15 @@ pub(super) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, 
         "help" => {
             meta.insert("view".to_string(), json!("help"));
         }
+        "media" => {
+            let file = cmd.file.as_deref().filter(|s| !s.is_empty())
+                .ok_or_else(|| "MISSING_ARG: view=media requires 'file'".to_string())?;
+            meta.insert("view".to_string(), json!("media"));
+            meta.insert("media:path".to_string(), json!(file));
+        }
         other => {
             return Err(format!(
-                "INVALID_VIEW: unsupported view '{other}' (expected editor/term/browser/sysinfo/help)"
+                "INVALID_VIEW: unsupported view '{other}' (expected editor/term/browser/sysinfo/help/media)"
             ));
         }
     }
