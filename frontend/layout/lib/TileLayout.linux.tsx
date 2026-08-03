@@ -438,7 +438,7 @@ const ResizeHandle = (props: ResizeHandleComponentProps) => {
                 teardown(); // primary button released without a pointerup reaching us
                 return;
             }
-            props.layoutModel.onResizeMove(props.resizeHandleProps, e.clientX, e.clientY);
+            props.layoutModel.onResizeMove(props.resizeHandleProps, e.clientX, e.clientY, e.shiftKey);
         });
         const onUp = () => teardown?.();
 
