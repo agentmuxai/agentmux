@@ -29,13 +29,18 @@
  * Truncate `s` to at most `max` characters (including the ellipsis), using a
  * real "…" character (both prior duplicates that used a literal "..." are
  * gone — one was dead code, the other never shipped that bug). With
- * `pathAware: true`, left-truncates instead of right-truncating so a
- * trailing filename survives — opt in only for inputs that are actually
- * file paths.
+ * `pathAware: true`, a string that actually LOOKS like a path (contains `/`
+ * or `\`) left-truncates instead of right-truncating so a trailing filename
+ * survives — `pathAware` only enables the check, it does not force every
+ * input through it. `AgentFooter.tsx`'s tool args aren't all paths (Bash
+ * flags, grep patterns, etc.) — reagent P1 on PR #2387 caught an earlier
+ * draft that left-truncated unconditionally once `pathAware: true` was
+ * passed, silently reversing the truncation direction for every non-path
+ * arg too.
  */
 export function abbreviateText(s: string, max: number, opts?: { pathAware?: boolean }): string {
     if (s.length <= max) return s;
-    if (opts?.pathAware) {
+    if (opts?.pathAware && (s.includes("/") || s.includes("\\"))) {
         return "…" + s.slice(-(max - 1));
     }
     return s.slice(0, max - 1) + "…";
