@@ -278,7 +278,7 @@ broker.publish(WaveEvent {
     event: EVENT_EDITOR_OPEN_FILE_REQUEST.to_string(),
     scopes: vec![format!("block:{existing_block_id}")],
     sender: String::new(),
-    persist: 0,
+    persist: 20, // §5 correction — see "Corrections from automated review"
     data: Some(json!({ "path": file_path })),
 });
 ```
@@ -308,8 +308,11 @@ inferred), and `cmd.floating != Some(true)`:
    `existing_block.oid` with the requested file path, and return a
    `PaneOpenResult` pointing at the **existing** block id (`created: false`)
    — skip `CreateBlock`/layout-insert entirely.
-4. If `None`: fall through to today's unchanged behavior (create a new
-   block, split next to the agent's pane).
+4. If `None`: fall through to the create-new-block path (create a new
+   block, split next to the agent's pane) — but note per §5's corrections
+   below, the tab this falls through to is *also* now derived from
+   `split_reference_block_id` when no explicit `tab_id` is given, not
+   `resolve_tab_id`'s old "first workspace's active tab" fallback.
 
 ### 5. Explicit `reuse_editor_pane` opt-in (not inferred)
 
