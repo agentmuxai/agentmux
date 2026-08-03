@@ -224,12 +224,6 @@ pub(super) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, 
             } else if is_markdown {
                 meta.insert("editor:tree_expanded".to_string(), json!(false));
             }
-
-            // Markdown files default to preview-only (source editor hidden).
-            // Agents open .md files to surface documentation, not to edit.
-            if is_markdown {
-                meta.insert("editor:source_hidden".to_string(), json!(true));
-            }
         }
         "term" => {
             meta.insert("view".to_string(), json!("term"));
