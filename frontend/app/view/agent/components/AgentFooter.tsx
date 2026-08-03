@@ -14,6 +14,7 @@ import { atoms } from "@/app/store/global";
 import { ObjectService } from "@/app/store/services";
 import { fireAndForget } from "@/util/util";
 import { formatCompactNumber } from "@/util/format-count";
+import { formatElapsedCompact } from "@/util/format-time";
 import { MicButton } from "@/app/element/MicButton";
 import type { AgentViewModel } from "../agent-model";
 import type { SlashCommand } from "../commands/types";
@@ -27,11 +28,6 @@ function pickThinkingPhrase(_exclude?: string): string {
 
 function ingToEd(_phrase: string): string {
     return "Worked";
-}
-
-function fmtElapsed(ms: number): string {
-    const s = Math.floor(ms / 1000);
-    return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
 function fmtTokens(t: TurnTokens): string {
@@ -236,7 +232,7 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
     const rightText = createMemo((): string => {
         const right: string[] = [];
         if (props.turnTokens) right.push(fmtTokens(props.turnTokens));
-        right.push(fmtElapsed(elapsedMs()));
+        right.push(formatElapsedCompact(elapsedMs()));
         return right.join("  ·  ");
     });
 
