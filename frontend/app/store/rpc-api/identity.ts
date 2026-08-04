@@ -119,7 +119,14 @@ export const IdentityApi = {
 
     UnlinkAgentIdentityCommand(
         client: RpcClient,
-        data: { agent_id: string; provider: string },
+        data: {
+            agent_id: string;
+            provider: string;
+            /** Skip the agentcredentials:revoked broadcast — for an alias
+             *  migration (same credential staying bound under its canonical
+             *  provider id), not a real unbind. Default false. */
+            silent?: boolean;
+        },
         opts?: RpcOpts,
     ): Promise<{ unlinked: boolean }> {
         return client.rpcCall("unlinkagentidentity", data, opts);

@@ -34,6 +34,17 @@ pub struct CommandLinkAgentIdentityData {
 pub struct CommandUnlinkAgentIdentityData {
     pub agent_id: String,
     pub provider: String,
+    /// Skip the `agentcredentials:revoked:<agent_id>` broadcast (see the
+    /// handler's own comment — spec-mandated for a genuine unbind, since a
+    /// live process still holds the unlinked account's tokens until
+    /// restarted). Set when this unlink is really an ALIAS MIGRATION — the
+    /// same credential is staying bound to the agent under its canonical
+    /// provider id, just cleaning up the now-redundant legacy-alias row
+    /// (reagent P2 on PR #2414: the generic revoked event made a successful
+    /// re-login show "Credentials revoked" immediately afterward). Default
+    /// false — every existing caller is a real unbind and keeps disclosing.
+    #[serde(default)]
+    pub silent: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
