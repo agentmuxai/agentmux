@@ -1,6 +1,6 @@
 # Docs Lifecycle Audit & Hardening Plan
 **Date:** 2026-08-03
-**Status:** Proposed
+**Status:** Phase 0 implemented (this PR, commit `d7ed5c08`) — Phases 1-5 still proposed, not started.
 **Scope:** `docs/` and `specs/` (both top-level trees)
 **Related:** [`docs/specs/SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md`](./SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md) — written the same day, deliberately the same shape. Both audits found the identical underlying pattern: **a marker that claims a state (a migration flag / a `Status:` field) is trusted without ever being checked against ground truth, and nothing re-verifies it once written.** For migrations that's a stale `.flag` file; for docs it's a `Status: Draft` line nobody revisits. The hardening approach below deliberately mirrors that doc's phasing for the same reason: one-shot fixes rot, self-verifying systems don't.
 
