@@ -193,6 +193,9 @@ pub async fn run_cli_login(
         let mut stored_stdin = state.cli_login_stdin.lock();
         *stored_stdin = child.stdin.take().map(CliLoginStdin::Pipe);
     }
+    state
+        .cli_login_active
+        .store(true, std::sync::atomic::Ordering::SeqCst);
 
     // Capture the OAuth URL from stdout/stderr (the CLI prints it within a few
     // hundred ms). CRITICAL: the readers must SURVIVE this capture and keep
@@ -302,6 +305,9 @@ pub async fn run_cli_login(
             == generation
         {
             *state_for_cleanup.cli_login_stdin.lock() = None;
+            state_for_cleanup
+                .cli_login_active
+                .store(false, std::sync::atomic::Ordering::SeqCst);
         }
     });
 
@@ -636,6 +642,9 @@ async fn run_cli_login_pty(
         let mut stored = state.cli_login_stdin.lock();
         *stored = Some(CliLoginStdin::Pty(writer));
     }
+    state
+        .cli_login_active
+        .store(true, std::sync::atomic::Ordering::SeqCst);
 
     // Synchronously read from the master in a blocking task, scanning
     // each line for an OAuth URL. portable_pty's reader is sync.
@@ -799,6 +808,9 @@ async fn run_cli_login_pty(
         {
             *state_for_cleanup.cli_login_stdin.lock() = None;
             *state_for_cleanup.cli_login_pty_pid.lock() = None;
+            state_for_cleanup
+                .cli_login_active
+                .store(false, std::sync::atomic::Ordering::SeqCst);
         }
     });
 
@@ -948,10 +960,16 @@ pub fn cancel_cli_login(state: &Arc<AppState>) -> Result<serde_json::Value, Stri
 
 /// Report whether a CLI login child is still in flight.
 ///
-/// `active` is derived from the `cli_login_stdin` slot, which both spawn
-/// transports (pipe and PTY) populate at spawn and whose reaper task clears
-/// on child exit / cancel / reap-timeout — generation-guarded, so a
-/// superseding login that repopulated the slot correctly reads as active.
+/// `active` is derived from `cli_login_active`, which both spawn transports
+/// (pipe and PTY) set at spawn and whose reaper task clears on child exit /
+/// cancel / reap-timeout — generation-guarded, so a superseding login that
+/// repopulated the slot correctly reads as active. Deliberately NOT derived
+/// from `cli_login_stdin`'s presence: `set_provider_auth` `.take()`s that
+/// slot the instant a pasted code is delivered (single-use), but the child
+/// keeps running afterward while it exchanges the code — reading the stdin
+/// slot here reported `active: false` the moment a code was pasted, which
+/// could time out and kill a login that was still genuinely completing
+/// (codex P1 on PR #2410).
 ///
 /// Added for the in-app Claude login session
 /// (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.1): tier-1 completion is
@@ -965,7 +983,9 @@ pub fn cancel_cli_login(state: &Arc<AppState>) -> Result<serde_json::Value, Stri
 /// "authenticated" — see force-login.ts's doc comment) and reap the login
 /// child before the user ever finished authorizing.
 pub fn get_cli_login_status(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
-    let active = state.cli_login_stdin.lock().is_some();
+    let active = state
+        .cli_login_active
+        .load(std::sync::atomic::Ordering::SeqCst);
     Ok(serde_json::json!({ "active": active }))
 }
 
