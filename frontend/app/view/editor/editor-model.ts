@@ -37,6 +37,7 @@ import { createBlockOnModel, waitForLayoutModel } from "@/app/tab/tab-presets";
 import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
+import { fireAndForget } from "@/util/util";
 import { createMemo, createSignal, type Accessor } from "solid-js";
 import { FileTreeModel } from "./file-tree-model";
 
@@ -45,6 +46,12 @@ const META_SHOW_HIDDEN = "editor:show_hidden";
 const META_TREE_WIDTH = "editor:tree_width";
 const META_PREVIEW_HEIGHT = "editor:preview_height";
 const META_LEGACY_FILE = "file";
+// Reuse (SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md
+// Part 2): a file pushed by a reuse-and-not-yet-mounted OpenEditor call.
+// Checked once at construction, then cleared — deliberately NOT delivered
+// via WPS event replay, which has no ack/consume concept and would
+// otherwise re-fire on every future reconnect (codex P1 on PR #2404).
+const META_PENDING_OPEN_FILE = "editor:pending_open_file";
 
 export type EditorMode = "preview" | "source" | "split";
 const META_SCRATCH = "editor:scratch";
@@ -352,6 +359,16 @@ export class EditorViewModel implements ViewModel {
         } else if (meta?.[META_SCRATCH] === true && snapshot(blockId)?.tabs.length === 0) {
             // Widget default: open a scratch buffer when no file was persisted.
             void this.openScratch();
+        }
+
+        // Reuse: a pending file from a not-yet-mounted OpenEditor reuse call
+        // (see META_PENDING_OPEN_FILE above). Consume once, then clear —
+        // openFile() itself is idempotent (activates the tab if the live WPS
+        // event below also fired for the same path), so no dedup needed here.
+        const pendingOpenFile = meta?.[META_PENDING_OPEN_FILE];
+        if (typeof pendingOpenFile === "string" && pendingOpenFile) {
+            void this.openFile(pendingOpenFile);
+            fireAndForget(() => this.persistMeta({ [META_PENDING_OPEN_FILE]: "" }));
         }
     }
 

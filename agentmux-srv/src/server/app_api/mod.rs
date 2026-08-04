@@ -1422,6 +1422,31 @@ mod pane_open_reducer_tests {
         .expect("open_pane first editor");
         assert!(first_editor.created);
 
+        // Simulate the frontend having already reported the materialized
+        // tree back (LayoutQueueBackendActions only queues an action for the
+        // frontend to apply — agentmux-srv/src/reducer/layout.rs's
+        // handle_layout_queue_backend_actions never touches rootnode itself,
+        // confirmed by reading it directly; the frontend round-trips a real
+        // tree via LayoutSetTree). Realistic for a reuse target: by the time
+        // a SECOND OpenEditor call reuses an existing pane, that pane's own
+        // creation round-trip has long since completed in real usage — this
+        // is not the same race maybe_reuse_editor_pane's meta-based file
+        // delivery bridges (block just created THIS call), it's simulating
+        // an already-settled pane from an EARLIER call.
+        {
+            let tab: Tab = state.wstore.must_get(&tab_id).unwrap();
+            let mut layout: obj::LayoutState = state.wstore.must_get(&tab.layoutstate).unwrap();
+            layout.rootnode = Some(obj::LayoutNode {
+                id: "leaf-1".to_string(),
+                data: Some(obj::LayoutNodeData {
+                    block_id: first_editor.block_id.clone(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            });
+            state.wstore.update(&mut layout).unwrap();
+        }
+
         // A second OpenEditor call from the caller, same tab, different file
         // — must reuse the existing Editor pane, not create a second one.
         let reused = open_pane(
@@ -1436,12 +1461,15 @@ mod pane_open_reducer_tests {
 
         // Regression for reagent P1 on PR #2404: focus (the OpenEditor
         // default, cmd.focus == None -> unwrap_or(true)) must still be
-        // applied on the reuse path, not silently dropped.
+        // applied on the reuse path, not silently dropped. focused_node_id
+        // is the layout LEAF id ("leaf-1", seeded above), NOT the block id
+        // (codex P1: an earlier version of the fix passed the block id
+        // directly, which is the wrong id type entirely).
         let s = state.srv_state.lock().await;
         assert_eq!(
             s.tabs.get(&tab_id).unwrap().focused_node_id,
-            first_editor.block_id,
-            "reusing an existing editor pane must still focus its tab, same as the create path"
+            "leaf-1",
+            "reusing an existing editor pane must still focus its tab's layout leaf, same as the create path"
         );
     }
 

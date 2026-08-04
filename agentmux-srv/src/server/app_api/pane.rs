@@ -278,16 +278,27 @@ pub(super) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, 
 /// See SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md Part 2.
 pub(super) const EVENT_EDITOR_OPEN_FILE_REQUEST: &str = "editor:open_file_request";
 
-/// Persist a handful of open-file requests per block (`Broker::subscribe`'s
-/// replay-on-subscribe, `agentmux-srv/src/backend/wps.rs:206-239`) rather
-/// than firing with `persist: 0`. Closes a real race (codex P1 on PR #2404):
-/// a just-created Editor block may not have finished mounting its
-/// `EditorViewModel` (and installing this event's subscription) by the time
-/// a second back-to-back `OpenEditor` call reuses it — with `persist: 0` that
-/// second call's request would be published to zero subscribers and silently
-/// lost. A small positive count also survives *several* such back-to-back
-/// calls arriving before the pane ever mounts, not just one.
-const OPEN_FILE_REQUEST_PERSIST_COUNT: usize = 20;
+/// Block-meta key carrying a file the reused pane should open once it
+/// (re)mounts — the actual race-closing delivery path, not the live WPS
+/// event below. Checked once by `EditorViewModel`'s constructor, then
+/// cleared immediately after being consumed.
+///
+/// **Superseded `persist > 0` on the WPS event** (codex P1 on PR #2404, two
+/// passes): a just-created Editor block may not have finished mounting its
+/// `EditorViewModel` (and installing the event subscription) by the time a
+/// second back-to-back `OpenEditor` call reuses it — with `persist: 0` that
+/// second call's request would reach zero subscribers and be lost. Using
+/// `persist: N` closes that race but opens a *worse* one: `Broker::
+/// unsubscribe_all` clears a route's replay marker on disconnect
+/// (`agentmux-srv/src/backend/wps.rs:312-323`), so any later, unrelated
+/// reconnect (page reload, network hiccup) would replay the *entire*
+/// persisted history again — reopening files the user has since closed and
+/// changing the active tab, potentially long after the original race
+/// window. The broker has no ack/consume concept, so nothing marks a
+/// persisted event "already delivered." Block meta does have exactly that
+/// shape already (write once, read once at construction, clear after
+/// reading) — reusing it avoids inventing new broker machinery.
+const META_PENDING_OPEN_FILE: &str = "editor:pending_open_file";
 
 /// If the calling agent (identified by its own block id, `caller_block_id`)
 /// already has an Editor pane open in its own tab, push `file` into that
@@ -318,11 +329,36 @@ pub(super) async fn maybe_reuse_editor_pane(
         None => return Ok(None),
     };
 
+    // Durable delivery path: written to block meta so a not-yet-mounted (or
+    // remounting) EditorViewModel picks it up once at construction, then
+    // clears it — see META_PENDING_OPEN_FILE's doc comment for why this
+    // replaces relying on WPS persist/replay for correctness.
+    let meta_events = crate::server::service::dispatch_to_reducer(
+        state,
+        agentmux_common::ipc::Command::UpdateBlockMeta {
+            block_id: existing.oid.clone(),
+            meta_patch: json!({ META_PENDING_OPEN_FILE: file }),
+        },
+    )
+    .await;
+    for ev in &meta_events {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, wstore) {
+            tracing::warn!("pane.open: reuse: UpdateBlockMeta wstore apply failed: {e}");
+        }
+    }
+    crate::server::service::publish_events(state, &meta_events);
+
+    // Live delivery path: immediate effect when the pane is already
+    // mounted. `persist: 0` — no replay-forever risk, since the meta write
+    // above is what a not-yet-mounted pane actually relies on. openFile()
+    // is idempotent (activates the existing tab rather than duplicating),
+    // so both paths firing for the same file in the rare overlap case is
+    // harmless.
     state.broker.publish(crate::backend::wps::WaveEvent {
         event: EVENT_EDITOR_OPEN_FILE_REQUEST.to_string(),
         scopes: vec![format!("block:{}", existing.oid)],
         sender: String::new(),
-        persist: OPEN_FILE_REQUEST_PERSIST_COUNT,
+        persist: 0,
         data: Some(json!({ "path": file })),
     });
 
@@ -330,12 +366,52 @@ pub(super) async fn maybe_reuse_editor_pane(
     // create-new-block path. Best-effort, matching this file's other
     // reducer-dispatch error handling (a focus failure shouldn't fail the
     // whole reuse — the file still opens as a tab either way).
+    //
+    // `focused_node_id` is a LAYOUT LEAF id, not a block id (`obj::LayoutState`'s
+    // `leaforder: Vec<LeafOrderEntry>` has separate `nodeid`/`blockid` fields —
+    // codex P1 on PR #2404 caught an earlier version of this passing
+    // `existing.oid` directly here, which is the wrong id entirely). Resolve
+    // the leaf via the existing `find_node_id_by_block` tree walk (the same
+    // helper the delete_block saga uses for the identical block→leaf lookup).
+    //
+    // Known gap: `wstore`'s `LayoutState.rootnode` is eventually consistent,
+    // not immediately updated on block creation — `Command::LayoutQueueBackendActions`
+    // (confirmed by reading `reducer/layout.rs::handle_layout_queue_backend_actions`
+    // directly) only queues the insert action for the frontend to apply and
+    // report back via `LayoutSetTree`; it never touches `rootnode` itself. So
+    // this lookup can miss immediately after the reused block's own creation
+    // (its layout round-trip hasn't landed yet) — acceptable in practice,
+    // since reuse targets a pane from an *earlier* `OpenEditor` call whose own
+    // round-trip has normally long since completed by the time it's reused.
+    // Degrades gracefully (skips focus, logs a warning) rather than failing
+    // the whole reuse when the lookup misses.
     if focus.unwrap_or(true) {
+        let leaf_node_id = wstore
+            .must_get::<Tab>(&tab_id)
+            .ok()
+            .and_then(|tab| wstore.must_get::<obj::LayoutState>(&tab.layoutstate).ok())
+            .and_then(|layout| layout.rootnode)
+            .and_then(|root| crate::backend::layout::find_node_id_by_block(&root, &existing.oid));
+
+        let Some(leaf_node_id) = leaf_node_id else {
+            tracing::warn!(
+                block_id = %existing.oid,
+                tab_id = %tab_id,
+                "pane.open: reuse: could not resolve the reused block's layout leaf id — skipping focus"
+            );
+            return Ok(Some(PaneOpenResult {
+                block_id: existing.oid,
+                tab_id,
+                view: "editor".to_string(),
+                created: false,
+            }));
+        };
+
         let focus_events = crate::server::service::dispatch_to_reducer(
             state,
             agentmux_common::ipc::Command::SetFocusedNode {
                 tab_id: tab_id.clone(),
-                node_id: existing.oid.clone(),
+                node_id: leaf_node_id,
             },
         )
         .await;
