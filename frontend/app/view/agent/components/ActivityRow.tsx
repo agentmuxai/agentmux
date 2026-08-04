@@ -12,6 +12,7 @@
 import clsx from "clsx";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
+import { formatElapsedClock } from "@/util/format-time";
 import { capChars, createChunkCapper, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
 import {
@@ -57,13 +58,6 @@ const KIND_CLASS: Record<string, string> = {
     system: "agent-tool-log-line--system",
 };
 
-function formatElapsed(ms: number): string {
-    const totalSec = Math.max(0, Math.floor(ms / 1000));
-    const m = Math.floor(totalSec / 60);
-    const s = totalSec % 60;
-    return `${m}:${String(s).padStart(2, "0")}`;
-}
-
 interface ActivityRowProps {
     /** Reactive accessor — returns undefined if the activity just left. */
     activity: () => PinnedActivity | undefined;
@@ -93,7 +87,7 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
         const a = props.activity();
         if (!a) return "";
         const end = a.endedAt ?? (tick(), Date.now());
-        return formatElapsed(end - a.startedAt);
+        return formatElapsedClock(end - a.startedAt);
     });
 
     // Terminal statuses override the kind sigil with a result glyph.

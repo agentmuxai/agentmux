@@ -21,6 +21,7 @@ import {
     AgentPaneCommand,
     AgentPaneEvent,
     AgentPaneState,
+    type CompactionState,
     type InitPhase,
     initialState,
     type PaneFailure,
@@ -88,6 +89,13 @@ export interface AgentPaneProjections {
      * See SPEC_AGENT_PANE_UNIFIED_FAILURE_REDUCER_2026_07_06.md.
      */
     failure?: (next: PaneFailure | null) => void;
+    /**
+     * Live "compaction in progress" state, or null. Reducer-owned (see
+     * `AgentPaneState.compacting` / `CompactionStarted` / `CompactionBoundary`).
+     * Drives the "Compacting…" status chip + elapsed counter. See
+     * docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md.
+     */
+    compacting?: (next: CompactionState | null) => void;
 }
 
 interface Slot {
@@ -261,6 +269,7 @@ export function dispatch(
     proj("detailsOpen", prev.detailsOpen, slot.state.detailsOpen, slot.proj.detailsOpen);
     proj("currentToolArg", prev.currentToolArg, slot.state.currentToolArg, slot.proj.currentToolArg);
     proj("failure", prev.failure, slot.state.failure, slot.proj.failure);
+    proj("compacting", prev.compacting, slot.state.compacting, slot.proj.compacting);
 
     if (cascadeSetter != null) {
         console.warn(

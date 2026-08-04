@@ -16,6 +16,7 @@
 
 import { createRoot, type Owner } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { sleep } from "@/util/util";
 
 vi.mock("@/app/store/rpc-api", () => {
     const RpcApi = {
@@ -58,7 +59,7 @@ const makeMockModel = (): AgentPaneModel & {
 
 let dispose: (() => void) | null = null;
 
-const flushMicrotasks = () => new Promise<void>((r) => setTimeout(r, 0));
+const flushMicrotasks = () => sleep(0);
 
 beforeEach(async () => {
     vi.clearAllMocks();

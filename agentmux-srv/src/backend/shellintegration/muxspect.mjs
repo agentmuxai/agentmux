@@ -1,0 +1,247 @@
+#!/usr/bin/env node
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// muxspect — live introspection into the CURRENT running AgentMux instance's
+// process/turn state. Sibling to muxlog (history) — muxspect answers "what is
+// this instance doing right now," not "what happened."
+//
+// Phase 1 of docs/specs/SPEC_MUXSPECT_LIVE_INTROSPECTION_TOOL_2026_08_01.md:
+// queries the instance the caller is ALREADY inside (via $AGENTMUX_LOCAL_URL /
+// $AGENTMUX_AUTH_KEY, inherited from the environment exactly the way
+// agentmux-mcp already does for every other /api/v1/* route — no new IPC, no
+// new auth scheme). Cross-instance querying (`muxspect targets` / `-i <other>`)
+// is Phase 2, not implemented here.
+//
+// Deployed by agentmux-srv next to muxlog.mjs (~/.agentmux/shell/muxspect.mjs);
+// the bash/zsh/pwsh/fish `muxspect` functions delegate here. Run standalone
+// with `node muxspect.mjs ...` (works from any subshell, unlike the shell
+// function) — but only from within a pane whose environment already carries
+// $AGENTMUX_LOCAL_URL/$AGENTMUX_AUTH_KEY (an agent pane, or any shell pane for
+// the URL — the auth key specifically is only injected for agent-CLI-type
+// controllers today, see agentmux-srv/src/server/agent_handlers/input.rs).
+
+import { pathToFileURL } from "node:url";
+
+const USAGE = `muxspect — live process/turn-state introspection for the current AgentMux instance
+
+Usage:
+  muxspect                        same as 'muxspect list'
+  muxspect list [--json]          summary of every controller-backed block
+  muxspect describe <block_id> [--json]
+                                  full detail for one block (process status,
+                                  controller status, OS process tree)
+  muxspect watch <block_id>       poll 'describe' every 2s until Ctrl+C
+  muxspect help                   this message
+
+Requires $AGENTMUX_LOCAL_URL and $AGENTMUX_AUTH_KEY in the environment.
+
+IMPORTANT (reagent P1 on PR #2380): the bare 'muxspect' shell FUNCTION is
+only defined in INTERACTIVE terminal panes (it's sourced from the shell
+rcfile), but those panes only get $AGENTMUX_LOCAL_URL, not
+$AGENTMUX_AUTH_KEY — so the function loads there but auth fails. Agent-CLI
+tool calls (the primary intended use — an agent inspecting its own running
+instance) get BOTH env vars, but tool-spawned shells don't source the
+rcfile, so the 'muxspect' function isn't defined there either. Until a
+Phase 2 fix wires this up properly, the ONLY invocation that reliably works
+today is calling the deployed core directly by path (same caveat muxlog
+itself documents for tool-spawned subshells):
+  node ~/.agentmux/shell/muxspect.mjs list
+See docs/specs/SPEC_MUXSPECT_LIVE_INTROSPECTION_TOOL_2026_08_01.md for the
+full story and the planned fix.`;
+
+function fail(msg) {
+    console.error(`muxspect: ${msg}`);
+    process.exit(1);
+}
+
+function requireEnv() {
+    const url = process.env.AGENTMUX_LOCAL_URL;
+    const authKey = process.env.AGENTMUX_AUTH_KEY;
+    if (!url || !authKey) {
+        fail(
+            "$AGENTMUX_LOCAL_URL / $AGENTMUX_AUTH_KEY not set — run this from inside an AgentMux agent pane.\n" +
+            "muxspect only queries the instance you're already running in; it can't discover or guess another one."
+        );
+    }
+    return { url, authKey };
+}
+
+async function apiGet(url, authKey, urlPath) {
+    let resp;
+    try {
+        resp = await fetch(`${url}${urlPath}`, { headers: { "X-AuthKey": authKey } });
+    } catch (e) {
+        fail(`could not reach ${url} — instance unreachable (${e.message})`);
+    }
+    if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        fail(`request failed (${resp.status}): ${body || resp.statusText}`);
+    }
+    return resp.json();
+}
+
+function ageString(lastComputedMs) {
+    if (!lastComputedMs) return "unknown";
+    const ageMs = Date.now() - lastComputedMs;
+    if (ageMs < 0) return "0s"; // clock skew — never print a negative age
+    if (ageMs < 1000) return `${ageMs}ms`;
+    if (ageMs < 60_000) return `${Math.round(ageMs / 1000)}s`;
+    return `${Math.round(ageMs / 60_000)}m`;
+}
+
+function renderList(data) {
+    const blocks = data.blocks ?? [];
+    if (blocks.length === 0) {
+        console.log("(no controller-backed blocks in this instance)");
+        return;
+    }
+    // "pane_type" reflects static pane classification, NOT live turn
+    // activity — that's what `lifecycle` is for (`lifecycle_from` maps
+    // turn_active=true straight to Lifecycle::Running; see
+    // agentmux-srv/src/broker/process.rs). A column literally named "turn"
+    // showing pane-type instead of turn state was reviewed as misleading
+    // (codex P2 on PR #2380) — `list`'s ProcessStatus rows don't carry
+    // BlockControllerRuntimeStatus::turn_active at all (that needs
+    // `describe`), so this renames rather than fetching it at extra cost.
+    //
+    // Uses the server-computed `is_agent` field, NOT the raw
+    // `is_agent_pane` flag — subprocess/persistent/acp controllers can
+    // report `is_agent_pane: false` even though those controller types are
+    // always agents; reimplementing that classification rule in JS instead
+    // of reusing ProcessStatus::is_agent() mislabeled exactly those three
+    // types as "term" (codex P2 on PR #2380, second round).
+    // "last_error" — the last thing that happened to this block was an
+    // unrecovered spawn/execution error (muxspect_handlers.rs's
+    // last_error_frame). Distinct from lifecycle/confidence (liveness): a
+    // block can be `lifecycle: unknown` for perfectly healthy reasons
+    // (idle, never opened) — this column is what disambiguates "idle"
+    // from "wedged, fix available" at a glance, which is the whole point
+    // (docs/reports/REPORT_MUXSPECT_SPAWN_REFUSAL_DIAGNOSIS_EXTENSION_2026_08_03.md §3.2).
+    const rows = blocks.map((b) => ({
+        block_id: b.block_id,
+        type: b.controller_type || "?",
+        lifecycle: b.lifecycle,
+        pane_type: b.is_agent ? "agent" : "term",
+        confidence: b.liveness_confidence,
+        age: ageString(b.last_computed_ms),
+        last_error: b.last_error ? `yes (${ageString(b.last_error.written_ms)})` : "-",
+    }));
+    const cols = ["block_id", "type", "lifecycle", "pane_type", "confidence", "age", "last_error"];
+    const widths = Object.fromEntries(
+        cols.map((c) => [c, Math.max(c.length, ...rows.map((r) => String(r[c]).length))])
+    );
+    const line = (r) => cols.map((c) => String(r[c]).padEnd(widths[c])).join("  ");
+    console.log(line(Object.fromEntries(cols.map((c) => [c, c]))));
+    for (const r of rows) console.log(line(r));
+    console.log(`\n(as of query time — each row's own 'age' shows how stale its computed status is)`);
+}
+
+function renderDescribe(data) {
+    const ps = data.process_status ?? {};
+    const cs = data.controller_status;
+    console.log(`block_id:            ${data.block_id}`);
+    console.log(`lifecycle:           ${ps.lifecycle ?? "unknown"}  (computed ${ageString(ps.last_computed_ms)} ago)`);
+    console.log(`controller_type:     ${ps.controller_type || "(no controller)"}`);
+    console.log(`is_agent:            ${data.is_agent ?? false}  (raw is_agent_pane: ${ps.is_agent_pane ?? false})`);
+    console.log(`liveness_confidence: ${ps.liveness_confidence ?? "none"}`);
+    console.log(`tracking_confidence: ${data.tracking_confidence}`);
+    if (cs) {
+        console.log(`\ncontroller status:`);
+        console.log(`  shellprocstatus:   ${cs.shellprocstatus || "(none)"}`);
+        console.log(`  shellprocexitcode: ${cs.shellprocexitcode}`);
+        console.log(`  turn_active:       ${cs.turn_active ?? false}`);
+        console.log(`  spawn_ts_ms:       ${cs.spawn_ts_ms ?? "(never spawned)"}`);
+    } else {
+        console.log(`\ncontroller status:   (no controller for this block_id)`);
+    }
+    const processes = data.processes ?? [];
+    console.log(`\nprocesses (${processes.length}):`);
+    if (processes.length === 0) {
+        console.log(`  (none tracked)`);
+    } else {
+        for (const p of processes) {
+            console.log(`  pid=${p.pid}  rss=${Math.round(p.rss_bytes / 1024)}KB  ${p.command || "(unknown command)"}`);
+        }
+    }
+    // The actual "why" for a block with no live controller/process — see
+    // muxspect_handlers.rs's last_error_frame. Printed last, since it's
+    // usually the answer someone's here for precisely when everything
+    // above it is empty.
+    if (data.last_error) {
+        console.log(`\nlast_error:`);
+        console.log(`  message: ${data.last_error.message}`);
+        console.log(`  source:  ${data.last_error.source}`);
+        console.log(`  age:     ${ageString(data.last_error.written_ms)}`);
+    } else {
+        console.log(`\nlast_error:           (none)`);
+    }
+}
+
+/**
+ * Split argv into `{ cmd, blockId, json, help }`, flags-and-positionals
+ * separated regardless of ordering. Flags can legally appear before OR
+ * after the positional args (both 'muxspect describe --json <id>' and
+ * 'muxspect --json describe <id>' are natural to type) — filtering them out
+ * first, then reading command/args positionally, is what makes both orders
+ * work; indexing into the raw, flag-interspersed argv (the original
+ * implementation) silently ran 'list' instead of 'describe' — or picked up
+ * a flag string as the block_id — depending on where the flag landed
+ * (reagent P2 on PR #2380). Exported (pure, no I/O) for
+ * muxspect.test.mjs.
+ */
+export function parseArgs(argv) {
+    const json = argv.includes("--json");
+    const help = argv.includes("--help") || argv.includes("-h");
+    const positional = argv.filter((a) => !a.startsWith("-"));
+    const cmd = positional[0] ?? "list";
+    const blockId = positional[1];
+    return { cmd, blockId, json, help };
+}
+
+async function main() {
+    const { cmd, blockId, json, help } = parseArgs(process.argv.slice(2));
+
+    if (cmd === "help" || help) {
+        console.log(USAGE);
+        return;
+    }
+
+    const { url, authKey } = requireEnv();
+
+    if (cmd === "list") {
+        const data = await apiGet(url, authKey, "/api/v1/muxspect/list");
+        if (json) console.log(JSON.stringify(data, null, 2));
+        else renderList(data);
+        return;
+    }
+
+    if (cmd === "describe") {
+        if (!blockId) fail("describe requires a block_id — 'muxspect describe <block_id>'");
+        const data = await apiGet(url, authKey, `/api/v1/muxspect/describe?block_id=${encodeURIComponent(blockId)}`);
+        if (json) console.log(JSON.stringify(data, null, 2));
+        else renderDescribe(data);
+        return;
+    }
+
+    if (cmd === "watch") {
+        if (!blockId) fail("watch requires a block_id — 'muxspect watch <block_id>'");
+        console.log(`watching ${blockId} — Ctrl+C to stop\n`);
+        for (;;) {
+            const data = await apiGet(url, authKey, `/api/v1/muxspect/describe?block_id=${encodeURIComponent(blockId)}`);
+            console.log(`--- ${new Date().toISOString()} ---`);
+            renderDescribe(data);
+            console.log("");
+            await new Promise((r) => setTimeout(r, 2000));
+        }
+    }
+
+    fail(`unknown command '${cmd}' — 'muxspect help' for usage`);
+}
+
+// Only run when executed directly (`node muxspect.mjs ...`) — importing this
+// module (muxspect.test.mjs imports `parseArgs`) must not trigger a live
+// network call / `process.exit`.
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+    main().catch((e) => fail(e?.message ?? String(e)));
+}

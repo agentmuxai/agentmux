@@ -28,7 +28,7 @@ import {
 } from "@/store/global";
 import * as services from "@/store/services";
 import * as keyutil from "@/util/keyutil";
-import { boundNumber, createSignalAtom, stringToBase64 } from "@/util/util";
+import { boundNumber, createSignalAtom, sleep, stringToBase64 } from "@/util/util";
 import type { SignalAtom } from "@/util/util";
 import { createMemo, createSignal } from "solid-js";
 
@@ -428,7 +428,7 @@ class TermViewModel implements ViewModel {
                     sendWSCommand(cmd);
                 }
                 if (!isLast) {
-                    await new Promise<void>((r) => setTimeout(r, TermViewModel.PASTE_CHUNK_DELAY_MS));
+                    await sleep(TermViewModel.PASTE_CHUNK_DELAY_MS);
                 }
             }
         } finally {

@@ -245,11 +245,18 @@
                 transition: color 150ms ease;
             }
 
-            // Tooltip wrapper div sits between the flex row and the actual
-            // text — takes over the flex-sizing role the <span> used to
-            // have directly, so the ellipsis-clip math below still works
-            // unchanged with one extra element in between.
-            .agent-tool-name-tooltip-anchor {
+            // Peek-anchor wrapper span sits between the flex row and the
+            // actual text — takes over the flex-sizing role the <span>
+            // used to have directly, so the ellipsis-clip math below still
+            // works unchanged with one extra element in between. reagent
+            // P1 (4 rounds, PR #2392): this rule targeted the OLD
+            // Tooltip-component wrapper class (`.agent-tool-name-tooltip-
+            // anchor`), orphaned when ToolBlock.tsx moved to the isPeeking-
+            // tracking span (`.agent-tool-name-peek-anchor`) for the
+            // Portal-based PeekOverlay migration — long tool names grew
+            // the row instead of eliding, crowding out the duration badge/
+            // result pill/live-tail.
+            .agent-tool-name-peek-anchor {
                 flex: 1 1 auto;
                 min-width: 0;
                 overflow: hidden;
@@ -418,23 +425,6 @@
         .agent-tool-loading {
             color: var(--secondary-text-color);
             padding: var(--space-2) 0;
-        }
-
-        .agent-tool-open-pane {
-            background: none;
-            border: 1px solid var(--border-color);
-            border-radius: 0;
-            color: var(--accent-color);
-            cursor: default;
-            font-size: 13px;
-            padding: 1px var(--space-1-5);
-            line-height: 1;
-            flex-shrink: 0;
-
-            &:hover {
-                background: var(--accent-color);
-                color: #fff; /* stylelint-disable-line color-no-hex */
-            }
         }
 
         .agent-tool-agent {
@@ -934,79 +924,6 @@
         }
     }
 
-    // === Subagent Link ===
-    .agent-subagent-link {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        padding: var(--space-2) var(--space-3);
-        border: 1px solid var(--border-color);
-        border-left: 2px solid var(--accent-color);
-        border-radius: 0;
-        cursor: default;
-        transition: all 0.15s;
-        user-select: none;
-
-        &:hover {
-            background: color-mix(in srgb, var(--accent-color) 8%, transparent);
-            border-color: var(--accent-color);
-        }
-
-        &.active {
-            border-left-color: var(--warning-color);
-
-            .agent-subagent-link-icon {
-                animation: pulse 1.5s ease-in-out infinite;
-            }
-        }
-
-        &.completed {
-            border-left-color: var(--success-color);
-            opacity: 0.8;
-        }
-
-        .agent-subagent-link-icon {
-            font-size: 14px;
-            flex-shrink: 0;
-        }
-
-        .agent-subagent-link-info {
-            display: flex;
-            align-items: center;
-            gap: var(--space-2);
-            flex: 1;
-            min-width: 0;
-        }
-
-        .agent-subagent-link-slug {
-            font-size: 12px;
-            font-weight: 500;
-            color: var(--main-text-color);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        .agent-subagent-link-id {
-            font-size: 10px;
-            color: var(--secondary-text-color);
-            opacity: 0.6;
-            font-family: var(--fixed-font);
-        }
-
-        .agent-subagent-link-action {
-            color: var(--accent-color);
-            font-size: 14px;
-            flex-shrink: 0;
-            opacity: 0;
-            transition: opacity 0.1s;
-        }
-
-        &:hover .agent-subagent-link-action {
-            opacity: 1;
-        }
-    }
-
     // === User Message ===
     // High-contrast user-input styling per
     // `docs/specs/SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md`.
@@ -1028,9 +945,6 @@
         border-radius: 0;
         user-select: text;
         cursor: text;
-        // Establish a positioning context for the overlay body
-        // (`agent-user-message-content--overlay-above/below` use
-        // `position: absolute` relative to this).
         position: relative;
 
         .agent-user-message-content {
@@ -1061,76 +975,28 @@
             overflow-x: hidden;
         }
 
-        // ─── Body render modes (PR for SPEC_STARTUP_HOVER_EXPANSION_ANCHOR_2026_05_24) ─
+        // ─── Body render modes ────────────────────────────────────────
         //
-        // Three modes (gated by `bodyMode()` in UserMessageBlock):
+        // Two modes (gated by `bodyMode()` in UserMessageBlock):
         //
-        //   --flow            — normal document flow. Used for regular
-        //                       (non-startup) user input AND for pinned
-        //                       startup rows. Row's measured height
-        //                       grows to include the body.
+        //   --flow   — normal document flow. Used for regular
+        //              (non-startup) user input AND for pinned startup
+        //              rows. Row's measured height grows to include
+        //              the body.
         //
-        //   --overlay-below   — `position: absolute; top: 100%; …`.
-        //                       Body floats below the summary as a
-        //                       transient hover preview. Row's
-        //                       measured height stays at 32px so the
-        //                       virtualizer doesn't see a height
-        //                       change.
-        //
-        //   --overlay-above   — `position: absolute; bottom: 100%; …`.
-        //                       Same as above but anchored to the
-        //                       summary's TOP edge — body grows
-        //                       upward. Picked when the row is near
-        //                       the bottom of the viewport.
-        //
-        // The summary's screen-Y is anchored across the transition.
-        // No layout shift in the document, no jitter — geometry
-        // determines direction, mouseleave on the outer block
-        // doesn't fire when the cursor crosses summary→body because
-        // the absolute body is still a DOM descendant of
-        // `.agent-user-message`. See the doc comment in
-        // UserMessageBlock.tsx and the spec.
+        //   overlay  — PeekOverlay, Portal-rendered at document.body,
+        //              top-anchored to the row (see PeekOverlay.tsx and
+        //              .agent-user-message-peek-overlay below). Used to
+        //              be a `position: absolute` sibling class here
+        //              (--overlay-below/--overlay-above, picking a side
+        //              via pickExpandDirection) — migrated off because
+        //              every virtualized row is its own CSS stacking
+        //              context, so that absolute overlay could never
+        //              paint above a LATER row regardless of z-index
+        //              (confirmed live via CDP; see PeekOverlay.tsx).
         .agent-user-message-content--flow {
             // Default — no special positioning. Body participates
             // in document flow. (This is the regular-input style.)
-        }
-        .agent-user-message-content--overlay-below,
-        .agent-user-message-content--overlay-above {
-            position: absolute;
-            left: 0;
-            right: 0;
-            z-index: 10;
-            // max-height is set inline by UserMessageBlock from the
-            // chosen-side container space — keeps `overflow-y: auto`
-            // operating INSIDE the scroll container's bounds rather
-            // than relying on `calc(100vh - …)`, which clipped the
-            // overlay's tail when the agent pane is in a sub-region
-            // of the window (codex P2 round 2 on PR #1021).
-            overflow-y: auto;
-            overscroll-behavior: contain;
-            // Fully OPAQUE background — the overlay covers other
-            // rows, so any transparency would let neighbor content
-            // bleed through. Use `--block-bg-solid-color` directly
-            // (with a hex fallback for early-paint), not
-            // `color-mix`, so there's no chance of a translucent
-            // intermediate result.
-            background-color: var(--block-bg-solid-color, #1c1c1c);
-            // 2px accent border + drop shadow so the overlay reads
-            // as a discrete floating surface above the rows it
-            // covers. Border doubles as the visual link back to
-            // the summary's accent.
-            border: 2px solid var(--user-input-color);
-            border-radius: 0;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-            // Same padding as the inline `pre` would have, so the
-            // overlay's content lines up with the summary above it.
-            padding: var(--space-0-5) var(--space-1);
-        }
-        .agent-user-message-content--overlay-below {
-            top: 100%;
-        }
-        .agent-user-message-content--overlay-above {
-            bottom: 100%;
         }
 
         // ─── Startup-injection variant ────────────────────────────
@@ -1198,23 +1064,17 @@
             //     no longer present once hover-expansion kicks in).
             //   - .agent-user-message-unpin shows ✕ when pinned,
             //     so the user can collapse without hunting.
-            // Both share styling.
+            // Both share styling. This copy is for the FLOW-mode case
+            // only (pinned session context, still a real DOM descendant
+            // of `.agent-user-message`) — the Portal-rendered hover-
+            // preview case has its own equivalent nested under
+            // `.agent-user-message-peek-overlay` above, since it's no
+            // longer inside `.agent-user-message` at all once hovered
+            // (see PeekOverlay.tsx).
             //
-            // Anchoring (codex P1 round 3 on PR #1021):
-            //   - Overlay variants are `position: absolute` —
-            //     they serve as the containing block for the
-            //     absolute-positioned buttons themselves, no
-            //     explicit `position: relative` needed (and
-            //     applying `relative` here would lose at equal
-            //     specificity to the overlay rule, dropping the
-            //     overlay back into flow and breaking the whole
-            //     anchor design).
-            //   - The flow variant (pinned, or non-startup
-            //     regular input) needs an explicit
-            //     `position: relative` to serve as containing
-            //     block for the buttons. Scoped via the
-            //     `--flow` modifier so it can't accidentally
-            //     override the overlay rules.
+            // The flow variant needs an explicit `position: relative`
+            // to serve as the containing block for the buttons' own
+            // `position: absolute`.
             .agent-user-message-content--flow {
                 position: relative;
             }
@@ -1848,16 +1708,129 @@
     }
 }
 
-// Tool-command hover tooltip content (ToolBlock.tsx's Tooltip over
-// .agent-tool-name). Portal-rendered outside .agent-tool-block, so this is
-// a standalone top-level rule, not nested. Unlike the collapsed row's
-// single-line ellipsis clip, this shows the FULL command, word-wrapped —
-// that's the point of the tooltip.
-.agent-tool-cmd-tooltip {
-    max-width: 480px;
+// "Compacting conversation…" — the in-progress announcement pushed when the
+// PreCompact hook fires (Tier 1 — SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md).
+// Deliberately amber-accented (vs. the neutral completed .agent-context-compacted
+// divider above) so an in-progress state is visually distinguishable from the
+// finished record — the two must never be confused mid-stream.
+.agent-compaction-started {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    padding: 10px var(--space-2);
+    user-select: none;
+
+    .agent-compaction-started-label {
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--warning-color, #d9a441);
+        padding: 2px 10px;
+        border: 1px solid color-mix(in srgb, var(--warning-color, #d9a441) 40%, transparent);
+        border-radius: 10px;
+    }
+
+    .agent-compaction-started-detail {
+        font-size: 11px;
+        color: var(--tertiary-text-color, rgba(255, 255, 255, 0.3));
+    }
+}
+
+// Node hover-peek overlay (ToolBlock.tsx / MarkdownBlock.tsx via
+// PeekOverlay.tsx). Portal-rendered at document.body, NOT a plain in-DOM
+// absolute child of the row — see PeekOverlay.tsx's doc comment: each
+// virtualized row (.agent-document-row) is its own CSS stacking context
+// (contain: layout + a transform), so a z-index inside one row can never
+// out-rank a LATER SIBLING row's own subtree; a plain absolute overlay
+// would render UNDER the next row's opaque background instead of over it
+// (confirmed live via CDP elementFromPoint). Portal-rendering escapes that
+// entirely. Visual treatment still mirrors UserMessageBlock.tsx's "Session
+// context" hover-to-peek (opaque background, border, drop shadow) so every
+// hover-to-peek surface in the transcript reads consistently — only the
+// positioning mechanism differs (fixed + JS-computed left/top/width instead
+// of absolute + top/bottom: 100%). Replaces the old, narrower
+// .agent-tool-cmd-tooltip (11px, cramped) — SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md
+// §2.2a: sized to read as comfortably as a native browser tooltip, not as a
+// shrunk-down technical readout.
+.agent-node-peek-tooltip-meta {
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--secondary-text-color);
+    white-space: nowrap;
+}
+
+.agent-node-peek-tooltip-body {
     white-space: pre-wrap;
     overflow-wrap: break-word;
     font-family: var(--fixed-font, monospace);
-    font-size: 11px;
-    line-height: 1.5;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--main-text-color);
+}
+
+// Visual chrome only — position/left/top/width/max-height are all set
+// inline by PeekOverlay.tsx (computed per-hover from the anchored row's
+// live getBoundingClientRect()).
+.agent-node-peek-overlay {
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    background-color: var(--block-bg-solid-color, var(--main-bg-color));
+    border: 1px solid var(--border-color);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    padding: var(--space-0-5) var(--space-1);
+}
+
+// UserMessageBlock.tsx's "Session context" hover-to-peek keeps its own
+// distinct, pre-existing visual identity (2px accent border matching
+// --user-input-color, same as the FLOW-mode expanded body's own accent
+// tie-back) — an additional modifier alongside the base chrome above,
+// not a fork of it.
+.agent-user-message-peek-overlay {
+    border: 2px solid var(--user-input-color);
+
+    // These previously lived nested under `.agent-user-message
+    // .agent-user-message-content` (see that rule above) — that only
+    // matched while the content was a real DOM descendant of the row.
+    // Now that this variant is Portal-rendered at document.body (see
+    // PeekOverlay.tsx), it needs its own top-level equivalents scoped to
+    // this wrapper instead of relying on an `.agent-user-message`
+    // ancestor that no longer exists at this DOM location.
+    .agent-user-message-content pre {
+        margin: 0;
+        white-space: pre;
+        overflow-x: auto;
+        overflow-y: hidden;
+    }
+
+    .agent-user-message-pin,
+    .agent-user-message-unpin {
+        position: absolute;
+        top: var(--space-0-5);
+        right: var(--space-0-5);
+        background: transparent;
+        border: none;
+        color: var(--user-input-color);
+        font-size: 0.9em;
+        line-height: 1;
+        padding: 2px 6px;
+        border-radius: 0;
+        cursor: default;
+        opacity: 0.6;
+
+        &:hover {
+            opacity: 1;
+            background: color-mix(in oklab, var(--user-input-color) 35%, var(--block-bg-solid-color));
+        }
+        &:focus-visible {
+            outline: 2px solid var(--user-input-color);
+            outline-offset: 1px;
+            opacity: 1;
+        }
+    }
 }

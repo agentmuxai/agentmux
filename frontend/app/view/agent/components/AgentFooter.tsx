@@ -13,6 +13,9 @@ import { makeORef } from "@/app/store/wos";
 import { atoms } from "@/app/store/global";
 import { ObjectService } from "@/app/store/services";
 import { fireAndForget } from "@/util/util";
+import { formatCompactNumber } from "@/util/format-count";
+import { formatElapsedCompact } from "@/util/format-time";
+import { abbreviateText } from "@/util/format-text";
 import { MicButton } from "@/app/element/MicButton";
 import type { AgentViewModel } from "../agent-model";
 import type { SlashCommand } from "../commands/types";
@@ -28,14 +31,8 @@ function ingToEd(_phrase: string): string {
     return "Worked";
 }
 
-function fmtElapsed(ms: number): string {
-    const s = Math.floor(ms / 1000);
-    return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
-}
-
 function fmtTokens(t: TurnTokens): string {
-    const fmt = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
-    return `\u2191${fmt(t.input)} \u2193${fmt(t.output)}`;
+    return `\u2191${formatCompactNumber(t.input)} \u2193${formatCompactNumber(t.output)}`;
 }
 
 // ── AgentWorkingRow ───────────────────────────────────────────────────────────
@@ -46,12 +43,7 @@ function fmtTokens(t: TurnTokens): string {
 
 /** Truncate tool arg to `max` chars, left-truncating file paths to preserve filename. */
 function abbreviateArg(s: string, max: number): string {
-    if (s.length <= max) return s;
-    // For paths (contain / or \), keep the tail (filename) end.
-    if (s.includes("/") || s.includes("\\")) {
-        return "…" + s.slice(-(max - 1));
-    }
-    return s.slice(0, max - 1) + "…";
+    return abbreviateText(s, max, { pathAware: true });
 }
 
 interface AgentWorkingRowProps {
@@ -236,7 +228,7 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
     const rightText = createMemo((): string => {
         const right: string[] = [];
         if (props.turnTokens) right.push(fmtTokens(props.turnTokens));
-        right.push(fmtElapsed(elapsedMs()));
+        right.push(formatElapsedCompact(elapsedMs()));
         return right.join("  ·  ");
     });
 

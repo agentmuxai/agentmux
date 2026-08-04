@@ -54,18 +54,8 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { ProviderLogo } from "@/element/ProviderLogo";
 import { Logger } from "@/util/logger";
+import { formatTimeAgo } from "@/util/format-time";
 import { RuntimeBadge } from "./RuntimeBadge";
-
-/** ms epoch → human-readable relative timestamp. Centralized here +
- * exported so unit tests can pin its boundary behavior. */
-export function formatRelative(now: number, ms: number): string {
-    if (!ms) return "";
-    const delta = Math.max(0, now - ms);
-    if (delta < 60_000) return "just now";
-    if (delta < 3_600_000) return `${Math.floor(delta / 60_000)}m ago`;
-    if (delta < 86_400_000) return `${Math.floor(delta / 3_600_000)}h ago`;
-    return `${Math.floor(delta / 86_400_000)}d ago`;
-}
 
 /** Empty-state copy varies based on whether an identity filter was
  * applied — surfaced so the integration test can match it. */
@@ -433,7 +423,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                     <span class="agent-recent-sessions-ts">
                                                         <span class="agent-recent-sessions-ts-label">Created</span>
                                                         <span class="agent-recent-sessions-ts-value">
-                                                            {formatRelative(now(), row.agent_created_at)}
+                                                            {formatTimeAgo(row.agent_created_at, now())}
                                                         </span>
                                                     </span>
                                                 </Show>
@@ -441,7 +431,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                     <span class="agent-recent-sessions-ts">
                                                         <span class="agent-recent-sessions-ts-label">Last Launch</span>
                                                         <span class="agent-recent-sessions-ts-value">
-                                                            {formatRelative(now(), row.started_at)}
+                                                            {formatTimeAgo(row.started_at, now())}
                                                         </span>
                                                     </span>
                                                 </Show>
@@ -449,7 +439,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                     <span class="agent-recent-sessions-ts">
                                                         <span class="agent-recent-sessions-ts-label">Last Active</span>
                                                         <span class="agent-recent-sessions-ts-value">
-                                                            {formatRelative(now(), row.last_active_at)}
+                                                            {formatTimeAgo(row.last_active_at, now())}
                                                         </span>
                                                     </span>
                                                 </Show>

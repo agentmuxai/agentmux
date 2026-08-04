@@ -7,7 +7,6 @@ import type {
     AgentMessageNode,
     MarkdownNode,
     SectionNode,
-    SubagentLinkNode,
     ToolNode,
     UserMessageNode,
 } from "../types";
@@ -38,11 +37,6 @@ const section = (id: string, collapsed: boolean): SectionNode => ({
 const markdown = (id: string, canceled = false): MarkdownNode => ({
     type: "markdown", id, content: "c", metadata: canceled ? { canceled: true } : undefined,
 });
-const subagent = (id: string): SubagentLinkNode => ({
-    type: "subagent_link", id, subagentId: "s", slug: "s", parentAgent: "p",
-    sessionId: "sess", status: "active", model: null,
-});
-
 describe("currentExpansion — parity with the per-kind expansion rules", () => {
     describe("tool", () => {
         it("collapsed by default for terminal statuses", () => {
@@ -94,10 +88,9 @@ describe("currentExpansion — parity with the per-kind expansion rules", () => 
         });
     });
 
-    describe("markdown / subagent_link", () => {
-        it("normal markdown + subagent link are open by default", () => {
+    describe("markdown", () => {
+        it("normal markdown is open by default", () => {
             expect(currentExpansion(markdown("m"), inputs())).toEqual({ open: true, via: "default" });
-            expect(currentExpansion(subagent("g"), inputs())).toEqual({ open: true, via: "default" });
         });
         it("canceled-thinking markdown is collapsed by default (its default IS derivable; only the expand click is local)", () => {
             expect(currentExpansion(markdown("m", true), inputs())).toEqual({ open: false });

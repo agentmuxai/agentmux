@@ -44,7 +44,7 @@ use anyhow::{Context, Result, anyhow};
 use clap::Parser;
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use serde::Serialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -73,6 +73,193 @@ pub struct Args {
     /// omitted, chunks publish unscoped.
     #[arg(long)]
     pub block_id: Option<String>,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cwd persistence across one-shot `exec` invocations
+//
+// Every Bash tool call the PreToolUse hook rewrites spawns a brand-new,
+// disposable `agentmux-bashwrap exec` process (see main.rs's module doc —
+// there is no daemon). Historically the inner bash's starting directory was
+// seeded from `std::env::current_dir()`, i.e. THIS process's own inherited
+// cwd, which is always the agent's fixed home directory (nothing in this
+// process tree ever chdirs it). A `cd` run by the wrapped command only ever
+// affected that one throwaway inner bash; the moment it exited, the change
+// was gone, and the NEXT call started over at the same fixed directory again
+// — every time, not intermittently. Claude Code's own Bash tool expects `cd`
+// continuity across calls within a session and (at least on Windows, where
+// this rewrite always applies) surfaces the mismatch as a
+// "Shell cwd was reset to ..." notice on effectively every call. See
+// docs/retro/RETRO_BASH_CWD_RESET_NOTICE_WINDOWS_2026_08_02.md for the full
+// investigation.
+//
+// The fix: persist the shell's ending `$PWD` to a small per-agent state file
+// after each call, and restore it as the starting directory of the next
+// call. This doesn't change what Claude Code itself believes (that's opaque,
+// out of process) but it does make the ACTUAL directory a `cd` in one Bash
+// call leaves the agent in survive to the next call, which is the part that
+// was silently broken.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Env var bashwrap sets on the *child* bash process (never interpolated
+/// into the script text, so no path-quoting concerns) pointing at the state
+/// file `append_cwd_capture`'s appended script writes the ending `$PWD` to.
+const CWD_STATE_ENV: &str = "AGENTMUX_BASHWRAP_CWD_STATE";
+
+/// Optional override of the state file's own path, read from bashwrap's own
+/// process env (distinct from `CWD_STATE_ENV`, which bashwrap sets rather
+/// than reads). Exists so tests can point persistence at a tempdir instead
+/// of a real agent's `~/.agentmux` state, and as an escape hatch for manual
+/// debugging.
+const CWD_STATE_FILE_OVERRIDE_ENV: &str = "AGENTMUX_BASHWRAP_CWD_STATE_FILE";
+
+/// Resolves the cwd-persistence file location and any previously-restored
+/// starting directory once per `exec` invocation.
+struct CwdState {
+    /// Where the ending `$PWD` gets written after this command runs, for the
+    /// *next* `exec` invocation to pick up. `None` if we couldn't resolve a
+    /// location or create its parent dir — persistence is then simply
+    /// skipped for this call (never a hard failure; falls back to today's
+    /// pre-fix behavior).
+    path: Option<PathBuf>,
+    /// The directory to actually start this command's shell in: the
+    /// previously-persisted directory if one was found and still exists,
+    /// otherwise this process's own (fixed, inherited) cwd — the same
+    /// default used before this fix existed.
+    start_dir: Option<PathBuf>,
+}
+
+impl CwdState {
+    fn load() -> Self {
+        let mut path = cwd_state_path();
+        if let Some(dir) = path.as_deref().and_then(Path::parent) {
+            if let Err(e) = std::fs::create_dir_all(dir) {
+                tracing::warn!(
+                    target: "bashwrap",
+                    error = %e,
+                    dir = %dir.display(),
+                    "failed to create cwd-state dir; cwd persistence disabled for this call",
+                );
+                // reagentx P2 (re-review): the log line above claims
+                // persistence is disabled, but `path` used to stay `Some`
+                // here regardless — restore_cwd below would still attempt
+                // (and silently fail) a read, and the child would still get
+                // CWD_STATE_ENV pointed at a directory that doesn't exist,
+                // so append_cwd_capture's write would silently fail on
+                // every single call forever instead of being skipped once,
+                // as documented. Actually clear it so both sides honor the
+                // "disabled" contract `path`'s own doc comment promises.
+                path = None;
+            }
+        }
+        let start_dir = path
+            .as_deref()
+            .and_then(restore_cwd)
+            .or_else(|| std::env::current_dir().ok());
+        Self { path, start_dir }
+    }
+}
+
+/// Per-*instance* state file path. Keyed by `AGENTMUX_INSTANCE_SLUG` — set by
+/// `agent-model.ts` to a per-launch slug that also seeds that instance's own
+/// unique working directory (`${agentmuxHome()}/agents/${instanceSlug}`) —
+/// NOT `AGENTMUX_AGENT_ID`, which is the definition-wide slug shared by every
+/// named instance launched from the same agent definition (codex P1 on this
+/// PR: keying by `AGENTMUX_AGENT_ID` made two concurrently-running instances
+/// of the same definition silently share one cwd file, so one instance's
+/// `cd` could redirect the other's next command into the wrong worktree).
+/// Falls back to `AGENTMUX_AGENT_ID` for older callers that only set that,
+/// then to a sanitized form of this process's own cwd (always the instance's
+/// fixed home directory either way) for the rare case neither is set, e.g. a
+/// manual invocation outside AgentMux.
+fn cwd_state_path() -> Option<PathBuf> {
+    if let Ok(over) = std::env::var(CWD_STATE_FILE_OVERRIDE_ENV) {
+        if !over.is_empty() {
+            return Some(PathBuf::from(over));
+        }
+    }
+    let dir = dirs::home_dir()?
+        .join(".agentmux")
+        .join("state")
+        .join("bashwrap-cwd");
+    let non_empty = |s: String| (!s.is_empty()).then_some(s);
+    let key = std::env::var("AGENTMUX_INSTANCE_SLUG")
+        .ok()
+        .and_then(non_empty)
+        .or_else(|| std::env::var("AGENTMUX_AGENT_ID").ok().and_then(non_empty))
+        .or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .map(|p| p.to_string_lossy().into_owned())
+        })?;
+    Some(dir.join(format!("{}.cwd", sanitize_state_key(&key))))
+}
+
+/// Filesystem-safe form of an arbitrary key for use as a filename component.
+fn sanitize_state_key(raw: &str) -> String {
+    raw.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+/// Read back a previously-persisted cwd, if the file exists, is non-empty,
+/// and still names a real directory (it may not — the directory could have
+/// been deleted since, or this is the first call for this agent).
+fn restore_cwd(state_path: &Path) -> Option<PathBuf> {
+    let contents = std::fs::read_to_string(state_path).ok()?;
+    let trimmed = contents.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let path = PathBuf::from(trimmed);
+    path.is_dir().then_some(path)
+}
+
+/// Appends bookkeeping to `command_block` that (1) captures its real exit
+/// code before running anything else, (2) persists the shell's ending
+/// `$PWD` to `$AGENTMUX_BASHWRAP_CWD_STATE` if that env var is set (skipped
+/// entirely otherwise — e.g. when `CwdState::path` was `None`), written via
+/// a temp-file-then-rename so a mid-write crash can't leave a half-written
+/// state file, and (3) re-exits with the captured code so this bookkeeping
+/// never changes the command's real exit status. `command_block` must be a
+/// brace group or bare command, not something that already ends in its own
+/// `exit`.
+///
+/// The temp file is suffixed with `$$` (this bash's own PID), not a fixed
+/// name — reagentx P2 on this PR: two Bash tool calls for the same
+/// agent/instance can run concurrently (Claude issues parallel tool calls),
+/// and a shared fixed temp name meant two concurrent writers could
+/// interleave writes to the *same* temp file before either renamed it,
+/// corrupting the persisted cwd. Per-PID temp names make each writer's
+/// temp-then-rename independent; the only remaining race is which
+/// completed rename lands last, which is an inherent, expected ambiguity
+/// for genuinely concurrent `cd`s (no different from two parallel shells
+/// racing to `cd` a shared session) — not data corruption.
+fn append_cwd_capture(command_block: &str) -> String {
+    // `pwd` alone prints MSYS-style paths under Git Bash (`/c/Users/...`),
+    // which Rust's `std::fs`/`Path::is_dir()` on native Windows can't
+    // resolve (it looks for a literal `\c\Users\...` under the current
+    // drive root). `-W` is Git Bash's own flag for "print the Windows-
+    // native form instead" (`C:/Users/...`), which both `restore_cwd`'s
+    // `is_dir()` check and `cmd.cwd()`/`cmd.current_dir()` understand
+    // correctly. Not a POSIX `pwd` flag — Unix has no such mismatch to
+    // work around, so plain `pwd` is correct there.
+    let pwd_cmd = if cfg!(windows) { "pwd -W" } else { "pwd" };
+    format!(
+        "{command_block}\n\
+__agentmux_bashwrap_rc=$?\n\
+if [ -n \"${CWD_STATE_ENV}\" ]; then\n\
+  __agentmux_bashwrap_cwd_tmp=\"${CWD_STATE_ENV}.tmp.$$\"\n\
+  {pwd_cmd} > \"$__agentmux_bashwrap_cwd_tmp\" 2>/dev/null && mv -f \"$__agentmux_bashwrap_cwd_tmp\" \"${CWD_STATE_ENV}\" 2>/dev/null\n\
+fi\n\
+exit $__agentmux_bashwrap_rc"
+    )
 }
 
 /// Cap the model-visible head/tail sections of the aggregated blob.
@@ -440,12 +627,16 @@ where
     // new frame, collapsing throttled spinner frames (>50 ms apart) before
     // they become separate LineEvents.
     let mut pending_cr_override: Option<Vec<u8>> = None;
+    // A1: speculative one-tick hold for a pending line with no leading OR
+    // trailing `\r` yet. Mirrors the same slot in `pty_reader_loop`. See
+    // docs/specs/SPEC_TOOL_LOG_UNIVERSAL_ANIMATION_COLLAPSE_2026_07_27.md §A1.
+    let mut deferred_pending: Option<Vec<u8>> = None;
     loop {
         match tokio::time::timeout(FLUSH_QUIET_WINDOW, reader.read(&mut buf)).await {
             Ok(Ok(0)) => {
-                // EOF: flush any held CR override, then drain remainder,
-                // stripping a dangling lone \r (stream ended mid-spinner
-                // or mid-CRLF pair).
+                // EOF: flush any held CR override or A1 deferred line, then
+                // drain remainder, stripping a dangling lone \r (stream
+                // ended mid-spinner or mid-CRLF pair).
                 if let Some(mut held) = pending_cr_override.take() {
                     if held.last() == Some(&b'\r') {
                         held.pop();
@@ -453,6 +644,9 @@ where
                     if !held.is_empty() {
                         let _ = tx.send(LineEvent { kind, bytes: held }).await;
                     }
+                }
+                if let Some(deferred) = deferred_pending.take() {
+                    let _ = tx.send(LineEvent { kind, bytes: deferred }).await;
                 }
                 if !pending.is_empty() {
                     if pending.last() == Some(&b'\r') {
@@ -477,6 +671,21 @@ where
                     let mut combined = held;
                     combined.extend_from_slice(&buf[..n]);
                     pending.splice(0..0, combined);
+                } else if let Some(deferred) = deferred_pending.take() {
+                    // A1: resolve last tick's speculative hold. A leading
+                    // `\r` means this is the overwrite we were hoping for;
+                    // otherwise the deferred line was genuinely final and
+                    // unrelated — flush it on its own first.
+                    if buf[..n].first() == Some(&b'\r') {
+                        let mut combined = deferred;
+                        combined.extend_from_slice(&buf[..n]);
+                        pending.splice(0..0, combined);
+                    } else {
+                        if tx.send(LineEvent { kind, bytes: deferred }).await.is_err() {
+                            return;
+                        }
+                        pending.extend_from_slice(&buf[..n]);
+                    }
                 } else {
                     pending.extend_from_slice(&buf[..n]);
                 }
@@ -506,7 +715,14 @@ where
                 return;
             }
             Err(_elapsed) => {
-                // P1b: quiet-window expiry.
+                // P1b/A1: quiet-window expiry.
+                //
+                // If a line was already speculatively deferred last tick
+                // (A1) and nothing new arrived since — deferred_pending
+                // being Some implies pending is empty, since any new data
+                // would have resolved it in the Ok(Ok(n)) branch above —
+                // give up waiting for a `\r`-prefixed overwrite and flush
+                // it now.
                 //
                 // If `pending` starts with `\r`, it is a leading-\r spinner
                 // frame. Stash it in the CR override slot so the next read
@@ -516,23 +732,27 @@ where
                 // If `pending` ends with `\r` (but not starts), hold it —
                 // a following `\n` will form a complete CRLF.
                 //
-                // Non-`\r` partial output (printf 'Building...') flushes here.
+                // Otherwise (non-`\r` partial output, e.g. `printf
+                // 'Building...'`): first quiet window with this content —
+                // defer it one tick (A1) instead of flushing immediately,
+                // in case the very next read starts with `\r`. See
+                // docs/specs/SPEC_TOOL_LOG_UNIVERSAL_ANIMATION_COLLAPSE_2026_07_27.md §A1.
                 //
-                // Note: pending_cr_override is always None here. The override is
-                // set only by take(&mut pending), which empties pending. The only
-                // way to reach this branch with non-empty pending is after an
-                // Ok(Some) that already consumed and cleared the override.
+                // Note: pending_cr_override / deferred_pending are always
+                // None here at this point (after the take() above). Each is
+                // set only by take(&mut pending), which empties pending; the
+                // only way to reach this branch with non-empty pending is
+                // after an Ok(Ok(n)) that already consumed and cleared both.
+                if let Some(deferred) = deferred_pending.take() {
+                    if tx.send(LineEvent { kind, bytes: deferred }).await.is_err() {
+                        return;
+                    }
+                }
                 if !pending.is_empty() {
                     if pending.first() == Some(&b'\r') {
                         pending_cr_override = Some(std::mem::take(&mut pending));
                     } else if pending.last() != Some(&b'\r') {
-                        if tx
-                            .send(LineEvent { kind, bytes: std::mem::take(&mut pending) })
-                            .await
-                            .is_err()
-                        {
-                            return;
-                        }
+                        deferred_pending = Some(std::mem::take(&mut pending));
                     }
                     // else: trailing-\r hold — do nothing, next read resolves CRLF.
                 }
@@ -627,7 +847,11 @@ async fn run_via_pty(
     // fd 0 (the console) stays open, so children see EOF and ConPTY never
     // fires ctrl-c. The leading newline terminates the group list cleanly
     // regardless of how `command` ends (trailing comment, no newline, etc.).
-    cmd.arg(format!("{{\n{}\n}} </dev/null", command));
+    let cwd_state = CwdState::load();
+    // Wrapped a second time by `append_cwd_capture` so the ending `$PWD`
+    // survives this disposable process — see the cwd-persistence block
+    // above `Args` for why that's necessary.
+    cmd.arg(append_cwd_capture(&format!("{{\n{}\n}} </dev/null", command)));
 
     // Disable pagers. The PTY above deliberately makes the child see
     // `isatty(stdout) == true` so external tools stay line-buffered (see
@@ -687,8 +911,11 @@ async fn run_via_pty(
             "PATH fix-up for child bash (no login-shell startup needed)",
         );
     }
-    if let Ok(cwd) = std::env::current_dir() {
-        cmd.cwd(cwd);
+    if let Some(dir) = &cwd_state.start_dir {
+        cmd.cwd(dir);
+    }
+    if let Some(state_path) = &cwd_state.path {
+        cmd.env(CWD_STATE_ENV, state_path);
     }
 
     let child = pair
@@ -866,9 +1093,12 @@ async fn run_via_pipes(
     buffered: Arc<Mutex<Vec<u8>>>,
     bash: &std::path::Path,
 ) -> Result<i32> {
+    // Same cwd-persistence rationale as run_via_pty — see the block above
+    // `Args`.
+    let cwd_state = CwdState::load();
     let mut cmd = Command::new(bash);
     cmd.arg("-c")
-        .arg(command)
+        .arg(append_cwd_capture(command))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -880,6 +1110,12 @@ async fn run_via_pipes(
         // docs/retro/RETRO_BASHWRAP_PAGER_HANG_LEAK_2026_07_14.md.
         .env("GIT_PAGER", "cat")
         .env("PAGER", "cat");
+    if let Some(dir) = &cwd_state.start_dir {
+        cmd.current_dir(dir);
+    }
+    if let Some(state_path) = &cwd_state.path {
+        cmd.env(CWD_STATE_ENV, state_path);
+    }
     // Windows only: bash.exe is a console-subsystem binary, so spawning it
     // without CREATE_NO_WINDOW pops a new visible (and orphaned-looking)
     // console window for every fallback exec — this path only runs when
@@ -1106,6 +1342,23 @@ fn pty_reader_loop(
     // it here so throttled spinner frames collapse before becoming separate
     // LineEvents.
     let mut pending_cr_override: Option<Vec<u8>> = None;
+    // A1: speculative one-tick hold for a pending line that has NO leading
+    // OR trailing `\r` yet (the overwhelmingly common real pattern: print a
+    // static label once, then every subsequent update is `\r`-prefixed).
+    // Distinct from `pending_cr_override` above — that slot only ever holds
+    // content that already starts with `\r`. See
+    // docs/specs/SPEC_TOOL_LOG_UNIVERSAL_ANIMATION_COLLAPSE_2026_07_27.md §A1.
+    let mut deferred_pending: Option<Vec<u8>> = None;
+    // A2: tracks whether this tool call's output has scrolled past its
+    // first visual line yet — see `normalize_csi_overwrites`'s doc comment
+    // for why CUP-to-home (`\x1b[H`) is only a `\r`-equivalent while this
+    // is still true.
+    let mut still_on_first_line = true;
+    // A2: tracks whether the cursor is currently at column 0, across PTY
+    // reads — see `normalize_csi_overwrites`'s doc comment for why a
+    // standalone EL is only safe to treat as `\r` while this is true, and
+    // why it must persist across calls rather than reset per-chunk.
+    let mut at_col0 = true;
     // Idle-kill tracking: `last_activity` resets on every byte read from
     // the PTY (regardless of whether it becomes a published LineEvent —
     // even control-sequence-only output means the child is still doing
@@ -1122,6 +1375,13 @@ fn pty_reader_loop(
                 last_activity = std::time::Instant::now();
                 let raw_n = chunk.len();
                 strip_dsr(&mut chunk);
+                // Phase γ (partial): convert the CHA(col-1)/EL cursor-
+                // repositioning idioms into `\r` bytes BEFORE strip_ansi
+                // deletes them outright, so collapse_cr (below) can treat
+                // CSI-based progress-bar redraws as overwrites the same way
+                // it already does for bare `\r`. See
+                // docs/specs/SPEC_TOOL_LOG_UNIVERSAL_ANIMATION_COLLAPSE_2026_07_27.md §A2.
+                normalize_csi_overwrites(&mut chunk, &mut still_on_first_line, &mut at_col0);
                 // Phase β: strip remaining ANSI control sequences so
                 // the plain-text chunk list doesn't render them as
                 // garbled literal characters. Bash emits terminal-
@@ -1140,6 +1400,24 @@ fn pty_reader_loop(
                     let mut combined = held;
                     combined.extend_from_slice(&chunk);
                     pending.splice(0..0, combined);
+                } else if let Some(deferred) = deferred_pending.take() {
+                    // A1: the new chunk resolves last tick's speculative
+                    // hold. A leading `\r` means it's the overwrite we were
+                    // hoping for — merge and let collapse_cr do the rest,
+                    // same as the pending_cr_override case above. Anything
+                    // else means the deferred line was genuinely final and
+                    // unrelated to this new content — flush it as its own
+                    // line first so the two are never wrongly concatenated.
+                    if chunk.first() == Some(&b'\r') {
+                        let mut combined = deferred;
+                        combined.extend_from_slice(&chunk);
+                        pending.splice(0..0, combined);
+                    } else {
+                        if tx.blocking_send(LineEvent { kind, bytes: deferred }).is_err() {
+                            return;
+                        }
+                        pending.extend_from_slice(&chunk);
+                    }
                 } else {
                     pending.extend_from_slice(&chunk);
                 }
@@ -1170,8 +1448,8 @@ fn pty_reader_loop(
                 }
             }
             Ok(None) => {
-                // EOF: flush any held CR override first, then drain remainder,
-                // stripping a dangling lone \r.
+                // EOF: flush any held CR override or A1 deferred line first,
+                // then drain remainder, stripping a dangling lone \r.
                 if let Some(mut held) = pending_cr_override.take() {
                     if held.last() == Some(&b'\r') {
                         held.pop();
@@ -1179,6 +1457,9 @@ fn pty_reader_loop(
                     if !held.is_empty() {
                         let _ = tx.blocking_send(LineEvent { kind, bytes: held });
                     }
+                }
+                if let Some(deferred) = deferred_pending.take() {
+                    let _ = tx.blocking_send(LineEvent { kind, bytes: deferred });
                 }
                 if !pending.is_empty() {
                     if pending.last() == Some(&b'\r') {
@@ -1204,17 +1485,35 @@ fn pty_reader_loop(
                         let _ = sender.send(());
                     }
                 }
-                // P1b: quiet-window expiry.
+                // P1b/A1: quiet-window expiry.
+                //
+                // If a line was ALREADY speculatively deferred last tick
+                // (A1) and nothing new has arrived since — deferred_pending
+                // being Some implies pending is empty, since any new data
+                // would have resolved it in the Ok(Some) branch above — give
+                // up waiting for a `\r`-prefixed overwrite and flush it now.
                 //
                 // If `pending` starts with `\r`, it is a leading-\r spinner
                 // frame. Stash it in the CR override slot so the next read
                 // prepends it and collapse_cr overwrites it with the new frame.
-                // Flush any prior held frame first.
                 //
                 // If `pending` ends with `\r` (but not starts), hold it —
                 // a following `\n` can form a complete CRLF.
                 //
-                // Non-`\r` partial output (printf 'Building...') flushes here.
+                // Otherwise (non-`\r` partial output, e.g. `printf
+                // 'Building...'`): this is the FIRST quiet window with this
+                // content, so defer it one tick (A1) rather than flushing
+                // immediately — in case the very next read starts with `\r`
+                // and this was actually the first frame of an overwrite
+                // sequence (the overwhelmingly common real pattern: print a
+                // static label once, then every subsequent update is
+                // `\r`-prefixed). See
+                // docs/specs/SPEC_TOOL_LOG_UNIVERSAL_ANIMATION_COLLAPSE_2026_07_27.md §A1.
+                if let Some(deferred) = deferred_pending.take() {
+                    if tx.blocking_send(LineEvent { kind, bytes: deferred }).is_err() {
+                        return;
+                    }
+                }
                 if !pending.is_empty() {
                     if pending.first() == Some(&b'\r') {
                         // Leading-\r spinner frame: stash in the override slot so
@@ -1226,28 +1525,19 @@ fn pty_reader_loop(
                         // The only way to reach this branch with non-empty pending is
                         // after an Ok(Some) that already consumed and cleared the
                         // override. No flush-prior is needed or reachable.
-                        //
-                        // Non-\r-prefixed first frames (e.g. a tool that starts with
-                        // "frame1" then switches to "\rframe2" overwrites) are already
-                        // flushed as regular LineEvents by the time the \r-prefixed
-                        // frames arrive; they cannot be retroactively collapsed.
                         pending_cr_override = Some(std::mem::take(&mut pending));
                     } else if pending.last() != Some(&b'\r') {
-                        // Non-spinner partial output (e.g. "Building..."): flush now.
-                        // pending_cr_override is always None here for the same reason
-                        // as above — no flush-prior needed.
-                        if tx.blocking_send(LineEvent {
-                            kind,
-                            bytes: std::mem::take(&mut pending),
-                        }).is_err() {
-                            return;
-                        }
+                        // First quiet window with this non-\r content: defer
+                        // instead of flushing (A1). deferred_pending is
+                        // always None here for the same reason as above.
+                        deferred_pending = Some(std::mem::take(&mut pending));
                     }
                     // else: trailing-\r hold — do nothing, next read resolves CRLF.
                 }
             }
             Err(std_mpsc::RecvTimeoutError::Disconnected) => {
-                // Reader thread died without EOF — flush CR override then drain.
+                // Reader thread died without EOF — flush CR override / A1
+                // deferred line, then drain.
                 if let Some(mut held) = pending_cr_override.take() {
                     if held.last() == Some(&b'\r') {
                         held.pop();
@@ -1255,6 +1545,9 @@ fn pty_reader_loop(
                     if !held.is_empty() {
                         let _ = tx.blocking_send(LineEvent { kind, bytes: held });
                     }
+                }
+                if let Some(deferred) = deferred_pending.take() {
+                    let _ = tx.blocking_send(LineEvent { kind, bytes: deferred });
                 }
                 if !pending.is_empty() {
                     if pending.last() == Some(&b'\r') {
@@ -1269,6 +1562,130 @@ fn pty_reader_loop(
                 }
                 return;
             }
+        }
+    }
+}
+
+/// Normalize CSI cursor-repositioning idioms that map cleanly onto the
+/// existing `\r`-based overwrite model, converting them to a literal `\r`
+/// byte so `collapse_cr` (which already understands `\r`) collapses them
+/// too, with no new cases needed there. Runs on the raw `chunk` BEFORE
+/// `strip_ansi`, which otherwise deletes CSI sequences unconditionally with
+/// no overwrite-awareness — the "Phase γ" gap `strip_ansi`'s own doc
+/// comment flags ("Cursor positioning escapes within the same line").
+/// See docs/specs/SPEC_TOOL_LOG_UNIVERSAL_ANIMATION_COLLAPSE_2026_07_27.md §A2.
+///
+/// `still_on_first_line` and `at_col0` are both caller-owned state that
+/// persists across calls for the lifetime of one reader loop — this
+/// function is invoked once per PTY read, and a chunk boundary is not a
+/// terminal state boundary: a read ending mid-line (no trailing `\n`/`\r`)
+/// must carry "cursor is NOT at column 0" into the next call, otherwise a
+/// standalone EL split across two reads (`"prefix"` in one chunk,
+/// `"\x1b[2Ksuffix"` in the next) would see a freshly-reset `at_col0 ==
+/// true` and wrongly convert that EL to `\r`, reproducing the exact
+/// mid-line truncation bug this function exists to prevent, just moved
+/// from a mid-chunk split to a cross-chunk-read split (reagent P1, PR
+/// #2330, caught after the first, chunk-internal-only version of this fix).
+///
+/// `still_on_first_line`: `true` until the first `\n` is
+/// seen in this tool call's output, `false` forever after. Needed because
+/// **Windows ConPTY re-serializes a literal `\r` as CUP-to-home
+/// (`\x1b[H`)** rather than passing it through unchanged — verified
+/// empirically via `a1_e2e_static_label_then_delayed_cr_overwrite_collapses_to_one_line`
+/// capturing the raw PTY bytes: a child process writing `\rdone` produces
+/// `\x1b[?25l\x1b[Hdone...\x1b[?25h` on the wire, not a literal `\r`. CUP
+/// "home" (row 1, col 1) is unambiguous evidence of an overwrite ONLY when
+/// nothing has scrolled the visual line off row 1 yet; once real multi-line
+/// output exists, `\x1b[H` genuinely means "go back to the first of several
+/// lines" (a multi-line redraw, spec §A3, deliberately out of scope) and
+/// must NOT be treated as "restart the current line".
+///
+/// Cases handled, chosen because each means exactly "move to the start of
+/// the (only) line so far" without needing true per-column tracking:
+///   - CUP to row 1 col 1 (`\x1b[H`, `\x1b[1H`, `\x1b[1;1H`, and the
+///     omitted-field variants of each), gated on `still_on_first_line` per
+///     above — the ConPTY-observed idiom.
+///   - CHA to column 1 (`\x1b[1G` / `\x1b[G`, "cursor to column 1") is
+///     literally "move to start of line" — identical to `\r`. Unix PTYs
+///     (and any tool not going through ConPTY's re-serialization) may use
+///     this form directly.
+///   - EL (`\x1b[2K` erase whole line, `\x1b[K`/`\x1b[0K` erase to end of
+///     line) is treated as "reset to start of line" too, but ONLY when the
+///     cursor is already known to be at column 0 (`*at_col0`) — i.e. the
+///     dominant real-world `\r` + EL idiom (`\r\x1b[2K<text>`), where it's
+///     genuinely redundant with the `\r` already just emitted. A
+///     STANDALONE EL, mid-line (cursor NOT at column 0 — e.g.
+///     `prefix\x1b[Ksuffix`), is a real, different case: EL only erases
+///     from the cursor onward and never moves it, so collapsing it to `\r`
+///     there would make `collapse_cr` truncate `prefix` even though EL
+///     never asked for that. That standalone case is left unconverted
+///     (falls through to the "unrecognized" branch below, so `strip_ansi`
+///     removes the escape byte-for-byte without touching `prefix`) — a
+///     bug reagent caught on this exact line (PR #2330): the prior,
+///     unconditional version silently discarded `prefix` in
+///     `prefix\x1b[Ksuffix\n`.
+///
+/// CUB (`\x1b[<n>D`, "cursor back n columns") is intentionally NOT handled
+/// here — a faithful implementation needs true per-column tracking (a raw
+/// byte position isn't a faithful proxy once `n` varies per frame), which
+/// `collapse_cr`'s line-offset model doesn't have. Left as a documented
+/// follow-up alongside CUU/multi-line redraw (spec §A3) rather than
+/// guessed at with an approximation that could truncate the wrong amount.
+fn normalize_csi_overwrites(chunk: &mut Vec<u8>, still_on_first_line: &mut bool, at_col0: &mut bool) {
+    let mut out: Vec<u8> = Vec::with_capacity(chunk.len());
+    let mut i = 0;
+    while i < chunk.len() {
+        let b = chunk[i];
+        if b == b'\n' {
+            *still_on_first_line = false;
+        }
+        if b == 0x1b && i + 1 < chunk.len() && chunk[i + 1] == b'[' {
+            let mut j = i + 2;
+            while j < chunk.len() && (0x30..=0x3F).contains(&chunk[j]) {
+                j += 1;
+            }
+            if j < chunk.len() && (0x40..=0x7E).contains(&chunk[j]) {
+                let params = &chunk[i + 2..j];
+                let final_byte = chunk[j];
+                let is_cha_col1 = final_byte == b'G' && (params.is_empty() || params == b"1");
+                let is_el = final_byte == b'K' && *at_col0;
+                let is_cup_home = *still_on_first_line
+                    && final_byte == b'H'
+                    && is_cup_row1_col1(params);
+                if is_cha_col1 || is_el || is_cup_home {
+                    out.push(b'\r');
+                    *at_col0 = true;
+                    i = j + 1;
+                    continue;
+                }
+                // Unrecognized/CUB/mid-line-EL/out-of-scope CSI sequence:
+                // fall through untouched, byte by byte, so strip_ansi
+                // (which runs next) still recognizes and removes it as a
+                // whole — this function only ever substitutes the matched
+                // idioms above. Each of those bytes then runs through the
+                // ordinary `*at_col0 = b == b'\n' || b == b'\r'` update
+                // below like any other byte, which forces `at_col0` to
+                // `false` (none of an escape sequence's bytes are `\n`/
+                // `\r`) — conservative and safe (errs toward NOT
+                // collapsing a subsequent EL), not "left as-is".
+            }
+        }
+        out.push(b);
+        *at_col0 = b == b'\n' || b == b'\r';
+        i += 1;
+    }
+    *chunk = out;
+}
+
+/// Does a CUP (`\x1b[<params>H`) params string address row 1, column 1
+/// ("home")? Each field defaults to 1 when empty, per ECMA-48 — so `""`,
+/// `"1"`, `"1;1"`, `";1"`, `"1;"`, and `";"` are all row-1-col-1.
+fn is_cup_row1_col1(params: &[u8]) -> bool {
+    let field_is_one_or_empty = |f: &[u8]| f.is_empty() || f == b"1";
+    match params.iter().position(|&b| b == b';') {
+        None => field_is_one_or_empty(params),
+        Some(idx) => {
+            field_is_one_or_empty(&params[..idx]) && field_is_one_or_empty(&params[idx + 1..])
         }
     }
 }
@@ -1717,6 +2134,353 @@ mod tests {
         assert!(decode_command("not-valid-base64===").is_err());
     }
 
+    // ── cwd persistence tests ───────────────────────────────────────────────
+    // See docs/retro/RETRO_BASH_CWD_RESET_NOTICE_WINDOWS_2026_08_02.md for
+    // the bug this exists to fix: each `exec` invocation used to always seed
+    // its inner bash's cwd from this process's own (fixed) cwd, silently
+    // discarding whatever directory a previous call's `cd` left the agent
+    // in.
+
+    /// Unique-per-call scratch directory under the OS temp dir, so parallel
+    /// test runs (cargo's default) never share state. Mirrors the marker-tag
+    /// pattern `run_via_pty_kills_idle_child_and_returns_promptly` already
+    /// uses for the same reason.
+    fn unique_temp_dir(tag: &str) -> PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "agentmux-bashwrap-test-{tag}-{}-{n}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).expect("create unique temp dir");
+        dir
+    }
+
+    #[test]
+    fn sanitize_state_key_replaces_unsafe_chars() {
+        assert_eq!(sanitize_state_key("agent3-0630k"), "agent3-0630k");
+        assert_eq!(sanitize_state_key("Agent With Spaces"), "Agent_With_Spaces");
+        assert_eq!(sanitize_state_key(r"C:\Users\asafe"), "C__Users_asafe");
+    }
+
+    #[test]
+    fn cwd_state_path_honors_explicit_override() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let scratch = unique_temp_dir("override");
+        let target = scratch.join("explicit.cwd");
+        unsafe {
+            std::env::set_var(CWD_STATE_FILE_OVERRIDE_ENV, &target);
+        }
+        let resolved = cwd_state_path();
+        unsafe {
+            std::env::remove_var(CWD_STATE_FILE_OVERRIDE_ENV);
+        }
+        let _ = std::fs::remove_dir_all(&scratch);
+        assert_eq!(resolved, Some(target));
+    }
+
+    /// Save-and-restore guard for an env var, so tests can freely
+    /// set/remove it and always leave the ambient environment exactly as
+    /// they found it, even on an early return or panic mid-test — every
+    /// cwd-state-key test needs this for at least `AGENTMUX_AGENT_ID` and
+    /// `AGENTMUX_INSTANCE_SLUG` simultaneously, so a bespoke prev/restore
+    /// dance per test (the pattern used elsewhere in this file for a single
+    /// var) would otherwise multiply combinatorially.
+    struct EnvVarGuard {
+        key: &'static str,
+        prev: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let prev = std::env::var(key).ok();
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self { key, prev }
+        }
+
+        fn unset(key: &'static str) -> Self {
+            let prev = std::env::var(key).ok();
+            unsafe {
+                std::env::remove_var(key);
+            }
+            Self { key, prev }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.prev {
+                    Some(v) => std::env::set_var(self.key, v),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn cwd_state_path_derives_from_agent_id_when_no_override_or_instance_slug() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _override = EnvVarGuard::unset(CWD_STATE_FILE_OVERRIDE_ENV);
+        let _instance = EnvVarGuard::unset("AGENTMUX_INSTANCE_SLUG");
+        let _agent = EnvVarGuard::set("AGENTMUX_AGENT_ID", "Test-Agent-42");
+
+        let resolved = cwd_state_path().expect("home dir should resolve in any test environment");
+        assert!(resolved.ends_with("Test-Agent-42.cwd"), "{resolved:?}");
+        assert!(resolved.to_string_lossy().contains(".agentmux"));
+    }
+
+    /// codex P1 on this PR: keying solely by `AGENTMUX_AGENT_ID` (the
+    /// definition-wide slug) made two concurrently-running *instances* of
+    /// the same agent definition share one cwd file — a `cd` in instance A
+    /// would redirect instance B's next command into A's directory, even
+    /// though each instance has its own distinct working directory. The
+    /// fix: prefer `AGENTMUX_INSTANCE_SLUG` (per-launch, unique per running
+    /// instance — see `agent-model.ts`) whenever it's set.
+    #[test]
+    fn cwd_state_path_prefers_instance_slug_over_agent_id() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _override = EnvVarGuard::unset(CWD_STATE_FILE_OVERRIDE_ENV);
+        let _agent = EnvVarGuard::set("AGENTMUX_AGENT_ID", "shared-definition-slug");
+        let _instance_a = EnvVarGuard::set("AGENTMUX_INSTANCE_SLUG", "shared-definition-slug-20260101-000000");
+
+        let resolved_a =
+            cwd_state_path().expect("home dir should resolve in any test environment");
+        assert!(
+            resolved_a.ends_with("shared-definition-slug-20260101-000000.cwd"),
+            "{resolved_a:?}"
+        );
+
+        // A second, concurrently-running instance of the SAME definition
+        // (same AGENTMUX_AGENT_ID, different AGENTMUX_INSTANCE_SLUG) must
+        // resolve to a DIFFERENT file.
+        let _instance_b = EnvVarGuard::set("AGENTMUX_INSTANCE_SLUG", "shared-definition-slug-20260101-000001");
+        let resolved_b =
+            cwd_state_path().expect("home dir should resolve in any test environment");
+        assert_ne!(resolved_a, resolved_b);
+        assert!(
+            resolved_b.ends_with("shared-definition-slug-20260101-000001.cwd"),
+            "{resolved_b:?}"
+        );
+    }
+
+    /// reagentx re-review finding: when the state dir can't be created,
+    /// `CwdState::load()` used to leave `path` as `Some` anyway, so
+    /// `restore_cwd` and the child's write would both silently keep failing
+    /// against a directory that doesn't exist on every subsequent call,
+    /// instead of cleanly disabling persistence once as the doc comment
+    /// promises. Forces the failure by pointing the override at a path
+    /// whose *parent* is a plain file, not a directory — `create_dir_all`
+    /// cannot create a directory there.
+    #[test]
+    fn cwd_state_load_clears_path_when_state_dir_cannot_be_created() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let scratch = unique_temp_dir("uncreatable-parent");
+        let blocking_file = scratch.join("not-a-directory");
+        std::fs::write(&blocking_file, b"blocks create_dir_all").unwrap();
+        let unreachable_state_file = blocking_file.join("state.cwd");
+
+        let _override = EnvVarGuard::set(
+            CWD_STATE_FILE_OVERRIDE_ENV,
+            unreachable_state_file.to_str().unwrap(),
+        );
+        let state = CwdState::load();
+        let _ = std::fs::remove_dir_all(&scratch);
+
+        assert_eq!(
+            state.path, None,
+            "path must be cleared (not just logged-as-disabled) when its parent dir can't be created"
+        );
+        assert!(state.start_dir.is_some(), "must still fall back to a start dir");
+    }
+
+    #[test]
+    fn restore_cwd_none_when_file_missing() {
+        let scratch = unique_temp_dir("missing");
+        let missing = scratch.join("does-not-exist.cwd");
+        assert_eq!(restore_cwd(&missing), None);
+        let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    #[test]
+    fn restore_cwd_none_when_persisted_dir_no_longer_exists() {
+        let scratch = unique_temp_dir("stale");
+        let state_file = scratch.join("state.cwd");
+        let gone = scratch.join("deleted-dir");
+        std::fs::create_dir_all(&gone).unwrap();
+        std::fs::write(&state_file, gone.to_string_lossy().as_bytes()).unwrap();
+        std::fs::remove_dir_all(&gone).unwrap();
+        assert_eq!(restore_cwd(&state_file), None);
+        let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    #[test]
+    fn restore_cwd_some_when_persisted_dir_exists() {
+        let scratch = unique_temp_dir("valid");
+        let state_file = scratch.join("state.cwd");
+        std::fs::write(&state_file, scratch.to_string_lossy().as_bytes()).unwrap();
+        assert_eq!(restore_cwd(&state_file), Some(scratch.clone()));
+        let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    #[test]
+    fn restore_cwd_ignores_blank_file() {
+        let scratch = unique_temp_dir("blank");
+        let state_file = scratch.join("state.cwd");
+        std::fs::write(&state_file, b"   \n").unwrap();
+        assert_eq!(restore_cwd(&state_file), None);
+        let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    #[test]
+    fn append_cwd_capture_preserves_exit_code_and_gates_on_env() {
+        let script = append_cwd_capture("false");
+        // The real command's exit code must survive the appended
+        // bookkeeping regardless of whether the state env var is set.
+        assert!(script.contains("__agentmux_bashwrap_rc=$?"));
+        assert!(script.trim_end().ends_with("exit $__agentmux_bashwrap_rc"));
+        // The write is gated on the env var being non-empty, and uses a
+        // per-PID temp-then-rename so a crash mid-write can't corrupt the
+        // file, and two concurrent invocations never write the same temp
+        // file (reagentx P2 on this PR).
+        assert!(script.contains(&format!("-n \"${CWD_STATE_ENV}\"")));
+        assert!(script.contains(&format!("${CWD_STATE_ENV}.tmp.$$")));
+        assert!(script.contains("mv -f"));
+    }
+
+    /// reagentx P2 on this PR: a fixed (non-unique) temp filename meant two
+    /// concurrent Bash tool calls for the same instance could both write to
+    /// the *same* temp file before either renamed it, corrupting the
+    /// persisted cwd with interleaved bytes. Proves two real, genuinely
+    /// concurrent writers (via `$$`, each process's own PID) never
+    /// interleave — the file always ends up as one writer's complete,
+    /// valid output, never a mix of both.
+    #[tokio::test]
+    async fn run_via_pipes_concurrent_writers_never_corrupt_state_file() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let scratch = unique_temp_dir("e2e-concurrent");
+        let state_file = scratch.join("state.cwd");
+        let dir_a = scratch.join("dir-a");
+        let dir_b = scratch.join("dir-b");
+        std::fs::create_dir_all(&dir_a).unwrap();
+        std::fs::create_dir_all(&dir_b).unwrap();
+
+        let _override =
+            EnvVarGuard::set(CWD_STATE_FILE_OVERRIDE_ENV, state_file.to_str().unwrap());
+
+        let bash = locate_bash().expect("locate_bash for test — same dependency the whole binary needs");
+        let args_a = Args {
+            tool_id: "test-concurrent-a".to_string(),
+            b64_cmd: String::new(),
+            block_id: None,
+        };
+        let args_b = Args {
+            tool_id: "test-concurrent-b".to_string(),
+            b64_cmd: String::new(),
+            block_id: None,
+        };
+        let cd_a = format!("cd \"{}\"", dir_a.display());
+        let cd_b = format!("cd \"{}\"", dir_b.display());
+        let buffered_a = Arc::new(tokio::sync::Mutex::new(Vec::<u8>::new()));
+        let buffered_b = Arc::new(tokio::sync::Mutex::new(Vec::<u8>::new()));
+
+        let (status_a, status_b) = tokio::join!(
+            run_via_pipes(&args_a, &cd_a, None, buffered_a, &bash),
+            run_via_pipes(&args_b, &cd_b, None, buffered_b, &bash),
+        );
+        assert_eq!(status_a.unwrap(), 0);
+        assert_eq!(status_b.unwrap(), 0);
+
+        // Whichever writer's rename landed last, the file must contain
+        // exactly ONE valid, complete directory path — never a truncated
+        // or interleaved mix of both writers' output.
+        let final_contents = std::fs::read_to_string(&state_file).unwrap();
+        let trimmed = final_contents.trim();
+        let a_str = dir_a.to_string_lossy();
+        let b_str = dir_b.to_string_lossy();
+        assert!(
+            trimmed.ends_with(dir_a.file_name().unwrap().to_str().unwrap())
+                || trimmed.ends_with(dir_b.file_name().unwrap().to_str().unwrap()),
+            "expected a clean write of either {a_str:?} or {b_str:?}, got {trimmed:?}"
+        );
+        assert!(
+            !trimmed.contains('\n'),
+            "a corrupted/interleaved write would likely contain embedded newlines: {trimmed:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    /// End-to-end proof of the actual fix: running a `cd` in one `exec`
+    /// invocation must change the starting directory of the *next*
+    /// invocation, via the persisted state file — not just leave a
+    /// same-process illusion of persistence.
+    #[tokio::test]
+    async fn run_via_pipes_persists_cwd_across_invocations() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let scratch = unique_temp_dir("e2e-pipes");
+        let state_file = scratch.join("state.cwd");
+        let target_dir = scratch.join("moved-here");
+        std::fs::create_dir_all(&target_dir).unwrap();
+
+        let prev = std::env::var(CWD_STATE_FILE_OVERRIDE_ENV).ok();
+        unsafe {
+            std::env::set_var(CWD_STATE_FILE_OVERRIDE_ENV, &state_file);
+        }
+
+        let bash = locate_bash().expect("locate_bash for test — same dependency the whole binary needs");
+        let args = Args {
+            tool_id: "test-cwd-persist".to_string(),
+            b64_cmd: String::new(),
+            block_id: None,
+        };
+
+        // Call 1: cd into target_dir. Nothing about this process's own env
+        // changes — the fix must work purely through the state file.
+        let cd_cmd = format!("cd \"{}\"", target_dir.display());
+        let buffered1 = Arc::new(tokio::sync::Mutex::new(Vec::<u8>::new()));
+        let status1 = run_via_pipes(&args, &cd_cmd, None, buffered1, &bash)
+            .await
+            .expect("call 1 should succeed");
+        assert_eq!(status1, 0, "cd should succeed");
+
+        // Call 2: a fresh, unrelated invocation with no cd of its own —
+        // `pwd` should report target_dir, proving the restored starting
+        // directory came from call 1's persisted state, not from this
+        // process's own (unchanged) cwd.
+        let buffered2 = Arc::new(tokio::sync::Mutex::new(Vec::<u8>::new()));
+        let status2 = run_via_pipes(&args, "pwd", None, buffered2.clone(), &bash)
+            .await
+            .expect("call 2 should succeed");
+        assert_eq!(status2, 0);
+
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var(CWD_STATE_FILE_OVERRIDE_ENV, v),
+                None => std::env::remove_var(CWD_STATE_FILE_OVERRIDE_ENV),
+            }
+        }
+
+        let pwd_output = String::from_utf8_lossy(&buffered2.lock().await).trim().to_string();
+        let expected_name = target_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap()
+            .to_string();
+        let _ = std::fs::remove_dir_all(&scratch);
+
+        // Compare by trailing path component only — Windows `pwd` under Git
+        // Bash reports an MSYS-style path (`/c/...`), not the Windows-style
+        // path this test constructed the `cd` from.
+        assert!(
+            pwd_output.ends_with(&expected_name),
+            "expected pwd output to end in {expected_name:?}, got {pwd_output:?}"
+        );
+    }
+
     #[test]
     fn format_model_blob_under_cap_passes_body_through() {
         let body = b"hello world\n";
@@ -1846,6 +2610,207 @@ mod tests {
         assert_eq!(cr(b"line1\npartial\rreplace\n"), b"line1\nreplace\n");
     }
 
+    // ── normalize_csi_overwrites tests (spec §A2) ──────────────────────────
+
+    fn csi(input: &[u8]) -> Vec<u8> {
+        let mut v = input.to_vec();
+        let mut still_on_first_line = true;
+        let mut at_col0 = true;
+        normalize_csi_overwrites(&mut v, &mut still_on_first_line, &mut at_col0);
+        v
+    }
+
+    #[test]
+    fn normalize_csi_cha_col1_becomes_cr() {
+        assert_eq!(csi(b"progress\x1b[1Gdone"), b"progress\rdone");
+        // Bare \x1b[G (no param) means column 1 too, per ECMA-48 default.
+        assert_eq!(csi(b"progress\x1b[Gdone"), b"progress\rdone");
+    }
+
+    #[test]
+    fn normalize_csi_cha_other_column_left_untouched() {
+        // Only column 1 maps cleanly onto "\r" (start of line); other
+        // columns are intentionally out of scope (need true column
+        // tracking) and must survive unmangled for strip_ansi to remove.
+        let out = csi(b"progress\x1b[10Gdone");
+        assert!(!out.contains(&b'\r'), "unrelated CHA column must not synthesize a \\r");
+        assert_eq!(out, b"progress\x1b[10Gdone");
+    }
+
+    #[test]
+    fn normalize_csi_el_at_line_start_becomes_cr() {
+        // EL at the very start of a chunk (nothing written on this line
+        // yet) is safe: there's nothing to lose by treating it as \r.
+        assert_eq!(csi(b"\x1b[2Kfresh"), b"\rfresh");
+        assert_eq!(csi(b"\x1b[Kfresh"), b"\rfresh");
+        assert_eq!(csi(b"\x1b[0Kfresh"), b"\rfresh");
+        // Same, after a real newline -- also column 0.
+        assert_eq!(csi(b"line1\n\x1b[2Kfresh"), b"line1\n\rfresh");
+    }
+
+    #[test]
+    fn normalize_csi_standalone_mid_line_el_is_left_untouched_not_synthesized_to_cr() {
+        // reagent P1, PR #2330: EL only erases from the cursor onward and
+        // never moves it -- it is NOT equivalent to \r when real content
+        // ("stale") already precedes it on the line. The previous,
+        // unconditional version turned this into "stale\rfresh", which
+        // collapse_cr then truncated to just "fresh", silently discarding
+        // "stale" even though EL never asked for that. Leaving it
+        // unconverted here means strip_ansi removes only the escape bytes
+        // afterward, preserving "stale" + "fresh" concatenated.
+        let out = csi(b"stale\x1b[2Kfresh");
+        assert!(!out.contains(&b'\r'), "mid-line EL must not synthesize a \\r: {out:?}");
+        assert_eq!(out, b"stale\x1b[2Kfresh");
+
+        let out_k = csi(b"stale\x1b[Kfresh");
+        assert!(!out_k.contains(&b'\r'));
+        assert_eq!(out_k, b"stale\x1b[Kfresh");
+    }
+
+    #[test]
+    fn normalize_csi_at_col0_persists_across_calls_mid_line_el_split_across_reads_stays_untouched() {
+        // reagent P1, PR #2330 (round 2): normalize_csi_overwrites is called
+        // once per PTY read in the real reader loop, with at_col0 threaded
+        // in by &mut reference across calls -- NOT reset per call. A prior
+        // version of this fix declared at_col0 as a local reset to `true`
+        // on every call, so a standalone EL split across two PTY reads
+        // ("prefix" in one read, "\x1b[2Ksuffix" in the next) would see a
+        // freshly-true at_col0 on the second call and wrongly convert the
+        // EL to \r, reproducing the exact mid-line truncation bug the first
+        // round of this fix addressed -- just moved from a mid-chunk split
+        // to a cross-chunk-read split.
+        let mut still_on_first_line = true;
+        let mut at_col0 = true;
+
+        let mut first_read = b"prefix".to_vec();
+        normalize_csi_overwrites(&mut first_read, &mut still_on_first_line, &mut at_col0);
+        assert_eq!(first_read, b"prefix");
+        assert!(!at_col0, "cursor is mid-line after a read with no trailing \\n/\\r");
+
+        let mut second_read = b"\x1b[2Ksuffix".to_vec();
+        normalize_csi_overwrites(&mut second_read, &mut still_on_first_line, &mut at_col0);
+        assert!(
+            !second_read.contains(&b'\r'),
+            "EL split across a PTY-read boundary, still mid-line, must not synthesize a \\r: {second_read:?}"
+        );
+        assert_eq!(second_read, b"\x1b[2Ksuffix");
+
+        // Simulate the reader loop's actual buffering: both reads accumulate
+        // into one pending buffer before collapse_cr/strip_ansi run on it.
+        let mut pending = first_read;
+        pending.extend_from_slice(&second_read);
+        assert_eq!(pending, b"prefix\x1b[2Ksuffix");
+    }
+
+    #[test]
+    fn normalize_csi_at_col0_persists_across_calls_leading_cr_read_then_bare_el_read_becomes_cr() {
+        // Complement of the above: a read ending in \r (cursor genuinely at
+        // column 0) followed by a read that STARTS with EL must still
+        // convert -- persisted state must correctly stay `true` too, not
+        // just correctly go false.
+        let mut still_on_first_line = true;
+        let mut at_col0 = true;
+
+        let mut first_read = b"frame1\r".to_vec();
+        normalize_csi_overwrites(&mut first_read, &mut still_on_first_line, &mut at_col0);
+        assert!(at_col0, "trailing \\r puts the cursor back at column 0");
+
+        let mut second_read = b"\x1b[2Kframe2".to_vec();
+        normalize_csi_overwrites(&mut second_read, &mut still_on_first_line, &mut at_col0);
+        assert_eq!(second_read, b"\rframe2");
+    }
+
+    #[test]
+    fn normalize_csi_el_immediately_after_real_cr_still_becomes_cr() {
+        // The dominant real-world idiom (\r\x1b[2K<text>): the \r already
+        // puts the cursor at column 0, so a following EL is genuinely
+        // redundant and safe to also represent as \r.
+        assert_eq!(csi(b"\r\x1b[2Kfresh"), b"\r\rfresh");
+    }
+
+    #[test]
+    fn normalize_csi_cup_home_becomes_cr_on_first_line() {
+        // Windows ConPTY re-serializes a literal \r as CUP-to-home rather
+        // than passing it through -- verified empirically via the e2e test
+        // below. All the omitted-field variants mean row 1, col 1.
+        assert_eq!(csi(b"progress\x1b[Hdone"), b"progress\rdone");
+        assert_eq!(csi(b"progress\x1b[1Hdone"), b"progress\rdone");
+        assert_eq!(csi(b"progress\x1b[1;1Hdone"), b"progress\rdone");
+        assert_eq!(csi(b"progress\x1b[;1Hdone"), b"progress\rdone");
+        assert_eq!(csi(b"progress\x1b[1;Hdone"), b"progress\rdone");
+    }
+
+    #[test]
+    fn normalize_csi_cup_other_position_left_untouched() {
+        // Row/col other than 1,1 isn't "start of line" and must survive
+        // unmangled.
+        let out = csi(b"progress\x1b[2;1Hdone");
+        assert!(!out.contains(&b'\r'));
+        assert_eq!(out, b"progress\x1b[2;1Hdone");
+    }
+
+    #[test]
+    fn normalize_csi_cup_home_ignored_once_output_has_scrolled_past_first_line() {
+        // Once real multi-line output exists, \x1b[H means "go back to the
+        // FIRST of several lines" (a multi-line redraw, spec §A3,
+        // deliberately out of scope) -- must NOT be treated as "restart
+        // the current line", which would corrupt the multi-line content.
+        let mut v = b"line1\nline2\n\x1b[Hline1-updated".to_vec();
+        let mut still_on_first_line = true;
+        let mut at_col0 = true;
+        normalize_csi_overwrites(&mut v, &mut still_on_first_line, &mut at_col0);
+        assert!(!still_on_first_line, "must flip false after the first \\n");
+        assert!(
+            !v.contains(&b'\r'),
+            "CUP-home after multi-line output must not synthesize a \\r: {:?}",
+            String::from_utf8_lossy(&v)
+        );
+        assert_eq!(v, b"line1\nline2\n\x1b[Hline1-updated");
+    }
+
+    #[test]
+    fn normalize_csi_cub_left_untouched() {
+        // CUB (cursor-back N) is documented out-of-scope for this pass
+        // (spec §A2) -- needs true per-column tracking. Must survive
+        // unmangled here so strip_ansi still strips it as a whole sequence
+        // afterward (not left as garbage).
+        let out = csi(b"progress\x1b[5Ddone");
+        assert!(!out.contains(&b'\r'));
+        assert_eq!(out, b"progress\x1b[5Ddone");
+    }
+
+    #[test]
+    fn normalize_csi_dominant_cr_plus_el_idiom_is_redundant_but_correct() {
+        // The overwhelmingly common real-world idiom: \r\x1b[2K<text>. The
+        // \r is already present; normalize_csi_overwrites additionally
+        // turning \x1b[2K into a second \r is harmless -- collapse_cr
+        // treats consecutive \r as idempotent resets to the same line
+        // start.
+        let normalized = csi(b"\r\x1b[2Knew frame");
+        let mut pending = normalized;
+        collapse_cr(&mut pending);
+        assert_eq!(pending, b"\rnew frame");
+    }
+
+    #[test]
+    fn normalize_csi_composes_with_collapse_cr_for_a_full_overwrite() {
+        // End-to-end of the two functions together, as the reader loop
+        // actually calls them: a progress line first written plainly, then
+        // rewritten via CHA(1) on the next PTY read, must collapse exactly
+        // like a \r-based rewrite would.
+        let mut pending = b"Downloading 10%".to_vec();
+        collapse_cr(&mut pending); // no-op, no \r yet
+
+        let mut next_chunk = b"\x1b[1GDownloading 45%".to_vec();
+        let mut still_on_first_line = true;
+        let mut at_col0 = true;
+        normalize_csi_overwrites(&mut next_chunk, &mut still_on_first_line, &mut at_col0);
+        pending.extend_from_slice(&next_chunk);
+        collapse_cr(&mut pending);
+
+        assert_eq!(pending, b"Downloading 45%");
+    }
+
     /// Verify that the quiet-window semantics are: hold when pending ends
     /// with \r; flush when it doesn't. These are unit tests of the policy
     /// (not of the reader loop directly) — they encode the contract so a
@@ -1867,13 +2832,57 @@ mod tests {
     }
 
     #[test]
-    fn quiet_window_flushes_when_no_trailing_cr() {
-        // "Building..." (no \r) should flush live on the quiet-window.
+    fn quiet_window_defers_once_when_no_leading_or_trailing_cr() {
+        // "Building..." (no \r at either end) is a candidate for A1's
+        // one-tick speculative defer, not an immediate flush — see
+        // docs/specs/SPEC_TOOL_LOG_UNIVERSAL_ANIMATION_COLLAPSE_2026_07_27.md §A1.
         let pending = b"Building...".to_vec();
         assert!(
-            pending.last() != Some(&b'\r'),
-            "quiet-window must flush pending NOT ending with \\r"
+            pending.first() != Some(&b'\r') && pending.last() != Some(&b'\r'),
+            "quiet-window must defer (not flush) pending with no leading/trailing \\r"
         );
+    }
+
+    /// A1: the exact real-world bug this closes — a static label is
+    /// printed once with no `\r`, THEN (after the label has already been
+    /// speculatively deferred) a `\r`-prefixed overwrite arrives. Before
+    /// A1, the label would already have been flushed as its own permanent
+    /// LineEvent by the time the overwrite showed up, producing two lines
+    /// instead of one settled line.
+    #[test]
+    fn a1_deferred_line_merges_with_a_following_cr_prefixed_overwrite() {
+        // What deferred_pending holds after tick 1 (no \r either end).
+        let deferred = b"Installing deps...".to_vec();
+        // What arrives on the next read: a \r-prefixed overwrite.
+        let next_chunk = b"\rInstalling deps... done\n".to_vec();
+        // Mirrors the reader's merge step: prepend deferred, let
+        // collapse_cr do the rest.
+        let mut combined = deferred;
+        combined.extend_from_slice(&next_chunk);
+        collapse_cr(&mut combined);
+        assert_eq!(
+            combined, b"Installing deps... done\n",
+            "deferred label + \\r-overwrite must collapse to ONE line, not two"
+        );
+    }
+
+    /// A1: the deferred line must NOT be merged with unrelated content
+    /// that arrives without a leading `\r` — that's two genuinely
+    /// different lines and must stay two LineEvents.
+    #[test]
+    fn a1_deferred_line_is_not_merged_with_unrelated_non_cr_content() {
+        let deferred = b"Installing deps...".to_vec();
+        let next_chunk = b"Running tests...\n".to_vec();
+        // Mirrors the reader's policy: no leading \r on the new chunk means
+        // flush `deferred` as its own event, then start fresh with the new
+        // chunk (never concatenate the two).
+        assert_ne!(next_chunk.first(), Some(&b'\r'));
+        let mut fresh = Vec::new();
+        fresh.extend_from_slice(&next_chunk);
+        collapse_cr(&mut fresh);
+        assert_eq!(fresh, b"Running tests...\n");
+        // The deferred line, flushed separately, is untouched by the above.
+        assert_eq!(deferred, b"Installing deps...");
     }
 
     #[test]
@@ -2198,5 +3207,84 @@ mod tests {
                 None => std::env::remove_var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS"),
             }
         }
+    }
+
+    /// End-to-end proof of A1 against a REAL PTY + bash, reproducing the
+    /// exact bug SPEC_TOOL_LOG_UNIVERSAL_ANIMATION_COLLAPSE_2026_07_27.md
+    /// closes: a static label printed with no `\r`, a pause past the
+    /// quiet-window, then a `\r`-prefixed overwrite. Before A1, the label
+    /// was already flushed as its own permanent LineEvent by the time the
+    /// overwrite arrived, so the model-visible blob contained the label
+    /// TWICE ("Installing deps..." followed by "Installing deps... done").
+    ///
+    /// The pause is deliberately tuned to land INSIDE A1's one-extra-tick
+    /// window: greater than one `FLUSH_QUIET_WINDOW` (50ms, so the label is
+    /// actually deferred rather than merged inline on the same read) but
+    /// less than two (100ms, the point at which A1 gives up waiting and
+    /// flushes the deferred line anyway per the spec's own "no added
+    /// latency beyond one extra tick" scope). 70ms centers comfortably
+    /// inside that ~50ms window in isolation, but real OS thread scheduling
+    /// still occasionally pushes either boundary under load (observed: this
+    /// test flaked ~1 run in 6 in the full-suite parallel run, though never
+    /// in isolation) — `FLUSH_QUIET_WINDOW` is a hardcoded const with no
+    /// test-only override, so retrying the wall-clock scenario a few times
+    /// (same "widen the chance" philosophy already used by
+    /// `run_via_pty_does_not_misclassify_fast_success_as_idle_timeout`
+    /// above, just applied to reliably demonstrate a real behavior instead
+    /// of reliably catching a rare regression) is more honest than either a
+    /// single flaky assertion or silently loosening what's being proven.
+    #[tokio::test]
+    async fn a1_e2e_static_label_then_delayed_cr_overwrite_collapses_to_one_line() {
+        let bash = locate_bash().expect("locate_bash for test — same dependency the whole binary needs");
+        let command = "printf 'Installing deps...'; sleep 0.07; printf '\\rInstalling deps... done\\n'";
+
+        const MAX_ATTEMPTS: u32 = 5;
+        let mut last_blob = String::new();
+        for attempt in 1..=MAX_ATTEMPTS {
+            let pty_system = native_pty_system();
+            let pair = match pty_system.openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            }) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("skipping: PTY unavailable in this environment: {e}");
+                    return;
+                }
+            };
+            let args = Args {
+                tool_id: format!("test-a1-e2e-{attempt}"),
+                b64_cmd: String::new(),
+                block_id: None,
+            };
+            let buffered = Arc::new(tokio::sync::Mutex::new(Vec::<u8>::new()));
+
+            let result = tokio::time::timeout(
+                Duration::from_secs(15),
+                run_via_pty(&args, command, None, buffered.clone(), &bash, pair),
+            )
+            .await
+            .expect("run_via_pty must not hang")
+            .expect("run_via_pty should return Ok");
+            assert_eq!(result, 0, "command should exit cleanly");
+
+            let blob = String::from_utf8_lossy(&buffered.lock().await).into_owned();
+            let occurrences = blob.matches("Installing deps").count();
+            if occurrences == 1 && blob.contains("Installing deps... done") {
+                return; // demonstrated: the collapse happened as designed
+            }
+            eprintln!(
+                "attempt {attempt}/{MAX_ATTEMPTS}: expected 1 occurrence + the settled frame, \
+                 got {occurrences} occurrence(s) — blob: {blob:?} (retrying: real OS scheduling \
+                 can occasionally push the 70ms pause outside A1's ~50-100ms defer window)"
+            );
+            last_blob = blob;
+        }
+        panic!(
+            "the static label + its delayed \\r-overwrite must collapse to ONE occurrence across \
+             {MAX_ATTEMPTS} attempts — last blob: {last_blob:?}"
+        );
     }
 }

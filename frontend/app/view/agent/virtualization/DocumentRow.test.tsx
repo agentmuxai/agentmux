@@ -17,7 +17,7 @@ import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DocumentRow } from "./DocumentRow";
-import type { AgentErrorNode, DocumentNode, DocumentState } from "../types";
+import type { AgentErrorNode, CompactionStartedNode, ContextCompactedNode, DocumentNode, DocumentState } from "../types";
 
 afterEach(() => cleanup());
 
@@ -85,5 +85,80 @@ describe("DocumentRow — inline auth-error CTA", () => {
     it("renders NO CTA when onAgentErrorLogin is not provided, even for a 401", () => {
         renderRow(errorNode(401), undefined);
         expect(screen.queryByRole("button", { name: /Login Again/i })).toBeNull();
+    });
+});
+
+/**
+ * DocumentRow — compaction nodes (SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md).
+ *
+ * Two DISTINCT node types render two DISTINCT rows: `compaction_started`
+ * (in-progress announcement, no outcome data yet) and `context_compacted`
+ * (the completed record — real backend data or the heuristic fallback).
+ * They must never be visually confusable — that's the exact bug this
+ * split guards against (an in-progress compaction reading as finished).
+ */
+describe("DocumentRow — compaction nodes", () => {
+    const realCompactedNode = (): ContextCompactedNode => ({
+        type: "context_compacted",
+        id: "cc-1",
+        tokensBefore: 100_000,
+        tokensAfter: 5_000,
+        timestamp: Date.now(),
+        source: "real",
+        trigger: "manual",
+        durationMs: 12_345,
+    });
+
+    const heuristicCompactedNode = (): ContextCompactedNode => ({
+        type: "context_compacted",
+        id: "cc-2",
+        tokensBefore: 60_000,
+        tokensAfter: 4_000,
+        timestamp: Date.now(),
+        source: "heuristic",
+    });
+
+    const startedNode = (trigger: "manual" | "auto"): CompactionStartedNode => ({
+        type: "compaction_started",
+        id: "cs-1",
+        trigger,
+        startedAt: Date.now(),
+    });
+
+    it("real context_compacted shows the trigger label and real duration", () => {
+        renderRow(realCompactedNode());
+        expect(screen.getByText(/context compacted/i)).toBeInTheDocument();
+        expect(screen.getByText(/you ran \/compact/i)).toBeInTheDocument();
+        expect(screen.getByText(/100k → 5\.0k tokens/i)).toBeInTheDocument();
+        expect(screen.getByText(/took 12\.3s/i)).toBeInTheDocument();
+    });
+
+    it("real context_compacted with auto trigger shows the auto-compacted label", () => {
+        renderRow({ ...realCompactedNode(), trigger: "auto" });
+        expect(screen.getByText(/auto-compacted/i)).toBeInTheDocument();
+    });
+
+    it("heuristic context_compacted renders WITHOUT a trigger label or duration", () => {
+        renderRow(heuristicCompactedNode());
+        expect(screen.getByText(/context compacted/i)).toBeInTheDocument();
+        expect(screen.queryByText(/you ran \/compact/i)).toBeNull();
+        expect(screen.queryByText(/auto-compacted/i)).toBeNull();
+        expect(screen.queryByText(/took/i)).toBeNull();
+        expect(screen.getByText(/60k → 4\.0k tokens/i)).toBeInTheDocument();
+    });
+
+    it("compaction_started renders the in-progress announcement, distinct from context_compacted", () => {
+        renderRow(startedNode("manual"));
+        expect(screen.getByText(/Compacting conversation/i)).toBeInTheDocument();
+        expect(screen.getByText(/you ran \/compact/i)).toBeInTheDocument();
+        // Must NOT render anything from the completed-record copy — an
+        // in-progress compaction must never look like a finished one.
+        expect(screen.queryByText(/context compacted/i)).toBeNull();
+    });
+
+    it("compaction_started with auto trigger shows a distinct reason label", () => {
+        renderRow(startedNode("auto"));
+        expect(screen.getByText(/Compacting conversation/i)).toBeInTheDocument();
+        expect(screen.getByText(/context filled up/i)).toBeInTheDocument();
     });
 });

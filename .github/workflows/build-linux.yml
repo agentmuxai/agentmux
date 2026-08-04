@@ -132,9 +132,17 @@ jobs:
             # agentmuxai/cef now holds BOTH platforms' releases — filter to the
             # Linux x86_64 prefix (a bare --limit 1 would grab whichever platform
             # released most recently, e.g. a macOS framework).
+            #
+            # gh release list's default order is NOT reliably publish-time-descending
+            # on this fork — a release cut without an explicit --target inherits a
+            # frozen default-branch-HEAD created_at instead of the actual cut time, so
+            # trusting [0] after the filter can silently pick a stale tag (this bit the
+            # macOS codec release — see
+            # docs/specs/STATUS_CEF_PROPRIETARY_CODECS_MACOS_2026_07_27.md). Sort by
+            # publishedAt explicitly instead.
             TAG=$(gh release list --repo agentmuxai/cef --limit 30 \
-                    --json tagName \
-                    --jq '[.[].tagName | select(startswith("cef-linux-x86_64-"))][0]')
+                    --json tagName,publishedAt \
+                    --jq '[.[] | select(.tagName | startswith("cef-linux-x86_64-"))] | sort_by(.publishedAt) | reverse | .[0].tagName')
           fi
           if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
             echo "ERROR: no cef-linux-x86_64-* release found in agentmuxai/cef"; exit 1

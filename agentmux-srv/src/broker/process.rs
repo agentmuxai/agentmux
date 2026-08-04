@@ -90,6 +90,14 @@ pub struct ProcessStatus {
     pub controller_type: String,
     pub is_agent_pane: bool,
     pub last_computed_ms: u64,
+    /// The raw `BlockControllerRuntimeStatus` `compute_status` already reads
+    /// to derive `lifecycle`/`is_agent_pane` above — exposed so callers that
+    /// want the finer-grained fields (`shellprocstatus`, `spawn_ts_ms`,
+    /// `turn_active` itself, not just the `lifecycle` it was folded into)
+    /// don't have to read the controller registry a second time and risk a
+    /// second, possibly-inconsistent snapshot (codex P2 on PR #2380 — the
+    /// `muxspect describe` route originally did exactly that).
+    pub controller_status: Option<BlockControllerRuntimeStatus>,
 }
 
 impl ProcessStatus {
@@ -102,6 +110,7 @@ impl ProcessStatus {
             controller_type: String::new(),
             is_agent_pane: false,
             last_computed_ms: now_ms(),
+            controller_status: None,
         }
     }
 
@@ -181,6 +190,7 @@ fn compute_status(block_id: &str) -> ProcessStatus {
             controller_type: controller.controller_type().to_string(),
             is_agent_pane: status.is_agent_pane,
             last_computed_ms: now_ms(),
+            controller_status: Some(status),
         },
         _ => ProcessStatus::unknown(block_id),
     }
@@ -230,6 +240,22 @@ impl ProcessBroker {
     pub fn status(&self, block_id: &str) -> ProcessStatus {
         let mut cache = self.cache.lock();
         let fresh = compute_status(block_id);
+        // Never cache (or emit a change event for) a block with no real
+        // controller — `list()`'s own callers only ever pass real,
+        // discovered block_ids (from `get_all_controllers()`), but this
+        // broker is also reachable directly with caller-supplied input via
+        // `muxspect describe` (agentmux-srv/src/server/muxspect_handlers.rs)
+        // — the first RPC-adjacent surface to call `status()` with an
+        // arbitrary string rather than one already known to exist. Without
+        // this guard, repeated queries for distinct nonexistent block_ids
+        // would grow this cache unboundedly, since `forget()` is only ever
+        // called from real controller teardown and never sees IDs that were
+        // never real to begin with (reagent + codex, independently, on
+        // PR #2380).
+        if fresh.lifecycle == Lifecycle::Unknown {
+            drop(cache);
+            return fresh;
+        }
         let changed = cache
             .get(block_id)
             .map(|prev| {
@@ -288,6 +314,14 @@ impl ProcessBroker {
         self.cache.lock().remove(block_id);
     }
 
+    /// Test-only: current cache size, to prove unknown/nonexistent
+    /// block_ids never get inserted (see `status()`'s own guard and the
+    /// regression test below).
+    #[cfg(test)]
+    fn cache_len(&self) -> usize {
+        self.cache.lock().len()
+    }
+
     fn emit_changed(&self, status: &ProcessStatus) {
         let Some(ref broker) = self.wps_broker else {
             return;
@@ -334,6 +368,7 @@ mod tests {
             controller_type: controller_type.to_string(),
             is_agent_pane,
             last_computed_ms: 0,
+            controller_status: None,
         }
     }
 
@@ -423,6 +458,22 @@ mod tests {
         let status = broker.status("no-such-block-id");
         assert_eq!(status.lifecycle, Lifecycle::Unknown);
         assert!(status.processes.is_empty());
+    }
+
+    #[test]
+    fn unknown_block_ids_are_never_cached_unbounded_growth_guard() {
+        // reagent + codex, independently, on PR #2380: `muxspect describe`
+        // is the first caller to reach `status()` with arbitrary,
+        // caller-supplied block_ids rather than ones already known to be
+        // real (list()'s own callers only ever pass IDs from
+        // get_all_controllers()). Without this guard, a loop probing
+        // distinct nonexistent block_ids would grow the cache forever,
+        // since forget() only ever fires from real controller teardown.
+        let broker = ProcessBroker::new(None);
+        for i in 0..50 {
+            let _ = broker.status(&format!("garbage-block-{i}"));
+        }
+        assert_eq!(broker.cache_len(), 0, "unknown block_ids must never be cached");
     }
 
     #[test]

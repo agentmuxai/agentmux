@@ -105,6 +105,18 @@ describe("thinking accumulation", () => {
         expect(think!.id).not.toBe(text!.id);
         expect((text as MarkdownNode).metadata).toBeUndefined();
     });
+
+    // SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md §2.4: thinking clumps
+    // never got a timestamp at all before — a real gap found auditing for
+    // the hover-peek feature, since every other node kind already had one.
+    test("stamps a timestamp on first creation, unchanged across subsequent appends", () => {
+        const before = Date.now();
+        const n1 = parser.parseStreamEvent({ type: "thinking", content: "Let me " }) as MarkdownNode;
+        const n2 = parser.parseStreamEvent({ type: "thinking", content: "think..." }) as MarkdownNode;
+
+        expect(n1.timestamp).toBeGreaterThanOrEqual(before);
+        expect(n2.timestamp).toBe(n1.timestamp);
+    });
 });
 
 // ── Interleaved events ──────────────────────────────────────────────────────

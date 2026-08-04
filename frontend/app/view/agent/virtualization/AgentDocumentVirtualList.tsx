@@ -32,7 +32,7 @@ import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, untra
 import { trail } from "@/log/render-trail";
 import { Key } from "@solid-primitives/keyed";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
-import type { DocumentNode, DocumentState, SubagentLinkNode } from "../types";
+import type { DocumentNode, DocumentState } from "../types";
 import { agentPerfStore, startAgentLayoutShiftObserver } from "./perf-probe";
 import {
     captureTopmostAnchor,
@@ -61,7 +61,6 @@ import {
 export interface AgentDocumentVirtualListProps {
     viewState: AgentViewState;
     documentState: Accessor<DocumentState>;
-    onSubagentClick?: (node: SubagentLinkNode) => void;
     onLoadOlder?: () => Promise<void>;
     loadingOlder?: Accessor<boolean>;
     highlightNodeId?: Accessor<string | null>;
@@ -130,6 +129,10 @@ export interface AgentDocumentVirtualListProps {
 export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): JSX.Element {
     let scrollRef!: HTMLDivElement;
     let virtualContainerRef: HTMLDivElement | undefined;
+    // Streaming-buffer's own element — observed by the content-resize pin
+    // below (never used for anything else, so it's fine that it's only set
+    // once the buffer first mounts).
+    let streamingBufferRef: HTMLDivElement | undefined;
     // Guard against concurrent older-history fetches triggered by scroll.
     let loadingOlderInFlight = false;
     // RAF-coalesced scroll handling (task #39): native `scroll` events can
@@ -142,6 +145,26 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // from the event), so it's safe to defer to the next frame: whichever
     // scroll position is current when the frame runs is the one applied.
     let scrollRafId: number | null = null;
+
+    // Set immediately before every programmatic scrollTo() call below
+    // (pin-to-bottom effect, ResizeObserver re-pin, jumpToBottom), consumed
+    // by the very next handleScrollNow() call. A `scrollTo()` call itself
+    // fires a native `scroll` event, coalesced by scrollRafId into the same
+    // handleScrollNow() batch as any other scroll activity in that frame —
+    // this flag lets that call distinguish "this scroll event resulted from
+    // OUR OWN auto-scroll" from a genuine user scroll landing in the same
+    // batch, so the disengage branch below doesn't misattribute it. Third
+    // documented attempt at the "scroll-follow silently stops" class of bug
+    // (docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md,
+    // docs/specs/SPEC_WORKING_STATE_AND_SCROLL_FOLLOW_HARDENING_2026_07_27.md §3/§5)
+    // — this is the "input-gating race" both prior passes deferred pending
+    // live reports continuing, which they did.
+    let pendingProgrammaticScroll = false;
+    function scrollToTrueBottom(): void {
+        if (!scrollRef) return;
+        pendingProgrammaticScroll = true;
+        scrollRef.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: "auto" });
+    }
 
     // Sticky frontier id — set once when the document first crosses
     // STREAMING_BUFFER_SIZE; advanced whenever the buffer exceeds the
@@ -421,7 +444,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                 // Re-check: user may have disengaged stickToBottom between
                 // when this microtask was queued and when it fires.
                 if (!props.viewState.stickToBottom()) return;
-                scrollRef.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: "auto" });
+                scrollToTrueBottom();
                 // New content may have pushed a held-open tool above the top
                 // without a user scroll event — collapse it now (pinned to
                 // bottom, so no visible jump).
@@ -454,7 +477,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         const ro = new ResizeObserver(() => {
             const h = scrollRef.clientHeight;
             if (h > 0 && props.viewState.stickToBottom()) {
-                scrollRef.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: "auto" });
+                scrollToTrueBottom();
             }
             // Phase 3: the scroll container resizing changes the viewport the
             // slice windows against — feed it (covers hidden→visible 0→N and
@@ -472,12 +495,52 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         onCleanup(() => ro.disconnect());
     });
 
+    // Content-resize-driven pin. The effect above only re-pins when one of
+    // three hand-picked signals changes (nodes().length, layoutView().totalSize,
+    // workingRowHeight) — any OTHER source of the content growing taller is
+    // invisible to it, and the scrollbar visibly sits above true bottom until
+    // some unrelated signal happens to change and the effect re-runs. The
+    // clientHeight RO right above this one doesn't catch it either — it only
+    // fires on VIEWPORT resizes (scrollRef's own border-box), not content
+    // growth (scrollRef's box is fixed by the flex layout regardless of how
+    // tall its overflowing content gets).
+    //
+    // A concrete, confirmed example: MarkdownBlock throttles streaming
+    // re-parses and fires a bare `setTimeout` ~90ms after the last token to
+    // commit a syntax-highlighted re-render — a code block routinely reflows
+    // to a different height than its plain-text intermediate. That write is
+    // completely outside the Solid signal graph the effect above depends on.
+    //
+    // Fix: observe the two elements whose box size IS "how tall the content
+    // actually is" — the virtualized region and the streaming buffer —
+    // directly, and re-pin from ANY resize, regardless of what caused it.
+    // ResizeObserver's notification step runs after layout but before paint
+    // (the same guarantee the WICG spec's own chat-scroll example and
+    // libraries like use-stick-to-bottom rely on), so writing scrollTop
+    // synchronously here never produces a visible flash. See
+    // docs/specs/REPORT_AGENT_PANE_SCROLL_PIN_FLICKER_AUDIT_2026_07_30.md.
+    //
+    // workingRowHeight is NOT covered by this observer — it drives
+    // `.agent-document`'s own padding-bottom (scrollRef's box, not a child's),
+    // which changes scrollHeight without resizing either observed element.
+    // It stays covered by the effect above.
+    onMount(() => {
+        if (typeof ResizeObserver === "undefined") return;
+        const ro = new ResizeObserver(() => {
+            if (!scrollRef || !props.viewState.stickToBottom()) return;
+            scrollToTrueBottom();
+        });
+        if (virtualContainerRef) ro.observe(virtualContainerRef);
+        if (streamingBufferRef) ro.observe(streamingBufferRef);
+        onCleanup(() => ro.disconnect());
+    });
+
     // jumpToBottom: forced scroll-to-bottom that re-engages stick.
     // Exposed to parent so AgentFooter can call it on keystroke.
     const jumpToBottom = (): void => {
         if (!scrollRef) return;
         props.viewState.engageStickToBottom();
-        scrollRef.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: "auto" });
+        scrollToTrueBottom();
     };
     if (props.scrollToBottomRef) props.scrollToBottomRef(jumpToBottom);
 
@@ -552,6 +615,14 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         if (!scrollRef) return;
         const { scrollTop, scrollHeight, clientHeight } = scrollRef;
 
+        // Consume the programmatic-scroll flag for THIS batch — see
+        // scrollToTrueBottom's own comment. Read once, up front: every
+        // branch below that might disengage needs to know whether this
+        // scroll event batch was (at least partly) caused by our own
+        // auto-scroll, not just the disengage branch specifically.
+        const wasProgrammatic = pendingProgrammaticScroll;
+        pendingProgrammaticScroll = false;
+
         // Phase 4: scrollTop / clientHeight are already unzoomed CSS px under the
         // ancestor CSS `zoom` (CDP-confirmed: ratio 1.0 at zoom 0.5/2 — only
         // getBoundingClientRect is zoomed), so push them raw. The lone ÷zoom is
@@ -582,7 +653,29 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             }
         } else {
             if (props.viewState.stickToBottom()) {
-                props.viewState.disengageStickToBottom();
+                const gapPx = scrollHeight - clientHeight - scrollTop;
+                if (wasProgrammatic) {
+                    // This scroll event batch included our own scrollTo()
+                    // call — isNearBottom() reading "not near bottom" here
+                    // means either new content landed in the same tick
+                    // (the pin effect's own reactive deps will re-fire and
+                    // re-scroll) or a user scroll got coalesced into the
+                    // same frame. Either way, disengaging on THIS event
+                    // would be misattributing our own auto-scroll (or a
+                    // same-frame race) as the user scrolling away.
+                    console.info(
+                        "[wave-scroll]",
+                        `pane=${props.blockId?.slice(0, 7) ?? "?"}`,
+                        `suppressed disengage — programmatic scroll in this batch, gap=${gapPx}px`,
+                    );
+                } else {
+                    console.info(
+                        "[wave-scroll]",
+                        `pane=${props.blockId?.slice(0, 7) ?? "?"}`,
+                        `disengage — scrollTop=${scrollTop} scrollHeight=${scrollHeight} clientHeight=${clientHeight} gap=${gapPx}px`,
+                    );
+                    props.viewState.disengageStickToBottom();
+                }
             }
         }
 
@@ -802,7 +895,6 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                                     <DocumentRow
                                         node={n}
                                         documentState={props.documentState}
-                                        onSubagentClick={props.onSubagentClick}
                                         highlightNodeId={props.highlightNodeId}
                                         onToggleCollapse={props.onToggleCollapse}
                                         onTogglePin={props.onTogglePin}
@@ -858,13 +950,16 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                 (SPEC_REPLACECHILD_CRASH_FULL_ANALYSIS_AND_FIX_2026-06-06.md §3.3) */}
             <Show when={partition()}>
                 {(p) => (
-                    <div class="agent-document-streaming-buffer" data-animate={animateEnabled() || undefined}>
+                    <div
+                        class="agent-document-streaming-buffer"
+                        data-animate={animateEnabled() || undefined}
+                        ref={(el) => { streamingBufferRef = el; }}
+                    >
                         <Key each={p().streamingNodes as DocumentNode[]} by={(n) => n.id}>
                             {(nodeAccessor) => (
                                 <DocumentRow
                                     node={nodeAccessor}
                                     documentState={props.documentState}
-                                    onSubagentClick={props.onSubagentClick}
                                     highlightNodeId={props.highlightNodeId}
                                     onToggleCollapse={props.onToggleCollapse}
                                     onTogglePin={props.onTogglePin}

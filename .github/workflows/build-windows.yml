@@ -115,9 +115,16 @@ jobs:
         run: |
           TAG="${{ steps.in.outputs.cef_tag }}"
           if [ -z "$TAG" ]; then
+            # gh release list's default order is NOT reliably publish-time-descending
+            # on this fork — a release cut without an explicit --target inherits a
+            # frozen default-branch-HEAD created_at instead of the actual cut time, so
+            # trusting [0] after the filter can silently pick a stale tag (this bit the
+            # macOS codec release — see
+            # docs/specs/STATUS_CEF_PROPRIETARY_CODECS_MACOS_2026_07_27.md). Sort by
+            # publishedAt explicitly instead.
             TAG=$(gh release list --repo agentmuxai/cef --limit 30 \
-                    --json tagName \
-                    --jq '[.[].tagName | select(startswith("cef-windows-x86_64-"))][0]')
+                    --json tagName,publishedAt \
+                    --jq '[.[] | select(.tagName | startswith("cef-windows-x86_64-"))] | sort_by(.publishedAt) | reverse | .[0].tagName')
           fi
           if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
             echo "ERROR: no cef-windows-x86_64-* release found in agentmuxai/cef"; exit 1
@@ -132,24 +139,37 @@ jobs:
           path: ${{ env.CEF_RUNTIME_DIR_WINDOWS }}
           key: cef-runtime-windows-${{ steps.cef.outputs.tag }}
 
+      # `Expand-Archive`, not bash `unzip`: the release zip is produced by
+      # PowerShell's `Compress-Archive` (docs/cef-build/build-patched-cef-windows.md
+      # §7), which stores internal entries with backslash path separators.
+      # Info-ZIP's `unzip` (the bash job's prior tool here) can't parse those
+      # as nested directories — it silently flattens/mangles them, so the
+      # libcef.dll lookup below always failed with "not found in zip" on any
+      # cache miss. Extracting with the same .NET zip implementation that
+      # created the archive round-trips correctly. See
+      # docs/retro/retro-nightly-windows-cef-zip-backslash-paths-2026-07-29.md.
       - name: Download codec-enabled CEF runtime
         if: steps.cef-cache.outputs.cache-hit != 'true'
-        shell: bash
+        shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.CEF_RUNTIME_TOKEN }}
         run: |
-          mkdir -p /tmp/cef-extract "$CEF_RUNTIME_DIR_WINDOWS"
-          gh release download "${{ steps.cef.outputs.tag }}" \
-            --repo agentmuxai/cef \
-            --pattern "*.zip" \
-            --dir /tmp/cef-extract \
+          $extractDir = "$env:RUNNER_TEMP\cef-extract"
+          New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
+          New-Item -ItemType Directory -Force -Path $env:CEF_RUNTIME_DIR_WINDOWS | Out-Null
+          gh release download "${{ steps.cef.outputs.tag }}" `
+            --repo agentmuxai/cef `
+            --pattern "*.zip" `
+            --dir $extractDir `
             --clobber
-          unzip -q /tmp/cef-extract/*.zip -d /tmp/cef-extract/unpacked
+          $zip = Get-ChildItem "$extractDir\*.zip" | Select-Object -First 1
+          if (-not $zip) { Write-Error "ERROR: no .zip downloaded from release"; exit 1 }
+          Expand-Archive -Path $zip.FullName -DestinationPath "$extractDir\unpacked" -Force
           # Find libcef.dll regardless of whether the zip has a top-level dir
-          LIBCEF=$(find /tmp/cef-extract/unpacked -name "libcef.dll" | head -1)
-          if [ -z "$LIBCEF" ]; then echo "ERROR: libcef.dll not found in zip"; exit 1; fi
-          cp -r "$(dirname "$LIBCEF")/." "$CEF_RUNTIME_DIR_WINDOWS/"
-          rm -rf /tmp/cef-extract
+          $libcef = Get-ChildItem -Path "$extractDir\unpacked" -Filter "libcef.dll" -Recurse | Select-Object -First 1
+          if (-not $libcef) { Write-Error "ERROR: libcef.dll not found in zip"; exit 1 }
+          Copy-Item -Path "$($libcef.DirectoryName)\*" -Destination $env:CEF_RUNTIME_DIR_WINDOWS -Recurse -Force
+          Remove-Item -Recurse -Force $extractDir
 
       - name: Set AGENTMUX_CEF_RUNTIME_DIR_WINDOWS
         shell: bash

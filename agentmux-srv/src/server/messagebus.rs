@@ -139,6 +139,7 @@ pub(super) async fn handle_inject(
         wait_for_idle: false,
         jekt_tier: None,
         delivery_tier: Some("host".to_string()),
+        forward_hops: 0,
     };
     let resp = state.reactive_handler.inject_message(reactive_req);
     if resp.success {

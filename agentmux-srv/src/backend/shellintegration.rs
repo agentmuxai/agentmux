@@ -21,7 +21,35 @@ const FISH_SCRIPT: &str = include_str!("shellintegration/fish.fish");
 /// shell's `muxlog` function delegates to it. One tested implementation does log
 /// discovery + NDJSON rendering + filtering for all shells.
 const MUXLOG_JS: &str = include_str!("shellintegration/muxlog.mjs");
-const VERSION_MARKER: &str = env!("CARGO_PKG_VERSION");
+/// Shared muxspect core (Node) — muxlog's live-state sibling. Deployed once
+/// at `<shell>/muxspect.mjs`; every shell's `muxspect` function delegates to
+/// it. See docs/specs/SPEC_MUXSPECT_LIVE_INTROSPECTION_TOOL_2026_08_01.md.
+const MUXSPECT_JS: &str = include_str!("shellintegration/muxspect.mjs");
+
+/// Deployment marker: `<package version>-<content hash>`, NOT the bare
+/// package version alone (codex P2 on PR #2380). Local/dev builds routinely
+/// iterate on these embedded scripts WITHOUT a version bump (this repo's own
+/// convention — see CLAUDE.md's "Build versioning — local builds are
+/// *labeled*, not *versioned*"), so a version-only marker left `.version`
+/// already matching on every same-version rebuild/restart, silently
+/// skipping deployment of a newly-added or newly-edited script (muxspect.mjs
+/// specifically, added in the same PR that added the startup call site —
+/// the marker never invalidated to pick it up). Hashing the actual embedded
+/// content means ANY change to ANY script forces a redeploy regardless of
+/// whether the package version moved, while an unchanged rebuild still
+/// skips the (cheap, but not free) disk writes.
+fn version_marker() -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    BASH_SCRIPT.hash(&mut hasher);
+    ZSH_SCRIPT.hash(&mut hasher);
+    PWSH_SCRIPT.hash(&mut hasher);
+    FISH_SCRIPT.hash(&mut hasher);
+    MUXLOG_JS.hash(&mut hasher);
+    MUXSPECT_JS.hash(&mut hasher);
+    format!("{}-{:x}", env!("CARGO_PKG_VERSION"), hasher.finish())
+}
 
 // ─── Shell type ──────────────────────────────────────────────────────────────
 
@@ -59,15 +87,16 @@ pub fn detect_shell_type(shell_path: &str) -> ShellType {
 pub fn deploy_scripts(wave_data_dir: &Path) {
     let shell_base = wave_data_dir.join("shell");
     let version_file = shell_base.join(".version");
+    let marker = version_marker();
 
     // Check if already up-to-date
     if let Ok(existing) = std::fs::read_to_string(&version_file) {
-        if existing.trim() == VERSION_MARKER {
+        if existing.trim() == marker {
             return;
         }
     }
 
-    tracing::info!("Deploying shell integration scripts (v{})", VERSION_MARKER);
+    tracing::info!("Deploying shell integration scripts ({})", marker);
 
     let deploys: &[(&str, &str, &str)] = &[
         ("bash", ".bashrc", BASH_SCRIPT),
@@ -99,9 +128,16 @@ pub fn deploy_scripts(wave_data_dir: &Path) {
         all_ok = false;
     }
 
+    // Deploy the shared muxspect core the same way, right next to muxlog.mjs.
+    let muxspect_path = shell_base.join("muxspect.mjs");
+    if let Err(e) = std::fs::write(&muxspect_path, MUXSPECT_JS) {
+        tracing::warn!("shell integration: failed to write {}: {}", muxspect_path.display(), e);
+        all_ok = false;
+    }
+
     // Write version marker only if all scripts deployed successfully
     if all_ok {
-        let _ = std::fs::write(&version_file, VERSION_MARKER);
+        let _ = std::fs::write(&version_file, &marker);
     }
 }
 
@@ -234,5 +270,65 @@ mod tests {
     fn test_unknown_shell_returns_none() {
         let dir = Path::new("/tmp");
         assert!(get_shell_startup(ShellType::Unknown, dir).is_none());
+    }
+
+    /// `muxspect.mjs` deploys next to `muxlog.mjs` — codified as a test since
+    /// it's easy to add a new embedded script and forget the deploy line
+    /// (see docs/specs/SPEC_MUXSPECT_LIVE_INTROSPECTION_TOOL_2026_08_01.md).
+    #[test]
+    fn deploy_scripts_writes_muxlog_and_muxspect_side_by_side() {
+        let tmp = std::env::temp_dir().join(format!(
+            "agentmux-shellintegration-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        deploy_scripts(&tmp);
+
+        let shell_base = tmp.join("shell");
+        let muxlog = shell_base.join("muxlog.mjs");
+        let muxspect = shell_base.join("muxspect.mjs");
+        assert!(muxlog.exists(), "muxlog.mjs should be deployed");
+        assert!(muxspect.exists(), "muxspect.mjs should be deployed alongside it");
+        assert_eq!(std::fs::read_to_string(&muxspect).unwrap(), MUXSPECT_JS);
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// codex P2 on PR #2380: a version-only marker left an EXISTING profile
+    /// (same CARGO_PKG_VERSION, older content) permanently skipping
+    /// deployment of a newly-added script — exactly what an existing
+    /// `~/.agentmux` from a prior same-version dev build would have. Content
+    /// hashing must force a redeploy in that case, not just on a genuinely
+    /// fresh profile (the only case the test above covers).
+    #[test]
+    fn deploy_scripts_redeploys_when_marker_predates_a_content_change() {
+        let tmp = std::env::temp_dir().join(format!(
+            "agentmux-shellintegration-test-stale-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let shell_base = tmp.join("shell");
+        std::fs::create_dir_all(&shell_base).unwrap();
+
+        // Simulate a profile deployed by an older build of shellintegration.rs
+        // that only ever wrote the bare package version as its marker (i.e.
+        // BEFORE this fix existed) — the exact "same version, no muxspect.mjs
+        // yet" scenario codex's finding describes.
+        std::fs::write(shell_base.join(".version"), env!("CARGO_PKG_VERSION")).unwrap();
+        assert!(!shell_base.join("muxspect.mjs").exists(), "precondition: not deployed yet");
+
+        deploy_scripts(&tmp);
+
+        assert!(
+            shell_base.join("muxspect.mjs").exists(),
+            "a stale version-only marker must not suppress deployment of a script that was never written"
+        );
+        assert_eq!(
+            std::fs::read_to_string(shell_base.join(".version")).unwrap(),
+            version_marker(),
+            "marker must be updated to the new content-hashed form"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

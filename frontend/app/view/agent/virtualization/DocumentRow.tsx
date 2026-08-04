@@ -18,12 +18,12 @@ import { onMount, Show, type Accessor, type JSX } from "solid-js";
 import { AgentMessageBlock } from "../components/AgentMessageBlock";
 import { JektBubble } from "../components/JektBubble";
 import { MarkdownBlock } from "../components/MarkdownBlock";
-import { SubagentLinkBlock } from "../components/SubagentLinkBlock";
 import { PersistentShellBlock } from "../components/PersistentShellBlock";
 import { ToolBlock } from "../components/ToolBlock";
 import { UserMessageBlock } from "../components/UserMessageBlock";
-import type { DocumentNode, DocumentState, ShellNode, SubagentLinkNode, UserMessageNode } from "../types";
+import type { DocumentNode, DocumentState, ShellNode, UserMessageNode } from "../types";
 import { markRowMount } from "./perf-probe";
+import { formatCompactNumber } from "@/util/format-count";
 
 export interface DocumentRowProps {
     /**
@@ -33,7 +33,6 @@ export interface DocumentRowProps {
      */
     node: Accessor<DocumentNode>;
     documentState: Accessor<DocumentState>;
-    onSubagentClick?: (node: SubagentLinkNode) => void;
     highlightNodeId?: Accessor<string | null>;
     onToggleCollapse: (id: string) => void;
     onTogglePin: (id: string) => void;
@@ -121,7 +120,6 @@ export function DocumentRow(props: DocumentRowProps): JSX.Element {
                 onToggleCollapse={props.onToggleCollapse}
                 onTogglePin={props.onTogglePin}
                 onHoldToolOpen={props.onHoldToolOpen}
-                onSubagentClick={props.onSubagentClick}
                 onAgentErrorLogin={props.onAgentErrorLogin}
             />
         </div>
@@ -134,7 +132,6 @@ interface DocumentNodeBodyProps {
     onToggleCollapse: (id: string) => void;
     onTogglePin: (id: string) => void;
     onHoldToolOpen?: (id: string) => void;
-    onSubagentClick?: (node: SubagentLinkNode) => void;
     /** Re-run the provider login flow — drives the inline auth-error CTA. */
     onAgentErrorLogin?: () => void;
 }
@@ -203,12 +200,6 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     onTogglePin={() => props.onTogglePin(props.node().id)}
                 />
             </Show>
-            <Show when={props.node() && props.node().type === "subagent_link"}>
-                <SubagentLinkBlock
-                    node={props.node() as Extract<DocumentNode, { type: "subagent_link" }>}
-                    onClick={props.onSubagentClick ?? (() => { })}
-                />
-            </Show>
             <Show when={props.node() && props.node().type === "shell"}>
                 <PersistentShellBlock
                     node={props.node() as ShellNode}
@@ -268,14 +259,42 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
             <Show when={props.node() && props.node().type === "context_compacted"}>
                 {(() => {
                     const n = props.node() as Extract<DocumentNode, { type: "context_compacted" }>;
-                    const fmt = (tok: number) => tok >= 1000 ? `${Math.round(tok / 1000)}k` : String(tok);
+                    const fmt = formatCompactNumber;
+                    // Real events (backend `CompactionBoundary`) carry a real
+                    // trigger + duration; the heuristic fallback (other
+                    // providers, or a missed real event) has neither. See
+                    // docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md §4.3.
+                    const triggerLabel = n.trigger === "manual"
+                        ? "you ran /compact"
+                        : n.trigger === "auto"
+                            ? "auto-compacted"
+                            : null;
+                    const durationLabel = n.durationMs != null
+                        ? ` · took ${(n.durationMs / 1000).toFixed(1)}s`
+                        : "";
                     return (
                         <div class="agent-context-compacted">
                             <div class="agent-context-compacted-label">
-                                context compacted
+                                context compacted{triggerLabel ? ` — ${triggerLabel}` : ""}
                             </div>
                             <div class="agent-context-compacted-detail">
-                                Earlier history summarized · {fmt(n.tokensBefore)} → {fmt(n.tokensAfter)} tokens
+                                Earlier history summarized · {fmt(n.tokensBefore)} → {fmt(n.tokensAfter)} tokens{durationLabel}
+                            </div>
+                        </div>
+                    );
+                })()}
+            </Show>
+            <Show when={props.node() && props.node().type === "compaction_started"}>
+                {(() => {
+                    const n = props.node() as Extract<DocumentNode, { type: "compaction_started" }>;
+                    const triggerLabel = n.trigger === "manual" ? "you ran /compact" : "context filled up";
+                    return (
+                        <div class="agent-compaction-started">
+                            <div class="agent-compaction-started-label">
+                                Compacting conversation…
+                            </div>
+                            <div class="agent-compaction-started-detail">
+                                {triggerLabel}
                             </div>
                         </div>
                     );

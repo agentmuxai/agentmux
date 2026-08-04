@@ -16,6 +16,7 @@ import type { Component } from "solid-js";
 import type {
     AgentErrorNode,
     AgentMessageNode,
+    CompactionStartedNode,
     ContextCompactedNode,
     DocumentNode,
     DocumentState,
@@ -23,7 +24,6 @@ import type {
     MarkdownNode,
     SectionNode,
     ShellNode,
-    SubagentLinkNode,
     ToolNode,
     UserMessageNode,
 } from "../types";
@@ -119,7 +119,6 @@ export function estimateUnwrappedTextHeight(
 const TOOL_COLLAPSED_PX = 32;
 const TOOL_EXPANDED_PX = 200;
 const SECTION_PX = 48;
-const SUBAGENT_LINK_PX = 56;
 const COLLAPSED_MESSAGE_PX = 32;
 
 // ── Per-kind estimator functions ────────────────────────────────────────────
@@ -167,10 +166,6 @@ export function estimateUserMessage(node: UserMessageNode, state: DocumentState)
     return estimateUnwrappedTextHeight(node.message);
 }
 
-export function estimateSubagentLink(_node: SubagentLinkNode): number {
-    return SUBAGENT_LINK_PX;
-}
-
 const SHELL_COLLAPSED_PX = 32;
 const SHELL_EXPANDED_PX = 200;
 
@@ -185,10 +180,11 @@ export const STREAMING_CAPABLE: Record<NodeKind, boolean> = {
     section: false,
     tool: false,
     user_message: false,
-    subagent_link: false,
     shell: false,
     agent_error: false, // fixed-content inline error — not a streaming node
     context_compacted: false,
+    // One-shot announcement (the PreCompact hook fires once) — not chunked.
+    compaction_started: false,
     // Arrives as a single complete user_message event, not chunk-by-chunk.
     jekt_message: false,
 };
@@ -202,12 +198,15 @@ export interface RendererComponents {
     AgentMessage: Component<{ node: AgentMessageNode; state: DocumentState }>;
     JektMessage: Component<{ node: JektMessageNode; state: DocumentState }>;
     UserMessage: Component<{ node: UserMessageNode; state: DocumentState }>;
-    SubagentLink: Component<{ node: SubagentLinkNode; state: DocumentState }>;
     Shell: Component<{ node: ShellNode; state: DocumentState }>;
     /** agent_error nodes are rendered inline in DocumentRow — this slot is a
      *  registry placeholder so NodeRendererRegistry stays exhaustive. */
     AgentError: Component<{ node: AgentErrorNode; state: DocumentState }>;
     ContextCompacted: Component<{ node: ContextCompactedNode; state: DocumentState }>;
+    /** compaction_started nodes are rendered inline in DocumentRow (like
+     *  agent_error) — this slot is a registry placeholder so
+     *  NodeRendererRegistry stays exhaustive. */
+    CompactionStarted: Component<{ node: CompactionStartedNode; state: DocumentState }>;
 }
 
 /**
@@ -247,11 +246,6 @@ export function buildRendererRegistry(components: RendererComponents): NodeRende
             estimatedSize: estimateUserMessage,
             isStreamingCapable: STREAMING_CAPABLE.user_message,
         },
-        subagent_link: {
-            component: components.SubagentLink,
-            estimatedSize: estimateSubagentLink,
-            isStreamingCapable: STREAMING_CAPABLE.subagent_link,
-        },
         shell: {
             component: components.Shell,
             estimatedSize: estimateShell,
@@ -266,6 +260,11 @@ export function buildRendererRegistry(components: RendererComponents): NodeRende
             component: components.ContextCompacted,
             estimatedSize: (_node: ContextCompactedNode) => 48,
             isStreamingCapable: STREAMING_CAPABLE.context_compacted,
+        },
+        compaction_started: {
+            component: components.CompactionStarted,
+            estimatedSize: (_node: CompactionStartedNode) => 32,
+            isStreamingCapable: STREAMING_CAPABLE.compaction_started,
         },
     };
 }
@@ -283,10 +282,10 @@ export function estimateNode(node: DocumentNode, state: DocumentState): number {
         case "agent_message": return estimateAgentMessage(node, state);
         case "jekt_message": return estimateJektMessage(node, state);
         case "user_message": return estimateUserMessage(node, state);
-        case "subagent_link": return estimateSubagentLink(node);
         case "shell": return estimateShell(node, state);
         case "agent_error":       return 64;
         case "context_compacted": return 48;
+        case "compaction_started": return 32;
     }
 }
 
@@ -323,10 +322,10 @@ export function estimateNodeForState(
                 return node.metadata?.canceled
                     ? COLLAPSED_MESSAGE_PX
                     : estimateTextHeight(node.content);
-            case "subagent_link": return SUBAGENT_LINK_PX;
             case "shell":         return SHELL_COLLAPSED_PX;
             case "agent_error":       return 64;
             case "context_compacted": return 48;
+            case "compaction_started": return 32;
         }
     }
     // expanded
@@ -337,9 +336,9 @@ export function estimateNodeForState(
         case "user_message":      return estimateUnwrappedTextHeight(node.message);
         case "section":           return SECTION_PX;
         case "markdown":          return estimateTextHeight(node.content);
-        case "subagent_link":     return SUBAGENT_LINK_PX;
         case "shell":             return SHELL_EXPANDED_PX;
         case "agent_error":       return 64;
         case "context_compacted": return 48;
+        case "compaction_started": return 32;
     }
 }

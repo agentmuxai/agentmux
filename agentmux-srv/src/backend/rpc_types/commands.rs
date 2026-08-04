@@ -313,6 +313,17 @@ pub const COMMAND_BUNDLE_SELF_GET: &str = "bundle.self.get";
 // https://docs.agentmux.ai/abf/. Serializes a bundle + its referenced
 // skills/MCP servers into the ABF on-disk layout.
 pub const COMMAND_BUNDLE_EXPORT: &str = "bundle.export";
+// ABF importer — Phase 2 of
+// docs/specs/SPEC_ABF_V0_1_SINGLE_FILE_AND_IMPORTER_2026_08_01.md. Inverse
+// of bundle.export: creates a bundle + skills from a `.abf` zip or raw
+// file list. No `preset.*` alias — importer postdates the preset->bundle
+// rename, nothing legacy to keep compatible with.
+pub const COMMAND_BUNDLE_IMPORT: &str = "bundle.import";
+// Phase 3 of SPEC_ABF_IMPORT_UI_PHASE3_2026_08_02.md -- selective import +
+// collision handling. preview is a pure parse (zero Store writes); commit
+// takes the same file plus a selection and writes only what was chosen.
+pub const COMMAND_BUNDLE_IMPORT_PREVIEW: &str = "bundle.import.preview";
+pub const COMMAND_BUNDLE_IMPORT_COMMIT: &str = "bundle.import.commit";
 // Deprecated `preset.*` aliases — kept wired for one release (remove in Phase 4).
 pub const COMMAND_PRESET_LIST: &str = "preset.list";
 pub const COMMAND_PRESET_GET: &str = "preset.get";

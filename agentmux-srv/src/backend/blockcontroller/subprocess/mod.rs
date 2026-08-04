@@ -104,6 +104,13 @@ pub struct SubprocessSpawnConfig {
     /// session and emits its own id, which then becomes the in-
     /// memory authority for every subsequent turn.
     pub session_id: Option<String>,
+    /// The registry's `instance_id` (`block.meta["agentId"]`) for this
+    /// agent — the cross-process session-lease key (see
+    /// `registry::LeaseStore`; NOT `session_id` above, which can be
+    /// `None` on a greenfield first turn). Empty string disables
+    /// leasing for this spawn (e.g. the container-mode branch in this
+    /// PR — see `host_spawn::spawn_turn`'s own doc comment).
+    pub instance_id: String,
 }
 
 /// Inner state protected by mutex.
@@ -151,10 +158,25 @@ pub struct SubprocessController {
     /// Weak self-reference for queue drain. Set by `set_self_ref` after
     /// the controller is wrapped in Arc.
     self_ref: Mutex<Option<std::sync::Weak<Self>>>,
+    /// Cross-process session-ownership lease store. `None` when the
+    /// shared registry can't be resolved (CI / unusual envs) — leasing
+    /// degrades to a no-op in that case, same convention as
+    /// `shared_agent_registry()` elsewhere. See
+    /// `docs/retros/RETRO_DEV_BUILD_SHARED_AGENT_SESSION_COLLISION_2026_07_29.md`.
+    lease_store: Option<Arc<crate::registry::LeaseStore>>,
+    /// This process's boot id — the lease owner id. See `AppState::boot_id`.
+    boot_id: Arc<str>,
 }
 
 impl SubprocessController {
     /// Create a new SubprocessController.
+    ///
+    /// `registry`/`boot_id` back the cross-process session-ownership
+    /// lease (see `lease_store` field doc). Passing `registry: None`
+    /// (or a registry whose root can't be opened as a `LeaseStore`,
+    /// which is logged and degrades the same way) disables leasing
+    /// for every turn this controller spawns — used by test call
+    /// sites that don't need a real registry.
     pub fn new(
         tab_id: String,
         block_id: String,
@@ -162,6 +184,8 @@ impl SubprocessController {
         event_bus: Option<Arc<EventBus>>,
         wstore: Option<Arc<Store>>,
         filestore: Option<Arc<FileStore>>,
+        registry: Option<Arc<crate::registry::Registry>>,
+        boot_id: Arc<str>,
     ) -> Self {
         let health_monitor = Arc::new(HealthMonitor::new(
             block_id.clone(),
@@ -169,6 +193,18 @@ impl SubprocessController {
             wstore.clone(),
             event_bus.clone(),
         ));
+        let lease_store = registry.and_then(|r| {
+            crate::registry::LeaseStore::open(r.root())
+                .map(Arc::new)
+                .map_err(|e| {
+                    tracing::warn!(
+                        block_id = %block_id,
+                        error = %e,
+                        "subprocess controller: failed to open lease store — leasing disabled for this controller"
+                    );
+                })
+                .ok()
+        });
         Self {
             tab_id,
             block_id,
@@ -188,6 +224,8 @@ impl SubprocessController {
             filestore,
             health_monitor,
             self_ref: Mutex::new(None),
+            lease_store,
+            boot_id,
         }
     }
 

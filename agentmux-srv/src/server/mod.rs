@@ -25,6 +25,7 @@ mod drone_handlers;
 mod cron;
 mod messaging_handlers;
 mod muxbus_handlers;
+mod muxspect_handlers;
 mod native_memory_handlers;
 
 #[cfg(test)]
@@ -67,6 +68,14 @@ use agentmux_common::api_types::{
 #[derive(Clone)]
 pub struct AppState {
     pub auth_key: String,
+    /// Random identifier generated once per process boot — NOT the
+    /// `--instance` channel name (`config.instance_id`), which is
+    /// stable across restarts and shared by every process on the same
+    /// channel. Used as the owner id for cross-process session leases
+    /// (`registry::LeaseStore`) so two live processes can be told
+    /// apart even when they're the same channel/version.
+    /// See `docs/retros/RETRO_DEV_BUILD_SHARED_AGENT_SESSION_COLLISION_2026_07_29.md`.
+    pub boot_id: Arc<str>,
     pub version: String,
     pub app_path: String,
     pub wstore: Arc<Store>,
@@ -350,6 +359,13 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/tab/activate", post(handle_tab_activate))
         .route("/api/v1/tab/new", post(handle_tab_new))
         .route("/api/v1/window/focus", post(handle_window_focus))
+        // Live-state introspection for the `muxspect` CLI (Phase 1 of
+        // docs/specs/SPEC_MUXSPECT_LIVE_INTROSPECTION_TOOL_2026_08_01.md) —
+        // read-only, diagnostic-only, reached the same way agentmux-mcp
+        // reaches every other /api/v1/* route (X-AuthKey from the caller's
+        // own environment, no new IPC).
+        .route("/api/v1/muxspect/list", get(muxspect_handlers::handle_muxspect_list))
+        .route("/api/v1/muxspect/describe", get(muxspect_handlers::handle_muxspect_describe))
         // Agent App API — identity / preset / memory namespaces, the MCP-facing
         // slice of the app-API RPC surface (SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28).
         // The agent identity (`agent_id`) is supplied by agentmux-mcp from its
@@ -534,12 +550,35 @@ async fn handle_discovery(State(state): State<AppState>) -> Json<serde_json::Val
     let version = state.version.clone();
     let local_url = state.local_web_url.clone();
 
+    // Tier 2b — other channels' agents on this same host (issue #1916), via
+    // the host-global shared registry. Excludes this instance's own channel
+    // (already covered by `agents`/`addressable` above) and this instance's
+    // own URL (a stale self-entry from a prior crash, if any).
+    let own_channel = std::env::var("AGENTMUX_CHANNEL").unwrap_or_else(|_| "stable".to_string());
+    let cross_channel: Vec<serde_json::Value> = crate::registry::resolve_shared_reactive_dir()
+        .map(|shared_dir| {
+            crate::backend::reactive::registry::list_all_shared(&shared_dir)
+                .into_iter()
+                .filter(|e| e.channel != own_channel && e.local_url != local_url)
+                .map(|e| {
+                    json!({
+                        "name": e.agent_id,
+                        "channel": e.channel,
+                        "local_url": e.local_url,
+                        "block_id": e.block_id,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
     Json(json!({
         "host": {
             "version": version,
             "local_url": local_url,
             "addressable": reachable,
             "agents": agents,
+            "cross_channel": cross_channel,
         },
         "lan": lan,
         "wan": { "subscribed_agents": wan_agents },

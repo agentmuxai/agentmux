@@ -1,23 +1,43 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// AgentComposerStrip — slim 28-32px status row above the textarea.
-//   LEFT:   AgentRuntimeDropup (single Mode · Model · Effort trigger)
-//   CENTER: token/elapsed stats, true-centered in the bar
-//   RIGHT:  process badge · context text · Shell toggle (Shell is rightmost)
-// 3-column grid (1fr auto 1fr) so the center column sits at the bar's
-// mathematical center regardless of how wide the left/right content is —
-// a flex row with one auto-margin zone can't do that once something sits
-// to the right of the auto-margin zone too (Shell used to be left-most in
-// that zone; now it's the last child of the right column instead).
+// AgentComposerStrip — status row above the textarea, left-justified and
+// wrapping onto additional lines instead of clipping or overlapping the
+// textarea below when the pane narrows. In flow order:
+//   1. AgentRuntimeDropup (single Mode · Model · Effort trigger) + HOST/SANDBOX tag
+//   2. token/elapsed stats
+//   3. process badge · context text · auth tag · Shell toggle
+// A wrapping flex row, not a grid — `flex-wrap` reflows content onto a new
+// line automatically wherever it doesn't fit, always left-justified; no
+// centering, no right-pinning. See
+// docs/specs/SPEC_COMPOSER_STRIP_LEFT_JUSTIFIED_TIERED_WRAP_2026_08_03.md
+// (supersedes the grid + true-centered-stats design from
+// SPEC_COMPOSER_STRIP_LAYOUT_MIC_CENTER_MODEL_DEFAULTS_2026_07_10.md and the
+// two-row grid-template-areas tier from
+// SPEC_COMPOSER_STRIP_TWO_LINE_RESPONSIVE_2026_07_30.md).
+//
+// No max-height/overflow:hidden cap: an earlier revision capped this at
+// ~3 lines, but .agent-composer-strip-controls/-right can *also* wrap
+// internally (below) so a zone doesn't get clipped when it alone doesn't
+// fit its wrapped line — and a height cap paired with internal wrapping
+// reintroduces the exact bug it was meant to fix (two zones each needing
+// their own sub-line can together exceed the cap, clipping Shell again,
+// just via the vertical axis instead of the horizontal one — reagent P2,
+// PR #2393). The shed-content queries further down keep real-world content
+// to ~1-3 lines by shrinking/hiding informational content as width drops;
+// growing taller than that is only possible in combinations those queries
+// don't cover, and growing is always preferable to silently clipping Shell.
 
 @use "../../../mixins.scss";
 
 .agent-composer-strip {
-    display: grid;
-    grid-template-columns: 1fr auto 1fr;
+    display: flex;
+    flex-wrap: wrap;
+    align-content: flex-start; // stack wrapped lines from the top
+    justify-content: flex-start; // always left
     align-items: center;
-    gap: var(--space-2);
+    row-gap: 2px;
+    column-gap: var(--space-2);
     min-height: 28px;
     padding: var(--space-1) var(--space-2);
     font-size: 11px;
@@ -34,26 +54,43 @@
     }
 }
 
-// ── Controls zone (left column) ─────────────────────────────────────────────
+// ── Controls zone ────────────────────────────────────────────────────────
+// First in flow — wraps onto its own line if it and the stats zone don't
+// both fit on line 1.
 
 .agent-composer-strip-controls {
     display: flex;
+    // Internal wrap, not just the outer strip's — a zone that only ever
+    // moves as one atomic flex item can still be wider than the line it
+    // lands on (e.g. a long resolved model name before the ≤150px trigger
+    // cap applies), and the strip's own `overflow: hidden` would silently
+    // clip whatever doesn't fit instead of reflowing it. Reagent P1 (PR
+    // #2393): the equivalent gap on .agent-composer-strip-right could clip
+    // the Shell toggle itself — same fix applied to both zones.
+    flex-wrap: wrap;
     align-items: center;
     gap: var(--space-1);
-    justify-self: start;
+    // A flex item's default min-width is `auto` (its content's intrinsic
+    // size), not 0 — without this the runtime trigger's own max-width cap
+    // (the ≤150px query below) can't actually shrink this zone below its
+    // content width.
+    min-width: 0;
 }
 
-// ── Stats zone (center column) ──────────────────────────────────────────────
+// ── Stats zone ───────────────────────────────────────────────────────────
+// No longer true-centered — sits left-justified in flow, immediately after
+// controls when there's room, or alone on its own wrapped line when there
+// isn't (see the spec header comment above for why centering was dropped).
 
 .agent-composer-strip-stats-zone {
-    justify-self: center;
+    min-width: 0;
 }
 
 // The consolidated Mode/Model/Effort trigger — a single <button> laying out
 // a "Mode · Model · Effort" summary label + up-caret; same slim-pill footprint
 // as the former three separate selects/drop-ups combined into one. No fixed
 // max-width — sizes to its content; a cap only reappears under real space
-// pressure (see the ≤320px container query below), so it only ellipsizes
+// pressure (see the ≤150px container query below), so it only ellipsizes
 // when the pane genuinely has no room for it.
 .agent-runtime-dropup-trigger {
     display: inline-flex;
@@ -167,17 +204,27 @@
     }
 }
 
-// ── Right zone (right column) ───────────────────────────────────────────────
-// Process badge · context text · Shell toggle, in that order — Shell last so
-// it's the rightmost element in the whole bar. justify-self:end pins the
-// column to the grid's right edge (the grid, not a margin trick, does the
-// pinning now).
+// ── Right zone ───────────────────────────────────────────────────────────
+// Process badge · context text · auth tag · Shell toggle, in that order —
+// Shell last. No longer pinned to the row's right edge (justify-self: end
+// required a grid track; a left-justified flex row has no equivalent): on a
+// wide pane it still lands near the right because it's the last thing in
+// flow and line 1 fills left-to-right; on a wrapped line it starts at that
+// line's left margin like everything else.
 
 .agent-composer-strip-right {
     display: flex;
+    // Internal wrap so Shell (the last, and only real actionable, item in
+    // this zone) reflows onto its own line instead of being clipped by the
+    // strip's `overflow: hidden` when the zone lands on a wrapped line
+    // narrower than its full content (badge + ctx + auth + Shell) — the
+    // shed-content queries below reduce that content as width shrinks, but
+    // shouldn't be the only thing standing between "fits" and "Shell is
+    // silently unreachable." Reagent P1, PR #2393.
+    flex-wrap: wrap;
     align-items: center;
     gap: var(--space-1-5);
-    justify-self: end;
+    min-width: 0;
 }
 
 .agent-composer-strip-stats {
@@ -186,6 +233,15 @@
     color: var(--secondary-text-color);
     letter-spacing: 0.01em;
     white-space: nowrap;
+
+    // Live "Compacting… Ns" readout (Tier 1/2 —
+    // SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md). Reuses the
+    // same amber the ctx meter's "high" band uses so the state reads as
+    // "notable but not an error" at a glance.
+    &--compacting {
+        color: var(--warning-color, #d9a441);
+        font-weight: 500;
+    }
 }
 
 .agent-composer-strip-process-badge {
@@ -257,24 +313,56 @@
     }
 }
 
-// Narrow-pane truncation — drop stats, then ctx text.
-@container modal-mount (max-width: 240px) {
-    .agent-composer-strip-stats,
-    .agent-composer-strip-ctx {
+// ── Responsive tiers ─────────────────────────────────────────────────────
+// The wrap itself needs no width-keyed rules — `flex-wrap: wrap` on
+// `.agent-composer-strip` (outer lines) plus on `-controls`/`-right`
+// (internal sub-lines) reflows content onto additional lines automatically
+// as the pane narrows, always left-justified, with no hard cap — see the
+// file-header comment for why there's no `max-height`/`overflow:hidden`
+// here. That alone is the fix for the clipping/overlap
+// `SPEC_COMPOSER_STRIP_TWO_LINE_RESPONSIVE_2026_07_30.md` documented (the
+// grid this replaced had no wrap path at all — its `@container modal-mount`
+// rules never matched the docked pane's own `agent-pane` container, so
+// nothing reflowed in production before that spec, and the two-line
+// grid-template-areas tier it landed only ever bought a 2nd line).
+//
+// What still needs a width-keyed rule is the *last-resort* shed order
+// below — not to prevent clipping (nothing clips now) but to keep the
+// strip's real-world height to ~1-3 lines instead of growing tall enough
+// to noticeably eat into the transcript above it. Content and Shell stay
+// visible at every tier — ctx is the one safety signal in this bar
+// (compaction proximity), Shell is the strip's one real action — so
+// shedding starts with the least essential, informational-only items,
+// trimming content before either zone would otherwise need an internal
+// sub-line.
+// Breakpoints are estimated from content width (right zone ≈ badge 28px +
+// ctx 50px + auth 70px + Shell 40px + 3 gaps ≈ 220px), not measured DOM
+// output — confirm against real rendered widths in `task dev` and adjust.
+
+@container agent-pane (max-width: 220px) {
+    .agent-composer-strip-auth {
         display: none;
     }
 }
 
-@container modal-mount (max-width: 320px) {
-    // Keep the runtime dropup visible — one compact trigger fits easily.
-    // (Previously `.agent-composer-strip-select { display:none }` here hid
-    // Mode/Model/Effort on any pane ≤320px, leaving only Log — see
-    // SPEC_COMPOSER_STRIP_RESPONSIVE_ARCHITECTURE_2026_07_02. Progressive
-    // collapse — short/icon/combined forms — is the follow-up.)
-    .agent-composer-strip-log-btn { font-size: 9px; padding: 1px 3px; }
-    // Only reintroduce a cap here, where the pane genuinely doesn't have
-    // room for the trigger's full "Mode · Model · Effort" summary.
-    .agent-runtime-dropup-trigger { max-width: 120px; }
+@container agent-pane (max-width: 180px) {
+    .agent-composer-strip-process-badge {
+        display: none;
+    }
+}
+
+// Controls trigger compacts to an ellipsized cap rather than disappearing
+// (never `display:none` the runtime controls — see
+// SPEC_COMPOSER_STRIP_RESPONSIVE_ARCHITECTURE_2026_07_02.md).
+@container agent-pane (max-width: 150px) {
+    .agent-runtime-dropup-trigger {
+        max-width: 120px;
+    }
+
+    .agent-composer-strip-log-btn {
+        font-size: 9px;
+        padding: 1px 3px;
+    }
 }
 
 // ── Resizable details drawer (ResizableDetailsDrawer.tsx) ──────────────────

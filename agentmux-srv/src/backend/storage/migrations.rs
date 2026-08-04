@@ -29,7 +29,13 @@ use super::error::StoreError;
 ///   v3 — Phase 4a of SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md: rename
 ///        db_identity_accounts -> db_accounts, db_memory_bundles -> db_bundles
 ///        (SPEC_ARMORY_PHASE4_STORAGE_RENAME_COMPLETION_2026_07_12.md).
-pub const SHARED_STORE_SCHEMA_VERSION: i64 = 3;
+///   v4 — db_agent_credentials: per-agent M2M Cognito client_id/secret +
+///        cached access token, one row per locally-registered agent_id.
+///        Lets cloud_subscriber use a credential bound to a specific agent
+///        (see agentmux-cloud's PLAN_PER_AGENT_CREDENTIAL_BINDING_2026_07_06.md)
+///        instead of the single shared per-account MUXBUS_TOKEN for every
+///        /reactive/* call.
+pub const SHARED_STORE_SCHEMA_VERSION: i64 = 4;
 
 /// `user_version` value stamped into `objects.db` after `run_object_schema`.
 /// The flat schema reset the counter to 1 (the pre-flatten chain never set
@@ -66,7 +72,12 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 3;
 ///        SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md §2.3). Defaults
 ///        to 0 (fail-by-default); the m0017 data migration grandfathers
 ///        pre-existing linkless agents to 1.
-pub const OBJECT_SCHEMA_VERSION: i64 = 12;
+///   v13 — db_agent_credentials: per-agent M2M muxbus credential, mirroring
+///        db_muxbus_credentials' presence in both schemas — id_store falls
+///        back to this (per-channel) schema on installs that haven't yet
+///        applied 0011_shared_store_backfill, so cloud_subscriber's calls
+///        must not assume the shared-schema copy (v4 there) is the one in use.
+pub const OBJECT_SCHEMA_VERSION: i64 = 13;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -471,6 +482,18 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             expires_at     INTEGER NOT NULL DEFAULT 0,
             user_email     TEXT NOT NULL DEFAULT '',
             user_sub       TEXT NOT NULL DEFAULT ''
+        );
+
+        -- v13: per-agent M2M muxbus credential — see db_agent_credentials in
+        -- run_shared_store_schema's doc comment for the full rationale.
+        CREATE TABLE IF NOT EXISTS db_agent_credentials (
+            agent_id       TEXT PRIMARY KEY,
+            client_id      TEXT NOT NULL DEFAULT '',
+            client_secret  TEXT NOT NULL DEFAULT '',
+            token_endpoint TEXT NOT NULL DEFAULT '',
+            access_token   TEXT NOT NULL DEFAULT '',
+            expires_at     INTEGER NOT NULL DEFAULT 0,
+            created_at     INTEGER NOT NULL DEFAULT 0
         );",
     )?;
 
@@ -736,7 +759,22 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
             created_at  INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_ss_cron_jobs_enabled
-            ON db_cron_jobs(enabled);",
+            ON db_cron_jobs(enabled);
+
+        -- v4: per-agent M2M credential for muxbus Tier-4 binding (see
+        -- SHARED_STORE_SCHEMA_VERSION's doc comment above). client_secret is
+        -- a Cognito app client secret, not a user password — same trust
+        -- tier as MUXBUS_TOKEN in db_muxbus_credentials above, stored
+        -- unencrypted in the same shared store.db for the same reason.
+        CREATE TABLE IF NOT EXISTS db_agent_credentials (
+            agent_id       TEXT PRIMARY KEY,
+            client_id      TEXT NOT NULL DEFAULT '',
+            client_secret  TEXT NOT NULL DEFAULT '',
+            token_endpoint TEXT NOT NULL DEFAULT '',
+            access_token   TEXT NOT NULL DEFAULT '',
+            expires_at     INTEGER NOT NULL DEFAULT 0,
+            created_at     INTEGER NOT NULL DEFAULT 0
+        );",
     )?;
 
     // Seed the blank Memory singleton — same fixed id as objects.db so

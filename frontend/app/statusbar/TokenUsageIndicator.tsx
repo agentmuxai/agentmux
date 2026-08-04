@@ -11,13 +11,8 @@
 import { createEffect, createMemo, createSignal, onCleanup, Show, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import { getTotal, tokenUsageState } from "@/store/token-usage";
+import { formatCompactNumber } from "@/util/format-count";
 import { TokenBreakdownPopover } from "./TokenBreakdownPopover";
-
-function formatTokenCount(n: number): string {
-    if (n < 1000) return String(n);
-    if (n < 10_000) return `${(n / 1000).toFixed(1)}k`;
-    return `${Math.round(n / 1000)}k`;
-}
 
 export const TokenUsageIndicator = (): JSX.Element => {
     // Trigger reactivity by reading the store field; then compute total.
@@ -91,10 +86,10 @@ export const TokenUsageIndicator = (): JSX.Element => {
                 <span class="token-usage-indicator-icon" aria-hidden="true">🪙</span>
                 <span class="token-usage-indicator-counts">
                     <span class="token-usage-indicator-arrow">↑</span>
-                    {formatTokenCount(total().input)}
+                    {formatCompactNumber(total().input)}
                     {" "}
                     <span class="token-usage-indicator-arrow">↓</span>
-                    {formatTokenCount(total().output)}
+                    {formatCompactNumber(total().output)}
                 </span>
             </button>
             <Show when={open()}>

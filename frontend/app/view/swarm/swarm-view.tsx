@@ -14,6 +14,8 @@ import { getBlockTurnPhase } from "@/app/store/agentActivity";
 import { WorkspaceService } from "@/app/store/services";
 import { recordTurn } from "@/app/store/token-usage";
 import { useTick } from "@/app/hook/useTick";
+import { formatCompactNumber } from "@/util/format-count";
+import { formatElapsedClock } from "@/util/format-time";
 import "./swarm-view.scss";
 
 // Navigate to the pane for a given block ID, switching tabs and windows as needed.
@@ -217,9 +219,7 @@ export function subagentDisplayStatus(sub: ActiveSubagent, parentAgentStatus: "r
 
 // ── Agent root row ───────────────────────────────────────────────────────
 
-function fmtCtx(tokens: number): string {
-    return `${Math.round(tokens / 100) / 10}k`;
-}
+const fmtCtx = formatCompactNumber;
 
 function AgentRow({
     node,
@@ -379,18 +379,11 @@ function ShellBucket({ rows }: { rows: ActiveShell[] }): JSX.Element {
     );
 }
 
-function formatElapsed(ms: number): string {
-    const totalSec = Math.max(0, Math.floor(ms / 1000));
-    const m = Math.floor(totalSec / 60);
-    const s = totalSec % 60;
-    return `${m}:${String(s).padStart(2, "0")}`;
-}
-
 function ShellRow({ shell }: { shell: ActiveShell }): JSX.Element {
     const tick = useTick(1000);
     const elapsed = createMemo(() => {
         tick();
-        return formatElapsed(Date.now() - shell.started_at);
+        return formatElapsedClock(Date.now() - shell.started_at);
     });
 
     const handleStop = (e: MouseEvent) => {

@@ -21,6 +21,7 @@
  */
 
 import { atoms, getApi } from "@/store/global";
+import { sleep } from "@/util/util";
 import { WorkspaceService } from "@/app/store/services";
 import { getLayoutModelForStaticTab, LayoutTreeActionType, LayoutTreeDeleteNodeAction } from "@/layout/index";
 import { invokeCommand } from "@/app/platform/ipc";
@@ -164,7 +165,7 @@ function CrossWindowDragMonitor(): JSX.Element {
             // after an out-of-window HTML5 drag, breaking subsequent mousedown delivery.
             getApi().releaseDragCapture().catch(() => {});
 
-            await new Promise((r) => setTimeout(r, 50));
+            await sleep(50);
             await handleCrossWindowDragEnd(payload, windowLabelRef, grabOffsetSnapshot);
         };
 
@@ -362,7 +363,7 @@ async function performTearOff(
             // true in open_floating_pane_window. A 350ms one-shot retry covers
             // the typical 100–200ms closing window so back-to-back tear-offs work.
             if (msg.includes("currently closing")) {
-                await new Promise<void>((r) => setTimeout(r, 350));
+                await sleep(350);
                 try {
                     await invokeCommand<{ window_label: string }>("open_floating_pane_window", {
                         pane_id: payload.blockId,

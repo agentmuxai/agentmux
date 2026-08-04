@@ -21,6 +21,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
     let broker_spawn = state.broker.clone();
     let event_bus_spawn = state.event_bus.clone();
     let filestore_spawn = state.filestore.clone();
+    let boot_id_spawn = state.boot_id.clone();
     engine.register_handler(
         COMMAND_SUBPROCESS_SPAWN,
         Box::new(move |data, _ctx| {
@@ -28,6 +29,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
             let broker = broker_spawn.clone();
             let event_bus = event_bus_spawn.clone();
             let filestore = filestore_spawn.clone();
+            let boot_id = boot_id_spawn.clone();
             Box::pin(async move {
                 let cmd: CommandSubprocessSpawnData = serde_json::from_value(data)
                     .map_err(|e| format!("subprocessspawn: {e}"))?;
@@ -42,6 +44,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                     Some(c) if c.controller_type() == blockcontroller::BLOCK_CONTROLLER_SUBPROCESS => c,
                     _ => {
                         // Create and register a new SubprocessController
+                        let registry = wstore.shared_agent_registry();
                         let ctrl = blockcontroller::subprocess::SubprocessController::new(
                             cmd.tabid.clone(),
                             cmd.blockid.clone(),
@@ -49,6 +52,8 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                             Some(event_bus),
                             Some(wstore),
                             Some(filestore),
+                            registry,
+                            boot_id,
                         );
                         let ctrl = std::sync::Arc::new(ctrl);
                         ctrl.set_self_ref();
@@ -77,6 +82,10 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                     // is None; spawn_turn captures it from CLI stdout
                     // on the first turn as before.
                     session_id: None,
+                    // COMMAND_SUBPROCESS_SPAWN has no block to read
+                    // agentId from (dead code — unused by the
+                    // frontend, per grep); empty disables leasing.
+                    instance_id: String::new(),
                 };
                 subprocess_ctrl.spawn_turn(config)?;
                 Ok(None)
@@ -101,6 +110,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
     // Filestore — the spawn-gate error frame must be PERSISTED to the
     // block file, not just live-broadcast (reagent P1, PR #2164 round 2).
     let filestore_ai = state.filestore.clone();
+    let local_web_url_ai = state.local_web_url.clone();
     engine.register_handler(
         COMMAND_AGENT_INPUT,
         Box::new(move |data, _ctx| {
@@ -110,6 +120,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
             let broker = broker_ai.clone();
             let container_manager = container_manager_ai.clone();
             let filestore_gate = filestore_ai.clone();
+            let local_web_url = local_web_url_ai.clone();
             Box::pin(async move {
                 let cmd: CommandAgentInputData = serde_json::from_value(data)
                     .map_err(|e| format!("agentinput: {e}"))?;
@@ -223,7 +234,17 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                 // doesn't receive them.
                 env_vars.insert("AGENTMUX_BLOCKID".to_string(), cmd.blockid.clone());
                 // Agent display name for MuxBus self-identification.
-                // muxbus-client reads AGENTMUX_AGENT_ID (preferred) or AGENT_NAME.
+                // AGENTMUX_AGENT_ID is the canonical, app-wide agent-identity
+                // variable (used far beyond muxbus -- MCP tool routing, native
+                // memory, shell OSC titling, jekt auto-registration, etc; see
+                // this repo's CLAUDE.md Naming Conventions table). MUXBUS_AGENT_ID
+                // is set below too, mirroring the same value, purely so
+                // muxbus-client picks it up under the MUXBUS_* prefix it already
+                // checks first (alongside MUXBUS_TOKEN/MUXBUS_COGNITO_DOMAIN
+                // injected above) -- this does NOT make MUXBUS_AGENT_ID a second
+                // source of truth for agent identity app-wide, it's scoped to
+                // this one muxbus hand-off point (ARCH-002, 2026-07-28
+                // architecture analyst report).
                 // Only set if not already present in cmd:env — user-provided values take precedence.
                 if !env_vars.contains_key("AGENTMUX_AGENT_ID") {
                     let agent_display_name = crate::backend::obj::meta_get_string(
@@ -231,6 +252,11 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                     );
                     if !agent_display_name.is_empty() {
                         env_vars.insert("AGENTMUX_AGENT_ID".to_string(), agent_display_name);
+                    }
+                }
+                if !env_vars.contains_key("MUXBUS_AGENT_ID") {
+                    if let Some(agent_id) = env_vars.get("AGENTMUX_AGENT_ID").cloned() {
+                        env_vars.insert("MUXBUS_AGENT_ID".to_string(), agent_id);
                     }
                 }
                 // PATH includes BOTH bundled tools dir (portable
@@ -323,6 +349,14 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                     let agent_mode = crate::backend::obj::meta_get_string(
                         &block.meta, "agentMode", "host",
                     );
+                    // Cross-process session-lease key (registry::LeaseStore) —
+                    // read once here for both branches below. Only the host
+                    // branch's spawn_turn actually enforces it in this PR;
+                    // the container branch's config field is unused for now
+                    // (struct-completeness — see host_spawn.rs's doc comment).
+                    let instance_id = crate::backend::obj::meta_get_string(
+                        &block.meta, "agentId", "",
+                    );
                     if agent_mode == "container" {
                         let cm = container_manager.get().await
                             .ok_or_else(|| "Docker not available on this host; cannot start container agent".to_string())?;
@@ -350,12 +384,19 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                                 "subtype": "error_during_execution",
                                 "error": {"message": format!("[AgentMux] container ensure_running failed: {e}")}
                             }).to_string();
+                            // Some(&filestore_gate): PERSIST, not just live-broadcast —
+                            // same requirement as the identity spawn-gate frame above
+                            // (reagent P1, PR #2164 round 2). Previously passed None
+                            // here despite the comment above claiming parity with that
+                            // path — codex P1 on PR #2390: muxspect's last_error_frame
+                            // (which reads only the persisted `output` file) could
+                            // never see this failure after the live moment passed.
                             crate::backend::blockcontroller::shell::handle_append_block_file(
                                 &broker,
                                 &cmd.blockid,
                                 crate::backend::blockcontroller::subprocess::SUBPROCESS_OUTPUT_SUBJECT,
                                 format!("{error_frame}\n").as_bytes(),
-                                None,
+                                Some(&filestore_gate),
                                 None,
                             );
                             return Err(format!("container ensure_running failed: {e}"));
@@ -402,6 +443,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                             } else {
                                 Some(persisted_session_id)
                             },
+                            instance_id: instance_id.clone(),
                         };
                         subprocess_ctrl.spawn_container_turn(cm.clone(), container_name, base_cmd, config)?;
                     } else {
@@ -420,6 +462,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                             } else {
                                 Some(persisted_session_id)
                             },
+                            instance_id,
                         };
                         subprocess_ctrl.spawn_turn(config)?;
                     }
@@ -446,6 +489,26 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                         if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
                             sub.add_agent(&agent_name);
                         }
+                        // Also mirror into the per-channel + host-global
+                        // shared file registries — this AgentInput/
+                        // SubprocessController path (unlike ShellController/
+                        // PersistentSubprocessController) previously only
+                        // ever registered in the in-memory Tier-1 map,
+                        // leaving it permanently unreachable via Tier 2/2b
+                        // cross-instance/cross-channel delivery (reagent P1,
+                        // third round on PR #2350).
+                        let data_dir = crate::backend::base::get_wave_data_dir();
+                        crate::backend::reactive::registry::write(
+                            &data_dir,
+                            &agent_name,
+                            &local_web_url,
+                            &cmd.blockid,
+                        );
+                        crate::backend::reactive::registry::write_shared_from_env(
+                            &agent_name,
+                            &local_web_url,
+                            &cmd.blockid,
+                        );
                     }
                 }
 
@@ -471,6 +534,13 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                         let handler = crate::backend::reactive::handler::get_global_handler();
                         let agent_name = handler.agent_id_for_block(&cmd.blockid);
                         handler.unregister_block(&cmd.blockid);
+                        if let Some(ref name) = agent_name {
+                            // Symmetric teardown for the registry writes added
+                            // alongside SubprocessSpawn's register_agent call.
+                            let data_dir = crate::backend::base::get_wave_data_dir();
+                            crate::backend::reactive::registry::remove(&data_dir, name);
+                            crate::backend::reactive::registry::remove_shared_from_env(name);
+                        }
                         if let (Some(sub), Some(name)) = (
                             crate::muxbus::cloud_subscriber::get_global_subscriber(),
                             agent_name,

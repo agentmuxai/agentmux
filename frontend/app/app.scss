@@ -91,10 +91,14 @@ a.plain-link {
 
 // Full-width exception: the agent pane's main conversation scroll. More specific
 // than the universal rule above, so it wins on size only (cursor/colour still
-// come from the shared rules).
+// come from the shared rules). Width driven by --agent-document-scrollbar-width
+// (declared on .agent-view, view/agent/styles/_document.scss — inherited here
+// since .agent-document is its descendant) so .agent-working-row-anchor can
+// inset itself by exactly this much and never paint over the scrollbar
+// gutter, instead of fighting it with z-index.
 .agent-document::-webkit-scrollbar {
-    width: 14px;
-    height: 14px;
+    width: var(--agent-document-scrollbar-width, 14px);
+    height: var(--agent-document-scrollbar-width, 14px);
 }
 
 *::-webkit-scrollbar-track {

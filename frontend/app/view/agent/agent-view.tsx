@@ -30,8 +30,6 @@ import {
     type LayoutView,
 } from "@/app/store/agent-pane-layout-store";
 import { workingFromPhase } from "@/app/store/agent-pane-state/types";
-import type { SubagentLinkNode } from "./types";
-import { openSubagentPane, isSubagentPaneOpen } from "@/app/store/subagent-pane-manager";
 import { getRecentDispatches } from "@/app/store/command-source";
 import { getTrail } from "@/log/render-trail";
 import { useAgentStream } from "./useAgentStream";
@@ -43,7 +41,6 @@ import { useScrollToNode } from "./hooks/useScrollToNode";
 import { useAgentKeyboard } from "./hooks/useAgentKeyboard";
 import { useProcessCount } from "./hooks/useProcessCount";
 import { usePtyWidth, computeTermSizeFromEl } from "./hooks/usePtyWidth";
-import { useSubagentEvents } from "./hooks/useSubagentEvents";
 import { useControllerStatusEvents, didTurnJustEnd } from "./hooks/useControllerStatusEvents";
 import { useBlockActivity } from "./hooks/useBlockActivity";
 import { useAgentActivitySummary } from "./hooks/useAgentActivitySummary";
@@ -90,8 +87,7 @@ import { createBlock, getApi, openOrFocusPaneByView, pushNotification, refocusNo
 import { ObjectService } from "@/app/store/services";
 import { ConfirmModal } from "@/element/modal";
 import { ModalLayer } from "@/element/ModalLayer";
-import { useModalLayer, type LaunchFormStateWire } from "@/element/modal-layer";
-import type { LaunchOverrides } from "./components/AgentLaunchModal";
+import { useModalLayer } from "@/element/modal-layer";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { loadAccounts, type AgentAccounts } from "@/app/view/identity/identity-model";
 import { buildStartupPayload, resolveAccounts } from "./startup/buildStartupPayload";
@@ -183,9 +179,11 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
 
     // Fork tab strip — Phases 3+4 of SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md.
     // Phase 3 ("read-only switch") let the user jump between forks that
-    // already exist and are already open somewhere. Phase 4 adds the "+"
-    // action that actually creates one. Replaces the unwired ForkBar/
-    // PaneRegions/PaneRow fork-bar path from
+    // already exist and are already open somewhere. Phase 4 originally made
+    // "+" auto-fork the current conversation via the launch modal; it now
+    // opens a blank AgentPicker tab instead (`handleNewAgentTab` below) so
+    // "+" behaves like a normal new-tab action, not an implicit fork.
+    // Replaces the unwired ForkBar/PaneRegions/PaneRow fork-bar path from
     // SPEC_AGENT_PANE_FORKS_AND_AUX_PINS_2026_06_15 (which never shipped);
     // `computeForkSet`'s derivation logic is reused as-is, only its
     // PaneRow-based rendering is retired.
@@ -248,111 +246,46 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             });
         }
     };
-    // "+" on the fork tab strip — Phase 4. Reuses the existing launch
-    // modal (same "launch-agent" request kind AgentPicker's own fork/launch
-    // flows use) so the user confirms instance name / identity / memory
-    // exactly like any other launch, rather than silently auto-launching —
-    // this also means the real AgentDefinition fork only gets created
-    // inside onSubmit, so cancelling the modal never leaves an orphan
-    // forked definition behind. The suggested branch label is fetched
-    // up front (ForkAgentDefinitionSuggestCommand) purely to pre-fill the
-    // form; the actual fork (ForkAgentDefinitionCommand) happens at submit.
-    const handleForkCreate = async (): Promise<void> => {
-        const source = currentAgent();
-        if (!source) return;
-        let suggestedLabel = "";
+    // "+" on the fork tab strip. Opens a blank agent tab — the same
+    // starting-view picker (`AgentPicker`, "select an existing agent or
+    // create a new one") a brand-new agent pane shows — instead of jumping
+    // straight into the launch/fork modal. Mirrors term.tsx's
+    // handleTermTabAdd: allocate an unplaced block via pane.open (no
+    // agentId meta, so AgentViewWrapper's `agentId()` gate falls through to
+    // AgentPicker) and push it onto this pane's own stack. No modal, no
+    // implicit fork of the current conversation.
+    const handleNewAgentTab = async (): Promise<void> => {
+        const layoutModel = getLayoutModelForStaticTab();
+        if (!layoutModel.getNodeByBlockId(model.blockId)) return;
+        let paneOpenResult: { block_id: string };
         try {
-            const suggestion = await RpcApi.ForkAgentDefinitionSuggestCommand(TabRpcClient, { source_id: agentId });
-            suggestedLabel = suggestion?.suggested_label ?? "";
-        } catch {
-            // Non-fatal — the modal's instance-name field just starts blank.
+            paneOpenResult = (await TabRpcClient.rpcCall(
+                "pane.open",
+                { view: "agent", skip_placement: true, meta: { view: "agent" } },
+                {},
+            )) as { block_id: string };
+        } catch (e: unknown) {
+            pushNotification({
+                icon: "fa-triangle-exclamation",
+                title: "New tab failed",
+                message: e instanceof Error ? e.message : String(e),
+                timestamp: new Date().toISOString(),
+                type: "error",
+                expiration: Date.now() + 8000,
+            });
+            return;
         }
-        const currentSessionId = (block()?.meta?.["agent:sessionid"] as string | undefined) ?? "";
-        const currentInstanceId = (block()?.meta?.["agentInstanceId"] as string | undefined) ?? "";
-        modalLayer.open({
-            kind: "launch-agent" as const,
-            // The real forked definition doesn't exist until submit — show
-            // the source definition's config (provider/model/etc, which the
-            // fork will inherit verbatim) as the modal's display source.
-            agent: source,
-            originBlockId: model.blockId,
-            // Review finding: field is `name`, not `instanceName` — the
-            // form's actual field name (LaunchFormState.name /
-            // LaunchFormStateWire.name). The prior `as Partial<...>` cast
-            // bypassed TS's excess-property check, which silently masked
-            // the typo instead of catching it. Using a properly-typed
-            // literal (no cast) here so a future field-name mismatch is a
-            // compile error, not a silently-broken pre-fill.
-            initialFormState: suggestedLabel ? { name: suggestedLabel } satisfies Partial<LaunchFormStateWire> : undefined,
-            onSubmit: async (overrides: LaunchOverrides) => {
-                // Review finding: this check must run BEFORE
-                // ForkAgentDefinitionCommand — resolving it after would let
-                // a failed lookup return silently (no cleanup, no error)
-                // with the real forked AgentDefinition already created and
-                // never launched or surfaced anywhere, and the modal's
-                // onSubmit promise resolving as if the fork succeeded.
-                const layoutModel = getLayoutModelForStaticTab();
-                const myNode = layoutModel.getNodeByBlockId(model.blockId);
-                if (!myNode) {
-                    pushNotification({
-                        icon: "fa-triangle-exclamation",
-                        title: "Fork failed",
-                        message: "Could not find this pane in the layout — try again after the pane finishes loading.",
-                        timestamp: new Date().toISOString(),
-                        type: "error",
-                        expiration: Date.now() + 8000,
-                    });
-                    return;
-                }
-                const forkedDef = await RpcApi.ForkAgentDefinitionCommand(TabRpcClient, {
-                    source_id: agentId,
-                    branch_label: overrides.instanceName,
-                });
-                // Create the new block without placing it anywhere — it's
-                // going onto THIS pane's stack, not its own tile. See
-                // pane.open's skip_placement + layoutStack.ts's
-                // pushBlockOntoStack doc comments.
-                const paneOpenResult = await TabRpcClient.rpcCall(
-                    "pane.open",
-                    { view: "agent", skip_placement: true, meta: { view: "agent" } },
-                    {},
-                ) as { block_id: string };
-                const newBlockId = paneOpenResult.block_id;
-                // Review finding: launchAgentDefinition never throws (every
-                // failure path is caught + logged internally, by design —
-                // most callers fire-and-forget). Check its boolean result
-                // explicitly: a failed launch must NOT get pushed onto the
-                // pane's stack as a permanently-broken tab with no
-                // indication anything went wrong. Clean up the orphaned
-                // skip_placement block on failure — the forked
-                // AgentDefinition itself is left alone (it's a real,
-                // reusable definition; the picker can retry launching it
-                // later, same as any other launch failure).
-                const launched = await model.launchAgentDefinition(
-                    forkedDef,
-                    {
-                        ...overrides,
-                        continueOfInstanceId: currentInstanceId || undefined,
-                        continueSessionId: currentSessionId || undefined,
-                        forkSession: true,
-                    },
-                    newBlockId,
-                );
-                if (!launched) {
-                    await ObjectService.DeleteBlock(newBlockId).catch(() => {});
-                    pushNotification({
-                        icon: "fa-triangle-exclamation",
-                        title: "Fork failed",
-                        message: `Could not launch the fork of "${source.name}" — see logs for details.`,
-                        timestamp: new Date().toISOString(),
-                        type: "error",
-                        expiration: Date.now() + 8000,
-                    });
-                    return;
-                }
-                pushBlockOntoStack(layoutModel, myNode.id, newBlockId);
-            },
-        });
+        // Review finding (term.tsx precedent): this pane could have closed
+        // while the RPC above was in flight — re-resolve the node fresh
+        // rather than trusting a pre-await reference. If it's gone, the
+        // skip_placement block we just created has nowhere to attach to;
+        // delete it instead of leaving an orphaned, unreachable block behind.
+        const myNode = layoutModel.getNodeByBlockId(model.blockId);
+        if (!myNode) {
+            await ObjectService.DeleteBlock(paneOpenResult.block_id).catch(() => {});
+            return;
+        }
+        pushBlockOntoStack(layoutModel, myNode.id, paneOpenResult.block_id);
     };
 
     // Wire the pane-scoped modal callback into the model so the single
@@ -453,6 +386,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 detailsOpen: a.detailsOpenAtom[1],
                 currentToolArg: a.currentToolArgAtom[1],
                 failure: a.failureAtom[1],
+                compacting: a.compactingAtom[1],
             },
         });
         registerAgentActivity(model.blockId, a.turnPhaseAtom[0]);
@@ -742,10 +676,30 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // isn't actually ending — reintroducing the over-trigger bug this fix
     // closes (reagent P1 on PR #2241).
     function trackTurnJustEnded(active: boolean): void {
-        if (didTurnJustEnd(wasTurnActive, active)) {
-            setTurnJustEndedAtom((n) => n + 1);
-        }
+        const turnJustEnded = didTurnJustEnd(wasTurnActive, active);
+        // Update BEFORE calling flushPendingControllerRefresh below, not
+        // after: that call synchronously checks isBackendTurnConfirmedIdle()
+        // (backed by this same wasTurnActive) at call time, before any
+        // await — the OLD ordering left it reading the STALE (pre-update)
+        // value on exactly the genuine turn-end edge this call exists to
+        // react to, so the deferred refresh's own safety gate saw the
+        // turn as still "active" and refused to run — stranding it
+        // forever on this trigger (the reactive turnIdle effect could
+        // still rescue it asynchronously, but only if it happened to fire
+        // separately). Codex P1 on PR #2338 (twenty-first re-review).
         wasTurnActive = active;
+        if (turnJustEnded) {
+            setTurnJustEndedAtom((n) => n + 1);
+            // Run any controller refresh /login deferred because this exact
+            // turn was still active when it succeeded — see
+            // SlashCommandContext.deferControllerRefreshUntilIdle's doc
+            // comment. No-ops if nothing is pending. `commands` is defined
+            // further down this component body, but this function is only
+            // ever invoked from async event callbacks registered after the
+            // full component setup (including `commands`) has run. Codex
+            // P1 on PR #2338 (thirteenth re-review).
+            void commands.flushPendingControllerRefresh();
+        }
     }
 
     // Posts a permanent, visible line into the pane's own conversation \u2014
@@ -806,7 +760,42 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         // the credential — retry the failed turn so the agent recovers in one
         // click. Lazy arrow: retryLastTurn is defined below but only invoked at
         // runtime (post-click), by which point it's initialized.
-        onRecovered: () => retryLastTurn(),
+        onRecovered: () => {
+            // If a DIFFERENT, overlapping recovery flow is still running,
+            // leave the failure banner and loginWaiting() both untouched
+            // instead of clearing-and-retrying now. THIS flow's own
+            // credential is confirmed good, but relogin()/useGlobalLogin()/
+            // loginViaTerminal() never check whether a turn is active
+            // before calling forceControllerRefresh (only /login's
+            // slash-command path does) — clearing+retrying here used to let
+            // this resend start a new turn that the sibling's later restart
+            // would then kill (Codex P1, fourteenth re-review), and even
+            // after gating the SEND on loginWaiting() (so it correctly got
+            // rejected instead), clearing the banner unconditionally still
+            // discarded the user's only path back if that sibling
+            // ultimately FAILS: a failed flow only decrements the counter
+            // and never calls onRecovered, so nothing retries automatically,
+            // and the banner this comment used to clear first was the
+            // user's manual "Retry"/"Login Again" affordance too. Codex P2
+            // on PR #2338 (sixteenth re-review). Bailing out here instead
+            // leaves that banner up — the user can retry manually once the
+            // sibling settles, and if the sibling instead SUCCEEDS, ITS OWN
+            // onRecovered fires this same check with loginWaiting() now
+            // false, and completes the clear+retry then.
+            if (status.loginWaiting()) return;
+            // Recovery succeeded and no sibling is in flight — explicitly
+            // resolve the failure this banner was showing rather than
+            // waiting for retryLastTurn's own TurnStart to clear it as a
+            // side effect. handleSendMessage captures the live
+            // "auth"-classified failure state BEFORE dispatching TurnStart
+            // (so a user's own fresh keystroke send gets fast-failed
+            // against a still-showing auth failure); without clearing here
+            // first, that same capture would see the stale failure on THIS
+            // auto-retry too and wrongly reject the very resend recovery
+            // just enabled. Codex P1 on PR #2338.
+            dispatchPane(model.blockId, { type: "FailureCleared" }, "system");
+            retryLastTurn();
+        },
         getInitialTermSize: () => computeTermSizeFromEl(rootRef),
         // Mount-time TurnPhase reconciliation — see
         // docs/specs/REPORT_AGENT_PANE_STATE_RECONCILIATION_2026_07_07.md
@@ -862,7 +851,9 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         onTurnActive: (active) => {
             reconcileTurnActive(active);
             trackTurnJustEnded(active);
-            // A real controllerstatus event for this pane is independent
+        },
+        onActiveTurnConfirmed: () => {
+            // A controllerstatus event with an ACTIVE turn is independent
             // proof the CLI is alive and running turns — clear any stale
             // "Retry Login" / auth notice left over from the mount-time
             // gated launch flow's auth_failed classification. Otherwise
@@ -870,7 +861,42 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             // agent recovers and starts answering messages through this
             // same event stream, but nothing ever told useAgentControllerStatus
             // its earlier canRetry=true was stale. Reported live 2026-07-18.
+            // Gated on an ACTIVE turn specifically (not any controllerstatus
+            // event) — codex P1 on PR #2338 (eighth re-review): an idle
+            // heartbeat from a controller left alive from before a
+            // just-FAILED recovery attempt carries no proof the credential
+            // is valid, and would otherwise silently clear that recovery's
+            // own canRetry=true, letting the next message bypass the
+            // fast-fail guard and reach the still-known-bad process.
             status.notifyControllerHealthy();
+            // Also clear a stale live "auth"-classified state.failure —
+            // unlike the OTHER two places in this PR that declare a
+            // controller healthy (login.ts's finalizeLoginSuccess,
+            // useAgentCommands.ts's flushPendingControllerRefresh success
+            // path), this call site only ever cleared canRetry via
+            // notifyControllerHealthy, never the separate state.failure
+            // checkAuthGuard's liveAuthFailure check reads
+            // (paneSnapshot(...).failure?.data.code === "auth"). Without
+            // this, a stale failure row survives even this independent,
+            // stronger proof of health (a live controllerstatus event
+            // showing a turn genuinely streaming), permanently
+            // fast-failing every subsequent send. reagentx P1 on PR #2338
+            // (thirty-second re-review).
+            //
+            // Gated on the failure actually being "auth" — FailureCleared
+            // has no payload and unconditionally clears state.failure
+            // REGARDLESS of code (reducer.ts's FailureCleared case), so
+            // dispatching it unconditionally here would ALSO silently wipe
+            // an unrelated concurrent failure (rate_limited, overloaded,
+            // context_exceeded, unresponsive, etc.) that happens to be
+            // showing the moment a turn-active event arrives, even though
+            // that unrelated problem was never actually resolved. Mirrors
+            // the established pattern at useAgentFailure.ts's silent
+            // self-heal handler ("never blow away an unrelated concurrent
+            // failure"). reagentx P1 on PR #2338 (thirty-fifth re-review).
+            if (paneSnapshot(model.blockId)?.failure?.data.code === "auth") {
+                dispatchPane(model.blockId, { type: "FailureCleared" }, "system");
+            }
         },
     });
 
@@ -900,6 +926,30 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 // useAgentActivitySummary/useNextPromptSuggestion silently
                 // never fire for that turn's completion.
                 trackTurnJustEnded(active);
+                // Independent of the turnJustEnded edge above: this RPC
+                // response is itself a fresh, authoritative confirmation of
+                // idleness whenever active is false — attempt the deferred
+                // refresh unconditionally on that, not only when
+                // trackTurnJustEnded's edge detector fires. didTurnJustEnd
+                // requires prev===true (a CONFIRMED active state to
+                // transition FROM); a pane whose backend state was never
+                // confirmed either way before this poll (wasTurnActive
+                // undefined — e.g. the live confirming controllerstatus
+                // push was itself missed, the exact gap this poll exists to
+                // self-heal) computes turnJustEnded=false here even though
+                // this is the FIRST time idleness has been confirmed. The
+                // reactive turnPhaseAtom effect (below) can't rescue this
+                // either: ReconcileTurnActive no-ops (same state reference)
+                // once local turnPhase already reads idle/Done, so it never
+                // re-fires off this same confirmation. Without this call,
+                // a /login deferred mid-turn — where the turn then ends via
+                // session_end while the live idle controllerstatus push is
+                // lost — would leave the refresh (and any held messages)
+                // stuck until the user happens to send another message.
+                // codex P1 on PR #2338 (twenty-eighth re-review).
+                if (!active) {
+                    void commands.flushPendingControllerRefresh();
+                }
             })
             .catch(() => {
                 // Best-effort — the live subscription and next mount remain
@@ -936,13 +986,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         turnPhase: agentAtoms().turnPhaseAtom[0],
         turnJustEndedAtom,
         isComposerEmpty: () => composerIsEmptyFn?.() ?? true,
-    });
-
-    // Subagent event subscriptions. See hooks/useSubagentEvents.ts.
-    useSubagentEvents({
-        blockId: model.blockId,
-        documentAtom: agentAtoms().documentAtom,
-        log,
     });
 
     // Count of OS processes currently tracked for this block — drives
@@ -1062,6 +1105,35 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         documentAtom: agentAtoms().documentAtom,
         log,
         setAuthUrl: status.setAuthUrl,
+        canRetry: status.canRetry,
+        loginWaiting: status.loginWaiting,
+        setAuthNotice: status.setAuthNotice,
+        notifyControllerHealthy: status.notifyControllerHealthy,
+        forceControllerRefresh: status.forceControllerRefresh,
+        beginRecoveryFlow: status.beginRecoveryFlow,
+        endRecoveryFlow: status.endRecoveryFlow,
+        // The last CONFIRMED backend turn_active reading (see
+        // UseAgentCommandsOptions.isBackendTurnActive's doc comment) —
+        // `wasTurnActive` is the same state trackTurnJustEnded's edge
+        // detector uses, tracked from live controllerstatus events only
+        // (never the mount-time GetControllerStatus one-shot — see
+        // trackTurnJustEnded's own doc comment for why). Codex P1 on
+        // PR #2338 (nineteenth re-review).
+        isBackendTurnActive: () => wasTurnActive === true,
+        // Deliberately NOT `!isBackendTurnActive()` (which would treat
+        // `undefined` — never confirmed either way, e.g. a pane that
+        // mounts mid-turn before its first live controllerstatus event
+        // arrives — the SAME as confirmed idle). flushPendingControllerRefresh
+        // force-restarts the controller when it proceeds, so it must
+        // require POSITIVE confirmation of idle before doing something
+        // destructive — "we don't know yet" must lean toward "don't
+        // flush," not "safe to flush." A pane that mounts onto an
+        // already-active turn and never receives a live event before a
+        // premature per-round session_end demotes turnPhase would
+        // otherwise have a deferred /login refresh flushed prematurely,
+        // killing that still-active (just never locally confirmed) turn.
+        // reagent P1 on PR #2338 (twenty-first re-review).
+        isBackendTurnConfirmedIdle: () => wasTurnActive === false,
         backToPicker: () => model.backToPicker(),
         // Scroll the user's own message into view after Enter. The hook
         // defers this to the next animation frame so the mounted node is
@@ -1072,7 +1144,9 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
 
     // Mark turn as active when the user sends a message — TurnStart
     // also clears stale sessionStats from the prior turn.
-    const handleSendMessage = (message: string): Promise<void> => {
+    const handleSendMessage = (
+        message: string,
+    ): Promise<void> => {
         // Bang commands (`!cmd`) output writes into the shell terminal (see
         // `log`/`handleShellTermReady` above). Auto-open the details drawer so
         // the shell — and thus the output — is immediately visible; without
@@ -1087,6 +1161,22 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         // where the message flashed in the amber zone between Streaming
         // promotion and agent-message-accepted. See ANALYSIS_IDLE_SEND_RACE_2026_06_11.md.
         const wasAlreadyWorking = workingFromPhase(paneSnapshot(model.blockId)?.turnPhase ?? { kind: "Idle" });
+        // Captured BEFORE TurnStart for the same reason wasAlreadyWorking is:
+        // TurnStart unconditionally clears state.failure (reducer.ts), so a
+        // read taken any later (e.g. inside deliverToBackend's guard) would
+        // always see it already gone, whether this send is a user's own
+        // fresh keystroke while a live "auth"-classified failure is still
+        // showing, or a legitimate auto-retry after successful recovery.
+        // onRecovered (above) explicitly dispatches FailureCleared before
+        // calling retryLastTurn precisely so this capture reads null for
+        // that case — for a real live auth failure the user hasn't
+        // acknowledged, nothing has cleared it yet, so this reads the actual
+        // failure. Codex P1 on PR #2338; captures the failure DATA (not just
+        // a boolean) so a rejected send can re-dispatch it and restore the
+        // banner instead of leaving it cleared with no recovery affordance
+        // (Codex P1, third re-review).
+        const liveFailure = agentAtoms().failureAtom[0]();
+        const authFailureToPreserve = liveFailure?.data.code === "auth" ? liveFailure.data : null;
         // Only start a NEW turn when the agent is idle. Dispatching TurnStart
         // while a turn is already running regresses Streaming → Submitting,
         // which would flicker the busy indicator back to its "Submitting"
@@ -1096,7 +1186,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         if (!wasAlreadyWorking) {
             dispatchPane(model.blockId, { type: "TurnStart", at: Date.now() }, "user");
         }
-        return commands.sendMessage(message, wasAlreadyWorking);
+        return commands.sendMessage(message, wasAlreadyWorking, authFailureToPreserve);
     };
 
     // Esc on an empty composer. Mirrors Claude Code CLI: if a message is
@@ -1200,6 +1290,28 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         const turnIdle = phaseKind === "Idle" || phaseKind === "Done";
         if ((newToolCall || turnIdle) && commands.hasHeldMessages()) {
             void commands.flushHeldMessages();
+        }
+        // Independent of the above: run any controller refresh /login
+        // deferred because a turn was active when it succeeded, the moment
+        // this pane's OWN turnPhase reflects idle — regardless of whether
+        // there are any held messages to otherwise trigger it. Deliberately
+        // reacts to turnPhaseAtom directly rather than relying solely on
+        // trackTurnJustEnded's live-controllerstatus-event edge detector:
+        // (1) a turn also ends via the independent session_end -> TurnEnd
+        // stream path (useTurnLifecycle.ts's finalizeTurn), which is not
+        // synchronized with the controllerstatus event stream reagent P1
+        // found flushHeldMessages/trackTurnJustEnded alone don't cover; (2)
+        // a pane that mounts onto an ALREADY-active turn never initializes
+        // trackTurnJustEnded's wasTurnActive (deliberately, to avoid a
+        // false busy->idle edge on the very first live event — see its own
+        // doc comment), so if /login succeeds during that pre-existing turn
+        // and it ends before any OTHER live event arrives,
+        // didTurnJustEnd(undefined, false) never fires and — with no held
+        // messages either — nothing would ever run the deferred refresh at
+        // all. Codex P1 on PR #2338 (seventeenth re-review, both points).
+        // No-ops when nothing is pending.
+        if (turnIdle) {
+            void commands.flushPendingControllerRefresh();
         }
     });
 
@@ -1344,25 +1456,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // stopPropagation pre-empting the zoom indicator), which broke
     // zoom in the agent pane. Deleted.
 
-    // Handle subagent link click — open a subagent pane
-    const handleSubagentClick = (node: SubagentLinkNode) => {
-        if (isSubagentPaneOpen(node.subagentId)) {
-            log("subagent", `pane already open for ${node.slug || node.subagentId}`);
-            return;
-        }
-        openSubagentPane({
-            subagentId: node.subagentId,
-            slug: node.slug,
-            parentAgent: node.parentAgent,
-            parentBlockId: model.blockId,
-            sessionId: node.sessionId,
-        }).then((blockId) => {
-            if (blockId) {
-                log("subagent", `opened pane for ${node.slug || node.subagentId}`);
-            }
-        });
-    };
-
     // Context menu for copy
     const handleContextMenu = (e: MouseEvent) => {
         const sel = window.getSelection()?.toString();
@@ -1441,8 +1534,8 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                         <span class="pane-tab-label">{f.title}</span>
                     )
                 }
-                onAdd={() => void handleForkCreate()}
-                addTitle="Fork this conversation"
+                onAdd={() => void handleNewAgentTab()}
+                addTitle="New tab"
             />
 
             <AgentSearchBar
@@ -1475,7 +1568,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     onDismissAuthNotice={() => status.setAuthNotice(null)}
                     onCancelLogin={status.cancelLogin}
                     authProviderId={provider()?.id ?? providerKey()}
-                    onSubagentClick={handleSubagentClick}
                     onAgentErrorLogin={() => {
                         // Must match onLoginAgain above: the button is labeled "Login
                         // Again", so it has to force a fresh OAuth regardless of
@@ -1688,6 +1780,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 blockAtom={block}
                 providerId={provider()?.id ?? ""}
                 agentMode={block()?.meta?.["agentMode"] as string | undefined}
+                compacting={agentAtoms().compactingAtom[0]()}
             />
 
             <div class="agent-composer-region">
@@ -1738,7 +1831,18 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                         commands={commands.availableCommands()}
                         onInvoke={(cmd) => {
                             commands.closeHelp();
-                            void commands.sendMessage(`/${cmd.name}`);
+                            // Route through handleSendMessage — NOT
+                            // commands.sendMessage directly — so this gets
+                            // the same pre-TurnStart wasAlreadyWorking
+                            // snapshot the composer path computes. Codex P1
+                            // on PR #2338 (twelfth re-review): calling
+                            // sendMessage() bare defaults wasAlreadyWorking
+                            // to false regardless of whether a turn is
+                            // actually active, so invoking /login from this
+                            // panel during an active turn made
+                            // isTurnActive() lie and finalizeLoginSuccess()
+                            // force-restart (killing) that turn.
+                            void handleSendMessage(`/${cmd.name}`);
                         }}
                         onClose={commands.closeHelp}
                     />

@@ -203,6 +203,7 @@ export class ClaudeTranslator implements OutputTranslator {
 
         const events: StreamEvent[] = [];
         let hasToolUse = false;
+        let hasText = false;
         for (const block of message.content) {
             if (block.type === "tool_use") {
                 hasToolUse = true;
@@ -220,15 +221,24 @@ export class ClaudeTranslator implements OutputTranslator {
                         : {},
                 });
             }
+            if (block.type === "text" && typeof block.text === "string" && block.text.trim().length > 0) {
+                hasText = true;
+            }
         }
         // In persistent/interactive mode the process never exits between turns,
         // so "result" is only emitted at session teardown. Detect per-turn
-        // completion here: a non-partial assistant message with no tool_use
-        // blocks is always the final text response of a turn. Emit session_end
-        // so TurnPhase transitions to Done → idle. In subprocess (--print) mode
-        // the "result" event fires a duplicate TurnEnd, which is a no-op
-        // (first-done-wins in the reducer).
-        if (!hasToolUse) {
+        // completion here instead. A message only counts as the real final
+        // response of a turn once it contains actual explanation text — not
+        // merely "no tool_use". A thinking-only or empty message is a
+        // transitional state (e.g. the model is still assembling its
+        // response, or a message boundary landed between a tool result and
+        // the model's real reply); firing session_end there settles the UI
+        // to "Worked" a beat before the real explanation streams in, then
+        // immediately reopens it — see
+        // SPEC_PERSISTENT_TURN_END_TEXT_GATE_2026_07_30.md. In subprocess
+        // (--print) mode the "result" event fires a duplicate TurnEnd, which
+        // is a no-op (first-done-wins in the reducer).
+        if (!hasToolUse && hasText) {
             events.push({ type: "session_end", stats: {} });
         }
         return events;
