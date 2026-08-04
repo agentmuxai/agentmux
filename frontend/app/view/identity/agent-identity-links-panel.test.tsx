@@ -167,6 +167,21 @@ describe("AgentIdentityLinksPanel", () => {
             expect(screen.queryByRole("button", { name: /re-login|connect/i })).not.toBeInTheDocument();
         });
 
+        it("shows Re-login for a legacy-aliased claude link row (\"claude-code\"), not just the canonical \"claude\" provider string (reagent P1 on PR #2414)", async () => {
+            listAllAgentIdentities.mockResolvedValue([
+                mkLink({ agent_id: "agent-1", account_id: "acc-claude-1", provider: "claude-code" }),
+            ]);
+
+            render(() => <AgentIdentityLinksPanel agentId="agent-1" />);
+
+            const button = await screen.findByRole("button", { name: "Re-login" });
+            button.click();
+
+            expect(claudeLoginPanel).toHaveBeenCalledWith(
+                expect.objectContaining({ existingAccountId: "acc-claude-1" }),
+            );
+        });
+
         it("empty state offers 'Connect Claude account' for an agent with NO links at all (the v0.54.9 stuck-instance case — no row exists to attach a per-row button to)", async () => {
             listAllAgentIdentities.mockResolvedValue([]);
 
