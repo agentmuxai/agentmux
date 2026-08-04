@@ -260,10 +260,30 @@ export class EditorViewModel implements ViewModel {
             createEffect(() => {
                 const pending = this.blockAtom()?.meta?.[META_PENDING_OPEN_FILES];
                 if (!Array.isArray(pending) || pending.length === 0) return;
-                for (const path of pending) {
-                    if (typeof path === "string" && path) void this.openFile(path);
-                }
-                fireAndForget(() => this.persistMeta({ [META_PENDING_OPEN_FILES]: [] }));
+                const processed = pending.filter((p): p is string => typeof p === "string" && p.length > 0);
+                for (const path of processed) void this.openFile(path);
+                fireAndForget(() => {
+                    // Re-read fresh (not the `pending` snapshot above) right
+                    // before writing, and remove only the entries THIS run
+                    // processed, rather than blind-clearing to `[]` — reagent
+                    // P1: an unconditional clear could overwrite a file the
+                    // backend appended between this effect's read and this
+                    // write landing, silently dropping it (the same class of
+                    // lost-update bug already fixed twice in this PR at
+                    // different points, reappearing here). This narrows the
+                    // race to the network round-trip of this one write,
+                    // rather than eliminating it outright — a fully atomic
+                    // fix needs a backend remove-these-entries command
+                    // running under the reducer's single-writer lock, not a
+                    // client-side read-filter-write; deferred given how
+                    // narrow the remaining window is (needs a third
+                    // concurrent reuse call specifically inside it).
+                    const current = this.blockAtom()?.meta?.[META_PENDING_OPEN_FILES];
+                    const remaining = Array.isArray(current)
+                        ? current.filter((p) => !processed.includes(p))
+                        : [];
+                    return this.persistMeta({ [META_PENDING_OPEN_FILES]: remaining });
+                });
             });
         });
 
