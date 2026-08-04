@@ -48,9 +48,29 @@ vi.mock("./identity-model", () => ({
             display_name: "Agent Two's GitHub",
             status: "valid",
         },
+        {
+            id: "acc-claude-1",
+            name: "claude-work",
+            provider: "claude",
+            kind: "oauth",
+            display_name: "Claude Work",
+            status: "valid",
+        },
     ],
     subscribeAccountChanges: () => () => {},
     PROVIDER_LABELS: { github: "GitHub", claude: "Claude" },
+}));
+
+const claudeLoginPanel = vi.fn();
+vi.mock("@/app/view/accounts/ClaudeLoginPanel", () => ({
+    // Stub: records the props it was opened with instead of driving a real
+    // login session (that flow is ClaudeLoginPanel's own concern) — this
+    // file only tests that AgentIdentityLinksPanel opens it with the right
+    // existingAccountId/linkTarget from the right row.
+    ClaudeLoginPanel: (props: any) => {
+        claudeLoginPanel(props);
+        return <div data-testid="claude-login-panel" />;
+    },
 }));
 
 import { AgentIdentityLinksPanel } from "./agent-identity-links-panel";
@@ -67,6 +87,7 @@ function mkLink(overrides: Partial<AgentDefinitionIdentity>): AgentDefinitionIde
 describe("AgentIdentityLinksPanel", () => {
     beforeEach(() => {
         listAllAgentIdentities.mockReset();
+        claudeLoginPanel.mockReset();
     });
 
     afterEach(() => {
@@ -112,5 +133,54 @@ describe("AgentIdentityLinksPanel", () => {
 
         expect(screen.getByText(/isn't attached to a specific agent/i)).toBeInTheDocument();
         expect(screen.queryByText("Linked accounts")).not.toBeInTheDocument();
+    });
+
+    describe("Claude Connect/Re-login (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.3 surface 3)", () => {
+        it("shows a Re-login button on a bound claude row and opens ClaudeLoginPanel with that row's account + this agent as linkTarget", async () => {
+            listAllAgentIdentities.mockResolvedValue([
+                mkLink({ agent_id: "agent-1", account_id: "acc-claude-1", provider: "claude" }),
+            ]);
+
+            render(() => <AgentIdentityLinksPanel agentId="agent-1" />);
+
+            const button = await screen.findByRole("button", { name: "Re-login" });
+            expect(claudeLoginPanel).not.toHaveBeenCalled();
+
+            button.click();
+
+            expect(claudeLoginPanel).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    existingAccountId: "acc-claude-1",
+                    linkTarget: { agentDefinitionId: "agent-1" },
+                }),
+            );
+        });
+
+        it("does NOT show a Connect/Re-login button on a non-claude row (github) — only Claude has an in-app session today", async () => {
+            listAllAgentIdentities.mockResolvedValue([
+                mkLink({ agent_id: "agent-1", account_id: "acc-1", provider: "github" }),
+            ]);
+
+            render(() => <AgentIdentityLinksPanel agentId="agent-1" />);
+
+            await waitFor(() => expect(screen.getByText("Work GitHub")).toBeInTheDocument());
+            expect(screen.queryByRole("button", { name: /re-login|connect/i })).not.toBeInTheDocument();
+        });
+
+        it("empty state offers 'Connect Claude account' for an agent with NO links at all (the v0.54.9 stuck-instance case — no row exists to attach a per-row button to)", async () => {
+            listAllAgentIdentities.mockResolvedValue([]);
+
+            render(() => <AgentIdentityLinksPanel agentId="agent-1" />);
+
+            const button = await screen.findByRole("button", { name: "Connect Claude account" });
+            button.click();
+
+            expect(claudeLoginPanel).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    existingAccountId: undefined,
+                    linkTarget: { agentDefinitionId: "agent-1" },
+                }),
+            );
+        });
     });
 });

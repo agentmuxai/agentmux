@@ -23,6 +23,15 @@ export function AccountsGallery(props: {
     /** Open the dedicated AgentMux connect panel instead of the OAuth/Key
      *  chooser. Required for the agentmux tile to do anything. */
     onAgentMux?: () => void;
+    /** Open ClaudeLoginPanel (the in-app CLI login session, spec
+     *  SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.3 surface 3) instead
+     *  of the generic Add-account form's OAuth path — Anthropic isn't in
+     *  oauth-catalog.ts's service-OAuth scaffold (no device/PKCE endpoint
+     *  an app-driven client could hit), so its "oauth" mode needs its own
+     *  panel the same way the agentmux tile needs its own connect flow.
+     *  Unlike agentmux, this fires from the chooser's OAuth button (the
+     *  anthropic tile still offers Key too), not at tile-click time. */
+    onClaudeConnect?: () => void;
 }): JSX.Element {
     const model = props.model;
     const [chooser, setChooser] = createSignal<ServiceTile | null>(null);
@@ -33,8 +42,12 @@ export function AccountsGallery(props: {
     };
 
     const pick = (tile: ServiceTile, mode: AuthMode) => {
-        const kind: AccountKind = mode === "oauth" ? "oauth" : tile.keyKind;
         setChooser(null);
+        if (tile.id === "anthropic" && mode === "oauth") {
+            props.onClaudeConnect?.();
+            return;
+        }
+        const kind: AccountKind = mode === "oauth" ? "oauth" : tile.keyKind;
         model.openAddFormFor(tile.id, kind);
     };
 
