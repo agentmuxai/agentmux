@@ -132,6 +132,8 @@ impl CronScheduler {
         let job_prompt = job.prompt.clone();
         let job_target = job.target.clone();
         let job_max_fires = job.max_fires;
+        let job_created_at = job.created_at;
+        let job_max_age_secs = job.max_age_secs;
 
         let handle = tokio::spawn(async move {
             // `initial_fires` is seeded from the persisted fire_count (plus 1
@@ -142,7 +144,10 @@ impl CronScheduler {
                 // Guard at top of loop: if fires was seeded at or above max_fires
                 // (e.g. a catch-up fire brought the persisted count to the cap),
                 // don't fire again before sleeping — this prevents one extra fire
-                // on restart when the catch-up itself hits the limit.
+                // on restart when the catch-up itself hits the limit. Age is
+                // checked the same way (Phase 0, SPEC_AGENT_POLLING_AND_WAKEUP_
+                // HARDENING_2026_08_04.md) — a job created before max_age_secs
+                // existed has max_age_secs = None and is never expired by this.
                 if let Some(max) = job_max_fires {
                     if fires >= max {
                         tracing::info!(id = %job_id, fires, "cron: max_fires reached — disabling job");
@@ -153,6 +158,15 @@ impl CronScheduler {
                         sched.publish_changed();
                         break;
                     }
+                }
+                if is_expired_by_age(job_created_at, job_max_age_secs, Utc::now().timestamp()) {
+                    tracing::info!(id = %job_id, "cron: max_age_secs reached — disabling job");
+                    if let Some(store) = &sched.shared_store {
+                        let _ = store.cron_set_enabled(&job_id, false);
+                    }
+                    sched.handles.lock().unwrap().remove(&job_id);
+                    sched.publish_changed();
+                    break;
                 }
                 let next = match schedule.upcoming(Utc).next() {
                     Some(t) => t,
@@ -249,5 +263,43 @@ fn should_catchup(job: &CronJob, now_dt: DateTime<Utc>) -> bool {
     match schedule.after(&last_dt).next() {
         Some(next_after_last) => next_after_last < now_dt,
         None => false,
+    }
+}
+
+/// True when a job's hard age-expiry bound (`max_age_secs`, seconds since
+/// `created_at`) has been reached. `None` = no bound, never expires by age
+/// (the default for every job created before this field existed, and for
+/// any job that explicitly opts out). See
+/// docs/specs/SPEC_AGENT_POLLING_AND_WAKEUP_HARDENING_2026_08_04.md Phase 0.
+fn is_expired_by_age(created_at: i64, max_age_secs: Option<i64>, now: i64) -> bool {
+    match max_age_secs {
+        Some(max_age) => now - created_at >= max_age,
+        None => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_expired_by_age_none_never_expires() {
+        assert!(!is_expired_by_age(1_000, None, 1_000_000_000));
+    }
+
+    #[test]
+    fn is_expired_by_age_before_bound_is_not_expired() {
+        assert!(!is_expired_by_age(1_000, Some(3_600), 1_000 + 3_599));
+    }
+
+    #[test]
+    fn is_expired_by_age_at_bound_is_expired() {
+        // >= at the boundary, matching the max_fires check's own >= semantics.
+        assert!(is_expired_by_age(1_000, Some(3_600), 1_000 + 3_600));
+    }
+
+    #[test]
+    fn is_expired_by_age_past_bound_is_expired() {
+        assert!(is_expired_by_age(1_000, Some(3_600), 1_000 + 10_000));
     }
 }
