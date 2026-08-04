@@ -56,6 +56,10 @@ mod splash_text;
 mod splash_config;
 mod splash_info;
 mod startup_events;
+// srv hang-while-alive detection plugs into srv recycle-on-exit
+// (SRV_RESTART_BUDGET, supervisor/mod.rs), which is Windows-only today.
+#[cfg(target_os = "windows")]
+mod srv_liveness;
 mod srv_spawner;
 mod state;
 mod wrr;
