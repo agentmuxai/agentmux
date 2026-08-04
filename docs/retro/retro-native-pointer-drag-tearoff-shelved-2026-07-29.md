@@ -63,10 +63,17 @@ against this:
   tear-off runs `LayoutTreeActionType.DeleteNode` on the exact node being
   dragged, unmounting that `DisplayNode` component instance. The end-of-drag
   cleanup was still calling that instance's own `createSignal` setters
-  (`setIsDragging`, `setGhostPos`) afterward — very likely what the user saw
-  as "the whole window is blank." Fixed by checking
+  (`setIsDragging`, `setGhostPos`) afterward. Guarded by checking
   `layoutModel.leafs().some(l => l.id === node.id)` before touching local
-  signals; global/`layoutModel`-level cleanup still always runs.
+  signals; global/`layoutModel`-level cleanup still always runs. **Root
+  cause of the blank window itself is NOT actually this** — per
+  `docs/analysis/ANALYSIS_AGENT_PANE_CRASH_2026_05_28_PM.md` §B, writing to
+  a disposed owner's signal is a silent no-op in SolidJS (the write
+  succeeds, no render fan-out happens, no error), so it cannot itself have
+  caused a blank window. The guard is a reasonable defensive cleanup either
+  way, but the retro's original claim that it explained/fixed the blank-
+  window symptom was speculative and is now known wrong; the actual root
+  cause of the blank window was never identified this session.
 - **Drop-zone precision regression (flagged by user, not yet fixed when
   shelved)**: the original per-pane hit-testing used the browser's real
   nested-element hit-test (`dropTargetForElements` on each `.overlay-node`)
@@ -177,10 +184,15 @@ agents — don't re-derive from scratch. In rough chronological/topical order:
 
 1. **Isolate to just the cursor.** Don't touch drop-zone hit-testing, ghost
    rendering, or redock — those are legitimately separate, already-tracked
-   problems. Confirm the direct-`SetCursor()` fix (already written, in
+   problems. Confirm the cursor fix (already written, in
    `agentmux-cef/src/commands/drag.rs`'s `set_drag_cursor`/
    `restore_drag_cursor` on this branch) actually shows a crosshair cursor
-   live, for **tabs only** first (smaller surface than panes).
+   live, for **tabs only** first (smaller surface than panes). Not a plain
+   `SetCursor()` call — `set_drag_cursor` replaces the *system* no-drop
+   cursor resource (`SetSystemCursor(copy, OCR_NO)`) with a crosshair, and
+   `restore_drag_cursor` resets ALL system cursors back to defaults
+   (`SystemParametersInfoW(SPI_SETCURSORS)`) — a coarser, system-wide swap
+   rather than a per-window/thread cursor set.
 2. If native pointer-capture continues to look like the right mechanism
    (it does eliminate the circle-slash structurally, confirmed this
    session), consider shipping **tabs only** as a first PR, deliberately
