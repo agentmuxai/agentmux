@@ -77,7 +77,7 @@ One reusable flow (backend-spawned, frontend-observed), extracted so all three s
 - **PR 1:** §3.1 core session + catalog changes (§3.2), wired into the launch surface (surface 1). Terminal tier kept as manual fallback.
 - **PR 2:** relogin surface (surface 2) on the same primitive.
 - **PR 3:** Armory + Stash (surface 3) incl. `accounts-catalog` change and the block-context decoupling.
-- **PR 4 (cleanup):** retire auto-launch of tier 3; docs sweep (`catalog.ts` comment, `SPEC_HOST_CLI_LOGIN_CAPTURE` §0 note, `REPORT_…RETHINK` §8 addendum).
+- **PR 4 (cleanup):** docs sweep only, no behavior change — correct stale "dead end"/"still impossible" claims (`catalog.ts` comment, `SPEC_HOST_CLI_LOGIN_CAPTURE` §0 note, `REPORT_…RETHINK` §8 addendum) to match §3.2's actual auto-launch semantics: the capture-miss 1→2→3 fallthrough stays automatic and unchanged; only the in-app-session-timeout path is user-driven ("Use terminal instead"), and that was already true before this PR, not something PR 4 newly retires.
 
 ## 5. Security notes
 
