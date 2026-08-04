@@ -381,6 +381,24 @@ pub struct CommandPaneOpenData {
     /// see `frontend/layout/lib/layoutStack.ts`'s `pushBlockOntoStack`,
     /// docs/specs/SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md §4.2).
     pub skip_placement: Option<bool>,
+    /// `Some(true)`, `view: "editor"` only: if the caller (identified by
+    /// `split_reference_block_id`) already has an Editor pane open in its
+    /// own tab, push `file` into that pane as a new tab instead of creating
+    /// a second Editor pane. Explicit opt-in, set only by the `OpenEditor`
+    /// MCP tool — NOT inferred from `meta`/`split_reference_block_id` being
+    /// present, since other legitimate callers of this same `pane.open` RPC
+    /// (`EditorViewModel.openToTheSide`/`openInTerminal`,
+    /// `frontend/app/view/editor/editor-model.ts:958-984`) also set
+    /// `split_reference_block_id` to their OWN block id purely for split
+    /// placement and must NOT trigger reuse (reagent P1 on PR #2404 — an
+    /// earlier version of this field inferred intent from `meta.is_none()`,
+    /// which incorrectly reused the calling pane itself for
+    /// `openToTheSide`). Ignored when `floating` is `Some(true)` — a
+    /// floating request always gets its own new window, never reuses a
+    /// docked pane. See
+    /// docs/specs/SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md
+    /// Part 2.
+    pub reuse_editor_pane: Option<bool>,
 }
 
 /// Response from pane.open.

@@ -159,6 +159,15 @@ pub struct PaneOpenRequest {
     pub tree_expanded: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub floating: Option<bool>,
+    /// `Some(true)`, `view: "editor"` only: explicit opt-in to reuse an
+    /// already-open Editor pane in the caller's own tab (identified via
+    /// `split_reference_block_id`) instead of always creating a new one.
+    /// Set only by the `OpenEditor` MCP tool — NOT inferred from other
+    /// fields, since other legitimate `pane.open` callers also set
+    /// `split_reference_block_id` for split placement without wanting
+    /// reuse (`EditorViewModel.openToTheSide`/`openInTerminal`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reuse_editor_pane: Option<bool>,
 }
 
 /// Response from `POST /api/v1/pane/open`
