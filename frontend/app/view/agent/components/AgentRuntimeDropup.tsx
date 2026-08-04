@@ -289,9 +289,6 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
                 onClick={() => toggleOpen()}
             >
                 <span class="agent-runtime-dropup-trigger-label">{compactSummary()}</span>
-                <span class="agent-runtime-dropup-trigger-caret" aria-hidden="true">
-                    ▴
-                </span>
             </button>
             <Show when={open()}>
                 <Portal>
