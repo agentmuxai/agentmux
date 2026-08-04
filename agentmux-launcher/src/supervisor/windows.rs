@@ -436,6 +436,9 @@ pub(crate) async fn run_windows(
     // (live-reproduced 2026-07-11: respawned srv logged "stdin closed,
     // shutting down" 7ms after binding its listeners).
     let mut srv_stdin_keepalive = srv_child.stdin.take();
+    // SPEC_SRV_HANG_WHILE_ALIVE_DETECTION_2026_08_03 — start the liveness
+    // prober's counters clean for this srv instance.
+    crate::srv_liveness::reset();
 
     // 4-6. Spawn the host (suspended) → assign to J0 → resume, via
     // spawn_host_supervised(). The splash event is passed on every launch
@@ -561,6 +564,20 @@ pub(crate) async fn run_windows(
     // Distinct exit code so the wedged-host teardown is unambiguous in any
     // log/exit-code triage (spec: "launcher exit with a distinct code").
     const TEARDOWN_BACKSTOP_EXIT_CODE: i32 = 86;
+    // SPEC_SRV_HANG_WHILE_ALIVE_DETECTION_2026_08_03 (#942 family) — srv
+    // liveness prober. Unlike the host's UI-thread probe, srv exposes a
+    // synchronous HTTP health endpoint, so each tick gets a pass/fail
+    // answer within that same tick — no cross-tick nonce matching needed.
+    // First tick delayed one interval for the same reason as
+    // `ui_probe_interval`: give a just-(re)spawned srv a moment before its
+    // first probe.
+    const SRV_PROBE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
+    const SRV_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+    let mut srv_probe_interval = tokio::time::interval_at(
+        tokio::time::Instant::now() + SRV_PROBE_INTERVAL,
+        SRV_PROBE_INTERVAL,
+    );
+    srv_probe_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let exit_code = loop {
         tokio::select! {
             _ = teardown_check_interval.tick() => {
@@ -619,6 +636,33 @@ pub(crate) async fn run_windows(
                         "[ui-liveness] probe send failed (transport, not liveness): {:?}",
                         e
                     ));
+                }
+            }
+            _ = srv_probe_interval.tick() => {
+                if crate::srv_liveness::probe(&srv_result.web_endpoint, SRV_PROBE_TIMEOUT).await {
+                    crate::srv_liveness::record_success();
+                } else {
+                    let misses = crate::srv_liveness::record_failure();
+                    log(&format!(
+                        "[srv-liveness] missed health probe ({} consecutive)",
+                        misses
+                    ));
+                    if crate::srv_liveness::should_recycle() {
+                        log(&format!(
+                            "[srv-liveness] srv wedged (alive, unresponsive to {} consecutive health \
+                             probes) — forcing recycle",
+                            misses
+                        ));
+                        crate::srv_liveness::reset();
+                        // Kill srv directly (not via J0/TerminateJobObject —
+                        // this is scoped to srv alone, not a whole-tree
+                        // teardown). The srv_status = srv_child.wait() arm
+                        // (next iteration) picks up the exit and runs the
+                        // already-shipped #2107 respawn/rebind/host-recycle
+                        // path unmodified — this arm's only job is deciding
+                        // "treat this as a crash".
+                        let _ = srv_child.start_kill();
+                    }
                 }
             }
             host_status = host_child.wait() => {
@@ -975,6 +1019,11 @@ pub(crate) async fn run_windows(
                         // milliseconds — live-reproduced on the first version
                         // of this arm.
                         srv_stdin_keepalive = srv_child.stdin.take();
+                        // A freshly respawned srv must not inherit its
+                        // predecessor's miss count (whether this respawn was
+                        // triggered by a real crash or by the liveness
+                        // prober's own recycle-kill above).
+                        crate::srv_liveness::reset();
                         log(&format!(
                             "srv respawned (pid {}) — new endpoints ws={} web={}; recycling host",
                             srv_result.pid, srv_result.ws_endpoint, srv_result.web_endpoint
