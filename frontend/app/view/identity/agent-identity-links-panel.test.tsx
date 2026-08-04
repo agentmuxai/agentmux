@@ -26,8 +26,9 @@ vi.mock("@/app/store/wps", () => ({
 }));
 vi.mock("@/app/view/agent/components/AgentPicker", () => ({
     useAgentDefinitions: () => () => [
-        { id: "agent-1", name: "Agent One" },
-        { id: "agent-2", name: "Agent Two" },
+        { id: "agent-1", name: "Agent One", provider: "claude" },
+        { id: "agent-2", name: "Agent Two", provider: "claude" },
+        { id: "agent-3", name: "Agent Three (codex)", provider: "codex" },
     ],
 }));
 vi.mock("./identity-model", () => ({
@@ -219,6 +220,30 @@ describe("AgentIdentityLinksPanel", () => {
                     linkTarget: { agentDefinitionId: "agent-1" },
                 }),
             );
+        });
+
+        it("reagent P2 on PR #2414 (round 3): does NOT offer 'Connect Claude account' for an agent whose own provider isn't claude — that would link an unrelated Claude account instead of the agent's actual provider", async () => {
+            listAllAgentIdentities.mockResolvedValue([]);
+
+            render(() => <AgentIdentityLinksPanel agentId="agent-3" />);
+
+            await waitFor(() => {
+                expect(screen.getByText(/no linked accounts yet/i)).toBeInTheDocument();
+            });
+            expect(screen.queryByRole("button", { name: "Connect Claude account" })).not.toBeInTheDocument();
+        });
+
+        it("reagent P2 on PR #2414 (round 3): does NOT offer 'Connect Claude account' before the initial load resolves or after it fails — only once genuinely confirmed empty", async () => {
+            let resolveLoad!: (v: unknown[]) => void;
+            listAllAgentIdentities.mockReturnValue(new Promise((res) => { resolveLoad = res; }));
+
+            render(() => <AgentIdentityLinksPanel agentId="agent-1" />);
+
+            expect(screen.queryByRole("button", { name: "Connect Claude account" })).not.toBeInTheDocument();
+
+            resolveLoad([]);
+            const button = await screen.findByRole("button", { name: "Connect Claude account" });
+            expect(button).toBeInTheDocument();
         });
     });
 });

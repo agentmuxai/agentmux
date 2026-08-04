@@ -188,7 +188,26 @@ export function ClaudeLoginPanel(props: {
                                 const links = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, {
                                     agent_id: props.linkTarget.agentDefinitionId,
                                 });
-                                linkConfirmed = links.some((l) => l.account_id === registeredAccountId);
+                                // reagent P0 on PR #2414 (round 3): must check
+                                // the CANONICAL "claude" provider specifically,
+                                // not just account_id. finalizeAccount only
+                                // warns/swallows a failed link insert (never
+                                // rethrows) — for a Stash re-login on a
+                                // legacy-aliased row, registeredAccountId
+                                // equals that SAME alias row's own account_id
+                                // (it's a refresh, not a fresh mint), so a bare
+                                // account_id match is vacuously satisfied by
+                                // the pre-existing alias link even when the
+                                // new canonical insert silently failed. That
+                                // false "confirmed" then fires the
+                                // staleAliasProvider unlink below, deleting
+                                // the one link that actually worked — leaving
+                                // the agent with ZERO identity links, worse
+                                // than the pre-PR orphaned-alias bug this
+                                // panel exists to fix.
+                                linkConfirmed = links.some(
+                                    (l) => l.account_id === registeredAccountId && l.provider === CLAUDE_PROVIDER.id,
+                                );
                             } catch (e) {
                                 console.warn(
                                     `[claude-login] failed to verify the agent link: ${(e as Error)?.message ?? String(e)}`,
