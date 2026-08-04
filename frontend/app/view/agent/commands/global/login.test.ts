@@ -134,6 +134,22 @@ describe("/login — tier-1 'opened' branch persist-failure gating", () => {
     });
 });
 
+describe("/login runs the in-app tier 1 for Claude (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.2)", () => {
+    it("passes skipTier1: false for a provider without headlessLoginUrlUnsupported — Claude's flag was dropped, so its URL-capture tier runs and the AuthUrlBox paste flow is reachable from /login", async () => {
+        vi.useFakeTimers();
+        hub.persistAndLinkAccount.mockResolvedValue(true);
+        const ctx = makeCtx();
+
+        const promise = loginCommand.handler(ctx, "");
+        await vi.advanceTimersByTimeAsync(2_000);
+        await promise;
+
+        expect(hub.runProviderLogin).toHaveBeenCalledWith(
+            expect.objectContaining({ skipTier1: false }),
+        );
+    });
+});
+
 describe("/login registers as an in-flight recovery (codex P1 on PR #2338, ninth re-review)", () => {
     // Without this, loginWaiting() reads false for the whole duration of a
     // /login attempt — a second message sent while it's still polling gets
