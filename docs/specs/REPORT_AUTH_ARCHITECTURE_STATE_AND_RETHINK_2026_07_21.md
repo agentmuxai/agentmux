@@ -490,6 +490,22 @@ legitimate ideas for future, independently-scoped work if either keeps coming up
 part of this rethink's core deliverable, and building either now, rushed, without its own design pass,
 would be worse than not building it.
 
+**2026-08-03 addendum — the "terminal-window is primary" half of this recommendation is superseded for
+Claude specifically.** This report's device-flow conclusion (Anthropic has no `device_authorization_endpoint`
+— §8 above) still holds; nothing here was wrong. What changed is a fact this report didn't have: live probes
+that day showed Claude Code v2.1.198+ prints the same PKCE authorize URL under AgentMux's own PTY spawn that
+v2.1.183 (this report's basis, and `SPEC_HOST_CLI_LOGIN_CAPTURE_2026_06_20.md`'s) never did, and accepts a
+pasted code on stdin, auto-completing on browser authorize with no paste needed in the happy path. That's
+not a device-flow shim (no new OAuth client, no endpoint AgentMux calls directly) — it's the CLI acting as
+its own OAuth client, same as it always has; AgentMux only needed to relay the URL it now prints. See
+`docs/specs/SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md`, which revives the in-app URL+paste UI as the
+PRIMARY path for Claude, demoting the terminal-window fallback to an explicit, never-auto-launched secondary
+action. The "paste a pre-generated long-lived token" idea floated above remains a legitimate, separately-
+scoped future enhancement (useful for genuinely headless/remote hosts where even a PTY-visible browser isn't
+reachable) but is no longer the load-bearing near-term recommendation this section originally made it.
+Codex/Gemini/OpenClaw are unaffected by this addendum — their tier-1 URL capture already worked before this
+date; only Claude's `headlessLoginUrlUnsupported` gate changed.
+
 ---
 
 ## Appendix: source material

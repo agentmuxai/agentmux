@@ -520,8 +520,11 @@ export class AuthFlowController {
     }
 
     /** Seed-from-global accepted — the agent's isolated dir now holds the
-     *  user's valid global credential, so auth is satisfied WITHOUT in-app
-     *  OAuth (the dead end for Claude v2.1.x; SPEC_HOST_CLI_LOGIN_CAPTURE §0).
+     *  user's valid global credential, so auth is satisfied WITHOUT running
+     *  a fresh OAuth — tier 2's fast path (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md
+     *  §3.1), offered alongside tier 1's in-app session rather than as its
+     *  replacement (it only WAS the replacement while in-app OAuth was a
+     *  dead end for Claude v2.1.183 — SPEC_HOST_CLI_LOGIN_CAPTURE §0).
      *  The seed RPC itself is fired by the view (PreLaunchAuthPanel via the
      *  seed-global-login flow); this records the success in the state machine
      *  so the reducer transitions to `ready` and the Launch button enables.
