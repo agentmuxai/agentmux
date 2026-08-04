@@ -193,6 +193,18 @@ in tension with that from the start once any sub-component could also wrap.
 | `frontend/app/view/agent/styles/_composer-strip.scss` | `.agent-composer-strip`: grid (+ 07-30's `≤480px` 2-row swap) → permanent wrapping flex, left-justified, no height cap (see §6). Removed `grid-area`/`justify-self` from all three zones. `.agent-composer-strip-controls`/`-right` gained their own `flex-wrap: wrap` (§6, Codex P1). Shed queries (auth/badge/controls-cap) moved from `300/260/220px` to `220/180/150px` to match the extra line of headroom. |
 | `frontend/app/view/agent/components/AgentComposerStrip.tsx` | No structural change — updated stale comments referencing the old centered-grid design to describe the new left-justified flow. |
 
+## Addendum 2026-08-03 (later same day) — restore true-centered stats at the widest tier
+
+User feedback, same day: Goal 1 above ("always left-justify... no centering... at any tier") went further than intended. The narrow-tier fix (flex-wrap, no hard height cap, internal wrap on `-controls`/`-right`) is real and stays — it's what actually fixed the Codex P1 / ReAgent P2 clipping bugs in §6. But left-justifying at *every* width, including wide panes with a full line of room to spare, silently dropped the true-centered stats zone from `SPEC_COMPOSER_STRIP_LAYOUT_MIC_CENTER_MODEL_DEFAULTS_2026_07_10.md` as a side effect of the fix, not a deliberate goal — the user flagged this directly ("at the widest, it should be center justified, not left. only left justified on narrow panes").
+
+**Fix:** a new widest tier (`@container agent-pane (min-width: 482px)`, live-verified — see below) gives `.agent-composer-strip-controls` and `.agent-composer-strip-right` matching `flex: 1 1 0` (equal flex-basis → equal width) with the right zone's own content pinned via `justify-content: flex-end`, and centers `.agent-composer-strip-stats-zone` between them — the standard "true-center a middle flex item regardless of unequal left/right content width" pattern. Same visual result as the pre-08-03 `1fr auto 1fr` grid, without switching `display` back to grid and without touching `flex-wrap` (still `wrap`, inherited, unchanged) — so if this breakpoint is ever off for some other real content combination, it still safely reflows instead of clipping, the same safety net every other tier in this file already relies on.
+
+Below 482px: entirely unchanged from the original 08-03 fix above — left-justified, wrapping, no cap.
+
+**Files touched (this addendum):** `_composer-strip.scss` (new `≥482px` container query + updated comments), `AgentComposerStrip.tsx` (comment updates only, no structural change — same as the original fix).
+
+**Live-verified in `task dev`, this addendum (closing the outstanding gap the original 08-03 fix explicitly left open):** first shipped as an estimated `640px`. Live testing in a real agent pane found the actual 1-line/2-line wrap boundary sits at ~482px — 640px left a ~160px "dead zone" (482-640px) where content genuinely fit on one line but the breakpoint hadn't kicked in yet, so it rendered left-justified when it should have stayed centered. Corrected to `482px`, matching the real measured wrap point, so centering now holds for every width where content is actually one line and only switches to left-justified exactly when a 2nd line appears — the behavior requested. Re-verify if the strip's typical content (model name length, stats width) changes meaningfully in the future, since this value is empirical, not derived from a formula.
+
 ## Verification performed
 
 - `npx stylelint frontend/app/view/agent/styles/_composer-strip.scss` — one
