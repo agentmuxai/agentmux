@@ -279,7 +279,15 @@
     flex-wrap: wrap;
     align-items: center;
     gap: var(--space-1);
-    flex: 0 0 auto;
+    // flex-shrink 1 (not 0) — reagentx P1, PR #2408: flex-shrink:0 makes
+    // this item never squeeze below its content's natural width inside
+    // `.agent-composer-strip-right`, which makes the flex-wrap fallback
+    // above dead code (an item that never shrinks never reaches the point
+    // where its own internal wrap needs to trigger). `-controls`/`-right`
+    // get this behavior "for free" from the flex initial default
+    // (flex-shrink: 1) since neither sets `flex` in its own base rule —
+    // matching that here, explicitly, since this rule does set `flex`.
+    flex: 0 1 auto;
     min-width: 0;
 }
 
