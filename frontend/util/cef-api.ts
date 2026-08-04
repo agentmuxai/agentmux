@@ -684,6 +684,14 @@ export function buildCefApi(): AppApi {
         cancelCliLogin: async () => {
             await invokeCommand("cancel_cli_login");
         },
+        // Whether a runCliLogin child is still alive host-side. The child-exit
+        // half of the in-app login session's completion check
+        // (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.1) — see
+        // cli_login.rs's get_cli_login_status doc for why credential probing
+        // alone isn't enough (present-but-expired tokens false-positive it).
+        getCliLoginStatus: async () => {
+            return await invokeCommand<{ active: boolean }>("get_cli_login_status");
+        },
         seedProviderAuthFromGlobal: async (providerId: string, configDir?: string) => {
             return await invokeCommand<{ seeded: boolean; status: string; expiresAt?: number | null }>(
                 "seed_provider_auth_from_global",

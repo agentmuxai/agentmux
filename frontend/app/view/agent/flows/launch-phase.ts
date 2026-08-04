@@ -47,7 +47,9 @@ export type LaunchPhase =
      *  warning and stops, it never opens anything on its own. */
     | { kind: "auth-expired" }
     /** Tier 1's PTY/pipe URL-capture attempt — only reachable for providers
-     *  where `headlessLoginUrlUnsupported` is NOT set (Codex/Gemini/OpenClaw).
+     *  where `headlessLoginUrlUnsupported` is NOT set (Codex/Gemini/OpenClaw,
+     *  and since SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.2 Claude too —
+     *  its pinned CLI 2.1.198+ prints the authorize URL under our PTY spawn).
      *  See catalog.ts and cli_login.rs's URL_CAPTURE_TIMEOUT_SECS. */
     | { kind: "waiting-for-login-link"; deadlineMs: number }
     | { kind: "opening-login-terminal" }

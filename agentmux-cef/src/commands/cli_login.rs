@@ -64,18 +64,22 @@ impl CliLoginStdin {
 const LOGIN_REAP_TIMEOUT_SECS: u64 = 6 * 60;
 
 /// Cap on how long run_cli_login_pty blocks waiting for a scrapeable OAuth
-/// URL before giving up and returning auth_url=None. Frontend callers that
-/// know in advance a provider never prints one (Claude — see catalog.ts's
-/// headlessLoginUrlUnsupported flag) skip this call entirely via
-/// runProviderLogin's skipTier1, so in practice this only bounds providers
-/// that plausibly DO print a URL (Codex/Gemini/OpenClaw).
+/// URL before giving up and returning auth_url=None. Bounds every provider
+/// that plausibly prints a URL — Codex/Gemini/OpenClaw, and since
+/// SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.2 Claude as well: the
+/// pinned CLI (2.1.198+) prints the full authorize URL
+/// (`https://claude.com/cai/oauth/authorize?…`) under this PTY spawn,
+/// verified by live probes on 2026-08-03, so catalog.ts's
+/// headlessLoginUrlUnsupported flag was dropped for Claude and tier 1
+/// reaches this function again. An OLDER Claude CLI (≤2.1.183 behavior,
+/// which prints nothing) simply times out here — that's the frontend's
+/// behavior-gate: auth_url=None makes runProviderLogin fall through to
+/// tiers 2/3 exactly as before, with no CLI version check anywhere.
 ///
-/// Left at 15s, NOT shortened as a "safety margin" for Claude: Claude never
-/// reaches this function at all now (skipTier1 above), so shortening it
-/// would only affect Codex/Gemini/OpenClaw — providers that legitimately
-/// need up to this long to print their URL. reagent P1 on PR #2300 caught
-/// an earlier attempt to cut this to 5s, which would have killed valid
-/// in-progress OpenClaw logins and forced an unnecessary terminal fallback.
+/// Left at 15s, NOT shortened as a "safety margin": reagent P1 on PR #2300
+/// caught an earlier attempt to cut this to 5s, which would have killed
+/// valid in-progress OpenClaw logins (they can take close to the full 15s
+/// to print their URL) and forced an unnecessary terminal fallback.
 const URL_CAPTURE_TIMEOUT_SECS: u64 = 15;
 
 /// Spawn a CLI auth login flow.
@@ -687,8 +691,11 @@ async fn run_cli_login_pty(
                             t.len()
                         );
                     }
-                    // Still capture an OAuth URL for providers that DO print one
-                    // (Codex/Gemini/OpenClaw); a no-op for Claude v2.1.x.
+                    // Capture the OAuth URL for providers that print one —
+                    // Codex/Gemini/OpenClaw, and Claude 2.1.198+ (its "If the
+                    // browser didn't open, visit: https://claude.com/cai/oauth/
+                    // authorize?…" fallback line, sometimes OSC-8-hyperlinked;
+                    // SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §2).
                     if let Some(tx) = url_tx.take() {
                         if let Some(u) = extract_url(&line) {
                             let _ = tx.send(Some(u));
@@ -937,6 +944,29 @@ pub fn cancel_cli_login(state: &Arc<AppState>) -> Result<serde_json::Value, Stri
         }
     }
     Ok(serde_json::Value::Null)
+}
+
+/// Report whether a CLI login child is still in flight.
+///
+/// `active` is derived from the `cli_login_stdin` slot, which both spawn
+/// transports (pipe and PTY) populate at spawn and whose reaper task clears
+/// on child exit / cancel / reap-timeout — generation-guarded, so a
+/// superseding login that repopulated the slot correctly reads as active.
+///
+/// Added for the in-app Claude login session
+/// (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.1): tier-1 completion is
+/// "child exited successfully AND credential material exists in the isolated
+/// dir". The frontend already probes the credential half via
+/// CheckCliAuthCommand against the isolated CLAUDE_CONFIG_DIR; this supplies
+/// the child-exit half, which run_cli_login can't return (it responds as
+/// soon as the URL is captured, while the child lives on). Without it, a
+/// reconnect into an EXISTING account dir would false-positive on the very
+/// first credential probe (a present-but-expired token still reports
+/// "authenticated" — see force-login.ts's doc comment) and reap the login
+/// child before the user ever finished authorizing.
+pub fn get_cli_login_status(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
+    let active = state.cli_login_stdin.lock().is_some();
+    Ok(serde_json::json!({ "active": active }))
 }
 
 /// Single-quote a value for embedding in the POSIX launch script
@@ -1200,19 +1230,73 @@ mod redact_tests {
 mod url_capture_timeout_tests {
     use super::URL_CAPTURE_TIMEOUT_SECS;
 
-    // Regression guard for the deterministic-login-UX fix: Claude no longer
-    // reaches this function at all (catalog.ts's headlessLoginUrlUnsupported
-    // flag routes it around run_cli_login_pty entirely via skipTier1), so
-    // this constant only bounds providers that legitimately DO print a URL
-    // (Codex/Gemini/OpenClaw). reagent P1 on PR #2300: an earlier attempt to
-    // shorten this to 5s "as a safety margin" would have killed valid
-    // in-progress OpenClaw logins, which can take close to the full 15s to
-    // print their URL. Pinned at a sane, bounded value — not "short" for
-    // its own sake — so a future edit can't reintroduce that regression.
+    // Regression guard: this constant bounds every provider that prints a
+    // URL — Codex/Gemini/OpenClaw, and (since
+    // SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md revived tier 1) Claude
+    // 2.1.198+ too. It doubles as the frontend's behavior-gate window: an
+    // older Claude CLI that prints nothing times out here and
+    // runProviderLogin falls back to tiers 2/3. reagent P1 on PR #2300: an
+    // earlier attempt to shorten this to 5s "as a safety margin" would have
+    // killed valid in-progress OpenClaw logins, which can take close to the
+    // full 15s to print their URL. Pinned at a sane, bounded value — not
+    // "short" for its own sake — so a future edit can't reintroduce that
+    // regression.
     #[test]
     fn is_a_sane_bounded_value_for_providers_that_actually_print_a_url() {
         assert!(URL_CAPTURE_TIMEOUT_SECS > 0);
         assert!(URL_CAPTURE_TIMEOUT_SECS <= 30);
+    }
+}
+
+#[cfg(test)]
+mod extract_url_claude_authorize_tests {
+    use super::extract_url;
+
+    // Pins tier-1 URL capture for the revived in-app Claude login
+    // (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §2): the pinned CLI
+    // (2.1.198+) prints the PKCE authorize URL as a plain fallback line —
+    // and, in some renderings, OSC-8-hyperlink-wrapped. Both forms were
+    // observed in the 2026-08-03 live probes and both must yield the exact
+    // URL (not doubled, not truncated) or tier 1 silently falls back to the
+    // terminal tiers for a CLI that fully supports the in-app flow.
+    const AUTHORIZE_URL: &str = "https://claude.com/cai/oauth/authorize?code=true&client_id=abc-123&code_challenge=xyz_456&code_challenge_method=S256&state=st-789";
+
+    #[test]
+    fn captures_plain_fallback_line() {
+        let line = format!("If the browser didn't open, visit: {AUTHORIZE_URL}");
+        assert_eq!(extract_url(&line), Some(AUTHORIZE_URL.to_string()));
+    }
+
+    #[test]
+    fn captures_osc8_hyperlink_bel_terminated() {
+        // OSC-8 with the URL as both the sequence param and the visible link
+        // text (what the CLI actually emits) — the de-escaped visible text
+        // must win, single and intact.
+        let line = format!(
+            "If the browser didn't open, visit: \u{1b}]8;;{AUTHORIZE_URL}\u{7}{AUTHORIZE_URL}\u{1b}]8;;\u{7}"
+        );
+        assert_eq!(extract_url(&line), Some(AUTHORIZE_URL.to_string()));
+    }
+
+    #[test]
+    fn captures_osc8_hyperlink_st_terminated_with_non_url_link_text() {
+        // ST-terminated OSC-8 whose visible text is NOT the URL — the URI
+        // stashed from the escape sequence itself must be used as fallback.
+        let line = format!(
+            "Visit \u{1b}]8;;{AUTHORIZE_URL}\u{1b}\\this link\u{1b}]8;;\u{1b}\\ to sign in"
+        );
+        assert_eq!(extract_url(&line), Some(AUTHORIZE_URL.to_string()));
+    }
+
+    #[test]
+    fn captures_url_wrapped_in_csi_color_codes() {
+        let line = format!("\u{1b}[1m\u{1b}[36m{AUTHORIZE_URL}\u{1b}[0m");
+        assert_eq!(extract_url(&line), Some(AUTHORIZE_URL.to_string()));
+    }
+
+    #[test]
+    fn ignores_non_auth_urls() {
+        assert_eq!(extract_url("see https://claude.com/docs for details"), None);
     }
 }
 

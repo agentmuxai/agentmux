@@ -74,7 +74,11 @@ export async function forceProviderLogin(p: ForceLoginParams): Promise<ForceLogi
         return "opened";
     }
     // No URL captured — the CLI either crashed at spawn or runs a login TUI
-    // that prints no parseable URL (Claude Code v2.1.x). Nothing opened.
+    // that prints no parseable URL (e.g. Claude Code ≤2.1.183; the pinned
+    // 2.1.198+ DOES print one — SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md
+    // §2 — so hitting this for Claude today means an older/odd CLI, and the
+    // behavior-gate falls through to runProviderLogin's tiers 2/3). Nothing
+    // opened.
     log("auth", "no login URL captured from the CLI — nothing was opened", "warn");
     return "no-url";
 }
