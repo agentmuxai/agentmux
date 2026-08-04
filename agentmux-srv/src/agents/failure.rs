@@ -199,11 +199,24 @@ pub fn classify(
     // agent pane got stuck showing a dead-end error with no way out (see
     // retro-agentu-0.54.9-stuck-error-2026-08-03.md).
     if hay.contains("bind an account for this provider in the armory") {
+        // codex P2 on PR #2413: this branch matches EVERY oauth-class
+        // provider's MissingCredentials refusal (Codex, Gemini, OpenClaw,
+        // Copilot — not just Claude), but a prior version of this message
+        // hardcoded "No Claude account is bound". Extract the provider id
+        // from the gate's own wording ("no credentials for {provider}: …")
+        // instead of assuming — falls back to generic phrasing if the
+        // extraction ever misses (wording drift in errors.rs), rather than
+        // asserting a specific, possibly wrong, provider name.
+        let provider_phrase = extract_spawn_gate_provider(&combined)
+            .map(|p| format!("No {p} account"))
+            .unwrap_or_else(|| "No account".to_string());
         return build(
             FailureClass::Auth,
             "No account linked",
-            "No Claude account is bound to this agent — the spawn was refused before it could run. \
-             Sign in to link one.",
+            &format!(
+                "{provider_phrase} is bound to this agent — the spawn was refused before it could run. \
+                 Sign in to link one."
+            ),
             false,
             exit_code,
             signal,
@@ -342,6 +355,26 @@ fn build(
         signal,
         stderr_tail: tail.to_string(),
         retryable,
+    }
+}
+
+/// Pulls the provider id out of `SpawnGateError::MissingCredentials`'s own
+/// Display wording ("no credentials for {provider}: the bound account was
+/// deleted or is unresolvable. Bind an account for this provider in the
+/// Armory." — identity/resolver/errors.rs). Returns `None` on any mismatch
+/// (e.g. that wording drifts) rather than guessing — callers fall back to
+/// generic phrasing instead of asserting a specific, possibly wrong,
+/// provider name.
+fn extract_spawn_gate_provider(combined: &str) -> Option<String> {
+    let marker = "no credentials for ";
+    let start = combined.find(marker)? + marker.len();
+    let rest = &combined[start..];
+    let end = rest.find(':')?;
+    let provider = rest[..end].trim();
+    if provider.is_empty() {
+        None
+    } else {
+        Some(provider.to_string())
     }
 }
 
@@ -584,6 +617,25 @@ mod tests {
         });
         let f = classify(Some(1), None, "", Some(&frame));
         assert_eq!(f.code, FailureClass::Auth);
+        assert!(f.detail.contains("claude"), "detail: {}", f.detail);
+    }
+
+    #[test]
+    fn spawn_gate_missing_credentials_names_the_actual_provider_not_claude() {
+        // codex P2 on PR #2413: this branch matches EVERY oauth-class
+        // provider's refusal, not just Claude's — a prior version
+        // hardcoded "No Claude account is bound" regardless of which
+        // provider the gate actually named.
+        let frame = json!({
+            "type": "result",
+            "is_error": true,
+            "subtype": "error_during_execution",
+            "error": { "message": "[AgentMux] no credentials for gemini: the bound account was deleted or is unresolvable. Bind an account for this provider in the Armory." }
+        });
+        let f = classify(Some(1), None, "", Some(&frame));
+        assert_eq!(f.code, FailureClass::Auth);
+        assert!(f.detail.contains("gemini"), "detail: {}", f.detail);
+        assert!(!f.detail.contains("Claude"), "detail: {}", f.detail);
     }
 
     #[test]
@@ -628,6 +680,21 @@ mod tests {
         assert_eq!(t.lines().count(), 5);
         assert!(t.contains("line99"));
         assert!(!t.contains("line0\n"));
+    }
+
+    #[test]
+    fn extract_spawn_gate_provider_reads_the_provider_out_of_the_gate_wording() {
+        assert_eq!(
+            extract_spawn_gate_provider(
+                "no credentials for codex: the bound account was deleted or is unresolvable."
+            ),
+            Some("codex".to_string()),
+        );
+    }
+
+    #[test]
+    fn extract_spawn_gate_provider_returns_none_on_wording_mismatch() {
+        assert_eq!(extract_spawn_gate_provider("some unrelated error text"), None);
     }
 
     #[test]

@@ -254,6 +254,7 @@ describe("useAgentControllerStatus — in-app login session (SPEC_INAPP_CLAUDE_O
         // exactly like tiers 2/3 — relogin() must not require a distinct
         // completion poll for it to recognize success.
         hub.runProviderLogin.mockImplementation(async (opts: any) => {
+            opts.setAuthUrl?.("https://claude.com/cai/oauth/authorize?code=true");
             opts.onAccountRegistered?.("acct-inapp", "/tmp/acct-inapp");
             return "inapp-success";
         });
@@ -268,12 +269,19 @@ describe("useAgentControllerStatus — in-app login session (SPEC_INAPP_CLAUDE_O
 
             expect(RpcApi.ControllerResyncCommand).toHaveBeenCalled();
             expect(status.authNotice()).toBeNull();
+            // codex P2 on PR #2413: AuthUrlBox must not stay mounted (still
+            // offering paste/cancel/"use terminal instead") after a login
+            // that already succeeded.
+            expect(status.authUrl()).toBeNull();
             dispose();
         });
     });
 
-    it("'inapp-timeout' surfaces a notice pointing back at the still-open login, not a generic failure", async () => {
-        hub.runProviderLogin.mockResolvedValue("inapp-timeout");
+    it("'inapp-timeout' surfaces a notice pointing back at the still-open login, not a generic failure, and clears the now-dead auth URL", async () => {
+        hub.runProviderLogin.mockImplementation(async (opts: any) => {
+            opts.setAuthUrl?.("https://claude.com/cai/oauth/authorize?code=true");
+            return "inapp-timeout";
+        });
 
         await createRoot(async (dispose) => {
             const status = useAgentControllerStatus({
@@ -285,6 +293,51 @@ describe("useAgentControllerStatus — in-app login session (SPEC_INAPP_CLAUDE_O
 
             expect(status.authNotice()).toMatch(/login link timed out/i);
             expect(RpcApi.ControllerResyncCommand).not.toHaveBeenCalled();
+            // codex P2 on PR #2413: runProviderLogin already cancelled and
+            // reaped the login child by the time it returns "inapp-timeout"
+            // — the URL/paste box must not stay mounted implying it still
+            // works (a paste at this point goes nowhere).
+            expect(status.authUrl()).toBeNull();
+            dispose();
+        });
+    });
+
+    it("useTerminalInstead waits for the in-flight relogin to actually finish before starting the terminal flow, even past a short fixed bound (codex P2 on PR #2413)", async () => {
+        let resolveFirstAttempt: (v: string) => void;
+        const firstAttempt = new Promise<string>((res) => { resolveFirstAttempt = res; });
+        let secondAttemptStarted = false;
+
+        hub.runProviderLogin
+            .mockImplementationOnce(() => firstAttempt) // relogin()'s own call — held open
+            .mockImplementationOnce(async () => {
+                secondAttemptStarted = true;
+                return "terminal-success";
+            }); // loginViaTerminal()'s call, fired from useTerminalInstead
+
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({
+                blockId: "block-1",
+                provider: () => claude,
+                log: () => {},
+            });
+
+            const reloginPromise = status.relogin({ retryAfterLogin: false });
+            const terminalPromise = status.useTerminalInstead();
+
+            // Held well past the old fixed ~4.5s bound (simulated instantly
+            // here since runProviderLogin is mocked, not timed) — the
+            // second attempt must NOT have started while the first is
+            // still unresolved. Flush several microtask ticks (relogin()'s
+            // own setup does a few awaited hops before reaching
+            // runProviderLogin) rather than asserting after just one.
+            for (let i = 0; i < 10; i++) await Promise.resolve();
+            expect(secondAttemptStarted).toBe(false);
+
+            resolveFirstAttempt!("inapp-timeout");
+            await reloginPromise;
+            await terminalPromise;
+
+            expect(secondAttemptStarted).toBe(true);
             dispose();
         });
     });
