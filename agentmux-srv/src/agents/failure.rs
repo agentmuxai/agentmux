@@ -184,6 +184,32 @@ pub fn classify(
             &tail,
         );
     }
+    // The identity spawn gate's own refusal (identity/resolver/errors.rs's
+    // `SpawnGateError::MissingCredentials` Display impl — a deliberate,
+    // spec-owned wording per SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md
+    // §2.2, not third-party CLI/API output, so matching on it is as stable
+    // as matching our own code). This never reaches the API at all — the
+    // spawn was refused before any CLI process existed to report a 401 —
+    // so it's checked separately from the 401 branch below with its own
+    // wording, but classifies the same way: no account bound is exactly as
+    // actionable as a rejected credential, and needs the same relogin UI.
+    // Before this, the message had no recognized keyword and fell through
+    // to `UnknownNonZero`, which offers only "Retry" — a retry can never
+    // succeed against a gate that blocks every respawn identically, so the
+    // agent pane got stuck showing a dead-end error with no way out (see
+    // retro-agentu-0.54.9-stuck-error-2026-08-03.md).
+    if hay.contains("bind an account for this provider in the armory") {
+        return build(
+            FailureClass::Auth,
+            "No account linked",
+            "No Claude account is bound to this agent — the spawn was refused before it could run. \
+             Sign in to link one.",
+            false,
+            exit_code,
+            signal,
+            &tail,
+        );
+    }
     if hay.contains("authentication_error")
         || hay.contains("authentication_failed")
         || hay.contains("invalid authentication")
@@ -539,6 +565,39 @@ mod tests {
         // "API Error: 401" lowercased → "api error: 401" → matches "error: 401".
         let f = classify(Some(0), None, "api error: 401 invalid authentication credentials", None);
         assert_eq!(f.code, FailureClass::Auth);
+    }
+
+    #[test]
+    fn spawn_gate_missing_credentials_is_auth_not_unknown() {
+        // Exact frame shape agent_handlers/input.rs emits for a
+        // SpawnGateError::MissingCredentials refusal (identity/resolver/
+        // errors.rs's Display impl) — before this branch existed, this
+        // frame had no recognized keyword and fell through to
+        // UnknownNonZero, which offers only "Retry" against a gate that
+        // blocks every respawn identically: a permanently stuck pane with
+        // no relogin affordance (retro-agentu-0.54.9-stuck-error-2026-08-03.md).
+        let frame = json!({
+            "type": "result",
+            "is_error": true,
+            "subtype": "error_during_execution",
+            "error": { "message": "[AgentMux] no credentials for claude: the bound account was deleted or is unresolvable. Bind an account for this provider in the Armory." }
+        });
+        let f = classify(Some(1), None, "", Some(&frame));
+        assert_eq!(f.code, FailureClass::Auth);
+    }
+
+    #[test]
+    fn spawn_gate_injection_unavailable_is_not_auth() {
+        // The gate's OTHER error variant — a task-join/panic failure, not a
+        // credentials problem — must not be swept into the same match.
+        let frame = json!({
+            "type": "result",
+            "is_error": true,
+            "subtype": "error_during_execution",
+            "error": { "message": "[AgentMux] credential injection could not run (panic); the spawn was refused rather than falling back to the global CLI login. Retry, and check `muxlog auth` if it persists." }
+        });
+        let f = classify(Some(1), None, "", Some(&frame));
+        assert_eq!(f.code, FailureClass::UnknownNonZero);
     }
 
     #[test]
