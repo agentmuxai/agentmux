@@ -38,6 +38,14 @@ export interface ForceLoginParams {
     authEnv: Record<string, string>;
     setAuthUrl: (url: string | null) => void;
     log: LogFn;
+    /** Polled right before opening a browser/pane for a captured URL —
+     *  `runCliLogin` can take up to the 15s capture window, during which
+     *  the user may have clicked Cancel or "Use terminal instead". Without
+     *  this check, an already-abandoned attempt could still pop a browser
+     *  window open after the fact (reagent P2 on PR #2410). Optional:
+     *  callers with no cancellation concept (e.g. a one-shot `/login`) can
+     *  omit it. */
+    isCancelled?: () => boolean;
 }
 
 /**
@@ -50,7 +58,7 @@ export interface ForceLoginParams {
 export type ForceLoginOutcome = "opened" | "no-url";
 
 export async function forceProviderLogin(p: ForceLoginParams): Promise<ForceLoginOutcome> {
-    const { provider, cliPath, authEnv, setAuthUrl, log } = p;
+    const { provider, cliPath, authEnv, setAuthUrl, log, isCancelled } = p;
     log("auth", "re-login: forcing a fresh OAuth (bypassing the auth-status check)…");
 
     const url = await getApi().runCliLogin(
@@ -61,6 +69,20 @@ export async function forceProviderLogin(p: ForceLoginParams): Promise<ForceLogi
     );
 
     if (url) {
+        if (isCancelled?.()) {
+            // The attempt was abandoned while runCliLogin was still
+            // capturing (up to 15s) — don't pop a browser/pane open for a
+            // login the user already walked away from. Still returns
+            // "opened" (NOT "no-url"): a caller using the awaited in-app
+            // session (runProviderLogin's awaitTier1Completion) relies on
+            // that outcome to reach pollForInAppLoginCompletion, whose OWN
+            // isCancelled check (its very first statement) is what
+            // produces the correct "inapp-timeout" — routing through
+            // "no-url" here instead would fall through to tiers 2/3
+            // running anyway, which is wrong for an explicit cancel.
+            log("auth", "login was cancelled before a browser could be opened", "warn");
+            return "opened";
+        }
         setAuthUrl(url);
         const opened = await openOAuthBrowserPane(url);
         if (opened === "pane") {

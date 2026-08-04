@@ -479,6 +479,9 @@ async function startConnect(
             console.warn("[auth-diag] startConnect: requiresLoginTty login already in flight, ignoring click");
             return;
         }
+        // Declared outside the try so the catch clause below can also see
+        // it (a rejection can happen before or after it's assigned).
+        let actionToken: ReturnType<typeof controller.currentActionToken> | undefined;
         try {
             controller.dispatch({ type: "ConnectClicked" });
             // Mount the in-app login panel immediately, before any URL is
@@ -499,7 +502,7 @@ async function startConnect(
             // eventual markSeeded/failConnect would still land on top of
             // it once runProviderLogin resolves, clobbering the new
             // selection's state with the old attempt's outcome.
-            const actionToken = controller.currentActionToken();
+            actionToken = controller.currentActionToken();
             let registeredAccountId = "";
             const runAttempt = (skipTier1: boolean) =>
                 runProviderLogin({
@@ -541,12 +544,26 @@ async function startConnect(
                     // Releases the in-app/tier-3 waits when the user clicks
                     // Cancel (controller.wasCancelled — reagent P2 on #2262:
                     // state can leave `waiting` for non-cancel reasons, so
-                    // the explicit flag is the only trustworthy signal) OR
+                    // the explicit flag is the only trustworthy signal), OR
                     // clicks "Use terminal instead" (terminalRequested —
-                    // same release mechanism, different follow-up below).
-                    // runProviderLogin reaps the login CLI child itself on
-                    // its way out of the awaited in-app wait.
-                    isCancelled: () => controller.wasCancelled() || ui.terminalRequested(),
+                    // same release mechanism, different follow-up below), OR
+                    // the action token itself went stale (changed account/
+                    // provider selection, or the modal closed — the SAME
+                    // condition the post-hoc discard at isStaleAction(...)
+                    // below checks). Without isStaleAction here too, a
+                    // selection change didn't stop the poll — with
+                    // awaitTier1Completion, runProviderLogin persists+links
+                    // the account INTERNALLY before this call even returns,
+                    // so the post-hoc discard below only hid the stale
+                    // outcome from the reducer; it couldn't undo a link/
+                    // persist that had already happened for a selection the
+                    // user had already moved away from (reagent P2 on
+                    // PR #2410). runProviderLogin reaps the login CLI child
+                    // itself on its way out of the awaited in-app wait.
+                    isCancelled: () =>
+                        controller.wasCancelled() ||
+                        ui.terminalRequested() ||
+                        controller.isStaleAction(actionToken),
                     // Keep the live phase line honest across the real
                     // transitions (reagent P1 on PR #2300's onTierChange
                     // rationale, applied to this panel).
@@ -632,6 +649,22 @@ async function startConnect(
                         new Error("Login started, but AgentMux couldn't prepare an isolated account for it. Try again."),
                     );
                     break;
+            }
+        } catch (e) {
+            // reagent P2 on PR #2410: runAttempt (runProviderLogin ->
+            // forceProviderLogin -> getApi().runCliLogin) can REJECT outright
+            // — e.g. the PTY child fails to spawn, or the IPC call itself
+            // errors — not just resolve to a failure outcome string. This
+            // try previously had no catch at all, so a rejection here
+            // escaped past `void startConnect(...)`'s fire-and-forget call
+            // as an unhandled rejection, leaving the reducer stuck in the
+            // sentinel `waiting` state (the panel shows "requesting a
+            // sign-in link…" forever) with no failed banner and no way to
+            // retry short of closing the modal. Reap any partial child and
+            // report it the same way every other failure path here does.
+            getApi().cancelCliLogin().catch(() => {});
+            if (actionToken === undefined || !controller.isStaleAction(actionToken)) {
+                controller.failConnect(e);
             }
         } finally {
             controller.endTtyLogin();
