@@ -229,3 +229,63 @@ describe("useAgentControllerStatus — existingAccountIdFor canonicalizes provid
         });
     });
 });
+
+describe("useAgentControllerStatus — in-app login session (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.3 surface 2)", () => {
+    it("relogin() requests the awaited in-app session, not the hand-rolled 'opened' poll", async () => {
+        hub.runProviderLogin.mockResolvedValue("terminal-unavailable");
+
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({
+                blockId: "block-1",
+                provider: () => claude,
+                log: () => {},
+            });
+            await status.relogin({ retryAfterLogin: false });
+            expect(hub.runProviderLogin).toHaveBeenCalledWith(
+                expect.objectContaining({ awaitTier1Completion: true }),
+            );
+            dispose();
+        });
+    });
+
+    it("'inapp-success' drives the same success path as 'seeded'/'terminal-success' — refreshes the controller and clears the failure banner", async () => {
+        // runProviderLogin persists+links internally for this outcome (see
+        // its own doc comment) and reports back via onAccountRegistered
+        // exactly like tiers 2/3 — relogin() must not require a distinct
+        // completion poll for it to recognize success.
+        hub.runProviderLogin.mockImplementation(async (opts: any) => {
+            opts.onAccountRegistered?.("acct-inapp", "/tmp/acct-inapp");
+            return "inapp-success";
+        });
+
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({
+                blockId: "block-1",
+                provider: () => claude,
+                log: () => {},
+            });
+            await status.relogin({ retryAfterLogin: false });
+
+            expect(RpcApi.ControllerResyncCommand).toHaveBeenCalled();
+            expect(status.authNotice()).toBeNull();
+            dispose();
+        });
+    });
+
+    it("'inapp-timeout' surfaces a notice pointing back at the still-open login, not a generic failure", async () => {
+        hub.runProviderLogin.mockResolvedValue("inapp-timeout");
+
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({
+                blockId: "block-1",
+                provider: () => claude,
+                log: () => {},
+            });
+            await status.relogin({ retryAfterLogin: false });
+
+            expect(status.authNotice()).toMatch(/login link timed out/i);
+            expect(RpcApi.ControllerResyncCommand).not.toHaveBeenCalled();
+            dispose();
+        });
+    });
+});

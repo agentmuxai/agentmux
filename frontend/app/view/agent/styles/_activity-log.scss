@@ -175,4 +175,11 @@
         color: var(--accent-color);
         opacity: 0.8;
     }
+
+    .agent-auth-actions-row {
+        display: flex;
+        align-items: center;
+        gap: var(--space-1-5);
+        margin-top: var(--space-2);
+    }
 }

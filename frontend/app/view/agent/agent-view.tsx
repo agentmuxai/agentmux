@@ -1567,6 +1567,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     authNotice={status.authNotice}
                     onDismissAuthNotice={() => status.setAuthNotice(null)}
                     onCancelLogin={status.cancelLogin}
+                    onUseTerminal={status.useTerminalInstead}
                     authProviderId={provider()?.id ?? providerKey()}
                     onAgentErrorLogin={() => {
                         // Must match onLoginAgain above: the button is labeled "Login
