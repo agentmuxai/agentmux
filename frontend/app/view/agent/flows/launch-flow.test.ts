@@ -76,7 +76,11 @@ const claude = {
     authType: "oauth",
     authConfigDirEnvVar: "CLAUDE_CONFIG_DIR",
     requiresLoginTty: true,
-    headlessLoginUrlUnsupported: true,
+    // No headlessLoginUrlUnsupported: mirrors the real catalog since
+    // SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.2 dropped it for Claude
+    // (2.1.198+ prints the authorize URL). Inert for these tests either way —
+    // launch-flow no longer auto-logins (login starts only from the user's
+    // own click), so no tier-1 decision is ever made here.
 } as any;
 
 beforeEach(() => {

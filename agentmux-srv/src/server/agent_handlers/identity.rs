@@ -570,17 +570,22 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     });
                     // Spec §3 names unlink alongside delete: a live process
                     // for this agent still holds the unlinked account's
-                    // tokens until restarted — same disclosure chip.
-                    broker.publish(crate::backend::wps::WaveEvent {
-                        event: format!("agentcredentials:revoked:{}", cmd.agent_id),
-                        scopes: vec![],
-                        sender: String::new(),
-                        persist: 0,
-                        data: Some(json!({
-                            "credentialsRevoked": true,
-                            "provider": cmd.provider,
-                        })),
-                    });
+                    // tokens until restarted — same disclosure chip. Skipped
+                    // for `silent` unlinks (alias migration, not a real
+                    // unbind — see CommandUnlinkAgentIdentityData's doc
+                    // comment; reagent P2 on PR #2414).
+                    if !cmd.silent {
+                        broker.publish(crate::backend::wps::WaveEvent {
+                            event: format!("agentcredentials:revoked:{}", cmd.agent_id),
+                            scopes: vec![],
+                            sender: String::new(),
+                            persist: 0,
+                            data: Some(json!({
+                                "credentialsRevoked": true,
+                                "provider": cmd.provider,
+                            })),
+                        });
+                    }
                 }
                 Ok(Some(json!({ "unlinked": removed })))
             })

@@ -417,6 +417,7 @@ async fn route_command(
         }
         "run_cli_login" => commands::cli_login::run_cli_login(state.clone(), args).await,
         "cancel_cli_login" => commands::cli_login::cancel_cli_login(state),
+        "get_cli_login_status" => commands::cli_login::get_cli_login_status(state),
         "open_login_terminal" => commands::cli_login::open_login_terminal(args),
         "ensure_settings_file" => commands::platform::ensure_settings_file(state),
         "open_in_editor" => commands::platform::open_in_editor(args),

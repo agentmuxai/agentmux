@@ -31,13 +31,21 @@ import type { ProviderDefinition } from "../providers";
 import type { LogFn } from "../types";
 
 export interface ForceLoginParams {
-    provider: Pick<ProviderDefinition, "authLoginCommand" | "requiresLoginTty">;
+    provider: Pick<ProviderDefinition, "authLoginCommand" | "requiresLoginTty" | "authConfigDirEnvVar">;
     /** Resolved CLI path (from block meta `cmd`, set at launch). */
     cliPath: string;
     /** Auth env (e.g. CLAUDE_CONFIG_DIR) — from block meta `cmd:env`. */
     authEnv: Record<string, string>;
     setAuthUrl: (url: string | null) => void;
     log: LogFn;
+    /** Polled right before opening a browser/pane for a captured URL —
+     *  `runCliLogin` can take up to the 15s capture window, during which
+     *  the user may have clicked Cancel or "Use terminal instead". Without
+     *  this check, an already-abandoned attempt could still pop a browser
+     *  window open after the fact (reagent P2 on PR #2410). Optional:
+     *  callers with no cancellation concept (e.g. a one-shot `/login`) can
+     *  omit it. */
+    isCancelled?: () => boolean;
 }
 
 /**
@@ -50,7 +58,7 @@ export interface ForceLoginParams {
 export type ForceLoginOutcome = "opened" | "no-url";
 
 export async function forceProviderLogin(p: ForceLoginParams): Promise<ForceLoginOutcome> {
-    const { provider, cliPath, authEnv, setAuthUrl, log } = p;
+    const { provider, cliPath, authEnv, setAuthUrl, log, isCancelled } = p;
     log("auth", "re-login: forcing a fresh OAuth (bypassing the auth-status check)…");
 
     const url = await getApi().runCliLogin(
@@ -58,9 +66,24 @@ export async function forceProviderLogin(p: ForceLoginParams): Promise<ForceLogi
         provider.authLoginCommand,
         authEnv,
         provider.requiresLoginTty ?? false,
+        provider.authConfigDirEnvVar,
     );
 
     if (url) {
+        if (isCancelled?.()) {
+            // The attempt was abandoned while runCliLogin was still
+            // capturing (up to 15s) — don't pop a browser/pane open for a
+            // login the user already walked away from. Still returns
+            // "opened" (NOT "no-url"): a caller using the awaited in-app
+            // session (runProviderLogin's awaitTier1Completion) relies on
+            // that outcome to reach pollForInAppLoginCompletion, whose OWN
+            // isCancelled check (its very first statement) is what
+            // produces the correct "inapp-timeout" — routing through
+            // "no-url" here instead would fall through to tiers 2/3
+            // running anyway, which is wrong for an explicit cancel.
+            log("auth", "login was cancelled before a browser could be opened", "warn");
+            return "opened";
+        }
         setAuthUrl(url);
         const opened = await openOAuthBrowserPane(url);
         if (opened === "pane") {
@@ -74,7 +97,11 @@ export async function forceProviderLogin(p: ForceLoginParams): Promise<ForceLogi
         return "opened";
     }
     // No URL captured — the CLI either crashed at spawn or runs a login TUI
-    // that prints no parseable URL (Claude Code v2.1.x). Nothing opened.
+    // that prints no parseable URL (e.g. Claude Code ≤2.1.183; the pinned
+    // 2.1.198+ DOES print one — SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md
+    // §2 — so hitting this for Claude today means an older/odd CLI, and the
+    // behavior-gate falls through to runProviderLogin's tiers 2/3). Nothing
+    // opened.
     log("auth", "no login URL captured from the CLI — nothing was opened", "warn");
     return "no-url";
 }

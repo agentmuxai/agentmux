@@ -22,22 +22,32 @@
  *
  * Three tiers, each tried only if the previous one couldn't complete:
  *
- *   1. `forceProviderLogin` — spawn the CLI headless/piped and scrape a
- *      login URL from its output. Fast, and still the right answer for any
- *      provider whose CLI prints one. Claude Code v2.1.x never does: its
- *      OAuth flow opens the browser itself from inside the CLI process, and
- *      a piped/PTY spawn has no attached console for that call to succeed
- *      from — see retro-headless-login-browser-open-2026-07-20 §1. The
- *      account dir is minted (see below) and pointed at BEFORE this tier
- *      runs, for every oauth-class provider, so a provider whose tier 1
- *      DOES succeed (not `requiresLoginTty` — e.g. gemini/copilot) lands
- *      the credential in an isolated dir too, not an untracked shared one.
- *      Tier 1 doesn't confirm completion itself — it returns "opened"
- *      immediately so its caller can show the auth-url box and poll at its
- *      own pace — so the caller MUST call the exported
- *      `persistAndLinkAccount` once its own poll confirms success, or the
- *      minted account never actually gets persisted/linked (reagent P0 on
- *      #2263 — see that function's doc comment).
+ *   1. `forceProviderLogin` — spawn the CLI headless/piped (or on a PTY for
+ *      `requiresLoginTty` providers) and scrape a login URL from its
+ *      output. Fast, and the right answer for any provider whose CLI prints
+ *      one — which since SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md
+ *      includes Claude: the pinned CLI (2.1.198+) prints the full PKCE
+ *      authorize URL under our PTY spawn and accepts a pasted code on
+ *      stdin, superseding the earlier "v2.1.x never prints one" verdict
+ *      (retro-headless-login-browser-open-2026-07-20 §1, whose factual
+ *      basis was v2.1.183). Older CLIs that print nothing are covered by
+ *      the behavior-gate: no URL within the capture window → fall through
+ *      to tiers 2/3 unchanged, no version check anywhere. The account dir
+ *      is minted (see below) and pointed at BEFORE this tier runs, for
+ *      every oauth-class provider, so the credential lands in an isolated
+ *      dir, not an untracked shared one. Two completion contracts:
+ *        - Default: tier 1 doesn't confirm completion itself — it returns
+ *          "opened" immediately so its caller can show the auth-url box
+ *          and poll at its own pace — so the caller MUST call the exported
+ *          `persistAndLinkAccount` once its own poll confirms success, or
+ *          the minted account never actually gets persisted/linked
+ *          (reagent P0 on #2263 — see that function's doc comment).
+ *        - `awaitTier1Completion`: the call itself stays alive as the
+ *          in-app login session (spec §3.1) — it polls for the child
+ *          exiting AND credential material landing in the isolated dir,
+ *          persists+links on success, and returns "inapp-success" /
+ *          "inapp-timeout". For callers (PreLaunchAuthPanel) that want the
+ *          whole session managed here instead of hand-rolling the poll.
  *   2. `seedGlobalLogin` + `persistSeededAccount` — Claude only: check
  *      whether the user already has a VALID login in their global
  *      `~/.claude` (common: the CLI installed outside AgentMux, or a prior
@@ -132,6 +142,19 @@ export interface RunProviderLoginParams extends ForceLoginParams {
      *  point trying headless first). Default false — existing callers are
      *  unaffected. */
     skipTier1?: boolean;
+    /** When set and tier 1 captures a URL, do NOT return "opened" — stay in
+     *  the call as the in-app login session
+     *  (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.1): keep the login
+     *  child alive, poll for completion (child exit + credential material in
+     *  the minted isolated dir), persist+link the account on success, and
+     *  return "inapp-success" (or "inapp-timeout" on timeout/cancel). The
+     *  pasted-code path needs nothing extra here — the caller's auth-url UI
+     *  delivers codes to the SAME child via `setProviderAuth`, and this
+     *  poll observes the resulting completion. Default false: existing
+     *  callers that hand-roll their own "opened" completion poll
+     *  (login.ts, useAgentControllerStatus.ts's relogin, launch-flow.ts)
+     *  keep their contract unchanged. */
+    awaitTier1Completion?: boolean;
     /** Reports tier transitions as they actually happen, so a caller
      *  showing a phase/deadline (see launch-phase.ts) can keep it accurate
      *  instead of freezing on whatever it guessed before this call started.
@@ -143,11 +166,14 @@ export interface RunProviderLoginParams extends ForceLoginParams {
     onTierChange?: (event:
         | { tier: "fallback" } // tier 1 conclusively failed; trying tier 2 (fast) or heading to tier 3
         | { tier: "polling"; deadlineMs: number } // a terminal opened; now polling for completion
+        | { tier: "inapp-waiting"; deadlineMs: number } // awaitTier1Completion only: URL captured; now waiting for the in-app login to complete
     ) => void;
 }
 
 export type ProviderLoginOutcome =
-    | "opened" // tier 1: browser/pane opened with a captured URL
+    | "opened" // tier 1: browser/pane opened with a captured URL (caller polls for completion itself)
+    | "inapp-success" // tier 1 + awaitTier1Completion: in-app login completed (child done, credential landed) and the account was persisted/linked here
+    | "inapp-timeout" // tier 1 + awaitTier1Completion: URL captured, but no completion within the window (or cancelled) — no automatic tier 2/3 fallback; the user already has the URL in hand
     | "seeded" // tier 2: valid global login copied into a real account, automatically
     | "terminal-success" // tier 3: terminal login completed and was detected
     | "terminal-timeout" // tier 3: terminal opened, but no login within 5 min (or cancelled)
@@ -249,6 +275,138 @@ async function pollForCliAuthReady(
     return false;
 }
 
+/** Ceiling on the awaited in-app login session (`awaitTier1Completion`).
+ *  Matches the 5-minute window every other completion poll in this file
+ *  uses, and deliberately sits BELOW the host's own login-child reap
+ *  backstop (cli_login.rs's LOGIN_REAP_TIMEOUT_SECS, 6 min) so this poll —
+ *  which also reaps on its way out — always wins the normal cases and the
+ *  host backstop only covers a vanished frontend driver. The spec's "no
+ *  fixed window, session lives as long as the panel is open" ideal (§3.1)
+ *  would need that host backstop lifted/refreshed first; until then a
+ *  bounded window that the caller can renew (by retrying) is the honest
+ *  contract. */
+const INAPP_COMPLETION_TIMEOUT_MS = 5 * 60 * 1_000;
+
+/** Completion detector for the awaited in-app login session
+ *  (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.1): the login is done
+ *  when the spawned login child has EXITED, credential material exists in
+ *  the isolated dir (probed via the CLI's own auth-check command, same as
+ *  `pollForCliAuthReady`), AND either that credential is the one THIS
+ *  attempt wrote (`credential_changed`, host-tracked against a baseline
+ *  captured before spawn) OR the account genuinely wasn't authenticated
+ *  before this attempt started (`initialAuthed`, captured up front here).
+ *  Why the OR, not just `credential_changed` alone (reagent P1 on PR #2410,
+ *  second round): `credential_changed` is FILE-based
+ *  (`cli_login_cred_baseline`'s mtime check), but on macOS the Claude CLI
+ *  can update credentials in the Keychain ("Claude Safe Storage") without
+ *  ever touching `.credentials.json` — the exact case
+ *  `cli_handlers.rs:393-416`'s own auth-check already has to special-case.
+ *  Requiring `credential_changed` unconditionally made EVERY macOS Claude
+ *  login report `inapp-timeout` even on success, since the file the
+ *  baseline watches simply never appears. `initialAuthed` recovers the
+ *  common case (fresh mint / first-ever login: not authenticated before,
+ *  authenticated after — real evidence regardless of storage mechanism)
+ *  without needing macOS Keychain-diffing. The narrower case both checks
+ *  still miss — a macOS RECONNECT into an account whose Keychain entry
+ *  already looked valid before this attempt — degrades to the pre-fix
+ *  behavior (child-exit + authed alone) rather than a regression; closing
+ *  it fully needs Keychain change-detection, tracked as a follow-up.
+ *  Child exit is observed via `getCliLoginStatus` (the generation-guarded
+ *  host-side active flag + credential-mtime baseline); when the child is
+ *  gone but completion isn't confirmed yet, a couple of grace re-checks
+ *  cover the exit-vs-credential-write race before failing fast instead of
+ *  burning the full window on a login that already died.
+ *
+ *  `superseded` (codex P2 on PR #2410): the host's `cli_login_*` state is a
+ *  SINGLE global slot, not one per caller. If a different surface starts a
+ *  newer login while this poll is still running, the host's generation
+ *  counter advances and `active`/`credential_changed` from here on describe
+ *  the NEWER child, not this poll's own. `myGeneration` is captured
+ *  up-front (before the first poll delay — reagent P2, second round: a
+ *  post-sleep capture left a window where a supersede during that FIRST
+ *  sleep would be attributed to us) and this function stops trusting
+ *  `active`/`credential_changed` the moment a later read disagrees — the
+ *  caller must NOT call `cancelCliLogin()` in that case (it would kill the
+ *  newer, unrelated login instead of reaping this one, which is already
+ *  gone). */
+async function pollForInAppLoginCompletion(
+    cliPath: string,
+    authCheckArgs: string[],
+    authEnv: Record<string, string>,
+    isCancelled: () => boolean,
+    opts: { pollMs?: number; timeoutMs?: number } = {},
+): Promise<{ completed: boolean; superseded: boolean }> {
+    const pollMs = opts.pollMs ?? 2_000;
+    const timeoutMs = opts.timeoutMs ?? INAPP_COMPLETION_TIMEOUT_MS;
+    const deadline = performance.now() + timeoutMs;
+    let exitGraceChecksLeft = 2;
+
+    if (isCancelled()) return { completed: false, superseded: false };
+    let myGeneration: number | undefined;
+    try {
+        myGeneration = (await getApi().getCliLoginStatus()).generation;
+    } catch {
+        // Fall through — the in-loop read below will try again; a missed
+        // upfront capture just means supersede-detection starts one tick
+        // later, same as the pre-this-fix behavior.
+    }
+    let initialAuthed = false;
+    try {
+        const result = await RpcApi.CheckCliAuthCommand(
+            TabRpcClient,
+            { cli_path: cliPath, auth_check_args: authCheckArgs, auth_env: authEnv },
+            { timeout: 10000 },
+        );
+        initialAuthed = !!result.authenticated;
+    } catch {
+        // Treat as "wasn't authenticated" — the safer default for the OR
+        // condition below (fresh mints, the common case, correctly report
+        // false here anyway; erring this way just narrows the acceptance
+        // window rather than widening it).
+    }
+
+    while (performance.now() < deadline) {
+        if (isCancelled()) return { completed: false, superseded: false };
+        await sleep(pollMs);
+        if (isCancelled()) return { completed: false, superseded: false };
+        let childActive = true;
+        let credentialChanged = true;
+        try {
+            const status = await getApi().getCliLoginStatus();
+            if (myGeneration === undefined) {
+                myGeneration = status.generation;
+            } else if (status.generation !== myGeneration) {
+                // A different surface's login superseded ours — the host
+                // state we'd read from here on belongs to that newer
+                // attempt, not this one. Stop; the caller must not reap it.
+                return { completed: false, superseded: true };
+            }
+            childActive = status.active;
+            credentialChanged = status.credential_changed;
+        } catch {
+            // Treat as still-active on transient IPC errors — erring toward
+            // "keep waiting" can cost one more poll tick; erring toward
+            // "exited" could fail a login that's still in progress.
+        }
+        let authed = false;
+        try {
+            const result = await RpcApi.CheckCliAuthCommand(
+                TabRpcClient,
+                { cli_path: cliPath, auth_check_args: authCheckArgs, auth_env: authEnv },
+                { timeout: 10000 },
+            );
+            authed = !!result.authenticated;
+        } catch {
+            // keep polling on transient RPC errors
+        }
+        if (!childActive) {
+            if (authed && (credentialChanged || !initialAuthed)) return { completed: true, superseded: false };
+            if (exitGraceChecksLeft-- <= 0) return { completed: false, superseded: false };
+        }
+    }
+    return { completed: false, superseded: false };
+}
+
 export async function runProviderLogin(p: RunProviderLoginParams): Promise<ProviderLoginOutcome> {
     // Mint the account dir ONCE, up front — before ANY tier runs — for
     // EVERY oauth-class provider, not just Claude. Account minting itself
@@ -289,8 +447,70 @@ export async function runProviderLogin(p: RunProviderLoginParams): Promise<Provi
     if (!p.skipTier1) {
         const tier1 = await forceProviderLogin({ ...p, authEnv: authEnvForTiers });
         if (tier1 === "opened") {
-            if (minted) p.onAccountRegistered?.(minted.accountId, minted.dir);
-            return "opened";
+            if (!(p.awaitTier1Completion && minted)) {
+                // Default contract: return immediately; the caller shows the
+                // auth-url box and runs its own completion poll +
+                // persistAndLinkAccount (see the tier-1 doc comment above).
+                // Also the fallback when the dir mint failed (minted null) —
+                // with no isolated dir there's nothing to poll or persist
+                // against, so the legacy contract is all we can offer.
+                if (minted) p.onAccountRegistered?.(minted.accountId, minted.dir);
+                return "opened";
+            }
+            // Awaited in-app session (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md
+            // §3.1): the URL is captured and surfaced (forceProviderLogin
+            // already called setAuthUrl + opened a browser); the login child
+            // is alive host-side, either auto-detecting the browser authorize
+            // itself (the happy path for Claude 2.1.198+) or waiting for a
+            // pasted code delivered via setProviderAuth. Stay here until the
+            // child exits and the credential lands in the minted dir.
+            p.onTierChange?.({
+                tier: "inapp-waiting",
+                deadlineMs: Date.now() + INAPP_COMPLETION_TIMEOUT_MS,
+            });
+            const isCancelled = p.isCancelled ?? (() => false);
+            const { completed, superseded } = await pollForInAppLoginCompletion(
+                p.cliPath,
+                p.provider.authCheckCommand,
+                authEnvForTiers,
+                isCancelled,
+            );
+            // Reap the login child on every exit path THIS ATTEMPT OWNS —
+            // idempotent and host-side (a no-op when the child already
+            // self-exited, the normal success case). On timeout/cancel this
+            // is what actually kills the abandoned child instead of leaving
+            // it to the host's 6-minute backstop. Skipped when superseded:
+            // the host's single global login slot now holds a DIFFERENT
+            // (newer) attempt from another surface — calling this would
+            // kill that unrelated login instead of reaping our own, which
+            // is already gone (codex P2 on PR #2410).
+            if (!superseded) {
+                await getApi().cancelCliLogin().catch(() => {});
+            }
+            if (!completed) return "inapp-timeout";
+            // Same persist + one-retry + loud-error contract as tiers 2/3
+            // below (reagent P2 / REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_
+            // WORKING_2026_07_27.md): the credential is genuinely on disk, so
+            // a persist failure is bookkeeping, not auth — return
+            // "inapp-success" regardless and let callers gate their success
+            // messaging on whether onAccountRegistered fired, exactly like
+            // the terminal-success contract.
+            let persisted = await persistSeededAccount(p.provider.id, minted.accountId, minted.dir, p.log);
+            if (!persisted) {
+                p.log("auth", "account registration failed — retrying once…", "warn");
+                persisted = await persistSeededAccount(p.provider.id, minted.accountId, minted.dir, p.log);
+            }
+            if (persisted) {
+                p.onAccountRegistered?.(minted.accountId, minted.dir);
+                await finalizeAccount(p, minted.accountId, minted.dir);
+            } else {
+                p.log(
+                    "auth",
+                    "your login succeeded, but AgentMux couldn't save the account record — it may still show as not logged in; try again in a moment",
+                    "error",
+                );
+            }
+            return "inapp-success";
         }
     }
 

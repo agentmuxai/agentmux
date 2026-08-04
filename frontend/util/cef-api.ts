@@ -673,8 +673,20 @@ export function buildCefApi(): AppApi {
         ensureAuthDir: async (providerId: string) => {
             return await invokeCommand<string>("ensure_auth_dir", { providerId });
         },
-        runCliLogin: async (cliPath: string, loginArgs: string[], authEnv: Record<string, string>, requiresTty?: boolean) => {
-            const result = await invokeCommand<{ auth_url: string | null } | string | null>("run_cli_login", { cliPath, loginArgs, authEnv, requiresTty: requiresTty ?? false });
+        runCliLogin: async (
+            cliPath: string,
+            loginArgs: string[],
+            authEnv: Record<string, string>,
+            requiresTty?: boolean,
+            authConfigDirEnvVar?: string,
+        ) => {
+            const result = await invokeCommand<{ auth_url: string | null } | string | null>("run_cli_login", {
+                cliPath,
+                loginArgs,
+                authEnv,
+                requiresTty: requiresTty ?? false,
+                authConfigDirEnvVar,
+            });
             // Backend now returns { auth_url } — extract for callers expecting just a URL
             if (result && typeof result === "object" && "auth_url" in result) {
                 return result.auth_url;
@@ -683,6 +695,16 @@ export function buildCefApi(): AppApi {
         },
         cancelCliLogin: async () => {
             await invokeCommand("cancel_cli_login");
+        },
+        // Whether a runCliLogin child is still alive host-side. The child-exit
+        // half of the in-app login session's completion check
+        // (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.1) — see
+        // cli_login.rs's get_cli_login_status doc for why credential probing
+        // alone isn't enough (present-but-expired tokens false-positive it).
+        getCliLoginStatus: async () => {
+            return await invokeCommand<{ active: boolean; credential_changed: boolean; generation: number }>(
+                "get_cli_login_status",
+            );
         },
         seedProviderAuthFromGlobal: async (providerId: string, configDir?: string) => {
             return await invokeCommand<{ seeded: boolean; status: string; expiresAt?: number | null }>(

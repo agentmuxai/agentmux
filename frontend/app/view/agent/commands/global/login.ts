@@ -149,8 +149,14 @@ export const loginCommand: SlashCommand = {
                         recheckAuthEnv = { ...authEnv, [prov.authConfigDirEnvVar]: dir };
                     }
                 },
-                // See catalog.ts's DEAD END note — skip tier 1's ~15s
-                // URL-capture wait for providers that can never produce one.
+                // Behavior-gate only: skip tier 1's ~15s URL-capture wait for
+                // providers whose CLI is documented to never print one. Since
+                // SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.2 dropped the
+                // flag for Claude (2.1.198+ prints the authorize URL under our
+                // PTY spawn), no catalog provider sets it — so /login now runs
+                // the in-app tier 1 for Claude too: the AuthUrlBox above the
+                // composer shows the URL + paste box, and the "opened" branch
+                // below polls for completion and persists the account.
                 skipTier1: prov.headlessLoginUrlUnsupported === true,
             });
             switch (outcome) {

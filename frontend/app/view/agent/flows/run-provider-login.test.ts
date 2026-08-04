@@ -20,6 +20,7 @@ const hub = vi.hoisted(() => ({
     runCliLogin: vi.fn(),
     checkCliAuth: vi.fn(),
     cancelCliLogin: vi.fn(),
+    getCliLoginStatus: vi.fn(),
     openPane: vi.fn(),
     seedProviderAuthFromGlobal: vi.fn(),
     openLoginTerminal: vi.fn(),
@@ -35,6 +36,7 @@ vi.mock("@/app/store/global", () => ({
         runCliLogin: hub.runCliLogin,
         checkCliAuth: hub.checkCliAuth,
         cancelCliLogin: hub.cancelCliLogin,
+        getCliLoginStatus: hub.getCliLoginStatus,
         seedProviderAuthFromGlobal: hub.seedProviderAuthFromGlobal,
         openLoginTerminal: hub.openLoginTerminal,
     }),
@@ -75,6 +77,7 @@ beforeEach(() => {
     hub.runCliLogin.mockReset();
     hub.checkCliAuth.mockReset();
     hub.cancelCliLogin.mockReset().mockResolvedValue(undefined);
+    hub.getCliLoginStatus.mockReset().mockResolvedValue({ active: false, credential_changed: true });
     hub.openPane.mockReset().mockResolvedValue("pane");
     hub.seedProviderAuthFromGlobal.mockReset();
     hub.openLoginTerminal.mockReset().mockResolvedValue({ opened: true });
@@ -133,6 +136,10 @@ describe("runProviderLogin", () => {
             ["auth", "login"],
             { CLAUDE_CONFIG_DIR: MINTED.dir },
             true,
+            // reagent P1 on PR #2410 (second round): threaded through so
+            // capture_cred_baseline checks the right provider's config-dir
+            // key, not a hardcoded "CLAUDE_CONFIG_DIR".
+            "CLAUDE_CONFIG_DIR",
         );
     });
 
@@ -626,5 +633,374 @@ describe("runProviderLogin", () => {
         await promise;
 
         expect(onAccountRegistered).toHaveBeenCalledWith(MINTED.accountId, MINTED.dir);
+    });
+});
+
+// The awaited in-app login session (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md
+// §3.1): with `awaitTier1Completion`, a tier-1 URL capture doesn't return
+// "opened" — the call stays alive as the session, polling for the login child
+// exiting AND credential material landing in the minted isolated dir, then
+// persists+links the account itself and resolves "inapp-success"/
+// "inapp-timeout". The URL the pinned Claude CLI (2.1.198+) actually prints is
+// used throughout; host-side capture of that URL (incl. OSC-8-wrapped) is
+// pinned separately in cli_login.rs's extract_url_claude_authorize_tests.
+describe("runProviderLogin — awaited in-app session (awaitTier1Completion)", () => {
+    const CLAUDE_AUTHORIZE_URL =
+        "https://claude.com/cai/oauth/authorize?code=true&client_id=abc&code_challenge=xyz&state=st";
+
+    it("returns 'inapp-success' once the login child has exited and the credential is present — persists and links the account itself, reaps the child, and never touches tiers 2/3", async () => {
+        vi.useFakeTimers();
+        hub.runCliLogin.mockResolvedValue(CLAUDE_AUTHORIZE_URL);
+        hub.getCliLoginStatus.mockResolvedValue({ active: false, credential_changed: true }); // child exited, credential written
+        hub.checkCliAuthCommand.mockResolvedValue({ authenticated: true }); // credential landed
+        const onAccountRegistered = vi.fn();
+        const setAuthUrl = vi.fn();
+
+        const promise = runProviderLogin({
+            provider: claude,
+            cliPath: "x",
+            authEnv: { CLAUDE_CONFIG_DIR: "C:/auth" },
+            setAuthUrl,
+            log: vi.fn(),
+            awaitTier1Completion: true,
+            onAccountRegistered,
+            linkTarget: { blockId: "block-1", agentDefinitionId: "def-1" },
+        });
+        await vi.advanceTimersByTimeAsync(2_000);
+        const outcome = await promise;
+
+        expect(outcome).toBe("inapp-success");
+        // The captured URL was surfaced for the caller's auth-url UI.
+        expect(setAuthUrl).toHaveBeenCalledWith(CLAUDE_AUTHORIZE_URL);
+        // The completion poll asked the CLI about the MINTED isolated dir.
+        expect(hub.checkCliAuthCommand).toHaveBeenCalledWith(
+            {},
+            { cli_path: "x", auth_check_args: ["auth", "status"], auth_env: { CLAUDE_CONFIG_DIR: MINTED.dir } },
+            { timeout: 10000 },
+        );
+        // Persisted + linked HERE (unlike the legacy "opened" contract,
+        // where the caller does this via persistAndLinkAccount).
+        expect(hub.upsertIdentityAccount).toHaveBeenCalledWith(
+            {},
+            expect.objectContaining({ id: MINTED.accountId, provider: "claude", kind: "oauth" }),
+        );
+        expect(hub.linkAgentIdentity).toHaveBeenCalledWith({}, {
+            agent_id: "def-1",
+            account_id: MINTED.accountId,
+            provider: "claude",
+        });
+        expect(onAccountRegistered).toHaveBeenCalledWith(MINTED.accountId, MINTED.dir);
+        // Child reaped on the way out (idempotent host call), and no
+        // fallback tier ever ran.
+        expect(hub.cancelCliLogin).toHaveBeenCalledTimes(1);
+        expect(hub.seedProviderAuthFromGlobal).not.toHaveBeenCalled();
+        expect(hub.openLoginTerminal).not.toHaveBeenCalled();
+    });
+
+    it("completion requires the CHILD EXIT, not just a positive credential probe — a reconnect into an existing dir whose stale token reports 'authenticated' must NOT complete (or reap the child) while the login is still running", async () => {
+        vi.useFakeTimers();
+        hub.runCliLogin.mockResolvedValue(CLAUDE_AUTHORIZE_URL);
+        // Stale-credential reconnect: the auth probe says "authenticated"
+        // from tick 1 (present-but-expired token — force-login.ts's
+        // documented false positive), but the login child is still alive
+        // for two ticks before finishing.
+        hub.checkCliAuthCommand.mockResolvedValue({ authenticated: true });
+        hub.getCliLoginStatus
+            .mockResolvedValueOnce({ active: true, credential_changed: true })
+            .mockResolvedValueOnce({ active: true, credential_changed: true })
+            .mockResolvedValueOnce({ active: false, credential_changed: true });
+
+        const promise = runProviderLogin({
+            provider: claude,
+            cliPath: "x",
+            authEnv: { CLAUDE_CONFIG_DIR: "C:/auth" },
+            setAuthUrl: vi.fn(),
+            log: vi.fn(),
+            awaitTier1Completion: true,
+            existingAccountId: "acct-existing",
+        });
+        await vi.advanceTimersByTimeAsync(6_000);
+        const outcome = await promise;
+
+        expect(outcome).toBe("inapp-success");
+        // Three status probes = it genuinely waited for the child to exit
+        // instead of trusting the first "authenticated" tick.
+        expect(hub.getCliLoginStatus).toHaveBeenCalledTimes(3);
+    });
+
+    it("reagent P1 on PR #2410: a reconnect whose child crashes instantly must NOT report success off the OLD stale-but-still-shaped credential — completion also requires credential_changed", async () => {
+        vi.useFakeTimers();
+        hub.runCliLogin.mockResolvedValue(CLAUDE_AUTHORIZE_URL);
+        // The reconnect's stale token already on disk BEFORE this attempt
+        // started reports "authenticated" throughout — present-but-expired
+        // tokens don't fail this local presence check (force-login.ts's
+        // documented false positive) — but the child dies on tick 1 without
+        // ever touching the credential file, so credential_changed stays
+        // false the whole time.
+        hub.checkCliAuthCommand.mockResolvedValue({ authenticated: true });
+        hub.getCliLoginStatus.mockResolvedValue({ active: false, credential_changed: false });
+
+        const promise = runProviderLogin({
+            provider: claude,
+            cliPath: "x",
+            authEnv: { CLAUDE_CONFIG_DIR: "C:/auth" },
+            setAuthUrl: vi.fn(),
+            log: vi.fn(),
+            awaitTier1Completion: true,
+            existingAccountId: "acct-existing",
+        });
+        // 2 grace re-checks after the first child-gone observation, same
+        // window as the "no credential ever landing" case.
+        await vi.advanceTimersByTimeAsync(6_000);
+        const outcome = await promise;
+
+        expect(outcome).toBe("inapp-timeout");
+        expect(hub.upsertIdentityAccount).not.toHaveBeenCalled();
+    });
+
+    it("reagent P1 on PR #2410 (second round): a FRESH mint whose credential_changed never flips true (macOS Keychain-backed Claude login — no .credentials.json ever appears) still succeeds, because it wasn't authenticated before this attempt started", async () => {
+        vi.useFakeTimers();
+        hub.runCliLogin.mockResolvedValue(CLAUDE_AUTHORIZE_URL);
+        // Never authenticated before (fresh mint) — the upfront probe
+        // captures this — and the login writes to the macOS Keychain, so
+        // credential_changed (file-mtime based) stays false throughout.
+        hub.checkCliAuthCommand
+            .mockResolvedValueOnce({ authenticated: false }) // upfront capture
+            .mockResolvedValue({ authenticated: true }); // after the child exits
+        hub.getCliLoginStatus.mockResolvedValue({ active: false, credential_changed: false, generation: 1 });
+
+        const promise = runProviderLogin({
+            provider: claude,
+            cliPath: "x",
+            authEnv: { CLAUDE_CONFIG_DIR: "C:/auth" },
+            setAuthUrl: vi.fn(),
+            log: vi.fn(),
+            awaitTier1Completion: true,
+        });
+        await vi.advanceTimersByTimeAsync(2_000);
+        const outcome = await promise;
+
+        expect(outcome).toBe("inapp-success");
+    });
+
+    it("reagent P1 on PR #2410 (second round): a RECONNECT that was already authenticated before this attempt started still requires credential_changed — the Keychain fallback only covers the not-previously-authenticated case", async () => {
+        vi.useFakeTimers();
+        hub.runCliLogin.mockResolvedValue(CLAUDE_AUTHORIZE_URL);
+        // Already authenticated before this attempt (stale reconnect) —
+        // the upfront probe captures THAT — and credential_changed never
+        // flips true (crashed child, or the same macOS Keychain gap).
+        hub.checkCliAuthCommand.mockResolvedValue({ authenticated: true });
+        hub.getCliLoginStatus.mockResolvedValue({ active: false, credential_changed: false, generation: 1 });
+
+        const promise = runProviderLogin({
+            provider: claude,
+            cliPath: "x",
+            authEnv: { CLAUDE_CONFIG_DIR: "C:/auth" },
+            setAuthUrl: vi.fn(),
+            log: vi.fn(),
+            awaitTier1Completion: true,
+            existingAccountId: "acct-existing",
+        });
+        await vi.advanceTimersByTimeAsync(6_000);
+        const outcome = await promise;
+
+        expect(outcome).toBe("inapp-timeout");
+        expect(hub.upsertIdentityAccount).not.toHaveBeenCalled();
+    });
+
+    it("reagent P2 on PR #2410 (second round): captures the login generation BEFORE the first poll delay — a supersede during that very first sleep is still detected, not attributed to this attempt", async () => {
+        vi.useFakeTimers();
+        hub.runCliLogin.mockResolvedValue(CLAUDE_AUTHORIZE_URL);
+        hub.checkCliAuthCommand.mockResolvedValue({ authenticated: false });
+        hub.getCliLoginStatus
+            // Upfront capture, BEFORE any sleep — establishes generation 5
+            // as this attempt's own, before another surface can supersede.
+            .mockResolvedValueOnce({ active: true, credential_changed: true, generation: 5 })
+            // First in-loop read, AFTER the first sleep — a different
+            // surface has already superseded by generation 6.
+            .mockResolvedValueOnce({ active: false, credential_changed: true, generation: 6 });
+
+        const promise = runProviderLogin({
+            provider: claude,
+            cliPath: "x",
+            authEnv: { CLAUDE_CONFIG_DIR: "C:/auth" },
+            setAuthUrl: vi.fn(),
+            log: vi.fn(),
+            awaitTier1Completion: true,
+        });
+        await vi.advanceTimersByTimeAsync(2_000);
+        const outcome = await promise;
+
+        expect(outcome).toBe("inapp-timeout");
+        // The whole point: must not reap a login that isn't this attempt's.
+        expect(hub.cancelCliLogin).not.toHaveBeenCalled();
+    });
+
+    it("fails fast with 'inapp-timeout' when the child exits WITHOUT a credential ever landing (login crashed/failed) — after grace re-checks, well before the full window", async () => {
+        vi.useFakeTimers();
+        hub.runCliLogin.mockResolvedValue(CLAUDE_AUTHORIZE_URL);
+        hub.getCliLoginStatus.mockResolvedValue({ active: false, credential_changed: false });
+        hub.checkCliAuthCommand.mockResolvedValue({ authenticated: false });
+
+        const promise = runProviderLogin({
+            provider: claude,
+            cliPath: "x",
+            authEnv: { CLAUDE_CONFIG_DIR: "C:/auth" },
+            setAuthUrl: vi.fn(),
+            log: vi.fn(),
+            awaitTier1Completion: true,
+        });
+        // 2 grace re-checks after the first child-gone observation = 3
+        // poll ticks (6s), nowhere near the 5-minute window.
+        await vi.advanceTimersByTimeAsync(6_000);
+        const outcome = await promise;
+
+        expect(outcome).toBe("inapp-timeout");
+        expect(hub.upsertIdentityAccount).not.toHaveBeenCalled();
+        expect(hub.cancelCliLogin).toHaveBeenCalledTimes(1);
+        // No automatic tier 2/3 fallback — the user already has the URL.
+        expect(hub.seedProviderAuthFromGlobal).not.toHaveBeenCalled();
+        expect(hub.openLoginTerminal).not.toHaveBeenCalled();
+    });
+
+    it("returns 'inapp-timeout' promptly when cancelled, reaping the child", async () => {
+        hub.runCliLogin.mockResolvedValue(CLAUDE_AUTHORIZE_URL);
+
+        const outcome = await runProviderLogin({
+            provider: claude,
+            cliPath: "x",
+            authEnv: { CLAUDE_CONFIG_DIR: "C:/auth" },
+            setAuthUrl: vi.fn(),
+            log: vi.fn(),
+            awaitTier1Completion: true,
+            isCancelled: () => true,
+        });
+
+        expect(outcome).toBe("inapp-timeout");
+        expect(hub.upsertIdentityAccount).not.toHaveBeenCalled();
+        expect(hub.cancelCliLogin).toHaveBeenCalledTimes(1);
+    });
+
+    it("feature-gate: when NO URL is captured within the window (older CLI, ≤2.1.183 behavior), falls through to tier 2/3 exactly as without the flag — the in-app wait never starts", async () => {
+        hub.runCliLogin.mockResolvedValue(null);
+        hub.seedProviderAuthFromGlobal.mockResolvedValue({ seeded: true });
+
+        const outcome = await runProviderLogin({
+            provider: claude,
+            cliPath: "x",
+            authEnv: { CLAUDE_CONFIG_DIR: "C:/auth" },
+            setAuthUrl: vi.fn(),
+            log: vi.fn(),
+            awaitTier1Completion: true,
+        });
+
+        expect(outcome).toBe("seeded");
+        expect(hub.getCliLoginStatus).not.toHaveBeenCalled();
+        expect(hub.seedProviderAuthFromGlobal).toHaveBeenCalledWith("claude", MINTED.dir);
+    });
+
+    it("fires onTierChange({tier:'inapp-waiting', deadlineMs}) when the awaited session starts, so a caller's phase line can show a live deadline", async () => {
+        vi.useFakeTimers();
+        const before = Date.now();
+        hub.runCliLogin.mockResolvedValue(CLAUDE_AUTHORIZE_URL);
+        hub.getCliLoginStatus.mockResolvedValue({ active: false, credential_changed: true });
+        hub.checkCliAuthCommand.mockResolvedValue({ authenticated: true });
+        const onTierChange = vi.fn();
+
+        const promise = runProviderLogin({
+            provider: claude,
+            cliPath: "x",
+            authEnv: { CLAUDE_CONFIG_DIR: "C:/auth" },
+            setAuthUrl: vi.fn(),
+            log: vi.fn(),
+            awaitTier1Completion: true,
+            onTierChange,
+        });
+        await vi.advanceTimersByTimeAsync(2_000);
+        await promise;
+
+        const call = onTierChange.mock.calls.find((c) => c[0].tier === "inapp-waiting");
+        expect(call).toBeDefined();
+        const { deadlineMs } = call![0];
+        expect(deadlineMs).toBeGreaterThanOrEqual(before + 5 * 60 * 1000 - 1000);
+        expect(deadlineMs).toBeLessThanOrEqual(before + 5 * 60 * 1000 + 1000);
+    });
+
+    it("persist failure on both attempts still resolves 'inapp-success' (credential is genuinely on disk) but does NOT fire onAccountRegistered — callers gate their success messaging on that, same as the terminal-success contract", async () => {
+        vi.useFakeTimers();
+        hub.runCliLogin.mockResolvedValue(CLAUDE_AUTHORIZE_URL);
+        hub.getCliLoginStatus.mockResolvedValue({ active: false, credential_changed: true });
+        hub.checkCliAuthCommand.mockResolvedValue({ authenticated: true });
+        hub.upsertIdentityAccount.mockRejectedValue(new Error("db error"));
+        const onAccountRegistered = vi.fn();
+        const log = vi.fn();
+
+        const promise = runProviderLogin({
+            provider: claude,
+            cliPath: "x",
+            authEnv: { CLAUDE_CONFIG_DIR: "C:/auth" },
+            setAuthUrl: vi.fn(),
+            log,
+            awaitTier1Completion: true,
+            onAccountRegistered,
+        });
+        await vi.advanceTimersByTimeAsync(2_000);
+        const outcome = await promise;
+
+        expect(outcome).toBe("inapp-success");
+        expect(hub.upsertIdentityAccount).toHaveBeenCalledTimes(2); // one retry
+        expect(onAccountRegistered).not.toHaveBeenCalled();
+        expect(log).toHaveBeenCalledWith(
+            "auth",
+            expect.stringMatching(/couldn't save the account record/i),
+            "error",
+        );
+    });
+
+    it("downgrades to the legacy 'opened' contract when the account-dir mint failed — no isolated dir to poll or persist against", async () => {
+        hub.runCliLogin.mockResolvedValue(CLAUDE_AUTHORIZE_URL);
+        hub.ensureAccountDir.mockResolvedValue(null);
+
+        const outcome = await runProviderLogin({
+            provider: claude,
+            cliPath: "x",
+            authEnv: { CLAUDE_CONFIG_DIR: "C:/auth" },
+            setAuthUrl: vi.fn(),
+            log: vi.fn(),
+            awaitTier1Completion: true,
+        });
+
+        expect(outcome).toBe("opened");
+        expect(hub.getCliLoginStatus).not.toHaveBeenCalled();
+        expect(hub.upsertIdentityAccount).not.toHaveBeenCalled();
+    });
+
+    it("codex P2 on PR #2410: when a DIFFERENT surface's login supersedes this one mid-poll (host generation advances), does not call cancelCliLogin — that would kill the newer, unrelated login instead of reaping this one", async () => {
+        vi.useFakeTimers();
+        hub.runCliLogin.mockResolvedValue(CLAUDE_AUTHORIZE_URL);
+        hub.checkCliAuthCommand.mockResolvedValue({ authenticated: false });
+        hub.getCliLoginStatus
+            // First read establishes this poll's own baseline generation.
+            .mockResolvedValueOnce({ active: true, credential_changed: true, generation: 5 })
+            // A different surface starts a new login — host generation
+            // advances. From here on, active/credential_changed describe
+            // THAT newer child, not this poll's own.
+            .mockResolvedValueOnce({ active: false, credential_changed: true, generation: 6 });
+
+        const promise = runProviderLogin({
+            provider: claude,
+            cliPath: "x",
+            authEnv: { CLAUDE_CONFIG_DIR: "C:/auth" },
+            setAuthUrl: vi.fn(),
+            log: vi.fn(),
+            awaitTier1Completion: true,
+        });
+        await vi.advanceTimersByTimeAsync(4_000);
+        const outcome = await promise;
+
+        expect(outcome).toBe("inapp-timeout");
+        expect(hub.upsertIdentityAccount).not.toHaveBeenCalled();
+        // The whole point: must NOT reap a login that isn't this attempt's.
+        expect(hub.cancelCliLogin).not.toHaveBeenCalled();
     });
 });
