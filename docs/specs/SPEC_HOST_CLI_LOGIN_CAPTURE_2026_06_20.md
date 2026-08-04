@@ -2,6 +2,15 @@
 **Date:** 2026-06-20
 **Author:** AgentA
 **Status:** Draft — revised 2026-06-20; **2026-06-23 capture outcome: §5.1 (`setup-token`) is a confirmed DEAD END under our spawn; §5.5 (seed-from-global) is now the PRIMARY path.**
+**2026-08-03 update:** §0's "abandoned for Claude v2.1.x" verdict for §5.2 (paste-code) and §5.6
+(URL-scrape) was correct for the CLI build tested here (v2.1.183) but does **not** hold for
+v2.1.198+: live probes that day showed the pinned CLI now prints the full PKCE authorize URL under
+our PTY spawn and accepts a pasted code on stdin, auto-completing on browser authorize with no
+paste needed in the happy path. §5.5 (seed-from-global) remains a fast secondary path (no browser
+round-trip when a valid global login exists), but §5.2/§5.6 are revived as the primary flow. See
+`docs/specs/SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md` for the current design; §0 below is kept
+verbatim as the historical record of what v2.1.183 actually did and why §5.5 was the only option
+at the time.
 **Related:** SPEC_REAUTH_FROM_AUTH_ERROR_2026_06_20 (frontend force-login, merged #1604); retro `docs/retro/retro-claude-v2-1-auth-spawn-2026-06-23.md`
 
 ---
