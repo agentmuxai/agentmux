@@ -113,6 +113,17 @@
     padding: 1px var(--space-1-5);
     cursor: default;
     outline: none;
+    // As a flex item of `.agent-composer-strip-controls`, this button's
+    // automatic minimum size defaults to its own max-content width (its
+    // `overflow` is visible, so the flexbox spec's "auto minimum = 0 under
+    // hidden overflow" rule doesn't apply to it the way it already does for
+    // `.agent-runtime-dropup-trigger-label` below). Without this override,
+    // at the ≥482px tier — where `-controls` shares only half the row via
+    // `flex: 1 1 0` (see the container query near the bottom of this file)
+    // — a long resolved Mode/Model/Effort summary can't actually shrink and
+    // overflows into the centered stats zone instead of the label's own
+    // ellipsis engaging. reagentx P1, PR #2408.
+    min-width: 0;
 
     &:hover {
         border-color: var(--border-color);
@@ -129,6 +140,10 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    // Explicit, not relying on the flexbox spec's "auto minimum resolves to
+    // 0 under non-visible overflow" rule alone — same defensive-explicit
+    // style as `.agent-composer-strip-controls`'s own `min-width: 0` above.
+    min-width: 0;
 }
 
 .agent-runtime-dropup-trigger-caret {
