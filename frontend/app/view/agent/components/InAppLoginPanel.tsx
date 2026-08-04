@@ -93,7 +93,24 @@ export const InAppLoginPanel = (p: InAppLoginPanelProps): JSX.Element => {
                 🔐 Sign in to {p.providerLabel}
             </div>
             <div class="pre-launch-auth-panel-hint">{phaseText()}</div>
-            <Show when={p.authUrl}>
+            {/* reagent P1 on PR #2410: gate on phase too, not just authUrl's
+                presence. "Use terminal instead" kills the tier-1 login child
+                (cancelCliLogin) and moves phase to "fallback"/"terminal-
+                polling" WITHOUT clearing the now-dead authUrl — without this
+                gate, the URL/paste box stayed visible for a session that no
+                longer exists. Pasting a code at that point would call
+                setProviderAuth, whose host handler falls through to the
+                non-CLI config-file branch (cli_login_stdin already cleared)
+                and silently writes the code as a plain auth_token while
+                showing "Code accepted…", misleading the user while the real
+                login runs in the separately-opened terminal instead. */}
+            <Show
+                when={
+                    p.phase === "starting" || p.phase === "waiting-authorize"
+                        ? p.authUrl
+                        : undefined
+                }
+            >
                 {(url) => (
                     <>
                         <div class="pre-launch-auth-panel-url-label">
