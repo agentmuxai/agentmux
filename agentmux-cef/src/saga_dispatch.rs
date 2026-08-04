@@ -556,7 +556,7 @@ mod tests {
                 },
             );
         }
-        assert_eq!(lru.len(), cap);
+        assert_eq!(lru.entries.len(), cap);
         assert_eq!(lru.oldest_saga_id(), Some(0));
 
         // Insert one more — saga_id=0 should be evicted (oldest).
@@ -568,7 +568,7 @@ mod tests {
                 saga_id: Some(cap as u64),
             },
         );
-        assert_eq!(lru.len(), cap);
+        assert_eq!(lru.entries.len(), cap);
         assert_eq!(lru.oldest_saga_id(), Some(1));
         assert!(lru.get(0, CommandKind::SpawnPoolWindow).is_none());
         assert!(lru.get(cap as u64, CommandKind::SpawnPoolWindow).is_some());
@@ -587,7 +587,7 @@ mod tests {
             let outcome = dispatch_host_command(&cmd, &runner, &lru, &tx);
             assert_eq!(outcome, DispatchOutcome::Fresh);
         }
-        assert_eq!(lru.lock().len(), SAGA_LRU_CAP);
+        assert_eq!(lru.lock().entries.len(), SAGA_LRU_CAP);
 
         // 257th distinct command — accepted; oldest (saga_id=1) evicted.
         let cmd = Command::SpawnPoolWindow {
@@ -595,7 +595,7 @@ mod tests {
         };
         let outcome = dispatch_host_command(&cmd, &runner, &lru, &tx);
         assert_eq!(outcome, DispatchOutcome::Fresh);
-        assert_eq!(lru.lock().len(), SAGA_LRU_CAP);
+        assert_eq!(lru.lock().entries.len(), SAGA_LRU_CAP);
 
         // Verify saga_id=1 is gone (replaying it now would be a
         // fresh call, not a duplicate).
@@ -660,7 +660,7 @@ mod tests {
             assert_eq!(outcome, DispatchOutcome::NoSagaBypass);
         }
         assert_eq!(runner.spawn_calls.load(Ordering::SeqCst), 3);
-        assert_eq!(lru.lock().len(), 0);
+        assert_eq!(lru.lock().entries.len(), 0);
 
         let replies = drain_replies(&mut rx);
         assert_eq!(replies.len(), 3);
