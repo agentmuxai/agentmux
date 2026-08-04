@@ -168,6 +168,37 @@ describe("ClaudeLoginPanel — Stash link verification (codex P1 on PR #2414)", 
         expect(hub.refreshAccountCache).toHaveBeenCalled();
     });
 
+    it("reagent P0 on PR #2414 (round 3): does NOT show success when the only matching row is the STALE ALIAS link, not the canonical 'claude' one — a Stash re-login refreshes the SAME account_id, so an account_id-only check is vacuously satisfied by the pre-existing alias row even when the new canonical link insert silently failed", async () => {
+        hub.runProviderLogin.mockImplementation(async (opts: any) => {
+            // A re-login: onAccountRegistered fires with the SAME account
+            // id the alias row already points at (registeredAccountId ===
+            // existingAccountId), exactly as run-provider-login.ts does for
+            // a refresh rather than a fresh mint.
+            opts.onAccountRegistered?.("acct-existing", "/tmp/acct-existing");
+            return "inapp-success";
+        });
+        // Only the OLD alias row is present — the canonical "claude" link
+        // insert silently failed (finalizeAccount swallows that error).
+        hub.listAgentIdentities.mockResolvedValue([
+            { agent_id: "agent-1", account_id: "acct-existing", provider: "claude-code" },
+        ]);
+
+        const { findByText } = render(() => (
+            <ClaudeLoginPanel
+                onClose={() => {}}
+                existingAccountId="acct-existing"
+                linkTarget={{ agentDefinitionId: "agent-1" }}
+                staleAliasProvider="claude-code"
+            />
+        ));
+
+        await findByText(/couldn't confirm the account was linked/i);
+        // Must NOT proceed to the stale-alias cleanup unlink — that would
+        // delete the one link that actually works, leaving zero links.
+        expect(hub.unlinkAgentIdentity).not.toHaveBeenCalled();
+        expect(hub.refreshAccountCache).not.toHaveBeenCalled();
+    });
+
     it("skips link verification entirely for Armory's bare Connect (no linkTarget) — nothing to verify", async () => {
         hub.runProviderLogin.mockImplementation(async (opts: any) => {
             opts.onAccountRegistered?.("acct-new", "/tmp/acct-new");
