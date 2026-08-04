@@ -590,9 +590,20 @@ export function useAgentControllerStatus(
                         recheckAuthEnv = { ...authEnv, [prov.authConfigDirEnvVar]: dir };
                     }
                 },
-                // See catalog.ts's DEAD END note — skip tier 1's ~15s
-                // URL-capture wait for providers that can never produce one.
-                skipTier1: prov.headlessLoginUrlUnsupported === true,
+                // reagent P1 on PR #2410: this call passes existingAccountId
+                // (reconnect, not fresh-connect) — dropping
+                // headlessLoginUrlUnsupported (catalog.ts) would let tier 1
+                // run here too, but this branch's completion poll below only
+                // calls CheckCliAuthCommand against the SAME isolated dir the
+                // stale/expired credential being re-authenticated already
+                // lives in, so it would report authenticated:true on the
+                // very first tick — before the user does anything — falsely
+                // completing "Login Again" instantly. The proper fix (child-
+                // aware completion via awaitTier1Completion/getCliLoginStatus,
+                // spec §3.1) lands in the stacked relogin-surface PR; hardcode
+                // true here in the meantime so this PR alone doesn't regress
+                // Claude relogin the moment the catalog flag drops.
+                skipTier1: true,
                 // See launch-flow.ts's identical wiring — without this the
                 // phase set just above never updates again for the rest of
                 // this call, even though tier 2/3 inside it can run for up
