@@ -125,6 +125,18 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
         return joinAgentIdentityRows(id, allLinks(), accountsById());
     });
 
+    // reagent P1 on PR #2414 (round 6): the empty-state Connect button was
+    // gated on `rows().length === 0`, so a Claude-provider agent with ANY
+    // other-provider link (e.g. a github row, but no claude/claude-code
+    // row) fell into the table branch instead — where the per-row
+    // Connect/Re-login button only renders on rows whose OWN provider is
+    // claude, so there was no row to attach it to either. Net effect: no
+    // in-app affordance anywhere in the panel to connect Claude for that
+    // agent, despite this being exactly the broken/missing-Claude-binding
+    // case the panel exists to fix. Computed independently of rows().length
+    // so it applies whether the table renders or not.
+    const hasClaudeLink = createMemo(() => rows().some((r) => canonicalProviderId(r.provider) === "claude"));
+
     return (
         <div class="identity-pane">
             <div class="identity-pane-detail">
@@ -153,31 +165,13 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
                             fallback={
                                 // reagent P2 on PR #2414 (round 3): gated on
                                 // linksLoaded() && !error() — without this,
-                                // the empty state (and its "Connect Claude
-                                // account" button) rendered indistinguishably
-                                // for "still loading", "load failed" (the
-                                // banner above already covers that), and a
+                                // this text rendered indistinguishably for
+                                // "still loading", "load failed" (the banner
+                                // above already covers that), and a
                                 // genuinely empty agent.
                                 <Show when={linksLoaded() && !error()}>
                                     <div class="identity-pane-empty-hint">
                                         <p>This agent has no linked accounts yet. Link one from its launch dialog.</p>
-                                        {/* The retro-agentu-0.54.9-stuck-error-2026-08-03.md case: a
-                                            Claude agent with ZERO links has no row above to attach a
-                                            Re-login button to, and no way back into the launch dialog
-                                            once the agent already exists — this is the only in-app path
-                                            left for exactly that state. Gated on the agent's own
-                                            provider (reagent P2 on PR #2414, round 3): otherwise this
-                                            button links an unrelated Claude account to an agent whose
-                                            actual provider is something else entirely. */}
-                                        <Show when={canonicalProviderId(agent()?.provider ?? "") === "claude"}>
-                                            <button
-                                                type="button"
-                                                class="identity-btn identity-btn-primary"
-                                                onClick={() => openClaudeLogin(undefined)}
-                                            >
-                                                Connect Claude account
-                                            </button>
-                                        </Show>
                                     </div>
                                 </Show>
                             }
@@ -253,6 +247,39 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
                                     </For>
                                 </tbody>
                             </table>
+                        </Show>
+
+                        {/* reagent P1 on PR #2414 (round 6): standalone, NOT
+                            nested inside the rows()===0 fallback above — a
+                            Claude-provider agent with other-provider links
+                            but no claude/claude-code row of its own needs
+                            this same affordance, and the per-row
+                            Connect/Re-login button (only rendered on rows
+                            whose OWN provider is claude) can't cover it since
+                            no such row exists to attach it to. The
+                            retro-agentu-0.54.9-stuck-error-2026-08-03.md case
+                            this button exists for. Gated on the agent's own
+                            provider (reagent P2 on PR #2414, round 3):
+                            otherwise this links an unrelated Claude account
+                            to an agent whose actual provider is something
+                            else entirely. */}
+                        <Show
+                            when={
+                                linksLoaded() &&
+                                !error() &&
+                                !hasClaudeLink() &&
+                                canonicalProviderId(agent()?.provider ?? "") === "claude"
+                            }
+                        >
+                            <div class="identity-pane-empty-hint">
+                                <button
+                                    type="button"
+                                    class="identity-btn identity-btn-primary"
+                                    onClick={() => openClaudeLogin(undefined)}
+                                >
+                                    Connect Claude account
+                                </button>
+                            </div>
                         </Show>
                     </div>
                 </Show>

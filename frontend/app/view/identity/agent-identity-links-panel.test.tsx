@@ -10,7 +10,7 @@
  * degrade gracefully when it has no agent context at all.
  */
 
-import { cleanup, render, screen, waitFor } from "@solidjs/testing-library";
+import { cleanup, render, screen, waitFor, within } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const listAllAgentIdentities = vi.fn();
@@ -180,7 +180,7 @@ describe("AgentIdentityLinksPanel", () => {
             );
         });
 
-        it("does NOT show a Connect/Re-login button on a non-claude row (github) — only Claude has an in-app session today", async () => {
+        it("does NOT show a PER-ROW Connect/Re-login button on a non-claude row (github) — only Claude has an in-app session today", async () => {
             listAllAgentIdentities.mockResolvedValue([
                 mkLink({ agent_id: "agent-1", account_id: "acc-1", provider: "github" }),
             ]);
@@ -188,7 +188,44 @@ describe("AgentIdentityLinksPanel", () => {
             render(() => <AgentIdentityLinksPanel agentId="agent-1" />);
 
             await waitFor(() => expect(screen.getByText("Work GitHub")).toBeInTheDocument());
-            expect(screen.queryByRole("button", { name: /re-login|connect/i })).not.toBeInTheDocument();
+            // The github row itself gets no button (only Claude rows do) —
+            // agent-1 is mocked as a claude-provider agent, though, so it
+            // DOES still get the standalone Connect affordance below the
+            // table (reagent P1 on PR #2414, round 6) since it has no
+            // claude/claude-code row of its own yet; that one action is
+            // legitimate and covered by the next test.
+            const table = screen.getByRole("table");
+            expect(within(table).queryByRole("button", { name: /re-login|connect/i })).not.toBeInTheDocument();
+        });
+
+        it("reagent P1 on PR #2414 (round 6): STILL offers 'Connect Claude account' when the agent has other-provider links but no claude/claude-code row of its own — the per-row button can't cover this since no claude row exists to attach it to", async () => {
+            listAllAgentIdentities.mockResolvedValue([
+                mkLink({ agent_id: "agent-1", account_id: "acc-1", provider: "github" }),
+            ]);
+
+            render(() => <AgentIdentityLinksPanel agentId="agent-1" />);
+
+            await waitFor(() => expect(screen.getByText("Work GitHub")).toBeInTheDocument());
+            const button = await screen.findByRole("button", { name: "Connect Claude account" });
+            button.click();
+
+            expect(claudeLoginPanel).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    existingAccountId: undefined,
+                    linkTarget: { agentDefinitionId: "agent-1" },
+                }),
+            );
+        });
+
+        it("reagent P1 on PR #2414 (round 6): does NOT offer 'Connect Claude account' anywhere for a non-claude agent that has other-provider links but no claude row — that would link an unrelated Claude account to an agent whose actual provider is something else entirely", async () => {
+            listAllAgentIdentities.mockResolvedValue([
+                mkLink({ agent_id: "agent-3", account_id: "acc-1", provider: "github" }),
+            ]);
+
+            render(() => <AgentIdentityLinksPanel agentId="agent-3" />);
+
+            await waitFor(() => expect(screen.getByText("Work GitHub")).toBeInTheDocument());
+            expect(screen.queryByRole("button", { name: /connect|re-login/i })).not.toBeInTheDocument();
         });
 
         it("shows Re-login for a legacy-aliased claude link row (\"claude-code\"), not just the canonical \"claude\" provider string (reagent P1 on PR #2414)", async () => {
