@@ -343,20 +343,6 @@ export const initialState = (agentId: string): AgentPaneState => ({
     lastCompactionBoundaryAt: null,
 });
 
-/**
- * Selector — `true` iff the pane currently holds a stream subscription
- * (i.e. between `StreamSubscribe` and the next `StreamUnsubscribe`).
- *
- * Since PR G, this replaces the legacy `state.streaming.active`
- * boolean. The two were always equivalent — both were set by
- * `StreamSubscribe` and cleared by `StreamUnsubscribe`, and nothing
- * else touched either. `lastEventMs !== null` is the cheaper
- * single-field check.
- */
-export function isStreamSubscribed(state: AgentPaneState): boolean {
-    return state.lastEventMs !== null;
-}
-
 /** Selector — `true` iff the pane has finished its initial history load. */
 export function isInitReady(state: AgentPaneState): boolean {
     return state.initPhase.kind === "InitReady";

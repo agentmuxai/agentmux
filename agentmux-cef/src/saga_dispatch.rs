@@ -132,11 +132,6 @@ impl SagaIdempotencyLru {
         self.entries.push_back((key, report));
     }
 
-    /// Current number of entries (for tests + diagnostics).
-    pub fn len(&self) -> usize {
-        self.entries.len()
-    }
-
     /// Return the saga_id of the oldest entry, or None if empty.
     /// Used in tests to verify drop-oldest semantics.
     #[cfg(test)]

@@ -20,7 +20,7 @@ function shellStatusToActivity(s: ShellNode["status"]): ActivityStatus {
     }
 }
 
-export function shellToActivity(n: ShellNode): PinnedActivity {
+function shellToActivity(n: ShellNode): PinnedActivity {
     return {
         id: n.id,
         kind: "shell",

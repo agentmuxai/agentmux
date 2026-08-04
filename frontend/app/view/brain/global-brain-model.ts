@@ -27,7 +27,7 @@ export const NEW_SECTION_ID = "__new__";
 
 /** Mirror of the backend format_global_brain_block — keep in sync so the
  *  preview matches exactly what lands in CLAUDE.md. */
-export function formatGlobalBrainBlock(sections: Memory[]): string {
+function formatGlobalBrainBlock(sections: Memory[]): string {
     return sections
         .filter((s) => (s.instructions ?? "").trim().length > 0)
         .map((s) => `# [Workspace] ${s.name}\n\n${s.instructions}`)

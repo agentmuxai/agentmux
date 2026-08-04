@@ -111,10 +111,6 @@ if (globalThis.window != null) {
     globalThis["consumeGenerator"] = consumeGenerator;
 }
 
-function shutdownWshrpc() {
-    globalWS?.shutdown();
-}
-
 class UpstreamRpcProxy implements AbstractRpcClient {
     recvRpcMessage(msg: RpcMessage): void {
         const wsMsg: WSRpcCommand = { wscommand: "rpc", message: msg };
@@ -122,4 +118,4 @@ class UpstreamRpcProxy implements AbstractRpcClient {
     }
 }
 
-export { DefaultRouter, sendRpcCommand, sendRpcResponse, setDefaultRouter, shutdownWshrpc };
+export { DefaultRouter, sendRpcCommand, sendRpcResponse, setDefaultRouter };

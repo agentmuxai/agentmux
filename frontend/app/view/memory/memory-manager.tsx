@@ -37,7 +37,7 @@ interface MemoryManagerBodyProps {
  * settings-pane wrapper and the standalone <MemoryManager/> render this
  * with their respective models, so the markup lives in exactly one place.
  */
-export const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
+const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
     const { model } = props;
     const modalLayer = useModalLayer();
 

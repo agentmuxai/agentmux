@@ -124,4 +124,3 @@ const Input = (props: InputProps): JSX.Element => {
 };
 
 export { Input, InputGroup, InputLeftElement, InputRightElement };
-export type { InputGroupProps, InputLeftElementProps, InputProps, InputRightElementProps };

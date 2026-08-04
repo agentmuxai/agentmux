@@ -573,7 +573,7 @@ export function computeSpiralOrder(
  * @param additionalProps The additional properties for all nodes.
  * @returns Sorted leaf order entries.
  */
-export function getLeafOrder(
+function getLeafOrder(
     leafs: LayoutNode[],
     additionalProps: Record<string, LayoutNodeAdditionalProps>
 ): LeafOrderEntry[] {

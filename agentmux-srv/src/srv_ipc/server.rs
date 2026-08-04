@@ -257,7 +257,6 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
             let mut state = ctx.state.lock().await;
             let rctx = reducer::Ctx {
                 now_rfc3339,
-                conn_id,
                 registered_pid,
             };
             reducer::update(&mut state, cmd.clone(), &rctx)

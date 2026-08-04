@@ -156,7 +156,7 @@ export function createChunkCapper(maxLines: number = MAX_TOOL_OUTPUT_LINES) {
  *  tqdm, etc. ASCII chars (-|/\) are intentionally excluded — they also
  *  appear as legitimate single-char output (table separators, diff/graph
  *  markers, line continuations) and would produce false positives. */
-export const SPINNER_CHARS = new Set([
+const SPINNER_CHARS = new Set([
     '⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏',
     '⣾','⣽','⣻','⢿','⡿','⣟','⣯','⣷',
     '◐','◓','◑','◒','◴','◷','◶','◵',

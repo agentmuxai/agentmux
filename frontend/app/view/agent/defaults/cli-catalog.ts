@@ -46,7 +46,7 @@ export interface CliCatalogEntry {
     containerImage?: string;
 }
 
-export const CLI_CATALOG: CliCatalogEntry[] = [
+const CLI_CATALOG: CliCatalogEntry[] = [
     {
         provider: "claude",
         displayName: "Claude Code",

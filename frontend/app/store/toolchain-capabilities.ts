@@ -30,7 +30,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { CORE_TOOLS, cliCommandForPlatform, currentPlatform } from "@/app/view/agent/providers/toolchain-catalog";
 
-export type CapabilityStatus = "unknown" | "checking" | "available" | "unavailable";
+type CapabilityStatus = "unknown" | "checking" | "available" | "unavailable";
 
 export interface CapabilityState {
     status: CapabilityStatus;

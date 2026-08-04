@@ -153,7 +153,7 @@ export interface AgentPrereqRequest {
  * Phase β of SPEC_LAUNCH_MODAL_PROFILE_SECTION_2026_05_18.md. Replaces
  * `NewIdentityBundleRequest`.
  */
-export interface AddAccountRequest {
+interface AddAccountRequest {
     kind: "add-account";
     originBlockId: string;
     /** Provider the new account is scoped to — the agent's own
@@ -306,7 +306,7 @@ export interface AgentMemoryRequest {
  * pane — see docs/reports/REPORT_ARMORY_STASH_NAMING_2026_07_27.md.
  * Spec: SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md §3.2b.
  */
-export interface AgentStashRequest {
+interface AgentStashRequest {
     kind: "agent-stash";
     /** Provider/definition id — used by the Accounts tab (read-only linked-
      *  accounts view, keyed on agentId alone) and the Memory tab. */
@@ -332,7 +332,7 @@ export interface AgentStashRequest {
  *  it triggers the native file dialog on mount, shows a spinner while
  *  `bundle.import.preview` runs, and surfaces a parse/validation error
  *  inline (with a retry) rather than advancing. */
-export interface BundleImportSelectRequest {
+interface BundleImportSelectRequest {
     kind: "bundle-import-select";
     /** Preview succeeded — caller does
      *  `modalLayer.replace(previewRequest)`. */
@@ -365,7 +365,7 @@ export interface BundleImportSelectionState {
  *  2: editable bundle name, instructions checkbox + preview, context
  *  files, skills (with collision UI per §4.1), MCP servers, a read-only
  *  requirements summary, and a dismissible warnings banner. */
-export interface BundleImportPreviewRequest {
+interface BundleImportPreviewRequest {
     kind: "bundle-import-preview";
     filePath: string;
     preview: BundleImportPreviewResponse;
@@ -378,7 +378,7 @@ export interface BundleImportPreviewRequest {
 /** Step 3 — confirm & import. Calls `bundle.import.commit`; a digest
  *  mismatch (the file changed since preview) surfaces as a distinct
  *  "re-select and preview again" error rather than a generic failure. */
-export interface BundleImportConfirmRequest {
+interface BundleImportConfirmRequest {
     kind: "bundle-import-confirm";
     filePath: string;
     contentDigest: string;

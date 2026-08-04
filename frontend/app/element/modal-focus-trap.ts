@@ -3,7 +3,7 @@
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-export const FOCUSABLE_SELECTOR = [
+const FOCUSABLE_SELECTOR = [
     "input:not([disabled])",
     "textarea:not([disabled])",
     "select:not([disabled])",

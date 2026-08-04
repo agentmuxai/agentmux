@@ -184,11 +184,6 @@ impl Handler {
         self.agent_info.values().cloned().collect()
     }
 
-    /// List all block IDs that have a registered agent.
-    pub fn list_active_blocks(&self) -> Vec<String> {
-        self.block_to_agent.keys().cloned().collect()
-    }
-
     /// Inject a message into an agent's terminal.
     ///
     /// Sends `message\r` as a single payload (required for text display),
@@ -585,10 +580,6 @@ impl ReactiveHandler {
 
     pub fn list_agents(&self) -> Vec<AgentRegistration> {
         self.inner.lock().unwrap().list_agents()
-    }
-
-    pub fn list_active_blocks(&self) -> Vec<String> {
-        self.inner.lock().unwrap().list_active_blocks()
     }
 
     pub fn inject_message(&self, req: InjectionRequest) -> InjectionResponse {

@@ -69,7 +69,7 @@ export interface ResourceList<T> {
     error: string | null;
 }
 
-export const initialResourceList = <T>(): ResourceList<T> => ({
+const initialResourceList = <T>(): ResourceList<T> => ({
     list: [],
     loading: false,
     error: null,
@@ -80,7 +80,7 @@ export interface SubmitStatus {
     error: string | null;
 }
 
-export const initialSubmit = (): SubmitStatus => ({
+const initialSubmit = (): SubmitStatus => ({
     inFlight: false,
     error: null,
 });

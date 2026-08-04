@@ -41,10 +41,6 @@ export function keyboardMouseDownHandler(e: MouseEvent) {
     }
 }
 
-export function getSimpleControlShiftAtom() {
-    return simpleControlShift;
-}
-
 function setControlShift() {
     setSimpleControlShift(true);
     setTimeout(() => {
@@ -54,7 +50,7 @@ function setControlShift() {
     }, 400);
 }
 
-export function unsetControlShift() {
+function unsetControlShift() {
     setSimpleControlShift(false);
     setControlShiftDelayAtom(false);
 }
@@ -162,6 +158,3 @@ export function registerControlShiftStateUpdateHandler() {
     });
 }
 
-export function tryReinjectKey(event: WaveKeyboardEvent): boolean {
-    return appHandleKeyDown(event);
-}

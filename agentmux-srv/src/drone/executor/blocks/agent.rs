@@ -95,7 +95,6 @@ pub async fn run(node: &FlowNode, scope: &ExecutionScope) -> Result<Value, Strin
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let handle = run_agent(agent_ref, task, tx).await.map_err(|e| match e {
         AgentError::Spawn(msg) => format!("agent block: spawn failed: {msg}"),
-        AgentError::InvalidRef(msg) => format!("agent block: invalid agent ref: {msg}"),
         AgentError::CommitPressure { avail_gb, reserve_gb } => format!(
             "agent block: memory full — {avail_gb:.1} GB commit free, need {reserve_gb:.1} GB; try again when memory frees"
         ),

@@ -10,7 +10,7 @@
 // What's here:
 //   * `LifecyclePhase` (re-exported from agentmux-common::ipc) — E.1b
 //   * `ProcessRecord` — pid, kind, state, spawned_at — E.1b
-//   * `ProcessState` — Spawning / Running / Exited — E.1b
+//   * `ProcessState` — Running / Exited — E.1b
 //   * `WorkspaceRecord` — workspace_id, name — E.2
 //   * `State` — top-level: lifecycle + process map + workspaces +
 //     monotonic counters
@@ -27,7 +27,6 @@ pub use agentmux_common::ipc::LifecyclePhase;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProcessState {
-    Spawning,
     Running,
     Exited { code: i32 },
 }

@@ -12,12 +12,8 @@
  * §"Render contract".
  */
 
-import type { Component } from "solid-js";
 import type {
-    AgentErrorNode,
     AgentMessageNode,
-    CompactionStartedNode,
-    ContextCompactedNode,
     DocumentNode,
     DocumentState,
     JektMessageNode,
@@ -29,38 +25,6 @@ import type {
 } from "../types";
 
 export type NodeKind = DocumentNode["type"];
-
-/** Map a NodeKind back to its concrete DocumentNode subtype. */
-export type NodeOf<K extends NodeKind> = Extract<DocumentNode, { type: K }>;
-
-export interface NodeKindRenderer<K extends NodeKind = NodeKind> {
-    /** SolidJS component that renders this kind. Must access props
-     *  reactively (no destructuring) so prop changes propagate. */
-    component: Component<{ node: NodeOf<K>; state: DocumentState }>;
-    /**
-     * Initial height estimate in pixels. Used until the measure RO
-     * settles each row to its real size. Should be close to the p50
-     * actual height for the kind — Phase 3's perf probe surfaces
-     * estimator misses > 30% in the dev HUD so we can recalibrate.
-     */
-    estimatedSize: (node: NodeOf<K>, state: DocumentState) => number;
-    /**
-     * True if this kind receives content chunk-by-chunk during a
-     * stream (markdown, agent_message). Drives the streaming-buffer
-     * pin so the row isn't recycled mid-stream.
-     */
-    isStreamingCapable: boolean;
-    /**
-     * Rare: render in a dedicated layer above/below the virtualized
-     * region instead of in the list. Reserved for future affordances
-     * (e.g., always-visible auth box). null = normal list item.
-     */
-    pinnedLayer?: "top" | "bottom";
-}
-
-export type NodeRendererRegistry = {
-    [K in NodeKind]: NodeKindRenderer<K>;
-};
 
 // ── Estimator helpers ───────────────────────────────────────────────────────
 
@@ -188,86 +152,6 @@ export const STREAMING_CAPABLE: Record<NodeKind, boolean> = {
     // Arrives as a single complete user_message event, not chunk-by-chunk.
     jekt_message: false,
 };
-
-// ── Registry factory ────────────────────────────────────────────────────────
-
-export interface RendererComponents {
-    Markdown: Component<{ node: MarkdownNode; state: DocumentState }>;
-    Section: Component<{ node: SectionNode; state: DocumentState }>;
-    Tool: Component<{ node: ToolNode; state: DocumentState }>;
-    AgentMessage: Component<{ node: AgentMessageNode; state: DocumentState }>;
-    JektMessage: Component<{ node: JektMessageNode; state: DocumentState }>;
-    UserMessage: Component<{ node: UserMessageNode; state: DocumentState }>;
-    Shell: Component<{ node: ShellNode; state: DocumentState }>;
-    /** agent_error nodes are rendered inline in DocumentRow — this slot is a
-     *  registry placeholder so NodeRendererRegistry stays exhaustive. */
-    AgentError: Component<{ node: AgentErrorNode; state: DocumentState }>;
-    ContextCompacted: Component<{ node: ContextCompactedNode; state: DocumentState }>;
-    /** compaction_started nodes are rendered inline in DocumentRow (like
-     *  agent_error) — this slot is a registry placeholder so
-     *  NodeRendererRegistry stays exhaustive. */
-    CompactionStarted: Component<{ node: CompactionStartedNode; state: DocumentState }>;
-}
-
-/**
- * Build the registry by binding components to their estimators.
- * Phase 2 will wire concrete components from `../components/`; tests
- * pass stub components.
- */
-export function buildRendererRegistry(components: RendererComponents): NodeRendererRegistry {
-    return {
-        markdown: {
-            component: components.Markdown,
-            estimatedSize: estimateMarkdown,
-            isStreamingCapable: STREAMING_CAPABLE.markdown,
-        },
-        section: {
-            component: components.Section,
-            estimatedSize: estimateSection,
-            isStreamingCapable: STREAMING_CAPABLE.section,
-        },
-        tool: {
-            component: components.Tool,
-            estimatedSize: estimateTool,
-            isStreamingCapable: STREAMING_CAPABLE.tool,
-        },
-        agent_message: {
-            component: components.AgentMessage,
-            estimatedSize: estimateAgentMessage,
-            isStreamingCapable: STREAMING_CAPABLE.agent_message,
-        },
-        jekt_message: {
-            component: components.JektMessage,
-            estimatedSize: estimateJektMessage,
-            isStreamingCapable: STREAMING_CAPABLE.jekt_message,
-        },
-        user_message: {
-            component: components.UserMessage,
-            estimatedSize: estimateUserMessage,
-            isStreamingCapable: STREAMING_CAPABLE.user_message,
-        },
-        shell: {
-            component: components.Shell,
-            estimatedSize: estimateShell,
-            isStreamingCapable: STREAMING_CAPABLE.shell,
-        },
-        agent_error: {
-            component: components.AgentError,
-            estimatedSize: (_node: AgentErrorNode) => 64,
-            isStreamingCapable: STREAMING_CAPABLE.agent_error,
-        },
-        context_compacted: {
-            component: components.ContextCompacted,
-            estimatedSize: (_node: ContextCompactedNode) => 48,
-            isStreamingCapable: STREAMING_CAPABLE.context_compacted,
-        },
-        compaction_started: {
-            component: components.CompactionStarted,
-            estimatedSize: (_node: CompactionStartedNode) => 32,
-            isStreamingCapable: STREAMING_CAPABLE.compaction_started,
-        },
-    };
-}
 
 /**
  * Dispatch helper — pick the right estimator for a given node. Used

@@ -38,7 +38,7 @@ import type { StreamFlushQueue } from "../stream-flush-queue";
  * `STUCK_THRESHOLD_MS` (45s) and emits a `stream-stuck` event when the
  * subscribed stream has been silent that long. Issue #728 gap 3.
  */
-export const WATCHDOG_INTERVAL_MS = 5_000;
+const WATCHDOG_INTERVAL_MS = 5_000;
 
 export interface UseTurnLifecycleOptions {
     blockId: string;

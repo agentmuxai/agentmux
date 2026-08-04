@@ -14,7 +14,7 @@
 import type { Platform } from "./toolchain-catalog";
 
 /** How the widget is installed onto the user's machine. */
-export type InstallMethod =
+type InstallMethod =
     | { kind: "pip"; package: string; extraArgs?: string[] }
     | { kind: "npm"; package: string; version?: string }
     | { kind: "manual" }; // user installs themselves; we only detect + health-check

@@ -109,11 +109,6 @@ pub fn config_for(provider: &str) -> Option<ServiceOAuthConfig> {
     }
 }
 
-/// Whether a provider has an OAuth flow at all (frontend gating).
-pub fn supports_oauth(provider: &str) -> bool {
-    config_for(provider).is_some()
-}
-
 // ── PKCE + state helpers (RFC 7636 §4, RFC 8252 §8.9) ───────────────────────
 
 /// A PKCE verifier/challenge pair. `challenge = BASE64URL(SHA256(verifier))`.
@@ -629,7 +624,7 @@ mod tests {
         assert!(config_for("slack").unwrap().requires_secret);
         assert!(!config_for("google").unwrap().requires_secret);
         assert!(config_for("nope").is_none());
-        assert!(supports_oauth("microsoft"));
+        assert!(config_for("microsoft").is_some());
     }
 
     #[test]

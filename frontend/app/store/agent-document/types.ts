@@ -12,7 +12,7 @@
 
 import type { DocumentNode, ShellNode, ToolLogChunk } from "../../view/agent/types";
 
-export type SessionPhase = "loading-history" | "active" | "ended";
+type SessionPhase = "loading-history" | "active" | "ended";
 
 export interface AgentDocumentState {
     nodes: DocumentNode[];

@@ -205,9 +205,6 @@ impl WhatsAppBridge {
 }
 
 impl crate::messaging::MessagingBridge for WhatsAppBridge {
-    fn send(&self, msg: OutboundMsg) -> Result<(), String> {
-        WhatsAppBridge::send(self, msg)
-    }
     fn health(&self) -> BridgeHealth {
         WhatsAppBridge::health(self)
     }

@@ -67,7 +67,7 @@ import { waveEventSubscribe } from "@/app/store/wps";
 import { subscribeLauncherEvent } from "@/util/launcher-events";
 
 /** WPS event name carrying singleton claim/release broadcasts. */
-export const EVENT_SINGLETON_CLAIM = "singleton:claim";
+const EVENT_SINGLETON_CLAIM = "singleton:claim";
 
 /**
  * Kind of singleton modal. Open enum (string) so future singletons add a

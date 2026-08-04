@@ -62,7 +62,7 @@ export interface AuthRpc {
     }): Promise<{ bundleId: string }>;
 }
 
-export const defaultAuthRpc: AuthRpc = {
+const defaultAuthRpc: AuthRpc = {
     async start(req) {
         return RpcApi.AuthStartCommand(TabRpcClient, req);
     },

@@ -14,7 +14,7 @@ import type { JSX } from "solid-js";
 import { TermStickers } from "./termsticker";
 import { TermThemeUpdater } from "./termtheme";
 import { computeTheme } from "./termutil";
-import { makeTerminalModel, setTerminalViewComponent, TermViewModel } from "./termViewModel";
+import { setTerminalViewComponent, TermViewModel } from "./termViewModel";
 import { TermWrap } from "./termwrap";
 import "./xterm.css";
 import { DragOverlay } from "@/app/element/dragoverlay";
@@ -565,4 +565,4 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
 // Register TerminalView with the ViewModel to break the circular dependency
 setTerminalViewComponent(TerminalView);
 
-export { makeTerminalModel, TerminalView, TermViewModel };
+export { TermViewModel };

@@ -96,9 +96,6 @@ impl DiscordBridge {
 }
 
 impl crate::messaging::MessagingBridge for DiscordBridge {
-    fn send(&self, msg: OutboundMsg) -> Result<(), String> {
-        DiscordBridge::send(self, msg)
-    }
     fn health(&self) -> BridgeHealth {
         DiscordBridge::health(self)
     }

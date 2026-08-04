@@ -20,7 +20,6 @@ function getCtx(): CanvasRenderingContext2D | null {
 //   10px left-pad + 10px right-pad + 4px gap + 16px close-btn + 12px slack = 52px
 // Matches .tab-inner { padding: 0 10px } in tab.scss.
 const TAB_PADDING_BUDGET = 52;
-export const TAB_MIN_WIDTH = 60;
 export const TAB_MAX_WIDTH = 260;
 // Chrome's own tab strip renders every tab at a fixed 232px (DIPs) — see
 // `TabStyle::GetStandardWidth()` / `kTabWidth` in

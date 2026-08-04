@@ -448,14 +448,6 @@ pub fn get_provider(id: &str) -> Option<&'static ProviderConfig> {
     REGISTRY.get(canonical).copied()
 }
 
-/// Return an iterator over all registered providers in insertion order.
-pub fn get_provider_list() -> impl Iterator<Item = &'static ProviderConfig> {
-    // Stable canonical order matches the TypeScript PROVIDERS object order.
-    static ORDER: &[&str] =
-        &["claude", "codex", "muxcode", "gemini", "qwen", "kimi", "openclaw", "pi", "copilot"];
-    ORDER.iter().filter_map(|id| REGISTRY.get(*id).copied())
-}
-
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -502,14 +494,6 @@ mod tests {
     #[test]
     fn unknown_returns_none() {
         assert!(get_provider("unknown-provider").is_none());
-    }
-
-    #[test]
-    fn provider_list_has_nine_entries() {
-        // Update this when a provider is added or removed; a stale
-        // count is the cheapest detection mechanism for accidental
-        // additions.
-        assert_eq!(get_provider_list().count(), 9);
     }
 
     #[test]

@@ -36,7 +36,7 @@ export interface ResizeContext {
 }
 
 export const DefaultGapSizePx = 3;
-export const MinNodeSizePx = 40;
+const MinNodeSizePx = 40;
 
 /**
  * Computes new sizes for every sibling in `siblings` when the one pane whose

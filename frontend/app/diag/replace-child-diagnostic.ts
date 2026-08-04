@@ -86,7 +86,7 @@ function sampleChildren(parent: Node, max = 8): string[] {
 
 let installed = false;
 
-export function installReplaceChildDiagnostic(): void {
+function installReplaceChildDiagnostic(): void {
     if (installed) return;
     if (typeof Node === "undefined" || !Node.prototype || !Node.prototype.replaceChild) return;
     installed = true;
