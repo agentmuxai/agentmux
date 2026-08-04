@@ -31,7 +31,7 @@ import type { ProviderDefinition } from "../providers";
 import type { LogFn } from "../types";
 
 export interface ForceLoginParams {
-    provider: Pick<ProviderDefinition, "authLoginCommand" | "requiresLoginTty">;
+    provider: Pick<ProviderDefinition, "authLoginCommand" | "requiresLoginTty" | "authConfigDirEnvVar">;
     /** Resolved CLI path (from block meta `cmd`, set at launch). */
     cliPath: string;
     /** Auth env (e.g. CLAUDE_CONFIG_DIR) — from block meta `cmd:env`. */
@@ -66,6 +66,7 @@ export async function forceProviderLogin(p: ForceLoginParams): Promise<ForceLogi
         provider.authLoginCommand,
         authEnv,
         provider.requiresLoginTty ?? false,
+        provider.authConfigDirEnvVar,
     );
 
     if (url) {

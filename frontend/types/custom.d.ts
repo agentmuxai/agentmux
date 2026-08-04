@@ -201,7 +201,13 @@ declare global {
         getCliPath: (provider: string) => Promise<string | null>;
         checkNodejsAvailable: () => Promise<NodejsStatus>;
         ensureAuthDir: (providerId: string) => Promise<string>;
-        runCliLogin: (cliPath: string, loginArgs: string[], authEnv: Record<string, string>, requiresTty?: boolean) => Promise<string | null>;
+        runCliLogin: (
+            cliPath: string,
+            loginArgs: string[],
+            authEnv: Record<string, string>,
+            requiresTty?: boolean,
+            authConfigDirEnvVar?: string,
+        ) => Promise<string | null>;
         cancelCliLogin: () => Promise<void>;
         getCliLoginStatus: () => Promise<{ active: boolean; credential_changed: boolean; generation: number }>;
         seedProviderAuthFromGlobal: (providerId: string, configDir?: string) => Promise<{ seeded: boolean; status: string; expiresAt?: number | null }>;

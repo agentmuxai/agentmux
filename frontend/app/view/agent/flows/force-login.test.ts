@@ -30,7 +30,11 @@ vi.mock("./open-oauth-pane", () => ({ openOAuthBrowserPane: hub.openPane }));
 import { forceProviderLogin } from "./force-login";
 
 const URL = "https://claude.ai/oauth/authorize?client_id=abc";
-const provider = { authLoginCommand: ["auth", "login"], requiresLoginTty: true } as any;
+const provider = {
+    authLoginCommand: ["auth", "login"],
+    requiresLoginTty: true,
+    authConfigDirEnvVar: "CLAUDE_CONFIG_DIR",
+} as any;
 
 beforeEach(() => {
     hub.runCliLogin.mockReset();
@@ -58,6 +62,10 @@ describe("forceProviderLogin", () => {
             ["auth", "login"],
             { CLAUDE_CONFIG_DIR: "C:/auth" },
             true,
+            // reagent P1 on PR #2410: threaded through so the host can
+            // baseline-check the RIGHT credential file for THIS provider
+            // (capture_cred_baseline no longer hardcodes CLAUDE_CONFIG_DIR).
+            "CLAUDE_CONFIG_DIR",
         );
         expect(setAuthUrl).toHaveBeenCalledWith(URL);
         expect(hub.openPane).toHaveBeenCalledWith(URL);
