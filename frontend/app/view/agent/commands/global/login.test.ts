@@ -55,6 +55,7 @@ function makeCtx(): SlashCommandContext {
         deferControllerRefreshUntilIdle: vi.fn(),
         beginRecoveryFlow: vi.fn(),
         endRecoveryFlow: vi.fn(),
+        isCancelled: () => false,
         openPicker: vi.fn(),
         openHelp: vi.fn(),
     };
@@ -181,6 +182,49 @@ describe("/login registers as an in-flight recovery (codex P1 on PR #2338, ninth
         // success — a leaked true here would wedge every future send behind
         // "wait for the login attempt to finish" forever.
         expect(ctx.endRecoveryFlow).toHaveBeenCalledOnce();
+    });
+});
+
+describe("reagent P1 on PR #2413 (round 3, second pass): /login's poll notices an external cancel", () => {
+    // The AuthUrlBox Cancel / "Use terminal instead" buttons call
+    // useAgentControllerStatus's cancelLogin()/useTerminalInstead() directly,
+    // not through this handler — ctx.isCancelled() is how the poll below
+    // learns that happened instead of running to its own 5-minute timeout,
+    // long past useTerminalInstead()'s 20s backstop.
+    it("stops polling and returns a silent ok as soon as isCancelled() flips true, instead of running to the 5-minute timeout", async () => {
+        vi.useFakeTimers();
+        hub.checkCliAuth.mockReset().mockResolvedValue({ authenticated: false });
+        const ctx = makeCtx();
+        let cancelled = false;
+        ctx.isCancelled = () => cancelled;
+
+        const promise = loginCommand.handler(ctx, "");
+        await vi.advanceTimersByTimeAsync(6_000);
+        cancelled = true;
+        await vi.advanceTimersByTimeAsync(2_000);
+        const result = await promise;
+
+        expect(result).toEqual({ kind: "ok" });
+        // Not the "no login detected" error — the user explicitly left this
+        // flow, so there's nothing wrong to report.
+        expect(ctx.log).not.toHaveBeenCalledWith(
+            "auth",
+            expect.stringMatching(/no login was detected/i),
+            expect.anything(),
+        );
+        expect(ctx.endRecoveryFlow).toHaveBeenCalledOnce();
+    });
+
+    it("does not stop polling on its own — still runs to the 5-minute timeout when isCancelled() never flips true", async () => {
+        vi.useFakeTimers();
+        hub.checkCliAuth.mockReset().mockResolvedValue({ authenticated: false });
+        const ctx = makeCtx();
+
+        const promise = loginCommand.handler(ctx, "");
+        await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+        const result = await promise;
+
+        expect(result.kind).toBe("error");
     });
 });
 
