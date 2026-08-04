@@ -196,8 +196,10 @@ export type AuthCommand =
     /**
      * Seed-from-global accepted (SPEC_HOST_CLI_LOGIN_CAPTURE §0 / §5.5):
      * the user's valid GLOBAL Claude login was copied into the agent's
-     * isolated dir, so auth is satisfied WITHOUT in-app OAuth — which is a
-     * dead end for Claude v2.1.x (the spawned login can't open a browser).
+     * isolated dir, so auth is satisfied WITHOUT running a fresh OAuth —
+     * the fast path when one's already available, offered as tier 2
+     * alongside the in-app session (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md
+     * §3.1) that's since become tier 1's primary path for Claude v2.1.198+.
      * Single-phase, like `ApiKeyAccepted`: the credential file IS the
      * persistence, so transition straight to `ready`. Honored only from
      * connect-able kinds (`unauthenticated`/`expired`/`failed`); a stale

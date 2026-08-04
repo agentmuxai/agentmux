@@ -49,8 +49,12 @@ One reusable flow (backend-spawned, frontend-observed), extracted so all three s
 ### 3.2 Catalog/flag changes
 
 - `frontend/app/view/agent/providers/catalog.ts`: drop `headlessLoginUrlUnsupported: true` for Claude; add the login argv (`["auth", "login"]`) alongside the existing login metadata. Keep `requiresLoginTty` semantics for providers that truly need it.
-- Remove the three `skipTier1: true` overrides (`useAgentControllerStatus.ts`, `commands/global/login.ts`, `PreLaunchAuthPanel.tsx`) for Claude; tier 1 becomes the revived in-app session (§3.1). Tier 2 (seed-from-global) stays as the fast path when a valid global login exists. Tier 3 (terminal) demotes to explicit fallback ("Use terminal instead"), never auto-launched.
-- **Feature-gate, not version-pin:** if URL capture yields nothing within the capture window (older CLI, e.g. ≤2.1.183 behavior), fall back to today's tier 2→3 order unchanged. No hard dependency on CLI version; 2.1.198 (pinned) is confirmed good.
+- Remove the three `skipTier1: true` overrides (`useAgentControllerStatus.ts`, `commands/global/login.ts`, `PreLaunchAuthPanel.tsx`) for Claude; tier 1 becomes the revived in-app session (§3.1). Tier 2 (seed-from-global) stays as the fast path when a valid global login exists.
+- **Two distinct "reach tier 3" paths — do not conflate them** (codex flagged this pairing as apparently contradictory on PR #2410; it isn't, but needs spelling out):
+  1. **Capture miss** — tier 1 prints no URL at all within its capture window (older CLI, e.g. ≤2.1.183 behavior). Falls through 1 → 2 → 3 **automatically**, exactly as today, unchanged — this is the behavior-gate, no CLI version check anywhere, and is why older CLIs keep working with zero regression.
+  2. **User-driven fallback ("`inapp-timeout`")** — a URL WAS captured and shown; there's no passive/unattended timeout on the in-app session itself (§3.1: it lives as long as the panel is open). Tier 3 is reached ONLY by the user's own "Use terminal instead" click, which is what interrupts the poll and produces the `inapp-timeout` outcome (not a poll that independently expires and is then, separately, escalated) — the terminal opens as part of that same click, re-running the login with `skipTier1: true`.
+
+  In short: once tier 1 has shown the user a URL, nothing after that auto-launches anything further out from under them — only a capture miss (nothing was ever shown) auto-proceeds, because there's nothing on screen to interrupt.
 
 ### 3.3 The three surfaces
 
@@ -58,7 +62,7 @@ One reusable flow (backend-spawned, frontend-observed), extracted so all three s
 2. **Credential-loss relogin** (agent pane, `useAgentControllerStatus.ts` path): when auth is lost mid-life, the pane's relogin affordance opens the same panel, targeting the agent's **existing** bound account dir (`existingAccountId` — refresh, don't mint; `run-provider-login.ts` already threads this).
 3. **Armory + Agent Stash:**
    - `accounts-catalog.ts`: Anthropic entry gains `authModes: ["oauth", "key"]` (OAuth = this flow, not `oauth-catalog.ts`'s service-OAuth scaffold — that stays untouched).
-   - Armory Accounts tile → Connect → in-app login panel → on success, account appears in the gallery (no agent link required; linking happens later at launch/Stash).
+   - Armory Accounts tile → Connect → in-app login panel → on success, account appears in the gallery (no agent link required; linking happens later at launch/Stash). **The tile's `id: "anthropic"` is a display-grouping key only** (`provider-brand.ts`'s existing `claude → anthropic` mapping) — the session itself always calls `runProviderLogin({ provider: PROVIDERS["claude"], ... })`, the same CLI-provider definition the other two surfaces use, and the resulting `IdentityAccount` row is persisted with `provider: "claude"` (oauth-class, resolvable by the spawn gate), never `"anthropic"` (the separate, key-only `AccountProvider` union member). No new provider-id translation step is needed; there was never a point where "anthropic" would have been passed to the login/persist path.
    - `AgentStashModal.tsx` Accounts tab (`AgentIdentityLinksPanel`): add "Connect / Re-login" action per binding, opening the same panel with `existingAccountId` + `linkTarget` set.
    - Requires decoupling `runProviderLogin` from agent-block context (today all 8 callers are pane/launch surfaces): the §3.1 session takes `{provider, accountId?, linkTarget?}` and no block id.
 
@@ -73,7 +77,7 @@ One reusable flow (backend-spawned, frontend-observed), extracted so all three s
 - **PR 1:** §3.1 core session + catalog changes (§3.2), wired into the launch surface (surface 1). Terminal tier kept as manual fallback.
 - **PR 2:** relogin surface (surface 2) on the same primitive.
 - **PR 3:** Armory + Stash (surface 3) incl. `accounts-catalog` change and the block-context decoupling.
-- **PR 4 (cleanup):** retire auto-launch of tier 3; docs sweep (`catalog.ts` comment, `SPEC_HOST_CLI_LOGIN_CAPTURE` §0 note, `REPORT_…RETHINK` §8 addendum).
+- **PR 4 (cleanup):** docs sweep only, no behavior change — correct stale "dead end"/"still impossible" claims (`catalog.ts` comment, `SPEC_HOST_CLI_LOGIN_CAPTURE` §0 note, `REPORT_…RETHINK` §8 addendum) to match §3.2's actual auto-launch semantics: the capture-miss 1→2→3 fallthrough stays automatic and unchanged; tier 3 is otherwise reached ONLY by the user's own "Use terminal instead" click (there's no passive session timeout to separately auto-escalate — §3.2), and that was already true before this PR, not something PR 4 newly retires.
 
 ## 5. Security notes
 
