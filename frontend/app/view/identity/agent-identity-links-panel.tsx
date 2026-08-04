@@ -12,8 +12,16 @@
 // documented in docs/specs/SPEC_ARMORY_PHASE5_CONSOLIDATION_AND_SKILL_SEEDING_2026_07_13.md
 // §1.3.
 //
-// No create/edit/delete/bind/unbind here — new agent identities are
-// created from the agent-launch flow directly. See
+// Create/edit/delete/bind/unbind stayed out of scope here EXCEPT for one
+// exception carved out by docs/specs/SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md
+// §3.3 surface 3: a Connect/Re-login action for Claude specifically, since
+// this is otherwise the only place a broken/missing Claude binding is
+// visible per-agent — without it, an agent whose bound account was deleted
+// (or, per retro-agentu-0.54.9-stuck-error-2026-08-03.md, never had one) had
+// no in-app path to fix it short of the launch dialog's own "New Agent"
+// flow, which doesn't apply to an agent that already exists. New agent
+// identities for OTHER providers, and non-Claude relogin, remain out of
+// scope — created from the agent-launch flow directly, per
 // docs/specs/SPEC_IDENTITY_DIRECT_LINKS_PHASE3_PRC_2026_07_10.md.
 
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
@@ -25,6 +33,8 @@ import { waveEventSubscribe } from "@/app/store/wps";
 import { loadAccounts, subscribeAccountChanges, PROVIDER_LABELS, type Account } from "./identity-model";
 import { statusBadge } from "./identity-manager";
 import { joinAgentIdentityRows } from "./agent-identities-model";
+import { ClaudeLoginPanel } from "@/app/view/accounts/ClaudeLoginPanel";
+import { canonicalProviderId } from "@/app/view/agent/providers/provider-id-aliases";
 
 import "./identity-pane-view.scss";
 
@@ -41,6 +51,32 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
     const [allLinks, setAllLinks] = createSignal<AgentDefinitionIdentity[]>([]);
     const [accounts, setAccounts] = createSignal<Account[]>(loadAccounts());
     const [error, setError] = createSignal<string | null>(null);
+    // Set to the account id being refreshed (or "" for a fresh connect —
+    // distinguished from "closed" by claudePanelOpen()) when the Claude
+    // Connect/Re-login panel is open.
+    const [claudePanelOpen, setClaudePanelOpen] = createSignal(false);
+    const [claudeRefreshAccountId, setClaudeRefreshAccountId] = createSignal<string | undefined>(undefined);
+    // reagent P0 on PR #2414: see ClaudeLoginPanel's staleAliasProvider doc
+    // comment — set when the row being acted on carries a legacy-alias
+    // provider string, so the panel can unlink it after a successful login
+    // instead of leaving an orphaned row that silently blocks every future
+    // spawn under the new canonical link.
+    const [claudeStaleAliasProvider, setClaudeStaleAliasProvider] = createSignal<string | undefined>(undefined);
+    // reagent P2 on PR #2414 (round 3): the empty-state "Connect Claude
+    // account" button below must not appear before the initial load
+    // resolves (was previously indistinguishable from "genuinely zero
+    // links") or after it fails (the top error banner already covers that
+    // case — offering the button too just invites clicking it against
+    // still-broken/unknown state).
+    const [linksLoaded, setLinksLoaded] = createSignal(false);
+
+    const openClaudeLogin = (existingAccountId: string | undefined, rawProvider?: string) => {
+        setClaudeRefreshAccountId(existingAccountId);
+        setClaudeStaleAliasProvider(
+            rawProvider && rawProvider !== "claude" ? rawProvider : undefined,
+        );
+        setClaudePanelOpen(true);
+    };
 
     const refreshLinks = async (): Promise<void> => {
         try {
@@ -49,6 +85,8 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
             setError(null);
         } catch (e: any) {
             setError(e?.message ?? "Failed to load agent identities");
+        } finally {
+            setLinksLoaded(true);
         }
     };
     void refreshLinks();
@@ -87,6 +125,18 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
         return joinAgentIdentityRows(id, allLinks(), accountsById());
     });
 
+    // reagent P1 on PR #2414 (round 6): the empty-state Connect button was
+    // gated on `rows().length === 0`, so a Claude-provider agent with ANY
+    // other-provider link (e.g. a github row, but no claude/claude-code
+    // row) fell into the table branch instead — where the per-row
+    // Connect/Re-login button only renders on rows whose OWN provider is
+    // claude, so there was no row to attach it to either. Net effect: no
+    // in-app affordance anywhere in the panel to connect Claude for that
+    // agent, despite this being exactly the broken/missing-Claude-binding
+    // case the panel exists to fix. Computed independently of rows().length
+    // so it applies whether the table renders or not.
+    const hasClaudeLink = createMemo(() => rows().some((r) => canonicalProviderId(r.provider) === "claude"));
+
     return (
         <div class="identity-pane">
             <div class="identity-pane-detail">
@@ -113,10 +163,17 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
                         <Show
                             when={rows().length > 0}
                             fallback={
-                                <p class="identity-pane-empty-hint">
-                                    This agent has no linked accounts yet. Link one from its launch
-                                    dialog.
-                                </p>
+                                // reagent P2 on PR #2414 (round 3): gated on
+                                // linksLoaded() && !error() — without this,
+                                // this text rendered indistinguishably for
+                                // "still loading", "load failed" (the banner
+                                // above already covers that), and a
+                                // genuinely empty agent.
+                                <Show when={linksLoaded() && !error()}>
+                                    <div class="identity-pane-empty-hint">
+                                        <p>This agent has no linked accounts yet. Link one from its launch dialog.</p>
+                                    </div>
+                                </Show>
                             }
                         >
                             <table class="identity-pane-bindings">
@@ -125,6 +182,7 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
                                         <th>Provider</th>
                                         <th>Account</th>
                                         <th>Status</th>
+                                        <th />
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -155,6 +213,34 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
                                                             </span>
                                                         </span>
                                                     </td>
+                                                    <td>
+                                                        {/* Claude-only for now — the in-app session
+                                                            (InAppLoginPanel/ClaudeLoginPanel) only
+                                                            exists for Claude; other providers still
+                                                            route through the launch dialog. Canonicalize
+                                                            — db_agent_identity_links can carry a
+                                                            legacy-alias row ("claude-code") for a
+                                                            migrated agent (reagent P1 on PR #2414;
+                                                            see provider-id-aliases.ts). */}
+                                                        <Show when={canonicalProviderId(row.provider) === "claude"}>
+                                                            <button
+                                                                type="button"
+                                                                class="identity-btn identity-btn-secondary"
+                                                                // reagent P2 on PR #2414 (round 5): row.accountId
+                                                                // (from the link row itself, agent-identities-model.ts)
+                                                                // is always present when a link exists; row.account
+                                                                // (the JOINED Account object) is null whenever the
+                                                                // local accounts cache hasn't caught up yet — using
+                                                                // row.account?.id here passed undefined on a
+                                                                // stale-cache click, minting a brand-new Claude
+                                                                // account instead of refreshing the one the link
+                                                                // row already points at.
+                                                                onClick={() => openClaudeLogin(row.accountId, row.provider)}
+                                                            >
+                                                                {row.account ? "Re-login" : "Connect"}
+                                                            </button>
+                                                        </Show>
+                                                    </td>
                                                 </tr>
                                             );
                                         }}
@@ -162,9 +248,51 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
                                 </tbody>
                             </table>
                         </Show>
+
+                        {/* reagent P1 on PR #2414 (round 6): standalone, NOT
+                            nested inside the rows()===0 fallback above — a
+                            Claude-provider agent with other-provider links
+                            but no claude/claude-code row of its own needs
+                            this same affordance, and the per-row
+                            Connect/Re-login button (only rendered on rows
+                            whose OWN provider is claude) can't cover it since
+                            no such row exists to attach it to. The
+                            retro-agentu-0.54.9-stuck-error-2026-08-03.md case
+                            this button exists for. Gated on the agent's own
+                            provider (reagent P2 on PR #2414, round 3):
+                            otherwise this links an unrelated Claude account
+                            to an agent whose actual provider is something
+                            else entirely. */}
+                        <Show
+                            when={
+                                linksLoaded() &&
+                                !error() &&
+                                !hasClaudeLink() &&
+                                canonicalProviderId(agent()?.provider ?? "") === "claude"
+                            }
+                        >
+                            <div class="identity-pane-empty-hint">
+                                <button
+                                    type="button"
+                                    class="identity-btn identity-btn-primary"
+                                    onClick={() => openClaudeLogin(undefined)}
+                                >
+                                    Connect Claude account
+                                </button>
+                            </div>
+                        </Show>
                     </div>
                 </Show>
             </div>
+
+            <Show when={claudePanelOpen()}>
+                <ClaudeLoginPanel
+                    onClose={() => setClaudePanelOpen(false)}
+                    existingAccountId={claudeRefreshAccountId()}
+                    linkTarget={props.agentId ? { agentDefinitionId: props.agentId } : undefined}
+                    staleAliasProvider={claudeStaleAliasProvider()}
+                />
+            </Show>
         </div>
     );
 };
