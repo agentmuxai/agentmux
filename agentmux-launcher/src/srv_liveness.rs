@@ -122,23 +122,23 @@ pub fn should_recycle() -> bool {
 /// `select!`) for up to `timeout` on every hiccup.
 ///
 /// Success = a response starting with `HTTP/1.1 200`. `web_endpoint` is
-/// `srv_result.web_endpoint`, already in `http://127.0.0.1:{port}` form
-/// (see `srv_spawner::SrvSpawnResult`).
+/// `srv_result.web_endpoint` — a bare `host:port` (e.g. `127.0.0.1:54321`),
+/// NOT a URL: `emit_estart` (`agentmux-srv/src/bootstrap.rs`) writes
+/// `web:127.0.0.1:{port}` with no scheme, and `parse_estart`
+/// (`srv_spawner.rs`) carries that through verbatim — the same convention
+/// `host_spawn.rs` relies on when it passes this value straight through as
+/// `AGENTMUX_BACKEND_WEB`. (codex P1, PR #2411: an earlier version of this
+/// function stripped a `http://` prefix that never exists, so every probe
+/// silently failed and every healthy srv got recycled to death.)
 pub async fn probe(web_endpoint: &str, timeout: Duration) -> bool {
     tokio::time::timeout(timeout, probe_inner(web_endpoint))
         .await
         .unwrap_or(false)
 }
 
-async fn probe_inner(web_endpoint: &str) -> bool {
+async fn probe_inner(host_port: &str) -> bool {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    let Some(host_port) = web_endpoint
-        .strip_prefix("http://")
-        .or_else(|| web_endpoint.strip_prefix("https://"))
-    else {
-        return false;
-    };
     let Ok(mut stream) = tokio::net::TcpStream::connect(host_port).await else {
         return false;
     };
@@ -216,7 +216,10 @@ mod tests {
                 .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
                 .await;
         });
-        let ok = super::probe(&format!("http://{}", addr), std::time::Duration::from_secs(2)).await;
+        // `addr` here matches the real shape of `srv_result.web_endpoint`
+        // (bare host:port, no scheme) — see the codex P1 fix this test
+        // guards against.
+        let ok = super::probe(&addr.to_string(), std::time::Duration::from_secs(2)).await;
         assert!(ok);
     }
 
@@ -231,7 +234,7 @@ mod tests {
             let (_sock, _) = listener.accept().await.unwrap();
             tokio::time::sleep(std::time::Duration::from_secs(10)).await;
         });
-        let ok = super::probe(&format!("http://{}", addr), std::time::Duration::from_millis(200)).await;
+        let ok = super::probe(&addr.to_string(), std::time::Duration::from_millis(200)).await;
         assert!(!ok);
     }
 
@@ -241,7 +244,7 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         drop(listener);
-        let ok = super::probe(&format!("http://{}", addr), std::time::Duration::from_secs(1)).await;
+        let ok = super::probe(&addr.to_string(), std::time::Duration::from_secs(1)).await;
         assert!(!ok);
     }
 }
