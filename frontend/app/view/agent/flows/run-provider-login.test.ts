@@ -136,6 +136,10 @@ describe("runProviderLogin", () => {
             ["auth", "login"],
             { CLAUDE_CONFIG_DIR: MINTED.dir },
             true,
+            // reagent P1 on PR #2410 (second round): threaded through so
+            // capture_cred_baseline checks the right provider's config-dir
+            // key, not a hardcoded "CLAUDE_CONFIG_DIR".
+            "CLAUDE_CONFIG_DIR",
         );
     });
 
@@ -752,6 +756,84 @@ describe("runProviderLogin — awaited in-app session (awaitTier1Completion)", (
 
         expect(outcome).toBe("inapp-timeout");
         expect(hub.upsertIdentityAccount).not.toHaveBeenCalled();
+    });
+
+    it("reagent P1 on PR #2410 (second round): a FRESH mint whose credential_changed never flips true (macOS Keychain-backed Claude login — no .credentials.json ever appears) still succeeds, because it wasn't authenticated before this attempt started", async () => {
+        vi.useFakeTimers();
+        hub.runCliLogin.mockResolvedValue(CLAUDE_AUTHORIZE_URL);
+        // Never authenticated before (fresh mint) — the upfront probe
+        // captures this — and the login writes to the macOS Keychain, so
+        // credential_changed (file-mtime based) stays false throughout.
+        hub.checkCliAuthCommand
+            .mockResolvedValueOnce({ authenticated: false }) // upfront capture
+            .mockResolvedValue({ authenticated: true }); // after the child exits
+        hub.getCliLoginStatus.mockResolvedValue({ active: false, credential_changed: false, generation: 1 });
+
+        const promise = runProviderLogin({
+            provider: claude,
+            cliPath: "x",
+            authEnv: { CLAUDE_CONFIG_DIR: "C:/auth" },
+            setAuthUrl: vi.fn(),
+            log: vi.fn(),
+            awaitTier1Completion: true,
+        });
+        await vi.advanceTimersByTimeAsync(2_000);
+        const outcome = await promise;
+
+        expect(outcome).toBe("inapp-success");
+    });
+
+    it("reagent P1 on PR #2410 (second round): a RECONNECT that was already authenticated before this attempt started still requires credential_changed — the Keychain fallback only covers the not-previously-authenticated case", async () => {
+        vi.useFakeTimers();
+        hub.runCliLogin.mockResolvedValue(CLAUDE_AUTHORIZE_URL);
+        // Already authenticated before this attempt (stale reconnect) —
+        // the upfront probe captures THAT — and credential_changed never
+        // flips true (crashed child, or the same macOS Keychain gap).
+        hub.checkCliAuthCommand.mockResolvedValue({ authenticated: true });
+        hub.getCliLoginStatus.mockResolvedValue({ active: false, credential_changed: false, generation: 1 });
+
+        const promise = runProviderLogin({
+            provider: claude,
+            cliPath: "x",
+            authEnv: { CLAUDE_CONFIG_DIR: "C:/auth" },
+            setAuthUrl: vi.fn(),
+            log: vi.fn(),
+            awaitTier1Completion: true,
+            existingAccountId: "acct-existing",
+        });
+        await vi.advanceTimersByTimeAsync(6_000);
+        const outcome = await promise;
+
+        expect(outcome).toBe("inapp-timeout");
+        expect(hub.upsertIdentityAccount).not.toHaveBeenCalled();
+    });
+
+    it("reagent P2 on PR #2410 (second round): captures the login generation BEFORE the first poll delay — a supersede during that very first sleep is still detected, not attributed to this attempt", async () => {
+        vi.useFakeTimers();
+        hub.runCliLogin.mockResolvedValue(CLAUDE_AUTHORIZE_URL);
+        hub.checkCliAuthCommand.mockResolvedValue({ authenticated: false });
+        hub.getCliLoginStatus
+            // Upfront capture, BEFORE any sleep — establishes generation 5
+            // as this attempt's own, before another surface can supersede.
+            .mockResolvedValueOnce({ active: true, credential_changed: true, generation: 5 })
+            // First in-loop read, AFTER the first sleep — a different
+            // surface has already superseded by generation 6.
+            .mockResolvedValueOnce({ active: false, credential_changed: true, generation: 6 });
+
+        const promise = runProviderLogin({
+            provider: claude,
+            cliPath: "x",
+            authEnv: { CLAUDE_CONFIG_DIR: "C:/auth" },
+            setAuthUrl: vi.fn(),
+            log: vi.fn(),
+            awaitTier1Completion: true,
+        });
+        await vi.advanceTimersByTimeAsync(2_000);
+        const outcome = await promise;
+
+        expect(outcome).toBe("inapp-timeout");
+        // The whole point: must not reap a login that isn't this attempt's.
+        expect(hub.cancelCliLogin).not.toHaveBeenCalled();
     });
 
     it("fails fast with 'inapp-timeout' when the child exits WITHOUT a credential ever landing (login crashed/failed) — after grace re-checks, well before the full window", async () => {

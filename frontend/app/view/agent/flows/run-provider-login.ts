@@ -291,20 +291,26 @@ const INAPP_COMPLETION_TIMEOUT_MS = 5 * 60 * 1_000;
  *  (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.1): the login is done
  *  when the spawned login child has EXITED, credential material exists in
  *  the isolated dir (probed via the CLI's own auth-check command, same as
- *  `pollForCliAuthReady`), AND that credential is the one THIS attempt
- *  wrote (`credential_changed`, tracked host-side against a baseline
- *  captured before spawn). All three are required:
- *    - the credential probe alone false-positives on a reconnect into an
- *      existing account dir (a present-but-expired token still reports
- *      "authenticated" — see force-login.ts's doc comment);
- *    - `credential_changed` alone (without requiring `!active` too) could
- *      fire on a mid-flow rewrite that isn't the terminal one;
- *    - and without `credential_changed` at all, a child that crashed
- *      instantly (auth exchange failed) right after a RECONNECT — where
- *      the stale-but-still-file-shaped OLD credential was on disk before
- *      this attempt ever started — would read `!active && authed` off
- *      that untouched file the moment it died, reporting success for a
- *      login that never actually ran (reagent P1 on PR #2410).
+ *  `pollForCliAuthReady`), AND either that credential is the one THIS
+ *  attempt wrote (`credential_changed`, host-tracked against a baseline
+ *  captured before spawn) OR the account genuinely wasn't authenticated
+ *  before this attempt started (`initialAuthed`, captured up front here).
+ *  Why the OR, not just `credential_changed` alone (reagent P1 on PR #2410,
+ *  second round): `credential_changed` is FILE-based
+ *  (`cli_login_cred_baseline`'s mtime check), but on macOS the Claude CLI
+ *  can update credentials in the Keychain ("Claude Safe Storage") without
+ *  ever touching `.credentials.json` — the exact case
+ *  `cli_handlers.rs:393-416`'s own auth-check already has to special-case.
+ *  Requiring `credential_changed` unconditionally made EVERY macOS Claude
+ *  login report `inapp-timeout` even on success, since the file the
+ *  baseline watches simply never appears. `initialAuthed` recovers the
+ *  common case (fresh mint / first-ever login: not authenticated before,
+ *  authenticated after — real evidence regardless of storage mechanism)
+ *  without needing macOS Keychain-diffing. The narrower case both checks
+ *  still miss — a macOS RECONNECT into an account whose Keychain entry
+ *  already looked valid before this attempt — degrades to the pre-fix
+ *  behavior (child-exit + authed alone) rather than a regression; closing
+ *  it fully needs Keychain change-detection, tracked as a follow-up.
  *  Child exit is observed via `getCliLoginStatus` (the generation-guarded
  *  host-side active flag + credential-mtime baseline); when the child is
  *  gone but completion isn't confirmed yet, a couple of grace re-checks
@@ -315,11 +321,14 @@ const INAPP_COMPLETION_TIMEOUT_MS = 5 * 60 * 1_000;
  *  SINGLE global slot, not one per caller. If a different surface starts a
  *  newer login while this poll is still running, the host's generation
  *  counter advances and `active`/`credential_changed` from here on describe
- *  the NEWER child, not this poll's own. This function captures the
- *  generation on its first read and stops trusting `active`/
- *  `credential_changed` the moment it changes — the caller must NOT call
- *  `cancelCliLogin()` in that case (it would kill the newer, unrelated
- *  login instead of reaping this one, which is already gone). */
+ *  the NEWER child, not this poll's own. `myGeneration` is captured
+ *  up-front (before the first poll delay — reagent P2, second round: a
+ *  post-sleep capture left a window where a supersede during that FIRST
+ *  sleep would be attributed to us) and this function stops trusting
+ *  `active`/`credential_changed` the moment a later read disagrees — the
+ *  caller must NOT call `cancelCliLogin()` in that case (it would kill the
+ *  newer, unrelated login instead of reaping this one, which is already
+ *  gone). */
 async function pollForInAppLoginCompletion(
     cliPath: string,
     authCheckArgs: string[],
@@ -331,7 +340,31 @@ async function pollForInAppLoginCompletion(
     const timeoutMs = opts.timeoutMs ?? INAPP_COMPLETION_TIMEOUT_MS;
     const deadline = performance.now() + timeoutMs;
     let exitGraceChecksLeft = 2;
+
+    if (isCancelled()) return { completed: false, superseded: false };
     let myGeneration: number | undefined;
+    try {
+        myGeneration = (await getApi().getCliLoginStatus()).generation;
+    } catch {
+        // Fall through — the in-loop read below will try again; a missed
+        // upfront capture just means supersede-detection starts one tick
+        // later, same as the pre-this-fix behavior.
+    }
+    let initialAuthed = false;
+    try {
+        const result = await RpcApi.CheckCliAuthCommand(
+            TabRpcClient,
+            { cli_path: cliPath, auth_check_args: authCheckArgs, auth_env: authEnv },
+            { timeout: 10000 },
+        );
+        initialAuthed = !!result.authenticated;
+    } catch {
+        // Treat as "wasn't authenticated" — the safer default for the OR
+        // condition below (fresh mints, the common case, correctly report
+        // false here anyway; erring this way just narrows the acceptance
+        // window rather than widening it).
+    }
+
     while (performance.now() < deadline) {
         if (isCancelled()) return { completed: false, superseded: false };
         await sleep(pollMs);
@@ -367,7 +400,7 @@ async function pollForInAppLoginCompletion(
             // keep polling on transient RPC errors
         }
         if (!childActive) {
-            if (authed && credentialChanged) return { completed: true, superseded: false };
+            if (authed && (credentialChanged || !initialAuthed)) return { completed: true, superseded: false };
             if (exitGraceChecksLeft-- <= 0) return { completed: false, superseded: false };
         }
     }
