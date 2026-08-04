@@ -154,6 +154,43 @@ describe("ClaudeLoginPanel — Stash link verification (codex P1 on PR #2414)", 
         expect(hub.unlinkAgentIdentity).not.toHaveBeenCalled();
     });
 
+    it("reagent P2 on PR #2414 (round 4): Retry after a link-verification failure reuses the account THIS panel already minted, instead of re-minting a second one", async () => {
+        // First attempt: Armory's bare-Connect shape (no existingAccountId
+        // prop) mints a NEW account and persists it, but the agent-link
+        // check fails — mirrors the test above, just with a Stash
+        // linkTarget added so there's an agent to (fail to) link to.
+        hub.runProviderLogin.mockImplementationOnce(async (opts: any) => {
+            opts.onAccountRegistered?.("acct-new", "/tmp/acct-new");
+            return "inapp-success";
+        });
+        hub.listAgentIdentities.mockResolvedValueOnce([]); // link never landed
+
+        const { findByText } = render(() => (
+            <ClaudeLoginPanel onClose={() => {}} linkTarget={{ agentDefinitionId: "agent-1" }} />
+        ));
+        const retryButton = await findByText("Retry");
+
+        // Second attempt (Retry): this time the link verification succeeds.
+        hub.runProviderLogin.mockImplementationOnce(async (opts: any) => {
+            opts.onAccountRegistered?.("acct-new", "/tmp/acct-new");
+            return "inapp-success";
+        });
+        hub.listAgentIdentities.mockResolvedValueOnce([
+            { agent_id: "agent-1", account_id: "acct-new", provider: "claude" },
+        ]);
+        retryButton.click();
+
+        await findByText(/signed in to claude/i);
+        // The whole point: Retry must refresh the SAME account
+        // ("acct-new") the first attempt already minted and persisted, not
+        // mint a brand-new one under the still-undefined original prop —
+        // that would orphan "acct-new" as a real, credentialed, unlinked
+        // Claude account.
+        expect(hub.runProviderLogin).toHaveBeenLastCalledWith(
+            expect.objectContaining({ existingAccountId: "acct-new" }),
+        );
+    });
+
     it("shows success when the link IS confirmed present for this agent", async () => {
         hub.runProviderLogin.mockImplementation(async (opts: any) => {
             opts.onAccountRegistered?.("acct-new", "/tmp/acct-new");

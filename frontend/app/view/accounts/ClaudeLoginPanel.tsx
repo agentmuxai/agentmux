@@ -98,7 +98,18 @@ export function ClaudeLoginPanel(props: {
             provider: CLAUDE_PROVIDER,
             cliPath,
             authEnv,
-            existingAccountId: props.existingAccountId,
+            // reagent P2 on PR #2414 (round 4): prefer the account THIS
+            // panel already minted/persisted (registeredAccountId, set by
+            // onAccountRegistered below) over the original prop. Without
+            // this, clicking Retry after a link-verification failure (the
+            // account persisted fine, but confirming its link to this
+            // agent failed) re-ran with the stale props.existingAccountId
+            // — undefined for Armory's bare Connect — minting a SECOND
+            // fresh account and orphaning the first one, which is already
+            // a real, credentialed Claude account. Falls back to
+            // props.existingAccountId when nothing has been registered yet
+            // (the ordinary first-attempt / non-persist-failure retries).
+            existingAccountId: registeredAccountId ?? props.existingAccountId,
             linkTarget: props.linkTarget,
             // See PreLaunchAuthPanel's identical rationale: the in-app tier 1
             // runs first; "Use terminal instead" re-runs with it skipped.
