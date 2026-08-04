@@ -19,11 +19,15 @@ import { BrowserAuthModalPanel } from "@/app/view/browser/components/BrowserAuth
 import { AgentIdentityModalPanel } from "@/app/view/agent/components/AgentIdentityModal";
 import { AgentNativeMemoryModal } from "@/app/view/agent/components/AgentNativeMemoryModal";
 import { AgentStashModal } from "@/app/view/agent/components/AgentStashModal";
+import { BundleImportSelectModalPanel } from "@/app/view/memory/components/BundleImportSelectModal";
+import { BundleImportPreviewModalPanel } from "@/app/view/memory/components/BundleImportPreviewModal";
+import { BundleImportConfirmModalPanel } from "@/app/view/memory/components/BundleImportConfirmModal";
 import "@/app/view/agent/components/AgentPrereqModal.scss";
 import "@/app/view/agent/components/AgentNewBundleModal.scss";
 import "@/app/view/agent/components/AgentIdentityModal.scss";
 import "@/app/view/agent/components/AgentStashModal.scss";
 import "@/app/view/browser/components/BrowserAuthModal.scss";
+import "@/app/view/memory/components/BundleImportModal.scss";
 
 import type { ModalLayerApi, ModalLayerRequest } from "./modal-layer";
 
@@ -49,6 +53,12 @@ export function requestLabel(req: ModalLayerRequest): string {
             return `Memory — ${req.agentName}`;
         case "agent-stash":
             return "Stash";
+        case "bundle-import-select":
+            return "Import Bundle";
+        case "bundle-import-preview":
+            return "Preview & Select";
+        case "bundle-import-confirm":
+            return "Confirm Import";
     }
 }
 
@@ -289,6 +299,41 @@ export function renderRequest(
                         workingDirectory={req.workingDirectory}
                         initialTab={req.initialTab}
                         onClose={api.close}
+                    />
+                ),
+            };
+        case "bundle-import-select":
+            return {
+                label: requestLabel(req),
+                panel: (
+                    <BundleImportSelectModalPanel
+                        onPreviewed={req.onPreviewed}
+                        onCancel={req.onCancel}
+                    />
+                ),
+            };
+        case "bundle-import-preview":
+            return {
+                label: requestLabel(req),
+                panel: (
+                    <BundleImportPreviewModalPanel
+                        preview={req.preview}
+                        onNext={req.onNext}
+                        onCancel={req.onCancel}
+                    />
+                ),
+            };
+        case "bundle-import-confirm":
+            return {
+                label: requestLabel(req),
+                panel: (
+                    <BundleImportConfirmModalPanel
+                        filePath={req.filePath}
+                        contentDigest={req.contentDigest}
+                        bundleDisplayName={req.bundleDisplayName}
+                        selection={req.selection}
+                        onImported={req.onImported}
+                        onCancel={req.onCancel}
                     />
                 ),
             };

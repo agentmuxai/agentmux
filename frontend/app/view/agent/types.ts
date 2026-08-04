@@ -53,7 +53,7 @@ export type InitState = {
 /**
  * Document node types that make up the agent's markdown document
  */
-export type DocumentNode = MarkdownNode | SectionNode | ToolNode | AgentMessageNode | UserMessageNode | SubagentLinkNode | ShellNode | AgentErrorNode | ContextCompactedNode | JektMessageNode;
+export type DocumentNode = MarkdownNode | SectionNode | ToolNode | AgentMessageNode | UserMessageNode | ShellNode | AgentErrorNode | ContextCompactedNode | CompactionStartedNode | JektMessageNode;
 
 /**
  * Raw markdown text block
@@ -349,22 +349,6 @@ export interface UserMessageNode {
 }
 
 /**
- * Subagent link — rendered as a clickable badge in the agent pane.
- * Clicking opens a subagent activity pane split from the parent.
- */
-export interface SubagentLinkNode {
-    type: "subagent_link";
-    id: string;
-    subagentId: string;
-    slug: string;
-    parentAgent: string;
-    sessionId: string;
-    status: "active" | "completed";
-    model: string | null;
-    timestamp?: number; // Unix ms
-}
-
-/**
  * Persistent shell — a long-running process launched by the agent via the
  * Shell tool (agentmux-mcp). Lives in the document as a single compact row
  * that expands inline to show the live-log.
@@ -399,13 +383,44 @@ export interface AgentErrorNode {
     message: string; // Full error text from the CLI result event
 }
 
-/** Transcript boundary marker inserted when Claude compacts its context. */
+/**
+ * Transcript boundary marker inserted when Claude compacts its context.
+ *
+ * `source: "real"` — sourced from the backend's authoritative
+ * `CompactionBoundary` event (Claude Code's `compact_boundary` frame,
+ * exact data). `trigger`/`durationMs` are present.
+ * `source: "heuristic"` — the pre-existing cross-provider fallback,
+ * inferred from a ≥50%-drop in observed input tokens. `trigger`/
+ * `durationMs` are absent (not knowable from the heuristic alone).
+ * See docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md §4.3.
+ */
 export interface ContextCompactedNode {
     type: "context_compacted";
     id: string;
     tokensBefore: number;
     tokensAfter: number;
     timestamp: number;
+    source: "real" | "heuristic";
+    trigger?: "manual" | "auto";
+    /** Real compaction duration in ms — only present when `source === "real"`. */
+    durationMs?: number;
+}
+
+/**
+ * Live "compaction is happening now" announcement — pushed the instant
+ * the `PreCompact` hook's `compaction_started` signal lands (Tier 1 of
+ * docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md).
+ * Deliberately a SEPARATE node type from `ContextCompactedNode`: this
+ * one represents an in-progress announcement with no outcome data yet,
+ * while `ContextCompactedNode` is the completed record (real or
+ * heuristic) — conflating the two would make a still-running
+ * compaction look like a finished one in the transcript.
+ */
+export interface CompactionStartedNode {
+    type: "compaction_started";
+    id: string;
+    trigger: "manual" | "auto";
+    startedAt: number;
 }
 
 /**

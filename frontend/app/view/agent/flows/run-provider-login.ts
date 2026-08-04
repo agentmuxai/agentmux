@@ -77,6 +77,7 @@
 
 import { getApi } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
+import { sleep } from "@/util/util";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import * as WOS from "@/app/store/wos";
 import { forceProviderLogin, type ForceLoginParams } from "./force-login";
@@ -232,7 +233,7 @@ async function pollForCliAuthReady(
     const deadline = performance.now() + timeoutMs;
     while (performance.now() < deadline) {
         if (isCancelled()) return false;
-        await new Promise<void>((r) => setTimeout(r, pollMs));
+        await sleep(pollMs);
         if (isCancelled()) return false;
         try {
             const result = await RpcApi.CheckCliAuthCommand(

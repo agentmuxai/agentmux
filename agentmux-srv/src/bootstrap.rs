@@ -861,6 +861,21 @@ pub fn spawn_background_subsystems(
         tracing::warn!("media file watcher not started; media panes will not live-update on new/changed files");
     }
 
+    // Deploy shell integration scripts (muxlog.mjs/muxspect.mjs + rcfiles)
+    // unconditionally at startup, not opportunistically from a specific
+    // controller's spawn path. Previously the only call site was
+    // `ShellController::start`'s interactive (empty-command) branch
+    // (`blockcontroller/shell/lifecycle.rs`) — a user whose first-ever pane
+    // in a fresh data dir is an Agent pane (persistent/subprocess/acp, which
+    // never hits that branch) would never get the scripts deployed at all,
+    // so even muxspect's own documented `node ~/.agentmux/shell/muxspect.mjs`
+    // direct-path fallback would ENOENT (codex P1 on PR #2380 — a latent gap
+    // in muxlog's identical deployment mechanism that PR newly depends on).
+    // `deploy_scripts` is idempotent (skips if its version marker already
+    // matches), so calling it here in addition to the existing call site is
+    // safe, not a double-write race.
+    backend::shellintegration::deploy_scripts(&backend::base::get_home_dir().join(".agentmux"));
+
     // Config watcher (created before sysinfo loop so it can read telemetry:interval)
     let config_watcher = Arc::new(wconfig::ConfigWatcher::with_config(wconfig::build_default_config()));
 
@@ -1236,6 +1251,15 @@ pub async fn bind_listeners_and_network(
         4 * 60 * 60 * 1000,
     );
 
+    // Same sweep for the host-global shared registry (Tier 2b, issue #1916)
+    // — additionally drops entries whose owning PID no longer exists on this
+    // host, since a channel that crashed without a clean unregister can
+    // leave an entry behind indefinitely otherwise (no other channel's
+    // startup would ever revisit it).
+    if let Some(shared_dir) = registry::resolve_shared_reactive_dir() {
+        backend::reactive::registry::cleanup_stale_shared(&shared_dir, 4 * 60 * 60 * 1000);
+    }
+
     // Tracks agent-spawned OS processes per block. Registered trackers
     // live as long as their agent pane; the background poller emits
     // delta events (`agent:process-added`/`-exited`) to the frontend.
@@ -1382,6 +1406,7 @@ pub fn build_app_state(
 
     AppState {
         auth_key: config.auth_key.clone(),
+        boot_id: Arc::from(uuid::Uuid::new_v4().to_string()),
         version,
         app_path: config.app_path.clone(),
         wstore: stores.wstore,
@@ -1400,7 +1425,20 @@ pub fn build_app_state(
         lan_discovery: net.lan_discovery.clone(),
         lsp_supervisor: net.lsp_supervisor.clone(),
         local_web_url: net.local_web_url.clone(),
-        http_client: reqwest::Client::new(),
+        // Bounded request timeout: cross-instance reactive-inject forwards
+        // (Tier 2/2b/3) chain through this client, and an unbounded client
+        // combined with a forwarding cycle (two channels each holding a
+        // stale-but-PID-alive shared-registry entry pointing at the other)
+        // could otherwise hang a request indefinitely. The hop-count guard
+        // in server/reactive.rs bounds the CYCLE; this bounds each
+        // individual HOP (reagent P1 on PR #2350).
+        http_client: reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
+            .unwrap_or_else(|e| {
+                tracing::warn!(error = %e, "failed to build http_client with timeout, using default");
+                reqwest::Client::new()
+            }),
         process_tracker: net.process_tracker.clone(),
         process_broker: net.process_broker.clone(),
         // Phase E.2c.2 — reducer state + event bus exposed to HTTP/WS

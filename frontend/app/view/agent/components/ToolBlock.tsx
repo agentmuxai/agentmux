@@ -41,12 +41,13 @@
 import clsx from "clsx";
 import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
+import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
+import { formatExactTime, formatTimeAgo } from "@/util/format-time";
 import type { BashResult, EditResult, GlobResult, GrepResult, WriteResult } from "../types";
-import { createBlock } from "@/store/global";
 import type { ToolNode } from "../types";
 import { ToolBlockOverlay } from "./ToolBlockOverlay";
-import { Tooltip } from "@/app/element/tooltip";
 import { extractToolDetail } from "../stream-parser";
+import { PeekOverlay } from "./PeekOverlay";
 
 /**
  * Ref callback that plays a one-shot fade-in animation ONLY on a genuine
@@ -113,7 +114,18 @@ const PREVIEW_ZOOM_STEP = 0.05;
 const PREVIEW_ZOOM_MIN = 0.7;
 const PREVIEW_ZOOM_MAX = 2.0;
 
+// 150ms enter-delay matches UserMessageBlock's hover-to-peek — prevents
+// accidental expansions during fast scroll-throughs.
+const PEEK_ENTER_DELAY_MS = 150;
+
 export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
+    // Drives the peek tooltip's live "time ago" text (§2.3 of
+    // SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md). Unconditional, same
+    // low-cost precedent as ToolElapsedTicker above — not gated on whether
+    // the tooltip is actually open, since Tooltip doesn't expose that state
+    // to its caller.
+    const peekTick = useTick(1000);
+
     // Independent font-scale for the tool preview panel. Ctrl+Scroll inside the
     // panel zooms only the preview; the pane-level zoom (block.meta["term:zoom"])
     // is unaffected. Ephemeral — not persisted to block meta.
@@ -275,8 +287,67 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // when there's nothing tool-kind-specific to show.
     const cmdText = createMemo(() => extractToolDetail(props.node.tool, (props.node.params as Record<string, any>) ?? {}));
 
+    // Peek-tooltip time + estimate lines (SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md
+    // §2.3). Real API-reported token/cost data doesn't exist per-tool-call
+    // today (see SPEC_PER_NODE_TOKEN_ACCOUNTING_2026_08_03.md for the real,
+    // Claude-only derivation planned as a follow-up) — this is a client-side
+    // chars÷4 estimate, always labeled "(est.)".
+    //
+    // isPeeking tracks REAL hover state over the tooltip anchor (set by the
+    // wrapping span below). reagent P2 on PR #2392: peekTimeText used to
+    // read peekTick() unconditionally, so every mounted ToolBlock — every
+    // completed tool row in a whole transcript — subscribed to the shared 1s
+    // ticker forever, not just the one actually being hovered right now.
+    // Short-circuiting before peekTick() means only genuinely-hovered rows
+    // subscribe.
+    const [isPeeking, setIsPeeking] = createSignal(false);
+    const peekTimeText = createMemo(() => {
+        if (!isPeeking()) return null;
+        peekTick(); // re-run every second so "ago" stays live while hovered
+        const ts = props.node.timestamp;
+        if (ts == null) return null;
+        return `${formatExactTime(ts)} · ${formatTimeAgo(ts)}`;
+    });
+    const peekEstimateText = createMemo(() => {
+        const text = JSON.stringify(props.node.params ?? {}) + JSON.stringify(props.node.result ?? "");
+        const count = estimateTokenCount(text);
+        return count > 0 ? `~${formatCompactNumber(count)} tok (est.)` : null;
+    });
+    // Raw-data existence check for showing the overlay at all — deliberately
+    // NOT reading peekTimeText()/peekEstimateText() themselves, since
+    // peekTimeText is gated behind isPeeking() (only resolves to a real
+    // value once hover already started). Using the ticking memos here would
+    // make the show-check circularly depend on hover having already begun,
+    // defeating its own purpose of deciding whether hover should open
+    // anything in the first place.
+    const hasAnyPeekContent = createMemo(() =>
+        cmdText() !== "" || props.node.timestamp != null || peekEstimateText() != null
+    );
+
+    // Peek overlay — Portal-rendered (see PeekOverlay.tsx's doc comment for
+    // why: each virtualized row is its own CSS stacking context, so a plain
+    // `position: absolute` child can never paint above a LATER row no
+    // matter its z-index — confirmed live via CDP, the next row's own
+    // content painted over it). Styled and positioned like
+    // UserMessageBlock.tsx's "Session context" hover-to-peek (flush to the
+    // row's edges, no gap), reusing the same `hover-anchor.ts` direction
+    // logic — just rendered outside the row's subtree instead of inside it.
+    let peekEnterTimer: ReturnType<typeof setTimeout> | undefined;
+    let rowEl: HTMLDivElement | undefined;
+
+    const handlePeekEnter = () => {
+        clearTimeout(peekEnterTimer);
+        peekEnterTimer = setTimeout(() => setIsPeeking(true), PEEK_ENTER_DELAY_MS);
+    };
+    const handlePeekLeave = () => {
+        clearTimeout(peekEnterTimer);
+        setIsPeeking(false);
+    };
+    onCleanup(() => clearTimeout(peekEnterTimer));
+
     return (
         <div
+            ref={(el) => (rowEl = el)}
             class={clsx("agent-tool-block", {
                 collapsed: !expanded(),
                 expanded: expanded(),
@@ -295,15 +366,13 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
         >
             <div class="agent-tool-summary" onClick={props.onTogglePin}>
                 <span class="agent-tool-status-icon">{statusIcon()}</span>
-                <Tooltip
-                    disable={expanded() || !cmdText()}
-                    delayMs={150}
-                    placement="bottom"
-                    divClassName="agent-tool-name-tooltip-anchor"
-                    content={<div class="agent-tool-cmd-tooltip">{cmdText()}</div>}
+                <span
+                    class="agent-tool-name-peek-anchor"
+                    onMouseEnter={handlePeekEnter}
+                    onMouseLeave={handlePeekLeave}
                 >
                     <span class="agent-tool-name">{props.node.summary}</span>
-                </Tooltip>
+                </span>
                 <Show when={props.node.duration}>
                     <span class="agent-tool-duration">({props.node.duration.toFixed(1)}s)</span>
                 </Show>
@@ -352,25 +421,27 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                         );
                     })()}
                 </Show>
-                <Show when={props.node.tool === "Agent"}>
-                    <button
-                        class="agent-tool-open-pane"
-                        title="Open subagent in new pane"
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            const agentId = (props.node.params as any).subagent_id || props.node.id;
-                            createBlock({
-                                meta: {
-                                    view: "subagent",
-                                    "subagent:id": agentId,
-                                } as any,
-                            });
-                        }}
-                    >
-                        ⧉
-                    </button>
-                </Show>
             </div>
+            {/* Peek overlay — SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md,
+                styled to match UserMessageBlock.tsx's "Session context"
+                hover-to-peek (see PeekOverlay.tsx). Suppressed once the
+                panel is already expanded, since the command/time are
+                visible in context there — same condition the old
+                Tooltip-based version used. */}
+            <PeekOverlay
+                show={isPeeking() && hasAnyPeekContent() && !expanded()}
+                rowEl={() => rowEl}
+            >
+                <Show when={peekTimeText()}>
+                    <div class="agent-node-peek-tooltip-meta">{peekTimeText()}</div>
+                </Show>
+                <Show when={peekEstimateText()}>
+                    <div class="agent-node-peek-tooltip-meta">{peekEstimateText()}</div>
+                </Show>
+                <Show when={cmdText()}>
+                    <div class="agent-node-peek-tooltip-body">{cmdText()}</div>
+                </Show>
+            </PeekOverlay>
             {/* Panel — three render modes per `panelMode()`:
              *
              *   hidden  → `.agent-tool-panel--hidden` (off).

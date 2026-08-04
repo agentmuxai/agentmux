@@ -482,11 +482,19 @@ impl Controller for ShellController {
                         agent_id = %agent_id,
                         "jekt: auto-registered"
                     );
-                    // Also write to cross-instance file registry.
+                    // Also write to cross-instance file registry, and its
+                    // host-global sibling (Tier 2b, issue #1916) — this
+                    // auto-register path bypasses the HTTP register handler
+                    // entirely, so it needs its own mirror call too.
                     if let Ok(local_url) = std::env::var("AGENTMUX_LOCAL_URL") {
                         let data_dir = crate::backend::base::get_wave_data_dir();
                         crate::backend::reactive::registry::write(
                             &data_dir,
+                            agent_id,
+                            &local_url,
+                            &self.block_id,
+                        );
+                        crate::backend::reactive::registry::write_shared_from_env(
                             agent_id,
                             &local_url,
                             &self.block_id,
@@ -768,6 +776,7 @@ impl Controller for ShellController {
             if let Some(ref agent_id) = agent_id_wait {
                 let data_dir = crate::backend::base::get_wave_data_dir();
                 crate::backend::reactive::registry::remove(&data_dir, agent_id);
+                crate::backend::reactive::registry::remove_shared_from_env(agent_id);
                 if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
                     sub.remove_agent(agent_id);
                 }

@@ -37,6 +37,7 @@ pub(crate) fn test_state() -> AppState {
 
     AppState {
         auth_key: "test-secret-key".to_string(),
+        boot_id: std::sync::Arc::from("test-boot"),
         version: "0.28.20".to_string(),
         app_path: String::new(),
         wstore: wstore.clone(),
@@ -1271,4 +1272,179 @@ async fn resolve_agent_definition_id_maps_slug_and_passes_through_def_id() {
 
     // Unknown ids error instead of silently writing bogus link rows.
     assert!(super::app_api::resolve_agent_definition_id(&state, "no-such-agent").is_err());
+}
+
+// ---- muxspect (docs/specs/SPEC_MUXSPECT_LIVE_INTROSPECTION_TOOL_2026_08_01.md) ----
+
+/// `GET /api/v1/muxspect/list` returns the full `ProcessStatus` collection
+/// (not just `block_ids`, unlike `agent.tracked-blocks`) and is auth-gated
+/// like every other `/api/v1/*` route.
+#[tokio::test]
+async fn muxspect_list_returns_full_process_status_collection() {
+    let state = test_state();
+    let app = build_router(state);
+
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri("/api/v1/muxspect/list")
+        .header("X-AuthKey", "test-secret-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(json["blocks"].is_array(), "response has a blocks array");
+    // Every row must carry the complete `is_agent` classification, not just
+    // the raw `is_agent_pane` flag a naive consumer might reimplement
+    // incorrectly for subprocess/persistent/acp controllers (codex P2 on
+    // PR #2380).
+    for block in json["blocks"].as_array().unwrap() {
+        assert!(block.get("is_agent").is_some(), "row is missing is_agent: {block}");
+    }
+}
+
+/// `GET /api/v1/muxspect/list` rejects a request with no/wrong auth key —
+/// same auth_middleware every other route already goes through.
+#[tokio::test]
+async fn muxspect_list_requires_auth() {
+    let state = test_state();
+    let app = build_router(state);
+
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri("/api/v1/muxspect/list")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+/// `GET /api/v1/muxspect/describe` composes ProcessBroker status +
+/// controller status + process tree into one response — the "describe
+/// everything about block X" query
+/// REPORT_PROCESS_ARCHITECTURE_STATE_AND_RETHINK_2026_07_22.md §5.4 named as
+/// missing. For a block with no controller, this must still succeed and
+/// report `Lifecycle::Unknown` rather than erroring — an unknown block is a
+/// legitimate, common answer (e.g. a stale/closed pane), not a failure.
+#[tokio::test]
+async fn muxspect_describe_composes_status_for_an_unknown_block() {
+    let state = test_state();
+    let app = build_router(state);
+
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri("/api/v1/muxspect/describe?block_id=no-such-block")
+        .header("X-AuthKey", "test-secret-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["block_id"], "no-such-block");
+    assert_eq!(json["process_status"]["lifecycle"], "unknown");
+    assert_eq!(json["is_agent"], false);
+    assert_eq!(json["controller_status"], serde_json::Value::Null);
+    // `process_status.controller_status` must agree with the top-level
+    // field — both must come from the SAME snapshot, not two independent
+    // reads that could observe different controller states (codex P2 on
+    // PR #2380).
+    assert_eq!(json["process_status"]["controller_status"], json["controller_status"]);
+    assert_eq!(json["tracking_confidence"], "none");
+    assert!(json["processes"].as_array().unwrap().is_empty());
+}
+
+/// Missing `block_id` is a client error, not a panic or a silent empty
+/// success — mirrors `/api/v1/self`'s identical guard.
+#[tokio::test]
+async fn muxspect_describe_requires_block_id() {
+    let state = test_state();
+    let app = build_router(state);
+
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri("/api/v1/muxspect/describe")
+        .header("X-AuthKey", "test-secret-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+/// `describe` on a block with NO controller (the exact "diagnostically
+/// empty" state `muxspect_describe_composes_status_for_an_unknown_block`
+/// pins above) must now also surface WHY, when the reason is knowable: a
+/// persisted `error_during_execution` frame as the last line of the
+/// block's own output — the durable signal `agent_handlers/input.rs`
+/// already writes for exactly this case (identity-gate spawn refusal,
+/// container-spawn failure, etc.). See
+/// `docs/reports/REPORT_MUXSPECT_SPAWN_REFUSAL_DIAGNOSIS_EXTENSION_2026_08_03.md`
+/// — this is the change that closes the gap the report was written about.
+#[tokio::test]
+async fn muxspect_describe_surfaces_last_error_for_a_wedged_block() {
+    use crate::backend::storage::filestore::{FileMeta, FileOpts};
+
+    let state = test_state();
+    let filestore = state.filestore.clone();
+    filestore
+        .make_file("wedged-block", "output", FileMeta::new(), FileOpts::default())
+        .unwrap();
+    let error_line = serde_json::json!({
+        "type": "result",
+        "is_error": true,
+        "subtype": "error_during_execution",
+        "error": {"message": "[AgentMux] no credentials for claude: bind an account for this provider in the Armory."}
+    })
+    .to_string();
+    filestore
+        .write_file("wedged-block", "output", format!("{error_line}\n").as_bytes())
+        .unwrap();
+
+    let app = build_router(state);
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri("/api/v1/muxspect/describe?block_id=wedged-block")
+        .header("X-AuthKey", "test-secret-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    // Still correctly reports no live controller — this block never had one.
+    assert_eq!(json["process_status"]["lifecycle"], "unknown");
+    assert_eq!(json["controller_status"], serde_json::Value::Null);
+    // ...but is no longer diagnostically empty about why.
+    assert_eq!(
+        json["last_error"]["message"],
+        "[AgentMux] no credentials for claude: bind an account for this provider in the Armory."
+    );
+    assert_eq!(json["last_error"]["source"], "identity");
+    assert!(json["last_error"]["written_ms"].as_u64().unwrap() > 0);
+}
+
+/// A block with no `output` file at all (never opened, or genuinely
+/// healthy) must report `last_error: null`, not error or fabricate one —
+/// this is the common case and must stay silent.
+#[tokio::test]
+async fn muxspect_describe_last_error_is_null_for_a_block_with_no_output() {
+    let state = test_state();
+    let app = build_router(state);
+
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri("/api/v1/muxspect/describe?block_id=never-opened")
+        .header("X-AuthKey", "test-secret-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["last_error"], serde_json::Value::Null);
 }

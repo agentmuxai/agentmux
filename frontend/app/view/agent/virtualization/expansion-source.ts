@@ -96,9 +96,6 @@ export function currentExpansion(
             // mapper fixes for running tools).
             return node.metadata?.canceled ? CLOSED : OPEN_DEFAULT;
 
-        case "subagent_link":
-            return OPEN_DEFAULT;
-
         case "shell":
             // Pin-to-expand only: unlike tools, a running shell stays collapsed
             // by default (spec §11). Only a pin opens it.
@@ -111,6 +108,10 @@ export function currentExpansion(
 
         case "context_compacted":
             // Fixed-height divider — never collapsible.
+            return OPEN_DEFAULT;
+
+        case "compaction_started":
+            // Fixed-height announcement — never collapsible.
             return OPEN_DEFAULT;
     }
 }

@@ -388,6 +388,71 @@ declare global {
         updated_at: number;
     };
 
+    // ── Armory Bundle Format (ABF) import, Phase 3 ──────────────────────
+    // agentmux-srv/src/server/app_api/bundle.rs — bundle.import.preview /
+    // bundle.import.commit. See docs/specs/SPEC_ABF_IMPORT_UI_PHASE3_2026_08_02.md.
+
+    type BundleImportContextFilePreview = {
+        /** Stable selection key (0-based index within this parse) — never
+         *  the (possibly truncated) display_path. */
+        id: number;
+        display_path: string;
+        size_bytes: number;
+    };
+
+    /** "none" | "name_conflict" | "duplicate_in_bundle". */
+    type BundleImportSkillCollision = "none" | "name_conflict" | "duplicate_in_bundle";
+
+    type BundleImportSkillPreview = {
+        /** Stable selection key — never the (possibly truncated) slug. */
+        source_dir: string;
+        slug: string;
+        description: string;
+        collision: BundleImportSkillCollision;
+    };
+
+    type BundleImportMcpServerPreview = {
+        /** Stable selection key. */
+        source_path: string;
+        display: { name: string | null; command: string | null };
+    };
+
+    type BundleImportRequirementPreview = {
+        id: string;
+        provider: string;
+        env: string;
+        resolved: boolean;
+        match_count: number;
+    };
+
+    type BundleImportPreviewResponse = {
+        name: string;
+        description: string;
+        instructions_preview: string;
+        instructions_truncated: boolean;
+        instructions_total_chars: number;
+        context_files: BundleImportContextFilePreview[];
+        skills: BundleImportSkillPreview[];
+        mcp_servers: BundleImportMcpServerPreview[];
+        requirements: BundleImportRequirementPreview[];
+        warnings: string[];
+        warnings_truncated: boolean;
+        name_collision: boolean;
+        /** Required back at commit as expected_content_digest — proves the
+         *  file hasn't changed since preview. */
+        content_digest: string;
+    };
+
+    type BundleImportCommitResponse = {
+        bundle_id: string;
+        imported_skill_ids: string[];
+        skipped_skills: string[];
+        resolved_requirement_ids: string[];
+        unresolved_requirements: { id: string; provider: string; env: string; match_count: number }[];
+        warnings: string[];
+        warnings_truncated: boolean;
+    };
+
     // ── v1 composable model — standalone MCP Server + Skill primitives ─────
     // Mirrors agentmux-srv/src/backend/storage/mcp_servers.rs::McpServer and
     // skills.rs::Skill (the v1 struct, not the legacy agent-scoped AgentSkill).
@@ -575,7 +640,26 @@ declare global {
         | { type: "tool_result"; toolUseId: string; output: unknown; isError: boolean }
         | { type: "cost"; costUsd: number; tokens: TokenCounts }
         | { type: "done"; response: string; transcript: AgentTurn[] }
-        | { type: "error"; message: string };
+        | { type: "error"; message: string }
+        /**
+         * Context compaction completed. Sourced from the CLI's own
+         * `system`/`compact_boundary` stream-json frame — real counts, not
+         * inferred. Mirror of `agentmux-srv/src/agents/types.rs`'s
+         * `AgentEvent::CompactionBoundary` (`CompactionTrigger` is
+         * `#[serde(rename_all = "snake_case")]`). See
+         * docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md
+         * (Codex P2, PR #2378 round 4: this mirror was missing the variant
+         * entirely, leaving typed consumers of this wire union unable to
+         * represent an event the backend actually emits).
+         */
+        | {
+              type: "compaction_boundary";
+              trigger: "auto" | "manual";
+              preTokens: number;
+              postTokens: number;
+              cumulativeDroppedTokens: number;
+              durationMs: number;
+          };
 
     /**
      * Wire shape of one pre-launch OAuth session's current status.

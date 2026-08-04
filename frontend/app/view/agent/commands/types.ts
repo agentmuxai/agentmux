@@ -123,6 +123,101 @@ export interface SlashCommandContext {
     /** Set the OAuth URL for /login. */
     setAuthUrl: (url: string | null) => void;
     /**
+     * Clear stale auth-recovery UI (the mount-time "Log in" bar, any
+     * lingering `authNotice`) once a command has independently confirmed
+     * the credential is good — `useAgentControllerStatus`'s
+     * `notifyControllerHealthy`. /login succeeding is exactly the "agent
+     * became healthy through a different path" case that function's own
+     * doc comment describes: unlike `relogin()` (wired to the mount-time
+     * button), /login never otherwise touches `canRetry`, so without this
+     * call a pane that already showed "Log in" before the user typed
+     * /login directly would have every subsequent normal message
+     * fast-failed by `deliverToBackend`'s guard forever — the credential
+     * is fixed, but nothing told the pane. Codex P1 on PR #2338.
+     */
+    notifyControllerHealthy: () => void;
+    /**
+     * Clear a live "auth"-classified failure row (state.failure), if any.
+     * relogin()/useGlobalLogin()/loginViaTerminal() all clear this via their
+     * onRecovered callback before auto-retrying, but /login is a fully
+     * separate path with no equivalent — without this, a stale pre-existing
+     * failure survives a successful /login, and the caller's NEXT normal
+     * send re-captures that stale failure as `authFailureToPreserve`,
+     * fast-failing the message and re-showing the stale banner even though
+     * the credential is now fine. reagent P1 on PR #2338.
+     */
+    clearAuthFailure: () => void;
+    /**
+     * Restart an already-running persistent controller so a just-refreshed
+     * credential actually takes effect — `send_message` only spawns a
+     * fresh process when one isn't already running. relogin()/
+     * useGlobalLogin()/loginViaTerminal() all call the equivalent
+     * (`useAgentControllerStatus.forceControllerRefresh`) before declaring
+     * success; /login must do the same, or a pane whose controller was
+     * already alive stays on the stale credential and the next message
+     * bypasses every guard in this file (nothing left to fast-fail on)
+     * while still reaching that stale process. Codex P1 on PR #2338
+     * (seventh re-review). Best-effort — never throws.
+     */
+    forceControllerRefresh: () => Promise<boolean>;
+    /**
+     * True while a turn is actively streaming on this pane. `/login`'s
+     * handler checks this before calling `forceControllerRefresh` —
+     * `agentmux-srv`'s `resync_controller` with `force: true` unconditionally
+     * stops the existing controller process before respawning it, which
+     * would kill an in-progress turn and discard its work. Codex P1 on
+     * PR #2338 (tenth re-review).
+     *
+     * A `false` result is FROZEN at the pre-`TurnStart` `wasAlreadyWorking`
+     * snapshot (`useAgentCommands.ts`'s `buildCommandContext`), never a
+     * live `paneSnapshot(...).turnPhase` read — `handleSendMessage`
+     * (agent-view.tsx) dispatches `TurnStart` optimistically before
+     * `sendMessage` ever runs, so a live read would see that optimistic
+     * "Submitting" phase and report `true` even for the ordinary case of
+     * typing /login on a genuinely idle pane, permanently defeating this
+     * check for the most common path. Codex P1 on PR #2338 (eleventh
+     * re-review). A `true`-or-unknown starting point instead falls through
+     * to a LIVE read on every call — /login's own OAuth poll can run for
+     * up to 5 minutes, during which the turn that was genuinely active at
+     * submission time can end; freezing `true` for that whole window would
+     * keep reporting active long after the only edge that flushes a
+     * deferred refresh (turn-just-ended) has already passed, stranding it
+     * forever. Codex P1 on PR #2338 (fourteenth re-review).
+     */
+    isTurnActive: () => boolean;
+    /**
+     * Defer the `forceControllerRefresh` restart until the currently-active
+     * turn ends, instead of skipping it outright. Persistent providers
+     * (`agentmux-srv`'s `persistent.rs`) keep the controller alive across
+     * MANY turns, not just this one — so a `/login` success that just skips
+     * the restart while `isTurnActive()` is true, and declares the pane
+     * healthy anyway, leaves the controller on the stale credential
+     * indefinitely (every fast-fail guard cleared, nothing left to catch
+     * the next message) until the pane is manually reopened. Codex P1 on
+     * PR #2338 (thirteenth re-review). Consumed by
+     * `useAgentCommands.flushPendingControllerRefresh`, which
+     * `agent-view.tsx` calls the moment its turn-just-ended edge detector
+     * fires — so `notifyControllerHealthy`/`clearAuthFailure` are deferred
+     * along with the restart itself, not declared early.
+     */
+    deferControllerRefreshUntilIdle: () => void;
+    /**
+     * Register /login's own up-to-5-minute poll as an in-flight recovery
+     * attempt, feeding the same shared counter behind
+     * `useAgentControllerStatus`'s `loginWaiting()` that
+     * relogin()/useGlobalLogin()/loginViaTerminal() already use. Without
+     * this, `loginWaiting()` reads `false` for the whole duration of a
+     * /login attempt — a second message sent while it's still polling gets
+     * held with `authWasKnownBadAtQueueTime: false` (mid-turn "auth"
+     * failures don't set `canRetry` either), so a /login that ultimately
+     * fails flushes that held message straight to the still-known-bad
+     * controller. Codex P1 on PR #2338 (ninth re-review). Must be paired
+     * with exactly one `endRecoveryFlow()` call (a `finally` block).
+     */
+    beginRecoveryFlow: () => void;
+    /** Pairs with `beginRecoveryFlow` — see its doc comment. */
+    endRecoveryFlow: () => void;
+    /**
      * Open the inline picker. Returns a promise that resolves with the
      * selected value, or rejects if the user dismisses (Esc / click-outside).
      * Set by useAgentCommands; the dispatcher only sees the function.

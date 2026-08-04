@@ -4,9 +4,15 @@
 /**
  * UserMessageBlock — render-shape tests for the two variants:
  *
- *   - regular user input: always expanded, no hover/pin handlers.
+ *   - regular user input: always expanded, no hover/pin handlers, but
+ *     gets a hover-to-peek time/estimate overlay (2026-08-03 user request,
+ *     same treatment ToolBlock/MarkdownBlock already have).
  *   - startup injection (`isStartup === true`): collapsed by default,
- *     hover-expand after 150ms, click-to-pin.
+ *     hover-expand after 150ms, click-to-pin. The hover-expand body is
+ *     PeekOverlay (Portal-rendered at document.body, top-anchored to the
+ *     row) — migrated off its own bespoke position:absolute overlay,
+ *     which had the same virtualized-row stacking-context bug PeekOverlay
+ *     was built to fix for ToolBlock/MarkdownBlock.
  *
  * Spec: `docs/specs/SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md`.
  */
@@ -71,6 +77,59 @@ describe("UserMessageBlock — regular user input", () => {
         expect(root.classList.contains("agent-user-message--startup")).toBe(false);
         expect(root.classList.contains("agent-user-message--collapsed")).toBe(false);
     });
+
+    // 2026-08-03 user request: regular (non-startup, always-visible) input
+    // gets the same hover-to-peek time/estimate treatment as tool calls
+    // and thinking clumps. PeekOverlay is Portal-rendered at document.body,
+    // so these query `document.body`, not `container` — same pattern as
+    // ToolBlock.test.tsx / MarkdownBlock.test.tsx.
+    describe("hover-to-peek (time + estimate)", () => {
+        it("shows exact time + time-ago + an estimated token count on hover", () => {
+            const timed: UserMessageNode = { ...baseNode, timestamp: Date.now() - 65_000 };
+            vi.useFakeTimers();
+            try {
+                const { container } = render(() => (
+                    <UserMessageBlock node={timed} pinned={false} onTogglePin={() => {}} />
+                ));
+                const root = container.querySelector(".agent-user-message") as HTMLElement;
+                fireEvent.mouseEnter(root);
+                vi.advanceTimersByTime(200);
+                const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
+                expect(metaLines.length).toBe(2);
+                expect(metaLines[0].textContent).toMatch(/\d{2}:\d{2}:\d{2} · 1m ago/);
+                expect(metaLines[1].textContent).toMatch(/~\d+ tok \(est\.\)/);
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it("shows nothing before the enter-delay elapses", () => {
+            const { container } = render(() => (
+                <UserMessageBlock node={baseNode} pinned={false} onTogglePin={() => {}} />
+            ));
+            const root = container.querySelector(".agent-user-message") as HTMLElement;
+            fireEvent.mouseEnter(root);
+            // No advanceTimersByTime — still within the 150ms delay.
+            expect(document.body.querySelector(".agent-node-peek-overlay")).toBeNull();
+        });
+
+        it("hides on mouseleave", () => {
+            vi.useFakeTimers();
+            try {
+                const { container } = render(() => (
+                    <UserMessageBlock node={baseNode} pinned={false} onTogglePin={() => {}} />
+                ));
+                const root = container.querySelector(".agent-user-message") as HTMLElement;
+                fireEvent.mouseEnter(root);
+                vi.advanceTimersByTime(200);
+                expect(document.body.querySelector(".agent-node-peek-overlay")).not.toBeNull();
+                fireEvent.mouseLeave(root);
+                expect(document.body.querySelector(".agent-node-peek-overlay")).toBeNull();
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+    });
 });
 
 describe("UserMessageBlock — startup injection", () => {
@@ -96,7 +155,8 @@ describe("UserMessageBlock — startup injection", () => {
         // Codex P2 on PR #1020 first cut: clicking inside the
         // expanded body (to place the caret or select text for
         // copying) must not unpin the row. Click handler is
-        // scoped to the summary, not the outer block.
+        // scoped to the summary, not the outer block. Pinned → flow
+        // mode → still a real DOM descendant of `container`.
         const togglePin = vi.fn();
         const { container } = render(() => (
             <UserMessageBlock node={startupNode} pinned={true} onTogglePin={togglePin} />
@@ -107,6 +167,7 @@ describe("UserMessageBlock — startup injection", () => {
     });
 
     it("explicit unpin button on pinned row fires onTogglePin", () => {
+        // Pinned → flow mode → still in `container`.
         const togglePin = vi.fn();
         const { container } = render(() => (
             <UserMessageBlock node={startupNode} pinned={true} onTogglePin={togglePin} />
@@ -127,10 +188,12 @@ describe("UserMessageBlock — startup injection", () => {
         const { container } = render(() => (
             <UserMessageBlock node={startupNode} pinned={false} onTogglePin={() => {}} />
         ));
-        // Not pinned + collapsed-by-default → button slot is hidden
-        // because the body itself isn't rendered yet.
+        // Not pinned + collapsed-by-default → body itself isn't
+        // rendered yet, in either location.
         expect(container.querySelector(".agent-user-message-pin")).toBeNull();
         expect(container.querySelector(".agent-user-message-unpin")).toBeNull();
+        expect(document.body.querySelector(".agent-user-message-pin")).toBeNull();
+        expect(document.body.querySelector(".agent-user-message-unpin")).toBeNull();
     });
 
     it("pin button is visible during hover-expansion and fires onTogglePin", async () => {
@@ -138,7 +201,8 @@ describe("UserMessageBlock — startup injection", () => {
         // then click 📌 to pin. Without this affordance, the user
         // would have to leave + re-enter the collapsed summary
         // before the 150ms enter-delay restarted — defeating the
-        // "hover to peek · click to pin" hint.
+        // "hover to peek · click to pin" hint. Hovering (not pinned)
+        // → overlay mode → Portal-rendered at document.body.
         vi.useFakeTimers();
         try {
             const togglePin = vi.fn();
@@ -148,8 +212,8 @@ describe("UserMessageBlock — startup injection", () => {
             const root = container.querySelector(".agent-user-message") as HTMLElement;
             fireEvent.mouseEnter(root);
             vi.advanceTimersByTime(200);
-            // Hover-expanded — pin button now present.
-            const pin = container.querySelector(".agent-user-message-pin");
+            // Hover-expanded — pin button now present in document.body.
+            const pin = document.body.querySelector(".agent-user-message-pin");
             expect(pin).not.toBeNull();
             expect((pin as HTMLElement).getAttribute("aria-label")).toContain("Pin");
             // Click it.
@@ -188,7 +252,10 @@ describe("UserMessageBlock — startup injection", () => {
 
     it("hover (mouseenter→delay) expands the body after 150ms", async () => {
         // The summary is now ALWAYS mounted. Only the BODY's
-        // presence changes across the hover transition.
+        // presence changes across the hover transition. `screen`
+        // queries the whole document (including document.body, where
+        // PeekOverlay Portals to), so this is unaffected by the
+        // Portal migration.
         vi.useFakeTimers();
         try {
             const { container } = render(() => (
@@ -257,48 +324,45 @@ describe("UserMessageBlock — startup injection", () => {
         expect(togglePin).toHaveBeenCalledTimes(1);
     });
 
-    describe("body positioning (overlay vs flow)", () => {
-        // SPEC_STARTUP_HOVER_EXPANSION_ANCHOR_2026_05_24:
-        // hover-expanded body uses absolute positioning so the
-        // summary's screen-Y is anchored across the transition;
-        // pinned body drops back into normal flow (Option B).
+    describe("body positioning (Portal overlay vs in-flow)", () => {
+        // Hover-expanded body is PeekOverlay (Portal-rendered at
+        // document.body, top-anchored to the row — see PeekOverlay.tsx);
+        // pinned body drops back into normal document flow (Option B of
+        // SPEC_STARTUP_HOVER_EXPANSION_ANCHOR_2026_05_24).
 
-        it("hover-expanded body has an overlay positioning class", async () => {
+        it("hover-expanded body renders via PeekOverlay in document.body, not in container", async () => {
             vi.useFakeTimers();
             try {
                 const { container } = render(() => (
                     <UserMessageBlock node={startupNode} pinned={false} onTogglePin={() => {}} />
                 ));
                 const root = container.querySelector(".agent-user-message") as HTMLElement;
-                // jsdom doesn't really compute getBoundingClientRect
-                // sizes for absolute layouts; with the default
-                // (top=0, bottom=0) the direction picker returns
-                // "below". That's fine for asserting the *class
-                // family*: we want one of the overlay classes, not
-                // the flow class.
                 fireEvent.mouseEnter(root);
                 vi.advanceTimersByTime(200);
-                const body = container.querySelector(".agent-user-message-content");
+                // Nothing in container — content lives at document.body.
+                expect(container.querySelector(".agent-user-message-content")).toBeNull();
+                const overlay = document.body.querySelector(".agent-node-peek-overlay");
+                expect(overlay).not.toBeNull();
+                // Keeps its own accent-bordered visual identity, layered
+                // on top of the shared base chrome.
+                expect(overlay!.classList.contains("agent-user-message-peek-overlay")).toBe(true);
+                const body = overlay!.querySelector(".agent-user-message-content");
                 expect(body).not.toBeNull();
                 expect(body!.classList.contains("agent-user-message-content--flow")).toBe(false);
-                const isOverlay =
-                    body!.classList.contains("agent-user-message-content--overlay-below") ||
-                    body!.classList.contains("agent-user-message-content--overlay-above");
-                expect(isOverlay).toBe(true);
             } finally {
                 vi.useRealTimers();
             }
         });
 
-        it("pinned body uses the in-flow positioning class", () => {
+        it("pinned body uses the in-flow positioning class inside container", () => {
             const { container } = render(() => (
                 <UserMessageBlock node={startupNode} pinned={true} onTogglePin={() => {}} />
             ));
             const body = container.querySelector(".agent-user-message-content");
             expect(body).not.toBeNull();
             expect(body!.classList.contains("agent-user-message-content--flow")).toBe(true);
-            expect(body!.classList.contains("agent-user-message-content--overlay-below")).toBe(false);
-            expect(body!.classList.contains("agent-user-message-content--overlay-above")).toBe(false);
+            // No Portal overlay while pinned (flow mode, not overlay mode).
+            expect(document.body.querySelector(".agent-node-peek-overlay")).toBeNull();
         });
 
         it("regular (non-startup) body uses the in-flow positioning class", () => {
@@ -310,13 +374,13 @@ describe("UserMessageBlock — startup injection", () => {
             expect(body!.classList.contains("agent-user-message-content--flow")).toBe(true);
         });
 
-        it("hover-expanded body has an inline max-height (per-hover cap)", () => {
-            // Codex P2 round 2: the overlay's max-height is computed
-            // per hover from the chosen-side container space, set
-            // inline. We can't assert a specific px value (jsdom's
-            // getBoundingClientRect returns zeros, plus
-            // window.innerHeight defaults), but we CAN assert that
-            // the style attribute carries a `max-height` rule —
+        it("hover-expanded body has an inline max-height on the Portal'd overlay", () => {
+            // The overlay's max-height is computed per hover from the
+            // scroll container's available space, set inline on the
+            // Portal'd wrapper (not the inner .agent-user-message-content
+            // div). We can't assert a specific px value (jsdom's
+            // getBoundingClientRect returns zeros), but we CAN assert
+            // that the style attribute carries a `max-height` rule —
             // proving the inline path fired.
             vi.useFakeTimers();
             try {
@@ -326,9 +390,9 @@ describe("UserMessageBlock — startup injection", () => {
                 const root = container.querySelector(".agent-user-message") as HTMLElement;
                 fireEvent.mouseEnter(root);
                 vi.advanceTimersByTime(200);
-                const body = container.querySelector(".agent-user-message-content") as HTMLElement;
-                expect(body).not.toBeNull();
-                expect(body.style.maxHeight).toMatch(/^\d+px$/);
+                const overlay = document.body.querySelector(".agent-node-peek-overlay") as HTMLElement;
+                expect(overlay).not.toBeNull();
+                expect(overlay.style.maxHeight).toMatch(/^\d+(\.\d+)?px$/);
             } finally {
                 vi.useRealTimers();
             }

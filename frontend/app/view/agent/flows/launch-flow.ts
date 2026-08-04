@@ -47,6 +47,7 @@ import { WpsEvent } from "@/app/store/wps-events";
 import * as WOS from "@/app/store/wos";
 import { BlockService } from "@/app/store/services";
 import { staticTabId } from "@/app/store/global";
+import { lastLinkedAccountId } from "../providers/provider-id-aliases";
 import type { LaunchPhase } from "./launch-phase";
 import type { ProviderDefinition } from "../providers";
 
@@ -134,6 +135,64 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
     // docs/retros/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md.
     const blockData = WOS.getWaveObjectAtom<Block>(oref)();
     const agentMode = blockData?.meta?.agentMode ?? "host";
+    const agentDefinitionId = blockData?.meta?.agentId as string | undefined;
+
+    // Resolve this agent's ALREADY-BOUND account dir (if any) up front, and
+    // use it in place of `authEnv`'s generic provider-default dir for both
+    // the meta env below and the auth check in Phase 2. Without this, the
+    // mount-time auth check validates the wrong directory for any agent with
+    // a real account binding — `ensureAuthDir` (which built `authEnv`) has no
+    // way to know which account this specific agent is bound to, so it
+    // always resolves the shared default, which can disagree with the
+    // per-account dir the real spawn (`inject_identity_env`) uses. See
+    // docs/specs/SPEC_AGENT_PANE_MOUNT_AUTH_CHECK_WRONG_DIR_2026_07_31.md.
+    //
+    // Gated on `authType === "oauth"`, not `authConfigDirEnvVar` truthy —
+    // some api-key providers (e.g. Kimi) also populate that field for an
+    // unrelated purpose, and the backend deliberately returns no isolated
+    // dir for non-oauth providers (codex P2 on PR #2377: calling the
+    // OAuth-directory RPC for those anyway logged a spurious "no isolated
+    // config dir" error on every mount despite nothing being wrong).
+    //
+    // Compares canonicalized provider IDs (codex P1 on PR #2377): a link row
+    // persisted under a legacy alias (e.g. "claude-code") must still match
+    // `provider.id`'s canonical form, the same way the backend spawn
+    // resolver already canonicalizes before matching.
+    //
+    // Reads the account's own stored OAuth dir via GetIdentityAccountCommand
+    // rather than `ensureAccountDir`/`identity.ensureaccountdir` (codex P1 on
+    // PR #2377): that RPC deterministically reconstructs a dir path from
+    // `account_id` + provider instead of reading the account row, so it can
+    // return an empty freshly-created directory for an account whose real
+    // credential lives at a different, non-canonical stored path (e.g.
+    // carried forward from a bundle-era migration) — silently disagreeing
+    // with `inject_identity_env`'s actual spawn-time read of `secret_ref.dir`,
+    // reintroducing the exact false-"Log in" bug this fix targets.
+    let linkedAccountId: string | undefined;
+    let linkLookupDone = false;
+    let effectiveAuthEnv = authEnv;
+    if (agentDefinitionId && provider.authType === "oauth") {
+        linkLookupDone = true;
+        try {
+            const links = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, {
+                agent_id: agentDefinitionId,
+            });
+            linkedAccountId = lastLinkedAccountId(links, provider.id);
+        } catch {
+            // Best-effort — treated as "no linked account" if this lookup fails.
+        }
+        if (linkedAccountId) {
+            try {
+                const account = await RpcApi.GetIdentityAccountCommand(TabRpcClient, { id: linkedAccountId });
+                if (account?.secret_ref?.backend === "oauth_config_dir" && account.secret_ref.dir) {
+                    effectiveAuthEnv = { ...authEnv, [provider.authConfigDirEnvVar]: account.secret_ref.dir };
+                }
+            } catch {
+                // Best-effort — fall back to authEnv's generic dir if this lookup fails.
+            }
+        }
+    }
+
     if (agentMode === "container") {
         log("docker", "container agent — checking for container runtime...");
         await ensureCapability("docker", { force: true });
@@ -210,7 +269,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
         oref,
         meta: {
             cmd: cliResult.cli_path,
-            ...(authEnv && Object.keys(authEnv).length > 0 ? { "cmd:env": authEnv } : {}),
+            ...(effectiveAuthEnv && Object.keys(effectiveAuthEnv).length > 0 ? { "cmd:env": effectiveAuthEnv } : {}),
         },
     });
 
@@ -222,7 +281,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
         const authResult = await RpcApi.CheckCliAuthCommand(TabRpcClient, {
             cli_path: cliResult.cli_path,
             auth_check_args: provider.authCheckCommand,
-            auth_env: authEnv,
+            auth_env: effectiveAuthEnv,
         }, { timeout: 30000 });
         if (authResult.authenticated) {
             const emailPart = authResult.email ? ` as ${authResult.email}` : "";
@@ -239,8 +298,6 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
     }
 
     if (needsLogin) {
-        const agentDefinitionId = blockData?.meta?.agentId as string | undefined;
-
         // Reuse the account already bound to this agent for this provider,
         // if any — used only to distinguish first-login from auth-expired
         // wording below. A REAL account link can only exist if a prior
@@ -250,13 +307,17 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
         // model.ts's launchAgent() writes `cmd` into meta unconditionally
         // at agent-CREATION time, before any login ever happens, so it was
         // true on every genuine first-ever login too).
-        let existingAccountId: string | undefined;
-        if (agentDefinitionId) {
+        //
+        // Already looked up above (`linkLookupDone`) for any oauth-class
+        // provider — reuse that result instead of calling
+        // ListAgentIdentitiesCommand a second time per mount.
+        let existingAccountId: string | undefined = linkedAccountId;
+        if (!linkLookupDone && agentDefinitionId) {
             try {
                 const links = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, {
                     agent_id: agentDefinitionId,
                 });
-                existingAccountId = links.find((l) => l.provider === provider.id)?.account_id;
+                existingAccountId = lastLinkedAccountId(links, provider.id);
             } catch {
                 // Best-effort — treated as "no existing account" if this lookup fails.
             }

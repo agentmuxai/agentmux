@@ -16,6 +16,8 @@ fn test_subprocess_controller_new() {
         None,
         None,
         None,
+        None,
+        std::sync::Arc::from("test-boot"),
     );
     assert_eq!(ctrl.controller_type(), BLOCK_CONTROLLER_SUBPROCESS);
     assert_eq!(ctrl.block_id(), "block-1");
@@ -34,6 +36,8 @@ fn test_subprocess_controller_rejects_raw_input() {
         None,
         None,
         None,
+        None,
+        std::sync::Arc::from("test-boot"),
     );
     let result = ctrl.send_input(BlockInputUnion::data(b"hello".to_vec()), None);
     assert!(result.is_err());
@@ -49,6 +53,8 @@ fn test_subprocess_controller_start_is_noop() {
         None,
         None,
         None,
+        None,
+        std::sync::Arc::from("test-boot"),
     );
     let result = ctrl.start(HashMap::new(), None, false);
     assert!(result.is_ok());
@@ -67,6 +73,8 @@ fn test_subprocess_controller_stop_when_idle() {
         None,
         None,
         None,
+        None,
+        std::sync::Arc::from("test-boot"),
     );
     let result = ctrl.stop(true, STATUS_DONE);
     assert!(result.is_ok());
@@ -84,6 +92,8 @@ fn test_subprocess_controller_session_id_initially_none() {
         None,
         None,
         None,
+        None,
+        std::sync::Arc::from("test-boot"),
     );
     assert!(ctrl.session_id().is_none());
 }
@@ -97,6 +107,8 @@ fn test_subprocess_controller_concurrent_spawn_blocked() {
         None,
         None,
         None,
+        None,
+        std::sync::Arc::from("test-boot"),
     );
 
     // Manually acquire run lock
@@ -112,6 +124,7 @@ fn test_subprocess_controller_concurrent_spawn_blocked() {
         session_id_field: "session_id".to_string(),
         message_id: None,
         session_id: None,
+        instance_id: String::new(),
     };
 
     let result = ctrl.spawn_turn(config);
@@ -148,6 +161,8 @@ fn hydrate_session_id_populates_inner_when_none() {
         None,
         None,
         None,
+        None,
+        std::sync::Arc::from("test-boot"),
     );
     assert!(ctrl.inner.lock().unwrap().session_id.is_none());
 
@@ -174,6 +189,8 @@ fn hydrate_session_id_is_noop_when_value_already_present() {
         None,
         None,
         None,
+        None,
+        std::sync::Arc::from("test-boot"),
     );
     ctrl.inner.lock().unwrap().session_id = Some("captured-sid".to_string());
 
@@ -202,6 +219,8 @@ fn record_captured_overwrites_hydrated_value() {
         None,
         None,
         None,
+        None,
+        std::sync::Arc::from("test-boot"),
     );
     ctrl.hydrate_session_id_from_config(Some("stale-hydrated-sid"));
     assert_eq!(
@@ -231,6 +250,8 @@ fn record_captured_dedups_same_value() {
         None,
         None,
         None,
+        None,
+        std::sync::Arc::from("test-boot"),
     );
     assert!(ctrl.record_captured_session_id("sid-1"));
     assert!(!ctrl.record_captured_session_id("sid-1"),
@@ -249,6 +270,8 @@ fn record_captured_ignores_empty() {
         None,
         None,
         None,
+        None,
+        std::sync::Arc::from("test-boot"),
     );
     ctrl.record_captured_session_id("real-sid");
     assert!(!ctrl.record_captured_session_id(""),
@@ -269,6 +292,8 @@ fn hydrate_session_id_ignores_empty_and_none() {
         None,
         None,
         None,
+        None,
+        std::sync::Arc::from("test-boot"),
     );
     ctrl.hydrate_session_id_from_config(None);
     assert!(ctrl.inner.lock().unwrap().session_id.is_none());
@@ -291,6 +316,8 @@ fn spawn_turn_preserves_session_id_in_queued_config() {
         None,
         None,
         None,
+        None,
+        std::sync::Arc::from("test-boot"),
     );
     ctrl.run_lock.store(true, Ordering::SeqCst);
 
@@ -304,6 +331,7 @@ fn spawn_turn_preserves_session_id_in_queued_config() {
         session_id_field: "session_id".to_string(),
         message_id: None,
         session_id: Some("prior-sid".to_string()),
+        instance_id: String::new(),
     };
     let _ = ctrl.spawn_turn(config);
 
@@ -316,4 +344,64 @@ fn spawn_turn_preserves_session_id_in_queued_config() {
     // Hydration didn't run yet — direct-spawn path was bypassed
     // by the busy lock; the drain will hydrate when it dequeues.
     assert!(inner.session_id.is_none());
+}
+
+/// End-to-end proof of the fix for
+/// `RETRO_DEV_BUILD_SHARED_AGENT_SESSION_COLLISION_2026_07_29.md`: a
+/// session already leased by a different boot_id refuses `spawn_turn`
+/// before any child process is spawned, rather than silently racing a
+/// second driver against the same session.
+#[test]
+fn spawn_turn_refuses_when_lease_held_by_another_process() {
+    let tmp = tempfile::tempdir().unwrap();
+    let registry = std::sync::Arc::new(
+        crate::registry::Registry::open(tmp.path().to_path_buf()).unwrap(),
+    );
+
+    // Simulate another live process already owning this instance_id.
+    let lease_store = crate::registry::LeaseStore::open(registry.root()).unwrap();
+    lease_store
+        .claim(
+            "instance-under-test",
+            &std::sync::Arc::from("other-process-boot-id"),
+            "other-block-id",
+            None,
+        )
+        .unwrap();
+
+    let ctrl = SubprocessController::new(
+        "tab-1".to_string(),
+        "block-1".to_string(),
+        None,
+        None,
+        None,
+        None,
+        Some(registry),
+        std::sync::Arc::from("this-process-boot-id"),
+    );
+
+    let config = SubprocessSpawnConfig {
+        cli_command: "claude".to_string(),
+        cli_args: vec!["-p".to_string()],
+        working_dir: String::new(),
+        env_vars: HashMap::new(),
+        message: "hi".to_string(),
+        resume_flag: String::new(),
+        session_id_field: "session_id".to_string(),
+        message_id: None,
+        session_id: None,
+        instance_id: "instance-under-test".to_string(),
+    };
+
+    let result = ctrl.spawn_turn(config);
+    let err = result.expect_err("spawn_turn must refuse when another process holds the lease");
+    assert!(
+        err.contains("already owned by another AgentMux process"),
+        "unexpected error message: {err}"
+    );
+
+    // The run lock must be released on refusal too — otherwise a
+    // legitimate retry against the SAME process would be permanently
+    // blocked by this controller's own busy-lock, not just the lease.
+    assert!(!ctrl.run_lock.load(Ordering::SeqCst));
 }

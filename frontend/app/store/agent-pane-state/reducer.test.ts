@@ -411,6 +411,516 @@ describe("agent-pane-state reducer", () => {
         });
     });
 
+    describe("Compaction (SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31)", () => {
+        describe("CompactionStarted", () => {
+            it("sets compacting and bumps lastEventMs while genuinely working (Streaming)", () => {
+                const s0 = streaming(100);
+                const r = update(s0, { type: "CompactionStarted", trigger: "manual", at: 200 }, 200);
+                expect(r.state.compacting).toEqual({ trigger: "manual", startedAt: 200 });
+                expect(r.state.lastEventMs).toBe(200);
+                expect(r.events).toEqual([{ type: "compaction-started", trigger: "manual" }]);
+            });
+
+            it("is a no-op when the stream is not subscribed", () => {
+                const s0 = mk();
+                const r = update(s0, { type: "CompactionStarted", trigger: "auto", at: 200 });
+                expect(r.state).toBe(s0);
+                expect(r.events).toEqual([]);
+            });
+
+            it("is a no-op when subscribed but Idle (reagent P1, round 5)", () => {
+                // The structural fix: `compaction_started` arrives over a
+                // SEPARATE transport (WPS) from the primary NDJSON stream
+                // carrying TurnEnd/compact_boundary, so it can race and
+                // land after that same turn's TurnEnd already fired,
+                // leaving the pane subscribed-but-Idle. Setting compacting
+                // here would orphan it — nothing clears an Idle pane's
+                // compacting until the NEXT full TurnEnd/TurnReset, since
+                // every "clear compacting" fix in this PR is itself gated
+                // on transitioning OUT of a working phase. Refuse to set
+                // stale-by-construction state instead.
+                const s0 = ready(100); // subscribed, but Idle — no TurnStart
+                const r = update(s0, { type: "CompactionStarted", trigger: "manual", at: 200 }, 200);
+                expect(r.state).toBe(s0);
+                expect(r.state.compacting).toBeNull();
+                expect(r.events).toEqual([]);
+            });
+
+            it("is a no-op once the turn has already ended (Done), even while still subscribed", () => {
+                const s0 = update(streaming(100), { type: "TurnEnd", stats: null }, 150).state;
+                expect(s0.turnPhase.kind).toBe("Done");
+                expect(s0.lastEventMs).not.toBeNull();
+                const r = update(s0, { type: "CompactionStarted", trigger: "auto", at: 200 }, 200);
+                expect(r.state).toBe(s0);
+                expect(r.state.compacting).toBeNull();
+            });
+
+            it("refreshes a Streaming phase's own lastEventMs so the watchdog doesn't misfire", () => {
+                const s0 = streaming(100);
+                const r = update(s0, { type: "CompactionStarted", trigger: "auto", at: 500 }, 500);
+                expect(r.state.turnPhase.kind).toBe("Streaming");
+                if (r.state.turnPhase.kind === "Streaming") {
+                    expect(r.state.turnPhase.lastEventMs).toBe(500);
+                }
+            });
+
+            it("is a no-op when the start's own timestamp is at or before the last known CompactionBoundary (reagent, round 6)", () => {
+                // Narrower race than round 5's fix: compaction_started and
+                // compact_boundary travel over two independent transports
+                // (WPS vs. the primary NDJSON stream) with no ordering
+                // guarantee. A stale start can arrive AFTER its own
+                // matching boundary while the turn is STILL working (e.g.
+                // streaming new content past the compaction that already
+                // completed) -- workingFromPhase alone can't catch this,
+                // since it stays true the whole time.
+                const s0 = update(streaming(100), {
+                    type: "CompactionBoundary",
+                    trigger: "manual",
+                    preTokens: 50_000,
+                    postTokens: 3_000,
+                    durationMs: 9_000,
+                    at: 150,
+                }, 150).state;
+                expect(s0.lastCompactionBoundaryAt).toBe(150);
+                // Equal-to-boundary timestamp: still rejected (not strictly after).
+                const rEqual = update(s0, { type: "CompactionStarted", trigger: "manual", at: 150 }, 200);
+                expect(rEqual.state).toBe(s0);
+                expect(rEqual.state.compacting).toBeNull();
+                // Before the boundary: also rejected.
+                const rBefore = update(s0, { type: "CompactionStarted", trigger: "manual", at: 120 }, 200);
+                expect(rBefore.state.compacting).toBeNull();
+            });
+
+            it("accepts a genuinely new start whose timestamp is after the last known CompactionBoundary", () => {
+                const s0 = update(streaming(100), {
+                    type: "CompactionBoundary",
+                    trigger: "manual",
+                    preTokens: 50_000,
+                    postTokens: 3_000,
+                    durationMs: 9_000,
+                    at: 150,
+                }, 150).state;
+                const r = update(s0, { type: "CompactionStarted", trigger: "auto", at: 200 }, 200);
+                expect(r.state.compacting).toEqual({ trigger: "auto", startedAt: 200 });
+            });
+        });
+
+        describe("CompactionBoundary", () => {
+            it("clears compacting, records lastCompactionBoundaryAt, and reconciles lastContextTokens", () => {
+                const s0 = update(streaming(100), {
+                    type: "CompactionStarted",
+                    trigger: "manual",
+                    at: 200,
+                }, 200).state;
+                const r = update(s0, {
+                    type: "CompactionBoundary",
+                    trigger: "manual",
+                    preTokens: 100_000,
+                    postTokens: 5_000,
+                    durationMs: 12_000,
+                    at: 300,
+                }, 300);
+                expect(r.state.compacting).toBeNull();
+                expect(r.state.lastCompactionBoundaryAt).toBe(300);
+                expect(r.state.lastContextTokens).toBe(5_000);
+                expect(r.events).toEqual([
+                    {
+                        type: "context-compacted",
+                        tokensBefore: 100_000,
+                        tokensAfter: 5_000,
+                        source: "real",
+                        trigger: "manual",
+                        durationMs: 12_000,
+                    },
+                ]);
+            });
+
+            it("works even if no CompactionStarted preceded it (compact_boundary without a live PreCompact hook signal)", () => {
+                const r = update(mk(), {
+                    type: "CompactionBoundary",
+                    trigger: "auto",
+                    preTokens: 50_000,
+                    postTokens: 2_000,
+                    durationMs: 8_000,
+                    at: 100,
+                });
+                expect(r.state.compacting).toBeNull();
+                expect(r.state.lastContextTokens).toBe(2_000);
+                expect(r.events[0]).toMatchObject({ type: "context-compacted", source: "real", trigger: "auto" });
+            });
+        });
+
+        describe("TokensIn heuristic suppression", () => {
+            it("fires the heuristic normally with source: heuristic when no real boundary landed", () => {
+                const s0 = update(mk(), { type: "TokensIn", input: 50_000 }, 100).state;
+                const r = update(s0, { type: "TokensIn", input: 1_000 }, 200);
+                expect(r.events).toContainEqual({
+                    type: "context-compacted",
+                    tokensBefore: 50_000,
+                    tokensAfter: 1_000,
+                    source: "heuristic",
+                });
+            });
+
+            it("suppresses the heuristic shortly after a real CompactionBoundary landed", () => {
+                const s0 = update(mk(), { type: "TokensIn", input: 50_000 }, 100).state;
+                const s1 = update(s0, {
+                    type: "CompactionBoundary",
+                    trigger: "manual",
+                    preTokens: 50_000,
+                    postTokens: 3_000,
+                    durationMs: 9_000,
+                    at: 150,
+                }, 150).state;
+                // Next turn's TokensIn shows the post-compaction fill growing
+                // back up but still nowhere near the ORIGINAL 50k baseline —
+                // since lastContextTokens is now 3_000 (reconciled by the
+                // boundary), this wouldn't even trip the ≥50% heuristic on
+                // its own, but the suppression guard is the belt-and-braces
+                // check under test here regardless.
+                const r = update(s1, { type: "TokensIn", input: 20_000 }, 200);
+                const compactionEvents = r.events.filter((e) => e.type === "context-compacted");
+                expect(compactionEvents).toEqual([]);
+            });
+
+            it("re-arms the heuristic once the suppression window has elapsed", () => {
+                const s0 = update(mk(), { type: "TokensIn", input: 50_000 }, 100).state;
+                const s1 = update(s0, {
+                    type: "CompactionBoundary",
+                    trigger: "manual",
+                    preTokens: 50_000,
+                    postTokens: 3_000,
+                    durationMs: 9_000,
+                    at: 150,
+                }, 150).state;
+                // Grow context back past 10k, then simulate a LATER, genuinely
+                // new compaction (another ≥50% drop) well past the
+                // suppression window (150 + 120_000ms).
+                const s2 = update(s1, { type: "TokensIn", input: 40_000 }, 1_000).state;
+                const r = update(s2, { type: "TokensIn", input: 1_000 }, 400_000);
+                expect(r.events).toContainEqual({
+                    type: "context-compacted",
+                    tokensBefore: 40_000,
+                    tokensAfter: 1_000,
+                    source: "heuristic",
+                });
+            });
+        });
+
+        describe("compacting cleared by other lifecycle transitions (reagent P1, PR #2378)", () => {
+            // If compact_boundary never arrives — the CLI crashes mid-compaction,
+            // the network drops, or a reconnect/truncate race intervenes — only
+            // clearing `compacting` on CompactionBoundary would strand the
+            // composer strip showing "Compacting… Ns" forever, surviving
+            // reconnects and every subsequent turn. Each of these four
+            // transitions must clear it independently.
+
+            it("StreamUnsubscribe clears compacting while a turn was working", () => {
+                const s0 = update(streaming(100), { type: "CompactionStarted", trigger: "manual", at: 150 }, 150).state;
+                expect(s0.compacting).not.toBeNull();
+                const r = update(s0, { type: "StreamUnsubscribe", at: 200 }, 200);
+                expect(r.state.compacting).toBeNull();
+            });
+
+            it("TurnEnd clears compacting", () => {
+                const s0 = update(streaming(100), { type: "CompactionStarted", trigger: "auto", at: 150 }, 150).state;
+                expect(s0.compacting).not.toBeNull();
+                const r = update(s0, { type: "TurnEnd", stats: null }, 200);
+                expect(r.state.compacting).toBeNull();
+            });
+
+            it("TurnReset clears compacting", () => {
+                const s0 = update(streaming(100), { type: "CompactionStarted", trigger: "manual", at: 150 }, 150).state;
+                expect(s0.compacting).not.toBeNull();
+                const r = update(s0, { type: "TurnReset" }, 200);
+                expect(r.state.compacting).toBeNull();
+            });
+
+            it("RequestStop deliberately does NOT clear compacting (codex P2, round 3)", () => {
+                // An earlier version of this fix cleared compacting here,
+                // per a since-superseded reagent finding — but RequestStop
+                // only sends a SIGINT, it doesn't confirm the turn actually
+                // ended. See the StopFailed test below for why eagerly
+                // clearing here was wrong.
+                const s0 = update(streaming(100), { type: "CompactionStarted", trigger: "auto", at: 150 }, 150).state;
+                expect(s0.compacting).not.toBeNull();
+                const r = update(s0, { type: "RequestStop", at: 200 }, 200);
+                expect(r.state.turnPhase.kind).toBe("Interrupting");
+                expect(r.state.compacting).not.toBeNull();
+            });
+
+            it("StopFailed rolling back to Streaming preserves compacting, since it was never actually interrupted", () => {
+                // Codex P2 on PR #2378 (round 3): if RequestStop HAD cleared
+                // compacting eagerly, this exact sequence would have lost the
+                // "Compacting…" status/timer for a compaction that kept
+                // running unaffected the whole time (the SIGINT never
+                // landed) — plus re-enabled the stream-stuck watchdog using
+                // a stale activity timestamp.
+                const s0 = update(streaming(100), { type: "CompactionStarted", trigger: "auto", at: 150 }, 150).state;
+                const s1 = update(s0, { type: "RequestStop", at: 200 }, 200).state;
+                expect(s1.turnPhase.kind).toBe("Interrupting");
+                const r = update(s1, { type: "StopFailed" }, 300);
+                expect(r.state.turnPhase.kind).toBe("Streaming");
+                expect(r.state.compacting).toEqual({ trigger: "auto", startedAt: 150 });
+            });
+
+            it("FailureObserved clears compacting when it ends the turn (reagent P1, round 3)", () => {
+                // A backend failure classification (e.g. the CLI erroring out
+                // partway through) can arrive mid-compaction just like any
+                // other turn-ending transition — same bug class as the four
+                // above, just reached via an error instead of a clean exit.
+                const s0 = update(streaming(100), { type: "CompactionStarted", trigger: "manual", at: 150 }, 150).state;
+                expect(s0.compacting).not.toBeNull();
+                const failure: AgentFailure = { code: "rate_limited", title: "Rate limited", detail: "429", retryable: true };
+                const r = update(s0, { type: "FailureObserved", failure, at: 200 });
+                expect(r.state.turnPhase).toEqual({ kind: "Done", outcome: "errored", finishedAt: 200 });
+                expect(r.state.compacting).toBeNull();
+            });
+
+            it("FailureObserved does NOT clear compacting when it's a stray/late no-op (turn already ended)", () => {
+                // If the turn already ended, FailureObserved leaves turnPhase
+                // alone (per its own existing "stray/late event" handling) —
+                // compacting should be left alone too, since nothing about
+                // this transition is authoritative in that case.
+                const s0 = mk(); // Idle, not working
+                const failure: AgentFailure = { code: "rate_limited", title: "Rate limited", detail: "429", retryable: true };
+                const r = update(s0, { type: "FailureObserved", failure, at: 200 });
+                expect(r.events).toContainEqual({ type: "failure-observed", code: "rate_limited", turnWasEnded: false });
+                expect(r.state.compacting).toBe(s0.compacting);
+            });
+
+            it("InterruptTimeoutElapsed clears compacting (reagent + codex P1, round 4)", () => {
+                // A fifth authoritative terminal transition found across
+                // three review rounds: round 3 deliberately stopped
+                // RequestStop from clearing compacting (so it survives a
+                // failed stop attempt) — but if the interrupt instead TIMES
+                // OUT, that IS authoritative and must clear it.
+                const s0 = ready(100);
+                const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+                const s2 = update(s1, { type: "StreamSubscribe", at: 120 }).state;
+                const s3 = update(s2, { type: "CompactionStarted", trigger: "manual", at: 150 }, 150).state;
+                const s4 = update(s3, { type: "RequestStop", at: 200 }).state;
+                expect(s4.compacting).not.toBeNull();
+                const deadline = 200 + INTERRUPT_TIMEOUT_MS;
+                const r = update(s4, { type: "InterruptTimeoutElapsed", at: deadline });
+                expect(r.state.turnPhase.kind).toBe("Done");
+                expect(r.state.compacting).toBeNull();
+            });
+
+            it("SubmitTimeoutElapsed clears compacting (defensive completeness, round 4)", () => {
+                const s0 = ready(100);
+                const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+                expect(s1.turnPhase.kind).toBe("Submitting");
+                const s2 = update(s1, { type: "CompactionStarted", trigger: "auto", at: 120 }, 120).state;
+                expect(s2.compacting).not.toBeNull();
+                const deadline = 110 + SUBMIT_TIMEOUT_MS;
+                const r = update(s2, { type: "SubmitTimeoutElapsed", at: deadline });
+                expect(r.state.turnPhase.kind).toBe("Done");
+                expect(r.state.compacting).toBeNull();
+            });
+
+            it("ReconcileTurnActive(active: false) clears compacting (reagent + codex P1, round 4)", () => {
+                // The backend has authoritatively confirmed no turn is
+                // active — whatever compaction the frontend still thought
+                // was in flight is stale.
+                const s0 = update(streaming(100), { type: "CompactionStarted", trigger: "manual", at: 150 }, 150).state;
+                expect(s0.compacting).not.toBeNull();
+                const r = update(s0, { type: "ReconcileTurnActive", at: 200, active: false });
+                expect(r.state.turnPhase.kind).toBe("Idle");
+                expect(r.state.compacting).toBeNull();
+            });
+
+            it("TurnStartFailed clears compacting (codex P2, round 8)", () => {
+                // A compaction_started ping can land while a NEW turn
+                // attempt is briefly Submitting (round 5's workingFromPhase
+                // gate explicitly permits Submitting) -- if that turn's own
+                // initiating RPC then fails synchronously, this arm must
+                // not leave the stale compacting state behind.
+                const s0 = ready(100);
+                const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+                expect(s1.turnPhase.kind).toBe("Submitting");
+                const s2 = update(s1, { type: "CompactionStarted", trigger: "manual", at: 120 }, 120).state;
+                expect(s2.compacting).not.toBeNull();
+                const r = update(s2, { type: "TurnStartFailed" });
+                expect(r.state.turnPhase.kind).toBe("Idle");
+                expect(r.state.compacting).toBeNull();
+            });
+        });
+
+        describe("CompactionBoundary preserves a newer compaction against an out-of-order delayed boundary (codex P2, round 8)", () => {
+            // compact_boundary (NDJSON) and compaction_started (WPS) travel
+            // over two independent transports with no ordering guarantee.
+            // If compaction N+1 has already started before a DELAYED
+            // boundary for compaction N arrives, clearing `compacting`
+            // unconditionally would wipe the genuinely active N+1 state
+            // using stale N data.
+
+            it("does NOT clear compacting when the boundary's frameTimestamp predates the current compaction's start", () => {
+                // Compaction N+1 started at t=1000 (frameTimestamp-space).
+                const s0 = update(streaming(100), {
+                    type: "CompactionStarted",
+                    trigger: "manual",
+                    at: 1_000,
+                }, 1_000).state;
+                expect(s0.compacting).toEqual({ trigger: "manual", startedAt: 1_000 });
+                // A delayed boundary for the OLDER compaction N arrives,
+                // whose own completion (frameTimestamp) was BEFORE N+1 started.
+                const r = update(s0, {
+                    type: "CompactionBoundary",
+                    trigger: "manual",
+                    preTokens: 50_000,
+                    postTokens: 3_000,
+                    durationMs: 9_000,
+                    at: 1_500,
+                    frameTimestamp: new Date(500).toISOString(),
+                }, 1_500);
+                expect(r.state.compacting).toEqual({ trigger: "manual", startedAt: 1_000 });
+                // lastCompactionBoundaryAt takes the boundary's own parsed
+                // completion time (frameTimestamp: 500), not the frontend
+                // receipt time (at: 1_500) -- see codex round 10.
+                expect(r.state.lastCompactionBoundaryAt).toBe(500);
+                // lastContextTokens is NOT overwritten with this older
+                // boundary's postTokens -- the newer N+1 compaction is
+                // confirmed still active, so showing its stale 3_000
+                // reading would be a regression from whatever context-fill
+                // value was live before it (reagent P2, round 11).
+                expect(r.state.lastContextTokens).toBe(null);
+            });
+
+            it("preserves the pre-existing lastContextTokens (not just null) against a stale delayed boundary (reagent P2, round 11)", () => {
+                // A real, live context-fill value (8_000) is already
+                // established before the delayed older boundary shows up,
+                // so this proves the fix preserves whatever was actually
+                // live -- not merely that it happens to stay null.
+                const withTokens = update(streaming(100), { type: "TokensIn", input: 8_000 }, 500).state;
+                const s0 = update(withTokens, {
+                    type: "CompactionStarted",
+                    trigger: "manual",
+                    at: 1_000,
+                }, 1_000).state;
+                const r = update(s0, {
+                    type: "CompactionBoundary",
+                    trigger: "manual",
+                    preTokens: 50_000,
+                    postTokens: 3_000,
+                    durationMs: 9_000,
+                    at: 1_500,
+                    frameTimestamp: new Date(500).toISOString(),
+                }, 1_500);
+                expect(r.state.compacting).toEqual({ trigger: "manual", startedAt: 1_000 });
+                expect(r.state.lastContextTokens).toBe(8_000);
+            });
+
+            it("DOES clear compacting when the boundary's frameTimestamp is at or after the current compaction's start", () => {
+                const s0 = update(streaming(100), {
+                    type: "CompactionStarted",
+                    trigger: "manual",
+                    at: 1_000,
+                }, 1_000).state;
+                const r = update(s0, {
+                    type: "CompactionBoundary",
+                    trigger: "manual",
+                    preTokens: 50_000,
+                    postTokens: 3_000,
+                    durationMs: 9_000,
+                    at: 1_500,
+                    frameTimestamp: new Date(1_200).toISOString(),
+                }, 1_500);
+                expect(r.state.compacting).toBeNull();
+            });
+
+            it("falls back to clearing when frameTimestamp is absent (can't tell, avoid a permanent stuck state)", () => {
+                const s0 = update(streaming(100), {
+                    type: "CompactionStarted",
+                    trigger: "manual",
+                    at: 1_000,
+                }, 1_000).state;
+                const r = update(s0, {
+                    type: "CompactionBoundary",
+                    trigger: "manual",
+                    preTokens: 50_000,
+                    postTokens: 3_000,
+                    durationMs: 9_000,
+                    at: 1_500,
+                    frameTimestamp: null,
+                }, 1_500);
+                expect(r.state.compacting).toBeNull();
+            });
+
+            it("records the boundary's own parsed completion time, not the frontend's receipt time, as lastCompactionBoundaryAt (codex P2, round 10)", () => {
+                // Compaction N truly completed at t=50 (frameTimestamp), but
+                // its boundary frame is delayed in delivery and only
+                // reaches the frontend at t=500 (receipt/`at`). Compaction
+                // N+1's own `CompactionStarted.at` carries the WPS payload's
+                // embedded TRUE start time (t=60), not a receipt timestamp
+                // -- comparing it against N's inflated receipt-time
+                // boundary (500) instead of N's true completion (50) would
+                // falsely reject N+1's genuinely-later start.
+                const s0 = update(streaming(30), {
+                    type: "CompactionBoundary",
+                    trigger: "manual",
+                    preTokens: 50_000,
+                    postTokens: 3_000,
+                    durationMs: 9_000,
+                    at: 500,
+                    frameTimestamp: new Date(50).toISOString(),
+                }, 500).state;
+                expect(s0.lastCompactionBoundaryAt).toBe(50);
+                const r = update(s0, { type: "CompactionStarted", trigger: "auto", at: 60 }, 600);
+                expect(r.state.compacting).toEqual({ trigger: "auto", startedAt: 60 });
+            });
+        });
+
+        describe("StreamWatchdogTick is suspended while compacting (codex P1, PR #2378 round 2)", () => {
+            // CompactionStarted only bumps lastEventMs ONCE, at the start —
+            // it is never re-bumped on later ticks. The captured real
+            // example (spec doc §2) took ~232s, comfortably past both
+            // STUCK_THRESHOLD_MS (45s) and LIVENESS_RECOVERY_MS (180s).
+            // Without an explicit suspension, a perfectly normal compaction
+            // would trip a false "stream-stuck" diagnostic and then get
+            // force-demoted from Streaming to Idle out from under an
+            // actively-compacting turn.
+
+            it("emits no stream-stuck diagnostic past STUCK_THRESHOLD_MS while compacting", () => {
+                const s0 = update(streaming(1_000), { type: "CompactionStarted", trigger: "auto", at: 1_000 }, 1_000).state;
+                const tick = 1_000 + STUCK_THRESHOLD_MS + 1_000;
+                const r = update(s0, { type: "StreamWatchdogTick", nowMs: tick });
+                expect(r.state).toBe(s0);
+                expect(r.events).toEqual([]);
+            });
+
+            it("does NOT force-recover Streaming -> Idle past LIVENESS_RECOVERY_MS while compacting", () => {
+                const s0 = update(streaming(1_000), { type: "CompactionStarted", trigger: "manual", at: 1_000 }, 1_000).state;
+                const tick = 1_000 + LIVENESS_RECOVERY_MS + 60_000; // well past, e.g. a ~232s-class compaction
+                const r = update(s0, { type: "StreamWatchdogTick", nowMs: tick });
+                expect(r.state.turnPhase.kind).toBe("Streaming");
+                expect(r.state).toBe(s0);
+                expect(r.events).toEqual([]);
+            });
+
+            it("re-arms the watchdog once CompactionBoundary clears compacting", () => {
+                const s0 = update(streaming(1_000), { type: "CompactionStarted", trigger: "manual", at: 1_000 }, 1_000).state;
+                const s1 = update(s0, {
+                    type: "CompactionBoundary",
+                    trigger: "manual",
+                    preTokens: 100_000,
+                    postTokens: 5_000,
+                    durationMs: 232_000,
+                    at: 233_000,
+                }, 233_000).state;
+                expect(s1.compacting).toBeNull();
+                // lastEventMs was bumped to 233_000 by the boundary itself
+                // (see the CompactionBoundary reducer case) — a tick past
+                // LIVENESS_RECOVERY_MS measured from THAT point behaves
+                // exactly like the ordinary hang-recovery case.
+                const tick = 233_000 + LIVENESS_RECOVERY_MS + 1_000;
+                const r = update(s1, { type: "StreamWatchdogTick", nowMs: tick });
+                expect(r.state.turnPhase.kind).toBe("Idle");
+                expect(r.events[0]).toMatchObject({ type: "working-recovered" });
+            });
+        });
+    });
+
     describe("Stop flow", () => {
         it("RequestStop while working transitions to Interrupting", () => {
             // PR G: RequestStop is only meaningful while a turn is in
@@ -2119,6 +2629,70 @@ describe("agent-pane-state reducer", () => {
             const r = update(s, { type: "TurnStart", at: 200 });
             expect(r.state.detailsOpen).toBe(true);
             expect(r.state.turnPhase.kind).toBe("Submitting");
+        });
+    });
+
+    // SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md — a sibling axis to
+    // TurnPhase for "is there a live agent-declared long-running task
+    // attached to this pane," independent of turn state.
+    describe("Attached task axis (AttachedTaskObserved / AttachedTaskCleared)", () => {
+        it("initial state: attachedTask null", () => {
+            const s = mk();
+            expect(s.attachedTask).toBeNull();
+        });
+
+        it("AttachedTaskObserved sets attachedTask with the given timestamp", () => {
+            const s = mk();
+            const r = update(s, { type: "AttachedTaskObserved", at: 100 });
+            expect(r.state.attachedTask).toEqual({ since: 100 });
+            expect(r.events).toEqual([{ type: "attached-task-observed", at: 100 }]);
+        });
+
+        it("AttachedTaskObserved is idempotent — a second task starting doesn't reset `since`", () => {
+            let s = mk();
+            s = update(s, { type: "AttachedTaskObserved", at: 100 }).state;
+            const r = update(s, { type: "AttachedTaskObserved", at: 200 });
+            expect(r.state).toBe(s); // same-ref no-op
+            expect(r.state.attachedTask).toEqual({ since: 100 });
+            expect(r.events).toEqual([]);
+        });
+
+        it("AttachedTaskCleared clears an active episode", () => {
+            let s = mk();
+            s = update(s, { type: "AttachedTaskObserved", at: 100 }).state;
+            const r = update(s, { type: "AttachedTaskCleared" });
+            expect(r.state.attachedTask).toBeNull();
+            expect(r.events).toEqual([{ type: "attached-task-cleared" }]);
+        });
+
+        it("AttachedTaskCleared is idempotent when already null", () => {
+            const s = mk();
+            const r = update(s, { type: "AttachedTaskCleared" });
+            expect(r.state).toBe(s);
+            expect(r.events).toEqual([]);
+        });
+
+        it("survives TurnEnd/TurnReset — a task attached in one turn can outlive it", () => {
+            let s = ready(100);
+            s = update(s, { type: "AttachedTaskObserved", at: 150 }).state;
+            s = update(s, { type: "TurnStart", at: 200 }).state;
+            s = update(s, { type: "TurnEnd", stats: null }).state;
+            expect(s.attachedTask).toEqual({ since: 150 });
+            s = update(s, { type: "TurnReset" }).state;
+            expect(s.attachedTask).toEqual({ since: 150 });
+        });
+
+        it("survives ReconcileTurnActive / FailureObserved — orthogonal to every turn-lifecycle arm", () => {
+            let s = ready(100);
+            s = update(s, { type: "AttachedTaskObserved", at: 150 }).state;
+            s = update(s, { type: "ReconcileTurnActive", at: 200, active: true }).state;
+            expect(s.attachedTask).toEqual({ since: 150 });
+            s = update(s, {
+                type: "FailureObserved",
+                failure: { code: "rate_limited", title: "Rate limited" } as AgentFailure,
+                at: 300,
+            }).state;
+            expect(s.attachedTask).toEqual({ since: 150 });
         });
     });
 

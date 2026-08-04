@@ -1,5 +1,57 @@
 # AgentMux Version History
 
+## 0.54.9 — 2026-08-02
+
+- fix(frontend): consolidate 7 duplicated token-count formatters, add k/m/b rollover
+- fix(frontend): consolidate 5 duplicated elapsed-time formatters, fix negative-duration gap
+- fix(frontend): consolidate string-truncation formatters, remove dead code
+- fix(frontend): consolidate 12 duplicated sleep-promise expressions into a shared helper
+
+
+## 0.54.8 — 2026-08-02
+
+- feat(muxbus): same-host cross-channel reactive delivery (Tier 2b, issue #1916)
+- docs(specs): archive 2 superseded specs (DOC-008, DOC-009)
+- feat(srv): enforce cross-process session lease on host-mode agent turns
+- fix(agent): transparently retry a stale --resume session id on a persistent controller's first message
+- fix(agent): backfill cross-channel agent definitions before instance create, filter legacy identity sentinels
+- fix(agent-pane): pin scroll from content ResizeObserver, not an itemized signal whitelist
+- fix(agent-stream): require real explanation text before ending a persistent-mode turn
+- fix(agent): suppress the visible error bubble a stale --resume retry leaves behind
+- fix(agent-composer): two-line responsive layout for narrow panes
+- refactor(agent): replace ad-hoc resume-retry fields with an explicit event-driven state machine
+- fix(agent-auth): mount-time auth check resolves the linked account's own dir, not the generic default
+- feat(agent): detect and surface context compaction in real time
+- feat(armory): ABF single-file (.abf zip) format + importer (Phase 2)
+- feat(muxspect): new live process/turn-state introspection tool, Phase 1 (current-instance only)
+- feat(armory): ABF import UI (Phase 3) -- selective import + collision handling
+
+
+## 0.54.7 — 2026-07-29
+
+- feat(telemetry): [wave-turn] diagnostic logging for the turn-phase state machine + watchdog reasoning
+- feat(armory): add Agent Skills (SKILL.md) format for skills, ABF Phase 0
+- feat(agent): guarantee pane close/reopen resumes the real conversation, or discloses it couldn't
+- fix(armory): align ArmorySection ids with their labels (memory/bundles, not brain/memories)
+- feat(armory): add bundle.export RPC — ABF Phase 1 exporter
+- feat(agent): harden Working-state and scroll-follow against 4 recurring desync bugs
+- fix(agent): harden My Agents against single-source failures, distinguish error from empty
+- fix(stash): MCP Servers and Skills tabs no longer fail unauthorized; reactive read+bind view over the Armory catalog
+- fix(agent): keep My Agents loading state visible during a retry, don't flash empty
+- feat(agent): collapse mid-line spinner/progress redraws in tool preview + bashwrap
+- fix(agent): let an AskUserQuestion answer survive a pane reopen or process respawn
+- fix(floating-pane): restore resize hit-target from 4px to 8px
+- feat(agent): surface a Restart action when an agent process goes unresponsive
+- fix(auth): fast-fail sends from a pane already known-unauthenticated
+- fix(deps): pin brace-expansion to patch the DoS advisory (SEC-005)
+- fix(agent): remove legacy standalone subagent pane, never show raw slugs in the agent pane
+- feat(muxbus): per-agent M2M credential fetch/cache, wired into cloud_subscriber's reactive requests
+- fix(build): wire up Windows codec-enabled CEF default-location auto-pickup + advisory warning
+- fix(muxbus): set MUXBUS_AGENT_ID directly at spawn time (ARCH-002)
+- fix(agent-pane): keep scrollbar visible above working-row/dock overlays and harden scroll-follow against programmatic-scroll races
+- feat(srv): cross-process session-ownership lease foundation (registry::LeaseStore)
+
+
 ## 0.54.6 — 2026-07-27
 
 - feat(macos): tab redock via CGEventTap — cross-window tab drag now merges directly with a live insertion indicator, matching Windows

@@ -91,12 +91,39 @@
 }
 
 .identity-form-error {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
     padding: var(--space-1-5) 10px;
     font-size: 12px;
     background: rgba(239, 68, 68, 0.1);
     border: 1px solid rgba(239, 68, 68, 0.3);
     border-radius: 0;
     color: var(--error-color);
+}
+
+.identity-form-error-text {
+    flex: 1;
+    min-width: 0;
+    // Long errors (e.g. a wrapped keychain error) wrap and, past a few
+    // lines, scroll instead of pushing the rest of the modal around.
+    overflow-wrap: anywhere;
+    max-height: 4.5em;
+    overflow-y: auto;
+}
+
+.identity-form-error-copy-btn {
+    flex: 0 0 auto;
+    background: transparent;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    padding: 2px 4px;
+    opacity: 0.7;
+
+    &:hover {
+        opacity: 1;
+    }
 }
 
 .identity-form-warning {

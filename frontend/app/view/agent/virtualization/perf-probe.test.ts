@@ -11,6 +11,7 @@
  */
 
 import { beforeEach, describe, expect, it } from "vitest";
+import { sleep } from "@/util/util";
 import {
     agentPerfStore,
     ESTIMATOR_MISS_THRESHOLD,
@@ -69,11 +70,11 @@ describe("agentPerfStore", () => {
         });
 
         it("rejects measurements with estimated=0 (avoid divide-by-zero)", () => {
-            agentPerfStore.recordEstimatorMeasurement("subagent_link", 0, 100);
+            agentPerfStore.recordEstimatorMeasurement("shell", 0, 100);
             // errorPct should be 0 (defensive), not Infinity
             const snap = agentPerfStore.snapshot();
             // The measurement still counted toward total, just not flagged.
-            expect(snap.estimatorMissRateByKind.get("subagent_link")).toBe(0);
+            expect(snap.estimatorMissRateByKind.get("shell")).toBe(0);
         });
 
         it("uses the documented threshold constant", () => {
@@ -168,7 +169,7 @@ describe("markRowMount", () => {
 
     it("returns a closer that records duration on call", async () => {
         const close = markRowMount("markdown");
-        await new Promise<void>((r) => setTimeout(r, 5));
+        await sleep(5);
         close();
         const snap = agentPerfStore.snapshot();
         const q = snap.rowMountByKind.get("markdown");
@@ -193,7 +194,7 @@ describe("markDispatch", () => {
 
     it("returns a closer that records duration on call", async () => {
         const close = markDispatch("layout");
-        await new Promise<void>((r) => setTimeout(r, 5));
+        await sleep(5);
         close();
         const snap = agentPerfStore.snapshot();
         const q = snap.dispatchByKind.get("layout");

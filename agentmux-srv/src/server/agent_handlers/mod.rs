@@ -317,6 +317,7 @@ mod recent_sessions_tests {
         let process_broker = Arc::new(crate::broker::ProcessBroker::new(Some(broker.clone())));
         let state = AppState {
             auth_key: "test".to_string(),
+            boot_id: std::sync::Arc::from("test-boot"),
             version: "test".to_string(),
             app_path: String::new(),
             wstore: wstore.clone(),
@@ -634,6 +635,7 @@ mod recent_sessions_tests {
         let process_broker = Arc::new(crate::broker::ProcessBroker::new(Some(broker.clone())));
         let state = AppState {
             auth_key: "test".to_string(),
+            boot_id: std::sync::Arc::from("test-boot"),
             version: "test".to_string(),
             app_path: String::new(),
             wstore: wstore.clone(),

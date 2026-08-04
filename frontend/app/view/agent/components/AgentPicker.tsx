@@ -42,6 +42,7 @@ import { getOpenDefinitionMap } from "@/app/store/agent-pane-state-store";
 import { subscribeToPaneLifecycle } from "@/app/store/agent-pane-registration";
 import type { AgentViewModel } from "../agent-model";
 import { getProvider } from "../providers";
+import { looksLikeRealAccountId } from "../identity-carry-over";
 import { AgentCard } from "./AgentCard";
 import { AgentActionBar } from "./AgentActionBar";
 import { HiddenTemplatesSection } from "./HiddenTemplatesSection";
@@ -429,10 +430,13 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                     (a, b) => (b.started_at ?? 0) - (a.started_at ?? 0),
                 )[0];
                 if (mostRecent) {
-                    accountId = mostRecent.identity_id && mostRecent.identity_id !== "blank"
-                        ? mostRecent.identity_id : "";
-                    memoryId = mostRecent.memory_id && mostRecent.memory_id !== "blank"
-                        ? mostRecent.memory_id : "";
+                    // See identity-carry-over.ts — a UUID-shape check,
+                    // not a per-literal blacklist, so legacy sentinels
+                    // like "default" (which would otherwise fail
+                    // linkagentidentity's FOREIGN KEY constraint) are
+                    // filtered along with "blank"/"".
+                    accountId = looksLikeRealAccountId(mostRecent.identity_id) ? mostRecent.identity_id : "";
+                    memoryId = looksLikeRealAccountId(mostRecent.memory_id) ? mostRecent.memory_id : "";
                 }
             } catch {
                 // best-effort — fall through with empty bundles.

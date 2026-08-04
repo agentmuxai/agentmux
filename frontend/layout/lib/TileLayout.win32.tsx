@@ -496,7 +496,7 @@ const ResizeHandle = (props: ResizeHandleComponentProps) => {
     const handlePointerMove = throttle(10, (event: PointerEvent) => {
         if (trackingPointer() === event.pointerId) {
             const { clientX, clientY } = event;
-            props.layoutModel.onResizeMove(props.resizeHandleProps, clientX, clientY);
+            props.layoutModel.onResizeMove(props.resizeHandleProps, clientX, clientY, event.shiftKey);
         }
     });
 

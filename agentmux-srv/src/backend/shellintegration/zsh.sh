@@ -105,6 +105,21 @@ muxlog() {
     case "$action" in tail) tail -f "$logfile" ;; cat) cat "$logfile" ;; *) grep "$action" "$logfile" ;; esac
 }
 
+# ─── muxspect ───────────────────────────────────────────────────────────────
+# Live process/turn-state introspection for the CURRENT instance (muxlog's
+# live-state sibling). Delegates to the shared Node core (muxspect.mjs).
+# `muxspect help` for usage. No non-Node fallback: introspection needs a real
+# authenticated HTTP call.
+_AGENTMUX_MUXSPECT_JS="${${(%):-%x}:A:h}/../muxspect.mjs"
+muxspect() {
+    if command -v node >/dev/null 2>&1 && [ -f "$_AGENTMUX_MUXSPECT_JS" ]; then
+        node "$_AGENTMUX_MUXSPECT_JS" "$@"
+        return
+    fi
+    echo "muxspect: Node unavailable or core missing at $_AGENTMUX_MUXSPECT_JS" >&2
+    return 1
+}
+
 autoload -U add-zsh-hook
 add-zsh-hook precmd _agentmux_si_precmd
 add-zsh-hook chpwd  _agentmux_si_osc7

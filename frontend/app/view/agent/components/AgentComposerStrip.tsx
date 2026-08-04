@@ -2,13 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AgentComposerStrip — slim 28-32px status row that sits directly above
- * the textarea in the agent pane composer region.
+ * AgentComposerStrip — status row that sits directly above the textarea in
+ * the agent pane composer region. Left-justified, wrapping onto additional
+ * lines (no hard cap — see _composer-strip.scss's file header) rather than
+ * clipping when the pane narrows — see
+ * docs/specs/SPEC_COMPOSER_STRIP_LEFT_JUSTIFIED_TIERED_WRAP_2026_08_03.md.
  *
- * LEFT:   AgentRuntimeDropup (single Mode · Model · Effort trigger)
- * CENTER: tokens (↑in ↓out) · elapsed — true-centered in the bar
- * RIGHT:  ⚙N process badge · context text (12.1k / 64k) · Shell toggle
- *         (Shell is rightmost — SPEC_COMPOSER_STRIP_LAYOUT_MIC_CENTER_MODEL_DEFAULTS_2026_07_10.md)
+ * In flow order:
+ *   1. AgentRuntimeDropup (single Mode · Model · Effort trigger) + HOST/SANDBOX tag
+ *   2. tokens (↑in ↓out) · elapsed
+ *   3. ⚙N process badge · context text (12.1k / 64k) · auth tag · Shell toggle
  *
  * The strip bar itself is not clickable. "Shell" is the sole toggle for
  * the details drawer (the AgentShellSubblock terminal — activity-log lines
@@ -22,6 +25,9 @@
 
 import { useTick } from "@/app/hook/useTick";
 import { compactionThreshold } from "@/app/store/agent-pane-state/context-window";
+import type { CompactionState } from "@/app/store/agent-pane-state/types";
+import { formatCompactNumber, formatExactNumber } from "@/util/format-count";
+import { formatElapsedCompact } from "@/util/format-time";
 import { Show, createEffect, createMemo, createSignal, type JSX } from "solid-js";
 import type { SessionStats, TurnTokens } from "../types";
 import { AgentRuntimeDropup } from "./AgentRuntimeDropup";
@@ -30,17 +36,7 @@ import { RuntimeBadge } from "./RuntimeBadge";
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function fmtTokens(t: TurnTokens): string {
-    const fmt = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
-    return `↑${fmt(t.input)} ↓${fmt(t.output)}`;
-}
-
-function fmtElapsed(ms: number): string {
-    const s = Math.floor(ms / 1000);
-    return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
-}
-
-function fmtK(n: number): string {
-    return `${Math.round(n / 100) / 10}k`;
+    return `↑${formatCompactNumber(t.input)} ↓${formatCompactNumber(t.output)}`;
 }
 
 type CtxBand = "low" | "mid" | "high" | "critical";
@@ -55,13 +51,13 @@ function ctxBand(tokens: number, contextWindow: number): CtxBand {
 
 function contextTitle(tokens: number, contextWindow: number | undefined): string {
     if (contextWindow == null) {
-        return `Context: ${tokens.toLocaleString()} tokens`;
+        return `Context: ${formatExactNumber(tokens)} tokens`;
     }
     const pct = ((tokens / contextWindow) * 100).toFixed(1);
     return (
-        `Context window: ${tokens.toLocaleString()} / ${contextWindow.toLocaleString()} tokens (${pct}%)\n` +
+        `Context window: ${formatExactNumber(tokens)} / ${formatExactNumber(contextWindow)} tokens (${pct}%)\n` +
         `This is the total conversation history sent to the model on each turn.\n` +
-        `Auto-compacts around ${compactionThreshold(contextWindow).toLocaleString()} tokens.`
+        `Auto-compacts around ${formatExactNumber(compactionThreshold(contextWindow))} tokens.`
     );
 }
 
@@ -109,6 +105,14 @@ interface AgentComposerStripProps {
      *  Docker sandbox" pane row — see
      *  docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md §3.2). */
     agentMode?: string;
+    /**
+     * Live "compaction in progress" state (reducer-owned, set by the
+     * `PreCompact` hook's `compaction_started` signal). While set, the
+     * center stats zone shows "Compacting…" plus a live elapsed
+     * counter instead of the normal turn/session stats — Tier 1/2 of
+     * docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md.
+     */
+    compacting?: CompactionState | null;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
@@ -128,18 +132,34 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         return s != null ? (tick(), Date.now() - s) : 0;
     });
 
+    // Live elapsed time since compaction started — a real stopwatch via
+    // Date.now() deltas (ticks every second through the same `useTick`
+    // this strip already uses for the turn-elapsed display). Once the
+    // authoritative `compact_boundary` event lands, `compacting` clears
+    // and the finalized transcript node shows the backend's real
+    // `durationMs` instead — this live reading is only ever the
+    // in-progress approximation. Tier 2 of
+    // docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md.
+    const compactingElapsedMs = createMemo(() => {
+        const c = props.compacting;
+        return c ? (tick(), Date.now() - c.startedAt) : 0;
+    });
+
     const rightText = createMemo((): string => {
+        if (props.compacting) {
+            return `Compacting…  ${formatElapsedCompact(compactingElapsedMs())}`;
+        }
         const parts: string[] = [];
         if (props.loading) {
             if (props.turnTokens) parts.push(fmtTokens(props.turnTokens));
-            parts.push(fmtElapsed(elapsedMs()));
+            parts.push(formatElapsedCompact(elapsedMs()));
         } else if (props.sessionTotals) {
             const s = props.sessionTotals;
             if (s.input_tokens != null || s.output_tokens != null) {
                 parts.push(fmtTokens({ input: s.input_tokens ?? 0, output: s.output_tokens ?? 0 }));
             }
             if (s.duration_ms != null) {
-                parts.push(fmtElapsed(s.duration_ms));
+                parts.push(formatElapsedCompact(s.duration_ms));
             }
         }
         return parts.join("  ·  ");
@@ -163,8 +183,8 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         const t = props.contextTokens;
         const w = props.contextWindow;
         if (t == null || t <= 0) return null;
-        if (w == null) return `${fmtK(t)} ctx`;
-        return `${fmtK(t)} / ${fmtK(w)}`;
+        if (w == null) return `${formatCompactNumber(t)} ctx`;
+        return `${formatCompactNumber(t)} / ${formatCompactNumber(w)}`;
     };
 
     return (
@@ -194,19 +214,28 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                 </Show>
             </span>
 
-            {/* Center zone — token/elapsed stats, true-centered in the bar via
-                the grid's middle column (see _composer-strip.scss). The
-                wrapper span always renders (even with no stats yet) so the
-                grid keeps 3 children and the right zone stays in the
-                rightmost column instead of sliding into the middle one. */}
+            {/* Stats zone — token/elapsed stats. Left-justified in flow (no
+                longer true-centered, see _composer-strip.scss), sitting
+                right after the controls zone or wrapping onto its own line
+                when there isn't room for both. The wrapper span always
+                renders (even with no stats yet) so this zone's presence in
+                the flow order — and therefore where the right zone wraps
+                to — stays stable whether or not stats are populated yet. */}
             <span class="agent-composer-strip-stats-zone">
                 <Show when={rightText()}>
-                    <span class="agent-composer-strip-stats">{rightText()}</span>
+                    <span
+                        class="agent-composer-strip-stats"
+                        classList={{ "agent-composer-strip-stats--compacting": !!props.compacting }}
+                    >
+                        {rightText()}
+                    </span>
                 </Show>
             </span>
 
-            {/* Right zone — process badge + context text + Shell toggle, in
-                that order so Shell is the rightmost element in the bar. */}
+            {/* Right zone — process badge + context text + auth tag + Shell
+                toggle, in that order. Shell still lands rightmost on a wide
+                pane (last in a left-filling line); on a wrapped line it
+                starts at that line's left margin like everything else. */}
             <span class="agent-composer-strip-right">
                 <Show when={(props.processCount ?? 0) > 0}>
                     <button

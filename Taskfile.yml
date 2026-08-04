@@ -554,39 +554,62 @@ tasks:
         platforms: [windows]
         cmds:
             - cmd: |
-                # Optional override: substitute a custom-built (e.g. codec-enabled)
-                # CEF runtime into target/release/ BEFORE the version-matched logic
-                # below runs, so everything downstream — including the
-                # verify-cef-version.sh gate — behaves identically whether the
-                # source was this override or the normal cargo-staged files. No-op
-                # when the env var is unset: default behavior is byte-for-byte
-                # unchanged from before this block existed. Mirrors bundle:darwin's
-                # resolver-driven override, adapted to bundle:windows's
-                # "source everything from target/release" design instead of a
-                # separate CEF_DIR variable, since target/release is what every
-                # downstream cp in this task already reads from.
+                # Resolve which directory to bundle CEF runtime files FROM.
+                # cefDir is set to that directory directly (never copied
+                # wholesale into target/release/) — the override and
+                # cef-build-default directories are raw Chromium ninja build
+                # output trees (potentially dozens of GB of intermediate/
+                # debug artifacts, not just runtime files), so a recursive
+                # `cp -rf .../. target/release/` of one of those is extremely
+                # slow and was observed to hang bundle:windows for 10+
+                # minutes copying files nothing downstream needs. Every
+                # downstream step in this task already does per-file `cp -f
+                # "$cefDir/<name>" dist/cef/` for exactly the runtime files
+                # it needs, so pointing cefDir at the source directly (no
+                # staging copy) is both correct and far cheaper.
                 # See docs/specs/SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md.
+                #
+                # cefSource tracks WHICH tier resolved the runtime, so the
+                # advisory warning below can fire only when we actually landed
+                # on the stock (no-codec) cargo cache — mirrors bundle:darwin's
+                # verify-cef-framework-darwin.sh warning, which Windows never
+                # had despite resolve-cef-runtime-windows.ps1 already
+                # containing the equivalent tier/warning logic — that script
+                # was written but never wired into this task, so `task dev`/
+                # `task package` silently used the stock CEF with no signal.
+                cefSource="cargo-cache"
+                cefDir="target/release"
+                cefBuildDefault="$HOME/cef-build/chromium_git/chromium/src/out/Release_GN_x64"
                 if [ -n "${AGENTMUX_CEF_RUNTIME_DIR_WINDOWS:-}" ]; then
-                  echo "AGENTMUX_CEF_RUNTIME_DIR_WINDOWS set — staging override CEF runtime from $AGENTMUX_CEF_RUNTIME_DIR_WINDOWS"
+                  echo "AGENTMUX_CEF_RUNTIME_DIR_WINDOWS set — using override CEF runtime at $AGENTMUX_CEF_RUNTIME_DIR_WINDOWS"
                   if [ ! -f "$AGENTMUX_CEF_RUNTIME_DIR_WINDOWS/libcef.dll" ] || [ ! -f "$AGENTMUX_CEF_RUNTIME_DIR_WINDOWS/icudtl.dat" ]; then
                     echo "❌ AGENTMUX_CEF_RUNTIME_DIR_WINDOWS is set but missing libcef.dll + icudtl.dat" >&2
                     exit 1
                   fi
-                  mkdir -p target/release
-                  cp -rf "$AGENTMUX_CEF_RUNTIME_DIR_WINDOWS/." target/release/
+                  cefDir="$AGENTMUX_CEF_RUNTIME_DIR_WINDOWS"
+                  cefSource="override"
+                elif [ -f "$cefBuildDefault/libcef.dll" ] && [ -f "$cefBuildDefault/icudtl.dat" ]; then
+                  # Tier 2: the standard cef-build layout from
+                  # docs/cef-build/build-patched-cef-windows.md, which
+                  # documents this as picked up "automatically" — previously
+                  # untrue, since this task never checked for it.
+                  echo "Found codec-enabled CEF at default cef-build location — using $cefBuildDefault"
+                  cefDir="$cefBuildDefault"
+                  cefSource="cef-build-default"
                 fi
-                # cargo/cef-dll-sys copies the ACTIVE build's full CEF runtime
-                # (libcef.dll + paks + icudtl.dat + GL dlls + en-US locale) into
-                # target/release/ alongside the linked host — always matching the
-                # host's CEF version. Source from there directly: deterministic and
-                # version-correct. The old `find … | head -1` was non-deterministic
-                # and could grab a STALE cef-dll-sys build-dir copy from a previous
-                # CEF version — after the 146→148 bump (#1221) it picked a 146
-                # libcef.dll, so the 148-linked host died with "unsupported CEF API
-                # version 14800". (Avoids `ls -t`/`find -printf` too — task's shell
-                # uses a limited Go coreutils that rejects those flags.)
-                cefDir=target/release
-                if [ ! -f "$cefDir/libcef.dll" ] || [ ! -f "$cefDir/icudtl.dat" ]; then
+                # Tier 3 (cefSource still "cargo-cache"): cargo/cef-dll-sys
+                # copies the ACTIVE build's full CEF runtime (libcef.dll +
+                # paks + icudtl.dat + GL dlls + en-US locale) into
+                # target/release/ alongside the linked host — always matching
+                # the host's CEF version. Source from there directly:
+                # deterministic and version-correct. The old `find … | head
+                # -1` was non-deterministic and could grab a STALE
+                # cef-dll-sys build-dir copy from a previous CEF version —
+                # after the 146→148 bump (#1221) it picked a 146 libcef.dll,
+                # so the 148-linked host died with "unsupported CEF API
+                # version 14800". (Avoids `ls -t`/`find -printf` too — task's
+                # shell uses a limited Go coreutils that rejects those flags.)
+                if [ "$cefSource" = "cargo-cache" ] && { [ ! -f "$cefDir/libcef.dll" ] || [ ! -f "$cefDir/icudtl.dat" ]; }; then
                   # rust-cache hit: cef-dll-sys build script didn't re-run →
                   # DLLs not staged to target/release/. The CEF SDK is still in
                   # the build OUT_DIR (rust-cache preserves
@@ -635,14 +658,41 @@ tasks:
                 # window). Fail loudly here instead of shipping a broken build.
                 # See docs/specs/SPEC_WINDOWS_CEF_BUNDLE_VERSION_INTEGRITY_2026_06_03.md.
                 bash scripts/verify-cef-version.sh "$cefDir" || exit 1
+                # Advisory-only, same posture as bundle:darwin's unpatched-
+                # framework warning: don't fail `task dev`/`task package` on
+                # the stock cef-dll-sys fallback (that's still a legitimate,
+                # working build for everything except proprietary codecs), but
+                # make it loud and actionable rather than silent — this is
+                # exactly the gap that let MP4/MOV playback silently fail with
+                # no signal pointing at the cause. See
+                # docs/reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md.
+                if [ "$cefSource" = "cargo-cache" ]; then
+                  echo "" >&2
+                  echo "⚠️ ⚠️ ⚠️  BUNDLING THE STOCK (NO-CODEC) CEF RUNTIME  ⚠️ ⚠️ ⚠️" >&2
+                  echo "    MP4/MOV/HEVC/AC3 playback will fail app-wide (DEMUXER_ERROR_NO_SUPPORTED_STREAMS)." >&2
+                  echo "    To use the codec-enabled build: docs/cef-build/build-patched-cef-windows.md," >&2
+                  echo "    then either place it at $cefBuildDefault or set AGENTMUX_CEF_RUNTIME_DIR_WINDOWS." >&2
+                  echo "    (Dev build continues anyway — this is advisory.)" >&2
+                  echo "" >&2
+                fi
                 mkdir -p dist/cef/locales
+                # Optional-file copies below use `[ -f src ] && cp` instead of
+                # `cp ... 2>/dev/null || true`: Task's shell (mvdan.cc/sh) runs
+                # `cp` as a native Go builtin, not a spawned cp.exe, and on
+                # Windows a missing SOURCE file surfaces as a hard
+                # GetFileAttributesEx task-engine error that bypasses the
+                # `2>/dev/null || true` shell-level suppression entirely —
+                # confirmed live when vulkan-1.dll was absent from a codec CEF
+                # runtime (docs/retro/retro-nightly-windows-cef-zip-backslash-paths-2026-07-29.md).
+                # An explicit existence check (already used below for the
+                # locale file) sidesteps the builtin's error path altogether.
                 # Core DLLs (required)
                 cp -f "$cefDir/libcef.dll" dist/cef/
-                cp -f "$cefDir/chrome_elf.dll" dist/cef/ 2>/dev/null || true
+                [ -f "$cefDir/chrome_elf.dll" ] && cp -f "$cefDir/chrome_elf.dll" dist/cef/
                 # GPU support (required — ANGLE + D3D compiler)
-                cp -f "$cefDir/libEGL.dll" dist/cef/ 2>/dev/null || true
-                cp -f "$cefDir/libGLESv2.dll" dist/cef/ 2>/dev/null || true
-                cp -f "$cefDir/d3dcompiler_47.dll" dist/cef/ 2>/dev/null || true
+                [ -f "$cefDir/libEGL.dll" ] && cp -f "$cefDir/libEGL.dll" dist/cef/
+                [ -f "$cefDir/libGLESv2.dll" ] && cp -f "$cefDir/libGLESv2.dll" dist/cef/
+                [ -f "$cefDir/d3dcompiler_47.dll" ] && cp -f "$cefDir/d3dcompiler_47.dll" dist/cef/
                 # Software-GL fallback (SwiftShader, ~6 MB). When the HARDWARE GPU process
                 # can't boot, Chromium falls back to SwiftShader for WebGL ONLY if these are
                 # present AND --enable-unsafe-swiftshader is set (app.rs). Without them, the
@@ -652,13 +702,15 @@ tasks:
                 # (GPU process STATUS_BREAKPOINTs at init — see issue / the DCHECK-build root
                 # cause). macOS/Linux bundles already ship SwiftShader; this restores parity.
                 # SAFETY NET ONLY — hardware GL is still preferred when it boots.
-                cp -f "$cefDir/vk_swiftshader.dll" dist/cef/ 2>/dev/null || true
-                cp -f "$cefDir/vulkan-1.dll" dist/cef/ 2>/dev/null || true
-                cp -f "$cefDir/vk_swiftshader_icd.json" dist/cef/ 2>/dev/null || true
+                [ -f "$cefDir/vk_swiftshader.dll" ] && cp -f "$cefDir/vk_swiftshader.dll" dist/cef/
+                [ -f "$cefDir/vulkan-1.dll" ] && cp -f "$cefDir/vulkan-1.dll" dist/cef/
+                [ -f "$cefDir/vk_swiftshader_icd.json" ] && cp -f "$cefDir/vk_swiftshader_icd.json" dist/cef/
                 # Data files (required)
-                cp -f "$cefDir/icudtl.dat" dist/cef/ 2>/dev/null || true
-                cp -f "$cefDir/v8_context_snapshot.bin" dist/cef/ 2>/dev/null || true
-                cp -f "$cefDir"/*.pak dist/cef/ 2>/dev/null || true
+                [ -f "$cefDir/icudtl.dat" ] && cp -f "$cefDir/icudtl.dat" dist/cef/
+                [ -f "$cefDir/v8_context_snapshot.bin" ] && cp -f "$cefDir/v8_context_snapshot.bin" dist/cef/
+                for pak in "$cefDir"/*.pak; do
+                  [ -f "$pak" ] && cp -f "$pak" dist/cef/
+                done
                 # Locales — en-US only (saves ~18 MB)
                 [ -f "$cefDir/locales/en-US.pak" ] && cp -f "$cefDir/locales/en-US.pak" dist/cef/locales/
                 # SKIPPED (not needed):

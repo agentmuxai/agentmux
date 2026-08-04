@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { parseHistoryLines } from "./parseHistoryLines";
+import { contextCompactedNodeId } from "./compact-boundary";
 import type { ToolNode } from "./types";
 
 // The Claude translator passes through events that already match the
@@ -109,5 +110,116 @@ describe("parseHistoryLines", () => {
         ];
         const { lastSessionStats } = parseHistoryLines(lines, "claude-stream-json");
         expect(lastSessionStats).toEqual({ input_tokens: 500, output_tokens: 50 });
+    });
+
+    describe("compact_boundary replay (Codex P2, PR #2378 round 2)", () => {
+        // Before this fix, a raw `system`/`compact_boundary` frame had no
+        // StreamEvent shape in the provider translator, so parseHistoryLines
+        // silently dropped it — every historical compaction record vanished
+        // from a reopened pane's transcript even though the live pane had
+        // shown it correctly at the time.
+
+        function compactBoundaryLine(metadataOverrides: Record<string, unknown> = {}): string {
+            return JSON.stringify({
+                type: "system",
+                subtype: "compact_boundary",
+                content: "Conversation compacted",
+                level: "info",
+                compactMetadata: {
+                    trigger: "manual",
+                    preTokens: 783_887,
+                    postTokens: 11_775,
+                    cumulativeDroppedTokens: 772_112,
+                    durationMs: 231_606,
+                    ...metadataOverrides,
+                },
+                timestamp: "2026-07-21T17:55:35.500Z",
+            });
+        }
+
+        it("rebuilds a context_compacted node with the real trigger/token/duration data", () => {
+            const lines = [
+                line({ type: "text", content: "before" }),
+                compactBoundaryLine(),
+                line({ type: "text", content: "after" }),
+            ];
+            const { nodes } = parseHistoryLines(lines, "claude-stream-json");
+            const compacted = nodes.find((n) => n.type === "context_compacted") as any;
+            expect(compacted).toBeDefined();
+            expect(compacted).toMatchObject({
+                type: "context_compacted",
+                tokensBefore: 783_887,
+                tokensAfter: 11_775,
+                source: "real",
+                trigger: "manual",
+                durationMs: 231_606,
+            });
+            expect(compacted.timestamp).toBe(Date.parse("2026-07-21T17:55:35.500Z"));
+        });
+
+        it("preserves insertion order relative to surrounding text", () => {
+            const lines = [
+                line({ type: "text", content: "before" }),
+                compactBoundaryLine(),
+                line({ type: "text", content: "after" }),
+            ];
+            const { nodes } = parseHistoryLines(lines, "claude-stream-json");
+            expect(nodes.map((n) => n.type)).toEqual(["markdown", "context_compacted", "markdown"]);
+        });
+
+        it("rebuilds an auto-triggered boundary too", () => {
+            const lines = [compactBoundaryLine({ trigger: "auto" })];
+            const { nodes } = parseHistoryLines(lines, "claude-stream-json");
+            expect((nodes[0] as any).trigger).toBe("auto");
+        });
+
+        it("drops a compact_boundary frame with malformed compactMetadata rather than emitting a bad node", () => {
+            const lines = [
+                line({ type: "text", content: "before" }),
+                compactBoundaryLine({ preTokens: "not-a-number" }),
+                line({ type: "text", content: "after" }),
+            ];
+            const { nodes } = parseHistoryLines(lines, "claude-stream-json");
+            // The dropped frame emits no node at all (not even a bad one) — it's
+            // simply absent from the replay, same as it never existed. Whether
+            // the surrounding text merges into one markdown block or stays two
+            // is the underlying parser's ordinary adjacent-text behavior, not
+            // something this fix changes; the invariant under test is just that
+            // no context_compacted node was fabricated from malformed data.
+            expect(nodes.some((n) => n.type === "context_compacted")).toBe(false);
+        });
+
+        it("dedupes a replayed identical compact_boundary line by its frame timestamp", () => {
+            const lines = [compactBoundaryLine(), compactBoundaryLine()];
+            const { nodes } = parseHistoryLines(lines, "claude-stream-json");
+            expect(nodes.filter((n) => n.type === "context_compacted")).toHaveLength(1);
+        });
+
+        it("keys a timestamp-less boundary's id the same way the live path would (codex P2, round 12)", () => {
+            // Constructed without a top-level `timestamp` field -- the
+            // defensive fallback case. Before round 12 this used a
+            // batch-relative `nodes.length` counter here, while
+            // useAgentStream.ts's live path used `Date.now()`; the same
+            // underlying boundary seen live AND via a history-replay
+            // overlap could then get two different ids and show up twice.
+            const raw = JSON.parse(compactBoundaryLine());
+            delete raw.timestamp;
+            const lines = [
+                line({ type: "text", content: "before" }),
+                JSON.stringify(raw),
+            ];
+            const { nodes } = parseHistoryLines(lines, "claude-stream-json");
+            const compacted = nodes.find((n) => n.type === "context_compacted") as any;
+            expect(compacted).toBeDefined();
+            expect(compacted.id).toBe(
+                contextCompactedNodeId({
+                    trigger: "manual",
+                    preTokens: 783_887,
+                    postTokens: 11_775,
+                    durationMs: 231_606,
+                    frameTimestamp: null,
+                }),
+            );
+        });
     });
 });

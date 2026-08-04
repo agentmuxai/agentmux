@@ -11,6 +11,7 @@
 
 import { getApi } from "@/app/store/app-api";
 import { BlockNodeModel } from "@/app/block/blocktypes";
+import { useBlockAtom } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
@@ -19,7 +20,7 @@ import { WpsEvent } from "@/app/store/wps-events";
 import { getWebServerEndpoint } from "@/util/endpoints";
 import { fetch } from "@/util/fetchutil";
 import { fireAndForget } from "@/util/util";
-import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type Accessor, type JSX } from "solid-js";
 
 const META_PATH = "media:path" as const;
 
@@ -48,6 +49,14 @@ export function extOf(path: string): string {
 export function dirnameOf(path: string): string {
     const lastSlash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
     return lastSlash === -1 ? "" : path.slice(0, lastSlash);
+}
+
+// File name of `path` (the part after the last separator), matching
+// whichever separator style it uses. Returns `path` unchanged if it has no
+// separator.
+export function basenameOf(path: string): string {
+    const lastSlash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+    return lastSlash === -1 ? path : path.slice(lastSlash + 1);
 }
 
 // Surfaces the browser's actual MediaError code/message instead of a
@@ -97,10 +106,26 @@ async function fetchMediaBlob(path: string): Promise<Blob> {
 class MediaViewModel implements ViewModel {
     viewType: string;
     blockId: string;
+    viewName: Accessor<string>;
 
     constructor(blockId: string) {
         this.viewType = "media";
         this.blockId = blockId;
+
+        // Header title — file basename of the persisted path, so an
+        // OpenMedia call's default (untitled) pane is distinguishable from
+        // another rather than showing a generic "Media" label for all of
+        // them. Mirrors EditorViewModel.viewName's pattern exactly
+        // (editor-model.ts:290-296): wrapped in useBlockAtom (creates a
+        // tracking root) rather than a bare createMemo, so block-frame
+        // subscribers reliably see updates.
+        this.viewName = useBlockAtom(blockId, "media-view-name", () =>
+            createMemo<string>(() => {
+                const blockData = getWaveObjectAtom<Block>(makeORef("block", blockId))();
+                const path = blockData?.meta?.[META_PATH];
+                return typeof path === "string" && path.length > 0 ? basenameOf(path) : "Media";
+            }),
+        );
     }
 
     get viewComponent(): ViewComponent {

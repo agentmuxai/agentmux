@@ -263,6 +263,11 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // Container agent branch: use Docker socket API exec (P1a: no
                     // secrets in argv). Host agent branch: regular CLI subprocess.
                     let agent_mode = obj::meta_get_string(&block.meta, "agentMode", "host");
+                    // Cross-process session-lease key (registry::LeaseStore) —
+                    // read once for both branches below. Only the host
+                    // branch's spawn_turn enforces it in this PR; the
+                    // container branch's field is unused for now.
+                    let instance_id = obj::meta_get_string(&block.meta, "agentId", "");
                     if agent_mode == "container" {
                         let cm = container_manager.get().await
                             .ok_or_else(|| "Docker not available on this host; cannot start container agent".to_string())?;
@@ -321,6 +326,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             } else {
                                 Some(persisted_session_id)
                             },
+                            instance_id: instance_id.clone(),
                         };
                         subprocess_ctrl.spawn_container_turn(cm.clone(), container_name, base_cmd, config)?;
                     } else {
@@ -339,6 +345,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             } else {
                                 Some(persisted_session_id)
                             },
+                            instance_id,
                         };
                         subprocess_ctrl.spawn_turn(config)?;
                     }

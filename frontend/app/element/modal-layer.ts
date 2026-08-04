@@ -25,7 +25,10 @@ export type ModalLayerRequest =
     | BrowserAuthRequest
     | AgentIdentityRequest
     | AgentMemoryRequest
-    | AgentStashRequest;
+    | AgentStashRequest
+    | BundleImportSelectRequest
+    | BundleImportPreviewRequest
+    | BundleImportConfirmRequest;
 
 export interface LaunchAgentRequest {
     kind: "launch-agent";
@@ -313,6 +316,78 @@ export interface AgentStashRequest {
     workingDirectory: string;
     /** Which tab to open on. Defaults to "accounts". */
     initialTab?: "accounts" | "memory";
+}
+
+/**
+ * Armory Bundle Format (ABF) import — Phase 3
+ * (docs/specs/SPEC_ABF_IMPORT_UI_PHASE3_2026_08_02.md §4). Three chained
+ * modal-layer requests, following the same `ModalLayerApi.replace()`
+ * sequential pattern as the install→launch chain above — this codebase has
+ * no wizard-panel component, and threading step state through this
+ * request-kind union keeps each step's props typed and testable
+ * independently.
+ */
+
+/** Step 1 — pick a `.abf` file and preview it. Has almost no UI of its own:
+ *  it triggers the native file dialog on mount, shows a spinner while
+ *  `bundle.import.preview` runs, and surfaces a parse/validation error
+ *  inline (with a retry) rather than advancing. */
+export interface BundleImportSelectRequest {
+    kind: "bundle-import-select";
+    /** Preview succeeded — caller does
+     *  `modalLayer.replace(previewRequest)`. */
+    onPreviewed: (filePath: string, preview: BundleImportPreviewResponse) => void;
+    onCancel: () => void;
+}
+
+/** One skill row's selection state — every parsed skill gets an entry,
+ *  including non-colliding ones (checked by default). For a colliding
+ *  row, `renameValue` starts empty (§4.1 point 5) and is the ONLY value
+ *  ever submitted as `import_as`; leaving it empty at commit time is
+ *  treated as skip regardless of the checkbox (§4.1 point 4). */
+export interface BundleImportSkillSelectionState {
+    sourceDir: string;
+    checked: boolean;
+    renameValue: string;
+}
+
+/** Built by Step 2, consumed by Step 3 — the user's full selection,
+ *  independent of the (possibly truncated) preview display values. */
+export interface BundleImportSelectionState {
+    bundleName: string;
+    includeInstructions: boolean;
+    includeContextFileIds: number[];
+    skills: BundleImportSkillSelectionState[];
+    includeMcpServerPaths: string[];
+}
+
+/** Step 2 — preview & select. Renders the checklist described in §4 Step
+ *  2: editable bundle name, instructions checkbox + preview, context
+ *  files, skills (with collision UI per §4.1), MCP servers, a read-only
+ *  requirements summary, and a dismissible warnings banner. */
+export interface BundleImportPreviewRequest {
+    kind: "bundle-import-preview";
+    filePath: string;
+    preview: BundleImportPreviewResponse;
+    /** "Next" — caller does
+     *  `modalLayer.replace(confirmRequest)`. */
+    onNext: (selection: BundleImportSelectionState) => void;
+    onCancel: () => void;
+}
+
+/** Step 3 — confirm & import. Calls `bundle.import.commit`; a digest
+ *  mismatch (the file changed since preview) surfaces as a distinct
+ *  "re-select and preview again" error rather than a generic failure. */
+export interface BundleImportConfirmRequest {
+    kind: "bundle-import-confirm";
+    filePath: string;
+    contentDigest: string;
+    bundleDisplayName: string;
+    selection: BundleImportSelectionState;
+    /** Commit succeeded — caller does `modalLayer.close()` (+ any
+     *  post-import navigation). */
+    onImported: (result: BundleImportCommitResponse) => void;
+    onCancel: () => void;
 }
 
 // ── Context API ──────────────────────────────────────────────────────────────

@@ -16,6 +16,7 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { sleep } from "@/util/util";
 
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
@@ -78,7 +79,7 @@ beforeEach(async () => {
 
 afterEach(() => cleanup());
 
-const flush = () => new Promise<void>((r) => setTimeout(r, 0));
+const flush = () => sleep(0);
 
 describe("AgentCreateFromTemplateModalPanel", () => {
     it("defaults the name field to the template name", async () => {

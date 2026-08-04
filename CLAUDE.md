@@ -174,7 +174,6 @@ These views exist in the codebase but are **not** widget-bar entries — do not 
 | **MCP Servers / Skills** | Armory tabs ("MCP Servers", "Skills" — hamburger → Armory) driving the standalone `mcp.*`/`skill.*` primitives (`McpManager`/`SkillManager`, `frontend/app/view/mcp/`, `frontend/app/view/skill/`), plus the matching per-agent tabs in the Agent setup modal (`AgentMcpModal`/`AgentSkillsModal`) for binding/creating agent-private entries. Introduced in #1943/#1946/#1948; see `specs/SPEC_V1_MCP_SKILLS_PRIMITIVES_2026_06_30.md` and tracking issue #1960 for remaining scope. |
 | **Settings** | Hamburger menu (≡) in the top tab bar → Settings. Opens the Settings pane (Appearance, Window & Panes, Terminal, Sounds, Network, Advanced); a footer button in the pane opens the raw `settings.json` in the user's default editor as an escape hatch. |
 | **DevTools** | View ▸ Toggle DevTools (macOS native menu bar) or the hamburger menu on other platforms; also the `dev:devtools` command. Toggles Chromium DevTools — does not open a pane. It is **not** a widget (no `defwidget@devtools`). |
-| **Subagent** | Spawned by clicking a sub-agent in the Swarm pane's overview. Not a top-level pane type the user opens directly. |
 
 ---
 
@@ -204,6 +203,14 @@ Renders NDJSON as `time level target message`; `--raw` for original JSON. Works
 identically across `task dev`, portable, and install builds. Not loaded in a
 tool-spawned subshell? Call the core directly: `node ~/.agentmux/shell/muxlog.mjs ls`.
 Full reference: `docs/MUXLOG.md`.
+
+`muxlog` is history (log files on disk); for **live** state — is this block's
+controller actually running right now, what's its process tree — use
+`muxspect`, its sibling tool. Only queries the instance you're already
+inside (Phase 1 — no cross-instance support yet). **The bare `muxspect`
+shell function doesn't work from a tool-spawned shell yet (known gap,
+reagent P1 on PR #2380)** — call the core directly instead:
+`node ~/.agentmux/shell/muxspect.mjs list`. Full reference: `docs/MUXSPECT.md`.
 
 ---
 
@@ -424,7 +431,7 @@ The cloud messaging layer has gone through several names (`agentbus`, `agentmux`
 
 | Layer | Canonical prefix | Examples |
 |-------|-----------------|---------|
-| Cloud auth env vars | `MUXBUS_` | `MUXBUS_TOKEN`, `MUXBUS_COGNITO_DOMAIN` |
+| Cloud auth env vars | `MUXBUS_` | `MUXBUS_TOKEN`, `MUXBUS_COGNITO_DOMAIN`, `MUXBUS_AGENT_ID` (mirrors the canonical app-wide `AGENTMUX_AGENT_ID`, set alongside it at spawn time — see `agentmux-srv/src/server/agent_handlers/input.rs`) |
 | Frontend build vars | `VITE_MUXBUS_` | `VITE_MUXBUS_CLIENT_ID` |
 | Rust types/modules | `MuxBus` / `muxbus` | `MuxBusCredentials`, `crate::muxbus::` |
 | RPC commands | `muxbus.` | `muxbus.login`, `muxbus.status` |

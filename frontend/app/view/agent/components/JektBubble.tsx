@@ -33,9 +33,9 @@ function formatTimestamp(ts: number): string {
 }
 
 export const JektBubble = (props: JektBubbleProps): JSX.Element => {
-    // Don't destructure props — see AgentMessageBlock/MarkdownBlock/
-    // SubagentLinkBlock for why (codex P1 on PR #786 + family of virt-
-    // redesign issues). Same reactivity discipline applies here.
+    // Don't destructure props — see AgentMessageBlock/MarkdownBlock
+    // for why (codex P1 on PR #786 + family of virt-redesign issues).
+    // Same reactivity discipline applies here.
     return (
         <div
             class={clsx("agent-jekt-bubble", {

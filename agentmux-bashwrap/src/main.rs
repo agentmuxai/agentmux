@@ -22,6 +22,12 @@
 //!   command is base64-encoded into the rewrite argv so quoting +
 //!   multi-line bodies survive.
 //!
+//! - `precompact` — registered as Claude Code's `PreCompact` hook.
+//!   Fires the instant compaction begins; pings the sidecar's WPS
+//!   broker with a `compaction_started` event so the UI can show
+//!   live status instead of a silent gap. See `precompact.rs` and
+//!   `docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md`.
+//!
 //! See `docs/specs/SPEC_STREAMING_BASH_RUNNER_2026_05_11.md` for the
 //! full design rationale (why command rewrite vs. MCP deny-redirect,
 //! why a separate binary vs. extending an MCP server, channel
@@ -32,6 +38,9 @@ use clap::{Parser, Subcommand};
 
 mod bash_wrap;
 mod hook;
+mod precompact;
+#[cfg(test)]
+mod test_env_lock;
 mod wps_client;
 
 #[derive(Parser)]
@@ -51,6 +60,10 @@ enum Command {
     /// Read a PreToolUse JSON payload on stdin (from Claude Code) and
     /// emit a hook response that rewrites the command to invoke `exec`.
     Hook,
+    /// Registered as Claude Code's `PreCompact` hook. Publishes a
+    /// `compaction_started` WPS event and exits 0 with no stdout
+    /// output — observe-only, never blocks compaction.
+    Precompact(precompact::Args),
 }
 
 fn main() -> Result<()> {
@@ -69,6 +82,7 @@ fn main() -> Result<()> {
             std::process::exit(exit_code);
         }
         Command::Hook => hook::run_pretooluse_bash(),
+        Command::Precompact(args) => rt.block_on(precompact::run(args)),
     }
 }
 

@@ -4,6 +4,7 @@
 //! Storage layer: SQLite-backed object store and file store.
 //! Port of Go's pkg/wstore and pkg/filestore.
 
+pub mod agent_credentials;
 pub mod agents;
 pub mod agents_consolidate;
 pub mod content;
@@ -23,6 +24,7 @@ pub mod skills;
 pub mod snapshot;
 pub mod store;
 
+pub use agent_credentials::AgentCredential;
 pub use agents::{AgentDefinition, AgentInstance, InstanceStatus, InstanceUpdate};
 pub use content::AgentContent;
 pub use cron::CronJob;
