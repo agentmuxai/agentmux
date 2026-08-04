@@ -82,14 +82,25 @@ pub async fn open_pane(state: &AppState, cmd: CommandPaneOpenData) -> Result<Pan
     // `openToTheSide`). Also excludes `floating` requests — those always get
     // their own new window (codex P1 on PR #2404: this branch previously ran
     // before the floating check below and silently swallowed floating
-    // requests into a reused docked pane).
-    if cmd.view == "editor" && cmd.reuse_editor_pane == Some(true) && cmd.floating != Some(true) {
+    // requests into a reused docked pane). Also excludes an explicit
+    // `tree_expanded` request (`OpenEditor`'s `collapse_tree` option) —
+    // reagent P2 on PR #2404: a reused pane keeps ITS OWN existing tree
+    // state, with no live mechanism to apply a new one (same class of
+    // construction-time-only limitation as focus, see
+    // `maybe_reuse_editor_pane`'s doc comment) — bypassing reuse for this
+    // specific request and falling through to the create path (which
+    // already honors `tree_expanded` correctly) is far simpler than
+    // building live meta-application, and was the reviewer's own suggested
+    // alternative.
+    if cmd.view == "editor"
+        && cmd.reuse_editor_pane == Some(true)
+        && cmd.floating != Some(true)
+        && cmd.tree_expanded.is_none()
+    {
         if let (Some(caller_block_id), Some(file)) =
             (cmd.split_reference_block_id.as_deref(), cmd.file.as_deref())
         {
-            if let Some(result) =
-                pane::maybe_reuse_editor_pane(state, caller_block_id, file, cmd.focus).await?
-            {
+            if let Some(result) = pane::maybe_reuse_editor_pane(state, caller_block_id, file).await? {
                 return Ok(result);
             }
         }
@@ -1375,6 +1386,60 @@ mod pane_open_reducer_tests {
         assert_ne!(res.block_id, caller.block_id);
     }
 
+    /// Regression for reagent P2 on PR #2404: an explicit `collapse_tree`
+    /// request (`tree_expanded: Some(false)`) has no live mechanism to apply
+    /// to an already-mounted pane's tree state — bypass reuse for it
+    /// entirely rather than silently ignoring the request.
+    #[tokio::test]
+    async fn open_editor_bypasses_reuse_when_tree_expanded_requested() {
+        let state = test_state();
+
+        let ws_evs = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() }).await;
+        let ws_id = ws_evs
+            .iter()
+            .find_map(|e| match e {
+                Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let tab_evs = dispatch_apply(
+            &state,
+            Command::CreateTab { workspace_id: ws_id.clone(), name: "t".into() },
+        )
+        .await;
+        let tab_id = tab_evs
+            .iter()
+            .find_map(|e| match e {
+                Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+
+        let caller = open_pane(&state, {
+            let mut cmd = editor_open_cmd(Some(tab_id.clone()), "/tmp/unused.txt", None, None);
+            cmd.view = "sysinfo".into();
+            cmd.file = None;
+            cmd
+        })
+        .await
+        .expect("open_pane caller");
+
+        let existing_editor = open_pane(
+            &state,
+            editor_open_cmd(Some(tab_id.clone()), "/tmp/existing.md", None, None),
+        )
+        .await
+        .expect("open_pane existing editor");
+
+        let mut cmd = editor_open_cmd(None, "/tmp/collapsed.md", Some(caller.block_id.clone()), Some(true));
+        cmd.tree_expanded = Some(false);
+        let res = open_pane(&state, cmd).await.expect("open_pane collapse_tree request");
+        assert_ne!(
+            res.block_id, existing_editor.block_id,
+            "an explicit tree_expanded request must bypass reuse and create its own pane"
+        );
+    }
+
     /// An Editor pane already open in the caller's own tab → reused (new tab
     /// pushed into it via EVENT_EDITOR_OPEN_FILE_REQUEST) instead of spawning
     /// a second Editor pane.
@@ -1422,31 +1487,6 @@ mod pane_open_reducer_tests {
         .expect("open_pane first editor");
         assert!(first_editor.created);
 
-        // Simulate the frontend having already reported the materialized
-        // tree back (LayoutQueueBackendActions only queues an action for the
-        // frontend to apply — agentmux-srv/src/reducer/layout.rs's
-        // handle_layout_queue_backend_actions never touches rootnode itself,
-        // confirmed by reading it directly; the frontend round-trips a real
-        // tree via LayoutSetTree). Realistic for a reuse target: by the time
-        // a SECOND OpenEditor call reuses an existing pane, that pane's own
-        // creation round-trip has long since completed in real usage — this
-        // is not the same race maybe_reuse_editor_pane's meta-based file
-        // delivery bridges (block just created THIS call), it's simulating
-        // an already-settled pane from an EARLIER call.
-        {
-            let tab: Tab = state.wstore.must_get(&tab_id).unwrap();
-            let mut layout: obj::LayoutState = state.wstore.must_get(&tab.layoutstate).unwrap();
-            layout.rootnode = Some(obj::LayoutNode {
-                id: "leaf-1".to_string(),
-                data: Some(obj::LayoutNodeData {
-                    block_id: first_editor.block_id.clone(),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            });
-            state.wstore.update(&mut layout).unwrap();
-        }
-
         // A second OpenEditor call from the caller, same tab, different file
         // — must reuse the existing Editor pane, not create a second one.
         let reused = open_pane(
@@ -1458,18 +1498,77 @@ mod pane_open_reducer_tests {
         assert!(!reused.created, "must reuse the existing Editor pane, not create a second one");
         assert_eq!(reused.block_id, first_editor.block_id);
         assert_eq!(reused.tab_id, tab_id);
+    }
 
-        // Regression for reagent P1 on PR #2404: focus (the OpenEditor
-        // default, cmd.focus == None -> unwrap_or(true)) must still be
-        // applied on the reuse path, not silently dropped. focused_node_id
-        // is the layout LEAF id ("leaf-1", seeded above), NOT the block id
-        // (codex P1: an earlier version of the fix passed the block id
-        // directly, which is the wrong id type entirely).
-        let s = state.srv_state.lock().await;
+    /// Regression for codex P1 on PR #2404: 2+ reuse calls before the target
+    /// pane's frontend ever drains its pending-files meta must all survive,
+    /// not overwrite each other down to just the last one.
+    #[tokio::test]
+    async fn open_editor_reuse_queues_multiple_pending_files() {
+        let state = test_state();
+
+        let ws_evs = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() }).await;
+        let ws_id = ws_evs
+            .iter()
+            .find_map(|e| match e {
+                Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let tab_evs = dispatch_apply(
+            &state,
+            Command::CreateTab { workspace_id: ws_id.clone(), name: "t".into() },
+        )
+        .await;
+        let tab_id = tab_evs
+            .iter()
+            .find_map(|e| match e {
+                Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+
+        let caller = open_pane(&state, {
+            let mut cmd = editor_open_cmd(Some(tab_id.clone()), "/tmp/unused.txt", None, None);
+            cmd.view = "sysinfo".into();
+            cmd.file = None;
+            cmd
+        })
+        .await
+        .expect("open_pane caller");
+
+        let first_editor = open_pane(
+            &state,
+            editor_open_cmd(Some(tab_id.clone()), "/tmp/first.md", None, None),
+        )
+        .await
+        .expect("open_pane first editor");
+
+        // Three back-to-back reuse calls, none of which drain the queue
+        // (no frontend attached in this test) — all three must still be
+        // present afterward, not just the last one.
+        for path in ["/tmp/a.md", "/tmp/b.md", "/tmp/c.md"] {
+            let res = open_pane(
+                &state,
+                editor_open_cmd(None, path, Some(caller.block_id.clone()), Some(true)),
+            )
+            .await
+            .expect("open_pane reuse");
+            assert!(!res.created);
+            assert_eq!(res.block_id, first_editor.block_id);
+        }
+
+        let block: Block = state.wstore.must_get(&first_editor.block_id).unwrap();
+        let pending = block
+            .meta
+            .get("editor:pending_open_files")
+            .and_then(|v| v.as_array())
+            .expect("pending_open_files must be an array");
+        let paths: Vec<&str> = pending.iter().filter_map(|v| v.as_str()).collect();
         assert_eq!(
-            s.tabs.get(&tab_id).unwrap().focused_node_id,
-            "leaf-1",
-            "reusing an existing editor pane must still focus its tab's layout leaf, same as the create path"
+            paths,
+            vec!["/tmp/a.md", "/tmp/b.md", "/tmp/c.md"],
+            "all three stacked reuse requests must survive, in order, not just the last one"
         );
     }
 

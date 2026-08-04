@@ -47,11 +47,14 @@ const META_TREE_WIDTH = "editor:tree_width";
 const META_PREVIEW_HEIGHT = "editor:preview_height";
 const META_LEGACY_FILE = "file";
 // Reuse (SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md
-// Part 2): a file pushed by a reuse-and-not-yet-mounted OpenEditor call.
-// Checked once at construction, then cleared — deliberately NOT delivered
-// via WPS event replay, which has no ack/consume concept and would
-// otherwise re-fire on every future reconnect (codex P1 on PR #2404).
-const META_PENDING_OPEN_FILE = "editor:pending_open_file";
+// Part 2): files pushed by reuse-and-not-yet-mounted OpenEditor calls.
+// Drained (all entries, in order) once at construction, then cleared —
+// deliberately NOT delivered via WPS event replay, which has no ack/consume
+// concept and would otherwise re-fire on every future reconnect (codex P1
+// on PR #2404). An array, not a single scalar, so 2+ calls stacking up
+// before the pane mounts don't overwrite/lose each other (codex P1, second
+// finding on the same PR).
+const META_PENDING_OPEN_FILES = "editor:pending_open_files";
 
 export type EditorMode = "preview" | "source" | "split";
 const META_SCRATCH = "editor:scratch";
@@ -233,12 +236,24 @@ export class EditorViewModel implements ViewModel {
         // instead of creating a second Editor pane (SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md
         // Part 2). Reuses the same openFile() path a file-tree click uses —
         // pin-if-existing/language-detection/RPC-load all apply unchanged.
+        // Also removes this path from META_PENDING_OPEN_FILES (the backend
+        // always writes there too, in case the pane isn't mounted yet) —
+        // codex P1: without this, a live-delivered request's entry would
+        // stay queued and get reprocessed (reopening the file, changing the
+        // active tab) on a later, unrelated remount.
         this._unsubOpenFileRequest = waveEventSubscribe({
             eventType: WpsEvent.EditorOpenFileRequest,
             scope: makeORef("block", blockId),
             handler: (event) => {
                 const path = (event as any)?.data?.path as string | undefined;
-                if (path) void this.openFile(path);
+                if (!path) return;
+                void this.openFile(path);
+                const pending = this.blockAtom()?.meta?.[META_PENDING_OPEN_FILES];
+                if (Array.isArray(pending) && pending.includes(path)) {
+                    const idx = pending.indexOf(path);
+                    const next = [...pending.slice(0, idx), ...pending.slice(idx + 1)];
+                    fireAndForget(() => this.persistMeta({ [META_PENDING_OPEN_FILES]: next }));
+                }
             },
         });
 
@@ -361,14 +376,17 @@ export class EditorViewModel implements ViewModel {
             void this.openScratch();
         }
 
-        // Reuse: a pending file from a not-yet-mounted OpenEditor reuse call
-        // (see META_PENDING_OPEN_FILE above). Consume once, then clear —
-        // openFile() itself is idempotent (activates the tab if the live WPS
-        // event below also fired for the same path), so no dedup needed here.
-        const pendingOpenFile = meta?.[META_PENDING_OPEN_FILE];
-        if (typeof pendingOpenFile === "string" && pendingOpenFile) {
-            void this.openFile(pendingOpenFile);
-            fireAndForget(() => this.persistMeta({ [META_PENDING_OPEN_FILE]: "" }));
+        // Reuse: pending files from not-yet-mounted OpenEditor reuse calls
+        // (see META_PENDING_OPEN_FILES above). Drain every entry, in order,
+        // then clear the whole queue — openFile() itself is idempotent
+        // (activates the tab if the live WPS event below also fired for the
+        // same path), so no dedup needed here.
+        const pendingOpenFiles = meta?.[META_PENDING_OPEN_FILES];
+        if (Array.isArray(pendingOpenFiles) && pendingOpenFiles.length > 0) {
+            for (const path of pendingOpenFiles) {
+                if (typeof path === "string" && path) void this.openFile(path);
+            }
+            fireAndForget(() => this.persistMeta({ [META_PENDING_OPEN_FILES]: [] }));
         }
     }
 
