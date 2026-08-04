@@ -1,5 +1,24 @@
 # AgentMux Version History
 
+## 0.54.10 — 2026-08-03
+
+- feat(agent-pane): add attachedTask status axis to agent-pane-state reducer
+- feat(muxspect): surface last persisted spawn/execution error in list/describe
+- fix(bashwrap): persist shell cwd across one-shot exec invocations
+- feat(agent-pane): hover-to-peek on tool calls and thinking clumps
+- fix(agent-pane): composer strip always left-justified, wraps up to 3 lines
+- fix(wrr): bound quit-watchdog retries when reducer shows a live, non-draining window
+- fix(muxbus): split token keychain entry to fit Windows Credential Manager's 2560-byte cap
+- feat(mcp): add OpenMedia tool for opening the Media pane
+- fix(identity): add copy button and wrap/scroll long AgentMux Cloud connect errors
+- fix(agent): agent-pane + button opens starting-view picker instead of the fork/launch modal
+- feat(layout): Shift+drag a splitter resizes every sibling pane along that row/column together
+- fix(editor): remove dead editor:source_hidden meta
+- feat(editor): reuse an already-open Editor pane for new OpenEditor calls
+- chore: remove dead code (Rust + frontend) and archive/dedupe stale docs
+- fix(security): bump fast-uri/undici/brace-expansion/postcss for known CVEs
+
+
 ## 0.54.9 — 2026-08-02
 
 - fix(frontend): consolidate 7 duplicated token-count formatters, add k/m/b rollover
