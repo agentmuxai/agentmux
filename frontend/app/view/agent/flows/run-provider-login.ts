@@ -289,37 +289,67 @@ const INAPP_COMPLETION_TIMEOUT_MS = 5 * 60 * 1_000;
 
 /** Completion detector for the awaited in-app login session
  *  (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.1): the login is done
- *  when the spawned login child has EXITED and credential material exists
- *  in the isolated dir (probed via the CLI's own auth-check command, same
- *  as `pollForCliAuthReady`). Both halves are required: the credential
- *  probe alone false-positives on a reconnect into an existing account dir
- *  (a present-but-expired token still reports "authenticated" — see
- *  force-login.ts's doc comment), which would end the session and reap the
- *  login child before the user ever finished authorizing; the child-exit
- *  signal alone can't tell a successful login from the CLI dying without
- *  writing anything. Child exit is observed via `getCliLoginStatus` (the
- *  generation-guarded host-side stdin slot); when the child is gone but no
- *  credential shows up, a couple of grace re-checks cover the exit-vs-
- *  credential-write race before failing fast instead of burning the full
- *  window on a login that already died. */
+ *  when the spawned login child has EXITED, credential material exists in
+ *  the isolated dir (probed via the CLI's own auth-check command, same as
+ *  `pollForCliAuthReady`), AND that credential is the one THIS attempt
+ *  wrote (`credential_changed`, tracked host-side against a baseline
+ *  captured before spawn). All three are required:
+ *    - the credential probe alone false-positives on a reconnect into an
+ *      existing account dir (a present-but-expired token still reports
+ *      "authenticated" — see force-login.ts's doc comment);
+ *    - `credential_changed` alone (without requiring `!active` too) could
+ *      fire on a mid-flow rewrite that isn't the terminal one;
+ *    - and without `credential_changed` at all, a child that crashed
+ *      instantly (auth exchange failed) right after a RECONNECT — where
+ *      the stale-but-still-file-shaped OLD credential was on disk before
+ *      this attempt ever started — would read `!active && authed` off
+ *      that untouched file the moment it died, reporting success for a
+ *      login that never actually ran (reagent P1 on PR #2410).
+ *  Child exit is observed via `getCliLoginStatus` (the generation-guarded
+ *  host-side active flag + credential-mtime baseline); when the child is
+ *  gone but completion isn't confirmed yet, a couple of grace re-checks
+ *  cover the exit-vs-credential-write race before failing fast instead of
+ *  burning the full window on a login that already died.
+ *
+ *  `superseded` (codex P2 on PR #2410): the host's `cli_login_*` state is a
+ *  SINGLE global slot, not one per caller. If a different surface starts a
+ *  newer login while this poll is still running, the host's generation
+ *  counter advances and `active`/`credential_changed` from here on describe
+ *  the NEWER child, not this poll's own. This function captures the
+ *  generation on its first read and stops trusting `active`/
+ *  `credential_changed` the moment it changes — the caller must NOT call
+ *  `cancelCliLogin()` in that case (it would kill the newer, unrelated
+ *  login instead of reaping this one, which is already gone). */
 async function pollForInAppLoginCompletion(
     cliPath: string,
     authCheckArgs: string[],
     authEnv: Record<string, string>,
     isCancelled: () => boolean,
     opts: { pollMs?: number; timeoutMs?: number } = {},
-): Promise<boolean> {
+): Promise<{ completed: boolean; superseded: boolean }> {
     const pollMs = opts.pollMs ?? 2_000;
     const timeoutMs = opts.timeoutMs ?? INAPP_COMPLETION_TIMEOUT_MS;
     const deadline = performance.now() + timeoutMs;
     let exitGraceChecksLeft = 2;
+    let myGeneration: number | undefined;
     while (performance.now() < deadline) {
-        if (isCancelled()) return false;
+        if (isCancelled()) return { completed: false, superseded: false };
         await sleep(pollMs);
-        if (isCancelled()) return false;
+        if (isCancelled()) return { completed: false, superseded: false };
         let childActive = true;
+        let credentialChanged = true;
         try {
-            childActive = (await getApi().getCliLoginStatus()).active;
+            const status = await getApi().getCliLoginStatus();
+            if (myGeneration === undefined) {
+                myGeneration = status.generation;
+            } else if (status.generation !== myGeneration) {
+                // A different surface's login superseded ours — the host
+                // state we'd read from here on belongs to that newer
+                // attempt, not this one. Stop; the caller must not reap it.
+                return { completed: false, superseded: true };
+            }
+            childActive = status.active;
+            credentialChanged = status.credential_changed;
         } catch {
             // Treat as still-active on transient IPC errors — erring toward
             // "keep waiting" can cost one more poll tick; erring toward
@@ -337,11 +367,11 @@ async function pollForInAppLoginCompletion(
             // keep polling on transient RPC errors
         }
         if (!childActive) {
-            if (authed) return true;
-            if (exitGraceChecksLeft-- <= 0) return false;
+            if (authed && credentialChanged) return { completed: true, superseded: false };
+            if (exitGraceChecksLeft-- <= 0) return { completed: false, superseded: false };
         }
     }
-    return false;
+    return { completed: false, superseded: false };
 }
 
 export async function runProviderLogin(p: RunProviderLoginParams): Promise<ProviderLoginOutcome> {
@@ -406,18 +436,24 @@ export async function runProviderLogin(p: RunProviderLoginParams): Promise<Provi
                 deadlineMs: Date.now() + INAPP_COMPLETION_TIMEOUT_MS,
             });
             const isCancelled = p.isCancelled ?? (() => false);
-            const completed = await pollForInAppLoginCompletion(
+            const { completed, superseded } = await pollForInAppLoginCompletion(
                 p.cliPath,
                 p.provider.authCheckCommand,
                 authEnvForTiers,
                 isCancelled,
             );
-            // Reap the login child on every exit path — idempotent and
-            // host-side (a no-op when the child already self-exited, which is
-            // the normal success case). On timeout/cancel this is what
-            // actually kills the abandoned child instead of leaving it to the
-            // host's 6-minute backstop.
-            await getApi().cancelCliLogin().catch(() => {});
+            // Reap the login child on every exit path THIS ATTEMPT OWNS —
+            // idempotent and host-side (a no-op when the child already
+            // self-exited, the normal success case). On timeout/cancel this
+            // is what actually kills the abandoned child instead of leaving
+            // it to the host's 6-minute backstop. Skipped when superseded:
+            // the host's single global login slot now holds a DIFFERENT
+            // (newer) attempt from another surface — calling this would
+            // kill that unrelated login instead of reaping our own, which
+            // is already gone (codex P2 on PR #2410).
+            if (!superseded) {
+                await getApi().cancelCliLogin().catch(() => {});
+            }
             if (!completed) return "inapp-timeout";
             // Same persist + one-retry + loud-error contract as tiers 2/3
             // below (reagent P2 / REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_

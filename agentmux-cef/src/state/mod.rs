@@ -209,6 +209,23 @@ pub struct AppState {
     /// a login that was still genuinely completing (codex P1 on PR #2410).
     pub cli_login_active: std::sync::atomic::AtomicBool,
 
+    /// Credential-file path + its mtime (`None` = file didn't exist yet)
+    /// captured right before the CURRENT login child spawns. `get_cli_
+    /// login_status` compares this baseline against the file's live mtime
+    /// to report `credential_changed` — required, alongside `!active`, for
+    /// `pollForInAppLoginCompletion` to accept a completion.
+    ///
+    /// Fixes reagent P1 on PR #2410: `active` alone can't distinguish "this
+    /// attempt genuinely completed" from "the child crashed/exited early
+    /// while a stale-but-still-file-shaped credential from BEFORE this
+    /// attempt started" — `CheckCliAuthCommand` only checks local presence,
+    /// not server-side validity (a present-but-expired token still reports
+    /// authenticated; see force-login.ts's doc comment), so a reconnect
+    /// into an account whose isolated dir already holds an old credential
+    /// could read `authenticated: true` off that untouched file the instant
+    /// the new child dies, before it ever wrote anything.
+    pub cli_login_cred_baseline: Mutex<Option<(std::path::PathBuf, Option<std::time::SystemTime>)>>,
+
     /// IPC HTTP server port
     pub ipc_port: Mutex<u16>,
 
@@ -584,6 +601,7 @@ impl Default for AppState {
             cli_login_stdin: Mutex::new(None),
             cli_login_generation: std::sync::atomic::AtomicU64::new(0),
             cli_login_active: std::sync::atomic::AtomicBool::new(false),
+            cli_login_cred_baseline: Mutex::new(None),
             ipc_port: Mutex::new(0),
             ipc_token: uuid::Uuid::new_v4().to_string(),
             // browsers field removed in H.2.e — see comment near struct decl.
