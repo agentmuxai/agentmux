@@ -349,7 +349,7 @@ export function useAgentControllerStatus(
     // CheckCliAuthCommand RPC with its own ~10s timeout that doesn't itself
     // recheck isCancelled). No-op (`Promise.resolve()`) when nothing is in
     // flight, so awaiting it is always safe.
-    let reloginDonePromise: Promise<void> = Promise.resolve();
+    let reloginDonePromise: Promise<"done"> = Promise.resolve("done" as const);
 
     /**
      * Resolve the provider CLI directly when block meta has no `cmd` yet.
@@ -528,7 +528,7 @@ export function useAgentControllerStatus(
         let cliPath = getBlockMetaKeyAtom(opts.blockId, "cmd")() as string | undefined;
         reloginInFlight = true;
         let resolveReloginDone: () => void = () => {};
-        reloginDonePromise = new Promise<void>((res) => { resolveReloginDone = res; });
+        reloginDonePromise = new Promise<"done">((res) => { resolveReloginDone = () => res("done"); });
         beginRecoveryFlow();
         // Guards against double-decrementing activeRecoveryFlows: the
         // success branches below call this early (before onRecovered, so
@@ -814,6 +814,13 @@ export function useAgentControllerStatus(
                             opts.onReady?.();
                         }
                     } else {
+                        // reagent P2 on PR #2413 (re-review): this branch is
+                        // exactly as terminal for the session as the success
+                        // branch above — runProviderLogin already reaped the
+                        // login child; the same setAuthUrl(null) applies, or
+                        // AuthUrlBox stays mounted offering paste/cancel/"use
+                        // terminal instead" against a session that's gone.
+                        setAuthUrl(null);
                         setAuthStatus("unauthenticated");
                         setAuthNotice(
                             "Your login succeeded, but AgentMux couldn't save the account record. Try again in a moment.",
@@ -1149,7 +1156,26 @@ export function useAgentControllerStatus(
     // can't hang this forever.
     const useTerminalInstead = async () => {
         cancelLogin();
-        await Promise.race([reloginDonePromise, sleep(20_000)]);
+        // reagent P2 on PR #2413 (re-review): the two race arms must
+        // resolve to DISTINGUISHABLE values — sleep() alone resolves to
+        // undefined, same as a bare Promise<void>, so there was no way to
+        // tell "relogin() actually finished tearing down" from "the 20s
+        // backstop fired while it's still wedged". Silently proceeding to
+        // loginViaTerminal() in the wedged case just hit its own
+        // reloginInFlight guard and returned — clearing the notice with no
+        // terminal opened and no error shown, the exact silent-failure
+        // shape retro-agent-auth-relogin-noop-2026-07-01 §5.1 exists to ban.
+        const winner = await Promise.race([
+            reloginDonePromise,
+            sleep(20_000).then(() => "backstop" as const),
+        ]);
+        if (winner === "backstop") {
+            setAuthNotice(
+                "The previous login attempt is taking longer than expected to stop. " +
+                "Please wait a moment and try “Login via terminal” again.",
+            );
+            return;
+        }
         // Suppress whatever notice relogin()'s own cancelled-poll branch
         // just set (e.g. "inapp-timeout"'s message) — the user asked to
         // switch flows, not to be told their login attempt failed.
