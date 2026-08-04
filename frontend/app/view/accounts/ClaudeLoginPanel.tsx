@@ -77,9 +77,20 @@ export function ClaudeLoginPanel(props: {
     // this component's poll keep running detached, holding the host's
     // singleton cli_login_* state and blocking any later login attempt
     // from starting. reagent P1 on PR #2414.
+    //
+    // Guarded on `inFlight` (codex P2 on PR #2414): this panel can also
+    // unmount AFTER reaching its success/error screen, while still counted
+    // as "mounted" for a moment (e.g. the user lingers on "✓ Signed in"
+    // before closing). cancelCliLogin() hits the host's SINGLE global
+    // login slot — if a different window/surface has since started its
+    // own login, an unconditional call here would kill that unrelated,
+    // newer attempt instead of a no-op cleanup of our own already-finished
+    // one.
     onCleanup(() => {
         cancelled = true;
-        getApi().cancelCliLogin().catch(() => {});
+        if (inFlight) {
+            getApi().cancelCliLogin().catch(() => {});
+        }
     });
 
     const runAttempt = async (cliPath: string, authEnv: Record<string, string>, skipTier1: boolean) =>
@@ -160,19 +171,55 @@ export function ClaudeLoginPanel(props: {
                 case "seeded":
                 case "terminal-success":
                     if (registeredAccountId) {
+                        // codex P1 on PR #2414: finalizeAccount (run-provider-
+                        // login.ts) catches and logs — does NOT rethrow — a
+                        // failed LinkAgentIdentityCommand, so
+                        // onAccountRegistered firing only proves the ACCOUNT
+                        // was persisted, not that it's actually linked to
+                        // this agent. For a Stash flow (linkTarget set),
+                        // that's the whole point of the click — confirm the
+                        // link is really there before showing success,
+                        // instead of "Signed in" for an agent whose next
+                        // spawn the resolver's gate still blocks.
+                        let linkConfirmed = true;
+                        if (props.linkTarget?.agentDefinitionId) {
+                            linkConfirmed = false;
+                            try {
+                                const links = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, {
+                                    agent_id: props.linkTarget.agentDefinitionId,
+                                });
+                                linkConfirmed = links.some((l) => l.account_id === registeredAccountId);
+                            } catch (e) {
+                                console.warn(
+                                    `[claude-login] failed to verify the agent link: ${(e as Error)?.message ?? String(e)}`,
+                                );
+                            }
+                        }
+                        if (!linkConfirmed) {
+                            setError(
+                                "Signed in, but AgentMux couldn't confirm the account was linked to this agent. Try again.",
+                            );
+                            break;
+                        }
                         void refreshAccountCache();
                         // See staleAliasProvider's own doc comment: the link
-                        // just written above used the canonical "claude" key,
-                        // never the alias — clean up the orphaned alias row
-                        // now so it can't abort a future spawn. Best-effort:
-                        // the new canonical link already succeeded and is
-                        // what matters for "signed in"; log and move on if
-                        // this fails rather than blocking the success state
-                        // on cleanup of an already-broken row.
+                        // just confirmed above used the canonical "claude"
+                        // key, never the alias — clean up the orphaned alias
+                        // row now so it can't abort a future spawn.
+                        // `silent: true` (codex P2 on PR #2414): a plain
+                        // unlink publishes agentcredentials:revoked, which
+                        // the agent pane shows as "Credentials revoked" —
+                        // misleading immediately after a successful
+                        // re-login where the credential and effective
+                        // binding are both fine; this is a migration, not a
+                        // real unbind. Best-effort either way: the new
+                        // canonical link already succeeded and is what
+                        // matters for "signed in".
                         if (props.staleAliasProvider && props.linkTarget?.agentDefinitionId) {
                             RpcApi.UnlinkAgentIdentityCommand(TabRpcClient, {
                                 agent_id: props.linkTarget.agentDefinitionId,
                                 provider: props.staleAliasProvider,
+                                silent: true,
                             }).catch((e) => {
                                 console.warn(
                                     `[claude-login] failed to unlink stale alias "${props.staleAliasProvider}": ${e?.message ?? String(e)}`,
@@ -194,6 +241,19 @@ export function ClaudeLoginPanel(props: {
                     setError("Couldn't start a browser login or open a terminal window on this platform.");
                     break;
             }
+        } catch (e) {
+            // codex P2 on PR #2414: runAttempt (runProviderLogin) can
+            // REJECT outright — e.g. the PTY child fails to spawn, or an
+            // IPC call errors — not just resolve to a failure outcome
+            // string. This try previously had no catch, only finally, so a
+            // rejection here escaped `void start()`'s fire-and-forget call
+            // (line ~208) as an unhandled rejection, leaving the panel
+            // stuck on its starting phase forever with no error shown and
+            // no Retry button (same class of bug as PreLaunchAuthPanel's
+            // identical gap, reagent P2 on PR #2410).
+            getApi().cancelCliLogin().catch(() => {});
+            const t = translateError(e);
+            setError(`${t.title}: ${t.message}${t.retry ? ` — ${t.retry}` : ""}`);
         } finally {
             inFlight = false;
         }
