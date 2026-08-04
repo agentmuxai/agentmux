@@ -23,7 +23,6 @@ import {
     type IdentityViewModel,
     parseAgentAccounts,
     PROVIDER_LABELS,
-    serializeAgentAccounts,
 } from "@/app/view/identity/identity-model";
 import { MuxBusConnectSection } from "@/app/view/accounts/AgentMuxConnectPanel";
 
@@ -180,6 +179,3 @@ export const AgentIdentityPanel = (props: AgentIdentityPanelProps): JSX.Element 
 };
 
 AgentIdentityPanel.displayName = "AgentIdentityPanel";
-
-/** Serialize AgentAccounts to the JSON string stored on AgentDefinition. */
-export { serializeAgentAccounts };

@@ -796,10 +796,3 @@ export function update(
         }
     }
 }
-
-// Re-exported for callers of the slice (the slot store + the future
-// Phase 1B/1C saga layers) so they can decide whether a command's
-// origin should be treated as "echoes our own host IPC". The reducer
-// itself uses it in the Navigate handler (line ~561) to suppress the
-// IPC-bound `navigate` event when the command source is "backend".
-export { isBackendSource };

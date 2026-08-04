@@ -35,7 +35,7 @@ export interface OAuthServiceInfo {
  * Providers connectable via OAuth, keyed by `AccountProvider`. Only providers
  * present here show the "Connect with OAuth" option in the Accounts form.
  */
-export const OAUTH_SERVICES: Partial<Record<AccountProvider, OAuthServiceInfo>> = {
+const OAUTH_SERVICES: Partial<Record<AccountProvider, OAuthServiceInfo>> = {
     github: {
         provider: "github",
         flow: "device",

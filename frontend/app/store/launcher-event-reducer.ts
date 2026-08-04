@@ -12,7 +12,7 @@
 //   - the projection layer (writes derived state into global atoms)
 //   - the echo-loop guard (`applyingRemote`)
 //   - the public API: startLauncherEventReducer, seedKnownEntriesFromSnapshot,
-//     isApplyingRemoteEvent, isInstanceLabel
+//     isApplyingRemoteEvent
 //
 // Behavior is unchanged from the prior in-place dispatch — see
 // `launcher-event/reducer.test.ts` for the 19 backfilled tests.
@@ -42,18 +42,11 @@ import { update } from "./launcher-event/reducer";
 import {
     initialState,
     isFloatingPaneLabel,
-    isInstanceLabel as isInstanceLabelFromTypes,
     LauncherEventCommand,
     LauncherEventReducerEvent,
     LauncherEventState,
 } from "./launcher-event/types";
 import { recordDispatch } from "./command-source";
-
-// Re-export the filter so existing callers (app-init.ts) don't need to
-// chase the new module path. The filter is the source of truth for
-// what the InstancePanel surfaces — if the two filters ever diverge,
-// reagent caught it on PR #603 and will catch it again.
-export const isInstanceLabel = isInstanceLabelFromTypes;
 
 // ── State cell ─────────────────────────────────────────────────────────
 
@@ -319,21 +312,4 @@ export function startLauncherEventReducer(): void {
     // See docs/retro/retro-window-count-stale-post-1701-2026-06-27.md §Gap C.
     // Reducer lives for the renderer's lifetime; interval is reclaimed on unload.
     setInterval(() => void resyncFromAuthorityAfterGap(), 30_000);
-}
-
-// ── Test/diagnostics helpers ───────────────────────────────────────────
-
-/**
- * Snapshot for tests + future diagnostics. Avoid in production code
- * paths — bypasses the projection layer.
- */
-export function __snapshot(): LauncherEventState {
-    return state;
-}
-
-/** Test-only: reset the state cell. Never call in production. */
-export function __resetState(): void {
-    state = initialState();
-    floatingPanes = new Map();
-    started = false;
 }

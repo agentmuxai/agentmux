@@ -81,7 +81,7 @@ export interface AgentPaneLayoutState {
 /** Height used when a row has neither a measurement nor an estimate for its
  *  current state. Matches the historical `estimateSize` fallback. */
 export const DEFAULT_ROW_PX = 32;
-export const DEFAULT_OVERSCAN = 5;
+const DEFAULT_OVERSCAN = 5;
 
 export const initialState = (): AgentPaneLayoutState => ({
     zoom: 1,

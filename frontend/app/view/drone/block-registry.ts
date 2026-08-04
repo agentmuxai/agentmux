@@ -7,7 +7,7 @@
 
 import type { BlockKind } from "./drone-types";
 
-export interface BlockHandleSpec {
+interface BlockHandleSpec {
     /** xyflow handle id; "in" / "out" by convention. */
     id: string;
     label: string;
@@ -29,7 +29,7 @@ export interface BlockKindMeta {
     outputs: BlockHandleSpec[];
 }
 
-export const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
+const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
     variables: {
         kind: "variables",
         emoji: "🔢",

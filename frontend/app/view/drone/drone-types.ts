@@ -13,7 +13,6 @@ export type BlockKind = "agent" | "condition" | "api" | "response" | "variables"
 
 export type FlowNode = DroneFlowNode;
 export type FlowEdge = DroneFlowEdge;
-export type RunStatus = "running" | "done" | "failed";
 
 export type DroneGraph = DroneDefinition["graph"];
 export type DroneViewport = DroneDefinition["viewport"];
@@ -21,7 +20,7 @@ export type DroneViewport = DroneDefinition["viewport"];
 // Re-export the globals via type aliases so callers in this view can
 // `import type { DroneDefinition } from "./drone-types"` without
 // reaching for the global directly.
-export type { DroneDefinition, DroneRun, DroneBlockState as BlockState };
+export type { DroneDefinition, DroneRun };
 
 export const emptyGraph = (): DroneGraph => ({ nodes: [], edges: [] });
 export const defaultViewport = (): DroneViewport => ({ x: 0, y: 0, zoom: 1 });

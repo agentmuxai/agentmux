@@ -61,4 +61,4 @@ class ContextMenuModelType {
 
 const ContextMenuModel = new ContextMenuModelType();
 
-export { ContextMenuModel, ContextMenuModelType };
+export { ContextMenuModel };

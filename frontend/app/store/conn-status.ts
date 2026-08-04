@@ -12,7 +12,7 @@ import { waveEventSubscribe } from "./wps";
 import { ClientService } from "./services";
 
 // Connection status map: connName → ConnStatus signal
-export const [connStatusMap, setConnStatusMap] = createSignal(
+const [connStatusMap, setConnStatusMap] = createSignal(
     new Map<string, [() => ConnStatus, (v: ConnStatus) => void]>()
 );
 
@@ -47,7 +47,7 @@ export function subscribeToConnEvents() {
     });
 }
 
-export function makeDefaultConnStatus(conn: string, connected: boolean, hasconnected: boolean): ConnStatus {
+function makeDefaultConnStatus(conn: string, connected: boolean, hasconnected: boolean): ConnStatus {
     return {
         connection: conn,
         connected,
@@ -58,7 +58,7 @@ export function makeDefaultConnStatus(conn: string, connected: boolean, hasconne
     };
 }
 
-export function getOrCreateConnStatusPair(conn: string): [() => ConnStatus, (v: ConnStatus) => void] {
+function getOrCreateConnStatusPair(conn: string): [() => ConnStatus, (v: ConnStatus) => void] {
     const map = connStatusMap();
     let pair = map.get(conn);
     if (pair == null) {

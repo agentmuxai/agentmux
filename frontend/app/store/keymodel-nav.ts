@@ -13,7 +13,7 @@ export function getFocusedBlockInStaticTab() {
     return focusedNode?.data?.blockId;
 }
 
-export function getStaticTabBlockCount(): number {
+function getStaticTabBlockCount(): number {
     const tabId = atoms.activeTabId();
     const tabORef = WOS.makeORef("tab", tabId);
     const tabAtom = WOS.getWaveObjectAtom<Tab>(tabORef);
@@ -29,14 +29,6 @@ export function simpleCloseStaticTab() {
     // WorkspaceService.CloseTab + deleteLayoutModelForTab calls all live
     // inside handleClose, which requestClose delegates to. (reagent P2 #1636.)
     triggerTabCloseRequest();
-}
-
-export function uxCloseBlock(blockId: string) {
-    const layoutModel = getLayoutModelForStaticTab();
-    const node = layoutModel.getNodeByBlockId(blockId);
-    if (node) {
-        fireAndForget(() => layoutModel.closeNode(node.id));
-    }
 }
 
 export function genericClose() {
@@ -92,7 +84,7 @@ export function switchBlockInDirection(direction: NavigateDirection) {
     }, 10);
 }
 
-export function getAllTabs(ws: Workspace): string[] {
+function getAllTabs(ws: Workspace): string[] {
     return [...(ws.pinnedtabids ?? []), ...(ws.tabids ?? [])];
 }
 

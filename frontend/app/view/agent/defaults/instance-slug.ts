@@ -57,7 +57,7 @@ function hourToBase24Char(h: number): string {
  * enough context to recognize their own folders on disk without
  * burning chars on the year prefix.
  */
-export function formatLocalStamp(d: Date): string {
+function formatLocalStamp(d: Date): string {
     const pad2 = (n: number) => String(n).padStart(2, "0");
     return `${pad2(d.getMonth() + 1)}${pad2(d.getDate())}${hourToBase24Char(d.getHours())}`;
 }

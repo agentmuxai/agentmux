@@ -52,7 +52,6 @@ import type { LaunchPhase } from "./launch-phase";
 import type { ProviderDefinition } from "../providers";
 
 import type { LogFn } from "../types";
-export type { LogFn };
 
 export interface LaunchFlowOptions {
     blockId: string;

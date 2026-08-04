@@ -12,7 +12,6 @@
 // tests. Migration of FlyoutMenu/Popover/etc. is Phase 2-3.
 
 import {
-    autoUpdate,
     computePosition,
     flip,
     offset,
@@ -20,7 +19,7 @@ import {
     size,
     type Placement,
 } from "@floating-ui/dom";
-import { createSignal, type JSX } from "solid-js";
+import type { JSX } from "solid-js";
 
 // ── Public types (spec §5) ──────────────────────────────────────────────────
 
@@ -206,68 +205,6 @@ function resolveAnchorRect(anchor: MenuPositionRequest["anchor"]): DOMRect {
         return makeRect(anchor.x, anchor.y, 0, 0);
     }
     return anchor as DOMRect;
-}
-
-// ── The hook (spec §5, §5.1) ─────────────────────────────────────────────────
-
-/**
- * SolidJS hook — accessor in, accessor out (matches the `() => T` signal
- * convention in flyoutmenu.tsx / popover.tsx).
- *
- * The returned accessor yields the latest {@link MenuPositionResult}. To get
- * live updates (flip/shift on scroll/resize), call `register(floatingEl)` with
- * the menu's DOM node once it mounts — mirrors the `registerFloating` +
- * `autoUpdate` pattern in flyoutmenu.tsx:57-64. `register` returns a cleanup
- * fn; the caller should also invoke it (or rely on the menu unmounting) to
- * stop the autoUpdate loop.
- *
- * Usage:
- *   const pos = useMenuPosition(() => ({ anchor: btn }));
- *   <div ref={pos().register} style={pos().style}>...</div>
- */
-export interface UseMenuPositionResult extends MenuPositionResult {
-    /** Attach the floating menu element; starts an autoUpdate loop. Returns cleanup. */
-    register: (floatingEl: HTMLElement) => () => void;
-}
-
-export function useMenuPosition(
-    req: () => MenuPositionRequest,
-): () => UseMenuPositionResult {
-    const [result, setResult] = createSignal<MenuPositionResult>({
-        style: { position: "fixed", left: "0px", top: "0px" },
-        placement: req().placement ?? "bottom-start",
-        maxHeight: typeof window !== "undefined" ? window.innerHeight : 0,
-        maxWidth: typeof window !== "undefined" ? window.innerWidth : 0,
-    });
-
-    let floatingEl: HTMLElement | null = null;
-    let cleanupAutoUpdate: (() => void) | null = null;
-
-    const compute = async (): Promise<void> => {
-        if (!floatingEl) return;
-        const computed = await computeMenuPosition(req(), floatingEl);
-        setResult(computed);
-    };
-
-    const register = (el: HTMLElement): (() => void) => {
-        floatingEl = el;
-        const anchor = req().anchor;
-        const referenceEl =
-            anchor instanceof HTMLElement
-                ? anchor
-                : virtualReference(resolveAnchorRect(anchor));
-        cleanupAutoUpdate?.();
-        cleanupAutoUpdate = autoUpdate(referenceEl, el, () => {
-            void compute();
-        });
-        return () => {
-            cleanupAutoUpdate?.();
-            cleanupAutoUpdate = null;
-            floatingEl = null;
-        };
-    };
-
-    return () => ({ ...result(), register });
 }
 
 // ── Core computation — exported for direct/test use ─────────────────────────

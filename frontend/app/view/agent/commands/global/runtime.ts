@@ -71,7 +71,7 @@ function modelChoices(ctx: SlashCommandContext): SlashChoice[] {
     }));
 }
 
-export const modelCommand: SlashCommand = {
+const modelCommand: SlashCommand = {
     name: "model",
     category: "runtime",
     description: "Change the active model (applies to next turn)",
@@ -110,7 +110,7 @@ function effortChoices(ctx: SlashCommandContext): SlashChoice[] {
     ];
 }
 
-export const effortCommand: SlashCommand = {
+const effortCommand: SlashCommand = {
     name: "effort",
     category: "runtime",
     description: "Change reasoning effort level (applies to next turn)",
@@ -157,7 +157,7 @@ function permissionChoices(ctx: SlashCommandContext): SlashChoice[] {
     ];
 }
 
-export const permissionModeCommand: SlashCommand = {
+const permissionModeCommand: SlashCommand = {
     name: "permission-mode",
     aliases: ["permission", "perm"],
     category: "runtime",
@@ -179,7 +179,7 @@ export const permissionModeCommand: SlashCommand = {
 // Not an enum because the no-arg case has the *opposite* meaning of
 // /model — bare `/bypass` should DO something, not open a picker.
 
-export const bypassCommand: SlashCommand = {
+const bypassCommand: SlashCommand = {
     name: "bypass",
     category: "runtime",
     description: "Enable permission bypass for the next turn (dangerous)",
@@ -209,7 +209,7 @@ export const bypassCommand: SlashCommand = {
 
 // ── /plan ─────────────────────────────────────────────────────────────
 
-export const planCommand: SlashCommand = {
+const planCommand: SlashCommand = {
     name: "plan",
     category: "runtime",
     description: "Switch to plan mode (no tool execution)",
@@ -224,7 +224,7 @@ export const planCommand: SlashCommand = {
 
 // ── /runtime ──────────────────────────────────────────────────────────
 
-export const runtimeCommand: SlashCommand = {
+const runtimeCommand: SlashCommand = {
     name: "runtime",
     category: "runtime",
     description: "Show current runtime config (permission / model / effort)",

@@ -28,7 +28,7 @@ function supportsObserver(type: string): boolean {
     return Array.isArray(supported) && supported.includes(type);
 }
 
-export function startLongTaskObserver(): (() => void) | null {
+function startLongTaskObserver(): (() => void) | null {
     if (!supportsObserver("longtask")) {
         console.info(`${PERF_LOG_PREFIX} longtask observer unavailable in this runtime`);
         return null;
@@ -54,7 +54,7 @@ export function startLongTaskObserver(): (() => void) | null {
     return () => observer.disconnect();
 }
 
-export function startEventObserver(): (() => void) | null {
+function startEventObserver(): (() => void) | null {
     // The `event` entry type covers every event-driven interaction
     // (click, keydown, pointerdown, etc.) and reports the
     // interactionId — so we can group multi-event interactions (a

@@ -24,8 +24,6 @@ import { useTabDragAndDrop } from "./tab-reorder";
 import { useActiveTabColorLine } from "./tab-color-line";
 import "./tabbar.scss";
 
-export { tabItemType } from "./tabbar-dnd";
-
 interface TabBarProps {
     workspace: Workspace;
 }

@@ -46,22 +46,18 @@ const DEFAULT_CLAUDE_BIN: &str = "claude";
 /// `mpsc::UnboundedReceiver<AgentEvent>` they paired with the `tx`
 /// passed into `run_agent`; this handle adds the structured terminal
 /// value via `final_result` (drone Agent block's downstream
-/// output) and the `instance_id` of the backing `db_agent_instances`
-/// row.
+/// output).
 ///
 /// Dropping the caller's receiver implicitly cancels the run only if
 /// the runner observes the send error — Phase 2 adds an explicit
 /// `AbortHandle`.
 pub struct AgentRunHandle {
-    pub instance_id: String,
     pub final_result: oneshot::Receiver<Result<AgentRunResult, String>>,
 }
 
 /// Error returned by the runner.
 #[derive(Debug, thiserror::Error)]
 pub enum AgentError {
-    #[error("agent runner: invalid AgentRef: {0}")]
-    InvalidRef(String),
     #[error("agent runner: spawn failed: {0}")]
     Spawn(String),
     /// System commit headroom is below the reserve required to safely start
@@ -223,7 +219,6 @@ pub(crate) async fn run_agent_with_bin(
         .take()
         .ok_or_else(|| AgentError::Spawn("claude stderr pipe missing".to_string()))?;
 
-    let instance_id = format!("drone-agent-{}", uuid::Uuid::new_v4());
     let (result_tx, result_rx) = oneshot::channel();
     // Hand the captured stderr back to `drain_and_collect` so a failed
     // run reports the real cause (rate-limit / auth / OOM) instead of a
@@ -263,7 +258,6 @@ pub(crate) async fn run_agent_with_bin(
     });
 
     Ok(AgentRunHandle {
-        instance_id,
         final_result: result_rx,
     })
 }

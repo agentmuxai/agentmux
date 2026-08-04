@@ -206,19 +206,6 @@ async function flushClip(): Promise<void> {
     );
 }
 
-/** Test-only. Forces a synchronous flush — useful in vitest where the
- *  rAF callback would otherwise never fire under happy-dom. */
-export function __flushPaneOverlayClipForTests(): void {
-    clipScheduled = false;
-    flushClip();
-}
-
-/** Test-only. Resets the dedup memo. */
-export function __resetPaneOverlayDispatchForTests(): void {
-    clipScheduled = false;
-    lastDispatchedKey = "";
-}
-
 /**
  * Auto-discovery hooks for `pane-overlay-auto.ts`. Each function
  * mutates the shared map and calls `sendClip()`. Returns true if the

@@ -7,14 +7,6 @@
 
 import { getApi } from "./app-api";
 
-const objectIdWeakMap = new WeakMap();
-let objectIdCounter = 0;
-
-export function getObjectId(obj: any): number {
-    if (!objectIdWeakMap.has(obj)) objectIdWeakMap.set(obj, objectIdCounter++);
-    return objectIdWeakMap.get(obj);
-}
-
 let cachedIsDev: boolean = null;
 export function isDev() {
     if (cachedIsDev == null) cachedIsDev = getApi().getIsDev();

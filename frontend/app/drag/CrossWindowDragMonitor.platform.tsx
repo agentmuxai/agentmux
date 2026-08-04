@@ -5,4 +5,3 @@
 // at build time by Vite's platformResolve plugin.
 // Do NOT import this file directly in application code.
 export { CrossWindowDragMonitor, setCurrentDragPayload, getCurrentDragPayload } from "./CrossWindowDragMonitor.win32";
-export type { DragItemPayload } from "./CrossWindowDragMonitor.win32";

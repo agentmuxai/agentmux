@@ -111,11 +111,6 @@ impl AgentProcessRegistry {
             .unwrap_or(TrackingConfidence::None)
     }
 
-    /// All tracked blocks — used by the swarm panel's aggregate view.
-    pub fn list_all_blocks(&self) -> Vec<String> {
-        self.inner.lock().keys().cloned().collect()
-    }
-
     /// Kill the entire process tree for a given block. Returns `true`
     /// if a tracker was found (the kill was dispatched). Does NOT
     /// synchronously wait for descendants to actually exit — the

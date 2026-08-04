@@ -35,7 +35,7 @@ const MUXBUS_COGNITO_DOMAIN =
 const MUXBUS_CLIENT_ID =
     (import.meta.env.VITE_MUXBUS_CLIENT_ID as string | undefined) ?? "";
 
-export interface MuxBusStatus {
+interface MuxBusStatus {
     connected: boolean;
     email: string;
     cognitoDomain: string;

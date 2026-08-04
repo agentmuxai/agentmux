@@ -1193,7 +1193,7 @@ const EXTENSION_MAP: Record<string, string> = {
     ".svg": "html",
 };
 
-export function detectLanguage(filePath: string): string {
+function detectLanguage(filePath: string): string {
     const lower = filePath.toLowerCase();
     // Extension lookup. Use endsWith so multi-segment extensions like
     // `.test.tsx` still resolve via the trailing component.

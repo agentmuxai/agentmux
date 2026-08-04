@@ -389,22 +389,6 @@ fn start_hook_session(seed: HookContextSeed) -> Result<(), String> {
         .map_err(|e| format!("hook ready channel closed: {}", e))?
 }
 
-/// No-op stub for non-Windows builds. Phase 7 adds platform
-/// equivalents (CGEventTap on macOS, polled XQueryPointer on X11).
-#[cfg(not(target_os = "windows"))]
-pub fn start_tear_off_tracking(
-    _state: std::sync::Arc<crate::state::AppState>,
-    _source_label: String,
-    _dragged_label: String,
-    _tab_id: String,
-    _source_ws_id: String,
-    _dest_ws_id: String,
-    _original_tab_index: usize,
-    _was_pinned: bool,
-) -> Result<(), String> {
-    Ok(())
-}
-
 #[cfg(target_os = "windows")]
 unsafe extern "system" fn low_level_keyboard_proc(
     n_code: i32,

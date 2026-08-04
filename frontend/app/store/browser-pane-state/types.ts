@@ -183,7 +183,7 @@ export function makeTab(url: string, isPreview = false): BrowserTab {
 
 /** uuid generator with a deterministic-fallback for older Node test
  *  runners. */
-export function newTabId(): string {
+function newTabId(): string {
     if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
         return crypto.randomUUID();
     }
@@ -199,7 +199,7 @@ export type BrowserCommandSource = "frontend" | "backend" | "system" | "hydrate"
  *  identity + URL needed to re-create the tab record; everything
  *  else (loading, error, backendCreated, titleOverridden, ...)
  *  resets to its initial value. */
-export interface HydratedBrowserTab {
+interface HydratedBrowserTab {
     id: string;
     url: string;
     title?: string;

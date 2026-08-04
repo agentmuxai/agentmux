@@ -158,15 +158,3 @@ pub struct BlockState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<i64>,
 }
-
-impl BlockState {
-    pub fn pending() -> Self {
-        Self {
-            status: "pending".to_string(),
-            output: None,
-            error: None,
-            started_at: None,
-            completed_at: None,
-        }
-    }
-}

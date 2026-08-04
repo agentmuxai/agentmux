@@ -6,11 +6,7 @@
  * See docs/specs/SPEC_SOUND_NOTIFICATIONS_2026_06_05.md.
  */
 
-export {
-    installSoundService,
-    setReplayMode,
-    isReplayMode,
-} from "./sound-service";
+export { installSoundService } from "./sound-service";
 export {
     notify,
     subscribeSoundEvents,
@@ -22,8 +18,3 @@ export {
     type SoundDef,
     type SoundCategory,
 } from "./sounds";
-export {
-    paramsForTool,
-    hashToolToParams,
-    type SyllableParams,
-} from "./tool-tones";

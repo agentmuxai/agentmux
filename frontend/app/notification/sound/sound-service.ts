@@ -58,10 +58,6 @@ export function setReplayMode(value: boolean): void {
     replayMode = value;
 }
 
-export function isReplayMode(): boolean {
-    return replayMode;
-}
-
 /**
  * Install the sound service. Idempotent — subsequent calls no-op.
  * Returns a cleanup function for tests; production code does not

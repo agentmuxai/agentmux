@@ -28,9 +28,3 @@ export function parseSlashCommand(input: string): [string, string] {
     if (spaceIdx < 0) return [rest.toLowerCase(), ""];
     return [rest.slice(0, spaceIdx).toLowerCase(), rest.slice(spaceIdx + 1).trim()];
 }
-
-/** True if the string is a recognizable slash-command prefix. */
-export function isSlashCommandInput(input: string): boolean {
-    const t = input.trim();
-    return t.startsWith("/") && t.length > 1;
-}

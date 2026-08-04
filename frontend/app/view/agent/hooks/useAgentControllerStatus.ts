@@ -57,7 +57,7 @@ export type { LogFn };
  * it finishes. "unknown" only applies before the very first auth check
  * resolves (or after a fatal, non-auth error where the check never ran).
  */
-export type AuthStatus = "authenticated" | "unauthenticated" | "unknown";
+type AuthStatus = "authenticated" | "unauthenticated" | "unknown";
 
 export interface UseAgentControllerStatusOptions {
     blockId: string;

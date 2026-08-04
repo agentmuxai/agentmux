@@ -101,7 +101,7 @@ export interface SectionNode {
 /**
  * Tool-specific parameter types
  */
-export interface ReadParams {
+interface ReadParams {
     file_path: string;
     offset?: number;
     limit?: number;
@@ -114,7 +114,7 @@ export interface EditParams {
     replace_all?: boolean;
 }
 
-export interface WriteParams {
+interface WriteParams {
     file_path: string;
     content: string;
 }
@@ -124,23 +124,23 @@ export interface BashParams {
     timeout?: number;
 }
 
-export interface GrepParams {
+interface GrepParams {
     pattern: string;
     path?: string;
     glob?: string;
 }
 
-export interface GlobParams {
+interface GlobParams {
     pattern: string;
     path?: string;
 }
 
-export type ToolParams = ReadParams | EditParams | WriteParams | BashParams | GrepParams | GlobParams | Record<string, unknown>;
+type ToolParams = ReadParams | EditParams | WriteParams | BashParams | GrepParams | GlobParams | Record<string, unknown>;
 
 /**
  * Tool-specific result types
  */
-export interface ReadResult {
+interface ReadResult {
     content: string;
     lines?: number;
 }
@@ -168,14 +168,14 @@ export interface GlobResult {
     files: string[];
 }
 
-export type ToolResult = ReadResult | EditResult | WriteResult | BashResult | GrepResult | GlobResult | Record<string, unknown>;
+type ToolResult = ReadResult | EditResult | WriteResult | BashResult | GrepResult | GlobResult | Record<string, unknown>;
 
 /**
  * Kind of a live log chunk. `stdout`/`stderr` are bash-style streams,
  * `diff-hunk` is one hunk of an Edit-tool incremental diff, `system`
  * is provider-emitted metadata (e.g. "command spawned", retry banner).
  */
-export type ToolLogChunkKind = "stdout" | "stderr" | "system" | "diff-hunk";
+type ToolLogChunkKind = "stdout" | "stderr" | "system" | "diff-hunk";
 
 /**
  * One append delivered while a tool is running. The reducer keeps an
@@ -465,7 +465,7 @@ export type StreamEvent =
     | ProviderWaitingEvent;
 
 /** Provider is rate-limited and retrying. Updates lastEventMs; shows "Rate limited…" in working row. */
-export interface ProviderWaitingEvent {
+interface ProviderWaitingEvent {
     type: "provider_waiting";
     reason: "rate_limited";
     retryAfterMs: number | null;
@@ -555,7 +555,7 @@ export interface PermissionRequestEvent {
     risk?: "low" | "medium" | "high";
 }
 
-export type PermissionPreview =
+type PermissionPreview =
     | { kind: "diff"; content: string }
     | { kind: "bash"; command: string }
     | { kind: "text"; content: string }
@@ -570,7 +570,7 @@ export type PermissionPreview =
  *
  * Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md.
  */
-export interface AskUserQuestionOption {
+interface AskUserQuestionOption {
     label: string;
     description?: string;
 }
@@ -614,7 +614,7 @@ export interface UserMessageEvent {
     timestamp?: number;
 }
 
-export interface SessionEndEvent {
+interface SessionEndEvent {
     type: "session_end";
     stats: SessionStats;
 }
@@ -680,7 +680,6 @@ export type LogFn = (tag: string, text: string, level?: "info" | "error" | "warn
  * Applied as CLI flags on each turn (between --resume spawns).
  */
 export type PermissionMode = "bypass" | "auto" | "acceptEdits" | "plan" | "default";
-export type ModelChoice = "opus" | "sonnet" | "haiku";
 export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
 
 export interface AgentRuntimeConfig {

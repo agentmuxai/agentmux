@@ -8,13 +8,6 @@ export type DataItem = {
     [k: string]: number;
 };
 
-// Use a loose type to avoid circular dependency with sysinfo-model.ts.
-// The model is typed as SysinfoViewModel at usage sites.
-export type SysinfoViewProps = {
-    blockId: string;
-    model: any;
-};
-
 function defaultCpuMeta(name: string): TimeSeriesMeta {
     return {
         name: name,

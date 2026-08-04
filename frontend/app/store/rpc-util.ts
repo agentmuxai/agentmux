@@ -44,4 +44,3 @@ class UpstreamRpcProxy implements AbstractRpcClient {
 }
 
 export { DefaultRouter, initWshrpc, TabRpcClient };
-export { sendRpcCommand, sendRpcResponse, shutdownWshrpc } from "./rpc-util-base";

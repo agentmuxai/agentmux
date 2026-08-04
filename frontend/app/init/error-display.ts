@@ -233,7 +233,7 @@ function mountRoot(): HTMLElement {
 const FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif";
 
 /** Transient state shown while an auto-reload is pending. */
-export function showReconnecting(attempt: number, max: number): void {
+function showReconnecting(attempt: number, max: number): void {
     const main = mountRoot();
     const wrap = document.createElement("div");
     wrap.style.cssText =

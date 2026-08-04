@@ -12,15 +12,15 @@
 // only when the last one closes, while modals in disjoint regions never
 // interfere.
 
-export interface RegionLockState {
+interface RegionLockState {
     openCount: number;
     previousOverflow: string;
     inertSiblings: HTMLElement[];
 }
 
-export const regionLocks = new WeakMap<HTMLElement, RegionLockState>();
+const regionLocks = new WeakMap<HTMLElement, RegionLockState>();
 
-export const supportsInert = typeof HTMLElement !== "undefined" && "inert" in HTMLElement.prototype;
+const supportsInert = typeof HTMLElement !== "undefined" && "inert" in HTMLElement.prototype;
 
 /**
  * Acquire the scroll + inert lock for `region`. The first modal in a

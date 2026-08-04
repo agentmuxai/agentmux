@@ -99,12 +99,6 @@ pub enum HostPipeError {
     /// callers won't see this from the public API today.
     #[allow(dead_code)] // reserved for stricter callers
     BufferOverflow,
-    /// Caller's captured `host_session_id` no longer matches the
-    /// pipe's current session (a new host registered, displacing the
-    /// old one). The caller — typically a per-host fanout task — should
-    /// exit immediately so it doesn't write into the new host's writer.
-    /// (codex P1 PR #642 round 2.)
-    StaleSession,
 }
 
 impl std::fmt::Display for HostPipeError {
@@ -114,7 +108,6 @@ impl std::fmt::Display for HostPipeError {
             HostPipeError::WriteFailed(e) => write!(f, "write to host pipe failed: {}", e),
             HostPipeError::Serialize(e) => write!(f, "frame serialize failed: {}", e),
             HostPipeError::BufferOverflow => write!(f, "host pipe pending buffer overflow"),
-            HostPipeError::StaleSession => write!(f, "host pipe session stale (replaced by new host registration)"),
         }
     }
 }
@@ -175,12 +168,9 @@ struct HostPipeInner {
     /// reconnect. Used to enforce the 30s disconnect timeout.
     host_disconnected_at: Option<Instant>,
     /// Monotonic generation incremented on every `set_writer` call.
-    /// Per-host fanout tasks capture this at start and pass it back
-    /// into `send_event_for_session`, which no-ops if it doesn't
-    /// match the current generation. Prevents a stale fanout (from
-    /// an old host connection that hasn't fully torn down yet) from
-    /// writing into a freshly-registered host's writer.
-    /// (codex P1 PR #642 round 2.)
+    /// Prevents a stale fanout (from an old host connection that
+    /// hasn't fully torn down yet) from writing into a freshly-
+    /// registered host's writer. (codex P1 PR #642 round 2.)
     host_session_id: u64,
 }
 
@@ -252,10 +242,7 @@ impl HostPipe {
     /// perspective. Hold time is bounded by `pending_buffer` size
     /// (cap 64) × per-frame write latency (microseconds on a healthy
     /// pipe), well under the existing `state.lock()` discipline.
-    /// Returns the new `host_session_id`. The caller (IPC server's
-    /// host-connection setup) MUST capture this and pass it to the
-    /// per-connection fanout task; the fanout task uses it as a
-    /// stale-writer guard via `send_event_for_session`.
+    /// Returns the new `host_session_id`.
     pub async fn set_writer(&self, writer: SharedWriter) -> u64 {
         let mut inner = self.inner.lock().await;
         inner.host_disconnected_at = None;
@@ -429,78 +416,11 @@ impl HostPipe {
         });
     }
 
-    /// Push an Event down to the host. Called by the per-connection
-    /// fanout task in `ipc::server` for the host's connection (replaces
-    /// the prior direct `send_event` call). Other client kinds keep
-    /// the direct path because they're not subject to HostPipe's
-    /// pending-buffer / reconnect semantics.
-    ///
-    /// `session_id` is the value captured from `set_writer` when the
-    /// host registered. If the current writer's session_id no longer
-    /// matches (because a new host registered and replaced the
-    /// writer), this returns `Err(HostPipeError::StaleSession)` so the
-    /// fanout task exits cleanly without writing to the new host.
-    /// (codex P1 PR #642 round 2.)
-    ///
-    /// **Wire format:** writes RAW `Event` JSON (no `HostFrame` envelope).
-    /// The host's existing parser (`agentmux-cef/src/launcher_ipc.rs`)
-    /// expects raw Event lines; CPD-3 will update host to handle
-    /// `HostFrame` and flip events to envelope form. Until then events
-    /// stay raw to preserve compat. Commands (sent via `send_command`)
-    /// already use `HostFrame::Command` because they're new and not
-    /// yet read by host. (codex P1 PR #642 round 3.)
-    ///
-    /// **Atomicity:** session check + writer fetch happen under a
-    /// single inner-lock acquisition to close the session-bypass
-    /// TOCTOU window. (codex P1 + reagent P1 PR #642 round 3.)
-    ///
-    /// **No pending buffer for events.** If the host is disconnected,
-    /// events are dropped silently. They're broadcast-bus-driven —
-    /// stale events post-reconnect would be incorrect anyway, and the
-    /// renderer/srv subscribers still get them. The pending buffer is
-    /// reserved for `send_command` (saga-issued, duty-cycle critical).
-    pub async fn send_event_for_session(
-        &self,
-        session_id: u64,
-        event: &Event,
-    ) -> Result<(), HostPipeError> {
-        // Atomic: hold inner lock for the entire session-check +
-        // writer-clone window so a concurrent set_writer can't slip
-        // a fresh writer in between.
-        let writer = {
-            let inner = self.inner.lock().await;
-            if inner.host_session_id != session_id {
-                return Err(HostPipeError::StaleSession);
-            }
-            match inner.writer.as_ref() {
-                Some(w) => Arc::clone(w),
-                None => return Ok(()), // disconnected; events drop (not buffered)
-            }
-        };
-
-        // Serialize raw Event (NOT HostFrame::Event — see fn doc).
-        let mut bytes =
-            serde_json::to_vec(event).map_err(HostPipeError::Serialize)?;
-        bytes.push(b'\n');
-
-        let mut wlock = writer.lock().await;
-        wlock
-            .write_all(&bytes)
-            .await
-            .map_err(HostPipeError::WriteFailed)?;
-        wlock
-            .flush()
-            .await
-            .map_err(HostPipeError::WriteFailed)?;
-        Ok(())
-    }
-
     /// Send an event without a session check — only safe in tests
-    /// or single-session contexts. Production fanout MUST use
-    /// `send_event_for_session` so a stale fanout from a previous
-    /// host connection cannot write into a fresh host's writer.
-    /// Mirrors `send_event_for_session`'s raw-Event wire format
-    /// (no HostFrame wrap).
+    /// or single-session contexts.
+    /// Writes RAW `Event` JSON (no `HostFrame` envelope) to match the
+    /// host's existing parser (`agentmux-cef/src/launcher_ipc.rs`),
+    /// which expects raw Event lines.
     #[cfg(test)]
     pub async fn send_event(&self, event: &Event) -> Result<(), HostPipeError> {
         let writer = {

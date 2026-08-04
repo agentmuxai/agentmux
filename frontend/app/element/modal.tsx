@@ -82,8 +82,8 @@ import { push, remove, isReachable, type StackEntry } from "./modal-stack";
 
 import "./modal.scss";
 
-export { ModalHeader, ModalBody, ModalFooter, ModalTitleIdContext } from "./modal-parts";
-export { ConfirmModal, type ConfirmModalProps } from "./confirm-modal";
+export { ModalHeader, ModalBody, ModalFooter } from "./modal-parts";
+export { ConfirmModal } from "./confirm-modal";
 
 // ── Scope ────────────────────────────────────────────────────────────────────
 

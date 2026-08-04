@@ -130,12 +130,6 @@ impl BridgeHealth {
 /// handlers). This trait exists for call sites that need to treat bridges
 /// polymorphically — today, only `handle_status`'s aggregation loop.
 pub trait MessagingBridge: Send + Sync {
-    /// Enqueue a message for delivery. Fire-and-forget: pushes onto the
-    /// bridge's internal mpsc channel and returns as soon as the send is
-    /// queued, not once it's delivered. Matches the existing Discord
-    /// contract exactly.
-    fn send(&self, msg: OutboundMsg) -> Result<(), String>;
-
     /// Current connection/health snapshot. Cheap, non-blocking (reads an
     /// `Arc<Mutex<BridgeHealth>>` guarded by a short-lived lock).
     fn health(&self) -> BridgeHealth;

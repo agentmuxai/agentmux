@@ -129,7 +129,7 @@ export interface SubagentEvent {
     timestamp: number;
 }
 
-export type SubagentEventType =
+type SubagentEventType =
     | { type: "text"; content: string }
     | { type: "tool_use"; name: string; input_summary: string }
     | { type: "tool_result"; is_error: boolean; preview: string }

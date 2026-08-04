@@ -29,7 +29,7 @@ type Api = ReturnType<typeof getApi>;
 
 // Minimum CSS pixel width the mother window must retain after a pane tear-off
 // resize. Below this the remaining layout would be too narrow to be useful.
-export const MIN_MOTHER_WIDTH = 400;
+const MIN_MOTHER_WIDTH = 400;
 
 // Tolerance in CSS px for deciding whether a pane's edge aligns with the
 // layout container's edge (sub-pixel rounding, scrollbar gutters, etc.).

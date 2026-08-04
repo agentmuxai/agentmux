@@ -128,9 +128,6 @@ impl SlackBridge {
 }
 
 impl crate::messaging::MessagingBridge for SlackBridge {
-    fn send(&self, msg: OutboundMsg) -> Result<(), String> {
-        SlackBridge::send(self, msg)
-    }
     fn health(&self) -> BridgeHealth {
         SlackBridge::health(self)
     }

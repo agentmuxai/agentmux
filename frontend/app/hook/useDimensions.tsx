@@ -3,7 +3,7 @@
 
 // SolidJS-compatible dimension/resize hooks (ported from React version).
 
-import { createSignal, onCleanup, onMount } from "solid-js";
+import { onCleanup, onMount } from "solid-js";
 import { debounce } from "throttle-debounce";
 
 // Ref object shape compatible with SolidJS refs { current: T | null }
@@ -39,30 +39,4 @@ export function useOnResize<T extends HTMLElement>(
             rszObs.disconnect();
         });
     });
-}
-
-// Returns a signal containing the DOMRect of the given ref element.
-// Observes resize events and updates the signal.
-export function useDimensionsWithExistingRef<T extends HTMLElement>(
-    ref?: RefObject<T>,
-    debounceMs: number = null
-): () => DOMRectReadOnly | null {
-    const [domRect, setDomRect] = createSignal<DOMRectReadOnly | null>(null);
-
-    onMount(() => {
-        if (!ref?.current) return;
-        const cb = debounceMs == null ? setDomRect : debounce(debounceMs, (r: DOMRectReadOnly) => setDomRect(() => r));
-        const rszObs = new ResizeObserver((entries) => {
-            for (const entry of entries) {
-                setDomRect(() => entry.contentRect);
-            }
-        });
-        rszObs.observe(ref.current);
-        onCleanup(() => rszObs.disconnect());
-    });
-
-    if (ref?.current != null) {
-        return () => ref.current!.getBoundingClientRect();
-    }
-    return domRect;
 }

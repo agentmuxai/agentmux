@@ -7,29 +7,11 @@ import type { Accessor } from "solid-js";
 import type { JSX } from "solid-js";
 import type { Properties as CSSProperties } from "csstype";
 
-// Re-export CSSProperties for consumers
-export type { CSSProperties };
-
 export enum NavigateDirection {
     Up = 0,
     Right = 1,
     Down = 2,
     Left = 3,
-}
-
-export function navigateDirectionToString(dir: NavigateDirection): string {
-    switch (dir) {
-        case NavigateDirection.Up:
-            return "up";
-        case NavigateDirection.Right:
-            return "right";
-        case NavigateDirection.Down:
-            return "down";
-        case NavigateDirection.Left:
-            return "left";
-        default:
-            return "unknown";
-    }
 }
 
 export enum DropDirection {
@@ -280,9 +262,6 @@ export type LayoutTreeState = {
     leafOrder?: LeafOrderEntry[];
     pendingBackendActions: LayoutActionData[];
 };
-
-// In SolidJS, a "writable atom" is just a signal — expose as a setter function.
-export type WritableLayoutTreeStateAtom = (value: LayoutTreeState) => void;
 
 // SolidJS: ContentRenderer returns a JSX.Element (SolidJS component output)
 export type ContentRenderer = (nodeModel: NodeModel) => JSX.Element;

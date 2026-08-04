@@ -31,7 +31,7 @@ import { getCliCatalogEntry } from "../defaults/cli-catalog";
 import { isAvailable, watchCapability } from "@/app/store/toolchain-capabilities";
 import { refreshAccountCache, type Account } from "@/app/view/identity/identity-model";
 
-export interface CreateFromTemplateFormData {
+interface CreateFromTemplateFormData {
     name: string;
     accountId: string;
     memoryId: string;

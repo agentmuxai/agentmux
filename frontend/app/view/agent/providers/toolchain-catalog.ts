@@ -30,7 +30,7 @@ import { getPlatform } from "@/util/platformutil";
  */
 
 export type Platform = "windows" | "macos" | "linux";
-export type CheckKind = "path" | "liveness";
+type CheckKind = "path" | "liveness";
 
 export interface CoreTool {
     /** Stable id. */

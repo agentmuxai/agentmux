@@ -41,5 +41,3 @@ export const WpsEvent = {
     UpgradeMigrationsFailed:   "upgrade:migrations-failed",
     UpgradeSagaVacuumDone:     "upgrade:saga-vacuum-done",
 } as const;
-
-export type WpsEventName = (typeof WpsEvent)[keyof typeof WpsEvent];

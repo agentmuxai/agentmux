@@ -8,7 +8,8 @@
 
 import { createSignal } from "solid-js";
 
-export const [flashErrors, setFlashErrors] = createSignal<FlashErrorType[]>([]);
+const [flashErrors, setFlashErrors] = createSignal<FlashErrorType[]>([]);
+export { flashErrors };
 export const [notifications, setNotifications] = createSignal<NotificationType[]>([]);
 export const [notificationPopoverMode, setNotificationPopoverMode] = createSignal(false);
 
@@ -18,7 +19,7 @@ export function pushFlashError(ferr: FlashErrorType) {
     setFlashErrors((prev) => [...prev, ferr]);
 }
 
-export function addOrUpdateNotification(notif: NotificationType) {
+function addOrUpdateNotification(notif: NotificationType) {
     setNotifications((prev) => {
         const withoutThis = prev.filter((n) => n.id !== notif.id);
         return [...withoutThis, notif];
@@ -39,6 +40,3 @@ export function removeFlashError(id: string) {
     setFlashErrors((prev) => prev.filter((ferr) => ferr.id !== id));
 }
 
-export function removeNotification(id: string) {
-    setNotifications((prev) => prev.filter((n) => n.id !== id));
-}

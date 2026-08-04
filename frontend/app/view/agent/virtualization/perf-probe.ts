@@ -23,7 +23,7 @@ import type { NodeKind } from "./renderers";
  * by more than ESTIMATOR_MISS_THRESHOLD. Aggregated per kind so the
  * HUD can flag persistently-wrong estimators for recalibration.
  */
-export interface EstimatorMissSample {
+interface EstimatorMissSample {
     kind: NodeKind;
     estimated: number;
     actual: number;
@@ -37,7 +37,7 @@ export interface EstimatorMissSample {
  * shift here is either an estimator miss or a measurement race —
  * both are bugs we want visible immediately, not via user reports.
  */
-export interface LayoutShiftSample {
+interface LayoutShiftSample {
     value: number;
     timestamp: number;
 }

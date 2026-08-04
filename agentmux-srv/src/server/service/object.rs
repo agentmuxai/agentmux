@@ -534,7 +534,6 @@ async fn update_layout_via_reducer(
         } else {
             let ctx = crate::reducer::Ctx {
                 now_rfc3339: chrono::Utc::now().to_rfc3339(),
-                conn_id: 0,
                 registered_pid: None,
             };
             let events = crate::reducer::update(&mut s, cmd, &ctx);

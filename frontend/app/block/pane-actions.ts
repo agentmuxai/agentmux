@@ -60,7 +60,7 @@ const agentInheritBlocklist = new Set([
  * that inherits the source pane's meta (view, controller, cwd, connection, etc.).
  * Agent panes strip agent-specific fields so the new pane shows the agent picker.
  */
-export async function handleSplitPane(blockData: Block, direction: SplitDirection): Promise<void> {
+async function handleSplitPane(blockData: Block, direction: SplitDirection): Promise<void> {
     const sourceConn = blockData.meta?.connection;
     const meta: Record<string, unknown> = { ...(blockData.meta ?? {}) };
     // Only inherit connection for non-local connections (SSH/WSL).

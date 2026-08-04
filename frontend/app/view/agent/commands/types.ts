@@ -53,7 +53,7 @@ export interface SlashPickerSpec {
  * Argument contract for a slash command. The dispatcher uses this to
  * decide whether to open a picker, error, or dispatch immediately.
  */
-export type SlashArg =
+type SlashArg =
     | { kind: "none" }
     | {
           kind: "enum";

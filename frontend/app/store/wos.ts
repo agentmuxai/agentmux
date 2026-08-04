@@ -184,10 +184,6 @@ function getWaveObjectValue<T extends WaveObj>(oref: string, createIfMissing = t
     return wov;
 }
 
-function clearWaveObjectCache() {
-    waveObjectValueCache.clear();
-}
-
 function reloadWaveObject<T extends WaveObj>(oref: string): Promise<T> {
     let wov = waveObjectValueCache.get(oref);
     if (wov === undefined) {
@@ -315,8 +311,6 @@ function setObjectValue<T extends WaveObj>(value: T, pushToServer?: boolean) {
 
 export {
     callBackendService,
-    cleanWaveObjectCache,
-    clearWaveObjectCache,
     getObjectValue,
     getWaveObjectAtom,
     getWaveObjectLoadingAtom,
@@ -324,9 +318,7 @@ export {
     makeORef,
     reloadWaveObject,
     setObjectValue,
-    splitORef,
     updateWaveObject,
-    updateWaveObjects,
     useWaveObjectValue,
     wpsSubscribeToObject,
 };

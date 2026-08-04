@@ -7,7 +7,7 @@
 // every external consumer keeps importing from "providers"/"providers/index"
 // unchanged.
 
-export type { SystemPrereq, ProviderModel, ProviderDefinition } from "./types";
+export type { ProviderModel, ProviderDefinition } from "./types";
 
 export { GIT_PREREQ, PROVIDERS, PROVIDER_ALIASES, resolveProviderAlias } from "./catalog";
 

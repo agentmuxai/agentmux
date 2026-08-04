@@ -10,7 +10,7 @@
 // dismiss control. The reduced-motion CSS variant is still a (brief,
 // non-moving) animation so `animationend` reliably fires.
 
-export const NUDGE_CLASS = "modal-dismiss--nudge";
+const NUDGE_CLASS = "modal-dismiss--nudge";
 
 export function nudgeDismissControl(panel: HTMLElement | undefined): void {
     if (!panel) return;

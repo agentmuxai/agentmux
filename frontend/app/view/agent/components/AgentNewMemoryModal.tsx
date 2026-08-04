@@ -26,7 +26,7 @@ import { Button } from "@/element/button";
 
 type SeedMode = "empty" | "paste" | "files";
 
-export interface NewMemoryFormData {
+interface NewMemoryFormData {
     name: string;
     description: string;
     /** JSON-encoded array of `{ path, content }` — server stores this

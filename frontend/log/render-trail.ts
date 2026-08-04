@@ -63,10 +63,3 @@ export function getTrail(): TrailEntry[] {
     }
     return out;
 }
-
-/** Test-only helper. */
-export function _resetTrailForTests(): void {
-    for (let i = 0; i < TRAIL_SIZE; i++) buffer[i] = undefined;
-    cursor = 0;
-    filled = 0;
-}

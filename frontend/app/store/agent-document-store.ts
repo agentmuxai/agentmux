@@ -62,11 +62,6 @@ let eventSink: EventSink = (blockId, event) => {
     }
 };
 
-/** Override the event sink (tests / diagnostics panel). */
-export function setEventSink(sink: EventSink): void {
-    eventSink = sink;
-}
-
 /**
  * Register a pane with the store. The slot owns the pane's reducer
  * state and writes through the setter on each mutation.
