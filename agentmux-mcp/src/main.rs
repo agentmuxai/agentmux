@@ -859,6 +859,12 @@ async fn call_tool(
                 url: None,
                 cwd: None,
                 tab_id: None,
+                // Reuse an already-open Editor pane in this agent's own tab
+                // instead of always spawning a new one — the explicit opt-in
+                // only OpenEditor sets (see reuse_editor_pane's doc comment on
+                // PaneOpenRequest for why this can't be inferred from
+                // split_reference_block_id alone).
+                reuse_editor_pane: Some(true),
             };
 
             let resp = client
@@ -929,6 +935,7 @@ async fn call_tool(
                 url: None,
                 cwd: None,
                 tab_id: None,
+                reuse_editor_pane: None, // view != "editor" — irrelevant here
             };
 
             let resp = client

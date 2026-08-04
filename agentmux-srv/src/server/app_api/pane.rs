@@ -264,6 +264,139 @@ pub(super) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, 
     Ok(meta)
 }
 
+/// Block-meta key carrying an ARRAY of files the reused pane should open —
+/// the sole delivery path (see below for why an earlier version's second,
+/// "live WPS event" path was removed). Drained (all entries, in order)
+/// reactively by `EditorViewModel`'s `createEffect` over its own block meta,
+/// then cleared immediately after — covers both "not yet mounted when this
+/// was written" and "already mounted, reacts as soon as the write lands"
+/// uniformly through the same WaveObj sync path the pane already depends on
+/// for everything else.
+///
+/// **Array, not a single scalar** (codex P1 on PR #2404): if 2+ `OpenEditor`
+/// reuse calls arrive before the target pane ever mounts, a single-value key
+/// would have each call overwrite the last, silently losing every request
+/// but the final one. Appending to an array and draining all of them at
+/// once fixes that.
+///
+/// **Sole delivery path — no separate live WPS event** (codex P1 on PR
+/// #2404, found twice): an earlier version ALSO fired a direct WPS event
+/// (`persist: 0`) alongside this meta write, for immediate delivery when the
+/// pane was already mounted. First finding: the frontend's live handler
+/// didn't clear its own entry from this array, so it could be reprocessed
+/// on a later, unrelated remount. Second, deeper finding after fixing that:
+/// the WPS event is a direct WS push and arrives essentially synchronously,
+/// while THIS meta write only reaches the frontend's `blockAtom` after an
+/// async WaveObj DB-refetch — so the live handler's own dequeue attempt
+/// could run and read stale data (this exact write not yet reflected)
+/// before it landed, no-op, and strand the entry anyway. Removing the
+/// separate live path entirely (rather than patching a second-order race in
+/// its own race-fix) leaves one delivery mechanism and one reactive
+/// consumer — nothing to race. Trades a small amount of latency for the
+/// already-mounted case (a real WaveObj round-trip instead of a direct
+/// push) for not being racy.
+///
+/// **Superseded relying on WPS `persist > 0` for durability** (codex P1 on
+/// PR #2404, earliest finding on this function): a just-created Editor
+/// block may not have finished mounting its `EditorViewModel` by the time a
+/// second back-to-back `OpenEditor` call reuses it. `persist: N` closes that
+/// race but opens a *worse* one: `Broker::unsubscribe_all` clears a route's
+/// replay marker on disconnect (`agentmux-srv/src/backend/wps.rs:312-323`),
+/// so any later, unrelated reconnect would replay the *entire* persisted
+/// history again — reopening files the user has since closed. The broker
+/// has no ack/consume concept, so nothing marks a persisted event "already
+/// delivered." Block meta does have exactly that shape (write once, drain
+/// once, clear after reading) — reusing it avoids inventing new broker
+/// machinery.
+const META_PENDING_OPEN_FILES: &str = "editor:pending_open_files";
+
+/// If the calling agent (identified by its own block id, `caller_block_id`)
+/// already has an Editor pane open in its own tab, push `file` into that
+/// pane as a new tab instead of creating another Editor pane. Returns
+/// `Ok(None)` when there's no existing Editor pane to reuse (or the caller's
+/// tab can't be resolved) — the normal create-new-block path handles that
+/// case unchanged.
+///
+/// **Known, accepted limitation: does not apply layout focus.** An earlier
+/// version of this function resolved the reused block's layout leaf id and
+/// dispatched `Command::SetFocusedNode` — reagent (PR #2404) confirmed the
+/// leaf-id resolution itself was correct, then found a deeper problem:
+/// the frontend's `onBackendUpdate` (`frontend/layout/lib/layoutPersistence.ts:59-82`)
+/// only re-derives `focusedNodeId` at initial model construction or via a
+/// `pendingBackendActions`-driven tree action — a bare `focusednodeid`
+/// WaveObj push to an ALREADY-MOUNTED `LayoutModel` (confirmed by reading
+/// the function directly: no branch reads `waveObj.focusednodeid` outside
+/// those two triggers) is silently never applied to the live `treeState`.
+/// Making that work would mean changing `onBackendUpdate`'s reactivity —
+/// shared code this file's own comments show has deliberately been kept
+/// narrow/non-reactive before (see the dangling-leaf-prune history right
+/// above it) — a real, separate piece of work, not a one-line fix. Shipping
+/// a backend dispatch that compiles and passes a reducer-internal test but
+/// has no visible frontend effect would be worse than not attempting it: it
+/// would look done without being done. The reused pane's new tab still
+/// becomes its *own* active tab via `openFile()`; only the cross-pane
+/// layout-focus indicator is unaffected, same as before this feature
+/// existed.
+pub(super) async fn maybe_reuse_editor_pane(
+    state: &AppState,
+    caller_block_id: &str,
+    file: &str,
+) -> Result<Option<PaneOpenResult>, String> {
+    let wstore = &state.wstore;
+    let tab_id = match super::resolve_tab_id_for_block(wstore, caller_block_id) {
+        Ok(id) => id,
+        Err(_) => return Ok(None), // caller's own block isn't in any known tab — fall through
+    };
+
+    let existing = match super::find_editor_block(wstore, &tab_id)? {
+        Some(block) => block,
+        None => return Ok(None),
+    };
+
+    // Durable delivery path: append to any already-pending queue (read then
+    // write — a small race window under truly concurrent reuse calls is
+    // accepted, matching this codebase's general best-effort meta-patch
+    // posture elsewhere) so a not-yet-mounted (or remounting)
+    // EditorViewModel drains every pending file once at construction, then
+    // clears the queue — see META_PENDING_OPEN_FILES's doc comment for why
+    // this replaces relying on WPS persist/replay for correctness.
+    let mut pending: Vec<String> = existing
+        .meta
+        .get(META_PENDING_OPEN_FILES)
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+        .unwrap_or_default();
+    pending.push(file.to_string());
+
+    let meta_events = crate::server::service::dispatch_to_reducer(
+        state,
+        agentmux_common::ipc::Command::UpdateBlockMeta {
+            block_id: existing.oid.clone(),
+            meta_patch: json!({ META_PENDING_OPEN_FILES: pending }),
+        },
+    )
+    .await;
+    for ev in &meta_events {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, wstore) {
+            tracing::warn!("pane.open: reuse: UpdateBlockMeta wstore apply failed: {e}");
+        }
+    }
+    crate::server::service::publish_events(state, &meta_events);
+
+    tracing::info!(
+        block_id = %existing.oid,
+        tab_id = %tab_id,
+        "pane.open: reused existing editor pane instead of creating a new one"
+    );
+
+    Ok(Some(PaneOpenResult {
+        block_id: existing.oid,
+        tab_id,
+        view: "editor".to_string(),
+        created: false,
+    }))
+}
+
 /// Translate `split_direction` + `split_reference_block_id` into the backend
 /// layout action triple. Returns `(actiontype, targetblockid, position)`.
 /// Falls back to a plain `insert` if direction/reference are missing.
