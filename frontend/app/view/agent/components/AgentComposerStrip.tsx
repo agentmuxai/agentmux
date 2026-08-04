@@ -231,10 +231,12 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                 </Show>
             </span>
 
-            {/* Right zone — process badge + context text + auth tag + Shell
-                toggle, in that order. Shell still lands rightmost on a wide
-                pane (last in a left-filling line); on a wrapped line it
-                starts at that line's left margin like everything else. */}
+            {/* Right zone — process badge + context text + auth tag + the
+                HOST/SANDBOX tag paired with the Shell toggle (see
+                .agent-composer-strip-host-shell below), in that order. That
+                pair still lands rightmost on a wide pane (last in a
+                left-filling line); on a wrapped line it starts at that
+                line's left margin like everything else. */}
             <span class="agent-composer-strip-right">
                 <Show when={(props.processCount ?? 0) > 0}>
                     <button
