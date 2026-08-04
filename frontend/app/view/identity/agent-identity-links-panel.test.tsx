@@ -157,6 +157,29 @@ describe("AgentIdentityLinksPanel", () => {
             );
         });
 
+        it("reagent P2 on PR #2414 (round 5): passes the link row's own account id, not the (possibly cache-lagging) joined Account's, so a click while the local accounts cache hasn't caught up still refreshes the RIGHT account instead of minting a new one", async () => {
+            // "acc-not-yet-cached" has no matching entry in the mocked
+            // loadAccounts() list (acc-1/acc-2/acc-claude-1 only) — this is
+            // exactly what a real cache-lag looks like: the link row exists,
+            // but subscribeAccountChanges() hasn't delivered the matching
+            // Account yet, so joinAgentIdentityRows's `account` field is
+            // null even though `accountId` (from the link row itself) is
+            // real. The button must still show "Connect" (row.account is
+            // null) but must NOT drop the account id on the floor.
+            listAllAgentIdentities.mockResolvedValue([
+                mkLink({ agent_id: "agent-1", account_id: "acc-not-yet-cached", provider: "claude" }),
+            ]);
+
+            render(() => <AgentIdentityLinksPanel agentId="agent-1" />);
+
+            const button = await screen.findByRole("button", { name: "Connect" });
+            button.click();
+
+            expect(claudeLoginPanel).toHaveBeenCalledWith(
+                expect.objectContaining({ existingAccountId: "acc-not-yet-cached" }),
+            );
+        });
+
         it("does NOT show a Connect/Re-login button on a non-claude row (github) — only Claude has an in-app session today", async () => {
             listAllAgentIdentities.mockResolvedValue([
                 mkLink({ agent_id: "agent-1", account_id: "acc-1", provider: "github" }),

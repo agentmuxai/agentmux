@@ -232,7 +232,16 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
                                                             <button
                                                                 type="button"
                                                                 class="identity-btn identity-btn-secondary"
-                                                                onClick={() => openClaudeLogin(row.account?.id, row.provider)}
+                                                                // reagent P2 on PR #2414 (round 5): row.accountId
+                                                                // (from the link row itself, agent-identities-model.ts)
+                                                                // is always present when a link exists; row.account
+                                                                // (the JOINED Account object) is null whenever the
+                                                                // local accounts cache hasn't caught up yet — using
+                                                                // row.account?.id here passed undefined on a
+                                                                // stale-cache click, minting a brand-new Claude
+                                                                // account instead of refreshing the one the link
+                                                                // row already points at.
+                                                                onClick={() => openClaudeLogin(row.accountId, row.provider)}
                                                             >
                                                                 {row.account ? "Re-login" : "Connect"}
                                                             </button>
