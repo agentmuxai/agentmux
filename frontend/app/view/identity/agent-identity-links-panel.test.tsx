@@ -178,7 +178,30 @@ describe("AgentIdentityLinksPanel", () => {
             button.click();
 
             expect(claudeLoginPanel).toHaveBeenCalledWith(
-                expect.objectContaining({ existingAccountId: "acc-claude-1" }),
+                expect.objectContaining({
+                    existingAccountId: "acc-claude-1",
+                    // reagent P0 on PR #2414: opening from an aliased row
+                    // must tell the panel which alias to clean up on
+                    // success — otherwise the login links the canonical
+                    // "claude" provider while this orphaned "claude-code"
+                    // row lingers and aborts every future spawn.
+                    staleAliasProvider: "claude-code",
+                }),
+            );
+        });
+
+        it("does NOT set staleAliasProvider when the row is already canonical \"claude\" — nothing to clean up", async () => {
+            listAllAgentIdentities.mockResolvedValue([
+                mkLink({ agent_id: "agent-1", account_id: "acc-claude-1", provider: "claude" }),
+            ]);
+
+            render(() => <AgentIdentityLinksPanel agentId="agent-1" />);
+
+            const button = await screen.findByRole("button", { name: "Re-login" });
+            button.click();
+
+            expect(claudeLoginPanel).toHaveBeenCalledWith(
+                expect.objectContaining({ staleAliasProvider: undefined }),
             );
         });
 

@@ -38,6 +38,21 @@ export function ClaudeLoginPanel(props: {
      *  launch/Stash bind). */
     existingAccountId?: string;
     linkTarget?: { blockId?: string; agentDefinitionId: string };
+    /** reagent P0 on PR #2414: set when the row this panel was opened from
+     *  carries a legacy-alias provider string (e.g. "claude-code") — a
+     *  successful login here links the CANONICAL "claude" provider
+     *  (finalizeAccount → agent_identity_link `ON CONFLICT(agent_id,
+     *  provider)`), which is a DIFFERENT key than the alias row, so it
+     *  INSERTS a second link instead of replacing the broken one. The old
+     *  alias row (pointing at a deleted/orphaned account) is left behind —
+     *  the resolver's `inject.rs` iterates ALL of an agent's bindings
+     *  ORDER BY provider and aborts the ENTIRE spawn on the first one that
+     *  fails to resolve, so the orphaned alias row (sorting after "claude")
+     *  silently blocks every future spawn even though the healthy "claude"
+     *  link now exists — "✓ Signed in" but the agent stays broken. On
+     *  success, this panel unlinks `staleAliasProvider` for the same
+     *  agent so only the canonical row remains. */
+    staleAliasProvider?: string;
 }): JSX.Element {
     const [phase, setPhase] = createSignal<InAppLoginPhase>("starting");
     const [authUrl, setAuthUrl] = createSignal<string | undefined>(undefined);
@@ -146,6 +161,24 @@ export function ClaudeLoginPanel(props: {
                 case "terminal-success":
                     if (registeredAccountId) {
                         void refreshAccountCache();
+                        // See staleAliasProvider's own doc comment: the link
+                        // just written above used the canonical "claude" key,
+                        // never the alias — clean up the orphaned alias row
+                        // now so it can't abort a future spawn. Best-effort:
+                        // the new canonical link already succeeded and is
+                        // what matters for "signed in"; log and move on if
+                        // this fails rather than blocking the success state
+                        // on cleanup of an already-broken row.
+                        if (props.staleAliasProvider && props.linkTarget?.agentDefinitionId) {
+                            RpcApi.UnlinkAgentIdentityCommand(TabRpcClient, {
+                                agent_id: props.linkTarget.agentDefinitionId,
+                                provider: props.staleAliasProvider,
+                            }).catch((e) => {
+                                console.warn(
+                                    `[claude-login] failed to unlink stale alias "${props.staleAliasProvider}": ${e?.message ?? String(e)}`,
+                                );
+                            });
+                        }
                         setDone(true);
                     } else {
                         setError("Login completed but the account couldn't be registered. Try again.");
