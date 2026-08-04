@@ -115,7 +115,7 @@ See also:
 
 | Spec | Summary |
 |---|---|
-| [SPEC_DATA_DIR_UNIFICATION_2026-05-05](SPEC_DATA_DIR_UNIFICATION_2026-05-05.md) | Data-dir unification (DataPaths) |
+| [SPEC_DATA_DIR_UNIFICATION_2026-05-05](archive/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md) | Data-dir unification (DataPaths) |
 | [SPEC_PERSISTENCE_LAYER_ANALYSIS_2026-05-14](SPEC_PERSISTENCE_LAYER_ANALYSIS_2026-05-14.md) | Persistence-layer design |
 | [SPEC_DATA_CHANNELS_2026_05_24](SPEC_DATA_CHANNELS_2026_05_24.md) | Data-channel multiplexing |
 

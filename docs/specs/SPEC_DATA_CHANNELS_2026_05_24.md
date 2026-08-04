@@ -4,7 +4,7 @@
 **Author:** AgentA (Claude Opus 4.7)
 **Tracking discussion:** [#1026](https://github.com/agentmuxai/agentmux/discussions/1026)
 **Research basis:** [`docs/research/RESEARCH_PER_VERSION_DATA_ISOLATION_2026_05_24.md`](../research/RESEARCH_PER_VERSION_DATA_ISOLATION_2026_05_24.md)
-**Builds on:** [`SPEC_DATA_DIR_UNIFICATION_2026-05-05.md`](./SPEC_DATA_DIR_UNIFICATION_2026-05-05.md) (Phase 1 — per-version isolation; this is its Phase 2)
+**Builds on:** [`SPEC_DATA_DIR_UNIFICATION_2026-05-05.md`](./archive/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md) (Phase 1 — per-version isolation; this is its Phase 2)
 
 ---
 
@@ -410,7 +410,7 @@ If we're not comfortable with the fresh-start UX even for the first stable relea
 ## 9. References
 
 - [`docs/research/RESEARCH_PER_VERSION_DATA_ISOLATION_2026_05_24.md`](../research/RESEARCH_PER_VERSION_DATA_ISOLATION_2026_05_24.md) — pattern survey
-- [`docs/specs/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md`](./SPEC_DATA_DIR_UNIFICATION_2026-05-05.md) — Phase 1 (per-version)
+- [`docs/specs/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md`](./archive/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md) — Phase 1 (per-version)
 - [`agentmux-common/src/data_paths.rs`](../../agentmux-common/src/data_paths.rs) — current implementation
 - [`agentmux-common/src/runtime_mode.rs`](../../agentmux-common/src/runtime_mode.rs) — mode detection (Dev/Portable/Installed)
 - Discussion [#1026](https://github.com/agentmuxai/agentmux/discussions/1026) — long-term tracking thread
