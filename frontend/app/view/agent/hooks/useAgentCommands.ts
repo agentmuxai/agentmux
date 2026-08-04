@@ -137,6 +137,21 @@ export interface UseAgentCommandsOptions {
      */
     isCancelled: () => boolean;
     /**
+     * `useAgentControllerStatus.resetCancelled` — threaded through so
+     * /login can clear the shared cancellation flag at the start of its
+     * OWN attempt, mirroring what relogin()/useGlobalLogin()/
+     * loginViaTerminal() already do at theirs. Without this, a flag left
+     * `true` by an EARLIER, unrelated cancelled attempt (e.g. clicking
+     * Cancel on the AuthUrlBox during a prior relogin()) stayed `true`
+     * forever — /login never called any of the three functions that reset
+     * it, so isCancelled() read as already-cancelled on entry, and the
+     * "opened" poll's cancellation check (added right below
+     * beginRecoveryFlow's own doc comment) short-circuited a brand-new
+     * /login into a silent, unearned "ok" without ever checking
+     * authentication. reagent P1 on PR #2413 (round 3, third pass).
+     */
+    resetCancelled: () => void;
+    /**
      * The last CONFIRMED backend `turn_active` reading, tracked from live
      * controllerstatus events (agent-view.tsx's `wasTurnActive`, the same
      * state `trackTurnJustEnded`'s edge detector uses) — `false` (not
@@ -769,6 +784,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         beginRecoveryFlow: opts.beginRecoveryFlow,
         endRecoveryFlow: opts.endRecoveryFlow,
         isCancelled: opts.isCancelled,
+        resetCancelled: opts.resetCancelled,
         openPicker,
         openHelp,
     });

@@ -231,6 +231,19 @@ export interface SlashCommandContext {
      */
     isCancelled: () => boolean;
     /**
+     * Reset the flag `isCancelled()` reads, mirroring the reset every OTHER
+     * login-starting function (relogin()/useGlobalLogin()/
+     * loginViaTerminal()) already does at its own start —
+     * `useAgentControllerStatus.resetCancelled`. Call this at the very
+     * start of a fresh /login attempt: without it, a flag left `true` by a
+     * PRIOR, unrelated cancelled attempt stays `true` forever (nothing
+     * else resets it for /login), so a brand-new /login's own
+     * `isCancelled()` poll check reads as already-cancelled and silently
+     * reports success without ever checking authentication. reagent P1 on
+     * PR #2413 (round 3, third pass).
+     */
+    resetCancelled: () => void;
+    /**
      * Open the inline picker. Returns a promise that resolves with the
      * selected value, or rejects if the user dismisses (Esc / click-outside).
      * Set by useAgentCommands; the dispatcher only sees the function.

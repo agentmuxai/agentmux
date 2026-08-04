@@ -56,6 +56,7 @@ function makeCtx(): SlashCommandContext {
         beginRecoveryFlow: vi.fn(),
         endRecoveryFlow: vi.fn(),
         isCancelled: () => false,
+        resetCancelled: vi.fn(),
         openPicker: vi.fn(),
         openHelp: vi.fn(),
     };
@@ -225,6 +226,45 @@ describe("reagent P1 on PR #2413 (round 3, second pass): /login's poll notices a
         const result = await promise;
 
         expect(result.kind).toBe("error");
+    });
+});
+
+describe("reagent P1 on PR #2413 (round 3, third pass): /login resets a stale cancellation flag left by an earlier, unrelated attempt", () => {
+    it("calls ctx.resetCancelled() before starting", async () => {
+        hub.checkCliAuth.mockReset().mockResolvedValue({ authenticated: true });
+        const ctx = makeCtx();
+        ctx.resetCancelled = vi.fn();
+
+        await loginCommand.handler(ctx, "");
+
+        expect(ctx.resetCancelled).toHaveBeenCalledOnce();
+    });
+
+    it("a stale isCancelled()===true left by a DIFFERENT, earlier cancelled attempt does not short-circuit this fresh /login into an unearned 'ok' — resetCancelled() actually clears it, so the poll runs for real", async () => {
+        vi.useFakeTimers();
+        hub.checkCliAuth.mockReset().mockResolvedValue({ authenticated: false });
+        const ctx = makeCtx();
+        // Mirrors useAgentControllerStatus's real shared boolean: `true`
+        // left over from some earlier, unrelated attempt whose Cancel
+        // button fired (e.g. via relogin()'s AuthUrlBox) — /login never
+        // touched it before this fix, so it stayed true forever.
+        let cancelled = true;
+        ctx.isCancelled = () => cancelled;
+        ctx.resetCancelled = () => { cancelled = false; };
+
+        const promise = loginCommand.handler(ctx, "");
+        // Without resetCancelled() actually clearing the stale flag, the
+        // poll's isCancelled() check would already read true on its very
+        // first tick and resolve "ok" almost instantly instead of running.
+        await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+        const result = await promise;
+
+        expect(result).toEqual({
+            kind: "error",
+            message:
+                "/login: opened a login page, but no login was detected within 5 minutes. " +
+                "Complete the login there, then run /login again.",
+        });
     });
 });
 
