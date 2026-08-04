@@ -394,4 +394,91 @@ describe("useAgentControllerStatus — in-app login session (SPEC_INAPP_CLAUDE_O
             dispose();
         });
     });
+
+    it("reagent P1 on PR #2413 (round 3): useTerminalInstead waits out a /login-driven session too, not just relogin()'s — /login never touches reloginInFlight/reloginDonePromise, only the shared loginWaiting() counter", async () => {
+        // /login (commands/global/login.ts) drives beginRecoveryFlow/
+        // endRecoveryFlow directly — it never calls relogin(), so
+        // reloginInFlight stays false throughout. Before this fix,
+        // useTerminalInstead awaited reloginDonePromise, which is
+        // ALREADY RESOLVED in this scenario (relogin() was never called),
+        // so it fell straight through to loginViaTerminal() — and since
+        // reloginInFlight is false, that guard didn't catch it either,
+        // starting a second concurrent login child while /login's own
+        // poll was still tearing the first one down.
+        let secondAttemptStarted = false;
+        hub.runProviderLogin.mockImplementation(async () => {
+            secondAttemptStarted = true;
+            return "terminal-success";
+        }); // only ever hit by loginViaTerminal(), fired from useTerminalInstead
+
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({
+                blockId: "block-1",
+                provider: () => claude,
+                log: () => {},
+            });
+
+            // Simulates /login's in-flight session.
+            status.beginRecoveryFlow();
+            expect(status.loginWaiting()).toBe(true);
+
+            const terminalPromise = status.useTerminalInstead();
+
+            // Give the poll a few real ticks to run — it must NOT proceed
+            // to loginViaTerminal() while the simulated /login session is
+            // still marked in-flight.
+            await new Promise((r) => setTimeout(r, 50));
+            expect(secondAttemptStarted).toBe(false);
+            expect(hub.runProviderLogin).not.toHaveBeenCalled();
+
+            // Simulates /login's own poll finishing and tearing down.
+            status.endRecoveryFlow();
+            await terminalPromise;
+
+            expect(secondAttemptStarted).toBe(true);
+            dispose();
+        });
+    });
+
+    it("reagent P2 on PR #2413 (round 3): 'inapp-timeout' from a relogin() cancelled via useTerminalInstead does not overwrite the terminal flow's own notice with the generic timeout message", async () => {
+        let resolveFirstAttempt: (v: string) => void;
+        const firstAttempt = new Promise<string>((res) => { resolveFirstAttempt = res; });
+
+        hub.runProviderLogin
+            .mockImplementationOnce((opts: any) => {
+                opts.setAuthUrl?.("https://claude.com/cai/oauth/authorize?code=true");
+                return firstAttempt;
+            }) // relogin()'s own call — held open
+            .mockImplementationOnce(async () => "terminal-success"); // loginViaTerminal()'s call
+
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({
+                blockId: "block-1",
+                provider: () => claude,
+                log: () => {},
+            });
+
+            const reloginPromise = status.relogin({ retryAfterLogin: false });
+            // Fires cancelLogin() synchronously (loginCancelled = true)
+            // before the still-in-flight relogin() resolves below — exactly
+            // the ordering a real click produces.
+            const terminalPromise = status.useTerminalInstead();
+
+            // The cancellation is what makes runProviderLogin's own poll
+            // resolve "inapp-timeout" in practice (run-provider-login.ts);
+            // simulated directly here since runProviderLogin is mocked.
+            resolveFirstAttempt!("inapp-timeout");
+            await reloginPromise;
+
+            // Before this fix, relogin()'s "inapp-timeout" branch
+            // unconditionally overwrote whatever notice the cancel/terminal
+            // flow had just set (or was about to set) with "the login link
+            // timed out" — telling the user their login failed when they'd
+            // simply asked to switch to a terminal.
+            expect(status.authNotice() ?? "").not.toMatch(/login link timed out/i);
+
+            await terminalPromise;
+            dispose();
+        });
+    });
 });

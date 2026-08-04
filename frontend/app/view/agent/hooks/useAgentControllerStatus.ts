@@ -341,15 +341,6 @@ export function useAgentControllerStatus(
     // flight (the user double-clicks "Login Again"). Separate from flowRunning
     // — relogin must work even when the gated flow believes it already finished.
     let reloginInFlight = false;
-    // Resolves when the CURRENTLY in-flight relogin() call reaches its
-    // `finally` — useTerminalInstead awaits this (not a fixed-timeout poll
-    // against reloginInFlight, codex P2 on PR #2413: a fixed ~4.5s bound can
-    // expire before cancellation is actually observed, since
-    // pollForInAppLoginCompletion's poll tick can be blocked inside a
-    // CheckCliAuthCommand RPC with its own ~10s timeout that doesn't itself
-    // recheck isCancelled). No-op (`Promise.resolve()`) when nothing is in
-    // flight, so awaiting it is always safe.
-    let reloginDonePromise: Promise<"done"> = Promise.resolve("done" as const);
 
     /**
      * Resolve the provider CLI directly when block meta has no `cmd` yet.
@@ -527,8 +518,6 @@ export function useAgentControllerStatus(
         // launch flow.
         let cliPath = getBlockMetaKeyAtom(opts.blockId, "cmd")() as string | undefined;
         reloginInFlight = true;
-        let resolveReloginDone: () => void = () => {};
-        reloginDonePromise = new Promise<"done">((res) => { resolveReloginDone = () => res("done"); });
         beginRecoveryFlow();
         // Guards against double-decrementing activeRecoveryFlows: the
         // success branches below call this early (before onRecovered, so
@@ -837,10 +826,19 @@ export function useAgentControllerStatus(
                     // (it would silently accept a paste that goes nowhere),
                     // and point at a fresh attempt rather than "finish there".
                     setAuthUrl(null);
-                    setAuthNotice(
-                        "The login link timed out before you finished authorizing. " +
-                        "Click “Login Again” to get a new link, or try “Login via terminal”.",
-                    );
+                    // reagent P2 on PR #2413 (round 3): mirror the "opened"
+                    // case's identical guard above — a real timeout and an
+                    // explicit user cancel (e.g. clicking "Use terminal
+                    // instead", which sets loginCancelled then calls
+                    // loginViaTerminal()) can both surface here, and
+                    // without this check the timeout message would
+                    // overwrite whatever notice the terminal path just set.
+                    if (!loginCancelled) {
+                        setAuthNotice(
+                            "The login link timed out before you finished authorizing. " +
+                            "Click “Login Again” to get a new link, or try “Login via terminal”.",
+                        );
+                    }
                     break;
                 case "terminal-timeout":
                     // Never fail silently (retro §5.1): tell the user nothing
@@ -878,7 +876,6 @@ export function useAgentControllerStatus(
             if (!succeeded && !retryAfterLogin) {
                 setCanRetry(true);
             }
-            resolveReloginDone();
         }
     };
 
@@ -1137,39 +1134,45 @@ export function useAgentControllerStatus(
 
     // "Use terminal instead" — AuthUrlBox's secondary action alongside
     // Cancel (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.3 surface 2).
-    // Can't just call loginViaTerminal() directly: it guards on the same
-    // `reloginInFlight` flag relogin()'s still-awaited call above is
-    // holding, and cancelLogin() only flips a boolean the poll notices on
-    // its own next tick rather than synchronously unwinding relogin()'s
-    // await — an immediate loginViaTerminal() call would just no-op against
-    // a flag that hasn't cleared yet.
+    // Shown for BOTH relogin()-driven and /login-driven sessions (both
+    // populate authUrl), so this can't just call loginViaTerminal()
+    // directly: it guards on `reloginInFlight`, which /login never sets,
+    // and cancelLogin() only flips a boolean the in-flight poll notices on
+    // its own next tick rather than synchronously unwinding — an immediate
+    // loginViaTerminal() call would race the still-live login child.
     //
-    // Awaits `reloginDonePromise` (resolved by relogin()'s own `finally`)
-    // rather than polling `reloginInFlight` on a fixed short bound — codex
-    // P2 on PR #2413: a ~4.5s bound could expire before cancellation is
-    // actually observed, since pollForInAppLoginCompletion's poll tick can
-    // be blocked inside a CheckCliAuthCommand RPC (its own ~10s timeout,
-    // which doesn't itself recheck isCancelled) — the fixed-bound version
-    // would then silently no-op against loginViaTerminal's guard, leaving
-    // the terminal unopened with no error surfaced. A generous backstop
-    // timeout still applies (Promise.race) so a genuinely wedged relogin
-    // can't hang this forever.
+    // Polls `loginWaiting()` (rather than the flow-specific
+    // `reloginInFlight`) with a generous backstop timeout so a genuinely
+    // wedged flow can't hang this forever — codex P2 on PR #2413: a fixed
+    // short bound could expire before cancellation is actually observed,
+    // since pollForInAppLoginCompletion's poll tick can be blocked inside a
+    // CheckCliAuthCommand RPC (its own ~10s timeout, which doesn't itself
+    // recheck isCancelled).
     const useTerminalInstead = async () => {
         cancelLogin();
-        // reagent P2 on PR #2413 (re-review): the two race arms must
-        // resolve to DISTINGUISHABLE values — sleep() alone resolves to
-        // undefined, same as a bare Promise<void>, so there was no way to
-        // tell "relogin() actually finished tearing down" from "the 20s
-        // backstop fired while it's still wedged". Silently proceeding to
-        // loginViaTerminal() in the wedged case just hit its own
-        // reloginInFlight guard and returned — clearing the notice with no
-        // terminal opened and no error shown, the exact silent-failure
-        // shape retro-agent-auth-relogin-noop-2026-07-01 §5.1 exists to ban.
-        const winner = await Promise.race([
-            reloginDonePromise,
-            sleep(20_000).then(() => "backstop" as const),
-        ]);
-        if (winner === "backstop") {
+        // reagent P1 on PR #2413 (round 3): AuthUrlBox's "Use terminal
+        // instead" is also shown while a `/login`-driven session is in
+        // flight (commands/global/login.ts), not just relogin()'s. That
+        // path never touches reloginInFlight/reloginDonePromise — only
+        // relogin()/loginViaTerminal() do — so waiting on
+        // reloginDonePromise alone raced an ALREADY-RESOLVED promise during
+        // a /login session and fell straight through to loginViaTerminal()
+        // below, starting a second concurrent login child while /login's
+        // own poll was still tearing the first one down.
+        // `loginWaiting()` is the one signal both relogin() and /login
+        // drive through the same activeRecoveryFlows counter (see the
+        // comment above its declaration), so polling it instead correctly
+        // waits out EITHER flow's teardown.
+        const deadline = Date.now() + 20_000;
+        while (loginWaiting() && Date.now() < deadline) {
+            await sleep(200);
+        }
+        if (loginWaiting()) {
+            // Still wedged after the backstop — same silent-failure shape
+            // retro-agent-auth-relogin-noop-2026-07-01 §5.1 exists to ban,
+            // so surface it instead of proceeding into loginViaTerminal()'s
+            // own reloginInFlight guard (which /login never sets, so it
+            // wouldn't even catch this case).
             setAuthNotice(
                 "The previous login attempt is taking longer than expected to stop. " +
                 "Please wait a moment and try “Login via terminal” again.",
