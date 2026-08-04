@@ -6,8 +6,6 @@ import {
     BlockNodeModel,
     BlockProps,
     FullBlockProps,
-    FullSubBlockProps,
-    SubBlockProps,
 } from "@/app/block/blocktypes";
 import { getBlockViewClass } from "@/app/block/block-registry";
 import { invokeCommand } from "@/app/platform/ipc";
@@ -110,26 +108,6 @@ function BlockPreview({ nodeModel, viewModel }: FullBlockProps): JSX.Element {
             blockModel={null}
             viewModel={viewModel}
         />
-    );
-}
-
-function BlockSubBlock({ nodeModel, viewModel }: FullSubBlockProps): JSX.Element {
-    const [blockData] = useWaveObjectValue<Block>(makeORef("block", nodeModel.blockId));
-    let blockRef: { current: HTMLDivElement | null } = { current: null };
-    let contentRef: { current: HTMLDivElement | null } = { current: null };
-    const blockViewType = createMemo(() => blockData()?.meta?.view);
-    const viewElem = createMemo(
-        () => getViewElem(nodeModel.blockId, blockRef, contentRef, blockViewType(), viewModel)
-    );
-    const noPadding = useAtomValueSafe(viewModel.noPadding);
-    return (
-        <Show when={blockData()}>
-            <div class={clsx("block-content", { "block-no-padding": noPadding })} ref={(el) => { contentRef.current = el; }}>
-                <ErrorBoundary>
-                    <Suspense fallback={<BrainSpinner />}>{viewElem()}</Suspense>
-                </ErrorBoundary>
-            </div>
-        </Show>
     );
 }
 
@@ -338,62 +316,4 @@ function Block(props: BlockProps): JSX.Element {
     );
 }
 
-function SubBlock(props: SubBlockProps): JSX.Element {
-    counterInc("render-Block");
-    counterInc("render-Block-" + props.nodeModel?.blockId?.substring(0, 8));
-    const [blockData, loading] = useWaveObjectValue<Block>(makeORef("block", props.nodeModel.blockId));
-
-    const viewType = createMemo(() => blockData()?.meta?.view);
-    const [viewModel, setViewModel] = createSignal<ViewModel>(null);
-
-    // Ownership tracking (SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR §3.4):
-    // remember exactly which bcm THIS mount registered and which ViewModels
-    // it created, so cleanup can neither clobber a newer mount's registration
-    // nor dispose a ViewModel it merely adopted from the registry.
-    let registeredBcm: BlockComponentModel | null = null;
-    const createdViewModels: ViewModel[] = [];
-    createEffect(() => {
-        const view = viewType();
-        if (!view) return;
-        const bcm = getBlockComponentModel(props.nodeModel.blockId);
-        let vm = bcm?.viewModel;
-        if (vm == null || vm.viewType !== view) {
-            vm = makeViewModel(props.nodeModel.blockId, view, props.nodeModel as any);
-            createdViewModels.push(vm);
-            registeredBcm = { viewModel: vm };
-            registerBlockComponentModel(props.nodeModel.blockId, registeredBcm);
-        }
-        setViewModel(vm);
-    });
-
-    onCleanup(() => {
-        if (registeredBcm) {
-            unregisterBlockComponentModel(props.nodeModel.blockId, registeredBcm);
-        }
-        // Dispose only ViewModels this mount CREATED and that are not the
-        // registry's live one (a newer mount may have adopted nothing from
-        // us, but never dispose someone else's live vm out from under them).
-        const liveVm = getBlockComponentModel(props.nodeModel.blockId)?.viewModel;
-        for (const vm of createdViewModels) {
-            if (vm !== liveVm) vm?.dispose?.();
-        }
-    });
-
-    const viewTypeStr = createMemo(() => blockData()?.meta?.view);
-    return (
-        <Show
-            when={!loading() && !isBlank(props.nodeModel.blockId) && blockData() != null && viewModel()}
-            fallback={<BrainSpinner />}
-        >
-            <BlockErrorBoundary
-                blockId={props.nodeModel.blockId}
-                viewType={viewTypeStr()}
-                onClose={props.nodeModel.onClose}
-            >
-                <BlockSubBlock nodeModel={props.nodeModel} viewModel={viewModel()} />
-            </BlockErrorBoundary>
-        </Show>
-    );
-}
-
-export { Block, SubBlock };
+export { Block };

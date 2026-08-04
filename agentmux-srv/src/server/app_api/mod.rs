@@ -70,8 +70,64 @@ pub async fn open_pane(state: &AppState, cmd: CommandPaneOpenData) -> Result<Pan
         None => pane::build_pane_meta(&cmd)?,
     };
 
-    // Resolve tab
-    let tab_id = resolve_tab_id(&wstore, cmd.tab_id.as_deref())?;
+    // Editor-pane reuse (SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md
+    // Part 2): if the calling agent already has an Editor pane open in its own
+    // tab, add the requested file as a new tab in that pane instead of always
+    // spawning another Editor pane. Gated on the explicit `reuse_editor_pane`
+    // opt-in only — NOT inferred from `meta`/`split_reference_block_id` being
+    // present, since `EditorViewModel.openToTheSide`/`openInTerminal` also set
+    // `split_reference_block_id` to their OWN block id for split placement and
+    // must not trigger reuse (reagent P1 on PR #2404 caught an earlier version
+    // of this check incorrectly reusing the calling pane itself for
+    // `openToTheSide`). Also excludes `floating` requests — those always get
+    // their own new window (codex P1 on PR #2404: this branch previously ran
+    // before the floating check below and silently swallowed floating
+    // requests into a reused docked pane). Also excludes an explicit
+    // `tree_expanded` request (`OpenEditor`'s `collapse_tree` option) —
+    // reagent P2 on PR #2404: a reused pane keeps ITS OWN existing tree
+    // state, with no live mechanism to apply a new one (same class of
+    // construction-time-only limitation as focus, see
+    // `maybe_reuse_editor_pane`'s doc comment) — bypassing reuse for this
+    // specific request and falling through to the create path (which
+    // already honors `tree_expanded` correctly) is far simpler than
+    // building live meta-application, and was the reviewer's own suggested
+    // alternative.
+    if cmd.view == "editor"
+        && cmd.reuse_editor_pane == Some(true)
+        && cmd.floating != Some(true)
+        && cmd.tree_expanded.is_none()
+    {
+        if let (Some(caller_block_id), Some(file)) =
+            (cmd.split_reference_block_id.as_deref(), cmd.file.as_deref())
+        {
+            if let Some(result) = pane::maybe_reuse_editor_pane(state, caller_block_id, file).await? {
+                return Ok(result);
+            }
+        }
+    }
+
+    // Resolve tab: explicit tab_id wins; otherwise, if the caller told us
+    // which block to place this pane relative to (split_reference_block_id),
+    // resolve THAT block's own tab rather than falling back to "whichever
+    // tab happens to be globally active" — a caller specifying a relative
+    // block virtually always means "my own tab" (codex P2 on PR #2404: the
+    // editor-reuse check above already resolves this correctly-scoped tab
+    // for its own lookup, but previously discarded it whenever reuse didn't
+    // apply — e.g. a floating request, or no existing Editor pane yet —
+    // silently falling through to the flakier "first workspace's active
+    // tab" heuristic for the actual block creation/placement below, which
+    // can place a pane in the wrong tab entirely in a multi-tab setup).
+    let tab_id = if let Some(explicit) = cmd.tab_id.as_deref() {
+        explicit.to_string()
+    } else if let Some(derived) = cmd
+        .split_reference_block_id
+        .as_deref()
+        .and_then(|id| resolve_tab_id_for_block(&wstore, id).ok())
+    {
+        derived
+    } else {
+        resolve_tab_id(&wstore, None)?
+    };
 
     // Floating path (SPEC_OPENEDITOR_FLOATING_AND_COLLAPSED_TREE_2026_06_16):
     // create the block in a fresh floating workspace (via reducer CreateBlock +
@@ -849,6 +905,39 @@ pub(super) fn find_agent_block(wstore: &Store, tab_id: &str, agent_id: &str) -> 
     Ok(None)
 }
 
+/// Find which tab a given block currently belongs to, by scanning every
+/// tab's `blockids`. Needed because `resolve_tab_id` only resolves an
+/// explicit tab_id or "the active tab" — neither answers "which tab is MY
+/// OWN block in," which a caller passing its own block id (e.g. an MCP
+/// tool's `split_reference_block_id`) actually needs.
+pub(super) fn resolve_tab_id_for_block(wstore: &Store, block_id: &str) -> Result<String, String> {
+    let tabs: Vec<Tab> = wstore.get_all::<Tab>()
+        .map_err(|e| format!("resolve_tab_id_for_block: list tabs: {e}"))?;
+    for tab in tabs {
+        if tab.blockids.iter().any(|b| b == block_id) {
+            return Ok(tab.oid);
+        }
+    }
+    Err(format!("resolve_tab_id_for_block: block {block_id} not found in any tab"))
+}
+
+/// Find an existing Editor-view block in a tab, if any. Direct sibling of
+/// `find_agent_block` above, checking `meta.view == "editor"` instead of
+/// `meta.agentId`.
+pub(super) fn find_editor_block(wstore: &Store, tab_id: &str) -> Result<Option<Block>, String> {
+    let tab: Tab = wstore.must_get(tab_id)
+        .map_err(|e| format!("TAB_NOT_FOUND: {e}"))?;
+
+    for block_id in &tab.blockids {
+        if let Ok(Some(block)) = wstore.get::<Block>(block_id) {
+            if obj::meta_get_string(&block.meta, "view", "") == "editor" {
+                return Ok(Some(block));
+            }
+        }
+    }
+    Ok(None)
+}
+
 // ---------------------------------------------------------------------------
 // S1 enforcement helper
 // ---------------------------------------------------------------------------
@@ -1129,6 +1218,7 @@ mod pane_open_reducer_tests {
             floating: None,
             meta: None,
             skip_placement: None,
+            reuse_editor_pane: None,
         };
         let res = open_pane(&state, cmd).await.expect("open_pane docked");
 
@@ -1207,6 +1297,7 @@ mod pane_open_reducer_tests {
                 m
             }),
             skip_placement: Some(true),
+            reuse_editor_pane: None,
         };
         let res = open_pane(&state, cmd).await.expect("open_pane skip_placement");
         assert!(res.created);
@@ -1219,6 +1310,387 @@ mod pane_open_reducer_tests {
         assert!(
             s.tabs.get(&tab_id).unwrap().rootnode.is_none(),
             "skip_placement must not place the block into the tab's layout tree"
+        );
+    }
+
+    fn editor_open_cmd(
+        tab_id: Option<String>,
+        file: &str,
+        split_reference_block_id: Option<String>,
+        reuse_editor_pane: Option<bool>,
+    ) -> CommandPaneOpenData {
+        CommandPaneOpenData {
+            view: "editor".into(),
+            file: Some(file.to_string()),
+            url: None,
+            cwd: None,
+            title: None,
+            tab_id,
+            split_direction: None,
+            split_reference_block_id,
+            focus: None,
+            tree_expanded: None,
+            floating: None,
+            meta: None,
+            skip_placement: None,
+            reuse_editor_pane,
+        }
+    }
+
+    /// No existing Editor pane in the caller's tab → today's unchanged
+    /// behavior: a new block is created (SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md
+    /// Part 2's fall-through path).
+    #[tokio::test]
+    async fn open_editor_creates_new_pane_when_none_exists_in_tab() {
+        let state = test_state();
+
+        let ws_evs = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() }).await;
+        let ws_id = ws_evs
+            .iter()
+            .find_map(|e| match e {
+                Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let tab_evs = dispatch_apply(
+            &state,
+            Command::CreateTab { workspace_id: ws_id.clone(), name: "t".into() },
+        )
+        .await;
+        let tab_id = tab_evs
+            .iter()
+            .find_map(|e| match e {
+                Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+
+        // A "caller" pane in the tab (stands in for the calling agent's own
+        // block) — but no Editor pane exists yet, so reuse must not trigger.
+        let caller = open_pane(&state, {
+            let mut cmd = editor_open_cmd(Some(tab_id.clone()), "/tmp/unused.txt", None, None);
+            cmd.view = "sysinfo".into();
+            cmd.file = None;
+            cmd
+        })
+        .await
+        .expect("open_pane caller");
+
+        // tab_id passed explicitly (matching this file's other tests) —
+        // resolve_tab_id's separate "first workspace" fallback is exercised
+        // by test_state()'s own seeded default workspace/tab and isn't part
+        // of what this test is checking.
+        let cmd = editor_open_cmd(Some(tab_id), "/tmp/a.md", Some(caller.block_id.clone()), Some(true));
+        let res = open_pane(&state, cmd).await.expect("open_pane editor");
+        assert!(res.created, "must create a new Editor pane when none exists in the tab");
+        assert_ne!(res.block_id, caller.block_id);
+    }
+
+    /// Regression for reagent P2 on PR #2404: an explicit `collapse_tree`
+    /// request (`tree_expanded: Some(false)`) has no live mechanism to apply
+    /// to an already-mounted pane's tree state — bypass reuse for it
+    /// entirely rather than silently ignoring the request.
+    #[tokio::test]
+    async fn open_editor_bypasses_reuse_when_tree_expanded_requested() {
+        let state = test_state();
+
+        let ws_evs = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() }).await;
+        let ws_id = ws_evs
+            .iter()
+            .find_map(|e| match e {
+                Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let tab_evs = dispatch_apply(
+            &state,
+            Command::CreateTab { workspace_id: ws_id.clone(), name: "t".into() },
+        )
+        .await;
+        let tab_id = tab_evs
+            .iter()
+            .find_map(|e| match e {
+                Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+
+        let caller = open_pane(&state, {
+            let mut cmd = editor_open_cmd(Some(tab_id.clone()), "/tmp/unused.txt", None, None);
+            cmd.view = "sysinfo".into();
+            cmd.file = None;
+            cmd
+        })
+        .await
+        .expect("open_pane caller");
+
+        let existing_editor = open_pane(
+            &state,
+            editor_open_cmd(Some(tab_id.clone()), "/tmp/existing.md", None, None),
+        )
+        .await
+        .expect("open_pane existing editor");
+
+        let mut cmd = editor_open_cmd(None, "/tmp/collapsed.md", Some(caller.block_id.clone()), Some(true));
+        cmd.tree_expanded = Some(false);
+        let res = open_pane(&state, cmd).await.expect("open_pane collapse_tree request");
+        assert_ne!(
+            res.block_id, existing_editor.block_id,
+            "an explicit tree_expanded request must bypass reuse and create its own pane"
+        );
+    }
+
+    /// An Editor pane already open in the caller's own tab → reused (file
+    /// appended to META_PENDING_OPEN_FILES for the pane to drain) instead of
+    /// spawning a second Editor pane.
+    #[tokio::test]
+    async fn open_editor_reuses_existing_pane_in_callers_tab() {
+        let state = test_state();
+
+        let ws_evs = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() }).await;
+        let ws_id = ws_evs
+            .iter()
+            .find_map(|e| match e {
+                Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let tab_evs = dispatch_apply(
+            &state,
+            Command::CreateTab { workspace_id: ws_id.clone(), name: "t".into() },
+        )
+        .await;
+        let tab_id = tab_evs
+            .iter()
+            .find_map(|e| match e {
+                Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+
+        // Caller's own pane (e.g. the agent pane that will call OpenEditor).
+        let caller = open_pane(&state, {
+            let mut cmd = editor_open_cmd(Some(tab_id.clone()), "/tmp/unused.txt", None, None);
+            cmd.view = "sysinfo".into();
+            cmd.file = None;
+            cmd
+        })
+        .await
+        .expect("open_pane caller");
+
+        // An Editor pane already open in the same tab.
+        let first_editor = open_pane(
+            &state,
+            editor_open_cmd(Some(tab_id.clone()), "/tmp/first.md", None, None),
+        )
+        .await
+        .expect("open_pane first editor");
+        assert!(first_editor.created);
+
+        // A second OpenEditor call from the caller, same tab, different file
+        // — must reuse the existing Editor pane, not create a second one.
+        let reused = open_pane(
+            &state,
+            editor_open_cmd(None, "/tmp/second.md", Some(caller.block_id.clone()), Some(true)),
+        )
+        .await
+        .expect("open_pane reused editor");
+        assert!(!reused.created, "must reuse the existing Editor pane, not create a second one");
+        assert_eq!(reused.block_id, first_editor.block_id);
+        assert_eq!(reused.tab_id, tab_id);
+    }
+
+    /// Regression for codex P1 on PR #2404: 2+ reuse calls before the target
+    /// pane's frontend ever drains its pending-files meta must all survive,
+    /// not overwrite each other down to just the last one.
+    #[tokio::test]
+    async fn open_editor_reuse_queues_multiple_pending_files() {
+        let state = test_state();
+
+        let ws_evs = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() }).await;
+        let ws_id = ws_evs
+            .iter()
+            .find_map(|e| match e {
+                Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let tab_evs = dispatch_apply(
+            &state,
+            Command::CreateTab { workspace_id: ws_id.clone(), name: "t".into() },
+        )
+        .await;
+        let tab_id = tab_evs
+            .iter()
+            .find_map(|e| match e {
+                Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+
+        let caller = open_pane(&state, {
+            let mut cmd = editor_open_cmd(Some(tab_id.clone()), "/tmp/unused.txt", None, None);
+            cmd.view = "sysinfo".into();
+            cmd.file = None;
+            cmd
+        })
+        .await
+        .expect("open_pane caller");
+
+        let first_editor = open_pane(
+            &state,
+            editor_open_cmd(Some(tab_id.clone()), "/tmp/first.md", None, None),
+        )
+        .await
+        .expect("open_pane first editor");
+
+        // Three back-to-back reuse calls, none of which drain the queue
+        // (no frontend attached in this test) — all three must still be
+        // present afterward, not just the last one.
+        for path in ["/tmp/a.md", "/tmp/b.md", "/tmp/c.md"] {
+            let res = open_pane(
+                &state,
+                editor_open_cmd(None, path, Some(caller.block_id.clone()), Some(true)),
+            )
+            .await
+            .expect("open_pane reuse");
+            assert!(!res.created);
+            assert_eq!(res.block_id, first_editor.block_id);
+        }
+
+        let block: Block = state.wstore.must_get(&first_editor.block_id).unwrap();
+        let pending = block
+            .meta
+            .get("editor:pending_open_files")
+            .and_then(|v| v.as_array())
+            .expect("pending_open_files must be an array");
+        let paths: Vec<&str> = pending.iter().filter_map(|v| v.as_str()).collect();
+        assert_eq!(
+            paths,
+            vec!["/tmp/a.md", "/tmp/b.md", "/tmp/c.md"],
+            "all three stacked reuse requests must survive, in order, not just the last one"
+        );
+    }
+
+    /// Regression for reagent P1 on PR #2404: `EditorViewModel.openToTheSide`/
+    /// `openInTerminal` (`frontend/app/view/editor/editor-model.ts:958-984`)
+    /// call the same generic `pane.open` RPC with `split_reference_block_id`
+    /// set to their OWN block id, for split placement only — never setting
+    /// `reuse_editor_pane`. Reuse must not trigger for them, or "Open to the
+    /// Side" would silently redirect into the calling pane itself instead of
+    /// creating the requested second pane.
+    #[tokio::test]
+    async fn open_editor_does_not_reuse_without_explicit_opt_in() {
+        let state = test_state();
+
+        let ws_evs = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() }).await;
+        let ws_id = ws_evs
+            .iter()
+            .find_map(|e| match e {
+                Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let tab_evs = dispatch_apply(
+            &state,
+            Command::CreateTab { workspace_id: ws_id.clone(), name: "t".into() },
+        )
+        .await;
+        let tab_id = tab_evs
+            .iter()
+            .find_map(|e| match e {
+                Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+
+        // The "current" Editor pane, standing in for the one openToTheSide
+        // is called from.
+        let current_editor = open_pane(
+            &state,
+            editor_open_cmd(Some(tab_id.clone()), "/tmp/current.md", None, None),
+        )
+        .await
+        .expect("open_pane current editor");
+
+        // openToTheSide's exact shape: split_reference_block_id = its own
+        // block id, no reuse_editor_pane set.
+        let side = open_pane(
+            &state,
+            editor_open_cmd(
+                Some(tab_id.clone()),
+                "/tmp/side.md",
+                Some(current_editor.block_id.clone()),
+                None,
+            ),
+        )
+        .await
+        .expect("open_pane openToTheSide");
+        assert!(
+            side.created,
+            "openToTheSide must always create its own new pane, never reuse the calling pane"
+        );
+        assert_ne!(side.block_id, current_editor.block_id);
+    }
+
+    /// Regression for codex P1 on PR #2404: a `floating: true` OpenEditor
+    /// call must always get its own new floating window, even when an
+    /// Editor pane already exists (with reuse opted in) in the caller's tab
+    /// — reuse must not silently swallow it into the existing docked pane.
+    #[tokio::test]
+    async fn open_editor_floating_request_bypasses_reuse() {
+        let state = test_state();
+
+        let ws_evs = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() }).await;
+        let ws_id = ws_evs
+            .iter()
+            .find_map(|e| match e {
+                Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let tab_evs = dispatch_apply(
+            &state,
+            Command::CreateTab { workspace_id: ws_id.clone(), name: "t".into() },
+        )
+        .await;
+        let tab_id = tab_evs
+            .iter()
+            .find_map(|e| match e {
+                Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+
+        let caller = open_pane(&state, {
+            let mut cmd = editor_open_cmd(Some(tab_id.clone()), "/tmp/unused.txt", None, None);
+            cmd.view = "sysinfo".into();
+            cmd.file = None;
+            cmd
+        })
+        .await
+        .expect("open_pane caller");
+
+        let existing_editor = open_pane(
+            &state,
+            editor_open_cmd(Some(tab_id.clone()), "/tmp/existing.md", None, None),
+        )
+        .await
+        .expect("open_pane existing editor");
+
+        let mut floating_cmd = editor_open_cmd(
+            None,
+            "/tmp/floating.md",
+            Some(caller.block_id.clone()),
+            Some(true),
+        );
+        floating_cmd.floating = Some(true);
+        let floating = open_pane(&state, floating_cmd)
+            .await
+            .expect("open_pane floating editor");
+        assert_ne!(
+            floating.block_id, existing_editor.block_id,
+            "a floating OpenEditor request must never be swallowed into an existing docked pane"
         );
     }
 }

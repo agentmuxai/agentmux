@@ -31,7 +31,7 @@ interface ModalEntry {
 }
 
 /** Handle returned by `openModal` — lets the caller close the modal it opened. */
-export interface ModalHandle {
+interface ModalHandle {
     /** Closes the modal. Idempotent — a no-op if already closed. */
     close: () => void;
 }

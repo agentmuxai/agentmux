@@ -27,7 +27,7 @@ import * as WOS from "./wos";
  * tabbar.tsx. Users can still change the colour per-tab via the
  * right-click menu after creation.
  */
-export function randomNewTabColor(): string {
+function randomNewTabColor(): string {
     return TAB_COLORS[Math.floor(Math.random() * TAB_COLORS.length)].hex;
 }
 

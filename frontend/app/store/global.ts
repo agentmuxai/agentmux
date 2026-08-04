@@ -13,7 +13,6 @@ import {
     backendStatusAtom,
     backendDeathInfoAtom,
     initBackendStatusListeners,
-    setBackendDeathInfoAtom,
     setBackendStatusAtom,
 } from "./backendStatus";
 import { openModal } from "./modalmodel";
@@ -29,23 +28,13 @@ import {
     hasCustomAIPresetsAtom,
 } from "./config-signals";
 import {
-    useBlockCache,
-    cleanupBlockAtomCache,
-    cleanupTabAtomCache,
     getBlockMetaKeyAtom,
-    useBlockMetaKeyAtom,
-    getTabMetaKeyAtom,
-    useTabMetaKeyAtom,
     getSettingsKeyAtom,
-    useSettingsKeyAtom,
     getOverrideConfigAtom,
-    useOverrideConfigAtom,
     getSettingsPrefixAtom,
     useBlockAtom,
-    useBlockDataLoaded,
 } from "./block-atom-cache";
 import {
-    windowId,
     setWindowId,
     clientId,
     setClientId,
@@ -68,9 +57,10 @@ import { flashErrors, notifications, notificationPopoverMode } from "./flash-not
 // Window identity — moved to window-identity.ts (see below for re-export);
 // imported above for use in the `atoms` back-compat object and initGlobalSignals.
 
-export { fullConfigAtom, setFullConfigAtom, settingsAtom, hasCustomAIPresetsAtom };
+export { fullConfigAtom, setFullConfigAtom, settingsAtom };
 
-export const [isFullScreen, setIsFullScreen] = createSignal(false);
+const [isFullScreen, setIsFullScreen] = createSignal(false);
+export { isFullScreen };
 export const [controlShiftDelayAtom, setControlShiftDelayAtom] = createSignal(false);
 export const [updaterStatusAtom, setUpdaterStatusAtom] = createSignal<UpdaterStatus>("up-to-date");
 export const [updaterVersionAtom, setUpdaterVersionAtom] = createSignal<string | null>(null);
@@ -92,18 +82,19 @@ export const [reducedMotionSystemPreference, setReducedMotionSystemPreference] =
 // the atom every consumer reads is hard false.
 export const prefersReducedMotionAtom = createMemo(() => false);
 
-export type { BackendStatusState, BackendDeathInfo } from "./backendStatus";
-export { backendStatusAtom, setBackendStatusAtom, backendDeathInfoAtom, setBackendDeathInfoAtom };
+export { backendStatusAtom, setBackendStatusAtom, backendDeathInfoAtom };
 
-export const [typeAheadModalAtom, setTypeAheadModalAtom] = createSignal<Record<string, unknown>>({});
+const [typeAheadModalAtom] = createSignal<Record<string, unknown>>({});
 export const [modalOpen, setModalOpen] = createSignal(false);
 
-export const [reinitVersion, setReinitVersion] = createSignal(0);
+const [reinitVersion, setReinitVersion] = createSignal(0);
+export { setReinitVersion };
 export const [isTermMultiInput, setIsTermMultiInput] = createSignal(false);
 
-export const [windowInstanceNumAtom, setWindowInstanceNumAtom] = createSignal(0);
+export const [, setWindowInstanceNumAtom] = createSignal(0);
 export const [windowCountAtom, setWindowCountAtom] = createSignal(1);
-export const [lanInstancesAtom, setLanInstancesAtom] = createSignal<LanInstance[]>([]);
+const [lanInstancesAtom, setLanInstancesAtom] = createSignal<LanInstance[]>([]);
+export { lanInstancesAtom };
 // Last error message from the LAN discovery daemon (e.g. firewall block).
 // Cleared on successful enable. See specs/lan-discovery-toggle.md.
 export const [lanDiscoveryErrorAtom, setLanDiscoveryErrorAtom] = createSignal<string | null>(null);
@@ -112,7 +103,7 @@ export const [lanDiscoveryErrorAtom, setLanDiscoveryErrorAtom] = createSignal<st
 // app-init's window-instances-changed listener whenever a window opens
 // or closes. Consumed by the version-click instance panel.
 // See SPEC_VERSION_INSTANCE_PANEL_2026_04_25.md.
-export const [openWindowLabelsAtom, setOpenWindowLabelsAtom] = createSignal<string[]>([]);
+export const [, setOpenWindowLabelsAtom] = createSignal<string[]>([]);
 
 // Same list, but each entry carries the backend window id alongside the
 // host label so the InstancePanel can resolve per-window Window records
@@ -169,7 +160,7 @@ export const atoms = {
 // globalPrimaryTabStartup
 // ---------------------------------------------------------------------------
 
-export let globalPrimaryTabStartup = false;
+let globalPrimaryTabStartup = false;
 
 // ---------------------------------------------------------------------------
 // Init
@@ -321,32 +312,18 @@ export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
 // Block / tab atom caches — moved to block-atom-cache.ts; re-exported below for
 // backward-compat (97 files import from this module).
 export {
-    useBlockCache,
-    cleanupBlockAtomCache,
-    cleanupTabAtomCache,
     getBlockMetaKeyAtom,
-    useBlockMetaKeyAtom,
-    getTabMetaKeyAtom,
-    useTabMetaKeyAtom,
     getSettingsKeyAtom,
-    useSettingsKeyAtom,
     getOverrideConfigAtom,
-    useOverrideConfigAtom,
     getSettingsPrefixAtom,
     useBlockAtom,
-    useBlockDataLoaded,
 } from "./block-atom-cache";
 
 // Window identity — moved to window-identity.ts; re-exported below for
 // backward-compat (97 files import from this module). Also imported above
 // (see top of file) for use in the `atoms` object and initGlobalSignals.
 export {
-    windowId,
-    setWindowId,
-    clientId,
-    setClientId,
     staticTabId,
-    setStaticTabId,
     client,
     waveWindow,
     workspace,
@@ -362,7 +339,6 @@ export {
     createBlockSplitVertically,
     createBlock,
     replaceBlock,
-    setNodeFocus,
 } from "./block-layout-actions";
 
 // Block component model registry — moved to block-component-registry.ts;
@@ -385,12 +361,9 @@ export { fetchWaveFile } from "./wave-file";
 // backward-compat (97 files import from this module). Also imported above
 // (see top of file) for use in the `atoms` object.
 export {
-    connStatusMap,
     allConnStatus,
     loadConnStatus,
     subscribeToConnEvents,
-    makeDefaultConnStatus,
-    getOrCreateConnStatusPair,
     getConnStatusAtom,
 } from "./conn-status";
 
@@ -399,22 +372,19 @@ export {
 // Also imported above (see top of file) for use in the `atoms` object.
 export {
     flashErrors,
-    setFlashErrors,
     notifications,
     setNotifications,
     notificationPopoverMode,
     setNotificationPopoverMode,
     pushFlashError,
-    addOrUpdateNotification,
     pushNotification,
     removeNotificationById,
     removeFlashError,
-    removeNotification,
 } from "./flash-notifications";
 
 // Tab management — moved to tab-actions.ts; re-exported below for
 // backward-compat (97 files import from this module).
-export { createTab, randomNewTabColor, setActiveTab } from "./tab-actions";
+export { createTab, setActiveTab } from "./tab-actions";
 
 // ---------------------------------------------------------------------------
 // Telemetry
@@ -431,7 +401,7 @@ export { countersClear, counterInc, countersPrint } from "./dev-counters";
 
 // Misc utilities — moved to misc-utils.ts; re-exported below for
 // backward-compat (97 files import from this module).
-export { getObjectId, isDev, getUserName, getHostName, openLink } from "./misc-utils";
+export { isDev, getUserName, getHostName, openLink } from "./misc-utils";
 
-// Re-export WOS, getApi, and setPlatform for call-sites that import them from here
-export { WOS, setPlatform, getApi };
+// Re-export WOS and getApi for call-sites that import them from here
+export { WOS, getApi };

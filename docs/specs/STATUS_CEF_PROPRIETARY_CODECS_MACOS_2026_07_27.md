@@ -166,15 +166,19 @@ across all three platforms' workflows), not something introduced by this
 specific release — but it means the codec work is a no-op for CI until it's
 addressed.
 
-**Not yet remediated as of this write-up** — the reliable fix is deleting/
-retiring the stale `cef-macos-arm64-148.23.21` tag so `[0]` has nothing wrong
-to pick (a version bump or tag suffix alone doesn't fix a `created_at`-based
-sort). That's a destructive action on a shared distribution repo other
-workflows depend on, so it's being confirmed with the user rather than done
-unilaterally. Whoever picks this up: check `gh release list --repo
-agentmuxai/cef --limit 30 --json tagName --jq '[.[].tagName |
-select(startswith("cef-macos-arm64-"))][0]'` again first — if it already
-prints `cef-macos-arm64-148.23.23-codecs`, this has been handled.
+**Remediated 2026-07-28, 23:57 PDT** — fixed via PR #2353
+(`fix(ci): sort agentmuxai/cef release resolution by publishedAt, not list
+order`), which changed the resolver in all four CI call sites
+(`build-macos.yml`, `build-linux.yml`, `build-windows.yml`,
+`ci-nightly-artifacts.yml` ×3) to explicitly `sort_by(.publishedAt) |
+reverse` instead of trusting `gh release list`'s default order. No tag
+deletion needed — the stale `cef-macos-arm64-148.23.21` tag is untouched,
+just no longer selected. Verified live 2026-08-03: the resolver query now
+returns `cef-macos-arm64-148.23.23-codecs`, and the 2026-08-03 scheduled
+nightly run (`ci-nightly-artifacts.yml`, run `30803686278`) shows all three
+platforms' jobs actually downloading/caching their respective `-codecs`
+release tags. Full verification write-up:
+`docs/reports/REPORT_CEF_CODEC_RELEASE_RESOLUTION_RETRO_2026_08_03.md`.
 
 ## Notes / findings as they come up
 

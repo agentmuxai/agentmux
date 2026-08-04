@@ -1,8 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Provider classification: [`ProviderClass`], [`provider_class`], and
-//! [`provider_env_vars`].
+//! Provider classification: [`ProviderClass`] and [`provider_class`].
 //!
 //! Split out of the single ~2193-line `resolver.rs` (pure relocation, no
 //! behavior change).
@@ -98,30 +97,9 @@ pub fn provider_class(provider: &str) -> Option<ProviderClass> {
     }
 }
 
-/// Legacy convenience: env vars for an api-key provider. Delegates to
-/// [`provider_class`]; returns empty for oauth-class providers (their
-/// resolution path doesn't go through string-secret env-var injection)
-/// and for unknown providers.
-pub fn provider_env_vars(provider: &str) -> Vec<&'static str> {
-    match provider_class(provider) {
-        Some(ProviderClass::ApiKey { env_vars }) => env_vars.to_vec(),
-        _ => Vec::new(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn provider_env_vars_matrix() {
-        assert_eq!(provider_env_vars("github"), vec!["GITHUB_TOKEN", "GH_TOKEN"]);
-        assert_eq!(provider_env_vars("anthropic"), vec!["ANTHROPIC_API_KEY"]);
-        assert_eq!(provider_env_vars("openai"), vec!["OPENAI_API_KEY"]);
-        assert_eq!(provider_env_vars("kimi"), vec!["MOONSHOT_API_KEY"]);
-        assert_eq!(provider_env_vars("aws"), vec!["AWS_ACCESS_KEY_ID"]);
-        assert!(provider_env_vars("unknown").is_empty());
-    }
 
     #[test]
     fn provider_class_oauth_providers() {

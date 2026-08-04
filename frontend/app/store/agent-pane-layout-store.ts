@@ -27,7 +27,6 @@ import {
     windowRangeOf,
     type LayoutView,
     type RowPosition,
-    type WindowRange,
 } from "./agent-pane-layout/reducer";
 import {
     AgentPaneLayoutCommand,
@@ -251,4 +250,4 @@ export function __resetAllSlots(): void {
 }
 
 export type { AgentPaneLayoutCommand, AgentPaneLayoutEvent, AgentPaneLayoutState };
-export type { LayoutView, RowPosition, WindowRange };
+export type { LayoutView, RowPosition };

@@ -53,7 +53,11 @@ export function parseHistoryLines(
     agentName?: string,
 ): ParsedHistory {
     const translator = createTranslator(outputFormat);
-    const parser = new ClaudeCodeStreamParser();
+    // isReplay: true — thinking/tool_call events carry no wire timestamp of
+    // their own, so stamping Date.now() here would show every replayed
+    // clump/call as "just now" (reagent P2 on PR #2392). See
+    // ClaudeCodeStreamParser's isReplay doc comment.
+    const parser = new ClaudeCodeStreamParser({ isReplay: true });
     if (agentName) parser.setAgentId(agentName);
     const nodes: DocumentNode[] = [];
     let lastSessionStats: SessionStats | null = null;

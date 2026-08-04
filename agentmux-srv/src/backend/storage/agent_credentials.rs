@@ -16,7 +16,6 @@ use super::store::Store;
 
 #[derive(Debug, Clone, Default)]
 pub struct AgentCredential {
-    pub agent_id: String,
     pub client_id: String,
     pub client_secret: String,
     pub token_endpoint: String,
@@ -47,17 +46,16 @@ impl Store {
         let key = agent_id.to_lowercase();
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT agent_id, client_id, client_secret, token_endpoint, access_token, expires_at
+            "SELECT client_id, client_secret, token_endpoint, access_token, expires_at
              FROM db_agent_credentials WHERE agent_id = ?1",
         )?;
         match stmt.query_row(params![key], |row| {
             Ok(AgentCredential {
-                agent_id: row.get(0)?,
-                client_id: row.get(1)?,
-                client_secret: row.get(2)?,
-                token_endpoint: row.get(3)?,
-                access_token: row.get(4)?,
-                expires_at: row.get(5)?,
+                client_id: row.get(0)?,
+                client_secret: row.get(1)?,
+                token_endpoint: row.get(2)?,
+                access_token: row.get(3)?,
+                expires_at: row.get(4)?,
             })
         }) {
             Ok(c) => Ok(Some(c)),
@@ -260,7 +258,6 @@ mod tests {
     #[test]
     fn is_valid_respects_the_300s_early_refresh_margin() {
         let mut cred = AgentCredential {
-            agent_id: "agentx".to_string(),
             client_id: "c".to_string(),
             client_secret: "s".to_string(),
             token_endpoint: "e".to_string(),
@@ -276,7 +273,6 @@ mod tests {
     #[test]
     fn is_valid_false_with_no_access_token() {
         let cred = AgentCredential {
-            agent_id: "agentx".to_string(),
             expires_at: AgentCredential::now_secs() + 3600,
             ..Default::default()
         };

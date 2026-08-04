@@ -20,7 +20,7 @@ import { Button } from "@/element/button";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 
-export interface AddAccountFormData {
+interface AddAccountFormData {
     accountId: string;
 }
 

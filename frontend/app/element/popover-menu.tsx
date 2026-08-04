@@ -11,7 +11,7 @@ import "./popover-menu.scss";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-export type PopoverMenuActionItem = {
+type PopoverMenuActionItem = {
     type?: "normal" | "checkbox";
     label: string;
     checked?: boolean;
@@ -21,9 +21,9 @@ export type PopoverMenuActionItem = {
     click: () => void;
 };
 
-export type PopoverMenuSeparator = { type: "separator" };
+type PopoverMenuSeparator = { type: "separator" };
 
-export type PopoverMenuSection = {
+type PopoverMenuSection = {
     type: "section";
     label: string;
     /** Whether the section starts expanded. Default true. */
@@ -33,7 +33,7 @@ export type PopoverMenuSection = {
 
 export type PopoverMenuItem = PopoverMenuActionItem | PopoverMenuSeparator | PopoverMenuSection;
 
-export interface PopoverMenuProps {
+interface PopoverMenuProps {
     items: PopoverMenuItem[];
     /** Cursor position in client px. Clamped to viewport on mount. */
     pos: { x: number; y: number };

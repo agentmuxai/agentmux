@@ -176,7 +176,7 @@ export function findParent(node: LayoutNode, id: string): LayoutNode | undefined
  * @param node The node to validate.
  * @returns True if the node is valid, false otherwise.
  */
-export function validateNode(node: LayoutNode): boolean {
+function validateNode(node: LayoutNode): boolean {
     if (!node.children == !node.data) {
         console.error("Either children or data must be defined for node, not both");
         return false;
@@ -328,8 +328,4 @@ function findNextInsertLocationHelper(
         .filter((a) => a)
         .sort((a, b) => Math.pow(a.depth, a.index + maxChildren) - Math.pow(b.depth, b.index + maxChildren));
     return insertLocs[0];
-}
-
-export function totalChildrenSize(node: LayoutNode): number {
-    return node.children?.reduce((partialSum, child) => partialSum + child.size, 0);
 }

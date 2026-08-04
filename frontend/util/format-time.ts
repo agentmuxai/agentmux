@@ -34,3 +34,39 @@ export function formatElapsedClock(ms: number): string {
     const s = totalSec % 60;
     return `${m}:${String(s).padStart(2, "0")}`;
 }
+
+/**
+ * Relative "time ago" form — consolidates 6+ independently-duplicated
+ * implementations (`MyAgentsList.tsx`, `AgentLaunchModal.tsx`,
+ * `AgentDisconnectedBanner.tsx`, `swarm-view.tsx`, `usenotification.tsx`,
+ * `warden.tsx`, plus devtools-only copies). Migrated from
+ * `MyAgentsList.tsx`'s `formatRelative` (the one with existing test
+ * coverage) — same behavior, `now` reordered to a trailing, defaulted
+ * parameter so production call sites don't need to pass it explicitly
+ * while tests still can.
+ *
+ * See docs/specs/SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md §2.2.
+ */
+export function formatTimeAgo(ms: number, now: number = Date.now()): string {
+    if (!ms) return "";
+    const delta = Math.max(0, now - ms);
+    if (delta < 60_000) return "just now";
+    if (delta < 3_600_000) return `${Math.floor(delta / 60_000)}m ago`;
+    if (delta < 86_400_000) return `${Math.floor(delta / 3_600_000)}h ago`;
+    return `${Math.floor(delta / 86_400_000)}d ago`;
+}
+
+/**
+ * Absolute local time, "HH:MM:SS" (24-hour). Adapted from the unshipped
+ * `docs/specs/node-timestamp-hover.md`'s draft — dropped the tenths-of-a-
+ * second digit that draft used (not meaningful at the granularity this is
+ * actually used at: hovering a tool call or thinking clump, not diagnosing
+ * out-of-order sub-second delivery).
+ */
+export function formatExactTime(ms: number): string {
+    const d = new Date(ms);
+    const h = String(d.getHours()).padStart(2, "0");
+    const m = String(d.getMinutes()).padStart(2, "0");
+    const s = String(d.getSeconds()).padStart(2, "0");
+    return `${h}:${m}:${s}`;
+}

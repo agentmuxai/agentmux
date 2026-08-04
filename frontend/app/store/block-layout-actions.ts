@@ -107,10 +107,3 @@ export async function replaceBlock(blockId: string, blockDef: BlockDef, focus: b
     return newBlockId;
 }
 
-// ---------------------------------------------------------------------------
-// Focus / node
-// ---------------------------------------------------------------------------
-
-export function setNodeFocus(nodeId: string) {
-    getLayoutModelForStaticTab().focusNode(nodeId);
-}

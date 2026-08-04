@@ -159,10 +159,6 @@ const QuickTips = (): JSX.Element => {
                             <span class="text-[15px]">New Terminal Pane</span>
                             <KeyBinding keyDecl="Cmd:n" />
                         </div>
-                        <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-white/5 transition-colors">
-                            <span class="text-[15px]">Open Agent Panel</span>
-                            <KeyBinding keyDecl="Cmd:Shift:a" />
-                        </div>
                     </div>
 
                     <div class="flex flex-col gap-1.5">
@@ -195,10 +191,6 @@ const QuickTips = (): JSX.Element => {
                             <span class="text-[15px]">Focus Nth Pane</span>
                             <KeyBinding keyDecl="Ctrl:Shift:Digit" />
                         </div>
-                        <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-white/5 transition-colors">
-                            <span class="text-[15px]">Focus Agent Panel</span>
-                            <KeyBinding keyDecl="Ctrl:Shift:0" />
-                        </div>
                     </div>
 
                     <div class="flex flex-col gap-1.5">
@@ -211,11 +203,15 @@ const QuickTips = (): JSX.Element => {
                         </div>
                         <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-white/5 transition-colors">
                             <span class="text-[15px]">Split Below</span>
-                            <KeyBinding keyDecl="Cmd:Shift:d" />
+                            <KeyBinding keyDecl="Shift:Cmd:d" />
                         </div>
                         <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-white/5 transition-colors">
                             <span class="text-[15px]">Split in Direction</span>
                             <KeyBinding keyDecl="Ctrl:Shift:s + Arrows" />
+                        </div>
+                        <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-white/5 transition-colors">
+                            <span class="text-[15px]">Resize All Panes Together</span>
+                            <KeyBinding keyDecl="Shift + Drag" />
                         </div>
                     </div>
                 </div>
@@ -361,4 +357,4 @@ const QuickTips = (): JSX.Element => {
     );
 };
 
-export { KeyBinding, QuickTips };
+export { QuickTips };

@@ -3,7 +3,7 @@
 
 import * as util from "./util";
 
-export function findBlockId(element: HTMLElement): string | null {
+function findBlockId(element: HTMLElement): string | null {
     let current: HTMLElement = element;
     while (current) {
         if (current.hasAttribute("data-blockid")) {
@@ -38,11 +38,6 @@ export function getElemAsStr(elem: EventTarget) {
         rtn += ` [${blockId.substring(0, 8)}]`;
     }
     return rtn;
-}
-
-export function hasSelection() {
-    const sel = document.getSelection();
-    return sel && sel.rangeCount > 0 && !sel.isCollapsed;
 }
 
 export function focusedBlockId(): string {

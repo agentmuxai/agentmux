@@ -221,6 +221,21 @@ const OPEN_EDITOR_TOOL: &str = r#"{
   }
 }"#;
 
+const OPEN_MEDIA_TOOL: &str = r#"{
+  "name": "OpenMedia",
+  "description": "Open an image, video, or audio file in an AgentMux media pane next to this conversation. Use when you want the user to see/watch generated media you're discussing. Pass an absolute host path. Fire-and-forget: returns once the pane is opened.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "file":     { "type": "string", "description": "Absolute path to the media file to open" },
+      "title":    { "type": "string", "description": "Optional tab/pane title (defaults to the file name)" },
+      "split":    { "type": "string", "enum": ["right", "left", "down", "up"], "description": "Where to place the new pane relative to this agent pane (default: right). Ignored when floating is true." },
+      "floating": { "type": "boolean", "description": "Open the file in a floating window (a chromeless pane over the app) instead of a docked split. Default: false." }
+    },
+    "required": ["file"]
+  }
+}"#;
+
 const LOOP_TOOL: &str = r#"{
   "name": "Loop",
   "description": "Run a prompt or slash command on a recurring interval by re-injecting it into a conversation. AgentMux's analogue of Claude's /loop. Returns immediately with a loop_id; the prompt is injected on a fixed schedule until you call LoopStop(loop_id) or it exhausts max_iterations. Use for polling/babysitting tasks ('check the deploy every 5m', 'keep running /babysit-prs'). Loops stop automatically when the agent pane closes. Do NOT use for one-off tasks — use ScheduleWakeup for that.",
@@ -479,6 +494,7 @@ async fn main() {
                 let shell_input: Value = serde_json::from_str(SHELL_INPUT_TOOL).expect("static json");
                 let shell_status: Value = serde_json::from_str(SHELL_STATUS_TOOL).expect("static json");
                 let open_editor: Value = serde_json::from_str(OPEN_EDITOR_TOOL).expect("static json");
+                let open_media: Value = serde_json::from_str(OPEN_MEDIA_TOOL).expect("static json");
                 let send_message: Value = serde_json::from_str(SEND_MESSAGE_TOOL).expect("static json");
                 let discover_agents: Value =
                     serde_json::from_str(DISCOVER_AGENTS_TOOL).expect("static json");
@@ -510,7 +526,7 @@ async fn main() {
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, open_editor, send_message, discover_agents, whoami, layout, set_name, set_active_tab, new_tab, focus_window, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, memory_list, memory_read, memory_write, preset_list, preset_get, identity_accounts, identity_validate] }
+                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, open_editor, open_media, send_message, discover_agents, whoami, layout, set_name, set_active_tab, new_tab, focus_window, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, memory_list, memory_read, memory_write, preset_list, preset_get, identity_accounts, identity_validate] }
                 })
             }
             "tools/call" => {
@@ -843,6 +859,12 @@ async fn call_tool(
                 url: None,
                 cwd: None,
                 tab_id: None,
+                // Reuse an already-open Editor pane in this agent's own tab
+                // instead of always spawning a new one — the explicit opt-in
+                // only OpenEditor sets (see reuse_editor_pane's doc comment on
+                // PaneOpenRequest for why this can't be inferred from
+                // split_reference_block_id alone).
+                reuse_editor_pane: Some(true),
             };
 
             let resp = client
@@ -865,6 +887,77 @@ async fn call_tool(
                 .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
 
             Ok(format!("Opened {file} in editor pane (block {})", result.block_id))
+        }
+        "OpenMedia" => {
+            let file = arguments
+                .get("file")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: file"))?;
+
+            if local_url.is_empty() || auth_key.is_empty() {
+                anyhow::bail!(
+                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+                     Is this agent pane opened via AgentMux?"
+                );
+            }
+
+            let split = arguments
+                .get("split")
+                .and_then(|v| v.as_str())
+                .filter(|s| matches!(*s, "right" | "left" | "down" | "up"))
+                .unwrap_or("right");
+
+            let url = format!("{}/api/v1/pane/open", local_url.trim_end_matches('/'));
+            // Place the media pane relative to the calling agent pane when we
+            // know its block id (AGENTMUX_BLOCKID); otherwise the sidecar
+            // inserts it at the tab root.
+            let (split_direction, split_reference_block_id) = if block_id.is_empty() {
+                (None, None)
+            } else {
+                (Some(split.to_string()), Some(block_id.to_string()))
+            };
+            let req = PaneOpenRequest {
+                view: "media".to_string(),
+                file: Some(file.to_string()),
+                focus: Some(true),
+                split_direction,
+                split_reference_block_id,
+                title: arguments.get("title").and_then(|v| v.as_str()).map(str::to_string),
+                // The Media pane has no file-tree sidebar, unlike Editor.
+                tree_expanded: None,
+                // `floating: true` → open in a floating window instead of a docked split.
+                floating: if arguments.get("floating").and_then(|v| v.as_bool()) == Some(true) {
+                    Some(true)
+                } else {
+                    None
+                },
+                url: None,
+                cwd: None,
+                tab_id: None,
+                reuse_editor_pane: None, // view != "editor" — irrelevant here
+            };
+
+            let resp = client
+                .post(&url)
+                .header("X-AuthKey", auth_key)
+                .json(&req)
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("pane.open failed: HTTP {status} — {text}");
+            }
+
+            let result: PaneOpenResponse = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+
+            Ok(format!("Opened {file} in media pane (block {})", result.block_id))
         }
         "SendMessage" => {
             let to = arguments
@@ -1720,6 +1813,7 @@ mod tests {
             SHELL_TOOL,
             SHELL_STOP_TOOL,
             OPEN_EDITOR_TOOL,
+            OPEN_MEDIA_TOOL,
             SEND_MESSAGE_TOOL,
             DISCOVER_AGENTS_TOOL,
             WHOAMI_TOOL,
@@ -1744,7 +1838,7 @@ mod tests {
             IDENTITY_ACCOUNTS_TOOL,
             IDENTITY_VALIDATE_TOOL,
         ];
-        assert_eq!(defs.len(), 26, "tools/list advertises 26 tools (11 original + 3 Loop + 5 Cron + 7 agent-API)");
+        assert_eq!(defs.len(), 27, "tools/list advertises 27 tools (11 original + 1 OpenMedia + 3 Loop + 5 Cron + 7 agent-API)");
         for d in defs {
             let v: Value = serde_json::from_str(d).expect("tool def must be valid JSON");
             assert!(

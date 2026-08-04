@@ -22,7 +22,7 @@ export interface StackEntry {
     close: () => void;
 }
 
-export const stack: StackEntry[] = [];
+const stack: StackEntry[] = [];
 
 export const push = (entry: StackEntry): void => {
     stack.push(entry);
@@ -39,7 +39,7 @@ export const remove = (id: string): void => {
  * region is covered if `outer.lockEl` contains `inner.lockEl`, or the two
  * resolve to the same node (two window modals share `document.body`).
  */
-export function covers(outer: StackEntry, inner: StackEntry): boolean {
+function covers(outer: StackEntry, inner: StackEntry): boolean {
     if (outer.lockEl === inner.lockEl) return true;
     return outer.lockEl.contains(inner.lockEl);
 }

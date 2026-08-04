@@ -133,7 +133,7 @@ export function buildConfigFiles(
 /**
  * Replace {{VARIABLE}} placeholders in content with values from vars map.
  */
-export function expandTemplate(content: string, vars: Record<string, string>): string {
+function expandTemplate(content: string, vars: Record<string, string>): string {
     return content.replace(/\{\{(\w+)\}\}/g, (match, key) => {
         return vars[key] ?? match;
     });
@@ -411,7 +411,7 @@ export function buildSettingsWithHooks(
  * Build .mcp.json content with auto-injected AgentMux MCP server.
  * Merges with user-provided MCP config if present.
  */
-export function buildMcpConfig(
+function buildMcpConfig(
     userMcpContent: string | undefined,
     agent?: AgentDefinition,
     instanceName?: string,

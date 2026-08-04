@@ -10,18 +10,16 @@ use agentmux_common::ipc::{Command, Event};
 use crate::reducer::{update, Ctx};
 use crate::state::State;
 
-pub(crate) fn ctx(conn_id: u64) -> Ctx {
+pub(crate) fn ctx(_conn_id: u64) -> Ctx {
     Ctx {
         now_rfc3339: "2026-04-30T00:00:00Z".to_string(),
-        conn_id,
         registered_pid: None,
     }
 }
 
-pub(crate) fn ctx_with_pid(conn_id: u64, pid: u32) -> Ctx {
+pub(crate) fn ctx_with_pid(_conn_id: u64, pid: u32) -> Ctx {
     Ctx {
         now_rfc3339: "2026-04-30T00:00:00Z".to_string(),
-        conn_id,
         registered_pid: Some(pid),
     }
 }

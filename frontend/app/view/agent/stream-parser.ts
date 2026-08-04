@@ -56,7 +56,7 @@ export const STARTUP_HEADING_RE = /^# Session Context\b/;
  *
  * Spec: docs/specs/SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md §3.1.
  */
-export const JEKT_BLOCK_RE = /^\[JEKT:([^\]\n]+)\]\r?\n([\s\S]*?)\r?\n\[\/JEKT\]\s*$/;
+const JEKT_BLOCK_RE = /^\[JEKT:([^\]\n]+)\]\r?\n([\s\S]*?)\r?\n\[\/JEKT\]\s*$/;
 
 const VALID_JEKT_TIERS: ReadonlySet<string> = new Set(["info", "coord", "sensitive"]);
 const VALID_JEKT_DELIVERY_TIERS: ReadonlySet<string> = new Set(["host", "lan", "wan"]);
@@ -181,10 +181,29 @@ export class ClaudeCodeStreamParser {
      */
     private skipIdsFn: () => ReadonlySet<string> = STATIC_EMPTY_SKIP_SET_FN;
     private pendingToolCalls: Map<string, ToolCallEvent> = new Map();
+    // Original call time, keyed by tool_use id — toolResultToNode() reads
+    // this so a completed tool's peek-tooltip time reflects when it was
+    // CALLED, not when the result arrived (reagent P1 on PR #2392: without
+    // this, toolResultToNode() built a fresh node with no timestamp at all,
+    // and useAgentStream.ts's generic backfill stamped Date.now() at
+    // *result* time instead).
+    private pendingToolTimestamps: Map<string, number> = new Map();
     private currentAgentId?: string;
     // Mutable node objects for accumulated text/thinking — content is appended in-place
     private currentTextNode: { type: "markdown"; id: string; content: string } | null = null;
-    private currentThinkingNode: { type: "markdown"; id: string; content: string; metadata: { thinking: true } } | null = null;
+    private currentThinkingNode: { type: "markdown"; id: string; content: string; timestamp?: number; metadata: { thinking: true } } | null = null;
+    // True for the dedicated parser instance parseHistoryLines.ts creates to
+    // batch-replay persisted NDJSON at pane-reopen time — false (default) for
+    // the live useAgentStream.ts parser. thinking/tool_call events carry no
+    // wire-level timestamp of their own (checked directly — neither
+    // ThinkingEvent nor ToolCallEvent has one; only a few frame kinds like
+    // the real compact_boundary system frame do), so there is no accurate
+    // "when did this actually happen" available during replay. Stamping
+    // Date.now() anyway would silently show every replayed thinking clump /
+    // tool call as "just now" (reagent P2 on PR #2392) — leaving timestamp
+    // unset here means the peek tooltip correctly shows no time rather than
+    // a confidently wrong one.
+    private isReplay: boolean;
 
     /**
      * `skipIds` accepts either a static `ReadonlySet<string>` (for
@@ -196,12 +215,17 @@ export class ClaudeCodeStreamParser {
      */
     constructor(opts?: {
         skipIds?: ReadonlySet<string> | (() => ReadonlySet<string>);
+        /** See `isReplay`'s own doc comment above. Defaults to `false`
+         *  (live-parsing behavior) — `parseHistoryLines.ts` is the only
+         *  caller that passes `true`. */
+        isReplay?: boolean;
     }) {
         if (opts?.skipIds) {
             this.skipIdsFn = typeof opts.skipIds === "function"
                 ? opts.skipIds
                 : ((s) => () => s)(opts.skipIds);
         }
+        this.isReplay = opts?.isReplay ?? false;
     }
 
     /**
@@ -385,7 +409,26 @@ export class ClaudeCodeStreamParser {
     private thinkingToNode(event: ThinkingEvent): DocumentNode {
         this.currentTextNode = null;
         if (!this.currentThinkingNode) {
-            this.currentThinkingNode = { type: "markdown", id: this.nextIdOf("node"), content: event.content, metadata: { thinking: true } };
+            // Stamped only on first creation of the clump — this is when the
+            // clump started, not when it was last extended. Matches
+            // toolCallToNode()'s Date.now() convention. See
+            // docs/specs/SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md §2.4:
+            // this was a real gap — thinking clumps never got a timestamp at
+            // all before, unlike every other node kind.
+            //
+            // Gated on !isReplay (reagent P2 on PR #2392): ThinkingEvent
+            // carries no wire timestamp, so during history replay Date.now()
+            // would just be "when this pane was reopened", not "when the
+            // thought happened" — every replayed clump would misleadingly
+            // show "just now". Leave it unset in that case; see isReplay's
+            // own doc comment.
+            this.currentThinkingNode = {
+                type: "markdown",
+                id: this.nextIdOf("node"),
+                content: event.content,
+                timestamp: this.isReplay ? undefined : Date.now(),
+                metadata: { thinking: true },
+            };
         } else {
             this.currentThinkingNode = { ...this.currentThinkingNode, content: this.currentThinkingNode.content + event.content };
         }
@@ -418,6 +461,23 @@ export class ClaudeCodeStreamParser {
     private toolCallToNode(event: ToolCallEvent): DocumentNode {
         // Store pending tool call for when result arrives
         this.pendingToolCalls.set(event.id, event);
+        // Capture ONE call timestamp, reused by every branch below and by
+        // toolResultToNode() later — a tool's "time" is when it was called,
+        // not touched again on re-entry (AskUserQuestion's placeholder ->
+        // fully-parsed upgrade calls this twice for the same id; only the
+        // first call should seed it).
+        //
+        // Gated on !isReplay (reagent P2 on PR #2392, same reasoning as
+        // thinkingToNode() above): ToolCallEvent carries no wire timestamp
+        // either, so Date.now() during history replay would be "when this
+        // pane was reopened", not "when the tool was actually called".
+        // undefined here (never set in the map) flows through to every
+        // return site below and to toolResultToNode()'s fallback read —
+        // left unset rather than confidently wrong.
+        if (!this.isReplay && !this.pendingToolTimestamps.has(event.id)) {
+            this.pendingToolTimestamps.set(event.id, Date.now());
+        }
+        const callTimestamp = this.pendingToolTimestamps.get(event.id);
 
         // AskUserQuestion is a tool the agent calls to consult the human; it
         // blocks the turn on a tool_result. When the params are fully parsed
@@ -438,6 +498,7 @@ export class ClaudeCodeStreamParser {
                     status: "awaiting_answer",
                     collapsed: false,
                     summary: "❓ Waiting for your answer",
+                    timestamp: callTimestamp,
                     question: {
                         type: "ask_user_question",
                         tool_use_id: event.id,
@@ -458,7 +519,7 @@ export class ClaudeCodeStreamParser {
             status: "running",
             collapsed: false, // Show running tools
             summary,
-            timestamp: Date.now(),
+            timestamp: callTimestamp,
         };
     }
 
@@ -473,9 +534,22 @@ export class ClaudeCodeStreamParser {
         // Prefer tool name from the pending call (set during tool_use) over
         // event.tool which may be "Unknown" when the API doesn't include it.
         const toolName = (event.tool && event.tool !== "Unknown") ? event.tool : (toolCall?.tool || "Unknown");
+        // Carry over the ORIGINAL call time (reagent P1 on PR #2392) — without
+        // this, the node built here had no timestamp at all, and
+        // useAgentStream.ts's generic "stamp a receive time" backfill filled
+        // it in with the RESULT's arrival time instead, so a completed tool's
+        // peek tooltip (the only state it's ever actually visible in — see
+        // ToolBlock.tsx's `disable`) showed "when did this finish" mislabeled
+        // as "when was this called". Falls back to now() only LIVE (never
+        // during replay, reagent P2 — see isReplay's doc comment); a live
+        // tool_result with no matching pending call shouldn't happen, but a
+        // fallback there is still more useful than none, whereas during
+        // replay it would just be "when this pane was reopened" again.
+        const callTimestamp = this.pendingToolTimestamps.get(event.id) ?? (this.isReplay ? undefined : Date.now());
 
         // Remove from pending
         this.pendingToolCalls.delete(event.id);
+        this.pendingToolTimestamps.delete(event.id);
 
         const summary = this.generateToolSummary(
             toolName,
@@ -502,6 +576,7 @@ export class ClaudeCodeStreamParser {
             // collapse to the single-line ✗ row with hover-to-peek.
             collapsed: true,
             summary,
+            timestamp: callTimestamp,
         };
     }
 
@@ -676,6 +751,7 @@ export class ClaudeCodeStreamParser {
         this.buffer = "";
         this.nodeIdCounter = 0;
         this.pendingToolCalls.clear();
+        this.pendingToolTimestamps.clear();
         this.currentTextNode = null;
         this.currentThinkingNode = null;
         // skipIds intentionally NOT cleared — a `reset()` typically

@@ -271,5 +271,3 @@ function LauncherView(props: ViewComponentProps<LauncherViewModel>): JSX.Element
         </div>
     );
 }
-
-export default LauncherView;

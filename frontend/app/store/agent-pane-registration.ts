@@ -232,5 +232,4 @@ export function isPaneHalfRegistered(blockId: string): boolean {
     return inDoc !== inPaneState;
 }
 
-export type { AgentPaneProjections };
 export type { AgentPaneModel } from "./agent-pane-model";

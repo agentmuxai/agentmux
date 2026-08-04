@@ -233,7 +233,7 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let run_id_for_drain = run_id.clone();
                 let drone_id_for_drain = drone_id.clone();
                 tokio::spawn(async move {
-                    let mut last_status = RunStatus::Running;
+                    let mut last_status;
                     let mut output = String::new();
                     let mut error = String::new();
                     while let Some(ev) = handle.events.recv().await {

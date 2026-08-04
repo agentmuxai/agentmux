@@ -6,7 +6,7 @@ import { For, Show } from "solid-js";
 import type { JSX } from "solid-js";
 import "./color-swatch-palette.scss";
 
-export interface SwatchColor {
+interface SwatchColor {
     name: string;
     hex: string;
 }

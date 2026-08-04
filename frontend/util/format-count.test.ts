@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { formatCompactNumber, formatExactNumber } from "./format-count";
+import { estimateTokenCount, formatCompactNumber, formatExactNumber } from "./format-count";
 
 describe("formatCompactNumber", () => {
     it("returns raw digits below 1000", () => {
@@ -63,5 +63,14 @@ describe("formatExactNumber", () => {
         expect(formatExactNumber(999)).toBe("999");
         expect(formatExactNumber(1_000)).toBe("1,000");
         expect(formatExactNumber(1_234_567)).toBe("1,234,567");
+    });
+});
+
+describe("estimateTokenCount", () => {
+    it("estimates chars/4, rounded up", () => {
+        expect(estimateTokenCount("")).toBe(0);
+        expect(estimateTokenCount("abcd")).toBe(1);
+        expect(estimateTokenCount("abcde")).toBe(2); // 5/4 = 1.25 -> ceil to 2
+        expect(estimateTokenCount("a".repeat(400))).toBe(100);
     });
 });

@@ -105,7 +105,7 @@ interface AgentLaunchModalPanelProps {
 /** Snapshot of the editable Launch form. Used to thread the user's
  *  in-progress edits through the new-identity / new-memory modal so
  *  returning to Launch doesn't reset typed-but-unsubmitted values. */
-export interface LaunchFormState {
+interface LaunchFormState {
     name: string;
     runtime: "host" | "container";
     image: string;

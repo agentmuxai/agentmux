@@ -24,7 +24,7 @@ export interface McpDraft {
     config: string;
 }
 
-export function emptyMcpDraft(): McpDraft {
+function emptyMcpDraft(): McpDraft {
     return { id: undefined, name: "", transport: "stdio", config: "{}" };
 }
 

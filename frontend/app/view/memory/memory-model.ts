@@ -50,7 +50,7 @@ export interface MemoryDraft {
  *  `db_bundles.skills` column is JSON-encoded; a literal `""` would
  *  trip downstream `JSON.parse(skills)` readers. Reagent P1 on
  *  PR #747 (2026-05-08). */
-export function emptyDraft(): MemoryDraft {
+function emptyDraft(): MemoryDraft {
     return {
         id: undefined,
         name: "",
@@ -65,7 +65,7 @@ export function emptyDraft(): MemoryDraft {
 /** Hydrate a draft from a stored Memory. JSON fields are parsed; on
  *  parse failure we fall back to safe empties so the UI stays usable
  *  even if the row is malformed. */
-export function draftFromMemory(m: Memory): MemoryDraft {
+function draftFromMemory(m: Memory): MemoryDraft {
     let context_files: Array<{ path: string; content: string }> = [];
     try {
         const parsed = JSON.parse(m.context_files ?? "[]");
@@ -97,7 +97,7 @@ export function draftFromMemory(m: Memory): MemoryDraft {
  *  0 for both — the upsert handler server-sets `created_at = now`
  *  when it sees 0 and always overwrites `updated_at` with now. Codex
  *  P1 (PR #749). */
-export function draftToWire(d: MemoryDraft): Memory {
+function draftToWire(d: MemoryDraft): Memory {
     return {
         id: d.id ?? "",
         name: d.name.trim(),

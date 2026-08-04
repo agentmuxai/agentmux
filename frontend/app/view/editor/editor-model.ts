@@ -37,7 +37,8 @@ import { createBlockOnModel, waitForLayoutModel } from "@/app/tab/tab-presets";
 import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
-import { createMemo, createSignal, type Accessor } from "solid-js";
+import { fireAndForget } from "@/util/util";
+import { createEffect, createMemo, createRoot, createSignal, type Accessor } from "solid-js";
 import { FileTreeModel } from "./file-tree-model";
 
 const META_TREE_EXPANDED = "editor:tree_expanded";
@@ -45,6 +46,15 @@ const META_SHOW_HIDDEN = "editor:show_hidden";
 const META_TREE_WIDTH = "editor:tree_width";
 const META_PREVIEW_HEIGHT = "editor:preview_height";
 const META_LEGACY_FILE = "file";
+// Reuse (SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md
+// Part 2): files pushed by reuse-and-not-yet-mounted OpenEditor calls.
+// Drained (all entries, in order) once at construction, then cleared —
+// deliberately NOT delivered via WPS event replay, which has no ack/consume
+// concept and would otherwise re-fire on every future reconnect (codex P1
+// on PR #2404). An array, not a single scalar, so 2+ calls stacking up
+// before the pane mounts don't overwrite/lose each other (codex P1, second
+// finding on the same PR).
+const META_PENDING_OPEN_FILES = "editor:pending_open_files";
 
 export type EditorMode = "preview" | "source" | "split";
 const META_SCRATCH = "editor:scratch";
@@ -176,6 +186,7 @@ export class EditorViewModel implements ViewModel {
     // the same path from this same pane is idempotent.
     private _watchedPathByTab = new Map<string, string>();
     private _unsubFileChanged: () => void = () => {};
+    private _disposePendingOpenFilesEffect: () => void = () => {};
 
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
@@ -218,6 +229,62 @@ export class EditorViewModel implements ViewModel {
                 const path = (event as any)?.data?.path as string | undefined;
                 if (path) void this._handleExternalFileChanged(path);
             },
+        });
+
+        // Pane-reuse (SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md
+        // Part 2): reactively drains META_PENDING_OPEN_FILES whenever the
+        // backend writes to it — a file an OpenEditor reuse call pushed into
+        // this pane instead of creating a second Editor pane. Reactive
+        // (createEffect over blockAtom), not a one-shot construction-time
+        // check, so it uniformly covers BOTH "this pane wasn't mounted yet
+        // when the backend wrote the request" and "already mounted, backend
+        // writes it later" through the same WaveObj sync path this pane
+        // already reactively depends on for everything else.
+        //
+        // An earlier version used a SEPARATE live WPS event (fired directly
+        // alongside the meta write) for the already-mounted case, racing
+        // this same meta update. Reagent (PR #2404) found the race: the WPS
+        // event is a direct WS push and arrives essentially synchronously,
+        // while the meta write reaches `blockAtom` only after an async
+        // WaveObj DB-refetch — so the live event's handler could run and try
+        // to dequeue its own path from `blockAtom()`'s meta BEFORE that same
+        // write had actually landed there, reading stale data and no-op'ing,
+        // stranding the entry to be wrongly reprocessed on a later remount.
+        // Removing the separate live path entirely (rather than patching the
+        // race) leaves one delivery mechanism and one reactive consumer —
+        // no ordering between two paths to get wrong. Costs a small amount
+        // of latency for the already-mounted case (a real WaveObj round-trip
+        // instead of a direct push) in exchange for not being racy.
+        createRoot((dispose) => {
+            this._disposePendingOpenFilesEffect = dispose;
+            createEffect(() => {
+                const pending = this.blockAtom()?.meta?.[META_PENDING_OPEN_FILES];
+                if (!Array.isArray(pending) || pending.length === 0) return;
+                const processed = pending.filter((p): p is string => typeof p === "string" && p.length > 0);
+                for (const path of processed) void this.openFile(path);
+                fireAndForget(() => {
+                    // Re-read fresh (not the `pending` snapshot above) right
+                    // before writing, and remove only the entries THIS run
+                    // processed, rather than blind-clearing to `[]` — reagent
+                    // P1: an unconditional clear could overwrite a file the
+                    // backend appended between this effect's read and this
+                    // write landing, silently dropping it (the same class of
+                    // lost-update bug already fixed twice in this PR at
+                    // different points, reappearing here). This narrows the
+                    // race to the network round-trip of this one write,
+                    // rather than eliminating it outright — a fully atomic
+                    // fix needs a backend remove-these-entries command
+                    // running under the reducer's single-writer lock, not a
+                    // client-side read-filter-write; deferred given how
+                    // narrow the remaining window is (needs a third
+                    // concurrent reuse call specifically inside it).
+                    const current = this.blockAtom()?.meta?.[META_PENDING_OPEN_FILES];
+                    const remaining = Array.isArray(current)
+                        ? current.filter((p) => !processed.includes(p))
+                        : [];
+                    return this.persistMeta({ [META_PENDING_OPEN_FILES]: remaining });
+                });
+            });
         });
 
         // Projections from the slice's slot cell. Reading sliceVersionAtom
@@ -338,6 +405,10 @@ export class EditorViewModel implements ViewModel {
             // Widget default: open a scratch buffer when no file was persisted.
             void this.openScratch();
         }
+
+        // Reuse: pending files are handled by the reactive createEffect
+        // above (covers this initial-mount case too — no separate one-shot
+        // check needed here, and having both would double-open).
     }
 
     // ── Event subscription (used by editor-view.tsx for CodeMirror state
@@ -1023,7 +1094,7 @@ export class EditorViewModel implements ViewModel {
                     meta: {
                         view: "editor",
                         file: filePath,
-                        ...(isMarkdown ? { "editor:tree_expanded": false, "editor:source_hidden": true } : {}),
+                        ...(isMarkdown ? { "editor:tree_expanded": false } : {}),
                     },
                 },
                 null,
@@ -1103,6 +1174,7 @@ export class EditorViewModel implements ViewModel {
 
     dispose(): void {
         this._unsubFileChanged();
+        this._disposePendingOpenFilesEffect();
         for (const tabId of [...this._watchedPathByTab.keys()]) this._unwatchTab(tabId);
         _instanceHandlers.delete(this._globalHandler);
         this._eventSubscribers.clear();
@@ -1193,7 +1265,7 @@ const EXTENSION_MAP: Record<string, string> = {
     ".svg": "html",
 };
 
-export function detectLanguage(filePath: string): string {
+function detectLanguage(filePath: string): string {
     const lower = filePath.toLowerCase();
     // Extension lookup. Use endsWith so multi-segment extensions like
     // `.test.tsx` still resolve via the trailing component.
