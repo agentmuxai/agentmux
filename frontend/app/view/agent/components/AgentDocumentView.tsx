@@ -47,6 +47,13 @@ interface AgentDocumentViewProps {
      *  button on the auth-URL box so a stuck login has an exit besides
      *  closing the pane. Wired to useAgentControllerStatus's cancelLogin. */
     onCancelLogin?: () => void;
+    /** Explicit "Use terminal instead" fallback on the auth-URL box — mirrors
+     *  PreLaunchAuthPanel's identical secondary action
+     *  (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.3 surface 2). Wired to
+     *  useAgentControllerStatus's loginViaTerminal, which cancels this
+     *  session's own login child itself (tier 1 starting a second one would
+     *  race against the one still open in this box). */
+    onUseTerminal?: () => void;
     /** Re-run the provider login flow — forwarded to the list so an inline
      *  auth-error node can offer a "Login Again" CTA (SPEC_REAUTH_FROM_AUTH_ERROR §7). */
     onAgentErrorLogin?: () => void;
@@ -171,7 +178,12 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
             </Show>
             <Show when={props.authUrl?.()}>
                 {(url) => (
-                    <AuthUrlBox url={url()} authProviderId={props.authProviderId} onCancel={props.onCancelLogin} />
+                    <AuthUrlBox
+                        url={url()}
+                        authProviderId={props.authProviderId}
+                        onCancel={props.onCancelLogin}
+                        onUseTerminal={props.onUseTerminal}
+                    />
                 )}
             </Show>
             <Show when={props.authNotice?.()}>
@@ -222,6 +234,7 @@ interface AuthUrlBoxProps {
     url: string;
     authProviderId?: string;
     onCancel?: () => void;
+    onUseTerminal?: () => void;
 }
 
 /**
@@ -233,6 +246,7 @@ function AuthUrlBox(props: AuthUrlBoxProps): JSX.Element {
     const [pasteCode, setPasteCode] = createSignal("");
     const [pasting, setPasting] = createSignal(false);
     const [pasteResult, setPasteResult] = createSignal<string | null>(null);
+    const [switchingToTerminal, setSwitchingToTerminal] = createSignal(false);
     let inputRef: HTMLInputElement | undefined;
 
     // Grab focus when the box appears so the user's pasted code lands HERE,
@@ -338,9 +352,32 @@ function AuthUrlBox(props: AuthUrlBoxProps): JSX.Element {
             <Show when={pasteResult()}>
                 <div class="agent-auth-paste-result">{pasteResult()}</div>
             </Show>
-            <Show when={props.onCancel}>
-                <Button onClick={() => props.onCancel?.()}>Cancel login</Button>
-            </Show>
+            <div class="agent-auth-actions-row">
+                <Show when={props.onCancel}>
+                    <Button onClick={() => props.onCancel?.()}>Cancel login</Button>
+                </Show>
+                <Show when={props.onUseTerminal}>
+                    {/* Secondary fallback alongside Cancel — the URL/paste flow
+                        above is the default now (spec §3.2), but a browser that
+                        can't reach it (remote desktop, sandboxed host) still
+                        needs a way out besides giving up. Mirrors
+                        PreLaunchAuthPanel's identical secondary action. */}
+                    <Button
+                        className="grey"
+                        disabled={switchingToTerminal()}
+                        onClick={async () => {
+                            setSwitchingToTerminal(true);
+                            try {
+                                await props.onUseTerminal?.();
+                            } finally {
+                                setSwitchingToTerminal(false);
+                            }
+                        }}
+                    >
+                        {switchingToTerminal() ? "Switching…" : "Use terminal instead"}
+                    </Button>
+                </Show>
+            </div>
         </div>
     );
 }

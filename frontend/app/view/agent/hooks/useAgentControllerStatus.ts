@@ -145,6 +145,14 @@ export interface UseAgentControllerStatus {
      * (not just a file — PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md §7).
      */
     loginViaTerminal: () => Promise<void>;
+    /**
+     * AuthUrlBox's "Use terminal instead" secondary action
+     * (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.3 surface 2): cancels
+     * whichever in-app login session is currently in flight and switches to
+     * loginViaTerminal() once it's actually torn down (loginViaTerminal()
+     * alone would no-op — it guards on the same in-flight flag).
+     */
+    useTerminalInstead: () => Promise<void>;
     cancelLogin: () => void;
     /**
      * Clear stale auth-recovery UI (the "Retry Login" bar / any lingering
@@ -590,20 +598,34 @@ export function useAgentControllerStatus(
                         recheckAuthEnv = { ...authEnv, [prov.authConfigDirEnvVar]: dir };
                     }
                 },
-                // reagent P1 on PR #2410: this call passes existingAccountId
-                // (reconnect, not fresh-connect) — dropping
-                // headlessLoginUrlUnsupported (catalog.ts) would let tier 1
-                // run here too, but this branch's completion poll below only
-                // calls CheckCliAuthCommand against the SAME isolated dir the
-                // stale/expired credential being re-authenticated already
-                // lives in, so it would report authenticated:true on the
-                // very first tick — before the user does anything — falsely
-                // completing "Login Again" instantly. The proper fix (child-
-                // aware completion via awaitTier1Completion/getCliLoginStatus,
-                // spec §3.1) lands in the stacked relogin-surface PR; hardcode
-                // true here in the meantime so this PR alone doesn't regress
-                // Claude relogin the moment the catalog flag drops.
-                skipTier1: true,
+                // Behavior-gate only (no catalog provider sets the flag
+                // since Claude's was dropped — see catalog.ts and
+                // SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.2): kept
+                // for defense-in-depth, matching PreLaunchAuthPanel.tsx's
+                // and login.ts's identical expression, in case a future
+                // provider needs tier 1 skipped again.
+                //
+                // reagent P1 on PR #2410 (against PR1 alone, before this PR
+                // existed): dropping headlessLoginUrlUnsupported here without
+                // ALSO adding awaitTier1Completion would let tier 1 run for
+                // this existingAccountId-bearing (reconnect) call, but the
+                // "opened" branch's completion poll only checks
+                // CheckCliAuthCommand against the SAME isolated dir the
+                // stale/expired credential already lives in — reporting
+                // authenticated:true on the first tick, before the user does
+                // anything. awaitTier1Completion below is exactly the fix:
+                // it's the reason this PR exists, not a leftover default.
+                skipTier1: prov.headlessLoginUrlUnsupported === true,
+                // The whole in-app session now lives inside runProviderLogin
+                // (spec §3.1/§3.3 surface 2): it polls for child-exit +
+                // credential-landed, persists and links the account, and
+                // resolves with "inapp-success"/"inapp-timeout" — no
+                // hand-rolled "opened" completion poll needed for the case
+                // that actually happens now (tier 1 succeeding for Claude).
+                // The "opened" branch below is kept as the fallback for the
+                // one case awaitTier1Completion doesn't cover itself — see
+                // its own comment.
+                awaitTier1Completion: true,
                 // See launch-flow.ts's identical wiring — without this the
                 // phase set just above never updates again for the rest of
                 // this call, even though tier 2/3 inside it can run for up
@@ -618,9 +640,15 @@ export function useAgentControllerStatus(
             });
             switch (outcome) {
                 case "opened": {
-                    // A real OAuth URL was captured and opened — poll until
-                    // the user finishes there, cancels, or 5 minutes elapse
-                    // (same pattern as launch-flow.ts's own "opened" case).
+                    // With awaitTier1Completion:true above, tier 1 only
+                    // still returns bare "opened" (instead of resolving the
+                    // awaited session itself) when the account-dir mint
+                    // failed — see run-provider-login.ts's own tier-1 doc
+                    // comment ("also the fallback when the dir mint
+                    // failed"). Kept as a hand-rolled poll for that one
+                    // remaining case; the case that actually happens now
+                    // (Claude's tier 1 succeeding) resolves via
+                    // "inapp-success"/"inapp-timeout" below instead.
                     opts.log("auth", "waiting for login to complete...");
                     let authenticated = false;
                     let authedEmail: string | null = null;
@@ -725,6 +753,7 @@ export function useAgentControllerStatus(
                     }
                     break;
                 }
+                case "inapp-success":
                 case "seeded":
                 case "terminal-success":
                     // openedAccountId/openedAccountDir are only set by
@@ -736,7 +765,11 @@ export function useAgentControllerStatus(
                     // Trusting the outcome string alone reported "Login
                     // successful" for a login the resolver's spawn gate would
                     // then block on the very next turn with no account ever
-                    // having existed.
+                    // having existed. "inapp-success" is subject to the exact
+                    // same gate — runProviderLogin's own persist call can
+                    // fail even though the credential is genuinely on disk
+                    // (see its doc comment) — so it's handled identically
+                    // here, not given its own branch.
                     if (openedAccountId && openedAccountDir) {
                         opts.log(
                             "auth",
@@ -767,6 +800,16 @@ export function useAgentControllerStatus(
                             "Your login succeeded, but AgentMux couldn't save the account record. Try again in a moment.",
                         );
                     }
+                    break;
+                case "inapp-timeout":
+                    // Unlike terminal-timeout, the user still has the
+                    // captured URL sitting in the AuthUrlBox (setAuthUrl
+                    // fired before this poll started) — point back at that
+                    // instead of implying they need to click something new.
+                    setAuthNotice(
+                        "The login link timed out. If you already authorized in your browser, " +
+                        "click “Login Again”. Otherwise finish there and paste the code, or try “Login via terminal”.",
+                    );
                     break;
                 case "terminal-timeout":
                     // Never fail silently (retro §5.1): tell the user nothing
@@ -1060,6 +1103,30 @@ export function useAgentControllerStatus(
         setLaunchPhase(null);
     };
 
+    // "Use terminal instead" — AuthUrlBox's secondary action alongside
+    // Cancel (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.3 surface 2).
+    // Can't just call loginViaTerminal() directly: it guards on the same
+    // `reloginInFlight` flag relogin()'s still-awaited call above is
+    // holding, and cancelLogin() only flips a boolean the poll notices on
+    // its own next tick (up to ~2s) rather than synchronously unwinding
+    // relogin()'s await — an immediate loginViaTerminal() call would just
+    // no-op against a flag that hasn't cleared yet. Bounded poll instead of
+    // a dedicated cross-flow signal for what is structurally the same
+    // "cancel, then start the next flow" the mount-time retry path already
+    // does after a `succeeded` relogin (see beginRecoveryFlow's own doc
+    // comment on the shared, not-exclusive nature of these flags).
+    const useTerminalInstead = async () => {
+        cancelLogin();
+        for (let i = 0; i < 15 && reloginInFlight; i++) {
+            await sleep(300);
+        }
+        // Suppress whatever notice relogin()'s own cancelled-poll branch
+        // just set (e.g. "inapp-timeout"'s message) — the user asked to
+        // switch flows, not to be told their login attempt failed.
+        setAuthNotice(null);
+        await loginViaTerminal();
+    };
+
     const notifyControllerHealthy = () => {
         setCanRetry(false);
         setAuthNotice(null);
@@ -1100,6 +1167,7 @@ export function useAgentControllerStatus(
         relogin,
         useGlobalLogin,
         loginViaTerminal,
+        useTerminalInstead,
         notifyControllerHealthy,
         forceControllerRefresh,
         cancelLogin,
