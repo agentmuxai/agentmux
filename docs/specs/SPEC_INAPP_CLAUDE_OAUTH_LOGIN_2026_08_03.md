@@ -52,7 +52,7 @@ One reusable flow (backend-spawned, frontend-observed), extracted so all three s
 - Remove the three `skipTier1: true` overrides (`useAgentControllerStatus.ts`, `commands/global/login.ts`, `PreLaunchAuthPanel.tsx`) for Claude; tier 1 becomes the revived in-app session (§3.1). Tier 2 (seed-from-global) stays as the fast path when a valid global login exists.
 - **Two distinct "reach tier 3" paths — do not conflate them** (codex flagged this pairing as apparently contradictory on PR #2410; it isn't, but needs spelling out):
   1. **Capture miss** — tier 1 prints no URL at all within its capture window (older CLI, e.g. ≤2.1.183 behavior). Falls through 1 → 2 → 3 **automatically**, exactly as today, unchanged — this is the behavior-gate, no CLI version check anywhere, and is why older CLIs keep working with zero regression.
-  2. **In-app session timeout** — a URL WAS captured and shown, but the awaited completion poll never observed success within its window. This does **not** auto-launch tier 3: the session just ends (`inapp-timeout`); the terminal opens only on the user's explicit "Use terminal instead" click, which re-runs the login with `skipTier1: true`.
+  2. **User-driven fallback ("`inapp-timeout`")** — a URL WAS captured and shown; there's no passive/unattended timeout on the in-app session itself (§3.1: it lives as long as the panel is open). Tier 3 is reached ONLY by the user's own "Use terminal instead" click, which is what interrupts the poll and produces the `inapp-timeout` outcome (not a poll that independently expires and is then, separately, escalated) — the terminal opens as part of that same click, re-running the login with `skipTier1: true`.
 
   In short: once tier 1 has shown the user a URL, nothing after that auto-launches anything further out from under them — only a capture miss (nothing was ever shown) auto-proceeds, because there's nothing on screen to interrupt.
 
@@ -77,7 +77,7 @@ One reusable flow (backend-spawned, frontend-observed), extracted so all three s
 - **PR 1:** §3.1 core session + catalog changes (§3.2), wired into the launch surface (surface 1). Terminal tier kept as manual fallback.
 - **PR 2:** relogin surface (surface 2) on the same primitive.
 - **PR 3:** Armory + Stash (surface 3) incl. `accounts-catalog` change and the block-context decoupling.
-- **PR 4 (cleanup):** docs sweep only, no behavior change — correct stale "dead end"/"still impossible" claims (`catalog.ts` comment, `SPEC_HOST_CLI_LOGIN_CAPTURE` §0 note, `REPORT_…RETHINK` §8 addendum) to match §3.2's actual auto-launch semantics: the capture-miss 1→2→3 fallthrough stays automatic and unchanged; only the in-app-session-timeout path is user-driven ("Use terminal instead"), and that was already true before this PR, not something PR 4 newly retires.
+- **PR 4 (cleanup):** docs sweep only, no behavior change — correct stale "dead end"/"still impossible" claims (`catalog.ts` comment, `SPEC_HOST_CLI_LOGIN_CAPTURE` §0 note, `REPORT_…RETHINK` §8 addendum) to match §3.2's actual auto-launch semantics: the capture-miss 1→2→3 fallthrough stays automatic and unchanged; tier 3 is otherwise reached ONLY by the user's own "Use terminal instead" click (there's no passive session timeout to separately auto-escalate — §3.2), and that was already true before this PR, not something PR 4 newly retires.
 
 ## 5. Security notes
 

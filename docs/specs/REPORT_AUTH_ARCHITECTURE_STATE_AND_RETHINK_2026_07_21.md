@@ -501,9 +501,10 @@ its own OAuth client, same as it always has; AgentMux only needed to relay the U
 `docs/specs/SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md`, which revives the in-app URL+paste UI as the
 PRIMARY path for Claude, demoting the terminal-window fallback to an explicit secondary action. Per
 `SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md` §3.2, that fallback is still auto-launched on a genuine capture
-miss (tier 1 prints no URL at all — the pre-existing 1→2→3 fallthrough, unchanged); it's only reached by
-explicit user action ("Use terminal instead") once a URL has actually been shown and an in-app session
-subsequently times out. The "paste a pre-generated long-lived token" idea floated above remains a legitimate, separately-
+miss (tier 1 prints no URL at all — the pre-existing 1→2→3 fallthrough, unchanged); once a URL HAS been shown,
+there's no passive session timeout to separately auto-escalate — it's reached ONLY by the user's own
+explicit "Use terminal instead" click, which is itself what interrupts the poll and produces that outcome.
+The "paste a pre-generated long-lived token" idea floated above remains a legitimate, separately-
 scoped future enhancement (useful for genuinely headless/remote hosts where even a PTY-visible browser isn't
 reachable) but is no longer the load-bearing near-term recommendation this section originally made it.
 Codex/Gemini/OpenClaw are unaffected by this addendum — their tier-1 URL capture already worked before this
