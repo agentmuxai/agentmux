@@ -91,6 +91,16 @@ export const loginCommand: SlashCommand = {
         if (!prov || !cliPath) {
             return { kind: "error", message: "/login: provider or CLI path not available" };
         }
+        // reagent P1 on PR #2413 (round 3, third pass): mirrors the
+        // `loginCancelled = false` every OTHER login-starting function
+        // (relogin()/useGlobalLogin()/loginViaTerminal()) already does at
+        // its own start. /login never called any of those three, so a flag
+        // left `true` by an EARLIER, unrelated cancelled attempt (e.g. the
+        // shared AuthUrlBox's Cancel button during a prior relogin()) stayed
+        // `true` forever — this fresh attempt's own isCancelled() poll
+        // check below would then read as already-cancelled on entry and
+        // silently report success without ever checking authentication.
+        ctx.resetCancelled();
         ctx.log("auth", "running /login via GUI flow...");
         // Registers this attempt (including the up-to-5-minute poll below)
         // as an in-flight recovery on the SAME shared counter behind

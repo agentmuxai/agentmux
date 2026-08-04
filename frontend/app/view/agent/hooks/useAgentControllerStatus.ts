@@ -156,16 +156,31 @@ export interface UseAgentControllerStatus {
     cancelLogin: () => void;
     /**
      * True once `cancelLogin()` has fired for the CURRENTLY in-flight login
-     * attempt (any of relogin()/useGlobalLogin()/loginViaTerminal(), reset
-     * false at the start of each). Exposed so a caller with its own
-     * long-running poll against the SAME shared AuthUrlBox UI — /login
-     * (commands/global/login.ts) is the one case, since it drives the
-     * identical `setAuthUrl`/Cancel/"Use terminal instead" surface but
-     * isn't itself one of the functions above — can notice an explicit
-     * cancel and stop polling instead of running to its own multi-minute
-     * timeout. reagent P1 on PR #2413 (round 3, second pass).
+     * attempt (any of relogin()/useGlobalLogin()/loginViaTerminal(), OR
+     * /login via `resetCancelled()` below — reset false at the start of
+     * each). Exposed so a caller with its own long-running poll against the
+     * SAME shared AuthUrlBox UI — /login (commands/global/login.ts) is the
+     * one case, since it drives the identical `setAuthUrl`/Cancel/"Use
+     * terminal instead" surface but isn't itself one of the functions
+     * above — can notice an explicit cancel and stop polling instead of
+     * running to its own multi-minute timeout. reagent P1 on PR #2413
+     * (round 3, second pass).
      */
     isCancelled: () => boolean;
+    /**
+     * Reset the cancellation flag `isCancelled()` reads, mirroring the
+     * `loginCancelled = false` every OTHER login-starting function
+     * (relogin()/useGlobalLogin()/loginViaTerminal()) already does at its
+     * own start. /login (commands/global/login.ts) is the one login-
+     * starting flow that lives outside this hook and never called any of
+     * those three, so without this a PRIOR attempt's cancel (via the same
+     * shared AuthUrlBox's Cancel button) left `isCancelled()` reading
+     * `true` forever — every SUBSEQUENT, otherwise-unrelated /login
+     * invocation in the pane then hit its cancellation check as already
+     * true and silently reported success without ever polling for
+     * authentication. reagent P1 on PR #2413 (round 3, third pass).
+     */
+    resetCancelled: () => void;
     /**
      * Clear stale auth-recovery UI (the "Retry Login" bar / any lingering
      * `authNotice`) once we have independent proof the controller is
@@ -1243,6 +1258,7 @@ export function useAgentControllerStatus(
         forceControllerRefresh,
         cancelLogin,
         isCancelled: () => loginCancelled,
+        resetCancelled: () => { loginCancelled = false; },
         beginRecoveryFlow,
         endRecoveryFlow,
     };

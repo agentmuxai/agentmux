@@ -1113,6 +1113,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         beginRecoveryFlow: status.beginRecoveryFlow,
         endRecoveryFlow: status.endRecoveryFlow,
         isCancelled: status.isCancelled,
+        resetCancelled: status.resetCancelled,
         // The last CONFIRMED backend turn_active reading (see
         // UseAgentCommandsOptions.isBackendTurnActive's doc comment) —
         // `wasTurnActive` is the same state trackTurnJustEnded's edge
