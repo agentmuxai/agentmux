@@ -89,6 +89,13 @@ export interface ProviderDefinition {
     // TTY but does print a URL through it). When true, runProviderLogin's
     // tier-1 PTY/pipe URL-capture attempt is skipped entirely instead of
     // burning its ~15s capture timeout on a documented dead end.
+    //
+    // No catalog entry sets this anymore: Claude was the only one, and its
+    // pinned CLI (2.1.198+) now prints the authorize URL under our PTY spawn
+    // (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §2, 2026-08-03 probes) —
+    // so the flag was dropped there. Kept as a behavior-gate mechanism: a
+    // future provider whose CLI genuinely prints nothing should set it rather
+    // than reintroducing per-call-site skipTier1 hardcoding.
     headlessLoginUrlUnsupported?: boolean;
     /** System tools the provider's CLI needs at runtime. Probed before
      *  the user launches the agent so we can show install links

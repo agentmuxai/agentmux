@@ -32,13 +32,24 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         styledOutputFormat: "claude-stream-json",
         authType: "oauth",
         authCheckCommand: ["auth", "status", "--json"],
-        // NOTE (2026-06-23, SPEC_HOST_CLI_LOGIN_CAPTURE §0): in-app OAuth is a DEAD
-        // END for Claude v2.1.x — the login is a self-driving TUI that opens its own
-        // browser, and when WE spawn it (host→PTY, not a real terminal) the browser
-        // never opens (it hangs). `setup-token` shares the same browser front-end, so
-        // it can't help in-app either (confirmed via two live captures). The robust
-        // path is seed-from-global (§5.5): authenticate once in a real terminal, then
-        // seed. Kept as ["auth","login"] only for the legacy Connect CTA.
+        // NOTE (2026-08-03, SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §2): in-app
+        // OAuth is VIABLE again for Claude — this supersedes the 2026-06-23
+        // "DEAD END for Claude v2.1.x" verdict (SPEC_HOST_CLI_LOGIN_CAPTURE §0),
+        // whose factual basis (v2.1.183 never printed a login URL when
+        // host-spawned) is stale. Live probes on 2026-08-03 against the pinned
+        // CLI (2.1.198) and a current global install (2.1.214) confirmed that
+        // `claude auth login`, spawned under a PTY with an isolated
+        // CLAUDE_CONFIG_DIR and no DISPLAY, prints the full PKCE authorize URL
+        // ("If the browser didn't open, visit: https://claude.com/cai/oauth/
+        // authorize?…"), then prompts `Paste code here if prompted >` on stdin —
+        // and if the user authorizes in a browser, the CLI detects completion
+        // on its own (polling keyed by `state`) and exits successfully with no
+        // paste needed. So tier 1 of runProviderLogin (URL capture + the
+        // AuthUrlBox paste UI, via the existing set_provider_auth stdin
+        // plumbing) works end to end; older CLIs that print nothing are handled
+        // by the behavior-gate fallthrough to tiers 2/3 (spec §3.2), not a
+        // version check. This is also the login argv the in-app session spawns
+        // (spec §3.2's "login argv" — it was already here as the auth metadata).
         authLoginCommand: ["auth", "login"],
         // Run `claude auth login` under a PTY (run_cli_login's PTY branch).
         // Spawned with plain pipes from the GUI host, the CLI exits cleanly
@@ -50,11 +61,12 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // the CLI fully interactive (isTTY + a controlling terminal), so it
         // stays alive for the paste. See docs / run_cli_login_pty.
         requiresLoginTty: true,
-        // Per the DEAD END note above: `claude auth login` never prints a
-        // scrapeable OAuth URL through our PTY spawn (v2.1.x's login is a
-        // self-driving TUI, not a stdout URL) — skip tier 1's URL-capture
-        // attempt entirely rather than burning its ~15s timeout every login.
-        headlessLoginUrlUnsupported: true,
+        // `headlessLoginUrlUnsupported` was dropped here on 2026-08-03
+        // (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.2): the pinned CLI
+        // (2.1.198+) DOES print a scrapeable authorize URL under our PTY spawn
+        // (see the probe note above), so tier 1's URL capture is live again for
+        // Claude. The flag itself remains in ProviderDefinition as a
+        // behavior-gate for providers whose CLI genuinely never prints one.
         npmPackage: "@anthropic-ai/claude-code",
         // Keep in sync with agentmux-srv/src/backend/providers.rs `pinned_version`,
         // agentmux-cef/src/commands/providers.rs `CLAUDE_VERSION`, and

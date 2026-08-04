@@ -203,6 +203,7 @@ declare global {
         ensureAuthDir: (providerId: string) => Promise<string>;
         runCliLogin: (cliPath: string, loginArgs: string[], authEnv: Record<string, string>, requiresTty?: boolean) => Promise<string | null>;
         cancelCliLogin: () => Promise<void>;
+        getCliLoginStatus: () => Promise<{ active: boolean }>;
         seedProviderAuthFromGlobal: (providerId: string, configDir?: string) => Promise<{ seeded: boolean; status: string; expiresAt?: number | null }>;
         openLoginTerminal: (cliPath: string, loginArgs: string[], authEnv: Record<string, string>) => Promise<{ opened: boolean }>;
         listen: (event: string, callback: (event: any) => void) => Promise<() => void>;
