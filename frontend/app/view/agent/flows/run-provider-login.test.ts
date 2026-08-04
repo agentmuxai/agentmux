@@ -281,6 +281,28 @@ describe("runProviderLogin", () => {
         });
     });
 
+    it("links the account but skips the block-meta update when linkTarget has no blockId (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.3 surface 3: Armory/Stash callers with no live pane)", async () => {
+        hub.runCliLogin.mockResolvedValue(null);
+        hub.seedProviderAuthFromGlobal.mockResolvedValue({ seeded: true });
+
+        const outcome = await runProviderLogin({
+            provider: claude,
+            cliPath: "x",
+            authEnv: { CLAUDE_CONFIG_DIR: "C:/auth" },
+            setAuthUrl: vi.fn(),
+            log: vi.fn(),
+            linkTarget: { agentDefinitionId: "def-1" },
+        });
+
+        expect(outcome).toBe("seeded");
+        expect(hub.linkAgentIdentity).toHaveBeenCalledWith({}, {
+            agent_id: "def-1",
+            account_id: MINTED.accountId,
+            provider: "claude",
+        });
+        expect(hub.setMeta).not.toHaveBeenCalled();
+    });
+
     it("skips tier 2 for non-claude providers (host rejects seed-from-global for them) but STILL mints an account dir and points the terminal at it directly (not stripped — codex has no seed-from-global to copy back from)", async () => {
         hub.runCliLogin.mockResolvedValue(null);
         hub.checkCliAuthCommand.mockResolvedValue({ authenticated: false });

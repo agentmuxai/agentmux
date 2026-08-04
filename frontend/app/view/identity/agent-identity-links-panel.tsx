@@ -12,8 +12,16 @@
 // documented in docs/specs/SPEC_ARMORY_PHASE5_CONSOLIDATION_AND_SKILL_SEEDING_2026_07_13.md
 // §1.3.
 //
-// No create/edit/delete/bind/unbind here — new agent identities are
-// created from the agent-launch flow directly. See
+// Create/edit/delete/bind/unbind stayed out of scope here EXCEPT for one
+// exception carved out by docs/specs/SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md
+// §3.3 surface 3: a Connect/Re-login action for Claude specifically, since
+// this is otherwise the only place a broken/missing Claude binding is
+// visible per-agent — without it, an agent whose bound account was deleted
+// (or, per retro-agentu-0.54.9-stuck-error-2026-08-03.md, never had one) had
+// no in-app path to fix it short of the launch dialog's own "New Agent"
+// flow, which doesn't apply to an agent that already exists. New agent
+// identities for OTHER providers, and non-Claude relogin, remain out of
+// scope — created from the agent-launch flow directly, per
 // docs/specs/SPEC_IDENTITY_DIRECT_LINKS_PHASE3_PRC_2026_07_10.md.
 
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
@@ -25,6 +33,7 @@ import { waveEventSubscribe } from "@/app/store/wps";
 import { loadAccounts, subscribeAccountChanges, PROVIDER_LABELS, type Account } from "./identity-model";
 import { statusBadge } from "./identity-manager";
 import { joinAgentIdentityRows } from "./agent-identities-model";
+import { ClaudeLoginPanel } from "@/app/view/accounts/ClaudeLoginPanel";
 
 import "./identity-pane-view.scss";
 
@@ -41,6 +50,16 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
     const [allLinks, setAllLinks] = createSignal<AgentDefinitionIdentity[]>([]);
     const [accounts, setAccounts] = createSignal<Account[]>(loadAccounts());
     const [error, setError] = createSignal<string | null>(null);
+    // Set to the account id being refreshed (or "" for a fresh connect —
+    // distinguished from "closed" by claudePanelOpen()) when the Claude
+    // Connect/Re-login panel is open.
+    const [claudePanelOpen, setClaudePanelOpen] = createSignal(false);
+    const [claudeRefreshAccountId, setClaudeRefreshAccountId] = createSignal<string | undefined>(undefined);
+
+    const openClaudeLogin = (existingAccountId: string | undefined) => {
+        setClaudeRefreshAccountId(existingAccountId);
+        setClaudePanelOpen(true);
+    };
 
     const refreshLinks = async (): Promise<void> => {
         try {
@@ -113,10 +132,21 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
                         <Show
                             when={rows().length > 0}
                             fallback={
-                                <p class="identity-pane-empty-hint">
-                                    This agent has no linked accounts yet. Link one from its launch
-                                    dialog.
-                                </p>
+                                <div class="identity-pane-empty-hint">
+                                    <p>This agent has no linked accounts yet. Link one from its launch dialog.</p>
+                                    {/* The retro-agentu-0.54.9-stuck-error-2026-08-03.md case: a
+                                        Claude agent with ZERO links has no row above to attach a
+                                        Re-login button to, and no way back into the launch dialog
+                                        once the agent already exists — this is the only in-app path
+                                        left for exactly that state. */}
+                                    <button
+                                        type="button"
+                                        class="identity-btn identity-btn-primary"
+                                        onClick={() => openClaudeLogin(undefined)}
+                                    >
+                                        Connect Claude account
+                                    </button>
+                                </div>
                             }
                         >
                             <table class="identity-pane-bindings">
@@ -125,6 +155,7 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
                                         <th>Provider</th>
                                         <th>Account</th>
                                         <th>Status</th>
+                                        <th />
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -155,6 +186,21 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
                                                             </span>
                                                         </span>
                                                     </td>
+                                                    <td>
+                                                        {/* Claude-only for now — the in-app session
+                                                            (InAppLoginPanel/ClaudeLoginPanel) only
+                                                            exists for Claude; other providers still
+                                                            route through the launch dialog. */}
+                                                        <Show when={row.provider === "claude"}>
+                                                            <button
+                                                                type="button"
+                                                                class="identity-btn identity-btn-secondary"
+                                                                onClick={() => openClaudeLogin(row.account?.id)}
+                                                            >
+                                                                {row.account ? "Re-login" : "Connect"}
+                                                            </button>
+                                                        </Show>
+                                                    </td>
                                                 </tr>
                                             );
                                         }}
@@ -165,6 +211,14 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
                     </div>
                 </Show>
             </div>
+
+            <Show when={claudePanelOpen()}>
+                <ClaudeLoginPanel
+                    onClose={() => setClaudePanelOpen(false)}
+                    existingAccountId={claudeRefreshAccountId()}
+                    linkTarget={props.agentId ? { agentDefinitionId: props.agentId } : undefined}
+                />
+            </Show>
         </div>
     );
 };
