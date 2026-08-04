@@ -38,7 +38,6 @@ import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
 import { parseHistoryLines } from "../parseHistoryLines";
 
 import type { DocumentState, FilterState, LogFn } from "../types";
-export type { LogFn };
 
 export interface UseHistoryPaginationOptions {
     blockId: string;
@@ -119,8 +118,6 @@ export interface UseHistoryPagination {
 
 const PAGE_SIZE = 200;
 
-/** Sidecar filename for reducer-state snapshots, sibling to "output". */
-export const SNAPSHOT_FILENAME = "output.state.json";
 /** Schema versions. v1 = nodes[] embedded; v2 = overlay only + NDJSON replay. */
 export const SNAPSHOT_SCHEMA_VERSION_V1 = 1;
 export const SNAPSHOT_SCHEMA_VERSION_V2 = 2;

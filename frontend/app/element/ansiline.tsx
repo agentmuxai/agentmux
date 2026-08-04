@@ -3,7 +3,7 @@
 
 import { For, JSX } from "solid-js";
 
-export const ANSI_TAILWIND_MAP = {
+const ANSI_TAILWIND_MAP = {
     // Reset and modifiers
     0: "reset", // special: clear state
     1: "font-bold",

@@ -12,7 +12,7 @@ function encodeFileURL(file: string) {
     return rtn;
 }
 
-export function processBackgroundUrls(cssText: string): string {
+function processBackgroundUrls(cssText: string): string {
     if (isBlank(cssText)) {
         return null;
     }

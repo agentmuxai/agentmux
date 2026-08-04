@@ -257,7 +257,6 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
             let mut state = ctx.state.lock().await;
             let rctx = reducer::Ctx {
                 now_rfc3339,
-                conn_id,
                 registered_pid,
             };
             reducer::update(&mut state, cmd.clone(), &rctx)
@@ -315,7 +314,7 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
 #[cfg(target_os = "windows")]
 async fn dispatch_synthetic_goodbye(
     ctx: &Arc<ServerCtx>,
-    conn_id: u64,
+    _conn_id: u64,
     registered_pid: Option<u32>,
 ) {
     let Some(pid) = registered_pid else {
@@ -326,7 +325,6 @@ async fn dispatch_synthetic_goodbye(
         let mut state = ctx.state.lock().await;
         let rctx = reducer::Ctx {
             now_rfc3339,
-            conn_id,
             registered_pid: Some(pid),
         };
         reducer::update(&mut state, Command::Goodbye, &rctx)

@@ -303,11 +303,8 @@ export {
     appHandleKeyDown,
     disableGlobalKeybindings,
     enableGlobalKeybindings,
-    getSimpleControlShiftAtom,
     keyboardMouseDownHandler,
     registerControlShiftStateUpdateHandler,
-    tryReinjectKey,
-    unsetControlShift,
 } from "./keymodel-dispatch";
 
-export { globalRefocus, globalRefocusWithTimeout, uxCloseBlock } from "./keymodel-nav";
+export { globalRefocus, globalRefocusWithTimeout } from "./keymodel-nav";

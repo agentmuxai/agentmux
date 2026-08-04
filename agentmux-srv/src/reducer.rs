@@ -37,12 +37,10 @@ mod workspace;
 use agentmux_common::ipc::{Command, ErrorCode, Event};
 use crate::state::State;
 
-/// Per-dispatch context. Currently just an RFC3339 timestamp + the
-/// originating connection's `conn_id` for log correlation.
+/// Per-dispatch context. Currently just an RFC3339 timestamp.
 #[derive(Debug, Clone)]
 pub struct Ctx {
     pub now_rfc3339: String,
-    pub conn_id: u64,
     pub registered_pid: Option<u32>,
 }
 

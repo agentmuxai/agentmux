@@ -65,7 +65,7 @@ export interface EditorTab {
     displayName?: string;
 }
 
-export interface ClosedTab {
+interface ClosedTab {
     filePath: string;
     closedAt: number;
 }
@@ -88,7 +88,7 @@ export const initialState = (): EditorPaneState => ({
 // Hydration shapes — input to bulk-restore commands. Note these don't
 // carry transient fields; the reducer reconstructs full tabs with
 // `contentLoaded: false`.
-export interface HydratedTab {
+interface HydratedTab {
     id: string;
     filePath: string;
     language?: string;
@@ -107,7 +107,7 @@ export interface HydratedTab {
  * reducer itself (e.g. `"hydrate"` for the initial doc the view writes
  * back to CodeMirror after a HydrateFromMeta). See slice #2 convention.
  */
-export type EditorCommandSource = "user" | "system" | "cm-update" | "hydrate";
+type EditorCommandSource = "user" | "system" | "cm-update" | "hydrate";
 
 export type EditorPaneCommand =
     | {
@@ -236,7 +236,7 @@ export function canonicalizePath(path: string): string {
 /** Derive a CodeMirror-friendly language id from a file extension.
  *  Phase 1A keeps this minimal — the view's existing extension-to-mode
  *  table can supersede it once we wire 1B. */
-export function deriveLanguage(path: string): string {
+function deriveLanguage(path: string): string {
     const m = /\.([A-Za-z0-9]+)$/.exec(path);
     if (!m) return "text";
     return m[1].toLowerCase();

@@ -18,13 +18,6 @@ function addWSReconnectHandler(handler: () => void) {
     reconnectHandlers.push(handler);
 }
 
-function removeWSReconnectHandler(handler: () => void) {
-    const index = this.reconnectHandlers.indexOf(handler);
-    if (index > -1) {
-        reconnectHandlers.splice(index, 1);
-    }
-}
-
 type WSEventCallback = (arg0: WSEventType) => void;
 
 type WSAuthOpts = {
@@ -280,8 +273,6 @@ export {
     globalWS,
     initGlobalWS,
     reconnectWS,
-    removeWSReconnectHandler,
     sendRawRpcMessage,
     sendWSCommand,
-    type WSAuthOpts,
 };

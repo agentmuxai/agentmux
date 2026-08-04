@@ -13,7 +13,7 @@
 //   benchMark("my-phase-done");
 //   benchDump(); // log full timeline
 
-export interface BenchEntry {
+interface BenchEntry {
     name: string;
     /** ms since performance.timeOrigin (page-load epoch) */
     tsMs: number;
@@ -69,9 +69,4 @@ export function benchDump(): void {
         const api = window.api;
         if (api?.sendLog) api.sendLog(report);
     } catch {}
-}
-
-/** Return all recorded entries (for tests or custom analysis). */
-export function benchGetEntries(): readonly BenchEntry[] {
-    return _entries;
 }

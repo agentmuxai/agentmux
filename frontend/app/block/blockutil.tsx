@@ -9,7 +9,7 @@ import type { JSX } from "solid-js";
 import { createMemo, createSignal } from "solid-js";
 import dotsUrl from "../asset/dots-anim-4.svg?url";
 
-export const colorRegex = /^((#[0-9a-f]{6,8})|([a-z]+))$/;
+const colorRegex = /^((#[0-9a-f]{6,8})|([a-z]+))$/;
 
 export function blockViewToIcon(view: string): string {
     if (view == "term") {
@@ -50,71 +50,6 @@ export function blockViewToName(view: string): string {
         return "(No View)";
     }
     return VIEW_LABELS[view] ?? view;
-}
-
-export function processTitleString(titleString: string): JSX.Element[] {
-    if (titleString == null) {
-        return null;
-    }
-    const tagRegex = /<(\/)?([a-z]+)(?::([#a-z0-9@-]+))?>/g;
-    let lastIdx = 0;
-    let match;
-    let partsStack: any[][] = [[]];
-    while ((match = tagRegex.exec(titleString)) != null) {
-        const lastPart = partsStack[partsStack.length - 1];
-        const before = titleString.substring(lastIdx, match.index);
-        lastPart.push(before);
-        lastIdx = match.index + match[0].length;
-        const [_, isClosing, tagName, tagParam] = match;
-        if (tagName == "icon" && !isClosing) {
-            if (tagParam == null) {
-                continue;
-            }
-            const iconClass = util.makeIconClass(tagParam, false);
-            if (iconClass == null) {
-                continue;
-            }
-            lastPart.push(<i class={iconClass} />);
-            continue;
-        }
-        if (tagName == "c" || tagName == "color") {
-            if (isClosing) {
-                if (partsStack.length <= 1) {
-                    continue;
-                }
-                partsStack.pop();
-                continue;
-            }
-            if (tagParam == null) {
-                continue;
-            }
-            if (!tagParam.match(colorRegex)) {
-                continue;
-            }
-            let children: any[] = [];
-            const rtag = <span style={{ color: tagParam }}>{children}</span>;
-            lastPart.push(rtag);
-            partsStack.push(children);
-            continue;
-        }
-        if (tagName == "i" || tagName == "b") {
-            if (isClosing) {
-                if (partsStack.length <= 1) {
-                    continue;
-                }
-                partsStack.pop();
-                continue;
-            }
-            let children: any[] = [];
-            // Use dynamic tag name via createElement equivalent — just use intrinsic elements
-            const rtag = tagName === "i" ? <i>{children}</i> : <b>{children}</b>;
-            lastPart.push(rtag);
-            partsStack.push(children);
-            continue;
-        }
-    }
-    partsStack[partsStack.length - 1].push(titleString.substring(lastIdx));
-    return partsStack[0];
 }
 
 export function getBlockHeaderIcon(blockIcon: string, blockData: Block): JSX.Element {

@@ -4,7 +4,7 @@
 import { createBlock, createBlockSplitHorizontally, createBlockSplitVertically, getSettingsKeyAtom, WOS } from "@/app/store/global";
 import { getLayoutModelForStaticTab } from "@/layout/index";
 
-export function getDefaultNewBlockDef(): BlockDef {
+function getDefaultNewBlockDef(): BlockDef {
     const adnbAtom = getSettingsKeyAtom("app:defaultnewblock");
     const adnb = adnbAtom() ?? "term";
     if (adnb == "launcher") {

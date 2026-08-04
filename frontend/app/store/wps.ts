@@ -154,4 +154,4 @@ function handleWaveEvent(event: WaveEvent) {
     dispatchToSubjects(event);
 }
 
-export { getFileSubject, handleWaveEvent, waveEventSubscribe, waveEventUnsubscribe, wpsReconnectHandler };
+export { getFileSubject, handleWaveEvent, waveEventSubscribe, wpsReconnectHandler };

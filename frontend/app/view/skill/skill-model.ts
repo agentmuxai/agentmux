@@ -25,7 +25,7 @@ export interface SkillDraft {
     content: string;
 }
 
-export function emptySkillDraft(): SkillDraft {
+function emptySkillDraft(): SkillDraft {
     return { id: undefined, name: "", trigger: "", skill_type: "prompt", description: "", content: "" };
 }
 

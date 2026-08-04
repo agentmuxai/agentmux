@@ -93,9 +93,6 @@ impl TelegramBridge {
 }
 
 impl crate::messaging::MessagingBridge for TelegramBridge {
-    fn send(&self, msg: OutboundMsg) -> Result<(), String> {
-        TelegramBridge::send(self, msg)
-    }
     fn health(&self) -> BridgeHealth {
         TelegramBridge::health(self)
     }

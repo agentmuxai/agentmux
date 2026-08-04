@@ -77,7 +77,6 @@ impl AuthSessionStatus {
 #[derive(Debug)]
 struct Session {
     provider_id: String,
-    into_bundle_id: Option<String>,
     status: AuthSessionStatus,
     /// Last URL or code we surfaced — kept across polls so the
     /// frontend can repaint without re-receiving on every tick.
@@ -92,10 +91,9 @@ struct Session {
 }
 
 impl Session {
-    fn new(provider_id: String, into_bundle_id: Option<String>) -> Self {
+    fn new(provider_id: String) -> Self {
         Self {
             provider_id,
-            into_bundle_id,
             status: AuthSessionStatus::Pending,
             captured_url: None,
             captured_device_code: None,
@@ -165,10 +163,10 @@ impl AuthSessionManager {
     pub fn start_session(
         &self,
         provider_id: String,
-        into_bundle_id: Option<String>,
+        _into_bundle_id: Option<String>,
     ) -> StartSessionResult {
         let session_id = format!("auth-{}", uuid::Uuid::new_v4());
-        let session = Session::new(provider_id, into_bundle_id);
+        let session = Session::new(provider_id);
         self.sessions
             .lock()
             .unwrap()
@@ -360,15 +358,6 @@ impl AuthSessionManager {
         refs.drain_tasks.remove(session_id);
         refs.stdin_senders.remove(session_id);
         refs.pty_pids.remove(session_id);
-    }
-
-    /// Remove a session from the map. Caller should only invoke this
-    /// after the session is terminal AND the frontend has had time
-    /// to read the final state (typically after the next successful
-    /// poll). For PR A we just leave terminal sessions in the map;
-    /// PR B can add an LRU sweep.
-    pub fn remove(&self, session_id: &str) {
-        self.sessions.lock().unwrap().remove(session_id);
     }
 
     /// Read the full transcript of captured stdout/stderr lines.
@@ -568,14 +557,6 @@ mod tests {
             }
             _ => panic!("expected UrlAvailable"),
         }
-    }
-
-    #[test]
-    fn remove_clears_session() {
-        let m = mgr();
-        let r = m.start_session("claude".to_string(), None);
-        m.remove(&r.session_id);
-        assert!(m.poll_session(&r.session_id).is_none());
     }
 
     #[test]

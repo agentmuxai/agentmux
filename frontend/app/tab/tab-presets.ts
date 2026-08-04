@@ -26,11 +26,11 @@ import { newLayoutNode } from "@/layout/lib/layoutNode";
 // Splits chained off the same parent always go on the "after" side, so
 // the children render in the order listed.
 
-export type WidgetKey = `defwidget@${string}`;
+type WidgetKey = `defwidget@${string}`;
 
-export type LeafNode = { widget: WidgetKey };
+type LeafNode = { widget: WidgetKey };
 
-export type SplitNode = {
+type SplitNode = {
     split: "horizontal" | "vertical";
     children: PresetNode[];
 };

@@ -39,7 +39,7 @@ import { Logger } from "@/util/logger";
  *
  * See docs/specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.
  */
-export async function requestTearOff(
+async function requestTearOff(
     tabId: string,
     workspaceId: string,
     cursorX: number,

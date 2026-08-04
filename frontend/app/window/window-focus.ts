@@ -42,8 +42,3 @@ export function makeWindowFocusSignal(): Accessor<boolean> {
     cached = focused;
     return focused;
 }
-
-/** Test/dev helper — resets the cached signal so a new one is built. */
-export function __resetWindowFocusSignal(): void {
-    cached = null;
-}

@@ -64,7 +64,7 @@ export const initialState = (): DroneRunState => ({
 /** Shape of one backfilled block row from `DroneRun.block_states`,
  *  used by `BackfilledFromRow` for the codex-P2 race recovery on PR
  *  #843. Mirror of `DroneBlockState` in `frontend/types/gotypes.d.ts`. */
-export interface BackfilledBlock {
+interface BackfilledBlock {
     blockId: string;
     status: "pending" | "running" | "done" | "error" | "skipped";
     output?: unknown;

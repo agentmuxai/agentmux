@@ -357,4 +357,4 @@ const QuickTips = (): JSX.Element => {
     );
 };
 
-export { KeyBinding, QuickTips };
+export { QuickTips };

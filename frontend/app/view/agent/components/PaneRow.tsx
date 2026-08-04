@@ -21,7 +21,7 @@ import { makeIconClass } from "@/util/util";
 import "./PaneRow.scss";
 
 /** Status accent — drives the 3px left-border colour (and dim for terminal). */
-export type PaneRowAccent =
+type PaneRowAccent =
     | "running"
     | "active"
     | "idle"

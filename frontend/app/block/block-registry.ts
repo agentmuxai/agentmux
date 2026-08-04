@@ -42,10 +42,6 @@ blockViewRegistry.set("toolchain", ToolchainViewModel as any);
 blockViewRegistry.set("armory", ArmoryViewModel as any);
 blockViewRegistry.set("settings", SettingsViewModel as any);
 
-export function registerBlockView(viewType: string, cls: ViewModelClass): void {
-    blockViewRegistry.set(viewType, cls);
-}
-
 export function getBlockViewClass(viewType: string): ViewModelClass | undefined {
     return blockViewRegistry.get(viewType);
 }
