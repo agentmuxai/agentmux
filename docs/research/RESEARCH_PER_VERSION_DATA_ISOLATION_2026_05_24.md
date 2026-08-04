@@ -6,7 +6,7 @@
 **Author:** AgentA (Claude Opus 4.7)
 **Context:** AgentMux currently isolates user data per build version (`~/.agentmux/versions/<version>/{data,agents,config,...}/`). This is safe (you can't corrupt v0.38.4's data by running v0.38.5) but creates real UX friction in the active-development workflow: every `task package` bump produces a portable with an empty "My Agents" list, and side-by-side comparison of builds means re-creating the test agent each time.
 
-The existing [`SPEC_DATA_DIR_UNIFICATION_2026-05-05.md`](../specs/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md) acknowledged this trade-off (line 103: "Version-comparison testing (running 624 alongside 639) requires re-doing every login") and chose isolation as Phase 1, with `shared/` as a Phase 2 escape hatch for cookies. Schema-safety was the explicit motivation. This research surveys what other desktop apps do, identifies the pattern they converge on, and proposes a concrete next step for AgentMux.
+The existing [`SPEC_DATA_DIR_UNIFICATION_2026-05-05.md`](../specs/archive/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md) acknowledged this trade-off (line 103: "Version-comparison testing (running 624 alongside 639) requires re-doing every login") and chose isolation as Phase 1, with `shared/` as a Phase 2 escape hatch for cookies. Schema-safety was the explicit motivation. This research surveys what other desktop apps do, identifies the pattern they converge on, and proposes a concrete next step for AgentMux.
 
 ---
 
@@ -221,7 +221,7 @@ Once that lands, Increment B unblocks a real channel rollout to Installed + (eve
 
 ## 9. References
 
-- [`docs/specs/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md`](../specs/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md) — current state + Phase 1 design
+- [`docs/specs/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md`](../specs/archive/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md) — current state + Phase 1 design
 - [`agentmux-common/src/data_paths.rs:81-117`](../../agentmux-common/src/data_paths.rs) — current resolution logic
 - Chrome user-data-dir docs: https://chromium.googlesource.com/chromium/src/+/HEAD/docs/user_data_dir.md
 - VS Code "Insiders import" issue thread: github.com/microsoft/vscode/issues/?q=is%3Aissue+insiders+import+settings

@@ -4,7 +4,7 @@
 **Author:** AgentA
 **Branch:** `agenta/schema-flatten-deforge`
 **PR:** https://github.com/agentmuxai/agentmux/pull/934
-**Spec:** [`SPEC_SCHEMA_FLATTENING_2026_05_19.md`](./SPEC_SCHEMA_FLATTENING_2026_05_19.md)
+**Spec:** [`SPEC_SCHEMA_FLATTENING_2026_05_19.md`](../SPEC_SCHEMA_FLATTENING_2026_05_19.md)
 **Status:** ✅ Merge-ready — both bot reviewers approve the latest commit; backend smoke verified.
 
 ---

@@ -1,4 +1,4 @@
-> **⚠️ SUPERSEDED — 2026-06-13.** Retained for its design rationale and the inbound code/doc references that cite it. For the current, code-anchored architecture of agent data & cross-channel persistence, see **[ARCHITECTURE_AGENT_DATA_AND_CROSS_CHANNEL_2026_06_13.md](../architecture/ARCHITECTURE_AGENT_DATA_AND_CROSS_CHANNEL_2026_06_13.md)**.
+> **⚠️ SUPERSEDED — 2026-06-13.** Retained for its design rationale and the inbound code/doc references that cite it. For the current, code-anchored architecture of agent data & cross-channel persistence, see **[ARCHITECTURE_AGENT_DATA_AND_CROSS_CHANNEL_2026_06_13.md](../../architecture/ARCHITECTURE_AGENT_DATA_AND_CROSS_CHANNEL_2026_06_13.md)**.
 
 # Data Directory Unification Plan — 2026-05-05
 
@@ -20,9 +20,9 @@ Three binaries each compute paths somewhat independently. The conventions match 
 
 | Binary | File:line | Detection mechanism |
 |---|---|---|
-| **Launcher** | [`agentmux-launcher/src/data_dir.rs:64-137`](../../agentmux-launcher/src/data_dir.rs) | `runtime/` subdir → portable. `cfg!(debug_assertions)` (compile time) → dev. |
-| **Host CEF cache** | [`agentmux-cef/src/main.rs:163,348-354,406`](../../agentmux-cef/src/main.rs) | `std::env::var("AGENTMUX_DEV").is_ok()` (line 163) **and** `as_deref() == Ok("1")` (line 354) — two different checks in the same file. |
-| **Host fallback (no launcher)** | [`agentmux-cef/src/sidecar.rs:96-178`](../../agentmux-cef/src/sidecar.rs) | `cfg!(debug_assertions)` (compile time, line 131) — only matters when host runs without launcher (i.e. legacy `task dev`). |
+| **Launcher** | [`agentmux-launcher/src/data_dir.rs:64-137`](../../../agentmux-launcher/src/data_dir.rs) | `runtime/` subdir → portable. `cfg!(debug_assertions)` (compile time) → dev. |
+| **Host CEF cache** | [`agentmux-cef/src/main.rs:163,348-354,406`](../../../agentmux-cef/src/main.rs) | `std::env::var("AGENTMUX_DEV").is_ok()` (line 163) **and** `as_deref() == Ok("1")` (line 354) — two different checks in the same file. |
+| **Host fallback (no launcher)** | [`agentmux-cef/src/sidecar.rs:96-178`](../../../agentmux-cef/src/sidecar.rs) | `cfg!(debug_assertions)` (compile time, line 131) — only matters when host runs without launcher (i.e. legacy `task dev`). |
 | **Srv** | (passed via env from launcher) | Receives `AGENTMUX_DATA_HOME` + `AGENTMUX_DEV` from parent. Trust-based — uses what it's told. |
 
 ### 1.2 Current path layout (per mode)
@@ -73,11 +73,11 @@ Notice that:
 | Sidecar fallback | `cfg!(debug_assertions)` | Compile time |
 | Sidecar→srv pass-through | `if cfg!(debug_assertions) { "1" } else { "" }` | Compile time, **passes empty string** — see 2.2 |
 
-**Concrete bug:** [`main.rs:163`](../../agentmux-cef/src/main.rs) does `env::var("AGENTMUX_DEV").is_ok()` — `is_ok()` returns `true` even for empty-string values. Combined with sidecar's habit of setting `AGENTMUX_DEV=""` on release builds (line 228), any subprocess that inherits this empty value is **mis-classified as dev**. This is the most plausible mechanism for the user's bug: the portable's terminal pane inherits `AGENTMUX_DEV=""` and `task dev` then trips the `is_ok()` branch.
+**Concrete bug:** [`main.rs:163`](../../../agentmux-cef/src/main.rs) does `env::var("AGENTMUX_DEV").is_ok()` — `is_ok()` returns `true` even for empty-string values. Combined with sidecar's habit of setting `AGENTMUX_DEV=""` on release builds (line 228), any subprocess that inherits this empty value is **mis-classified as dev**. This is the most plausible mechanism for the user's bug: the portable's terminal pane inherits `AGENTMUX_DEV=""` and `task dev` then trips the `is_ok()` branch.
 
 ### 2.2 Empty-string `AGENTMUX_DEV` propagates
 
-[`sidecar.rs:227-228`](../../agentmux-cef/src/sidecar.rs):
+[`sidecar.rs:227-228`](../../../agentmux-cef/src/sidecar.rs):
 ```rust
 "AGENTMUX_DEV",
 if cfg!(debug_assertions) { "1" } else { "" },
