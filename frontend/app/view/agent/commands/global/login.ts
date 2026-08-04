@@ -91,6 +91,16 @@ export const loginCommand: SlashCommand = {
         if (!prov || !cliPath) {
             return { kind: "error", message: "/login: provider or CLI path not available" };
         }
+        // reagent P1 on PR #2413 (round 3, third pass): mirrors the
+        // `loginCancelled = false` every OTHER login-starting function
+        // (relogin()/useGlobalLogin()/loginViaTerminal()) already does at
+        // its own start. /login never called any of those three, so a flag
+        // left `true` by an EARLIER, unrelated cancelled attempt (e.g. the
+        // shared AuthUrlBox's Cancel button during a prior relogin()) stayed
+        // `true` forever — this fresh attempt's own isCancelled() poll
+        // check below would then read as already-cancelled on entry and
+        // silently report success without ever checking authentication.
+        ctx.resetCancelled();
         ctx.log("auth", "running /login via GUI flow...");
         // Registers this attempt (including the up-to-5-minute poll below)
         // as an in-flight recovery on the SAME shared counter behind
@@ -164,8 +174,20 @@ export const loginCommand: SlashCommand = {
                     ctx.log("auth", "waiting for login to complete...");
                     let authenticated = false;
                     const deadline = Date.now() + 5 * 60 * 1000;
-                    while (Date.now() < deadline && !authenticated) {
+                    // reagent P1 on PR #2413 (round 3, second pass): the
+                    // AuthUrlBox Cancel / "Use terminal instead" buttons
+                    // call useAgentControllerStatus's cancelLogin()/
+                    // useTerminalInstead() directly — this poll had no way
+                    // to learn that happened and kept running for up to its
+                    // own 5-minute deadline regardless, long past
+                    // useTerminalInstead()'s 20s backstop (which then
+                    // reported a bogus "taking longer than expected"
+                    // instead of ever actually opening a terminal). Checked
+                    // in the loop condition AND right after the sleep,
+                    // mirroring relogin()'s identical "opened" poll.
+                    while (!ctx.isCancelled() && Date.now() < deadline && !authenticated) {
                         await sleep(2000);
+                        if (ctx.isCancelled()) break;
                         try {
                             const recheck = await RpcApi.CheckCliAuthCommand(TabRpcClient, {
                                 cli_path: cliPath,
@@ -176,6 +198,15 @@ export const loginCommand: SlashCommand = {
                         } catch {
                             // keep polling on transient RPC errors
                         }
+                    }
+                    if (ctx.isCancelled()) {
+                        // The user explicitly switched away (e.g. "Use
+                        // terminal instead", already opening its own
+                        // terminal login) — silent, not an error: never
+                        // fail silently (retro §5.1) still holds, but there
+                        // is nothing wrong to report here, just a flow the
+                        // user chose to leave.
+                        return { kind: "ok" };
                     }
                     if (authenticated && openedAccountId && openedAccountDir) {
                         // reagent P1 (re-review of PR #2318): must check the
