@@ -17,7 +17,7 @@
  * staleness tracking needed.
  */
 
-import { createSignal, Show, type JSX } from "solid-js";
+import { createSignal, onCleanup, Show, type JSX } from "solid-js";
 import { getApi } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -46,6 +46,26 @@ export function ClaudeLoginPanel(props: {
     let cancelled = false;
     let terminalRequested = false;
     let inFlight = false;
+    // Set by onAccountRegistered — run-provider-login.ts fires it ONLY once
+    // the account row is actually persisted (reagent P0 on #2263). A
+    // credential can be validly seeded/pasted on disk while that persist
+    // call itself fails (REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_
+    // 2026_07_27.md) — trusting the outcome string alone would show
+    // "Signed in" for a login the resolver's spawn gate then blocks on the
+    // agent's next spawn, with no account ever having existed. reagent P1
+    // on PR #2414: this panel omitted the check both PreLaunchAuthPanel and
+    // useAgentControllerStatus.ts's relogin() already make.
+    let registeredAccountId: string | undefined;
+
+    // Kill a genuinely orphaned login (in-flight up to 5 min) if the panel
+    // unmounts before it resolves — otherwise the spawned CLI child and
+    // this component's poll keep running detached, holding the host's
+    // singleton cli_login_* state and blocking any later login attempt
+    // from starting. reagent P1 on PR #2414.
+    onCleanup(() => {
+        cancelled = true;
+        getApi().cancelCliLogin().catch(() => {});
+    });
 
     const runAttempt = async (cliPath: string, authEnv: Record<string, string>, skipTier1: boolean) =>
         runProviderLogin({
@@ -64,6 +84,9 @@ export function ClaudeLoginPanel(props: {
             },
             log: (_cat, msg) => console.log(`[claude-login] ${msg}`),
             isCancelled: () => cancelled || terminalRequested,
+            onAccountRegistered: (accountId) => {
+                registeredAccountId = accountId;
+            },
             onTierChange: (event) => {
                 if (event.tier === "inapp-waiting") setPhase("waiting-authorize");
                 else if (event.tier === "fallback") setPhase("fallback");
@@ -121,8 +144,12 @@ export function ClaudeLoginPanel(props: {
                 case "inapp-success":
                 case "seeded":
                 case "terminal-success":
-                    void refreshAccountCache();
-                    setDone(true);
+                    if (registeredAccountId) {
+                        void refreshAccountCache();
+                        setDone(true);
+                    } else {
+                        setError("Login completed but the account couldn't be registered. Try again.");
+                    }
                     break;
                 case "inapp-timeout":
                     setError("The login link timed out. Complete it in your browser, then try again.");

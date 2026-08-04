@@ -34,6 +34,7 @@ import { loadAccounts, subscribeAccountChanges, PROVIDER_LABELS, type Account } 
 import { statusBadge } from "./identity-manager";
 import { joinAgentIdentityRows } from "./agent-identities-model";
 import { ClaudeLoginPanel } from "@/app/view/accounts/ClaudeLoginPanel";
+import { canonicalProviderId } from "@/app/view/agent/providers/provider-id-aliases";
 
 import "./identity-pane-view.scss";
 
@@ -190,8 +191,12 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
                                                         {/* Claude-only for now — the in-app session
                                                             (InAppLoginPanel/ClaudeLoginPanel) only
                                                             exists for Claude; other providers still
-                                                            route through the launch dialog. */}
-                                                        <Show when={row.provider === "claude"}>
+                                                            route through the launch dialog. Canonicalize
+                                                            — db_agent_identity_links can carry a
+                                                            legacy-alias row ("claude-code") for a
+                                                            migrated agent (reagent P1 on PR #2414;
+                                                            see provider-id-aliases.ts). */}
+                                                        <Show when={canonicalProviderId(row.provider) === "claude"}>
                                                             <button
                                                                 type="button"
                                                                 class="identity-btn identity-btn-secondary"
