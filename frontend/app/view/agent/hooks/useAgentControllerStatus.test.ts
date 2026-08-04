@@ -63,6 +63,7 @@ const claude = { id: "claude" } as any; // no authConfigDirEnvVar — skips the 
 
 afterEach(() => {
     vi.clearAllMocks();
+    vi.useRealTimers();
     hub.agentDefinitionId = undefined;
 });
 
@@ -338,6 +339,58 @@ describe("useAgentControllerStatus — in-app login session (SPEC_INAPP_CLAUDE_O
             await terminalPromise;
 
             expect(secondAttemptStarted).toBe(true);
+            dispose();
+        });
+    });
+
+    it("reagent P2 on PR #2413 (re-review): clears authUrl on the persist-FAILURE branch too, not just the success branch", async () => {
+        // registeredAccountId/Dir never get set — onAccountRegistered
+        // simply doesn't fire, mirroring a persist failure inside
+        // runProviderLogin (REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_
+        // WORKING_2026_07_27.md) — the credential is on disk but the
+        // Armory row couldn't be saved.
+        hub.runProviderLogin.mockImplementation(async (opts: any) => {
+            opts.setAuthUrl?.("https://claude.com/cai/oauth/authorize?code=true");
+            return "inapp-success";
+        });
+
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({
+                blockId: "block-1",
+                provider: () => claude,
+                log: () => {},
+            });
+            await status.relogin({ retryAfterLogin: false });
+
+            expect(status.authNotice()).toMatch(/couldn't save the account record/i);
+            // The whole point: AuthUrlBox must not stay mounted (offering
+            // paste/cancel/"use terminal instead") against a session
+            // runProviderLogin already reaped.
+            expect(status.authUrl()).toBeNull();
+            dispose();
+        });
+    });
+
+    it("reagent P2 on PR #2413 (re-review): useTerminalInstead surfaces an explicit failure instead of silently no-op'ing when the 20s teardown backstop fires on a genuinely wedged relogin", async () => {
+        vi.useFakeTimers();
+        // relogin() never resolves within this test — simulates a
+        // genuinely wedged teardown (e.g. getCliLoginStatus() itself hung).
+        hub.runProviderLogin.mockImplementation(() => new Promise(() => {}));
+
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({
+                blockId: "block-1",
+                provider: () => claude,
+                log: () => {},
+            });
+
+            void status.relogin({ retryAfterLogin: false });
+            await vi.advanceTimersByTimeAsync(10);
+            const terminalPromise = status.useTerminalInstead();
+            await vi.advanceTimersByTimeAsync(20_000);
+            await terminalPromise;
+
+            expect(status.authNotice()).toMatch(/taking longer than expected/i);
             dispose();
         });
     });
