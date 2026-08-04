@@ -210,9 +210,14 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
         void startConnect(controller, prov, props.accountId(), inAppUi);
     };
 
-    // "Use my existing login" — the PRIMARY path for Claude v2.1.x, whose
-    // in-app OAuth can't open a browser when WE spawn it (a dead end —
-    // SPEC_HOST_CLI_LOGIN_CAPTURE §0). Mints a real per-account isolated dir,
+    // "Use my existing login" — a fast SECONDARY path when a valid global
+    // terminal login already exists (spec §3.2). Until 2026-08-03 this
+    // REPLACED Connect entirely, because in-app OAuth was a dead end for
+    // Claude v2.1.183 (SPEC_HOST_CLI_LOGIN_CAPTURE §0, live browser spawn
+    // couldn't open when WE spawned it); that verdict is superseded —
+    // SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §2 — so Connect (the
+    // in-app login session) is primary again, same as the `canSeed` doc
+    // comment below this component. Mints a real per-account isolated dir,
     // copies the user's valid GLOBAL login into it, and persists a real
     // IdentityAccount row (not just a file in the shared dir — this used to
     // call `seedGlobalLogin` directly against `ensureAuthDir`'s SHARED
