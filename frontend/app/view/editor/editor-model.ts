@@ -38,7 +38,7 @@ import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import { fireAndForget } from "@/util/util";
-import { createMemo, createSignal, type Accessor } from "solid-js";
+import { createEffect, createMemo, createRoot, createSignal, type Accessor } from "solid-js";
 import { FileTreeModel } from "./file-tree-model";
 
 const META_TREE_EXPANDED = "editor:tree_expanded";
@@ -186,7 +186,7 @@ export class EditorViewModel implements ViewModel {
     // the same path from this same pane is idempotent.
     private _watchedPathByTab = new Map<string, string>();
     private _unsubFileChanged: () => void = () => {};
-    private _unsubOpenFileRequest: () => void = () => {};
+    private _disposePendingOpenFilesEffect: () => void = () => {};
 
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
@@ -231,30 +231,40 @@ export class EditorViewModel implements ViewModel {
             },
         });
 
-        // Pane-reuse: the backend pushes this when an OpenEditor call for a
-        // file finds this pane already open in the calling agent's own tab,
-        // instead of creating a second Editor pane (SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md
-        // Part 2). Reuses the same openFile() path a file-tree click uses —
-        // pin-if-existing/language-detection/RPC-load all apply unchanged.
-        // Also removes this path from META_PENDING_OPEN_FILES (the backend
-        // always writes there too, in case the pane isn't mounted yet) —
-        // codex P1: without this, a live-delivered request's entry would
-        // stay queued and get reprocessed (reopening the file, changing the
-        // active tab) on a later, unrelated remount.
-        this._unsubOpenFileRequest = waveEventSubscribe({
-            eventType: WpsEvent.EditorOpenFileRequest,
-            scope: makeORef("block", blockId),
-            handler: (event) => {
-                const path = (event as any)?.data?.path as string | undefined;
-                if (!path) return;
-                void this.openFile(path);
+        // Pane-reuse (SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md
+        // Part 2): reactively drains META_PENDING_OPEN_FILES whenever the
+        // backend writes to it — a file an OpenEditor reuse call pushed into
+        // this pane instead of creating a second Editor pane. Reactive
+        // (createEffect over blockAtom), not a one-shot construction-time
+        // check, so it uniformly covers BOTH "this pane wasn't mounted yet
+        // when the backend wrote the request" and "already mounted, backend
+        // writes it later" through the same WaveObj sync path this pane
+        // already reactively depends on for everything else.
+        //
+        // An earlier version used a SEPARATE live WPS event (fired directly
+        // alongside the meta write) for the already-mounted case, racing
+        // this same meta update. Reagent (PR #2404) found the race: the WPS
+        // event is a direct WS push and arrives essentially synchronously,
+        // while the meta write reaches `blockAtom` only after an async
+        // WaveObj DB-refetch — so the live event's handler could run and try
+        // to dequeue its own path from `blockAtom()`'s meta BEFORE that same
+        // write had actually landed there, reading stale data and no-op'ing,
+        // stranding the entry to be wrongly reprocessed on a later remount.
+        // Removing the separate live path entirely (rather than patching the
+        // race) leaves one delivery mechanism and one reactive consumer —
+        // no ordering between two paths to get wrong. Costs a small amount
+        // of latency for the already-mounted case (a real WaveObj round-trip
+        // instead of a direct push) in exchange for not being racy.
+        createRoot((dispose) => {
+            this._disposePendingOpenFilesEffect = dispose;
+            createEffect(() => {
                 const pending = this.blockAtom()?.meta?.[META_PENDING_OPEN_FILES];
-                if (Array.isArray(pending) && pending.includes(path)) {
-                    const idx = pending.indexOf(path);
-                    const next = [...pending.slice(0, idx), ...pending.slice(idx + 1)];
-                    fireAndForget(() => this.persistMeta({ [META_PENDING_OPEN_FILES]: next }));
+                if (!Array.isArray(pending) || pending.length === 0) return;
+                for (const path of pending) {
+                    if (typeof path === "string" && path) void this.openFile(path);
                 }
-            },
+                fireAndForget(() => this.persistMeta({ [META_PENDING_OPEN_FILES]: [] }));
+            });
         });
 
         // Projections from the slice's slot cell. Reading sliceVersionAtom
@@ -376,18 +386,9 @@ export class EditorViewModel implements ViewModel {
             void this.openScratch();
         }
 
-        // Reuse: pending files from not-yet-mounted OpenEditor reuse calls
-        // (see META_PENDING_OPEN_FILES above). Drain every entry, in order,
-        // then clear the whole queue — openFile() itself is idempotent
-        // (activates the tab if the live WPS event below also fired for the
-        // same path), so no dedup needed here.
-        const pendingOpenFiles = meta?.[META_PENDING_OPEN_FILES];
-        if (Array.isArray(pendingOpenFiles) && pendingOpenFiles.length > 0) {
-            for (const path of pendingOpenFiles) {
-                if (typeof path === "string" && path) void this.openFile(path);
-            }
-            fireAndForget(() => this.persistMeta({ [META_PENDING_OPEN_FILES]: [] }));
-        }
+        // Reuse: pending files are handled by the reactive createEffect
+        // above (covers this initial-mount case too — no separate one-shot
+        // check needed here, and having both would double-open).
     }
 
     // ── Event subscription (used by editor-view.tsx for CodeMirror state
@@ -1153,7 +1154,7 @@ export class EditorViewModel implements ViewModel {
 
     dispose(): void {
         this._unsubFileChanged();
-        this._unsubOpenFileRequest();
+        this._disposePendingOpenFilesEffect();
         for (const tabId of [...this._watchedPathByTab.keys()]) this._unwatchTab(tabId);
         _instanceHandlers.delete(this._globalHandler);
         this._eventSubscribers.clear();

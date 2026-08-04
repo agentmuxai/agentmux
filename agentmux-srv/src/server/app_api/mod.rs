@@ -1440,9 +1440,9 @@ mod pane_open_reducer_tests {
         );
     }
 
-    /// An Editor pane already open in the caller's own tab → reused (new tab
-    /// pushed into it via EVENT_EDITOR_OPEN_FILE_REQUEST) instead of spawning
-    /// a second Editor pane.
+    /// An Editor pane already open in the caller's own tab → reused (file
+    /// appended to META_PENDING_OPEN_FILES for the pane to drain) instead of
+    /// spawning a second Editor pane.
     #[tokio::test]
     async fn open_editor_reuses_existing_pane_in_callers_tab() {
         let state = test_state();

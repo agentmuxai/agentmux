@@ -270,40 +270,50 @@ pub(super) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, 
     Ok(meta)
 }
 
-/// WPS event asking an already-mounted Editor pane to open an additional
-/// file as a new tab. Payload is `{ path }` — the frontend's `EditorViewModel`
-/// calls its own existing `openFile(path)` on receipt, so pin-if-existing/
-/// language-detection/RPC-load all apply unchanged. Scoped `block:<id>`,
-/// matching `EVENT_EDITOR_FILE_CHANGED`'s existing shape exactly.
-/// See SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md Part 2.
-pub(super) const EVENT_EDITOR_OPEN_FILE_REQUEST: &str = "editor:open_file_request";
-
-/// Block-meta key carrying an ARRAY of files the reused pane should open
-/// once it (re)mounts — the actual race-closing delivery path, not the live
-/// WPS event below. Drained (all entries, in order) once by
-/// `EditorViewModel`'s constructor, then cleared immediately after.
+/// Block-meta key carrying an ARRAY of files the reused pane should open —
+/// the sole delivery path (see below for why an earlier version's second,
+/// "live WPS event" path was removed). Drained (all entries, in order)
+/// reactively by `EditorViewModel`'s `createEffect` over its own block meta,
+/// then cleared immediately after — covers both "not yet mounted when this
+/// was written" and "already mounted, reacts as soon as the write lands"
+/// uniformly through the same WaveObj sync path the pane already depends on
+/// for everything else.
 ///
-/// **Array, not a single scalar** (codex P1 on PR #2404, second finding): if
-/// 2+ `OpenEditor` reuse calls arrive before the target pane ever mounts, a
-/// single-value key would have each call overwrite the last, silently
-/// losing every request but the final one. Appending to an array and
-/// draining all of them at once fixes that.
+/// **Array, not a single scalar** (codex P1 on PR #2404): if 2+ `OpenEditor`
+/// reuse calls arrive before the target pane ever mounts, a single-value key
+/// would have each call overwrite the last, silently losing every request
+/// but the final one. Appending to an array and draining all of them at
+/// once fixes that.
 ///
-/// **Superseded `persist > 0` on the WPS event** (codex P1 on PR #2404,
-/// first finding): a just-created Editor block may not have finished
-/// mounting its `EditorViewModel` (and installing the event subscription) by
-/// the time a second back-to-back `OpenEditor` call reuses it — with
-/// `persist: 0` that second call's request would reach zero subscribers and
-/// be lost. Using `persist: N` closes that race but opens a *worse* one:
-/// `Broker::unsubscribe_all` clears a route's replay marker on disconnect
-/// (`agentmux-srv/src/backend/wps.rs:312-323`), so any later, unrelated
-/// reconnect (page reload, network hiccup) would replay the *entire*
-/// persisted history again — reopening files the user has since closed and
-/// changing the active tab, potentially long after the original race
-/// window. The broker has no ack/consume concept, so nothing marks a
-/// persisted event "already delivered." Block meta does have exactly that
-/// shape already (write once, drain once, clear after reading) — reusing it
-/// avoids inventing new broker machinery.
+/// **Sole delivery path — no separate live WPS event** (codex P1 on PR
+/// #2404, found twice): an earlier version ALSO fired a direct WPS event
+/// (`persist: 0`) alongside this meta write, for immediate delivery when the
+/// pane was already mounted. First finding: the frontend's live handler
+/// didn't clear its own entry from this array, so it could be reprocessed
+/// on a later, unrelated remount. Second, deeper finding after fixing that:
+/// the WPS event is a direct WS push and arrives essentially synchronously,
+/// while THIS meta write only reaches the frontend's `blockAtom` after an
+/// async WaveObj DB-refetch — so the live handler's own dequeue attempt
+/// could run and read stale data (this exact write not yet reflected)
+/// before it landed, no-op, and strand the entry anyway. Removing the
+/// separate live path entirely (rather than patching a second-order race in
+/// its own race-fix) leaves one delivery mechanism and one reactive
+/// consumer — nothing to race. Trades a small amount of latency for the
+/// already-mounted case (a real WaveObj round-trip instead of a direct
+/// push) for not being racy.
+///
+/// **Superseded relying on WPS `persist > 0` for durability** (codex P1 on
+/// PR #2404, earliest finding on this function): a just-created Editor
+/// block may not have finished mounting its `EditorViewModel` by the time a
+/// second back-to-back `OpenEditor` call reuses it. `persist: N` closes that
+/// race but opens a *worse* one: `Broker::unsubscribe_all` clears a route's
+/// replay marker on disconnect (`agentmux-srv/src/backend/wps.rs:312-323`),
+/// so any later, unrelated reconnect would replay the *entire* persisted
+/// history again — reopening files the user has since closed. The broker
+/// has no ack/consume concept, so nothing marks a persisted event "already
+/// delivered." Block meta does have exactly that shape (write once, drain
+/// once, clear after reading) — reusing it avoids inventing new broker
+/// machinery.
 const META_PENDING_OPEN_FILES: &str = "editor:pending_open_files";
 
 /// If the calling agent (identified by its own block id, `caller_block_id`)
@@ -378,24 +388,6 @@ pub(super) async fn maybe_reuse_editor_pane(
         }
     }
     crate::server::service::publish_events(state, &meta_events);
-
-    // Live delivery path: immediate effect when the pane is already
-    // mounted. `persist: 0` — no replay-forever risk, since the meta write
-    // above is what a not-yet-mounted pane actually relies on. The frontend
-    // handler clears its own entry out of the pending-files queue after
-    // consuming it (codex P1: an earlier version left the queue write in
-    // place after live delivery, so a later remount without an intervening
-    // reuse call would reopen the same file again) — openFile() is also
-    // idempotent (activates the existing tab rather than duplicating), so
-    // both paths firing for the same file in the rare overlap case is
-    // harmless either way.
-    state.broker.publish(crate::backend::wps::WaveEvent {
-        event: EVENT_EDITOR_OPEN_FILE_REQUEST.to_string(),
-        scopes: vec![format!("block:{}", existing.oid)],
-        sender: String::new(),
-        persist: 0,
-        data: Some(json!({ "path": file })),
-    });
 
     tracing::info!(
         block_id = %existing.oid,
