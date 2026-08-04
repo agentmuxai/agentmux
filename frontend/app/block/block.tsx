@@ -6,7 +6,6 @@ import {
     BlockNodeModel,
     BlockProps,
     FullBlockProps,
-    FullSubBlockProps,
 } from "@/app/block/blocktypes";
 import { getBlockViewClass } from "@/app/block/block-registry";
 import { invokeCommand } from "@/app/platform/ipc";
@@ -109,26 +108,6 @@ function BlockPreview({ nodeModel, viewModel }: FullBlockProps): JSX.Element {
             blockModel={null}
             viewModel={viewModel}
         />
-    );
-}
-
-function BlockSubBlock({ nodeModel, viewModel }: FullSubBlockProps): JSX.Element {
-    const [blockData] = useWaveObjectValue<Block>(makeORef("block", nodeModel.blockId));
-    let blockRef: { current: HTMLDivElement | null } = { current: null };
-    let contentRef: { current: HTMLDivElement | null } = { current: null };
-    const blockViewType = createMemo(() => blockData()?.meta?.view);
-    const viewElem = createMemo(
-        () => getViewElem(nodeModel.blockId, blockRef, contentRef, blockViewType(), viewModel)
-    );
-    const noPadding = useAtomValueSafe(viewModel.noPadding);
-    return (
-        <Show when={blockData()}>
-            <div class={clsx("block-content", { "block-no-padding": noPadding })} ref={(el) => { contentRef.current = el; }}>
-                <ErrorBoundary>
-                    <Suspense fallback={<BrainSpinner />}>{viewElem()}</Suspense>
-                </ErrorBoundary>
-            </div>
-        </Show>
     );
 }
 
