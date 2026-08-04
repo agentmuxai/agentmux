@@ -341,6 +341,15 @@ export function useAgentControllerStatus(
     // flight (the user double-clicks "Login Again"). Separate from flowRunning
     // — relogin must work even when the gated flow believes it already finished.
     let reloginInFlight = false;
+    // Resolves when the CURRENTLY in-flight relogin() call reaches its
+    // `finally` — useTerminalInstead awaits this (not a fixed-timeout poll
+    // against reloginInFlight, codex P2 on PR #2413: a fixed ~4.5s bound can
+    // expire before cancellation is actually observed, since
+    // pollForInAppLoginCompletion's poll tick can be blocked inside a
+    // CheckCliAuthCommand RPC with its own ~10s timeout that doesn't itself
+    // recheck isCancelled). No-op (`Promise.resolve()`) when nothing is in
+    // flight, so awaiting it is always safe.
+    let reloginDonePromise: Promise<void> = Promise.resolve();
 
     /**
      * Resolve the provider CLI directly when block meta has no `cmd` yet.
@@ -518,6 +527,8 @@ export function useAgentControllerStatus(
         // launch flow.
         let cliPath = getBlockMetaKeyAtom(opts.blockId, "cmd")() as string | undefined;
         reloginInFlight = true;
+        let resolveReloginDone: () => void = () => {};
+        reloginDonePromise = new Promise<void>((res) => { resolveReloginDone = res; });
         beginRecoveryFlow();
         // Guards against double-decrementing activeRecoveryFlows: the
         // success branches below call this early (before onRecovered, so
@@ -778,6 +789,14 @@ export function useAgentControllerStatus(
                                 : (retryAfterLogin ? "Login successful — retrying…" : "Login successful"),
                         );
                         setAuthNotice(null);
+                        // codex P2 on PR #2413: "inapp-success" follows a
+                        // setAuthUrl(url) call from tier 1 — without clearing
+                        // it here, AuthUrlBox stayed mounted after a
+                        // successful login, still offering paste/cancel/"use
+                        // terminal instead" against a session that already
+                        // finished. No-op for seeded/terminal-success (authUrl
+                        // was never set for those tiers).
+                        setAuthUrl(null);
                         setAuthStatus("authenticated");
                         await forceControllerRefresh();
                         opts.onLoginSuccess?.(null);
@@ -802,13 +821,18 @@ export function useAgentControllerStatus(
                     }
                     break;
                 case "inapp-timeout":
-                    // Unlike terminal-timeout, the user still has the
-                    // captured URL sitting in the AuthUrlBox (setAuthUrl
-                    // fired before this poll started) — point back at that
-                    // instead of implying they need to click something new.
+                    // codex P2 on PR #2413: by the time runProviderLogin
+                    // returns this outcome, it has already cancelled and
+                    // reaped the login child (run-provider-login.ts's
+                    // pollForInAppLoginCompletion timeout path) — the
+                    // AuthUrlBox's URL/paste box is for a session that no
+                    // longer exists. Clear it instead of leaving it mounted
+                    // (it would silently accept a paste that goes nowhere),
+                    // and point at a fresh attempt rather than "finish there".
+                    setAuthUrl(null);
                     setAuthNotice(
-                        "The login link timed out. If you already authorized in your browser, " +
-                        "click “Login Again”. Otherwise finish there and paste the code, or try “Login via terminal”.",
+                        "The login link timed out before you finished authorizing. " +
+                        "Click “Login Again” to get a new link, or try “Login via terminal”.",
                     );
                     break;
                 case "terminal-timeout":
@@ -847,6 +871,7 @@ export function useAgentControllerStatus(
             if (!succeeded && !retryAfterLogin) {
                 setCanRetry(true);
             }
+            resolveReloginDone();
         }
     };
 
@@ -1108,18 +1133,23 @@ export function useAgentControllerStatus(
     // Can't just call loginViaTerminal() directly: it guards on the same
     // `reloginInFlight` flag relogin()'s still-awaited call above is
     // holding, and cancelLogin() only flips a boolean the poll notices on
-    // its own next tick (up to ~2s) rather than synchronously unwinding
-    // relogin()'s await — an immediate loginViaTerminal() call would just
-    // no-op against a flag that hasn't cleared yet. Bounded poll instead of
-    // a dedicated cross-flow signal for what is structurally the same
-    // "cancel, then start the next flow" the mount-time retry path already
-    // does after a `succeeded` relogin (see beginRecoveryFlow's own doc
-    // comment on the shared, not-exclusive nature of these flags).
+    // its own next tick rather than synchronously unwinding relogin()'s
+    // await — an immediate loginViaTerminal() call would just no-op against
+    // a flag that hasn't cleared yet.
+    //
+    // Awaits `reloginDonePromise` (resolved by relogin()'s own `finally`)
+    // rather than polling `reloginInFlight` on a fixed short bound — codex
+    // P2 on PR #2413: a ~4.5s bound could expire before cancellation is
+    // actually observed, since pollForInAppLoginCompletion's poll tick can
+    // be blocked inside a CheckCliAuthCommand RPC (its own ~10s timeout,
+    // which doesn't itself recheck isCancelled) — the fixed-bound version
+    // would then silently no-op against loginViaTerminal's guard, leaving
+    // the terminal unopened with no error surfaced. A generous backstop
+    // timeout still applies (Promise.race) so a genuinely wedged relogin
+    // can't hang this forever.
     const useTerminalInstead = async () => {
         cancelLogin();
-        for (let i = 0; i < 15 && reloginInFlight; i++) {
-            await sleep(300);
-        }
+        await Promise.race([reloginDonePromise, sleep(20_000)]);
         // Suppress whatever notice relogin()'s own cancelled-poll branch
         // just set (e.g. "inapp-timeout"'s message) — the user asked to
         // switch flows, not to be told their login attempt failed.
