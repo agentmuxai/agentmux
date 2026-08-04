@@ -192,6 +192,23 @@ pub struct AppState {
     /// bug, where the pasted code has nowhere to be delivered.
     pub cli_login_generation: std::sync::atomic::AtomicU64,
 
+    /// True while a CLI login child (either transport) is alive. Set by
+    /// `run_cli_login`/`run_cli_login_pty` right after spawn, cleared by
+    /// their reaper tasks once the child has actually exited — the SAME
+    /// generation guard `cli_login_stdin`'s clear uses, so a superseded
+    /// login's reaper can't falsely mark a newer one inactive.
+    ///
+    /// Deliberately independent of `cli_login_stdin`: `set_provider_auth`
+    /// `.take()`s that slot the instant a pasted code is delivered (it's
+    /// single-use), but the child itself keeps running for a bit afterward
+    /// while it exchanges the code with the OAuth service. Before this
+    /// field existed, `get_cli_login_status` read `cli_login_stdin.is_some()`
+    /// directly — reporting `active: false` the moment a code was pasted,
+    /// which could make `pollForInAppLoginCompletion` (spec
+    /// SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.1) time out and kill
+    /// a login that was still genuinely completing (codex P1 on PR #2410).
+    pub cli_login_active: std::sync::atomic::AtomicBool,
+
     /// IPC HTTP server port
     pub ipc_port: Mutex<u16>,
 
@@ -566,6 +583,7 @@ impl Default for AppState {
             cli_login_pty_pid: Mutex::new(None),
             cli_login_stdin: Mutex::new(None),
             cli_login_generation: std::sync::atomic::AtomicU64::new(0),
+            cli_login_active: std::sync::atomic::AtomicBool::new(false),
             ipc_port: Mutex::new(0),
             ipc_token: uuid::Uuid::new_v4().to_string(),
             // browsers field removed in H.2.e — see comment near struct decl.
