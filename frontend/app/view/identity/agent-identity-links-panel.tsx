@@ -56,9 +56,18 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
     // Connect/Re-login panel is open.
     const [claudePanelOpen, setClaudePanelOpen] = createSignal(false);
     const [claudeRefreshAccountId, setClaudeRefreshAccountId] = createSignal<string | undefined>(undefined);
+    // reagent P0 on PR #2414: see ClaudeLoginPanel's staleAliasProvider doc
+    // comment — set when the row being acted on carries a legacy-alias
+    // provider string, so the panel can unlink it after a successful login
+    // instead of leaving an orphaned row that silently blocks every future
+    // spawn under the new canonical link.
+    const [claudeStaleAliasProvider, setClaudeStaleAliasProvider] = createSignal<string | undefined>(undefined);
 
-    const openClaudeLogin = (existingAccountId: string | undefined) => {
+    const openClaudeLogin = (existingAccountId: string | undefined, rawProvider?: string) => {
         setClaudeRefreshAccountId(existingAccountId);
+        setClaudeStaleAliasProvider(
+            rawProvider && rawProvider !== "claude" ? rawProvider : undefined,
+        );
         setClaudePanelOpen(true);
     };
 
@@ -200,7 +209,7 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
                                                             <button
                                                                 type="button"
                                                                 class="identity-btn identity-btn-secondary"
-                                                                onClick={() => openClaudeLogin(row.account?.id)}
+                                                                onClick={() => openClaudeLogin(row.account?.id, row.provider)}
                                                             >
                                                                 {row.account ? "Re-login" : "Connect"}
                                                             </button>
@@ -222,6 +231,7 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
                     onClose={() => setClaudePanelOpen(false)}
                     existingAccountId={claudeRefreshAccountId()}
                     linkTarget={props.agentId ? { agentDefinitionId: props.agentId } : undefined}
+                    staleAliasProvider={claudeStaleAliasProvider()}
                 />
             </Show>
         </div>
