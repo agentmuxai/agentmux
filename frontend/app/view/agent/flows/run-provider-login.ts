@@ -102,12 +102,18 @@ export interface RunProviderLoginParams extends ForceLoginParams {
     };
     /** Polled during the tier-3 wait; return true to abort early (e.g. the user hit Cancel). */
     isCancelled?: () => boolean;
-    /** When set, a newly-registered account (tier 2 or 3) is linked to this
-     *  agent definition and the block's `cmd:env` is updated to point at
-     *  its isolated dir — the pane-level recovery case (an already-running
-     *  agent). Omit for a pre-launch flow with no agent yet; that flow's own
-     *  launch-time reconcile links the account once one is created. */
-    linkTarget?: { blockId: string; agentDefinitionId: string };
+    /** When set, a newly-registered account (tier 2 or 3, or the awaited
+     *  tier-1 session) is linked to this agent definition. Omit for a
+     *  pre-launch flow with no agent yet; that flow's own launch-time
+     *  reconcile links the account once one is created.
+     *  `blockId` is optional (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md
+     *  §3.3 surface 3): when present, the block's `cmd:env` is ALSO updated
+     *  to point at the isolated dir — the pane-level recovery case (an
+     *  already-running agent that needs its live env refreshed right now).
+     *  Callers with no live pane (Armory's bare Connect, or the Stash's
+     *  per-binding re-login when the agent has no open pane) still get the
+     *  account linked; the next spawn resolves the dir fresh regardless. */
+    linkTarget?: { blockId?: string; agentDefinitionId: string };
     /** Reconnect (not fresh-connect) into this account id, if set — threaded
      *  through to tier 2/3's account-dir minting so the SAME account's
      *  isolated dir is reused/refreshed instead of a new one being minted.
@@ -199,6 +205,12 @@ async function finalizeAccount(
         );
         return;
     }
+    // Best-effort live-pane env refresh — only when a block actually exists
+    // (the pane-level recovery case). Armory's bare Connect and the Stash's
+    // re-login for an agent with no open pane have nothing to refresh here;
+    // the link above is already durable, and the next spawn resolves the
+    // account's dir fresh regardless of this pane-local cache.
+    if (!p.linkTarget.blockId) return;
     try {
         const oref = WOS.makeORef("block", p.linkTarget.blockId);
         await RpcApi.SetMetaCommand(TabRpcClient, {

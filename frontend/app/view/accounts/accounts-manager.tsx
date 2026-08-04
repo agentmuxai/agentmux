@@ -29,6 +29,7 @@ import { AccountForm } from "@/app/view/identity/identity-account-form";
 import { ProviderLogo } from "@/element/ProviderLogo";
 import { AccountsGallery } from "./AccountsGallery";
 import { AgentMuxConnectPanel, useMuxBusStatus } from "./AgentMuxConnectPanel";
+import { ClaudeLoginPanel } from "./ClaudeLoginPanel";
 import "@/app/view/identity/identity-view.scss";
 
 export function AccountsManager(): JSX.Element {
@@ -46,6 +47,7 @@ export function AccountsManager(): JSX.Element {
     onMount(() => void muxbus.refresh());
 
     const [muxPanelOpen, setMuxPanelOpen] = createSignal(false);
+    const [claudePanelOpen, setClaudePanelOpen] = createSignal(false);
     const agentMuxConnected = () => muxbus.status()?.connected === true;
 
     const muxStatusDot = (): string => {
@@ -74,6 +76,7 @@ export function AccountsManager(): JSX.Element {
                     model={model}
                     agentMuxConnected={agentMuxConnected}
                     onAgentMux={() => setMuxPanelOpen(true)}
+                    onClaudeConnect={() => setClaudePanelOpen(true)}
                 />
                 {/* Connected accounts (manage existing). Shown when there is any
                     stored account OR an AgentMux Cloud session is connected.
@@ -128,6 +131,10 @@ export function AccountsManager(): JSX.Element {
 
             <Show when={muxPanelOpen()}>
                 <AgentMuxConnectPanel muxbus={muxbus} onClose={() => setMuxPanelOpen(false)} />
+            </Show>
+
+            <Show when={claudePanelOpen()}>
+                <ClaudeLoginPanel onClose={() => setClaudePanelOpen(false)} />
             </Show>
         </div>
     );

@@ -39,7 +39,15 @@ export const SERVICE_CATALOG: ServiceTile[] = [
     // yet — key-only for v1 so the chooser never offers a dead-end OAuth path.
     { id: "aws", displayName: "AWS", authModes: ["key"], keyKind: "role", blurb: "IAM, deploy" },
     { id: "openai", displayName: "OpenAI", authModes: ["key"], keyKind: "api_key", blurb: "API key" },
-    { id: "anthropic", displayName: "Anthropic", authModes: ["key"], keyKind: "api_key", blurb: "API key" },
+    // "oauth" here is Claude's own in-app CLI login (spec
+    // SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.3 surface 3), NOT the
+    // service-OAuth scaffold (oauth-catalog.ts's OAUTH_SERVICES) the
+    // github/google/slack tiles above use — Anthropic has no device/PKCE
+    // endpoint an app-driven client could hit (auth-broker Phase D
+    // decision), so the gallery intercepts this tile's "oauth" pick the
+    // same way it intercepts the AgentMux tile above, opening
+    // ClaudeLoginPanel instead of the generic OAuthConnectPanel form path.
+    { id: "anthropic", displayName: "Anthropic", authModes: ["oauth", "key"], keyKind: "api_key", blurb: "Claude Code sign-in, or API key" },
     { id: "slack", displayName: "Slack", authModes: ["oauth"], keyKind: "api_key", blurb: "Messaging" },
     { id: "custom", displayName: "Custom", authModes: ["key"], keyKind: "api_key", blurb: "Any bearer token" },
 ];
