@@ -690,7 +690,9 @@ export function buildCefApi(): AppApi {
         // cli_login.rs's get_cli_login_status doc for why credential probing
         // alone isn't enough (present-but-expired tokens false-positive it).
         getCliLoginStatus: async () => {
-            return await invokeCommand<{ active: boolean }>("get_cli_login_status");
+            return await invokeCommand<{ active: boolean; credential_changed: boolean; generation: number }>(
+                "get_cli_login_status",
+            );
         },
         seedProviderAuthFromGlobal: async (providerId: string, configDir?: string) => {
             return await invokeCommand<{ seeded: boolean; status: string; expiresAt?: number | null }>(

@@ -77,7 +77,7 @@ beforeEach(() => {
     hub.runCliLogin.mockReset();
     hub.checkCliAuth.mockReset();
     hub.cancelCliLogin.mockReset().mockResolvedValue(undefined);
-    hub.getCliLoginStatus.mockReset().mockResolvedValue({ active: false });
+    hub.getCliLoginStatus.mockReset().mockResolvedValue({ active: false, credential_changed: true });
     hub.openPane.mockReset().mockResolvedValue("pane");
     hub.seedProviderAuthFromGlobal.mockReset();
     hub.openLoginTerminal.mockReset().mockResolvedValue({ opened: true });
@@ -647,7 +647,7 @@ describe("runProviderLogin — awaited in-app session (awaitTier1Completion)", (
     it("returns 'inapp-success' once the login child has exited and the credential is present — persists and links the account itself, reaps the child, and never touches tiers 2/3", async () => {
         vi.useFakeTimers();
         hub.runCliLogin.mockResolvedValue(CLAUDE_AUTHORIZE_URL);
-        hub.getCliLoginStatus.mockResolvedValue({ active: false }); // child already exited
+        hub.getCliLoginStatus.mockResolvedValue({ active: false, credential_changed: true }); // child exited, credential written
         hub.checkCliAuthCommand.mockResolvedValue({ authenticated: true }); // credential landed
         const onAccountRegistered = vi.fn();
         const setAuthUrl = vi.fn();
@@ -702,9 +702,9 @@ describe("runProviderLogin — awaited in-app session (awaitTier1Completion)", (
         // for two ticks before finishing.
         hub.checkCliAuthCommand.mockResolvedValue({ authenticated: true });
         hub.getCliLoginStatus
-            .mockResolvedValueOnce({ active: true })
-            .mockResolvedValueOnce({ active: true })
-            .mockResolvedValueOnce({ active: false });
+            .mockResolvedValueOnce({ active: true, credential_changed: true })
+            .mockResolvedValueOnce({ active: true, credential_changed: true })
+            .mockResolvedValueOnce({ active: false, credential_changed: true });
 
         const promise = runProviderLogin({
             provider: claude,
@@ -724,10 +724,40 @@ describe("runProviderLogin — awaited in-app session (awaitTier1Completion)", (
         expect(hub.getCliLoginStatus).toHaveBeenCalledTimes(3);
     });
 
+    it("reagent P1 on PR #2410: a reconnect whose child crashes instantly must NOT report success off the OLD stale-but-still-shaped credential — completion also requires credential_changed", async () => {
+        vi.useFakeTimers();
+        hub.runCliLogin.mockResolvedValue(CLAUDE_AUTHORIZE_URL);
+        // The reconnect's stale token already on disk BEFORE this attempt
+        // started reports "authenticated" throughout — present-but-expired
+        // tokens don't fail this local presence check (force-login.ts's
+        // documented false positive) — but the child dies on tick 1 without
+        // ever touching the credential file, so credential_changed stays
+        // false the whole time.
+        hub.checkCliAuthCommand.mockResolvedValue({ authenticated: true });
+        hub.getCliLoginStatus.mockResolvedValue({ active: false, credential_changed: false });
+
+        const promise = runProviderLogin({
+            provider: claude,
+            cliPath: "x",
+            authEnv: { CLAUDE_CONFIG_DIR: "C:/auth" },
+            setAuthUrl: vi.fn(),
+            log: vi.fn(),
+            awaitTier1Completion: true,
+            existingAccountId: "acct-existing",
+        });
+        // 2 grace re-checks after the first child-gone observation, same
+        // window as the "no credential ever landing" case.
+        await vi.advanceTimersByTimeAsync(6_000);
+        const outcome = await promise;
+
+        expect(outcome).toBe("inapp-timeout");
+        expect(hub.upsertIdentityAccount).not.toHaveBeenCalled();
+    });
+
     it("fails fast with 'inapp-timeout' when the child exits WITHOUT a credential ever landing (login crashed/failed) — after grace re-checks, well before the full window", async () => {
         vi.useFakeTimers();
         hub.runCliLogin.mockResolvedValue(CLAUDE_AUTHORIZE_URL);
-        hub.getCliLoginStatus.mockResolvedValue({ active: false });
+        hub.getCliLoginStatus.mockResolvedValue({ active: false, credential_changed: false });
         hub.checkCliAuthCommand.mockResolvedValue({ authenticated: false });
 
         const promise = runProviderLogin({
@@ -791,7 +821,7 @@ describe("runProviderLogin — awaited in-app session (awaitTier1Completion)", (
         vi.useFakeTimers();
         const before = Date.now();
         hub.runCliLogin.mockResolvedValue(CLAUDE_AUTHORIZE_URL);
-        hub.getCliLoginStatus.mockResolvedValue({ active: false });
+        hub.getCliLoginStatus.mockResolvedValue({ active: false, credential_changed: true });
         hub.checkCliAuthCommand.mockResolvedValue({ authenticated: true });
         const onTierChange = vi.fn();
 
@@ -817,7 +847,7 @@ describe("runProviderLogin — awaited in-app session (awaitTier1Completion)", (
     it("persist failure on both attempts still resolves 'inapp-success' (credential is genuinely on disk) but does NOT fire onAccountRegistered — callers gate their success messaging on that, same as the terminal-success contract", async () => {
         vi.useFakeTimers();
         hub.runCliLogin.mockResolvedValue(CLAUDE_AUTHORIZE_URL);
-        hub.getCliLoginStatus.mockResolvedValue({ active: false });
+        hub.getCliLoginStatus.mockResolvedValue({ active: false, credential_changed: true });
         hub.checkCliAuthCommand.mockResolvedValue({ authenticated: true });
         hub.upsertIdentityAccount.mockRejectedValue(new Error("db error"));
         const onAccountRegistered = vi.fn();
@@ -861,5 +891,34 @@ describe("runProviderLogin — awaited in-app session (awaitTier1Completion)", (
         expect(outcome).toBe("opened");
         expect(hub.getCliLoginStatus).not.toHaveBeenCalled();
         expect(hub.upsertIdentityAccount).not.toHaveBeenCalled();
+    });
+
+    it("codex P2 on PR #2410: when a DIFFERENT surface's login supersedes this one mid-poll (host generation advances), does not call cancelCliLogin — that would kill the newer, unrelated login instead of reaping this one", async () => {
+        vi.useFakeTimers();
+        hub.runCliLogin.mockResolvedValue(CLAUDE_AUTHORIZE_URL);
+        hub.checkCliAuthCommand.mockResolvedValue({ authenticated: false });
+        hub.getCliLoginStatus
+            // First read establishes this poll's own baseline generation.
+            .mockResolvedValueOnce({ active: true, credential_changed: true, generation: 5 })
+            // A different surface starts a new login — host generation
+            // advances. From here on, active/credential_changed describe
+            // THAT newer child, not this poll's own.
+            .mockResolvedValueOnce({ active: false, credential_changed: true, generation: 6 });
+
+        const promise = runProviderLogin({
+            provider: claude,
+            cliPath: "x",
+            authEnv: { CLAUDE_CONFIG_DIR: "C:/auth" },
+            setAuthUrl: vi.fn(),
+            log: vi.fn(),
+            awaitTier1Completion: true,
+        });
+        await vi.advanceTimersByTimeAsync(4_000);
+        const outcome = await promise;
+
+        expect(outcome).toBe("inapp-timeout");
+        expect(hub.upsertIdentityAccount).not.toHaveBeenCalled();
+        // The whole point: must NOT reap a login that isn't this attempt's.
+        expect(hub.cancelCliLogin).not.toHaveBeenCalled();
     });
 });

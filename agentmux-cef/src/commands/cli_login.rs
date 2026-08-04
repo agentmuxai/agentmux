@@ -166,6 +166,11 @@ pub async fn run_cli_login(
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
         + 1;
 
+    // Capture the credential-freshness baseline BEFORE either spawn path
+    // launches its child — see cli_login_cred_baseline's own doc comment.
+    // Single call site: run_cli_login_pty is only ever reached from here.
+    *state.cli_login_cred_baseline.lock() = capture_cred_baseline(&auth_env);
+
     if requires_tty {
         return run_cli_login_pty(state, cli_path, login_args, auth_env, generation).await;
     }
@@ -249,7 +254,7 @@ pub async fn run_cli_login(
     .flatten();
 
     if let Some(ref url) = auth_url {
-        tracing::info!(url = %url, "run_cli_login: captured auth URL");
+        tracing::info!(url = %redact_url_query(url), "run_cli_login: captured auth URL");
     } else {
         tracing::warn!("run_cli_login: no auth URL captured within 2s");
     }
@@ -735,7 +740,7 @@ async fn run_cli_login_pty(
         Ok(Err(_)) | Err(_) => None,
     };
     if let Some(ref url) = auth_url {
-        tracing::info!(url = %url, "run_cli_login_pty: captured auth URL");
+        tracing::info!(url = %redact_url_query(url), "run_cli_login_pty: captured auth URL");
     } else {
         tracing::warn!(
             "run_cli_login_pty: no auth URL captured within {URL_CAPTURE_TIMEOUT_SECS}s"
@@ -848,6 +853,19 @@ fn redact_secrets(line: &str) -> String {
     out
 }
 
+/// Strips the query string from a captured authorize URL before logging.
+/// codex P2 on PR #2410: the query carries `state`/`code_challenge` —
+/// SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §5 explicitly says never
+/// log those. Keeps scheme+host+path (still useful for confirming WHICH
+/// provider/endpoint was captured) and appends a marker so a reader knows
+/// the query was intentionally dropped, not lost.
+fn redact_url_query(url: &str) -> String {
+    match url.find('?') {
+        Some(idx) => format!("{}?<redacted>", &url[..idx]),
+        None => url.to_string(),
+    }
+}
+
 /// Extract an OAuth URL from a line of CLI output.
 /// Strips ANSI escape sequences and looks for `https://...` substrings.
 fn extract_url(line: &str) -> Option<String> {
@@ -958,6 +976,22 @@ pub fn cancel_cli_login(state: &Arc<AppState>) -> Result<serde_json::Value, Stri
     Ok(serde_json::Value::Null)
 }
 
+/// Reads `CLAUDE_CONFIG_DIR` out of the spawn's `auth_env` and stats its
+/// `.credentials.json` (same path convention the PTY reap's post-login
+/// existence check already uses, ~line 773). `None` inner value = the file
+/// doesn't exist yet (a fresh mint — any later appearance counts as
+/// "changed"). Returns `None` entirely when no config-dir env var was
+/// passed (nothing to compare against; `get_cli_login_status` treats that
+/// as "can't tell, don't block on it").
+fn capture_cred_baseline(
+    auth_env: &std::collections::HashMap<String, String>,
+) -> Option<(std::path::PathBuf, Option<std::time::SystemTime>)> {
+    let dir = auth_env.get("CLAUDE_CONFIG_DIR")?;
+    let path = std::path::Path::new(dir).join(".credentials.json");
+    let mtime = std::fs::metadata(&path).ok().and_then(|m| m.modified().ok());
+    Some((path, mtime))
+}
+
 /// Report whether a CLI login child is still in flight.
 ///
 /// `active` is derived from `cli_login_active`, which both spawn transports
@@ -986,7 +1020,32 @@ pub fn get_cli_login_status(state: &Arc<AppState>) -> Result<serde_json::Value, 
     let active = state
         .cli_login_active
         .load(std::sync::atomic::Ordering::SeqCst);
-    Ok(serde_json::json!({ "active": active }))
+    // credential_changed: has the credential file's mtime moved (or did it
+    // start existing) since the baseline captured right before THIS
+    // attempt spawned? `None` baseline (no CLAUDE_CONFIG_DIR was passed)
+    // reports `true` — nothing to compare against, so don't block callers
+    // that have no way to supply this. See cli_login_cred_baseline's doc
+    // comment for why this is required alongside `active` for a caller to
+    // trust a completion signal (reagent P1 on PR #2410).
+    let credential_changed = match &*state.cli_login_cred_baseline.lock() {
+        None => true,
+        Some((path, baseline_mtime)) => {
+            let current_mtime = std::fs::metadata(path).ok().and_then(|m| m.modified().ok());
+            current_mtime != *baseline_mtime
+        }
+    };
+    // codex P2 on PR #2410: without this, a poll that started against
+    // generation N can't tell it's been superseded by generation N+1 (a
+    // DIFFERENT surface starting a newer login) — it would keep reading
+    // the newer child's `active`/`credential_changed` as if they were its
+    // own, and its unconditional cancelCliLogin() on timeout would kill
+    // that unrelated newer login. Callers capture this on their first read
+    // and treat any later mismatch as "no longer mine" rather than
+    // "timed out" — see pollForInAppLoginCompletion's own doc comment.
+    let generation = state
+        .cli_login_generation
+        .load(std::sync::atomic::Ordering::SeqCst);
+    Ok(serde_json::json!({ "active": active, "credential_changed": credential_changed, "generation": generation }))
 }
 
 /// Single-quote a value for embedding in the POSIX launch script
@@ -1265,6 +1324,64 @@ mod url_capture_timeout_tests {
     fn is_a_sane_bounded_value_for_providers_that_actually_print_a_url() {
         assert!(URL_CAPTURE_TIMEOUT_SECS > 0);
         assert!(URL_CAPTURE_TIMEOUT_SECS <= 30);
+    }
+}
+
+#[cfg(test)]
+mod redact_url_query_tests {
+    use super::redact_url_query;
+
+    // codex P2 on PR #2410: SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §5
+    // says never log the authorize URL's full query (state/code_challenge).
+    #[test]
+    fn strips_the_query_string() {
+        let url = "https://claude.com/cai/oauth/authorize?code=true&state=abc123&code_challenge=xyz";
+        assert_eq!(redact_url_query(url), "https://claude.com/cai/oauth/authorize?<redacted>");
+    }
+
+    #[test]
+    fn leaves_a_query_less_url_untouched() {
+        let url = "https://claude.com/cai/oauth/authorize";
+        assert_eq!(redact_url_query(url), url);
+    }
+}
+
+#[cfg(test)]
+mod capture_cred_baseline_tests {
+    use super::capture_cred_baseline;
+    use std::collections::HashMap;
+
+    #[test]
+    fn returns_none_when_no_config_dir_env_var_is_present() {
+        let auth_env = HashMap::new();
+        assert!(capture_cred_baseline(&auth_env).is_none());
+    }
+
+    #[test]
+    fn reports_none_mtime_for_a_credential_file_that_does_not_exist_yet() {
+        let dir = std::env::temp_dir().join(format!("cli-login-baseline-test-{}", std::process::id()));
+        let mut auth_env = HashMap::new();
+        auth_env.insert("CLAUDE_CONFIG_DIR".to_string(), dir.to_string_lossy().to_string());
+
+        let (path, mtime) = capture_cred_baseline(&auth_env).expect("config dir was set");
+        assert_eq!(path, dir.join(".credentials.json"));
+        assert!(mtime.is_none(), "fresh mint: no credential file should exist yet");
+    }
+
+    #[test]
+    fn reports_a_real_mtime_for_an_existing_credential_file() {
+        let dir = std::env::temp_dir().join(format!("cli-login-baseline-test-existing-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cred_path = dir.join(".credentials.json");
+        std::fs::write(&cred_path, "{}").unwrap();
+
+        let mut auth_env = HashMap::new();
+        auth_env.insert("CLAUDE_CONFIG_DIR".to_string(), dir.to_string_lossy().to_string());
+
+        let (_, mtime) = capture_cred_baseline(&auth_env).expect("config dir was set");
+        assert!(mtime.is_some(), "reconnect: the stale credential's baseline mtime must be captured");
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
 
