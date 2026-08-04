@@ -831,10 +831,9 @@ const CONVERSATIONAL_PREAMBLES: &[&str] = &[
 /// this list is deliberately not exhaustive NLP-style filler detection,
 /// just the handful of openers a model actually reaches for here).
 fn strip_conversational_preamble(s: &str) -> Option<String> {
-    let lower = s.to_lowercase();
     for prefix in CONVERSATIONAL_PREAMBLES {
-        if lower.starts_with(prefix) {
-            let rest = &s[prefix.len()..];
+        if let Some(byte_len) = case_insensitive_prefix_byte_len(s, prefix) {
+            let rest = &s[byte_len..];
             let mut chars = rest.chars();
             return Some(match chars.next() {
                 Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
@@ -843,6 +842,32 @@ fn strip_conversational_preamble(s: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Byte length in `s` of a prefix that case-insensitively matches `prefix`
+/// (always plain ASCII lowercase), or `None` if `s` doesn't start with it.
+/// Walks `s`'s own char boundaries rather than slicing by an offset computed
+/// against a separately-lowercased copy of `s` — a char's lowercase mapping
+/// can change UTF-8 byte length (e.g. the Kelvin sign 'K' -> 'k') or even
+/// character count (e.g. Turkish 'İ' -> "i̇"), which would otherwise misalign
+/// the offset or land it off a char boundary and panic on slice.
+fn case_insensitive_prefix_byte_len(s: &str, prefix: &str) -> Option<usize> {
+    let mut prefix_chars = prefix.chars().peekable();
+    for (byte_idx, c) in s.char_indices() {
+        if prefix_chars.peek().is_none() {
+            return Some(byte_idx);
+        }
+        for lc in c.to_lowercase() {
+            if prefix_chars.next_if_eq(&lc).is_none() {
+                return None;
+            }
+        }
+    }
+    if prefix_chars.peek().is_none() {
+        Some(s.len())
+    } else {
+        None
+    }
 }
 
 /// Extract meaningful text from raw stream-json lines for digest summarization.
@@ -1046,5 +1071,26 @@ mod sanitize_ambient_text_tests {
         // guess at degenerate whole-string filler" scope this function
         // documents.
         assert_eq!(sanitize_ambient_text("Yeah,"), "Yeah,");
+    }
+
+    #[test]
+    fn preamble_strip_handles_byte_length_changing_case_folding() {
+        // U+212A KELVIN SIGN lowercases to ASCII 'k' (3 bytes -> 1 byte). If the
+        // preamble strip computed its slice offset from a separately-lowercased
+        // copy of the string instead of walking the original string's own char
+        // boundaries, this would misalign the slice (or panic on a non-char-
+        // boundary index) instead of matching "ok, " normally.
+        let s = "O\u{212A}, run the tests";
+        assert_eq!(sanitize_ambient_text(s), "Run the tests");
+    }
+
+    #[test]
+    fn preamble_strip_handles_char_count_changing_case_folding() {
+        // U+0130 LATIN CAPITAL LETTER I WITH DOT ABOVE lowercases to "i̇" (2
+        // chars) under Rust's default Unicode case folding. This does not
+        // match any configured preamble, but must not panic or corrupt the
+        // string while failing to match.
+        let s = "\u{0130} think we should refactor this";
+        assert_eq!(sanitize_ambient_text(s), s);
     }
 }
