@@ -208,7 +208,7 @@ pub fn classify(
         // extraction ever misses (wording drift in errors.rs), rather than
         // asserting a specific, possibly wrong, provider name.
         let provider_phrase = extract_spawn_gate_provider(&combined)
-            .map(|p| format!("No {p} account"))
+            .map(|p| format!("No {} account", capitalize_provider(&p)))
             .unwrap_or_else(|| "No account".to_string());
         return build(
             FailureClass::Auth,
@@ -375,6 +375,21 @@ fn extract_spawn_gate_provider(combined: &str) -> Option<String> {
         None
     } else {
         Some(provider.to_string())
+    }
+}
+
+/// Title-cases a raw provider id ("claude" -> "Claude") for the
+/// spawn-gate message. reagent P2 on PR #2413: the raw lowercase slug
+/// read poorly next to catalog.ts's real display names ("Claude Code",
+/// "Gemini CLI"); this doesn't reach for those (Rust has no access to
+/// the frontend catalog and duplicating/syncing the full display-name
+/// table across languages is disproportionate for one error string) —
+/// just enough prettification that the message reads as a proper noun.
+fn capitalize_provider(id: &str) -> String {
+    let mut chars = id.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => id.to_string(),
     }
 }
 
@@ -617,7 +632,7 @@ mod tests {
         });
         let f = classify(Some(1), None, "", Some(&frame));
         assert_eq!(f.code, FailureClass::Auth);
-        assert!(f.detail.contains("claude"), "detail: {}", f.detail);
+        assert!(f.detail.contains("Claude"), "detail: {}", f.detail);
     }
 
     #[test]
@@ -634,8 +649,15 @@ mod tests {
         });
         let f = classify(Some(1), None, "", Some(&frame));
         assert_eq!(f.code, FailureClass::Auth);
-        assert!(f.detail.contains("gemini"), "detail: {}", f.detail);
+        assert!(f.detail.contains("Gemini"), "detail: {}", f.detail);
         assert!(!f.detail.contains("Claude"), "detail: {}", f.detail);
+    }
+
+    #[test]
+    fn capitalize_provider_title_cases_the_raw_id() {
+        assert_eq!(capitalize_provider("claude"), "Claude");
+        assert_eq!(capitalize_provider("gemini"), "Gemini");
+        assert_eq!(capitalize_provider(""), "");
     }
 
     #[test]
