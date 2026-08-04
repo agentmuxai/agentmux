@@ -64,18 +64,22 @@ impl CliLoginStdin {
 const LOGIN_REAP_TIMEOUT_SECS: u64 = 6 * 60;
 
 /// Cap on how long run_cli_login_pty blocks waiting for a scrapeable OAuth
-/// URL before giving up and returning auth_url=None. Frontend callers that
-/// know in advance a provider never prints one (Claude — see catalog.ts's
-/// headlessLoginUrlUnsupported flag) skip this call entirely via
-/// runProviderLogin's skipTier1, so in practice this only bounds providers
-/// that plausibly DO print a URL (Codex/Gemini/OpenClaw).
+/// URL before giving up and returning auth_url=None. Bounds every provider
+/// that plausibly prints a URL — Codex/Gemini/OpenClaw, and since
+/// SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.2 Claude as well: the
+/// pinned CLI (2.1.198+) prints the full authorize URL
+/// (`https://claude.com/cai/oauth/authorize?…`) under this PTY spawn,
+/// verified by live probes on 2026-08-03, so catalog.ts's
+/// headlessLoginUrlUnsupported flag was dropped for Claude and tier 1
+/// reaches this function again. An OLDER Claude CLI (≤2.1.183 behavior,
+/// which prints nothing) simply times out here — that's the frontend's
+/// behavior-gate: auth_url=None makes runProviderLogin fall through to
+/// tiers 2/3 exactly as before, with no CLI version check anywhere.
 ///
-/// Left at 15s, NOT shortened as a "safety margin" for Claude: Claude never
-/// reaches this function at all now (skipTier1 above), so shortening it
-/// would only affect Codex/Gemini/OpenClaw — providers that legitimately
-/// need up to this long to print their URL. reagent P1 on PR #2300 caught
-/// an earlier attempt to cut this to 5s, which would have killed valid
-/// in-progress OpenClaw logins and forced an unnecessary terminal fallback.
+/// Left at 15s, NOT shortened as a "safety margin": reagent P1 on PR #2300
+/// caught an earlier attempt to cut this to 5s, which would have killed
+/// valid in-progress OpenClaw logins (they can take close to the full 15s
+/// to print their URL) and forced an unnecessary terminal fallback.
 const URL_CAPTURE_TIMEOUT_SECS: u64 = 15;
 
 /// Spawn a CLI auth login flow.
@@ -123,6 +127,24 @@ pub async fn run_cli_login(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
+    // Which key in `auth_env` holds the provider's isolated config dir —
+    // "CLAUDE_CONFIG_DIR" for Claude, "OPENCLAW_HOME" for OpenClaw (the
+    // only other requiresLoginTty/awaitTier1Completion provider today),
+    // catalog.ts's per-provider `authConfigDirEnvVar`. reagent P1 on
+    // PR #2410: capture_cred_baseline previously hardcoded
+    // "CLAUDE_CONFIG_DIR", silently no-op'ing the credential-freshness
+    // guard for OpenClaw (auth_env has no such key, so the baseline
+    // capture always returned None → credential_changed always true —
+    // exactly the false-positive-on-reconnect bug this guard exists to
+    // close, just for a different provider). Falls back to
+    // "CLAUDE_CONFIG_DIR" if omitted, for any caller not yet updated.
+    let auth_config_dir_env_var = args
+        .get("auth_config_dir_env_var")
+        .or_else(|| args.get("authConfigDirEnvVar"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("CLAUDE_CONFIG_DIR")
+        .to_string();
+
     // §4 instrumentation (SPEC_HOST_CLI_LOGIN_CAPTURE): snapshot the
     // auth-precedence env keys the child will see. A stray ANTHROPIC_API_KEY
     // (precedence #3) overrides subscription OAuth (#6) and, if it belongs to a
@@ -162,6 +184,11 @@ pub async fn run_cli_login(
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
         + 1;
 
+    // Capture the credential-freshness baseline BEFORE either spawn path
+    // launches its child — see cli_login_cred_baseline's own doc comment.
+    // Single call site: run_cli_login_pty is only ever reached from here.
+    *state.cli_login_cred_baseline.lock() = capture_cred_baseline(&auth_env, &auth_config_dir_env_var);
+
     if requires_tty {
         return run_cli_login_pty(state, cli_path, login_args, auth_env, generation).await;
     }
@@ -189,6 +216,9 @@ pub async fn run_cli_login(
         let mut stored_stdin = state.cli_login_stdin.lock();
         *stored_stdin = child.stdin.take().map(CliLoginStdin::Pipe);
     }
+    state
+        .cli_login_active
+        .store(true, std::sync::atomic::Ordering::SeqCst);
 
     // Capture the OAuth URL from stdout/stderr (the CLI prints it within a few
     // hundred ms). CRITICAL: the readers must SURVIVE this capture and keep
@@ -242,7 +272,7 @@ pub async fn run_cli_login(
     .flatten();
 
     if let Some(ref url) = auth_url {
-        tracing::info!(url = %url, "run_cli_login: captured auth URL");
+        tracing::info!(url = %redact_url_query(url), "run_cli_login: captured auth URL");
     } else {
         tracing::warn!("run_cli_login: no auth URL captured within 2s");
     }
@@ -298,6 +328,9 @@ pub async fn run_cli_login(
             == generation
         {
             *state_for_cleanup.cli_login_stdin.lock() = None;
+            state_for_cleanup
+                .cli_login_active
+                .store(false, std::sync::atomic::Ordering::SeqCst);
         }
     });
 
@@ -632,6 +665,9 @@ async fn run_cli_login_pty(
         let mut stored = state.cli_login_stdin.lock();
         *stored = Some(CliLoginStdin::Pty(writer));
     }
+    state
+        .cli_login_active
+        .store(true, std::sync::atomic::Ordering::SeqCst);
 
     // Synchronously read from the master in a blocking task, scanning
     // each line for an OAuth URL. portable_pty's reader is sync.
@@ -672,8 +708,17 @@ async fn run_cli_login_pty(
                         // CLAUDE_CODE_OAUTH_TOKEN (`sk-ant-oat…`) to stdout — never
                         // write it to the host log. redact_secrets masks it while
                         // preserving the surrounding shape so we can still read the
-                        // output format from the capture.
-                        tracing::info!(target: "login_pty", "[login-pty] {}", redact_secrets(t));
+                        // output format from the capture. redact_url_queries_in_line
+                        // similarly masks any authorize URL's query (state/
+                        // code_challenge — SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md
+                        // §5) wherever it appears in the line, not just in the
+                        // separate "captured auth URL" event below (codex P2 on
+                        // PR #2410, second round).
+                        tracing::info!(
+                            target: "login_pty",
+                            "[login-pty] {}",
+                            redact_url_queries_in_line(&redact_secrets(t))
+                        );
                     }
                     // §5.1 (SPEC_HOST_CLI_LOGIN_CAPTURE): a CLAUDE_CODE_OAUTH_TOKEN /
                     // `sk-ant-oat…` line is the setup-token headless contract — the
@@ -687,8 +732,11 @@ async fn run_cli_login_pty(
                             t.len()
                         );
                     }
-                    // Still capture an OAuth URL for providers that DO print one
-                    // (Codex/Gemini/OpenClaw); a no-op for Claude v2.1.x.
+                    // Capture the OAuth URL for providers that print one —
+                    // Codex/Gemini/OpenClaw, and Claude 2.1.198+ (its "If the
+                    // browser didn't open, visit: https://claude.com/cai/oauth/
+                    // authorize?…" fallback line, sometimes OSC-8-hyperlinked;
+                    // SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §2).
                     if let Some(tx) = url_tx.take() {
                         if let Some(u) = extract_url(&line) {
                             let _ = tx.send(Some(u));
@@ -719,7 +767,7 @@ async fn run_cli_login_pty(
         Ok(Err(_)) | Err(_) => None,
     };
     if let Some(ref url) = auth_url {
-        tracing::info!(url = %url, "run_cli_login_pty: captured auth URL");
+        tracing::info!(url = %redact_url_query(url), "run_cli_login_pty: captured auth URL");
     } else {
         tracing::warn!(
             "run_cli_login_pty: no auth URL captured within {URL_CAPTURE_TIMEOUT_SECS}s"
@@ -792,6 +840,9 @@ async fn run_cli_login_pty(
         {
             *state_for_cleanup.cli_login_stdin.lock() = None;
             *state_for_cleanup.cli_login_pty_pid.lock() = None;
+            state_for_cleanup
+                .cli_login_active
+                .store(false, std::sync::atomic::Ordering::SeqCst);
         }
     });
 
@@ -827,6 +878,47 @@ fn redact_secrets(line: &str) -> String {
     }
     out.push_str(rest);
     out
+}
+
+/// Redacts every URL query string found anywhere in a raw log line —
+/// unlike `redact_url_query` (which takes a whole URL, used for the
+/// already-extracted "captured auth URL" event), this scans arbitrary CLI
+/// output for `?` characters and truncates each one's query run at the
+/// next whitespace, so it catches the authorize URL wherever it appears
+/// in surrounding text (e.g. "Browser didn't open? Use the url below…
+/// https://claude.com/…?state=…").
+///
+/// codex P2 on PR #2410 (second round): `redact_url_query` was only ever
+/// applied to the structured "captured auth URL" tracing event — the RAW
+/// PTY line logger (`redact_secrets(t)`, a few lines above this file's
+/// URL-capture logic) still wrote the full authorize URL, query and all,
+/// verbatim to the host log for every line the CLI printed, including the
+/// very line the URL was scraped from.
+fn redact_url_queries_in_line(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut rest = line;
+    while let Some(pos) = rest.find('?') {
+        out.push_str(&rest[..=pos]);
+        let after = &rest[pos + 1..];
+        let end = after.find(char::is_whitespace).unwrap_or(after.len());
+        out.push_str("<redacted>");
+        rest = &after[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Strips the query string from a captured authorize URL before logging.
+/// codex P2 on PR #2410: the query carries `state`/`code_challenge` —
+/// SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §5 explicitly says never
+/// log those. Keeps scheme+host+path (still useful for confirming WHICH
+/// provider/endpoint was captured) and appends a marker so a reader knows
+/// the query was intentionally dropped, not lost.
+fn redact_url_query(url: &str) -> String {
+    match url.find('?') {
+        Some(idx) => format!("{}?<redacted>", &url[..idx]),
+        None => url.to_string(),
+    }
 }
 
 /// Extract an OAuth URL from a line of CLI output.
@@ -937,6 +1029,88 @@ pub fn cancel_cli_login(state: &Arc<AppState>) -> Result<serde_json::Value, Stri
         }
     }
     Ok(serde_json::Value::Null)
+}
+
+/// Reads the provider's config-dir env var (`config_dir_env_var` — e.g.
+/// "CLAUDE_CONFIG_DIR", "OPENCLAW_HOME") out of the spawn's `auth_env` and
+/// stats its `.credentials.json` (same path convention the PTY reap's
+/// post-login existence check already uses, ~line 773). `None` inner value
+/// = the file doesn't exist yet (a fresh mint — any later appearance
+/// counts as "changed"). Returns `None` entirely when the named env var
+/// wasn't passed (nothing to compare against; `get_cli_login_status`
+/// treats that as "can't tell, don't block on it").
+///
+/// reagent P1 on PR #2410: this used to hardcode "CLAUDE_CONFIG_DIR",
+/// silently no-op'ing the freshness guard for every OTHER
+/// requiresLoginTty/awaitTier1Completion provider (OpenClaw uses
+/// OPENCLAW_HOME) — auth_env simply had no matching key, so this always
+/// returned None and credential_changed always read true, reopening the
+/// exact stale-credential-reconnect false-positive the guard exists to
+/// close, just for OpenClaw instead of Claude.
+fn capture_cred_baseline(
+    auth_env: &std::collections::HashMap<String, String>,
+    config_dir_env_var: &str,
+) -> Option<(std::path::PathBuf, Option<std::time::SystemTime>)> {
+    let dir = auth_env.get(config_dir_env_var)?;
+    let path = std::path::Path::new(dir).join(".credentials.json");
+    let mtime = std::fs::metadata(&path).ok().and_then(|m| m.modified().ok());
+    Some((path, mtime))
+}
+
+/// Report whether a CLI login child is still in flight.
+///
+/// `active` is derived from `cli_login_active`, which both spawn transports
+/// (pipe and PTY) set at spawn and whose reaper task clears on child exit /
+/// cancel / reap-timeout — generation-guarded, so a superseding login that
+/// repopulated the slot correctly reads as active. Deliberately NOT derived
+/// from `cli_login_stdin`'s presence: `set_provider_auth` `.take()`s that
+/// slot the instant a pasted code is delivered (single-use), but the child
+/// keeps running afterward while it exchanges the code — reading the stdin
+/// slot here reported `active: false` the moment a code was pasted, which
+/// could time out and kill a login that was still genuinely completing
+/// (codex P1 on PR #2410).
+///
+/// Added for the in-app Claude login session
+/// (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.1): tier-1 completion is
+/// "child exited successfully AND credential material exists in the isolated
+/// dir". The frontend already probes the credential half via
+/// CheckCliAuthCommand against the isolated CLAUDE_CONFIG_DIR; this supplies
+/// the child-exit half, which run_cli_login can't return (it responds as
+/// soon as the URL is captured, while the child lives on). Without it, a
+/// reconnect into an EXISTING account dir would false-positive on the very
+/// first credential probe (a present-but-expired token still reports
+/// "authenticated" — see force-login.ts's doc comment) and reap the login
+/// child before the user ever finished authorizing.
+pub fn get_cli_login_status(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
+    let active = state
+        .cli_login_active
+        .load(std::sync::atomic::Ordering::SeqCst);
+    // credential_changed: has the credential file's mtime moved (or did it
+    // start existing) since the baseline captured right before THIS
+    // attempt spawned? `None` baseline (no CLAUDE_CONFIG_DIR was passed)
+    // reports `true` — nothing to compare against, so don't block callers
+    // that have no way to supply this. See cli_login_cred_baseline's doc
+    // comment for why this is required alongside `active` for a caller to
+    // trust a completion signal (reagent P1 on PR #2410).
+    let credential_changed = match &*state.cli_login_cred_baseline.lock() {
+        None => true,
+        Some((path, baseline_mtime)) => {
+            let current_mtime = std::fs::metadata(path).ok().and_then(|m| m.modified().ok());
+            current_mtime != *baseline_mtime
+        }
+    };
+    // codex P2 on PR #2410: without this, a poll that started against
+    // generation N can't tell it's been superseded by generation N+1 (a
+    // DIFFERENT surface starting a newer login) — it would keep reading
+    // the newer child's `active`/`credential_changed` as if they were its
+    // own, and its unconditional cancelCliLogin() on timeout would kill
+    // that unrelated newer login. Callers capture this on their first read
+    // and treat any later mismatch as "no longer mine" rather than
+    // "timed out" — see pollForInAppLoginCompletion's own doc comment.
+    let generation = state
+        .cli_login_generation
+        .load(std::sync::atomic::Ordering::SeqCst);
+    Ok(serde_json::json!({ "active": active, "credential_changed": credential_changed, "generation": generation }))
 }
 
 /// Single-quote a value for embedding in the POSIX launch script
@@ -1200,19 +1374,177 @@ mod redact_tests {
 mod url_capture_timeout_tests {
     use super::URL_CAPTURE_TIMEOUT_SECS;
 
-    // Regression guard for the deterministic-login-UX fix: Claude no longer
-    // reaches this function at all (catalog.ts's headlessLoginUrlUnsupported
-    // flag routes it around run_cli_login_pty entirely via skipTier1), so
-    // this constant only bounds providers that legitimately DO print a URL
-    // (Codex/Gemini/OpenClaw). reagent P1 on PR #2300: an earlier attempt to
-    // shorten this to 5s "as a safety margin" would have killed valid
-    // in-progress OpenClaw logins, which can take close to the full 15s to
-    // print their URL. Pinned at a sane, bounded value — not "short" for
-    // its own sake — so a future edit can't reintroduce that regression.
+    // Regression guard: this constant bounds every provider that prints a
+    // URL — Codex/Gemini/OpenClaw, and (since
+    // SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md revived tier 1) Claude
+    // 2.1.198+ too. It doubles as the frontend's behavior-gate window: an
+    // older Claude CLI that prints nothing times out here and
+    // runProviderLogin falls back to tiers 2/3. reagent P1 on PR #2300: an
+    // earlier attempt to shorten this to 5s "as a safety margin" would have
+    // killed valid in-progress OpenClaw logins, which can take close to the
+    // full 15s to print their URL. Pinned at a sane, bounded value — not
+    // "short" for its own sake — so a future edit can't reintroduce that
+    // regression.
     #[test]
     fn is_a_sane_bounded_value_for_providers_that_actually_print_a_url() {
         assert!(URL_CAPTURE_TIMEOUT_SECS > 0);
         assert!(URL_CAPTURE_TIMEOUT_SECS <= 30);
+    }
+}
+
+#[cfg(test)]
+mod redact_url_query_tests {
+    use super::redact_url_query;
+
+    // codex P2 on PR #2410: SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §5
+    // says never log the authorize URL's full query (state/code_challenge).
+    #[test]
+    fn strips_the_query_string() {
+        let url = "https://claude.com/cai/oauth/authorize?code=true&state=abc123&code_challenge=xyz";
+        assert_eq!(redact_url_query(url), "https://claude.com/cai/oauth/authorize?<redacted>");
+    }
+
+    #[test]
+    fn leaves_a_query_less_url_untouched() {
+        let url = "https://claude.com/cai/oauth/authorize";
+        assert_eq!(redact_url_query(url), url);
+    }
+}
+
+#[cfg(test)]
+mod redact_url_queries_in_line_tests {
+    use super::redact_url_queries_in_line;
+
+    // codex P2 on PR #2410 (second round): the raw PTY line logger wrote
+    // the authorize URL's full query verbatim — redact_url_query alone
+    // never reached it, since it was only applied to the separate
+    // "captured auth URL" structured event.
+    #[test]
+    fn redacts_a_url_query_embedded_in_surrounding_text() {
+        let line = "Browser didn't open? Use the url below to sign in (c to copy) https://claude.com/cai/oauth/authorize?code=true&state=abc&code_challenge=xyz";
+        let redacted = redact_url_queries_in_line(line);
+        assert!(redacted.contains("https://claude.com/cai/oauth/authorize?<redacted>"));
+        assert!(!redacted.contains("state=abc"));
+        assert!(!redacted.contains("code_challenge=xyz"));
+        // The leading text (including its OWN "?") is preserved verbatim.
+        assert!(redacted.starts_with("Browser didn't open?<redacted> Use the url"));
+    }
+
+    #[test]
+    fn leaves_a_line_with_no_query_string_untouched() {
+        let line = "Paste code here if prompted >";
+        assert_eq!(redact_url_queries_in_line(line), line);
+    }
+
+    #[test]
+    fn redacts_multiple_query_strings_in_the_same_line() {
+        let line = "a?x=1 b?y=2";
+        assert_eq!(redact_url_queries_in_line(line), "a?<redacted> b?<redacted>");
+    }
+}
+
+#[cfg(test)]
+mod capture_cred_baseline_tests {
+    use super::capture_cred_baseline;
+    use std::collections::HashMap;
+
+    #[test]
+    fn returns_none_when_no_config_dir_env_var_is_present() {
+        let auth_env = HashMap::new();
+        assert!(capture_cred_baseline(&auth_env, "CLAUDE_CONFIG_DIR").is_none());
+    }
+
+    #[test]
+    fn reports_none_mtime_for_a_credential_file_that_does_not_exist_yet() {
+        let dir = std::env::temp_dir().join(format!("cli-login-baseline-test-{}", std::process::id()));
+        let mut auth_env = HashMap::new();
+        auth_env.insert("CLAUDE_CONFIG_DIR".to_string(), dir.to_string_lossy().to_string());
+
+        let (path, mtime) = capture_cred_baseline(&auth_env, "CLAUDE_CONFIG_DIR").expect("config dir was set");
+        assert_eq!(path, dir.join(".credentials.json"));
+        assert!(mtime.is_none(), "fresh mint: no credential file should exist yet");
+    }
+
+    #[test]
+    fn reports_a_real_mtime_for_an_existing_credential_file() {
+        let dir = std::env::temp_dir().join(format!("cli-login-baseline-test-existing-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cred_path = dir.join(".credentials.json");
+        std::fs::write(&cred_path, "{}").unwrap();
+
+        let mut auth_env = HashMap::new();
+        auth_env.insert("CLAUDE_CONFIG_DIR".to_string(), dir.to_string_lossy().to_string());
+
+        let (_, mtime) = capture_cred_baseline(&auth_env, "CLAUDE_CONFIG_DIR").expect("config dir was set");
+        assert!(mtime.is_some(), "reconnect: the stale credential's baseline mtime must be captured");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn reagent_p1_on_pr_2410_uses_the_providers_own_env_var_not_a_hardcoded_claude_one() {
+        // OpenClaw uses OPENCLAW_HOME, not CLAUDE_CONFIG_DIR — before this
+        // fix, capture_cred_baseline hardcoded the latter, so this exact
+        // auth_env (a real OpenClaw spawn's) always returned None,
+        // silently disabling the freshness guard for OpenClaw entirely.
+        let dir = std::env::temp_dir().join(format!("cli-login-baseline-test-openclaw-{}", std::process::id()));
+        let mut auth_env = HashMap::new();
+        auth_env.insert("OPENCLAW_HOME".to_string(), dir.to_string_lossy().to_string());
+
+        assert!(capture_cred_baseline(&auth_env, "CLAUDE_CONFIG_DIR").is_none());
+        assert!(capture_cred_baseline(&auth_env, "OPENCLAW_HOME").is_some());
+    }
+}
+
+#[cfg(test)]
+mod extract_url_claude_authorize_tests {
+    use super::extract_url;
+
+    // Pins tier-1 URL capture for the revived in-app Claude login
+    // (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §2): the pinned CLI
+    // (2.1.198+) prints the PKCE authorize URL as a plain fallback line —
+    // and, in some renderings, OSC-8-hyperlink-wrapped. Both forms were
+    // observed in the 2026-08-03 live probes and both must yield the exact
+    // URL (not doubled, not truncated) or tier 1 silently falls back to the
+    // terminal tiers for a CLI that fully supports the in-app flow.
+    const AUTHORIZE_URL: &str = "https://claude.com/cai/oauth/authorize?code=true&client_id=abc-123&code_challenge=xyz_456&code_challenge_method=S256&state=st-789";
+
+    #[test]
+    fn captures_plain_fallback_line() {
+        let line = format!("If the browser didn't open, visit: {AUTHORIZE_URL}");
+        assert_eq!(extract_url(&line), Some(AUTHORIZE_URL.to_string()));
+    }
+
+    #[test]
+    fn captures_osc8_hyperlink_bel_terminated() {
+        // OSC-8 with the URL as both the sequence param and the visible link
+        // text (what the CLI actually emits) — the de-escaped visible text
+        // must win, single and intact.
+        let line = format!(
+            "If the browser didn't open, visit: \u{1b}]8;;{AUTHORIZE_URL}\u{7}{AUTHORIZE_URL}\u{1b}]8;;\u{7}"
+        );
+        assert_eq!(extract_url(&line), Some(AUTHORIZE_URL.to_string()));
+    }
+
+    #[test]
+    fn captures_osc8_hyperlink_st_terminated_with_non_url_link_text() {
+        // ST-terminated OSC-8 whose visible text is NOT the URL — the URI
+        // stashed from the escape sequence itself must be used as fallback.
+        let line = format!(
+            "Visit \u{1b}]8;;{AUTHORIZE_URL}\u{1b}\\this link\u{1b}]8;;\u{1b}\\ to sign in"
+        );
+        assert_eq!(extract_url(&line), Some(AUTHORIZE_URL.to_string()));
+    }
+
+    #[test]
+    fn captures_url_wrapped_in_csi_color_codes() {
+        let line = format!("\u{1b}[1m\u{1b}[36m{AUTHORIZE_URL}\u{1b}[0m");
+        assert_eq!(extract_url(&line), Some(AUTHORIZE_URL.to_string()));
+    }
+
+    #[test]
+    fn ignores_non_auth_urls() {
+        assert_eq!(extract_url("see https://claude.com/docs for details"), None);
     }
 }
 

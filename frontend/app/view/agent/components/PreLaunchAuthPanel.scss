@@ -99,6 +99,15 @@
     gap: var(--space-2);
 }
 
+// Bottom action row of the in-app login session panel (InAppLoginPanel):
+// Cancel + the explicit "Use terminal instead" fallback, side by side.
+.pre-launch-auth-panel-inapp-actions {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-2);
+}
+
 .pre-launch-auth-panel-url-label {
     font-size: 12px;
     color: var(--secondary-text-color);
