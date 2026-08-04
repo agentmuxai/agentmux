@@ -3,15 +3,23 @@
 
 /**
  * AgentComposerStrip — status row that sits directly above the textarea in
- * the agent pane composer region. Left-justified, wrapping onto additional
- * lines (no hard cap — see _composer-strip.scss's file header) rather than
- * clipping when the pane narrows — see
+ * the agent pane composer region. Below the widest tier: left-justified,
+ * wrapping onto additional lines (no hard cap — see _composer-strip.scss's
+ * file header) rather than clipping when the pane narrows — see
  * docs/specs/SPEC_COMPOSER_STRIP_LEFT_JUSTIFIED_TIERED_WRAP_2026_08_03.md.
+ * At the widest tier (≥482px, live-measured — the real 1-line/2-line wrap
+ * point, not an estimate): controls left / stats zone true-centered / right
+ * zone right — restored the same day after the left-justify-always behavior
+ * above silently dropped the centered stats presentation as a side effect
+ * (the narrow-tier wrap/no-clip fix itself is unchanged either way).
  *
  * In flow order:
- *   1. AgentRuntimeDropup (single Mode · Model · Effort trigger) + HOST/SANDBOX tag
+ *   1. AgentRuntimeDropup (single Mode · Model · Effort trigger)
  *   2. tokens (↑in ↓out) · elapsed
- *   3. ⚙N process badge · context text (12.1k / 64k) · auth tag · Shell toggle
+ *   3. ⚙N process badge · context text (12.1k / 64k) · auth tag · HOST/SANDBOX
+ *      tag + Shell toggle (paired as one unit, same day, per direct user
+ *      request — HOST/SANDBOX moved out of the controls zone to sit
+ *      immediately left of Shell)
  *
  * The strip bar itself is not clickable. "Shell" is the sole toggle for
  * the details drawer (the AgentShellSubblock terminal — activity-log lines
@@ -201,26 +209,17 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                         providerId={props.providerId ?? ""}
                     />
                 </Show>
-                {/* HOST/SANDBOX tag — not gated by showControls(): agent mode
-                    applies to every provider, not just Claude. Replaces the
-                    old "Host — full system access" / "Container — isolated
-                    Docker sandbox" pane row (confirmed inert — no click
-                    handler) with a compact label reusing the same
-                    RuntimeBadge component MyAgentsList/HostPopover already
-                    use elsewhere for this distinction (size="tag" — see
-                    RuntimeBadge.tsx). */}
-                <Show when={props.agentMode === "host" || props.agentMode === "container"}>
-                    <RuntimeBadge runtime={props.agentMode!} size="tag" />
-                </Show>
             </span>
 
-            {/* Stats zone — token/elapsed stats. Left-justified in flow (no
-                longer true-centered, see _composer-strip.scss), sitting
-                right after the controls zone or wrapping onto its own line
-                when there isn't room for both. The wrapper span always
-                renders (even with no stats yet) so this zone's presence in
-                the flow order — and therefore where the right zone wraps
-                to — stays stable whether or not stats are populated yet. */}
+            {/* Stats zone — token/elapsed stats. Below the widest tier:
+                left-justified in flow, sitting right after the controls
+                zone or wrapping onto its own line when there isn't room for
+                both. At the widest tier: true-centered between the controls
+                and right zones (see _composer-strip.scss). The wrapper span
+                always renders (even with no stats yet) so this zone's
+                presence in the flow order — and therefore where the right
+                zone wraps to — stays stable whether or not stats are
+                populated yet. */}
             <span class="agent-composer-strip-stats-zone">
                 <Show when={rightText()}>
                     <span
@@ -278,15 +277,32 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                         {props.authStatus === "authenticated" ? "Logged in" : "Not logged in"}
                     </span>
                 </Show>
-                <button
-                    type="button"
-                    class="agent-composer-strip-log-btn"
-                    classList={{ "agent-composer-strip-log-btn--active": props.logOpen }}
-                    title={props.logOpen ? "Hide the shell" : "Show the shell"}
-                    onClick={() => props.onToggleLog()}
-                >
-                    Shell
-                </button>
+                {/* HOST/SANDBOX tag + Shell toggle — grouped as a single unit
+                    immediately to the left of Shell (moved out of the
+                    controls zone, same day, per direct user request), so the
+                    two never separate across an internal wrap the way two
+                    independent zone children could. Not gated by
+                    showControls(): agent mode applies to every provider, not
+                    just Claude. Replaces the old "Host — full system access"
+                    / "Container — isolated Docker sandbox" pane row
+                    (confirmed inert — no click handler) with a compact label
+                    reusing the same RuntimeBadge component MyAgentsList/
+                    HostPopover already use elsewhere for this distinction
+                    (size="tag" — see RuntimeBadge.tsx). */}
+                <span class="agent-composer-strip-host-shell">
+                    <Show when={props.agentMode === "host" || props.agentMode === "container"}>
+                        <RuntimeBadge runtime={props.agentMode!} size="tag" />
+                    </Show>
+                    <button
+                        type="button"
+                        class="agent-composer-strip-log-btn"
+                        classList={{ "agent-composer-strip-log-btn--active": props.logOpen }}
+                        title={props.logOpen ? "Hide the shell" : "Show the shell"}
+                        onClick={() => props.onToggleLog()}
+                    >
+                        Shell
+                    </button>
+                </span>
             </span>
         </div>
     );

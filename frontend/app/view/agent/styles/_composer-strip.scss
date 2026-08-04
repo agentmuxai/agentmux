@@ -1,20 +1,26 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// AgentComposerStrip — status row above the textarea, left-justified and
-// wrapping onto additional lines instead of clipping or overlapping the
-// textarea below when the pane narrows. In flow order:
-//   1. AgentRuntimeDropup (single Mode · Model · Effort trigger) + HOST/SANDBOX tag
+// AgentComposerStrip — status row above the textarea. In flow order:
+//   1. AgentRuntimeDropup (single Mode · Model · Effort trigger)
 //   2. token/elapsed stats
-//   3. process badge · context text · auth tag · Shell toggle
-// A wrapping flex row, not a grid — `flex-wrap` reflows content onto a new
-// line automatically wherever it doesn't fit, always left-justified; no
-// centering, no right-pinning. See
+//   3. process badge · context text · auth tag · HOST/SANDBOX tag + Shell
+//      toggle (paired as a single unit — see .agent-composer-strip-host-shell)
+// Below the widest tier: a wrapping flex row, not a grid — `flex-wrap`
+// reflows content onto a new line automatically wherever it doesn't fit,
+// always left-justified, no centering, no right-pinning. See
 // docs/specs/SPEC_COMPOSER_STRIP_LEFT_JUSTIFIED_TIERED_WRAP_2026_08_03.md
 // (supersedes the grid + true-centered-stats design from
 // SPEC_COMPOSER_STRIP_LAYOUT_MIC_CENTER_MODEL_DEFAULTS_2026_07_10.md and the
 // two-row grid-template-areas tier from
-// SPEC_COMPOSER_STRIP_TWO_LINE_RESPONSIVE_2026_07_30.md).
+// SPEC_COMPOSER_STRIP_TWO_LINE_RESPONSIVE_2026_07_30.md) — this is the tier
+// that matters for never clipping/overlapping the textarea below, and stays
+// exactly as that spec left it.
+// At the widest tier (≥482px, see the container query near the bottom of
+// this file): the stats zone is true-centered again, controls left, right
+// zone right — same visual result as the pre-08-03 grid, restored the same
+// day after user feedback that always-left-justifying (even with room to
+// spare) silently dropped the centered stats presentation.
 //
 // No max-height/overflow:hidden cap: an earlier revision capped this at
 // ~3 lines, but .agent-composer-strip-controls/-right can *also* wrap
@@ -78,9 +84,10 @@
 }
 
 // ── Stats zone ───────────────────────────────────────────────────────────
-// No longer true-centered — sits left-justified in flow, immediately after
+// Below the widest tier: sits left-justified in flow, immediately after
 // controls when there's room, or alone on its own wrapped line when there
-// isn't (see the spec header comment above for why centering was dropped).
+// isn't. At the widest tier (≥482px, see the container query near the
+// bottom of this file): true-centered between the controls and right zones.
 
 .agent-composer-strip-stats-zone {
     min-width: 0;
@@ -205,12 +212,17 @@
 }
 
 // ── Right zone ───────────────────────────────────────────────────────────
-// Process badge · context text · auth tag · Shell toggle, in that order —
-// Shell last. No longer pinned to the row's right edge (justify-self: end
-// required a grid track; a left-justified flex row has no equivalent): on a
-// wide pane it still lands near the right because it's the last thing in
-// flow and line 1 fills left-to-right; on a wrapped line it starts at that
-// line's left margin like everything else.
+// Process badge · context text · auth tag · HOST/SANDBOX tag + Shell toggle
+// (paired, see .agent-composer-strip-host-shell below), in that order — the
+// HOST/SANDBOX + Shell pair last. Below the widest tier: not pinned to the
+// row's right edge —
+// on a wide-but-below-482px pane it still lands near the right because it's
+// the last thing in flow and line 1 fills left-to-right; on a wrapped line
+// it starts at that line's left margin like everything else. At the widest
+// tier (≥482px): explicitly pinned right again via `justify-content:
+// flex-end` on this zone's own flex-basis-0 half of the row (see the
+// container query near the bottom of this file) — same visual position as
+// the pre-08-03 grid's `justify-self: end`.
 
 .agent-composer-strip-right {
     display: flex;
@@ -225,6 +237,20 @@
     align-items: center;
     gap: var(--space-1-5);
     min-width: 0;
+}
+
+// HOST/SANDBOX tag + Shell toggle, paired as a single unit — moved out of
+// the controls zone, same day, per direct user request ("the HOST/SANDBOX
+// indicator should be just to the left of the Shell button"). An
+// inline-flex wrapper, not just adjacent DOM order: as ONE flex item inside
+// `.agent-composer-strip-right`'s own `flex-wrap: wrap` above, the pair can
+// never be torn apart onto two different sub-lines the way two independent
+// zone children could — they move together or not at all.
+.agent-composer-strip-host-shell {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    flex: 0 0 auto;
 }
 
 .agent-composer-strip-stats {
@@ -362,6 +388,42 @@
     .agent-composer-strip-log-btn {
         font-size: 9px;
         padding: 1px 3px;
+    }
+}
+
+// ── Widest tier — restore true-centered stats (2026-08-03, later same day) ──
+// The left-justified flex-wrap above is unchanged and stays the ONLY layout
+// below this breakpoint — it fixed a real clipping bug (PR #2393, Codex
+// P1 / ReAgent P2: content could overflow under the textarea) and nothing
+// here touches that. But left-justifying at EVERY width, including wide
+// panes with a whole line to spare, silently dropped the true-centered
+// stats zone from SPEC_COMPOSER_STRIP_LAYOUT_MIC_CENTER_MODEL_DEFAULTS_2026_07_10.md
+// as a side effect, not a deliberate goal — flagged by the user directly.
+// Restore it, but without the grid that caused the original clipping bug:
+// give `-controls` and `-right` matching `flex: 1 1 0` (equal flex-basis, so
+// they grow to occupy equal width) and center-align the stats zone between
+// them — the standard "true-center a middle flex item regardless of
+// left/right content width" pattern, same visual result as the old
+// `1fr auto 1fr` grid, without switching `display` or touching `flex-wrap`
+// (still `wrap`, inherited, unchanged — if this breakpoint's estimate is a
+// little off for some real content combination, it still safely reflows
+// instead of clipping, same safety net as every other tier in this file).
+// Breakpoint is estimated (controls ~150-250px + stats ~120-180px + right
+// ~220px + gaps ≈ 600-650px on one line), not measured — needs live
+// task dev verification, same caveat as every breakpoint in this file.
+@container agent-pane (min-width: 482px) {
+    .agent-composer-strip-controls {
+        flex: 1 1 0;
+    }
+
+    .agent-composer-strip-stats-zone {
+        flex: 0 0 auto;
+        text-align: center;
+    }
+
+    .agent-composer-strip-right {
+        flex: 1 1 0;
+        justify-content: flex-end;
     }
 }
 
