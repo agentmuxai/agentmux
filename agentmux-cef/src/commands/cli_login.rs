@@ -127,6 +127,24 @@ pub async fn run_cli_login(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
+    // Which key in `auth_env` holds the provider's isolated config dir —
+    // "CLAUDE_CONFIG_DIR" for Claude, "OPENCLAW_HOME" for OpenClaw (the
+    // only other requiresLoginTty/awaitTier1Completion provider today),
+    // catalog.ts's per-provider `authConfigDirEnvVar`. reagent P1 on
+    // PR #2410: capture_cred_baseline previously hardcoded
+    // "CLAUDE_CONFIG_DIR", silently no-op'ing the credential-freshness
+    // guard for OpenClaw (auth_env has no such key, so the baseline
+    // capture always returned None → credential_changed always true —
+    // exactly the false-positive-on-reconnect bug this guard exists to
+    // close, just for a different provider). Falls back to
+    // "CLAUDE_CONFIG_DIR" if omitted, for any caller not yet updated.
+    let auth_config_dir_env_var = args
+        .get("auth_config_dir_env_var")
+        .or_else(|| args.get("authConfigDirEnvVar"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("CLAUDE_CONFIG_DIR")
+        .to_string();
+
     // §4 instrumentation (SPEC_HOST_CLI_LOGIN_CAPTURE): snapshot the
     // auth-precedence env keys the child will see. A stray ANTHROPIC_API_KEY
     // (precedence #3) overrides subscription OAuth (#6) and, if it belongs to a
@@ -169,7 +187,7 @@ pub async fn run_cli_login(
     // Capture the credential-freshness baseline BEFORE either spawn path
     // launches its child — see cli_login_cred_baseline's own doc comment.
     // Single call site: run_cli_login_pty is only ever reached from here.
-    *state.cli_login_cred_baseline.lock() = capture_cred_baseline(&auth_env);
+    *state.cli_login_cred_baseline.lock() = capture_cred_baseline(&auth_env, &auth_config_dir_env_var);
 
     if requires_tty {
         return run_cli_login_pty(state, cli_path, login_args, auth_env, generation).await;
@@ -690,8 +708,17 @@ async fn run_cli_login_pty(
                         // CLAUDE_CODE_OAUTH_TOKEN (`sk-ant-oat…`) to stdout — never
                         // write it to the host log. redact_secrets masks it while
                         // preserving the surrounding shape so we can still read the
-                        // output format from the capture.
-                        tracing::info!(target: "login_pty", "[login-pty] {}", redact_secrets(t));
+                        // output format from the capture. redact_url_queries_in_line
+                        // similarly masks any authorize URL's query (state/
+                        // code_challenge — SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md
+                        // §5) wherever it appears in the line, not just in the
+                        // separate "captured auth URL" event below (codex P2 on
+                        // PR #2410, second round).
+                        tracing::info!(
+                            target: "login_pty",
+                            "[login-pty] {}",
+                            redact_url_queries_in_line(&redact_secrets(t))
+                        );
                     }
                     // §5.1 (SPEC_HOST_CLI_LOGIN_CAPTURE): a CLAUDE_CODE_OAUTH_TOKEN /
                     // `sk-ant-oat…` line is the setup-token headless contract — the
@@ -853,6 +880,34 @@ fn redact_secrets(line: &str) -> String {
     out
 }
 
+/// Redacts every URL query string found anywhere in a raw log line —
+/// unlike `redact_url_query` (which takes a whole URL, used for the
+/// already-extracted "captured auth URL" event), this scans arbitrary CLI
+/// output for `?` characters and truncates each one's query run at the
+/// next whitespace, so it catches the authorize URL wherever it appears
+/// in surrounding text (e.g. "Browser didn't open? Use the url below…
+/// https://claude.com/…?state=…").
+///
+/// codex P2 on PR #2410 (second round): `redact_url_query` was only ever
+/// applied to the structured "captured auth URL" tracing event — the RAW
+/// PTY line logger (`redact_secrets(t)`, a few lines above this file's
+/// URL-capture logic) still wrote the full authorize URL, query and all,
+/// verbatim to the host log for every line the CLI printed, including the
+/// very line the URL was scraped from.
+fn redact_url_queries_in_line(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut rest = line;
+    while let Some(pos) = rest.find('?') {
+        out.push_str(&rest[..=pos]);
+        let after = &rest[pos + 1..];
+        let end = after.find(char::is_whitespace).unwrap_or(after.len());
+        out.push_str("<redacted>");
+        rest = &after[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Strips the query string from a captured authorize URL before logging.
 /// codex P2 on PR #2410: the query carries `state`/`code_challenge` —
 /// SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §5 explicitly says never
@@ -976,17 +1031,27 @@ pub fn cancel_cli_login(state: &Arc<AppState>) -> Result<serde_json::Value, Stri
     Ok(serde_json::Value::Null)
 }
 
-/// Reads `CLAUDE_CONFIG_DIR` out of the spawn's `auth_env` and stats its
-/// `.credentials.json` (same path convention the PTY reap's post-login
-/// existence check already uses, ~line 773). `None` inner value = the file
-/// doesn't exist yet (a fresh mint — any later appearance counts as
-/// "changed"). Returns `None` entirely when no config-dir env var was
-/// passed (nothing to compare against; `get_cli_login_status` treats that
-/// as "can't tell, don't block on it").
+/// Reads the provider's config-dir env var (`config_dir_env_var` — e.g.
+/// "CLAUDE_CONFIG_DIR", "OPENCLAW_HOME") out of the spawn's `auth_env` and
+/// stats its `.credentials.json` (same path convention the PTY reap's
+/// post-login existence check already uses, ~line 773). `None` inner value
+/// = the file doesn't exist yet (a fresh mint — any later appearance
+/// counts as "changed"). Returns `None` entirely when the named env var
+/// wasn't passed (nothing to compare against; `get_cli_login_status`
+/// treats that as "can't tell, don't block on it").
+///
+/// reagent P1 on PR #2410: this used to hardcode "CLAUDE_CONFIG_DIR",
+/// silently no-op'ing the freshness guard for every OTHER
+/// requiresLoginTty/awaitTier1Completion provider (OpenClaw uses
+/// OPENCLAW_HOME) — auth_env simply had no matching key, so this always
+/// returned None and credential_changed always read true, reopening the
+/// exact stale-credential-reconnect false-positive the guard exists to
+/// close, just for OpenClaw instead of Claude.
 fn capture_cred_baseline(
     auth_env: &std::collections::HashMap<String, String>,
+    config_dir_env_var: &str,
 ) -> Option<(std::path::PathBuf, Option<std::time::SystemTime>)> {
-    let dir = auth_env.get("CLAUDE_CONFIG_DIR")?;
+    let dir = auth_env.get(config_dir_env_var)?;
     let path = std::path::Path::new(dir).join(".credentials.json");
     let mtime = std::fs::metadata(&path).ok().and_then(|m| m.modified().ok());
     Some((path, mtime))
@@ -1347,6 +1412,38 @@ mod redact_url_query_tests {
 }
 
 #[cfg(test)]
+mod redact_url_queries_in_line_tests {
+    use super::redact_url_queries_in_line;
+
+    // codex P2 on PR #2410 (second round): the raw PTY line logger wrote
+    // the authorize URL's full query verbatim — redact_url_query alone
+    // never reached it, since it was only applied to the separate
+    // "captured auth URL" structured event.
+    #[test]
+    fn redacts_a_url_query_embedded_in_surrounding_text() {
+        let line = "Browser didn't open? Use the url below to sign in (c to copy) https://claude.com/cai/oauth/authorize?code=true&state=abc&code_challenge=xyz";
+        let redacted = redact_url_queries_in_line(line);
+        assert!(redacted.contains("https://claude.com/cai/oauth/authorize?<redacted>"));
+        assert!(!redacted.contains("state=abc"));
+        assert!(!redacted.contains("code_challenge=xyz"));
+        // The leading text (including its OWN "?") is preserved verbatim.
+        assert!(redacted.starts_with("Browser didn't open?<redacted> Use the url"));
+    }
+
+    #[test]
+    fn leaves_a_line_with_no_query_string_untouched() {
+        let line = "Paste code here if prompted >";
+        assert_eq!(redact_url_queries_in_line(line), line);
+    }
+
+    #[test]
+    fn redacts_multiple_query_strings_in_the_same_line() {
+        let line = "a?x=1 b?y=2";
+        assert_eq!(redact_url_queries_in_line(line), "a?<redacted> b?<redacted>");
+    }
+}
+
+#[cfg(test)]
 mod capture_cred_baseline_tests {
     use super::capture_cred_baseline;
     use std::collections::HashMap;
@@ -1354,7 +1451,7 @@ mod capture_cred_baseline_tests {
     #[test]
     fn returns_none_when_no_config_dir_env_var_is_present() {
         let auth_env = HashMap::new();
-        assert!(capture_cred_baseline(&auth_env).is_none());
+        assert!(capture_cred_baseline(&auth_env, "CLAUDE_CONFIG_DIR").is_none());
     }
 
     #[test]
@@ -1363,7 +1460,7 @@ mod capture_cred_baseline_tests {
         let mut auth_env = HashMap::new();
         auth_env.insert("CLAUDE_CONFIG_DIR".to_string(), dir.to_string_lossy().to_string());
 
-        let (path, mtime) = capture_cred_baseline(&auth_env).expect("config dir was set");
+        let (path, mtime) = capture_cred_baseline(&auth_env, "CLAUDE_CONFIG_DIR").expect("config dir was set");
         assert_eq!(path, dir.join(".credentials.json"));
         assert!(mtime.is_none(), "fresh mint: no credential file should exist yet");
     }
@@ -1378,10 +1475,24 @@ mod capture_cred_baseline_tests {
         let mut auth_env = HashMap::new();
         auth_env.insert("CLAUDE_CONFIG_DIR".to_string(), dir.to_string_lossy().to_string());
 
-        let (_, mtime) = capture_cred_baseline(&auth_env).expect("config dir was set");
+        let (_, mtime) = capture_cred_baseline(&auth_env, "CLAUDE_CONFIG_DIR").expect("config dir was set");
         assert!(mtime.is_some(), "reconnect: the stale credential's baseline mtime must be captured");
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn reagent_p1_on_pr_2410_uses_the_providers_own_env_var_not_a_hardcoded_claude_one() {
+        // OpenClaw uses OPENCLAW_HOME, not CLAUDE_CONFIG_DIR — before this
+        // fix, capture_cred_baseline hardcoded the latter, so this exact
+        // auth_env (a real OpenClaw spawn's) always returned None,
+        // silently disabling the freshness guard for OpenClaw entirely.
+        let dir = std::env::temp_dir().join(format!("cli-login-baseline-test-openclaw-{}", std::process::id()));
+        let mut auth_env = HashMap::new();
+        auth_env.insert("OPENCLAW_HOME".to_string(), dir.to_string_lossy().to_string());
+
+        assert!(capture_cred_baseline(&auth_env, "CLAUDE_CONFIG_DIR").is_none());
+        assert!(capture_cred_baseline(&auth_env, "OPENCLAW_HOME").is_some());
     }
 }
 
