@@ -25,7 +25,7 @@ import { translateError } from "@/app/errors/translate";
 import { getApi } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { readText as clipboardReadText, writeText as clipboardWriteText } from "@/util/clipboard";
+import { writeText as clipboardWriteText } from "@/util/clipboard";
 import {
     createEffect,
     createSignal,
