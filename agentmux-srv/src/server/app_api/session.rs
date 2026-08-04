@@ -527,12 +527,17 @@ fn register_session_next_prompt_suggestion(engine: &Arc<WshRpcEngine>, state: &A
                 }
 
                 let prompt = format!(
-                    "Based on this recent activity, predict ONE short, natural next \
-                     message the user might send to continue the conversation. \
-                     Respond with just that message and nothing else — plain text only, \
-                     no markdown, no code fences, no backticks, no quotes, no explanation, \
-                     no preamble. If nothing plausible comes to mind, respond with an \
-                     empty string.\n\n\
+                    "Based on this recent activity, predict ONE short next instruction \
+                     the user is likely to give to continue the work. Phrase it as a \
+                     direct, imperative command — the way someone types a task into a \
+                     prompt box, not casual chat. Do not start with conversational \
+                     filler or throat-clearing (\"Yeah\", \"Sure\", \"Let's\", \"Go ahead \
+                     and\", \"OK\", or similar) — begin directly with the action itself. \
+                     For example, write \"Debug the blank preview bug next\", not \"Yeah \
+                     let's debug the blank preview bug next\". Respond with just that \
+                     instruction and nothing else — plain text only, no markdown, no code \
+                     fences, no backticks, no quotes, no explanation, no preamble. If \
+                     nothing plausible comes to mind, respond with an empty string.\n\n\
                      Recent activity:\n\n{extracted}"
                 );
 
@@ -715,20 +720,25 @@ pub(crate) async fn invoke_ambient_haiku_call(
     Ok((last_text, tokens))
 }
 
-/// Defends against the model wrapping its answer in markdown despite every
-/// ambient-call prompt asking for a bare line of plain text — instruction-
-/// following isn't guaranteed, and an unwrapped fence is exactly what
-/// produces a literal ` ``` `/newline/` ``` ` blob on a UI surface that
-/// renders this text verbatim (e.g. the ghost-text composer placeholder,
-/// which has no markdown renderer). Applied once here so every current and
-/// future `invoke_ambient_haiku_call` caller is covered, not just the one
-/// that first surfaced the bug.
+/// Defends against the model wrapping its answer in markdown, or opening
+/// with conversational filler, despite every ambient-call prompt asking for
+/// a bare, direct line of plain text — instruction-following isn't
+/// guaranteed. An unwrapped fence is what produces a literal
+/// ` ``` `/newline/` ``` ` blob on a UI surface that renders this text
+/// verbatim (e.g. the ghost-text composer placeholder, which has no
+/// markdown renderer). Filler ("Yeah, let's fix the bug" instead of "Fix
+/// the bug") is a separate readability problem the prompt alone can't fully
+/// prevent — same "prompt nudge + reliable sanitizer" split this project
+/// already uses for the fence/quote case. Applied once here so every
+/// current and future `invoke_ambient_haiku_call` caller is covered, not
+/// just the one that first surfaced each bug.
 ///
-/// Strips a wrapping code fence and wrapping quote characters, repeatedly (a
-/// model can nest both), then trims. A result left with nothing but
-/// backticks (e.g. an empty fence) collapses to "" so callers' existing
-/// empty-string handling (skip writing ghost text / filter out the summary)
-/// covers it without any caller-side change.
+/// Strips a wrapping code fence, wrapping quote characters, and a leading
+/// conversational preamble, repeatedly (a model can combine all three —
+/// e.g. a quoted, filler-prefixed sentence), then trims. A result left with
+/// nothing but backticks (e.g. an empty fence) collapses to "" so callers'
+/// existing empty-string handling (skip writing ghost text / filter out the
+/// summary) covers it without any caller-side change.
 fn sanitize_ambient_text(raw: &str) -> String {
     let mut s = raw.trim().to_string();
     for _ in 0..4 {
@@ -742,6 +752,9 @@ fn sanitize_ambient_text(raw: &str) -> String {
             })
             .trim()
             .to_string();
+        if let Some(rest) = strip_conversational_preamble(&s) {
+            s = rest;
+        }
         if s == before {
             break;
         }
@@ -767,6 +780,66 @@ fn strip_wrapping_fence(s: &str) -> Option<String> {
                 }
             }
             return Some(inner.trim().to_string());
+        }
+    }
+    None
+}
+
+/// Conversational-filler openers a model reaches for despite being told to
+/// respond with a bare, direct instruction — e.g. "Yeah, let's fix the
+/// bug" instead of "Fix the bug". Matched case-insensitively against the
+/// very start of the string only (a "let's" appearing mid-sentence is left
+/// alone — this strips openers, not arbitrary word choice). Longer/more
+/// specific entries first so e.g. "let's go ahead and " matches whole
+/// rather than the shorter "let's " eating only part of it.
+const CONVERSATIONAL_PREAMBLES: &[&str] = &[
+    "let's go ahead and ",
+    "lets go ahead and ",
+    "yeah, let's ",
+    "yeah let's ",
+    "yeah, lets ",
+    "yeah lets ",
+    "sure, let's ",
+    "sure let's ",
+    "ok, let's ",
+    "okay, let's ",
+    "alright, let's ",
+    "go ahead and ",
+    "let's ",
+    "lets ",
+    "sure, i'll ",
+    "sure, i will ",
+    "sure, ",
+    "yeah, ",
+    "yeah ",
+    "ok, ",
+    "okay, ",
+    "alright, ",
+    "i'll ",
+    "i will ",
+    "i should ",
+    "we should ",
+    "next up, ",
+    "next, ",
+];
+
+/// Strip one leading conversational-filler opener (see
+/// `CONVERSATIONAL_PREAMBLES`) and re-capitalize the new first letter, so
+/// "Yeah, let's debug the bug" becomes "Debug the bug" — matching the
+/// direct-instruction register every ambient-call prompt asks for. Returns
+/// `None` if no known opener matches (left alone rather than guessed at —
+/// this list is deliberately not exhaustive NLP-style filler detection,
+/// just the handful of openers a model actually reaches for here).
+fn strip_conversational_preamble(s: &str) -> Option<String> {
+    let lower = s.to_lowercase();
+    for prefix in CONVERSATIONAL_PREAMBLES {
+        if lower.starts_with(prefix) {
+            let rest = &s[prefix.len()..];
+            let mut chars = rest.chars();
+            return Some(match chars.next() {
+                Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+                None => String::new(),
+            });
         }
     }
     None
@@ -927,5 +1000,51 @@ mod sanitize_ambient_text_tests {
     #[test]
     fn lone_backticks_with_no_content_collapse_to_empty() {
         assert_eq!(sanitize_ambient_text("```"), "");
+    }
+
+    #[test]
+    fn strips_yeah_lets_preamble() {
+        assert_eq!(
+            sanitize_ambient_text("Yeah, let's debug the blank preview bug next"),
+            "Debug the blank preview bug next"
+        );
+        assert_eq!(sanitize_ambient_text("Yeah let's fix the login bug"), "Fix the login bug");
+    }
+
+    #[test]
+    fn strips_go_ahead_and_preamble() {
+        assert_eq!(
+            sanitize_ambient_text("Go ahead and add tests for the parser"),
+            "Add tests for the parser"
+        );
+    }
+
+    #[test]
+    fn strips_sure_ok_alright_preamble() {
+        assert_eq!(sanitize_ambient_text("Sure, fix the typo"), "Fix the typo");
+        assert_eq!(sanitize_ambient_text("OK, run the tests"), "Run the tests");
+        assert_eq!(sanitize_ambient_text("Alright, let's ship it"), "Ship it");
+    }
+
+    #[test]
+    fn strips_preamble_from_inside_quotes_and_fences() {
+        assert_eq!(sanitize_ambient_text("\"Yeah, let's fix the bug\""), "Fix the bug");
+        assert_eq!(sanitize_ambient_text("```\nYeah, let's fix the bug\n```"), "Fix the bug");
+    }
+
+    #[test]
+    fn leaves_a_mid_sentence_lets_alone() {
+        let s = "Check whether the retry logic still lets errors through";
+        assert_eq!(sanitize_ambient_text(s), s);
+    }
+
+    #[test]
+    fn a_filler_word_with_no_trailing_content_is_left_alone() {
+        // "Yeah," alone (no instruction after it) doesn't match any
+        // CONVERSATIONAL_PREAMBLES entry — they all require trailing
+        // content after the opener, matching the "strip openers, not
+        // guess at degenerate whole-string filler" scope this function
+        // documents.
+        assert_eq!(sanitize_ambient_text("Yeah,"), "Yeah,");
     }
 }
