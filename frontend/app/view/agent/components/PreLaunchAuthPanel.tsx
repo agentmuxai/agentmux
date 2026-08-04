@@ -25,7 +25,7 @@ import { translateError } from "@/app/errors/translate";
 import { getApi } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { writeText as clipboardWriteText } from "@/util/clipboard";
+import { readText as clipboardReadText, writeText as clipboardWriteText } from "@/util/clipboard";
 import {
     createEffect,
     createSignal,
@@ -89,12 +89,46 @@ export interface PreLaunchAuthPanelProps {
     disabled?: boolean;
 }
 
+/** Sentinel session id for logins driven by `runProviderLogin` (the
+ *  `requiresLoginTty` branch of `startConnect`), which bypass the
+ *  `auth.start`/`auth.poll` RPC session machinery entirely. Doubles as the
+ *  render switch: a `waiting` state carrying this id means "in-app login
+ *  session" (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.1) and renders
+ *  `InAppLoginPanel` (URL + paste-code → `setProviderAuth`) instead of the
+ *  generic `WaitingPanel` (whose paste row submits a redirect URL to
+ *  `auth.submitcallback` — a backend session this flow doesn't have). */
+const PROVIDER_LOGIN_SESSION_ID = "provider-login";
+
+/** Live phase of the in-app login session, surfaced in `InAppLoginPanel`'s
+ *  status line. Driven by `startConnect`'s `onTierChange`/`setAuthUrl`
+ *  wiring off `runProviderLogin`'s real transitions (spec §3.1's
+ *  `spawning → url_captured → waiting_for_authorize → …` states). */
+type InAppLoginPhase = "starting" | "waiting-authorize" | "fallback" | "terminal-polling";
+
+/** UI hooks `startConnect` (a module-level function) uses to drive the
+ *  panel-owned in-app-login signals: the live phase line, and the
+ *  "Use terminal instead" request flag. */
+interface InAppLoginUi {
+    setPhase: (phase: InAppLoginPhase) => void;
+    terminalRequested: () => boolean;
+    setTerminalRequested: (v: boolean) => void;
+}
+
 export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element => {
     // Controller is owned by the parent (AgentLaunchModal); panel
     // mount/unmount doesn't construct or dispose it. The parent
     // reads `controller.state()` directly for `authStateKind()`
     // — no more `onStateChange` callback wiring.
     const controller = props.controller;
+
+    // In-app login session UI state (see InAppLoginPhase / InAppLoginUi).
+    const [inAppPhase, setInAppPhase] = createSignal<InAppLoginPhase>("starting");
+    const [terminalRequested, setTerminalRequested] = createSignal(false);
+    const inAppUi: InAppLoginUi = {
+        setPhase: setInAppPhase,
+        terminalRequested,
+        setTerminalRequested,
+    };
 
     // Auto-open the OAuth URL in the user's default browser as soon as
     // the auth controller surfaces it. Same effect as the legacy
@@ -103,10 +137,17 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
     // fallback when the OS doesn't route the open (browser closed,
     // protocol handler missing, etc.). Fires once per URL (the guard
     // tracks the last URL we opened so re-renders don't re-fire).
+    //
+    // Skipped for the in-app login session (PROVIDER_LOGIN_SESSION_ID):
+    // there, `forceProviderLogin` already opened the URL itself
+    // (openOAuthBrowserPane — system browser with an in-app-pane fallback)
+    // the moment it was captured; opening it a second time here would spawn
+    // a duplicate tab/pane for every Claude connect.
     let lastOpenedUrl: string | null = null;
     createEffect(() => {
         const s = controller.state();
         const url = s.authUrl;
+        if (s.sessionId === PROVIDER_LOGIN_SESSION_ID) return;
         if (url && url !== lastOpenedUrl) {
             lastOpenedUrl = url;
             console.log(`[auth-diag] opening auth URL in browser (host=${(() => { try { return new URL(url).host; } catch { return "?"; } })()})`);
@@ -166,7 +207,7 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
     const handleConnect = (): void => {
         const prov = props.provider;
         if (!prov) return;
-        void startConnect(controller, prov, props.accountId());
+        void startConnect(controller, prov, props.accountId(), inAppUi);
     };
 
     // "Use my existing login" — the PRIMARY path for Claude v2.1.x, whose
@@ -242,6 +283,29 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
                 <Match when={controller.state().kind === "ready"}>
                     <ReadyBanner />
                 </Match>
+                {/* In-app login session (PROVIDER_LOGIN_SESSION_ID sentinel —
+                    see its doc comment): URL + paste-code UI wired to the
+                    login child's stdin via setProviderAuth, with a live phase
+                    line and an explicit (never auto-launched) terminal
+                    fallback. Must match BEFORE the generic waiting arm. */}
+                <Match
+                    when={
+                        controller.state().kind === "waiting" &&
+                        controller.state().sessionId === PROVIDER_LOGIN_SESSION_ID
+                    }
+                >
+                    <InAppLoginPanel
+                        providerId={props.provider?.id ?? ""}
+                        providerLabel={props.provider?.displayName ?? "this provider"}
+                        state={controller.state()}
+                        phase={inAppPhase()}
+                        onCancel={() => void controller.cancel()}
+                        onUseTerminal={() => {
+                            setTerminalRequested(true);
+                            setInAppPhase("fallback");
+                        }}
+                    />
+                </Match>
                 <Match when={controller.state().kind === "waiting"}>
                     <WaitingPanel
                         state={controller.state()}
@@ -313,6 +377,7 @@ async function startConnect(
     controller: AuthFlowController,
     provider: ProviderDefinition | undefined,
     existingAccountId: string,
+    ui: InAppLoginUi,
 ): Promise<void> {
     console.log(`[auth-diag] startConnect entry: provider=${provider?.id ?? "(undefined)"} requiresLoginTty=${provider?.requiresLoginTty}`);
     if (!provider) {
@@ -383,22 +448,24 @@ async function startConnect(
 
     // requiresLoginTty providers (Claude, OpenClaw) route through
     // `runProviderLogin` instead of `controller.connect()`'s `auth.start`/
-    // `auth.poll` RPC path. That path only ever spawns the login command
-    // piped/PTY-without-console (`spawn_auth_cli`/`spawn_auth_cli_pty`),
-    // which for a CLI whose OAuth flow opens the browser itself from inside
-    // its own process — exactly what `requiresLoginTty` means — has no
-    // console to open a browser from and cannot succeed. It's currently a
-    // structural dead end reachable today via OpenClaw's Connect button
-    // (Claude's own Connect button happens to be masked by the `canSeed`
-    // branch in ConnectCta above, which routes it to "Use my existing
-    // login" instead — but the underlying `controller.connect()` call this
-    // function makes is unconditionally broken for BOTH providers, so this
-    // fixes the live bug and forecloses it for Claude too against any
-    // future change to that UI gate). `runProviderLogin` already has a real
-    // terminal fallback (tier 3) plus seed-from-global (tier 2, Claude
-    // only); `skipTier1: true` skips its headless URL-capture attempt
-    // entirely since it's a documented, unconditional dead end for these
-    // providers — see run-provider-login.ts's tier-1 doc comment.
+    // `auth.poll` RPC path — that path's spawn (`spawn_auth_cli`/
+    // `spawn_auth_cli_pty`) can't drive these CLIs' interactive logins and
+    // was a structural dead end for both providers (see PR #2262's history).
+    //
+    // Since SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md this branch IS the
+    // in-app login session (spec §3.1, surface 1): tier 1 runs (no more
+    // hardcoded `skipTier1: true` — the 2026-08-03 probes confirmed Claude
+    // 2.1.198+ prints the authorize URL under our PTY spawn and accepts a
+    // pasted code on stdin), `awaitTier1Completion` keeps the session inside
+    // `runProviderLogin` until the login child exits and the credential
+    // lands in the minted isolated dir, and `InAppLoginPanel` (rendered via
+    // the PROVIDER_LOGIN_SESSION_ID sentinel) shows URL + paste box + live
+    // phase + Cancel. The terminal tier is never auto-launched from here on
+    // the happy path — it remains reachable two ways: the behavior-gate
+    // (an older CLI that prints no URL within the capture window falls
+    // through to tiers 2/3 exactly as before), and the user's explicit
+    // "Use terminal instead" click (ui.terminalRequested), which releases
+    // the in-app wait and re-runs the login with tier 1 skipped.
     if (provider.requiresLoginTty) {
         // reagent P1 on #2262: the Reconnect arm (stale needs_reauth/expired
         // account) leaves the reducer in `ready` for this whole call —
@@ -414,6 +481,14 @@ async function startConnect(
         }
         try {
             controller.dispatch({ type: "ConnectClicked" });
+            // Mount the in-app login panel immediately, before any URL is
+            // captured — the sentinel session id is the render switch (see
+            // PROVIDER_LOGIN_SESSION_ID's doc), and an empty authUrl just
+            // renders the live phase line ("requesting a sign-in link…")
+            // with Cancel / "Use terminal instead" available from second 0.
+            controller.dispatch({ type: "SessionStarted", sessionId: PROVIDER_LOGIN_SESSION_ID });
+            ui.setPhase("starting");
+            ui.setTerminalRequested(false);
             // reagent P1 on #2262: this branch isn't gated through
             // connect()'s own actionToken staleness check at all (it
             // bypasses connect() entirely for requiresLoginTty providers).
@@ -426,33 +501,66 @@ async function startConnect(
             // selection's state with the old attempt's outcome.
             const actionToken = controller.currentActionToken();
             let registeredAccountId = "";
-            const outcome = await runProviderLogin({
-                provider,
-                cliPath,
-                authEnv,
-                existingAccountId: existingAccountId || undefined,
-                skipTier1: true,
-                onAccountRegistered: (accountId) => {
-                    registeredAccountId = accountId;
-                },
-                // Unreachable in practice with skipTier1: true (forceProviderLogin
-                // is the only setAuthUrl caller, and it's skipped) — provided
-                // because ForceLoginParams requires it.
-                setAuthUrl: (url) =>
-                    controller.dispatch({ type: "SessionStarted", sessionId: "provider-login", authUrl: url ?? undefined }),
-                log: (_cat, msg) => console.log(`[auth-diag] ${msg}`),
-                // The user's Cancel click dispatches CancelClicked (moving state
-                // out of `waiting`) AND sets controller.wasCancelled() — tier 3's
-                // poll loop watches the latter specifically (reagent P2: state
-                // could leave `waiting` for a reason other than a user cancel,
-                // which `kind !== "waiting"` alone can't distinguish, misreporting
-                // a non-cancel exit as "wasn't completed within 5 minutes"). This
-                // doesn't kill the terminal process itself (a known,
-                // separately-tracked gap — see
-                // PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md §7 Phase 4),
-                // only the frontend's wait for it.
-                isCancelled: () => controller.wasCancelled(),
-            });
+            const runAttempt = (skipTier1: boolean) =>
+                runProviderLogin({
+                    provider,
+                    cliPath,
+                    authEnv,
+                    existingAccountId: existingAccountId || undefined,
+                    // Behavior-gate only (no catalog provider sets the flag
+                    // since Claude's was dropped — see catalog.ts): the
+                    // in-app tier 1 runs first; a CLI that prints no URL
+                    // within the capture window falls through to tiers 2/3
+                    // inside runProviderLogin exactly as before. The second
+                    // attempt (the user's explicit "Use terminal instead")
+                    // passes true to go straight there.
+                    skipTier1: skipTier1 || provider.headlessLoginUrlUnsupported === true,
+                    // The whole in-app session lives inside runProviderLogin:
+                    // it polls for child-exit + credential-landed, persists
+                    // and links the account, and resolves with
+                    // "inapp-success"/"inapp-timeout" — no hand-rolled
+                    // "opened" completion poll in this caller.
+                    awaitTier1Completion: true,
+                    onAccountRegistered: (accountId) => {
+                        registeredAccountId = accountId;
+                    },
+                    // Captured URL → InAppLoginPanel (the reducer accepts a
+                    // repeat SessionStarted while `waiting`, updating
+                    // authUrl in place). forceProviderLogin opens the
+                    // browser itself; the panel's own auto-open effect is
+                    // suppressed for this sentinel to avoid a double open.
+                    setAuthUrl: (url) => {
+                        controller.dispatch({
+                            type: "SessionStarted",
+                            sessionId: PROVIDER_LOGIN_SESSION_ID,
+                            authUrl: url ?? undefined,
+                        });
+                        if (url) ui.setPhase("waiting-authorize");
+                    },
+                    log: (_cat, msg) => console.log(`[auth-diag] ${msg}`),
+                    // Releases the in-app/tier-3 waits when the user clicks
+                    // Cancel (controller.wasCancelled — reagent P2 on #2262:
+                    // state can leave `waiting` for non-cancel reasons, so
+                    // the explicit flag is the only trustworthy signal) OR
+                    // clicks "Use terminal instead" (terminalRequested —
+                    // same release mechanism, different follow-up below).
+                    // runProviderLogin reaps the login CLI child itself on
+                    // its way out of the awaited in-app wait.
+                    isCancelled: () => controller.wasCancelled() || ui.terminalRequested(),
+                    // Keep the live phase line honest across the real
+                    // transitions (reagent P1 on PR #2300's onTierChange
+                    // rationale, applied to this panel).
+                    onTierChange: (event) => {
+                        if (event.tier === "inapp-waiting") {
+                            ui.setPhase("waiting-authorize");
+                        } else if (event.tier === "fallback") {
+                            ui.setPhase("fallback");
+                        } else {
+                            ui.setPhase("terminal-polling");
+                        }
+                    },
+                });
+            let outcome = await runAttempt(false);
             if (controller.isStaleAction(actionToken)) {
                 // The user moved on (changed selection, cancelled, or the
                 // modal closed) while this login was in flight — its
@@ -461,7 +569,22 @@ async function startConnect(
                 console.warn(`[auth-diag] startConnect: requiresLoginTty login outcome (${outcome}) is stale, discarding`);
                 return;
             }
+            if (outcome === "inapp-timeout" && ui.terminalRequested() && !controller.wasCancelled()) {
+                // "Use terminal instead": the flag released the in-app wait
+                // (isCancelled above), which surfaces as "inapp-timeout".
+                // Reset it BEFORE the terminal attempt — it's part of that
+                // same isCancelled closure, and leaving it set would abort
+                // the terminal tier's own completion poll on its first tick.
+                ui.setTerminalRequested(false);
+                ui.setPhase("fallback");
+                outcome = await runAttempt(true);
+                if (controller.isStaleAction(actionToken)) {
+                    console.warn(`[auth-diag] startConnect: terminal-fallback login outcome (${outcome}) is stale, discarding`);
+                    return;
+                }
+            }
             switch (outcome) {
+                case "inapp-success":
                 case "seeded":
                 case "terminal-success":
                     if (registeredAccountId) {
@@ -478,6 +601,7 @@ async function startConnect(
                         );
                     }
                     break;
+                case "inapp-timeout":
                 case "terminal-timeout":
                     // reagent P1 on #2262: an explicit user Cancel already
                     // reset state to unauthenticated via CancelClicked —
@@ -493,9 +617,19 @@ async function startConnect(
                     }
                     break;
                 case "terminal-unavailable":
-                case "opened": // structurally unreachable with skipTier1 — defensive only
                     controller.failConnect(
                         new Error(`Couldn't open a terminal for ${provider.displayName} login on this platform.`),
+                    );
+                    break;
+                case "opened":
+                    // Only reachable when the isolated account-dir mint failed
+                    // (runProviderLogin downgrades an awaited tier 1 to the
+                    // legacy "opened" contract when there's no dir to poll or
+                    // persist against). No fake-ready: without a minted
+                    // account the resolver's spawn gate would block the agent
+                    // anyway, so surface it as the failure it is.
+                    controller.failConnect(
+                        new Error("Login started, but AgentMux couldn't prepare an isolated account for it. Try again."),
                     );
                     break;
             }
@@ -531,10 +665,16 @@ const ConnectCta = (p: {
      *  generic Connect CTA wording the user already knows). */
     hasAccount: boolean;
     onConnect: () => void;
-    /** True for providers where seed-from-global is the path (Claude
-     *  v2.1.x — in-app OAuth can't open a browser under our spawn, so the
-     *  Connect CTA is a dead end). When true the panel leads with "Use my
-     *  existing login" instead of OAuth. SPEC_HOST_CLI_LOGIN_CAPTURE §0. */
+    /** True for providers that ALSO support seed-from-global (Claude only —
+     *  `seed_provider_auth_from_global` hard-rejects everything else). When
+     *  true the panel offers "Use my existing login" as a SECONDARY action
+     *  under the Connect CTA — the fast path when a valid global terminal
+     *  login already exists (spec §3.2 keeps tier-2 seeding for exactly
+     *  that). Until 2026-08-03 this REPLACED Connect entirely, because
+     *  in-app OAuth was a dead end for Claude v2.1.183
+     *  (SPEC_HOST_CLI_LOGIN_CAPTURE §0); that verdict is superseded —
+     *  SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §2 — so Connect (the
+     *  in-app login session) is primary again. */
     canSeed: boolean;
     onUseExistingLogin: () => void;
     disabled: boolean;
@@ -561,52 +701,48 @@ const ConnectCta = (p: {
                         ? `⚠ Your ${providerLabel()} session is expired. Re-authenticate before launching.`
                         : `⚠ ${providerLabel()} requires a login before launch.`}
             </div>
-            <Show
-                when={p.canSeed}
-                fallback={
-                    <>
-                        <Button
-                            onClick={() => p.onConnect()}
-                            disabled={p.disabled}
-                            className="pre-launch-auth-panel-connect green solid"
-                        >
-                            <span class="pre-launch-auth-panel-connect-icon" aria-hidden="true">
-                                {catalog()?.icon ?? "🔐"}
-                            </span>
-                            <span class="pre-launch-auth-panel-connect-label">
-                                {needsReconnect()
-                                    ? `Reconnect ${providerLabel()}`
-                                    : isExpired()
-                                        ? "Re-authenticate"
-                                        : `Connect to ${providerLabel()}`}
-                            </span>
-                        </Button>
-                        <div class="pre-launch-auth-panel-hint">
-                            {needsReconnect()
-                                ? `Re-runs OAuth into your existing account. Launch stays available — your CLI will refresh on first call.`
-                                : `Opens browser → ${providerLabel()} login → returns to AgentMux.
-                                Tokens get saved as a new account so the next agent doesn't
-                                have to re-authenticate.`}
-                        </div>
-                    </>
-                }
+            <Button
+                onClick={() => p.onConnect()}
+                disabled={p.disabled}
+                className="pre-launch-auth-panel-connect green solid"
             >
-                {/* Claude v2.1.x: in-app OAuth can't open a browser under our
-                    spawn (SPEC_HOST_CLI_LOGIN_CAPTURE §0), so seed the user's
-                    existing global login instead — the upstream-recommended
-                    method (issue #7100). PRIMARY path. */}
+                <span class="pre-launch-auth-panel-connect-icon" aria-hidden="true">
+                    {catalog()?.icon ?? "🔐"}
+                </span>
+                <span class="pre-launch-auth-panel-connect-label">
+                    {needsReconnect()
+                        ? `Reconnect ${providerLabel()}`
+                        : isExpired()
+                            ? "Re-authenticate"
+                            : `Connect to ${providerLabel()}`}
+                </span>
+            </Button>
+            <div class="pre-launch-auth-panel-hint">
+                {needsReconnect()
+                    ? `Re-runs OAuth into your existing account. Launch stays available — your CLI will refresh on first call.`
+                    : `Opens browser → ${providerLabel()} login → returns to AgentMux.
+                    Tokens get saved as a new account so the next agent doesn't
+                    have to re-authenticate.`}
+            </div>
+            <Show when={p.canSeed}>
+                {/* Claude only: seed-from-global as the SECONDARY fast path —
+                    copies an already-valid global terminal login, no browser
+                    round-trip. Was the PRIMARY (and only) path while in-app
+                    OAuth was a dead end for Claude v2.1.183
+                    (SPEC_HOST_CLI_LOGIN_CAPTURE §0); demoted when the Connect
+                    CTA above became the revived in-app login session
+                    (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.2). */}
                 <Button
                     onClick={() => p.onUseExistingLogin()}
                     disabled={p.disabled}
-                    className="pre-launch-auth-panel-connect green solid"
+                    className="pre-launch-auth-panel-connect grey"
                 >
                     <span class="pre-launch-auth-panel-connect-icon" aria-hidden="true">🌐</span>
                     <span class="pre-launch-auth-panel-connect-label">Use my existing login</span>
                 </Button>
                 <div class="pre-launch-auth-panel-hint">
-                    Copies your existing terminal login into this agent — no in-app
-                    browser needed. First time? Run <code>claude setup-token</code> in a
-                    terminal, finish it in the browser, then click this.
+                    Already signed in to {providerLabel()} in a terminal? This copies
+                    that login into this agent — no browser needed.
                 </div>
             </Show>
         </div>
@@ -691,6 +827,189 @@ const WaitingPanel = (p: {
                 </div>
             </Show>
             <Button onClick={() => p.onCancel()}>Cancel login</Button>
+        </div>
+    );
+};
+
+/** The in-app login session panel (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md
+ *  §3.1 / §3.3 surface 1) — the launch-modal sibling of AgentDocumentView's
+ *  `AuthUrlBox` (same 2-step authorize-then-paste pattern, same
+ *  `setProviderAuth` → login-child-stdin code delivery), plus the pieces the
+ *  modal flow needs that the composer box doesn't have: a live phase line
+ *  (fed from `runProviderLogin`'s real tier transitions), and the explicit
+ *  "Use terminal instead" secondary action that replaces the old
+ *  auto-launched terminal. The paste step is the FALLBACK — when the user
+ *  authorizes in the browser, the CLI detects completion on its own and the
+ *  session resolves with nothing pasted (spec §2 item 3). */
+const InAppLoginPanel = (p: {
+    providerId: string;
+    providerLabel: string;
+    state: AuthState;
+    phase: InAppLoginPhase;
+    onCancel: () => void;
+    onUseTerminal: () => void;
+}): JSX.Element => {
+    const [pasteCode, setPasteCode] = createSignal("");
+    const [pasting, setPasting] = createSignal(false);
+    const [pasteResult, setPasteResult] = createSignal<string | null>(null);
+    let inputRef: HTMLInputElement | undefined;
+
+    // Grab focus when the paste input appears (same rationale as
+    // AuthUrlBox: a pasted code must land HERE, not whatever field held
+    // focus before). Deferred a frame so it wins the modal's own focus
+    // management; fires once per URL appearance.
+    createEffect(() => {
+        if (p.state.authUrl) {
+            requestAnimationFrame(() => inputRef?.focus());
+        }
+    });
+
+    const submitCode = async (explicit?: string): Promise<void> => {
+        // Read from the live input element as a fallback (mirrors
+        // AuthUrlBox): if focus desynced and the controlled signal missed
+        // the paste, the DOM value still holds it.
+        const code = (explicit ?? inputRef?.value ?? pasteCode()).trim();
+        if (!code) return;
+        setPasting(true);
+        setPasteResult(null);
+        try {
+            // Delivered to the login child's stdin via the host's
+            // set_provider_auth → CliLoginStdin::write_line plumbing; the
+            // session's completion poll (inside runProviderLogin) then
+            // observes the CLI finishing. SECURITY: the code is single-use
+            // and PKCE-bound to the spawned process (spec §5) — never logged.
+            await getApi().setProviderAuth(p.providerId, code);
+            setPasteResult("Code accepted — signing you in…");
+            setPasteCode("");
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            setPasteResult(`Error: ${msg}`);
+        } finally {
+            setPasting(false);
+        }
+    };
+
+    const phaseText = (): string => {
+        switch (p.phase) {
+            case "starting":
+                return `Starting ${p.providerLabel} sign-in — requesting a sign-in link…`;
+            case "waiting-authorize":
+                return "Waiting for you to authorize in the browser — we'll detect it automatically.";
+            case "fallback":
+                return "No sign-in link appeared — trying your existing login, then a terminal…";
+            case "terminal-polling":
+                return "A terminal window opened — finish the login there.";
+        }
+    };
+
+    return (
+        <div class="pre-launch-auth-panel-waiting">
+            <div class="pre-launch-auth-panel-waiting-title">
+                🔐 Sign in to {p.providerLabel}
+            </div>
+            <div class="pre-launch-auth-panel-hint">{phaseText()}</div>
+            <Show when={p.state.authUrl}>
+                <div class="pre-launch-auth-panel-url-label">
+                    1 · Authorize in your browser (it should have opened — if not, use this link):
+                </div>
+                <div class="pre-launch-auth-panel-url-row">
+                    <code
+                        class="pre-launch-auth-panel-url-text"
+                        title={p.state.authUrl}
+                    >
+                        {p.state.authUrl}
+                    </code>
+                    <Button
+                        className="grey solid"
+                        onClick={() => {
+                            try {
+                                getApi().openExternal(p.state.authUrl);
+                            } catch (e) {
+                                console.warn(`[auth-diag] openExternal failed: ${(e as Error)?.message ?? String(e)}`);
+                            }
+                        }}
+                    >
+                        Open
+                    </Button>
+                    <Button
+                        className="grey solid"
+                        onClick={() => {
+                            // CEF clipboard wrapper, not navigator.clipboard —
+                            // SPEC_UNIFIED_CLIPBOARD_2026_05_18.md §3.3.
+                            void clipboardWriteText(p.state.authUrl).catch((err) =>
+                                console.log("clipboard write failed", err),
+                            );
+                        }}
+                    >
+                        Copy
+                    </Button>
+                </div>
+                <div class="pre-launch-auth-panel-url-label">
+                    2 · If the page shows an authorization code, paste it here:
+                </div>
+                <div class="pre-launch-auth-panel-callback-row">
+                    <input
+                        ref={inputRef}
+                        class="pre-launch-auth-panel-url-input"
+                        type="text"
+                        placeholder="Paste the authorization code…"
+                        value={pasteCode()}
+                        onInput={(e) => setPasteCode(e.currentTarget.value)}
+                        onKeyDown={(e) => {
+                            if (e.key === "Enter") void submitCode();
+                        }}
+                        onPaste={(e) => {
+                            // Auto-submit on paste — pasting the code IS the
+                            // intent to submit (same UX as AuthUrlBox).
+                            const text = (e.clipboardData?.getData("text") ?? "").trim();
+                            if (text) {
+                                setPasteCode(text);
+                                void submitCode(text);
+                            }
+                        }}
+                    />
+                    <Button
+                        className="grey solid"
+                        title="Paste from clipboard and submit"
+                        onClick={() => {
+                            clipboardReadText()
+                                .then((text) => {
+                                    const trimmed = (text ?? "").trim();
+                                    if (trimmed) {
+                                        setPasteCode(trimmed);
+                                        void submitCode(trimmed);
+                                    }
+                                })
+                                .catch(() => {
+                                    setPasteResult("Could not read clipboard — paste manually");
+                                });
+                        }}
+                    >
+                        Paste &amp; submit
+                    </Button>
+                    <Button
+                        className="grey solid"
+                        onClick={() => void submitCode()}
+                        disabled={pasting()}
+                    >
+                        {pasting() ? "…" : "Submit"}
+                    </Button>
+                </div>
+                <Show when={pasteResult()}>
+                    <div class="pre-launch-auth-panel-hint">{pasteResult()}</div>
+                </Show>
+            </Show>
+            <div class="pre-launch-auth-panel-inapp-actions">
+                <Button onClick={() => p.onCancel()}>Cancel login</Button>
+                {/* Explicit terminal fallback — never auto-launched (spec
+                    §3.2). Hidden once the flow is already in the terminal
+                    tiers, where the request would only abort a live poll. */}
+                <Show when={p.phase === "starting" || p.phase === "waiting-authorize"}>
+                    <Button className="grey" onClick={() => p.onUseTerminal()}>
+                        Use terminal instead
+                    </Button>
+                </Show>
+            </div>
         </div>
     );
 };
