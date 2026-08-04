@@ -218,6 +218,19 @@ export interface SlashCommandContext {
     /** Pairs with `beginRecoveryFlow` — see its doc comment. */
     endRecoveryFlow: () => void;
     /**
+     * True once the user has explicitly cancelled the CURRENTLY in-flight
+     * login attempt via the shared AuthUrlBox UI (Cancel / "Use terminal
+     * instead") — `useAgentControllerStatus.isCancelled`. /login's own
+     * "opened" poll (below) doesn't otherwise learn this: that UI's
+     * buttons call `cancelLogin()`/`useTerminalInstead()` directly on
+     * `useAgentControllerStatus`, not through /login's handler, so without
+     * this the poll ran to its own 5-minute timeout regardless — long past
+     * `useTerminalInstead()`'s 20s backstop, which then reported a bogus
+     * "taking longer than expected" instead of ever opening a terminal.
+     * reagent P1 on PR #2413 (round 3, second pass).
+     */
+    isCancelled: () => boolean;
+    /**
      * Open the inline picker. Returns a promise that resolves with the
      * selected value, or rejects if the user dismisses (Esc / click-outside).
      * Set by useAgentCommands; the dispatcher only sees the function.

@@ -124,6 +124,19 @@ export interface UseAgentCommandsOptions {
     /** Pairs with `beginRecoveryFlow` — see its doc comment. */
     endRecoveryFlow: () => void;
     /**
+     * `useAgentControllerStatus.isCancelled` — threaded into the
+     * slash-command context so /login's own poll can notice a cancel fired
+     * through the SAME shared AuthUrlBox UI (Cancel / "Use terminal
+     * instead", which call `cancelLogin()`/`useTerminalInstead()` on
+     * `useAgentControllerStatus` directly, not through /login's handler).
+     * Without this, /login's poll had no way to learn its own login was
+     * abandoned and kept running for up to its own 5-minute timeout — long
+     * past `useTerminalInstead()`'s 20s backstop, which reported a bogus
+     * "taking longer than expected" instead of ever actually opening a
+     * terminal. reagent P1 on PR #2413 (round 3, second pass).
+     */
+    isCancelled: () => boolean;
+    /**
      * The last CONFIRMED backend `turn_active` reading, tracked from live
      * controllerstatus events (agent-view.tsx's `wasTurnActive`, the same
      * state `trackTurnJustEnded`'s edge detector uses) — `false` (not
@@ -755,6 +768,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             opts.isBackendTurnActive(),
         beginRecoveryFlow: opts.beginRecoveryFlow,
         endRecoveryFlow: opts.endRecoveryFlow,
+        isCancelled: opts.isCancelled,
         openPicker,
         openHelp,
     });

@@ -155,6 +155,18 @@ export interface UseAgentControllerStatus {
     useTerminalInstead: () => Promise<void>;
     cancelLogin: () => void;
     /**
+     * True once `cancelLogin()` has fired for the CURRENTLY in-flight login
+     * attempt (any of relogin()/useGlobalLogin()/loginViaTerminal(), reset
+     * false at the start of each). Exposed so a caller with its own
+     * long-running poll against the SAME shared AuthUrlBox UI — /login
+     * (commands/global/login.ts) is the one case, since it drives the
+     * identical `setAuthUrl`/Cancel/"Use terminal instead" surface but
+     * isn't itself one of the functions above — can notice an explicit
+     * cancel and stop polling instead of running to its own multi-minute
+     * timeout. reagent P1 on PR #2413 (round 3, second pass).
+     */
+    isCancelled: () => boolean;
+    /**
      * Clear stale auth-recovery UI (the "Retry Login" bar / any lingering
      * `authNotice`) once we have independent proof the controller is
      * healthy. `canRetry`/`authNotice` are set once, from the mount-time
@@ -1230,6 +1242,7 @@ export function useAgentControllerStatus(
         notifyControllerHealthy,
         forceControllerRefresh,
         cancelLogin,
+        isCancelled: () => loginCancelled,
         beginRecoveryFlow,
         endRecoveryFlow,
     };
