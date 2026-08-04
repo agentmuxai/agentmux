@@ -1112,6 +1112,8 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         forceControllerRefresh: status.forceControllerRefresh,
         beginRecoveryFlow: status.beginRecoveryFlow,
         endRecoveryFlow: status.endRecoveryFlow,
+        isCancelled: status.isCancelled,
+        resetCancelled: status.resetCancelled,
         // The last CONFIRMED backend turn_active reading (see
         // UseAgentCommandsOptions.isBackendTurnActive's doc comment) —
         // `wasTurnActive` is the same state trackTurnJustEnded's edge
@@ -1567,6 +1569,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     authNotice={status.authNotice}
                     onDismissAuthNotice={() => status.setAuthNotice(null)}
                     onCancelLogin={status.cancelLogin}
+                    onUseTerminal={status.useTerminalInstead}
                     authProviderId={provider()?.id ?? providerKey()}
                     onAgentErrorLogin={() => {
                         // Must match onLoginAgain above: the button is labeled "Login

@@ -124,6 +124,34 @@ export interface UseAgentCommandsOptions {
     /** Pairs with `beginRecoveryFlow` — see its doc comment. */
     endRecoveryFlow: () => void;
     /**
+     * `useAgentControllerStatus.isCancelled` — threaded into the
+     * slash-command context so /login's own poll can notice a cancel fired
+     * through the SAME shared AuthUrlBox UI (Cancel / "Use terminal
+     * instead", which call `cancelLogin()`/`useTerminalInstead()` on
+     * `useAgentControllerStatus` directly, not through /login's handler).
+     * Without this, /login's poll had no way to learn its own login was
+     * abandoned and kept running for up to its own 5-minute timeout — long
+     * past `useTerminalInstead()`'s 20s backstop, which reported a bogus
+     * "taking longer than expected" instead of ever actually opening a
+     * terminal. reagent P1 on PR #2413 (round 3, second pass).
+     */
+    isCancelled: () => boolean;
+    /**
+     * `useAgentControllerStatus.resetCancelled` — threaded through so
+     * /login can clear the shared cancellation flag at the start of its
+     * OWN attempt, mirroring what relogin()/useGlobalLogin()/
+     * loginViaTerminal() already do at theirs. Without this, a flag left
+     * `true` by an EARLIER, unrelated cancelled attempt (e.g. clicking
+     * Cancel on the AuthUrlBox during a prior relogin()) stayed `true`
+     * forever — /login never called any of the three functions that reset
+     * it, so isCancelled() read as already-cancelled on entry, and the
+     * "opened" poll's cancellation check (added right below
+     * beginRecoveryFlow's own doc comment) short-circuited a brand-new
+     * /login into a silent, unearned "ok" without ever checking
+     * authentication. reagent P1 on PR #2413 (round 3, third pass).
+     */
+    resetCancelled: () => void;
+    /**
      * The last CONFIRMED backend `turn_active` reading, tracked from live
      * controllerstatus events (agent-view.tsx's `wasTurnActive`, the same
      * state `trackTurnJustEnded`'s edge detector uses) — `false` (not
@@ -755,6 +783,8 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             opts.isBackendTurnActive(),
         beginRecoveryFlow: opts.beginRecoveryFlow,
         endRecoveryFlow: opts.endRecoveryFlow,
+        isCancelled: opts.isCancelled,
+        resetCancelled: opts.resetCancelled,
         openPicker,
         openHelp,
     });

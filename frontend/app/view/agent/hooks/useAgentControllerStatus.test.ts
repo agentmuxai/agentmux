@@ -63,6 +63,7 @@ const claude = { id: "claude" } as any; // no authConfigDirEnvVar — skips the 
 
 afterEach(() => {
     vi.clearAllMocks();
+    vi.useRealTimers();
     hub.agentDefinitionId = undefined;
 });
 
@@ -225,6 +226,258 @@ describe("useAgentControllerStatus — existingAccountIdFor canonicalizes provid
             expect(hub.runProviderLogin).toHaveBeenCalledWith(
                 expect.objectContaining({ existingAccountId: "acct-under-alias" }),
             );
+            dispose();
+        });
+    });
+});
+
+describe("useAgentControllerStatus — in-app login session (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.3 surface 2)", () => {
+    it("relogin() requests the awaited in-app session, not the hand-rolled 'opened' poll", async () => {
+        hub.runProviderLogin.mockResolvedValue("terminal-unavailable");
+
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({
+                blockId: "block-1",
+                provider: () => claude,
+                log: () => {},
+            });
+            await status.relogin({ retryAfterLogin: false });
+            expect(hub.runProviderLogin).toHaveBeenCalledWith(
+                expect.objectContaining({ awaitTier1Completion: true }),
+            );
+            dispose();
+        });
+    });
+
+    it("'inapp-success' drives the same success path as 'seeded'/'terminal-success' — refreshes the controller and clears the failure banner", async () => {
+        // runProviderLogin persists+links internally for this outcome (see
+        // its own doc comment) and reports back via onAccountRegistered
+        // exactly like tiers 2/3 — relogin() must not require a distinct
+        // completion poll for it to recognize success.
+        hub.runProviderLogin.mockImplementation(async (opts: any) => {
+            opts.setAuthUrl?.("https://claude.com/cai/oauth/authorize?code=true");
+            opts.onAccountRegistered?.("acct-inapp", "/tmp/acct-inapp");
+            return "inapp-success";
+        });
+
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({
+                blockId: "block-1",
+                provider: () => claude,
+                log: () => {},
+            });
+            await status.relogin({ retryAfterLogin: false });
+
+            expect(RpcApi.ControllerResyncCommand).toHaveBeenCalled();
+            expect(status.authNotice()).toBeNull();
+            // codex P2 on PR #2413: AuthUrlBox must not stay mounted (still
+            // offering paste/cancel/"use terminal instead") after a login
+            // that already succeeded.
+            expect(status.authUrl()).toBeNull();
+            dispose();
+        });
+    });
+
+    it("'inapp-timeout' surfaces a notice pointing back at the still-open login, not a generic failure, and clears the now-dead auth URL", async () => {
+        hub.runProviderLogin.mockImplementation(async (opts: any) => {
+            opts.setAuthUrl?.("https://claude.com/cai/oauth/authorize?code=true");
+            return "inapp-timeout";
+        });
+
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({
+                blockId: "block-1",
+                provider: () => claude,
+                log: () => {},
+            });
+            await status.relogin({ retryAfterLogin: false });
+
+            expect(status.authNotice()).toMatch(/login link timed out/i);
+            expect(RpcApi.ControllerResyncCommand).not.toHaveBeenCalled();
+            // codex P2 on PR #2413: runProviderLogin already cancelled and
+            // reaped the login child by the time it returns "inapp-timeout"
+            // — the URL/paste box must not stay mounted implying it still
+            // works (a paste at this point goes nowhere).
+            expect(status.authUrl()).toBeNull();
+            dispose();
+        });
+    });
+
+    it("useTerminalInstead waits for the in-flight relogin to actually finish before starting the terminal flow, even past a short fixed bound (codex P2 on PR #2413)", async () => {
+        let resolveFirstAttempt: (v: string) => void;
+        const firstAttempt = new Promise<string>((res) => { resolveFirstAttempt = res; });
+        let secondAttemptStarted = false;
+
+        hub.runProviderLogin
+            .mockImplementationOnce(() => firstAttempt) // relogin()'s own call — held open
+            .mockImplementationOnce(async () => {
+                secondAttemptStarted = true;
+                return "terminal-success";
+            }); // loginViaTerminal()'s call, fired from useTerminalInstead
+
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({
+                blockId: "block-1",
+                provider: () => claude,
+                log: () => {},
+            });
+
+            const reloginPromise = status.relogin({ retryAfterLogin: false });
+            const terminalPromise = status.useTerminalInstead();
+
+            // Held well past the old fixed ~4.5s bound (simulated instantly
+            // here since runProviderLogin is mocked, not timed) — the
+            // second attempt must NOT have started while the first is
+            // still unresolved. Flush several microtask ticks (relogin()'s
+            // own setup does a few awaited hops before reaching
+            // runProviderLogin) rather than asserting after just one.
+            for (let i = 0; i < 10; i++) await Promise.resolve();
+            expect(secondAttemptStarted).toBe(false);
+
+            resolveFirstAttempt!("inapp-timeout");
+            await reloginPromise;
+            await terminalPromise;
+
+            expect(secondAttemptStarted).toBe(true);
+            dispose();
+        });
+    });
+
+    it("reagent P2 on PR #2413 (re-review): clears authUrl on the persist-FAILURE branch too, not just the success branch", async () => {
+        // registeredAccountId/Dir never get set — onAccountRegistered
+        // simply doesn't fire, mirroring a persist failure inside
+        // runProviderLogin (REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_
+        // WORKING_2026_07_27.md) — the credential is on disk but the
+        // Armory row couldn't be saved.
+        hub.runProviderLogin.mockImplementation(async (opts: any) => {
+            opts.setAuthUrl?.("https://claude.com/cai/oauth/authorize?code=true");
+            return "inapp-success";
+        });
+
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({
+                blockId: "block-1",
+                provider: () => claude,
+                log: () => {},
+            });
+            await status.relogin({ retryAfterLogin: false });
+
+            expect(status.authNotice()).toMatch(/couldn't save the account record/i);
+            // The whole point: AuthUrlBox must not stay mounted (offering
+            // paste/cancel/"use terminal instead") against a session
+            // runProviderLogin already reaped.
+            expect(status.authUrl()).toBeNull();
+            dispose();
+        });
+    });
+
+    it("reagent P2 on PR #2413 (re-review): useTerminalInstead surfaces an explicit failure instead of silently no-op'ing when the 20s teardown backstop fires on a genuinely wedged relogin", async () => {
+        vi.useFakeTimers();
+        // relogin() never resolves within this test — simulates a
+        // genuinely wedged teardown (e.g. getCliLoginStatus() itself hung).
+        hub.runProviderLogin.mockImplementation(() => new Promise(() => {}));
+
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({
+                blockId: "block-1",
+                provider: () => claude,
+                log: () => {},
+            });
+
+            void status.relogin({ retryAfterLogin: false });
+            await vi.advanceTimersByTimeAsync(10);
+            const terminalPromise = status.useTerminalInstead();
+            await vi.advanceTimersByTimeAsync(20_000);
+            await terminalPromise;
+
+            expect(status.authNotice()).toMatch(/taking longer than expected/i);
+            dispose();
+        });
+    });
+
+    it("reagent P1 on PR #2413 (round 3): useTerminalInstead waits out a /login-driven session too, not just relogin()'s — /login never touches reloginInFlight/reloginDonePromise, only the shared loginWaiting() counter", async () => {
+        // /login (commands/global/login.ts) drives beginRecoveryFlow/
+        // endRecoveryFlow directly — it never calls relogin(), so
+        // reloginInFlight stays false throughout. Before this fix,
+        // useTerminalInstead awaited reloginDonePromise, which is
+        // ALREADY RESOLVED in this scenario (relogin() was never called),
+        // so it fell straight through to loginViaTerminal() — and since
+        // reloginInFlight is false, that guard didn't catch it either,
+        // starting a second concurrent login child while /login's own
+        // poll was still tearing the first one down.
+        let secondAttemptStarted = false;
+        hub.runProviderLogin.mockImplementation(async () => {
+            secondAttemptStarted = true;
+            return "terminal-success";
+        }); // only ever hit by loginViaTerminal(), fired from useTerminalInstead
+
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({
+                blockId: "block-1",
+                provider: () => claude,
+                log: () => {},
+            });
+
+            // Simulates /login's in-flight session.
+            status.beginRecoveryFlow();
+            expect(status.loginWaiting()).toBe(true);
+
+            const terminalPromise = status.useTerminalInstead();
+
+            // Give the poll a few real ticks to run — it must NOT proceed
+            // to loginViaTerminal() while the simulated /login session is
+            // still marked in-flight.
+            await new Promise((r) => setTimeout(r, 50));
+            expect(secondAttemptStarted).toBe(false);
+            expect(hub.runProviderLogin).not.toHaveBeenCalled();
+
+            // Simulates /login's own poll finishing and tearing down.
+            status.endRecoveryFlow();
+            await terminalPromise;
+
+            expect(secondAttemptStarted).toBe(true);
+            dispose();
+        });
+    });
+
+    it("reagent P2 on PR #2413 (round 3): 'inapp-timeout' from a relogin() cancelled via useTerminalInstead does not overwrite the terminal flow's own notice with the generic timeout message", async () => {
+        let resolveFirstAttempt: (v: string) => void;
+        const firstAttempt = new Promise<string>((res) => { resolveFirstAttempt = res; });
+
+        hub.runProviderLogin
+            .mockImplementationOnce((opts: any) => {
+                opts.setAuthUrl?.("https://claude.com/cai/oauth/authorize?code=true");
+                return firstAttempt;
+            }) // relogin()'s own call — held open
+            .mockImplementationOnce(async () => "terminal-success"); // loginViaTerminal()'s call
+
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({
+                blockId: "block-1",
+                provider: () => claude,
+                log: () => {},
+            });
+
+            const reloginPromise = status.relogin({ retryAfterLogin: false });
+            // Fires cancelLogin() synchronously (loginCancelled = true)
+            // before the still-in-flight relogin() resolves below — exactly
+            // the ordering a real click produces.
+            const terminalPromise = status.useTerminalInstead();
+
+            // The cancellation is what makes runProviderLogin's own poll
+            // resolve "inapp-timeout" in practice (run-provider-login.ts);
+            // simulated directly here since runProviderLogin is mocked.
+            resolveFirstAttempt!("inapp-timeout");
+            await reloginPromise;
+
+            // Before this fix, relogin()'s "inapp-timeout" branch
+            // unconditionally overwrote whatever notice the cancel/terminal
+            // flow had just set (or was about to set) with "the login link
+            // timed out" — telling the user their login failed when they'd
+            // simply asked to switch to a terminal.
+            expect(status.authNotice() ?? "").not.toMatch(/login link timed out/i);
+
+            await terminalPromise;
             dispose();
         });
     });
