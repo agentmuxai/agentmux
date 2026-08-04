@@ -2,7 +2,6 @@
 
 ## 0.54.10 — 2026-08-03
 
-- feat(agent-pane): add attachedTask status axis to agent-pane-state reducer
 - feat(muxspect): surface last persisted spawn/execution error in list/describe
 - fix(bashwrap): persist shell cwd across one-shot exec invocations
 - feat(agent-pane): hover-to-peek on tool calls and thinking clumps
