@@ -43,7 +43,17 @@ pub fn make_cli_cmd(cli_path: &str) -> tokio::process::Command {
 /// Resolve `cli_path` to a runnable `Command` (the `.cmd`/`.bat` shim parsing
 /// on Windows). `make_cli_cmd` wraps this to apply `CREATE_NO_WINDOW`.
 fn build_cli_cmd(cli_path: &str) -> tokio::process::Command {
-    let (program, args) = resolve_cli_spawn_target(cli_path);
+    // `None` means the `.cmd` shim didn't match either known npm shape — fall
+    // back to spawning the raw path directly. For a `tokio::process::Command`
+    // (piped stdio, no PTY) this has the pre-existing, already-documented
+    // failure mode of npm `.cmd` wrappers (args/output can get lost through
+    // `cmd.exe`'s implicit association) rather than the ConPTY indefinite
+    // hang — see `resolve_cli_spawn_target`'s doc for why that hang is
+    // PTY-specific and why this fallback must NOT be `cmd.exe /C` (that's
+    // exactly as broken here as the raw path, so there's nothing to gain by
+    // routing through it explicitly).
+    let (program, args) = resolve_cli_spawn_target(cli_path)
+        .unwrap_or_else(|| (cli_path.to_string(), Vec::new()));
     let mut cmd = tokio::process::Command::new(&program);
     cmd.args(&args);
     cmd
@@ -58,25 +68,36 @@ fn build_cli_cmd(cli_path: &str) -> tokio::process::Command {
 /// layer hangs indefinitely under a real ConPTY (confirmed live: 0% CPU, zero
 /// output, target dir never created) — this is the fix for that class of bug,
 /// not just a refactor for its own sake.
-pub fn resolve_cli_spawn_target(cli_path: &str) -> (String, Vec<String>) {
+///
+/// Returns `None` when `cli_path` is a `.cmd`/`.bat` shim that doesn't match
+/// either known npm shape (Node-script or native-exe). A previous version
+/// fell back to `("cmd.exe", ["/C", cli_path])` here, but that's the exact
+/// invocation this function exists to avoid — under a ConPTY it hangs just
+/// as indefinitely as the raw shim path did, silently reintroducing the bug
+/// for any unrecognized shim shape (reagent P2 on PR review). Callers must
+/// decide how to handle an unresolvable shim themselves: `build_cli_cmd`
+/// (piped stdio, no ConPTY) falls back to the raw path, which loses some
+/// stdio fidelity but doesn't hang; `run_cli_login_pty` (real ConPTY) must
+/// fail fast instead of attempting a doomed spawn.
+pub fn resolve_cli_spawn_target(cli_path: &str) -> Option<(String, Vec<String>)> {
     #[cfg(windows)]
     if cli_path.ends_with(".cmd") || cli_path.ends_with(".bat") {
-        match parse_cmd_wrapper(cli_path) {
+        return match parse_cmd_wrapper(cli_path) {
             Some(ResolvedShim::NodeScript(entry_script)) => {
                 tracing::debug!(cmd = %cli_path, script = %entry_script, "resolved .cmd → node");
-                return ("node".to_string(), vec![entry_script]);
+                Some(("node".to_string(), vec![entry_script]))
             }
             Some(ResolvedShim::Executable(exe_path)) => {
                 tracing::debug!(cmd = %cli_path, exe = %exe_path, "resolved .cmd → native .exe");
-                return (exe_path, Vec::new());
+                Some((exe_path, Vec::new()))
             }
             None => {
-                tracing::warn!(cmd = %cli_path, "could not parse .cmd wrapper, falling back to cmd.exe /C");
-                return ("cmd.exe".to_string(), vec!["/C".to_string(), cli_path.to_string()]);
+                tracing::warn!(cmd = %cli_path, "could not parse .cmd wrapper — no safe spawn target");
+                None
             }
-        }
+        };
     }
-    (cli_path.to_string(), Vec::new())
+    Some((cli_path.to_string(), Vec::new()))
 }
 
 /// Parse an npm-generated `.cmd` wrapper to extract the real entry point.
@@ -185,7 +206,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let cmd_path = write_shim(dir.path(), "claude", CLAUDE_EXE_SHIM);
 
-        let (program, args) = resolve_cli_spawn_target(&cmd_path);
+        let (program, args) = resolve_cli_spawn_target(&cmd_path).expect("parseable shim must resolve");
 
         assert!(
             program.ends_with("claude.exe") || program.ends_with("claude-code\\bin\\claude.exe"),
@@ -200,7 +221,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let cmd_path = write_shim(dir.path(), "openclaw", NODE_SCRIPT_SHIM);
 
-        let (program, args) = resolve_cli_spawn_target(&cmd_path);
+        let (program, args) = resolve_cli_spawn_target(&cmd_path).expect("parseable shim must resolve");
 
         assert_eq!(program, "node");
         assert_eq!(args.len(), 1, "expected exactly the script path as the sole arg: {args:?}");
@@ -209,19 +230,27 @@ mod tests {
 
     #[test]
     fn non_cmd_path_passes_through_unchanged() {
-        let (program, args) = resolve_cli_spawn_target(r"C:\some\native\tool.exe");
+        let (program, args) =
+            resolve_cli_spawn_target(r"C:\some\native\tool.exe").expect("non-.cmd path always resolves");
         assert_eq!(program, r"C:\some\native\tool.exe");
         assert!(args.is_empty());
     }
 
+    /// An unparseable `.cmd` shim must resolve to `None`, not a `cmd.exe /C`
+    /// fallback — that fallback is exactly the invocation this resolver
+    /// exists to avoid, and hangs just as indefinitely under a real ConPTY
+    /// as the raw shim path did (reagent P2 on PR #2422 review). Callers
+    /// decide their own fallback: `build_cli_cmd` uses the raw path (piped
+    /// stdio, no hang risk); `run_cli_login_pty` fails fast instead.
     #[test]
-    fn unparseable_cmd_falls_back_to_cmd_exe_c() {
+    fn unparseable_cmd_resolves_to_none_not_cmd_exe_c() {
         let dir = tempfile::tempdir().unwrap();
         let cmd_path = write_shim(dir.path(), "weird", "@ECHO off\r\necho nothing useful here\r\n");
 
-        let (program, args) = resolve_cli_spawn_target(&cmd_path);
-
-        assert_eq!(program, "cmd.exe");
-        assert_eq!(args, vec!["/C".to_string(), cmd_path]);
+        assert_eq!(
+            resolve_cli_spawn_target(&cmd_path),
+            None,
+            "must not silently fall back to the broken cmd.exe /C invocation"
+        );
     }
 }
