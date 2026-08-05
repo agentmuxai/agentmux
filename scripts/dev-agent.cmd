@@ -45,12 +45,39 @@ set "PATH=%GIT_BIN%;%GIT_USR%;%PATH%"
 :: any other parallel dev session — this is the common case: an agent runs its
 :: own `task dev` to let the human test a fix, and the human needs to tell
 :: whose window is whose. An explicit TITLE= from the caller always wins.
-set "ARGS=%*"
+::
+:: Detection avoids two traps found by testing against a deliberately
+:: malicious TITLE value (e.g. containing `&`/`>`):
+::   - `echo %ARGS% | findstr` (an earlier version of this fix) put
+::     caller-controlled text unquoted on an external command's line,
+::     letting cmd.exe metacharacters in it execute as separate commands.
+::     Detection below never spawns a command with ARGS-derived text on
+::     its line — only quoted `if` string comparisons, which cmd.exe does
+::     not split on `&`/`|`/etc.
+::   - `for %%A in (%*)` / `%1`..%9` both split tokens on a bare `=`
+::     (not just whitespace — a documented cmd.exe quirk), so a single
+::     `TITLE=value` argument arrives as two separate tokens and a
+::     per-token prefix check silently never matches. Detection instead
+::     runs directly against the whole ARGS string.
+:: `set ARGS=%*` (deliberately no surrounding quotes) preserves whatever
+:: quoting the caller's own arguments already carry; wrapping it in an
+:: extra `"..."` pair (`set "ARGS=%*"`) breaks quote-parity and reopens
+:: the same injection when a caller-quoted value contains its own quotes.
+set ARGS=%*
 set "TITLE_ARG="
-echo %ARGS% | findstr /C:"TITLE=" >nul
-if errorlevel 1 (
-    if not "%AGENTMUX_AGENT_ID%"=="" set "TITLE_ARG=TITLE=%AGENTMUX_AGENT_ID%"
-)
+setlocal enabledelayedexpansion
+set "U=!ARGS!"
+set "U=!U:"=!"
+set "U=!U:t=T!"
+set "U=!U:i=I!"
+set "U=!U:l=L!"
+set "U=!U:e=E!"
+set "HAS_TITLE="
+if "!U:~0,6!"=="TITLE=" set "HAS_TITLE=1"
+if not "!U!"=="!U: TITLE==!" set "HAS_TITLE=1"
+set "NEWTITLE="
+if not defined HAS_TITLE if not "%AGENTMUX_AGENT_ID%"=="" set "NEWTITLE=TITLE=%AGENTMUX_AGENT_ID%"
+endlocal & set "TITLE_ARG=%NEWTITLE%"
 
 :: Call bare `task` (no extension) — this .cmd wrapper itself runs under cmd.exe
 :: (Gap A only applies to bash resolving .cmd files, not to us), so PATHEXT
