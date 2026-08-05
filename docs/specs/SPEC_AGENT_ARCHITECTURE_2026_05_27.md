@@ -5,6 +5,8 @@
 **Status:** Tracking spec — supersedes `SPEC_AGENT_CONCEPT_CONSOLIDATION_2026_05_24.md` for ongoing planning. The 2026-05-24 spec laid out the design; this one is the live status doc with the per-handler matrix and the migration plan.
 **Tracking discussion:** [#1095 — Architecture: agent data-model consolidation — tracking](https://github.com/agentmuxai/agentmux/discussions/1095). All PRs that touch agent data-layer code link there.
 
+> **Staleness note (2026-08-03):** this doc has not been edited since 2026-05-28 (`6584c024`). Phase 3b is only partially shipped and Phase 3c has not happened — `db_agent_definitions`/`db_agent_instances` still exist in the current schema, contradicting this doc's own acceptance criteria. Confirmed stalled, not just unread — see `docs/specs/SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md` §1.4 and `SPEC_DOCS_LIFECYCLE_HARDENING_2026_08_03.md` for the audit that found this. Treat the phase table below as historical intent, not current status, until someone either finishes the migration or formally re-scopes it here.
+
 ---
 
 ## Why this spec exists

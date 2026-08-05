@@ -509,7 +509,7 @@ enum RuntimeSlot {
 /// "start Docker Desktop while AgentMux is already running" is picked up
 /// within one call, everywhere `container_manager` is read.
 ///
-/// See docs/retros/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md.
+/// See docs/retro/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md.
 pub struct ContainerRuntimeHandle {
     slot: tokio::sync::RwLock<RuntimeSlot>,
 }

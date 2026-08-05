@@ -73,7 +73,7 @@ beforeEach(async () => {
     ]);
     // Default: Docker daemon not reachable → host-only. Consumed via the
     // shared toolchain-capabilities store, not called directly by the
-    // component anymore — see docs/retros/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md.
+    // component anymore — see docs/retro/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md.
     vi.mocked(RpcApi.ContainerRuntimeAvailableCommand).mockResolvedValue({ available: false });
 });
 

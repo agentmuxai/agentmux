@@ -6,6 +6,8 @@
 - [`docs/specs/archive/SPEC_SHARED_BUNDLES_AND_DEFINITIONS_2026_05_19.md`](./archive/SPEC_SHARED_BUNDLES_AND_DEFINITIONS_2026_05_19.md) — proposes moving durable content to `~/.agentmux/shared/`. Read this audit first; the spec assumes its inventory.
 - agentmux-docs internals: [`data-layout.md`](https://github.com/agentmuxai/agentmux-docs/blob/main/src/content/docs/internals/data-layout.md), [`persistence.md`](https://github.com/agentmuxai/agentmux-docs/blob/main/src/content/docs/internals/persistence.md). Both are partially stale (see §10).
 
+> **Staleness note (2026-08-03):** "current as of 2026-05-19" is no longer accurate. `~/.agentmux/shared/store.db` (described here as proposed) is now a real, versioned, actively-written store (schema v1-v4: identity/memory/cron/credentials — see `agentmux-srv/src/backend/storage/migrations.rs`). Treat this doc's inventory as a snapshot of intent at the time, not the current schema.
+
 ---
 
 ## 0. TL;DR

@@ -631,6 +631,10 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
         } else {
             sidecar::use_launcher_endpoints(&app_state)
         };
+        // Captured before the match below consumes launcher_provided by value.
+        // Phase 0f: distinguishes which path result.pending_migrations came
+        // from, so we know when it's safe to trust a 0.
+        let is_host_owned_spawn = launcher_provided.is_none();
         let result = match launcher_provided {
             Some(Ok(r)) => {
                 tracing::info!(
@@ -660,13 +664,18 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
                     endpoints.ws_endpoint = result.ws_endpoint.clone();
                     endpoints.web_endpoint = result.web_endpoint.clone();
                 }
-                // Only update pending_migrations from the ESTART result on the
-                // host-owned spawn_backend path (result.pending_migrations > 0
-                // is meaningful). On the launcher path use_launcher_endpoints
-                // returns 0 and the real count is already in AppState from
-                // AGENTMUX_PENDING_MIGRATIONS — overwriting with 0 would
-                // clobber it.
-                if result.pending_migrations > 0 {
+                // On the host-owned spawn_backend path, result.pending_migrations
+                // is the authoritative signal for THIS spawn — always trust it,
+                // including 0, so a stale nonzero count cached from an earlier
+                // spawn in this process's lifetime (e.g. before a restart) gets
+                // cleared on a clean re-spawn instead of sticking forever
+                // (Phase 0f, docs/specs/SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md
+                // §1.6/F8). On the launcher path use_launcher_endpoints always
+                // returns 0 here (meaningless stub) and the real count was
+                // already seeded into AppState from AGENTMUX_PENDING_MIGRATIONS
+                // at construction time — only ever overwrite it with a
+                // genuinely positive value, never clobber it with this stub 0.
+                if is_host_owned_spawn || result.pending_migrations > 0 {
                     *app_state.pending_migrations.lock() = result.pending_migrations;
                 }
                 tracing::info!(

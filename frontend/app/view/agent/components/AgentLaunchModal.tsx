@@ -337,7 +337,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     // blocking a legitimate continue. `containerSupported` (does this
     // provider ship a container image at all) remains the only thing that
     // actually disables the radio. See
-    // docs/retros/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md.
+    // docs/retro/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md.
     onCleanup(watchCapability("docker"));
 
     // If the catalog says this provider can't run in a container, coerce

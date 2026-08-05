@@ -74,7 +74,7 @@ pub struct AppState {
     /// channel. Used as the owner id for cross-process session leases
     /// (`registry::LeaseStore`) so two live processes can be told
     /// apart even when they're the same channel/version.
-    /// See `docs/retros/RETRO_DEV_BUILD_SHARED_AGENT_SESSION_COLLISION_2026_07_29.md`.
+    /// See `docs/retro/RETRO_DEV_BUILD_SHARED_AGENT_SESSION_COLLISION_2026_07_29.md`.
     pub boot_id: Arc<str>,
     pub version: String,
     pub app_path: String,
@@ -173,7 +173,7 @@ pub struct AppState {
     /// Docker connection on demand rather than being fixed at process
     /// boot, so a daemon that starts after AgentMux launched is picked up
     /// without an app restart. See `ContainerRuntimeHandle` and
-    /// docs/retros/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md.
+    /// docs/retro/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md.
     pub container_manager: std::sync::Arc<crate::backend::container::ContainerRuntimeHandle>,
     /// Phase 3 — per-shell stop handles so `ShellStop` (MCP tool) and the UI
     /// stop button can tree-kill a running persistent shell node. See

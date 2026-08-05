@@ -3,7 +3,7 @@
 //
 // Tests for the shared toolchain-capabilities store — the single point of
 // entry that fixed the Docker "installed here, not installed there"
-// divergence (docs/retros/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md).
+// divergence (docs/retro/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md).
 
 import { describe, test, expect, beforeEach, vi } from "vitest";
 

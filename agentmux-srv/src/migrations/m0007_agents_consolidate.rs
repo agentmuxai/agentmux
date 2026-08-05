@@ -20,9 +20,22 @@ impl Migration for M0007AgentsConsolidate {
             Store::open(&ctx.channel_store_path)
                 .map_err(|e| MigrationError(format!("agents_consolidate: open wstore: {}", e)))?,
         );
-        wstore
+        let stats = wstore
             .run_agents_consolidate(Some(&ctx.data_dir))
-            .map(|_| ())
-            .map_err(|e| MigrationError(format!("agents_consolidate: {}", e)))
+            .map_err(|e| MigrationError(format!("agents_consolidate: {}", e)))?;
+        // Phase 0c hardening: log the outcome instead of discarding it —
+        // `already_done` in particular used to be silently thrown away,
+        // making a "marker present, wrote nothing" run indistinguishable
+        // from a real backfill in the logs. See
+        // docs/specs/SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md Phase 0c.
+        tracing::info!(
+            already_done = stats.already_done,
+            templates_inserted = stats.templates_inserted,
+            user_defs_inserted = stats.user_defs_inserted,
+            instances_as_clone_inserted = stats.instances_as_clone_inserted,
+            instances_folded_into_def = stats.instances_folded_into_def,
+            "m0007_agents_consolidate: outcome",
+        );
+        Ok(())
     }
 }

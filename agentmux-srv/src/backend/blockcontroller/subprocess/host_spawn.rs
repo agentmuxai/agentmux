@@ -72,7 +72,7 @@ impl SubprocessController {
         // `instance_id` (container-mode branch in this PR) or no
         // `lease_store` (registry unavailable) both mean leasing is a
         // no-op for this spawn. See `registry::LeaseStore` and
-        // `docs/retros/RETRO_DEV_BUILD_SHARED_AGENT_SESSION_COLLISION_2026_07_29.md`.
+        // `docs/retro/RETRO_DEV_BUILD_SHARED_AGENT_SESSION_COLLISION_2026_07_29.md`.
         let claimed_lease: Option<crate::registry::Lease> = if config.instance_id.is_empty() {
             None
         } else {

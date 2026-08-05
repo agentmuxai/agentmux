@@ -27,7 +27,7 @@
 //! lock-free version was neither.
 //!
 //! Root cause + design context:
-//! `docs/retros/RETRO_DEV_BUILD_SHARED_AGENT_SESSION_COLLISION_2026_07_29.md`,
+//! `docs/retro/RETRO_DEV_BUILD_SHARED_AGENT_SESSION_COLLISION_2026_07_29.md`,
 //! `docs/analysis/ANALYSIS_MULTI_AGENT_SESSION_AND_WORKDIR_ISOLATION_2026-07-29.md`.
 
 use std::path::{Path, PathBuf};

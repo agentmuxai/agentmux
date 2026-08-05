@@ -3,6 +3,8 @@
 **Date:** 2026-06-25
 **Purpose:** Design-session input for making auth robust app-wide. Covers current state, the terminal-vs-agent gap, the "Login Again" crash, and gaps to fix.
 
+> **Staleness note (2026-08-03):** table/column names here (e.g. `db_identity_accounts`) predate the 2026-07-12 Phase 4a rename to `db_accounts`. See `docs/specs/REPORT_AUTH_ARCHITECTURE_STATE_AND_RETHINK_2026_07_21.md` for a later pass over the same territory (itself also flagged as partially stale — check both against current code before relying on either for schema names).
+
 ---
 
 ## 1. How Credentials Are Stored
