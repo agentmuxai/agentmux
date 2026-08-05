@@ -874,17 +874,34 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         },
     });
 
-    // Focus/visibility-triggered reconcile — the mount-time GetControllerStatus
+    // Focus/visibility-triggered re-poll — the mount-time GetControllerStatus
     // (onControllerStatus above) is one-shot, and the live useControllerStatusEvents
     // subscription only self-heals a missed turn-end if a LATER live event
     // arrives. If the single turn-end push is missed (backgrounded window, a
     // WPS reconnect gap, a pane remount that doesn't re-trigger the WPS
     // persisted-event replay — see REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md
     // §3/§4 item 5) nothing else corrects it until the *next* turn starts.
-    // Re-poll on every background→foreground transition so looking back at a
-    // pane always shows the true current state within one RPC round trip,
-    // independent of event-bus replay semantics. Skips the initial `true` at
-    // mount (already covered by the one-shot above) via `{ defer: true }`.
+    // Re-poll on every background→foreground transition to drive the two
+    // effects below (turnJustEnded edge-tracking, deferred controller-refresh
+    // recovery), independent of event-bus replay semantics. Skips the
+    // initial `true` at mount (already covered by the one-shot above) via
+    // `{ defer: true }`.
+    //
+    // Deliberately does NOT call reconcileTurnActive from this snapshot
+    // (removed per direct user request — "Working" state must not depend on
+    // window focus at all). `turn_active` isn't a clean boolean: it reads
+    // transiently false during the gap between one CLI round's session_end
+    // and the next round's start (the same phenomenon StreamFlushObserved's
+    // Done->Streaming re-promotion exists to paper over on a different
+    // path), and this poll fires on the single most common user action —
+    // clicking/refocusing a pane to check on it — making that race far more
+    // visible than it needs to be. The live useControllerStatusEvents
+    // subscription below still reconciles TurnPhase from the backend's
+    // periodic status heartbeat (persistent.rs's spawn_status_heartbeat,
+    // every 20s while a turn is active) independent of focus, so the
+    // original stuck-Working-forever gap this mechanism was built for is
+    // still bounded — just by that heartbeat's cadence instead of an
+    // instant refocus, not left uncovered entirely.
     const windowFocused = makeWindowFocusSignal();
     createEffect(on(windowFocused, (focused) => {
         if (!focused) return;
@@ -892,7 +909,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             .then((rts) => {
                 if (!rts) return;
                 const active = !!rts.turn_active;
-                reconcileTurnActive(active);
                 // Mirror the live useControllerStatusEvents handler below —
                 // reagent P2: a turn-end detected ONLY via this focus poll
                 // (the missed-live-push case this mechanism exists for)
