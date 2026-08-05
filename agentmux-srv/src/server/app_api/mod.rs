@@ -683,8 +683,21 @@ pub(crate) async fn bundle_self_get_impl(
 ) -> Result<serde_json::Value, String> {
     let instance = state.wstore.instance_get_by_name(agent_id)
         .map_err(|e| format!("bundle.self.get: {e}"))?;
+    // `instance_get_by_name` only ever hits the local `db_agents` table — a
+    // live agent that only exists in the global named-agent registry (never
+    // created a `db_agents` instance row) falls through with `instance:
+    // None` here. Without this fallback that silently read as "no bundle
+    // bound" and returned the blank/vanilla preset regardless of what's
+    // actually bound, with nothing to distinguish it from a genuinely
+    // unbound agent. Mirrors the two-tier lookup
+    // `native_memory_handlers::memory_dir_for_agent` already does for the
+    // same reason (see that function's own doc comment, issue #1836).
     let memory_id = instance.as_ref()
-        .and_then(|i| if i.memory_id.is_empty() { None } else { Some(i.memory_id.clone()) });
+        .and_then(|i| if i.memory_id.is_empty() { None } else { Some(i.memory_id.clone()) })
+        .or_else(|| {
+            crate::server::native_memory_handlers::find_active_registry_record_by_slug(agent_id)
+                .and_then(|rec| rec.data.memory_id)
+        });
     let memory = if let Some(mid) = memory_id {
         state.id_store.bundle_memory_get(&mid).map_err(|e| format!("bundle.self.get: {e}"))?
             .ok_or_else(|| format!("bundle.self.get: memory_id {mid} not found"))?
@@ -1759,5 +1772,75 @@ mod bundle_upsert_input_tests {
         }));
         assert_eq!(out["context_files"], json!("[]"));
         assert_eq!(out["skills"], json!("[\"already\"]"));
+    }
+}
+
+// SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md follow-up: `PresetGet`
+// self-mode (backed by `bundle_self_get_impl`) only ever checked the local
+// `db_agents` table via `instance_get_by_name`. A live agent that only
+// exists in the global named-agent registry (the common case — launching
+// an agent does not create a `db_agents` row, see issue #1836, already
+// handled the same way by `native_memory_handlers::memory_dir_for_agent`)
+// fell through to `instance: None` and silently returned the generic
+// blank/vanilla preset, with nothing to distinguish it from an agent that
+// genuinely has no bundle bound. Confirmed live against a real registry-only
+// agent named "AgentY": `PresetGet` returned `is_blank: true` even though
+// the registry's own `memory_id` was set.
+#[cfg(test)]
+mod bundle_self_get_registry_fallback_tests {
+    use super::*;
+    use crate::server::tests::test_state;
+    use crate::test_support::ISOLATED_AUTH_ENV_LOCK as ENV_LOCK;
+
+    #[tokio::test]
+    async fn falls_back_to_the_registrys_own_bound_bundle_when_no_local_instance_row_exists() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let state = test_state();
+        let bundle: crate::backend::storage::memory_bundles::Memory =
+            serde_json::from_value(serde_json::json!({
+                "id": "bundle-agenty-test",
+                "name": "AgentY's real bundle",
+            }))
+            .unwrap();
+        state.id_store.bundle_memory_upsert(&bundle).unwrap();
+
+        let tmp = tempfile::tempdir().unwrap();
+        let prev = std::env::var_os("AGENTMUX_HOME_OVERRIDE");
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", tmp.path());
+
+        let registry_dir = tmp.path().join("shared").join("agents").join("registry");
+        let registry = crate::registry::Registry::open(registry_dir).unwrap();
+        registry
+            .upsert(&crate::registry::NamedAgentRecord {
+                schema_version: 1,
+                data: crate::registry::NamedAgentRecordV1 {
+                    instance_id: "inst-agenty".to_string(),
+                    instance_name: "AgentY".to_string(),
+                    definition_id: "def-agenty".to_string(),
+                    identity_id: None,
+                    memory_id: Some("bundle-agenty-test".to_string()),
+                    session_id: None,
+                    working_dir: "agenty-0629j".to_string(),
+                    source_agents_base: None,
+                    created_at_ms: 1,
+                    last_launched_at_ms: 1,
+                    created_by_version: "test".to_string(),
+                    last_launched_by_version: "test".to_string(),
+                },
+            })
+            .unwrap();
+
+        // No `db_agents` row for "agenty" exists in `state.wstore` — this
+        // must resolve entirely through the registry fallback.
+        let resp = bundle_self_get_impl(&state, "agenty").await;
+
+        match prev {
+            Some(v) => std::env::set_var("AGENTMUX_HOME_OVERRIDE", v),
+            None => std::env::remove_var("AGENTMUX_HOME_OVERRIDE"),
+        }
+
+        let resp = resp.expect("bundle.self.get must succeed via the registry fallback");
+        assert_eq!(resp["id"], "bundle-agenty-test");
+        assert_eq!(resp["is_blank"], false);
     }
 }

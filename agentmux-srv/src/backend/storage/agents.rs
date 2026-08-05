@@ -1596,6 +1596,20 @@ impl Store {
     /// detection only cares about identity / cwd; ContinueNamed only
     /// cares about `id` + bindings).
     /// Spec: docs/specs/SPEC_AGENT_ARCHITECTURE_2026_05_27.md §3b.
+    /// Resolve an instance by `instance_name` — but App-API callers (App
+    /// API self-lookup endpoints: `memory.*`, `identity.self.*`,
+    /// `bundle.self.get`) actually pass the `AGENTMUX_AGENT_ID` routing
+    /// slug (`derive_slug(display_name)`, injected into the agent's MCP
+    /// server env — see `agent_config.rs::build_mcp_config`'s own doc
+    /// comment), NOT the literal display name. An exact match still wins
+    /// when it hits (cheap, indexed, and correct for any caller that DOES
+    /// pass the literal name), but a mixed-case display name (e.g.
+    /// "AgentY") never equals its own lowercased slug ("agenty") — so
+    /// every one of those App-API endpoints 404'd/500'd for any agent
+    /// whose name wasn't already all-lowercase. Confirmed live: `MemoryList`
+    /// ("agent agenty not found"), `IdentityAccounts` ("unknown agent
+    /// 'agenty'"). Falls back to a slug-normalized scan so both forms
+    /// resolve to the same row.
     pub fn instance_get_by_name(
         &self,
         instance_name: &str,
@@ -1628,30 +1642,34 @@ impl Store {
              ORDER BY updated_at DESC, created_at DESC
              LIMIT 1",
         )?;
-        let result = stmt.query_row(params![instance_name], |row| {
-            Ok(AgentInstance {
-                id: row.get(0)?,
-                definition_id: row.get(1)?,
-                parent_instance_id: String::new(),
-                block_id: String::new(),
-                session_id: String::new(),
-                status: String::new(),
-                github_context: row.get(2)?,
-                started_at: row.get(3)?, // created_at — best proxy for the consolidated row
-                ended_at: 0,
-                created_at: row.get(3)?,
-                identity_id: row.get(4)?,
-                memory_id: row.get(5)?,
-                instance_name: row.get(6)?,
-                working_directory: row.get(7)?,
-                display_hidden: row.get::<_, i64>(8)? != 0,
-            })
-        });
+        let result = stmt.query_row(params![instance_name], map_agent_instance_row);
         match result {
-            Ok(a) => Ok(Some(a)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e.into()),
+            Ok(a) => return Ok(Some(a)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => {}
+            Err(e) => return Err(e.into()),
         }
+        drop(stmt);
+
+        // Slug-normalized fallback — see the doc comment above.
+        let queried_slug = derive_slug(instance_name);
+        let mut fallback_stmt = conn.prepare(
+            "SELECT id, id AS def_id,
+                    github_context, created_at,
+                    identity_id, memory_id, instance_name, working_directory,
+                    user_hidden
+             FROM db_agents
+             WHERE is_template = 0
+               AND user_hidden = 0
+             ORDER BY updated_at DESC, created_at DESC",
+        )?;
+        let mut rows = fallback_stmt.query_map([], map_agent_instance_row)?;
+        while let Some(row) = rows.next() {
+            let instance = row?;
+            if derive_slug(&instance.instance_name) == queried_slug {
+                return Ok(Some(instance));
+            }
+        }
+        Ok(None)
     }
 
     /// Partial update of an instance's mutable runtime fields. Only
@@ -1999,6 +2017,29 @@ fn map_instance_row(row: &rusqlite::Row) -> rusqlite::Result<AgentInstance> {
     })
 }
 
+/// Row mapper for `instance_get_by_name`'s two queries (exact-match and
+/// the slug-normalized fallback scan) — column order MUST match both
+/// SELECTs there.
+fn map_agent_instance_row(row: &rusqlite::Row) -> rusqlite::Result<AgentInstance> {
+    Ok(AgentInstance {
+        id: row.get(0)?,
+        definition_id: row.get(1)?,
+        parent_instance_id: String::new(),
+        block_id: String::new(),
+        session_id: String::new(),
+        status: String::new(),
+        github_context: row.get(2)?,
+        started_at: row.get(3)?, // created_at — best proxy for the consolidated row
+        ended_at: 0,
+        created_at: row.get(3)?,
+        identity_id: row.get(4)?,
+        memory_id: row.get(5)?,
+        instance_name: row.get(6)?,
+        working_directory: row.get(7)?,
+        display_hidden: row.get::<_, i64>(8)? != 0,
+    })
+}
+
 /// Row mapper for `db_agents` rows projected back into the
 /// `AgentDefinition` shape. The column order MUST match the SELECT in
 /// `agent_def_list`. `parent_template_id` maps to `parent_id` because
@@ -2132,6 +2173,53 @@ mod tests {
         // swallow a real error.
         let result = store.instance_create(&instance("inst-2", "nowhere"));
         assert!(result.is_err(), "instance_create must still fail for a truly orphaned definition_id");
+    }
+
+    // SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md follow-up: App-API
+    // self-lookup callers (MemoryList/Read/Write, IdentityAccounts,
+    // IdentityValidate, bundle.self.get) pass the AGENTMUX_AGENT_ID routing
+    // slug (`derive_slug(display_name)`), not the literal display name.
+    // Confirmed live: a real agent named "AgentY" got "agent agenty not
+    // found" from every one of those endpoints.
+    #[test]
+    fn instance_get_by_name_resolves_a_mixed_case_display_name_via_its_slug() {
+        let store = Store::open_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let def_store = Arc::new(DefinitionStore::open(tmp.path().join("definitions")).unwrap());
+        def_store.upsert(&global_user_agent("def-agenty", "AgentY")).unwrap();
+        store.set_def_registry(def_store);
+
+        let mut inst = instance("inst-agenty", "def-agenty");
+        inst.instance_name = "AgentY".to_string();
+        store.instance_create(&inst).unwrap();
+
+        // The routing slug ("agenty", what every MCP-tool-backed App-API
+        // endpoint actually has) must resolve to the display-cased row.
+        let found = store.instance_get_by_name("agenty").unwrap();
+        assert!(found.is_some(), "must resolve via the slug-normalized fallback");
+        assert_eq!(found.unwrap().instance_name, "AgentY");
+
+        // The literal display name must still hit the exact-match fast
+        // path unchanged.
+        let found_exact = store.instance_get_by_name("AgentY").unwrap();
+        assert!(found_exact.is_some());
+        assert_eq!(found_exact.unwrap().instance_name, "AgentY");
+    }
+
+    #[test]
+    fn instance_get_by_name_returns_none_for_a_genuinely_unrelated_slug() {
+        let store = Store::open_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let def_store = Arc::new(DefinitionStore::open(tmp.path().join("definitions")).unwrap());
+        def_store.upsert(&global_user_agent("def-agenty2", "AgentY")).unwrap();
+        store.set_def_registry(def_store);
+
+        let mut inst = instance("inst-agenty2", "def-agenty2");
+        inst.instance_name = "AgentY".to_string();
+        store.instance_create(&inst).unwrap();
+
+        let found = store.instance_get_by_name("someone-else").unwrap();
+        assert!(found.is_none(), "an unrelated slug must not match by coincidence");
     }
 
     #[test]

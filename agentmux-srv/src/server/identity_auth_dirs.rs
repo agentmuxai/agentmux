@@ -263,17 +263,19 @@ pub(crate) fn compute_and_ensure_account_dir(
 mod tests {
     use super::*;
 
-    // Shared across every test in this module that mutates process-
-    // global env vars (`AGENTMUX_HOME_OVERRIDE` + `DataPaths::to_env_vars()`
-    // entries) via `compute_and_ensure_bundle_dir`/`compute_and_ensure_account_dir`
-    // round-trip tests. `cargo test` runs tests in this binary in
-    // parallel by default — a `static` declared inside a TEST FUNCTION
-    // body is a separate item per function, so per-function locks don't
-    // actually serialize against each other, only against repeated
-    // calls to the SAME test. One module-level lock, taken by every
-    // such test before touching the environment, is what actually
-    // prevents them from racing.
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    // `AGENTMUX_HOME_OVERRIDE` is one of the process-global env vars
+    // `crate::test_support::ISOLATED_AUTH_ENV_LOCK` exists specifically to
+    // guard — a module-local lock here only serializes tests WITHIN this
+    // module; `cargo test` runs a crate's tests in one multi-threaded
+    // process, so a local-only lock still let this module's tests race
+    // against any other module's tests touching the same var (confirmed
+    // live: `server::app_api::bundle_self_get_registry_fallback_tests`
+    // and `server::native_memory_handlers::tests`, both added for
+    // SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md, intermittently
+    // failed this module's `compute_account_dir_mints_fresh_id_when_
+    // existing_is_empty` in full-suite runs — passed every time alone).
+    // Reusing the crate-wide lock here closes that gap.
+    use crate::test_support::ISOLATED_AUTH_ENV_LOCK as ENV_LOCK;
 
     #[test]
     fn compute_account_dir_mints_fresh_id_when_existing_is_empty() {

@@ -113,6 +113,30 @@ pub(crate) fn memory_dir_for_agent(
         .ok_or_else(|| format!("memory: agent {agent_id} not found"))
 }
 
+/// Find the global named-agent registry's active record for `agent_id` —
+/// the `AGENTMUX_AGENT_ID` routing slug (`derive_slug(display_name)`),
+/// NOT the record's own `instance_name` (which keeps the original
+/// display casing, e.g. "AgentY"). Matching by raw string equality here
+/// used to mean this — and every App-API self-lookup endpoint that falls
+/// back to it (`memory.*`, and `bundle.self.get` once it's wired to use
+/// this too) — silently 404'd for any agent whose name wasn't already
+/// all-lowercase. `derive_slug` on both sides makes the comparison
+/// consistent with how the slug was actually derived in the first place.
+/// Shared so callers outside this module (e.g. `app_api::mod::
+/// bundle_self_get_impl`) don't reimplement the same lookup.
+pub(crate) fn find_active_registry_record_by_slug(
+    agent_id: &str,
+) -> Option<crate::registry::NamedAgentRecord> {
+    let registry_dir = crate::registry::resolve_shared_registry_dir()?;
+    let registry = crate::registry::Registry::open(registry_dir).ok()?;
+    let queried_slug = crate::backend::storage::store::derive_slug(agent_id);
+    registry
+        .list_active()
+        .ok()?
+        .into_iter()
+        .find(|r| crate::backend::storage::store::derive_slug(&r.data.instance_name) == queried_slug)
+}
+
 /// Resolve a memory dir for `agent_id` from the global named-agent registry.
 ///
 /// Each live agent is recorded by `instance_name` with a `working_dir` relative
@@ -120,13 +144,7 @@ pub(crate) fn memory_dir_for_agent(
 /// `identity_id` that determines its `CLAUDE_CONFIG_DIR` root. Returns `None`
 /// when the registry is unavailable or no active record matches the slug.
 fn memory_dir_from_registry(agent_id: &str) -> Option<std::path::PathBuf> {
-    let registry_dir = crate::registry::resolve_shared_registry_dir()?;
-    let registry = crate::registry::Registry::open(registry_dir).ok()?;
-    let rec = registry
-        .list_active()
-        .ok()?
-        .into_iter()
-        .find(|r| r.data.instance_name == agent_id)?;
+    let rec = find_active_registry_record_by_slug(agent_id)?;
 
     // Reconstruct the absolute working directory: source_agents_base joined with
     // the relative working_dir. Legacy (v1/v2) records without a base fall back
@@ -496,10 +514,15 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
 
-    // Process-global env access — serialize so parallel tests don't race.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    // Process-global env access (AGENTMUX_SHARED_DIR / AGENTMUX_HOME_OVERRIDE
+    // both feed registry::paths::resolve_global_shared_root) — a module-local
+    // lock only serializes tests within THIS file; registry::paths's own
+    // test module touches the same resolution path and already uses this
+    // crate-wide lock for exactly that reason (see test_support.rs's doc
+    // comment). Reusing it here avoids reintroducing the cross-module race
+    // it was built to prevent.
+    use crate::test_support::ISOLATED_AUTH_ENV_LOCK as ENV_LOCK;
 
     #[test]
     fn config_dir_for_default_identity_is_empty() {
@@ -513,7 +536,7 @@ mod tests {
 
     #[test]
     fn config_dir_for_bound_identity_points_at_bundle() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let prev = std::env::var_os("AGENTMUX_SHARED_DIR");
         std::env::set_var("AGENTMUX_SHARED_DIR", "/home/u/.agentmux/shared");
 
@@ -525,6 +548,53 @@ mod tests {
             .to_string_lossy()
             .to_string();
         assert_eq!(got, want);
+
+        match prev {
+            Some(v) => std::env::set_var("AGENTMUX_SHARED_DIR", v),
+            None => std::env::remove_var("AGENTMUX_SHARED_DIR"),
+        }
+    }
+
+    // SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md follow-up: confirmed
+    // live — a real agent named "AgentY" (routing slug "agenty") got
+    // "memory: agent agenty not found" from `MemoryList`, because this
+    // lookup used to compare the slug against the registry's own
+    // display-cased `instance_name` with raw string equality.
+    #[test]
+    fn find_active_registry_record_by_slug_resolves_a_mixed_case_display_name() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var_os("AGENTMUX_SHARED_DIR");
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("AGENTMUX_SHARED_DIR", tmp.path());
+
+        let registry_dir = tmp.path().join("agents").join("registry");
+        let registry = crate::registry::Registry::open(registry_dir).unwrap();
+        registry
+            .upsert(&crate::registry::NamedAgentRecord {
+                schema_version: 1,
+                data: crate::registry::NamedAgentRecordV1 {
+                    instance_id: "inst-agenty".to_string(),
+                    instance_name: "AgentY".to_string(),
+                    definition_id: "def-agenty".to_string(),
+                    identity_id: None,
+                    memory_id: None,
+                    session_id: None,
+                    working_dir: "agenty-0629j".to_string(),
+                    source_agents_base: None,
+                    created_at_ms: 1,
+                    last_launched_at_ms: 1,
+                    created_by_version: "test".to_string(),
+                    last_launched_by_version: "test".to_string(),
+                },
+            })
+            .unwrap();
+
+        let found = find_active_registry_record_by_slug("agenty");
+        assert!(found.is_some(), "must resolve via the slug-normalized fallback");
+        assert_eq!(found.unwrap().data.instance_name, "AgentY");
+
+        let not_found = find_active_registry_record_by_slug("someone-else");
+        assert!(not_found.is_none(), "an unrelated slug must not match by coincidence");
 
         match prev {
             Some(v) => std::env::set_var("AGENTMUX_SHARED_DIR", v),
