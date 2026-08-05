@@ -1632,6 +1632,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 onCancelLogin={status.cancelLogin}
                 onUseTerminal={status.useTerminalInstead}
                 authProviderId={provider()?.id ?? providerKey()}
+                launchPhase={status.launchPhase}
             />
 
             <Show when={status.canRetry()}>
