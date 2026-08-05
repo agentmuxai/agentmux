@@ -35,6 +35,12 @@ pub struct CronCreateRequest {
     #[serde(default)]
     pub created_by: String,
     pub max_fires: Option<i64>,
+    /// Hard expiry bound in seconds since creation. Optional — omit for no
+    /// expiry (matching native CronCreate's 7-day default is a caller
+    /// choice, not enforced here; AgentMux's cross-agent jobs are often
+    /// meant to run indefinitely, e.g. a recurring standup check).
+    #[serde(default)]
+    pub max_age_secs: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -55,6 +61,14 @@ pub struct CronJobView {
     pub fire_count: i64,
     pub max_fires: Option<i64>,
     pub created_at: i64,
+    pub max_age_secs: Option<i64>,
+    /// Seconds remaining before `max_age_secs` expiry, computed server-side
+    /// (clamped to 0, never negative) so callers don't need their own clock/
+    /// date-math to display something meaningful — `None` when there's no
+    /// `max_age_secs` bound. Fixes a review finding on the first cut of this
+    /// field: the MCP CLI was printing the raw `max_age_secs` bound under an
+    /// "expires_in" label, which is only correct at the instant of creation.
+    pub expires_in_secs: Option<i64>,
     /// ISO-8601 string of the next scheduled fire (UTC), or null if disabled.
     pub next_fire: Option<String>,
 }
@@ -65,6 +79,10 @@ fn to_view(job: &CronJob) -> CronJobView {
     } else {
         None
     };
+    let expires_in_secs = job.max_age_secs.map(|max_age| {
+        let elapsed = Utc::now().timestamp() - job.created_at;
+        (max_age - elapsed).max(0)
+    });
     CronJobView {
         id: job.id.clone(),
         name: job.name.clone(),
@@ -76,6 +94,8 @@ fn to_view(job: &CronJob) -> CronJobView {
         fire_count: job.fire_count,
         max_fires: job.max_fires,
         created_at: job.created_at,
+        expires_in_secs,
+        max_age_secs: job.max_age_secs,
         next_fire,
     }
 }
@@ -170,6 +190,7 @@ pub(super) async fn handle_cron_create(
         fire_count: 0,
         max_fires: req.max_fires,
         created_at: Utc::now().timestamp(),
+        max_age_secs: req.max_age_secs,
     };
 
     if let Err(e) = store.cron_create(&job) {
@@ -273,6 +294,7 @@ mod tests {
             fire_count,
             max_fires,
             created_at: 1_699_000_000,
+            max_age_secs: None,
         }
     }
 
