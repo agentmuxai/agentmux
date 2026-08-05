@@ -134,7 +134,9 @@ export function AccountsManager(): JSX.Element {
             </Show>
 
             <Show when={claudePanelOpen()}>
-                <ClaudeLoginPanel onClose={() => setClaudePanelOpen(false)} />
+                {/* Armory has no ModalLayer/PaneModalScope ancestor — "tab"
+                    resolves via tabcontent.tsx's outer ModalLayer scope="tab". */}
+                <ClaudeLoginPanel onClose={() => setClaudePanelOpen(false)} scope="tab" />
             </Show>
         </div>
     );

@@ -108,6 +108,26 @@
 }
 
 // ── Tile-click chooser (OAuth / Key) ──────────────────────────────────────────
+// These class names are shared by TWO different dialogs:
+//  1. AccountsGallery.tsx's own OAuth-vs-Key mode picker — a small, still
+//     hand-rolled overlay+dialog (`.accounts-chooser-overlay` provides its
+//     backdrop; `.accounts-chooser` its box chrome). Unrelated to Modal.
+//  2. ClaudeLoginPanel.tsx's dialog — now wrapped in the canonical <Modal>
+//     via `panelClass="accounts-chooser"`, which just adds this class
+//     alongside `modal-panel` on the same element. Outer chrome (backdrop,
+//     z-index, scroll lock, inert) comes from Modal there; the bare
+//     `.accounts-chooser` width rule below still applies to it (harmless —
+//     background/border/shadow duplicate what `.modal-panel` already
+//     provides) but LOSES the width cascade to `.modal-panel[data-size="md"]`
+//     (equal 0,2,0 specificity, later source order) — hence the second,
+//     Modal-specific override rule further down, matching
+//     command-palette.scss's `.modal-panel.command-palette-panel` pattern.
+//
+// Live-verified 2026-08-05: an earlier version of this fix replaced the bare
+// `.accounts-chooser`/`.accounts-chooser-overlay` rules outright (assuming
+// only ClaudeLoginPanel used them), which broke AccountsGallery's own picker
+// — it rendered unstyled (position: static, transparent backdrop) since it's
+// a plain div, never wrapped by Modal.
 .accounts-chooser-overlay {
     position: fixed;
     inset: 0;
@@ -192,4 +212,13 @@
         font-size: 11px;
         color: var(--secondary-text-color);
     }
+}
+
+// ClaudeLoginPanel's Modal-wrapped case only: beat
+// `.modal-panel[data-size="md"]`'s equal-specificity width rule. Only `width`/
+// `max-width` are needed here — `.modal-panel` already supplies background,
+// border, border-radius, box-shadow, and overflow for this element.
+.modal-panel.accounts-chooser {
+    width: 320px;
+    max-width: calc(100vw - 32px);
 }
