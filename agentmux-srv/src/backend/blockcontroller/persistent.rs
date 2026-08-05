@@ -1273,6 +1273,23 @@ impl PersistentSubprocessController {
             self.filestore.as_ref(),
             global_output_zone.as_deref(),
         );
+        // Same gap reagentx flagged (PR #2421 P2) at the other FlushErrorLine
+        // call sites: this is also a previously held-back turn's error only
+        // now confirmed final (a fresh spawn superseding a still-tracking
+        // generation, or a retry batch exhausted with nothing left to
+        // deliver) — give it the same classify/persist/publish treatment so
+        // it isn't silently dropped from the pane's failure-recovery UI. No
+        // exit code exists for this now-superseded turn.
+        if let Some(failure) = classify_exit_line(None, &line) {
+            core::persist_last_failure(&self.block_id, Some(&failure), &self.wstore, &self.event_bus);
+            broker.publish(wps::WaveEvent {
+                event: wps::EVENT_AGENT_FAILURE.to_string(),
+                scopes: vec![format!("block:{}", self.block_id)],
+                sender: String::new(),
+                persist: 1,
+                data: serde_json::to_value(&failure).ok(),
+            });
+        }
     }
 
     fn retry_after_resume_failure(
@@ -2283,6 +2300,12 @@ impl PersistentSubprocessController {
                     // session-id capture entirely for this exact frame;
                     // every other frame type (system/init, a successful
                     // result) still captures normally.
+                    // Set when the capture_effects loop below classifies and
+                    // persists a flushed OLDER turn's failure this tick — the
+                    // clear-on-success step further down must not immediately
+                    // wipe out state it just recorded (SPEC_PERSISTENT_
+                    // CONTROLLER_FAILURE_CLASSIFICATION_2026_08_04.md).
+                    let mut flushed_failure_this_tick = false;
                     if !is_error_result {
                         if let Some(sid) = parsed.get(&session_id_field).and_then(|v| v.as_str()) {
                             let sid_string = sid.to_string();
@@ -2336,6 +2359,30 @@ impl PersistentSubprocessController {
                                                 filestore_read.as_ref(),
                                                 global_output_zone.as_deref(),
                                             );
+                                        }
+                                        // reagentx P2 on PR #2421: this flushes
+                                        // an earlier held-back turn's error,
+                                        // finally confirmed final now that
+                                        // session-id tracking resolved — must
+                                        // get the same classify/persist/publish
+                                        // treatment as the identical
+                                        // FlushErrorLine handled at the
+                                        // process-exit arm, or this turn's
+                                        // failure silently loses its recovery
+                                        // banner. No exit code exists for this
+                                        // now-superseded turn.
+                                        if let Some(failure) = classify_exit_line(None, &line) {
+                                            flushed_failure_this_tick = true;
+                                            core::persist_last_failure(&block_id_read, Some(&failure), &wstore_read, &event_bus_read);
+                                            if let Some(ref broker) = broker_read {
+                                                broker.publish(wps::WaveEvent {
+                                                    event: wps::EVENT_AGENT_FAILURE.to_string(),
+                                                    scopes: vec![format!("block:{}", block_id_read)],
+                                                    sender: String::new(),
+                                                    persist: 1,
+                                                    data: serde_json::to_value(&failure).ok(),
+                                                });
+                                            }
                                         }
                                     }
                                     other => {
@@ -2440,6 +2487,23 @@ impl PersistentSubprocessController {
                                 data: serde_json::to_value(&failure).ok(),
                             });
                         }
+                    } else if is_result_frame && !is_error_result && !flushed_failure_this_tick {
+                        // reagentx P1 on PR #2421: unlike host_spawn.rs, this
+                        // controller never exits between turns, so nothing
+                        // else ever clears a previously recorded failure —
+                        // once one rate-limit/overloaded error was persisted,
+                        // the pane's onMount seed logic kept re-showing that
+                        // stale banner on every future reload, even after
+                        // many later successful turns. A genuinely successful
+                        // terminal result on this still-alive process is the
+                        // signal that it's stale. persist_last_failure is a
+                        // no-op when there's nothing to clear, so this is
+                        // cheap on the (overwhelmingly common) already-clear
+                        // path. Skipped when the capture_effects loop above
+                        // just persisted a freshly-flushed OLDER failure this
+                        // same tick — that state must survive, not be
+                        // immediately wiped by this frame's own success.
+                        core::persist_last_failure(&block_id_read, None, &wstore_read, &event_bus_read);
                     }
                 }
 
@@ -2745,7 +2809,7 @@ impl PersistentSubprocessController {
                                 // exit is NOT being silently retried (contrast
                                 // FireRetry below, which must stay invisible to
                                 // the user).
-                                if let Some(failure) = classify_exit_line(exit_code, &line) {
+                                if let Some(failure) = classify_exit_line(Some(exit_code), &line) {
                                     core::persist_last_failure(&block_id_wait, Some(&failure), &wstore_wait, &event_bus_wait);
                                     if let Some(ref broker) = broker_wait {
                                         broker.publish(wps::WaveEvent {
@@ -3141,23 +3205,26 @@ impl Controller for PersistentSubprocessController {
     }
 }
 
-/// Classify a flushed exit-arm error line, if it's confident enough to
-/// surface to the pane's failure-recovery UI. `line` is usually the same
-/// result-frame JSON the mid-stream error-result path handles, but
+/// Classify a flushed error line, if it's confident enough to surface to
+/// the pane's failure-recovery UI. `line` is usually the same result-frame
+/// JSON the mid-stream error-result path handles, but
 /// `persistent_resume::ResumeEffect::FlushErrorLine` can also carry an
 /// earlier held-back turn's line — falls back to raw-text keyword matching
 /// (the same `classify()` uses for a stderr tail) if it doesn't parse as
-/// JSON. Returns `None` for an unrecognized, non-retryable
+/// JSON. `exit_code` is `Some` at the process-exit arm and `None` at the
+/// mid-generation flush sites (a superseded spawn generation, or a
+/// `SessionCaptured` resolution), where no fresh exit code exists for the
+/// line being flushed. Returns `None` for an unrecognized, non-retryable
 /// `FailureClass::UnknownNonZero` to avoid a low-confidence banner from
 /// noisy flushed text — every other recognized class is surfaced, not just
 /// the retryable ones, since the recovery banner has value for e.g. `Auth`
 /// too (see `SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md`'s per-class
 /// action matrix), just without auto-retry.
 /// See `SPEC_PERSISTENT_CONTROLLER_FAILURE_CLASSIFICATION_2026_08_04.md`.
-fn classify_exit_line(exit_code: i32, line: &str) -> Option<crate::agents::failure::AgentFailure> {
+fn classify_exit_line(exit_code: Option<i32>, line: &str) -> Option<crate::agents::failure::AgentFailure> {
     let parsed_line: Option<serde_json::Value> = serde_json::from_str(line).ok();
     let stderr_text = if parsed_line.is_none() { line } else { "" };
-    let failure = crate::agents::failure::classify(Some(exit_code), None, stderr_text, parsed_line.as_ref());
+    let failure = crate::agents::failure::classify(exit_code, None, stderr_text, parsed_line.as_ref());
     if failure.retryable || failure.code != crate::agents::failure::FailureClass::UnknownNonZero {
         Some(failure)
     } else {
@@ -3173,7 +3240,7 @@ mod classify_exit_line_tests {
     #[test]
     fn json_result_frame_with_overloaded_text_is_surfaced() {
         let line = r#"{"type":"result","is_error":true,"result":"Overloaded"}"#;
-        let failure = classify_exit_line(1, line).expect("overloaded should surface");
+        let failure = classify_exit_line(Some(1), line).expect("overloaded should surface");
         assert_eq!(failure.code, FailureClass::Overloaded);
         assert!(failure.retryable);
     }
@@ -3181,7 +3248,7 @@ mod classify_exit_line_tests {
     #[test]
     fn json_result_frame_with_rate_limit_text_is_surfaced() {
         let line = r#"{"type":"result","is_error":true,"result":"429 rate limited, please retry"}"#;
-        let failure = classify_exit_line(1, line).expect("rate-limited should surface");
+        let failure = classify_exit_line(Some(1), line).expect("rate-limited should surface");
         assert_eq!(failure.code, FailureClass::RateLimited);
         assert!(failure.retryable);
     }
@@ -3192,7 +3259,7 @@ mod classify_exit_line_tests {
         // not guaranteed to be well-formed JSON — the fallback path must
         // still classify it from the raw text.
         let line = "connection error: rate limited (429)";
-        let failure = classify_exit_line(1, line).expect("raw-text 429 should surface");
+        let failure = classify_exit_line(Some(1), line).expect("raw-text 429 should surface");
         assert_eq!(failure.code, FailureClass::RateLimited);
     }
 
@@ -3201,13 +3268,13 @@ mod classify_exit_line_tests {
         // A real error frame, but with no keyword classify() recognizes —
         // must not produce a low-confidence UnknownNonZero banner.
         let line = r#"{"type":"result","is_error":true,"result":"something unusual happened"}"#;
-        assert_eq!(classify_exit_line(1, line), None);
+        assert_eq!(classify_exit_line(Some(1), line), None);
     }
 
     #[test]
     fn unrecognized_raw_text_is_suppressed() {
         let line = "some unrelated noise flushed from an earlier turn";
-        assert_eq!(classify_exit_line(1, line), None);
+        assert_eq!(classify_exit_line(Some(1), line), None);
     }
 
     #[test]
@@ -3215,9 +3282,19 @@ mod classify_exit_line_tests {
         // Non-retryable classes still have recovery-banner value (Login
         // Again / Armory actions) — only UnknownNonZero is suppressed.
         let line = r#"{"type":"result","is_error":true,"result":"invalid api key (401)"}"#;
-        let failure = classify_exit_line(1, line).expect("auth errors should still surface");
+        let failure = classify_exit_line(Some(1), line).expect("auth errors should still surface");
         assert_eq!(failure.code, FailureClass::Auth);
         assert!(!failure.retryable);
+    }
+
+    #[test]
+    fn no_exit_code_still_classifies_from_line_content() {
+        // Mid-generation flush sites (a superseded spawn generation, a
+        // SessionCaptured resolution) have no fresh exit code for the line
+        // being flushed — classification must still work from content alone.
+        let line = r#"{"type":"result","is_error":true,"result":"Overloaded"}"#;
+        let failure = classify_exit_line(None, line).expect("overloaded should surface without an exit code");
+        assert_eq!(failure.code, FailureClass::Overloaded);
     }
 }
 
