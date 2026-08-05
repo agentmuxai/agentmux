@@ -108,17 +108,13 @@
 }
 
 // ── Tile-click chooser (OAuth / Key) ──────────────────────────────────────────
-.accounts-chooser-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: var(--zindex-modal-wrapper);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(0, 0, 0, 0.45);
-}
-
-.accounts-chooser {
+// Outer chrome (backdrop, z-index, scroll lock, inert) is provided by the
+// canonical <Modal>; this file only styles the panel sizing + inner content.
+// `.modal-panel.accounts-chooser` (not a bare `.accounts-chooser`) matches
+// command-palette.scss's pattern — a bare class loses the width override to
+// `.modal-panel[data-size="md"]`'s equal-or-higher specificity, rendering
+// the dialog at the default ~520px instead of this intended 320px.
+.modal-panel.accounts-chooser {
     width: 320px;
     max-width: calc(100vw - 32px);
     background: var(--modal-bg-color);
