@@ -2454,6 +2454,30 @@ impl PersistentSubprocessController {
                                                 global_output_zone.as_deref(),
                                             );
                                         }
+                                        // reagentx P1 on PR #2421 (round 2):
+                                        // this is a SEPARATE, already-settled
+                                        // older turn's error, superseded by
+                                        // the current still-tracking line —
+                                        // now confirmed final, same as the
+                                        // other three FlushErrorLine/
+                                        // PersistImmediately call sites this
+                                        // PR wired up. `is_error_result` is
+                                        // true for the rest of this tick, so
+                                        // this can never collide with the
+                                        // clear-on-success step below.
+                                        if let Some(failure) = classify_exit_line(None, &old_line) {
+                                            flushed_failure_this_tick = true;
+                                            core::persist_last_failure(&block_id_read, Some(&failure), &wstore_read, &event_bus_read);
+                                            if let Some(ref broker) = broker_read {
+                                                broker.publish(wps::WaveEvent {
+                                                    event: wps::EVENT_AGENT_FAILURE.to_string(),
+                                                    scopes: vec![format!("block:{}", block_id_read)],
+                                                    sender: String::new(),
+                                                    persist: 1,
+                                                    data: serde_json::to_value(&failure).ok(),
+                                                });
+                                            }
+                                        }
                                     }
                                     other => {
                                         tracing::warn!(
