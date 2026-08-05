@@ -24,7 +24,7 @@ import { getPlatform } from "@/util/platformutil";
  * toolchain-capabilities.ts` — the single point of entry that dispatches
  * to the right backend check based on this field, instead of every
  * consumer deciding for itself which check answers "is it available."
- * docs/retros/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md has the
+ * docs/retro/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md has the
  * incident this field exists to prevent from recurring for the next
  * daemon-backed tool.
  */

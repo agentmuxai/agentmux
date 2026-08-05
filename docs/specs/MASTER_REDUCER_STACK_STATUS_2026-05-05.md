@@ -6,6 +6,8 @@
 
 **Authority.** When this file disagrees with another spec, the source spec wins for *design* and this file wins for *current status*. Update this file when status changes; don't fork the source specs.
 
+> **Staleness note (2026-08-03):** this file hasn't been updated since its own 2026-05-29 correction (§0) — now ~9 weeks stale. A later, independently-scoped pass exists — `docs/specs/REPORT_REDUCER_STACK_AUDIT_2026_07_26.md` — covering the same subsystem without referencing or updating this file. Check both before trusting either as "current status"; this file's own "Authority" claim above no longer holds uncontested.
+
 ---
 
 ## 0. Code-verified refresh — 2026-05-29 (READ THIS FIRST; §3–§9 below are the 2026-05-05 snapshot, retained as history)

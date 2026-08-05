@@ -157,7 +157,7 @@ export function ToolchainView(_props: ViewComponentProps<ToolchainViewModel>): J
     // toolchain-capabilities store (see the sync effect below) so this view
     // can never disagree with any other consumer (create-agent modal, launch
     // pre-flight) about whether the tool is actually available. See
-    // docs/retros/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md.
+    // docs/retro/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md.
     const probe = async (idx: number, opts?: { force?: boolean }) => {
         const row = rows[idx];
         const def = row.kind === "core" ? CORE_TOOLS.find((t) => t.id === row.id) : getProviderList().find((p) => p.id === row.id);

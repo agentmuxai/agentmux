@@ -87,7 +87,7 @@ export const AgentCreateFromTemplateModalPanel = (
     // when Docker is installed but the daemon is stopped, re-creating the
     // exact trap this modal exists to avoid: defaulting to a container agent
     // that then can't start (codex P1 on #1576). See
-    // docs/retros/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md.
+    // docs/retro/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md.
     const canPickContainer = () => containerSupported() && isAvailable("docker");
 
     // Poll while this modal is open so a user who starts Docker Desktop

@@ -1462,7 +1462,7 @@ pub fn build_app_state(
             // boot, `ContainerRuntimeHandle` retries the connect on demand, so
             // a daemon that starts after this point is picked up by later
             // calls without an app restart. See
-            // docs/retros/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md.
+            // docs/retro/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md.
             let handle = std::sync::Arc::new(
                 crate::backend::container::ContainerRuntimeHandle::connect_at_startup(),
             );

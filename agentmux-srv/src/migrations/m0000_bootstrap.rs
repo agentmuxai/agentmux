@@ -97,8 +97,24 @@ impl Migration for M0000Bootstrap {
 
         // ── Channel: agents consolidate ──────────────────────────────────────
         // marker = data_dir/migration_agents_consolidate_v1.flag
+        //
+        // Phase 0a hardening: existence of the marker alone is no longer
+        // trusted as proof the backfill actually populated db_agents (a
+        // rebuilt/restored objects.db sitting next to a stale flag file
+        // would otherwise get permanently stamped "applied" with zero rows
+        // written — see docs/specs/SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md
+        // §1.2/Phase 0a). If the channel store looks incomplete, leave this
+        // unstamped so the real migration (m0007) runs and does the work.
         if ctx.data_dir.join("migration_agents_consolidate_v1.flag").exists() {
-            stamp_channel("0007_agents_consolidate");
+            let looks_incomplete = channel_store
+                .as_ref()
+                .map(|cs| cs.agents_consolidate_looks_incomplete())
+                .transpose()
+                .map_err(|e| MigrationError(format!("bootstrap: verify agents_consolidate: {}", e)))?
+                .unwrap_or(false);
+            if !looks_incomplete {
+                stamp_channel("0007_agents_consolidate");
+            }
         }
 
         // NOTE: 0008_default_bundle is intentionally NOT stamped here. Its

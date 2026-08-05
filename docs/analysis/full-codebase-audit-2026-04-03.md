@@ -1,5 +1,9 @@
 # AgentMux Full Codebase Audit — 2026-04-03
 
+**Status:** Historical — a point-in-time snapshot, not current status.
+
+> **Staleness note (2026-08-03):** confirmed stale, not just old. `src-tauri/` (issue #1) is gone — no longer in the workspace or referenced by the build. The "dual state management" finding (issue #2) is also out of date — the frontend is now essentially SolidJS-only. Read this for historical context on the Tauri→CEF migration, not as a current-state audit; see `docs/reports/` for more recent repo-health passes.
+
 ## Executive Summary
 
 The codebase is **solid but carries significant technical debt** from the Tauri→CEF migration and the Go→Rust port. Three systemic issues dominate:

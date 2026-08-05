@@ -162,7 +162,7 @@ pub struct SubprocessController {
     /// shared registry can't be resolved (CI / unusual envs) — leasing
     /// degrades to a no-op in that case, same convention as
     /// `shared_agent_registry()` elsewhere. See
-    /// `docs/retros/RETRO_DEV_BUILD_SHARED_AGENT_SESSION_COLLISION_2026_07_29.md`.
+    /// `docs/retro/RETRO_DEV_BUILD_SHARED_AGENT_SESSION_COLLISION_2026_07_29.md`.
     lease_store: Option<Arc<crate::registry::LeaseStore>>,
     /// This process's boot id — the lease owner id. See `AppState::boot_id`.
     boot_id: Arc<str>,

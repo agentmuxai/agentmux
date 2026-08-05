@@ -63,6 +63,24 @@ pub struct ConsolidateStats {
     pub already_done: bool,
 }
 
+/// True when the backfill's source tables have data but its target
+/// (`db_agents`) doesn't — i.e. a marker (or a `db_migrations` stamp) claims
+/// this migration ran, but the data it's supposed to have produced isn't
+/// there. Used to stop trusting marker/stamp *existence* as proof of
+/// *effect* (see `docs/specs/SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md`
+/// Phase 0a/0b) — a stale marker (rebuilt/restored `objects.db` sitting next
+/// to an old flag file, or `m0000_bootstrap` stamping from a copied flag
+/// file with no matching data) is now detectable instead of silently
+/// trusted.
+///
+/// Cheap: three `COUNT(*)` queries, safe to call on every startup.
+pub fn consolidate_looks_incomplete(conn: &Connection) -> Result<bool, StoreError> {
+    let defs: i64 = conn.query_row("SELECT COUNT(*) FROM db_agent_definitions", [], |r| r.get(0))?;
+    let insts: i64 = conn.query_row("SELECT COUNT(*) FROM db_agent_instances", [], |r| r.get(0))?;
+    let agents: i64 = conn.query_row("SELECT COUNT(*) FROM db_agents", [], |r| r.get(0))?;
+    Ok((defs > 0 || insts > 0) && agents == 0)
+}
+
 /// Run the one-shot consolidation backfill, gated by the marker file.
 ///
 /// `data_dir` is the directory that holds the marker file (typically
@@ -76,14 +94,23 @@ pub fn run_consolidate_migration(
     conn: &mut Connection,
     data_dir: Option<&Path>,
 ) -> Result<ConsolidateStats, StoreError> {
-    // Marker gate.
+    // Marker gate. Existence alone is no longer trusted (Phase 0b): if the
+    // source tables have rows but db_agents doesn't, the marker is stale —
+    // fall through and re-run instead of silently reporting "already done."
     if let Some(dir) = data_dir {
         let marker = dir.join(CONSOLIDATE_MARKER);
         if marker.exists() {
-            return Ok(ConsolidateStats {
-                already_done: true,
-                ..Default::default()
-            });
+            if !consolidate_looks_incomplete(conn)? {
+                return Ok(ConsolidateStats {
+                    already_done: true,
+                    ..Default::default()
+                });
+            }
+            warn!(
+                marker = %marker.display(),
+                "agents_consolidate: marker present but db_agents is empty while source tables have rows — \
+                 treating as stale and re-running instead of trusting it",
+            );
         }
     }
 
@@ -982,5 +1009,69 @@ mod tests {
             "a definition's working_directory must survive Pass 1/2 consolidation \
              even when it was never instantiated (no instance row to fold bindings from)"
         );
+    }
+
+    // ── Phase 0 hardening (SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03) ──────
+
+    #[test]
+    fn consolidate_looks_incomplete_is_false_on_a_fresh_db() {
+        let conn = fresh_conn();
+        // No source rows, no db_agents rows — nothing to backfill, not "incomplete".
+        assert!(!consolidate_looks_incomplete(&conn).unwrap());
+    }
+
+    #[test]
+    fn consolidate_looks_incomplete_is_false_once_backfilled() {
+        let mut conn = fresh_conn();
+        insert_def(&conn, "tpl-1", "Coder", 1, "");
+        run_consolidate_migration(&mut conn, None).unwrap();
+        assert!(!consolidate_looks_incomplete(&conn).unwrap());
+    }
+
+    #[test]
+    fn consolidate_looks_incomplete_is_true_when_source_has_rows_but_db_agents_is_empty() {
+        let conn = fresh_conn();
+        // Source rows present, but db_agents was never populated (the exact
+        // shape a stale/orphaned marker file produces).
+        insert_def(&conn, "tpl-1", "Coder", 1, "");
+        assert!(consolidate_looks_incomplete(&conn).unwrap());
+    }
+
+    #[test]
+    fn stale_marker_does_not_block_a_real_backfill() {
+        // Acceptance test for Phase 0a/0b: a data dir with a marker file
+        // present but an empty db_agents table (simulating a rebuilt/restored
+        // objects.db sitting next to a stale flag file) must NOT be trusted
+        // as "already done" — the migration must detect this and actually
+        // run the backfill instead of silently no-op'ing.
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::write(tmp.path().join(CONSOLIDATE_MARKER), b"phase3a").unwrap();
+
+        let mut conn = fresh_conn();
+        insert_def(&conn, "tpl-1", "Coder", 1, "");
+        assert_eq!(count_agents(&conn, "1=1"), 0, "db_agents must start empty for this test to be meaningful");
+
+        let stats = run_consolidate_migration(&mut conn, Some(tmp.path())).unwrap();
+        assert!(!stats.already_done, "a stale marker must not short-circuit as already_done");
+        assert_eq!(stats.templates_inserted, 1);
+        assert_eq!(count_agents(&conn, "1=1"), 1, "db_agents must actually get populated, not silently skipped");
+    }
+
+    #[test]
+    fn genuinely_completed_marker_still_short_circuits() {
+        // The flip side: once db_agents is correctly populated, a present
+        // marker SHOULD short-circuit (already_done=true) — Phase 0's fix
+        // must not make every run pay the full backfill cost forever.
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::write(tmp.path().join(CONSOLIDATE_MARKER), b"phase3a").unwrap();
+
+        let mut conn = fresh_conn();
+        insert_def(&conn, "tpl-1", "Coder", 1, "");
+        run_consolidate_migration(&mut conn, None).unwrap(); // populate db_agents directly
+        assert_eq!(count_agents(&conn, "1=1"), 1);
+
+        let stats = run_consolidate_migration(&mut conn, Some(tmp.path())).unwrap();
+        assert!(stats.already_done, "a marker backed by real data must still short-circuit");
+        assert_eq!(count_agents(&conn, "1=1"), 1, "must not double-insert");
     }
 }
