@@ -1519,7 +1519,7 @@ async fn call_tool(
                 let next = j["next_fire"].as_str().unwrap_or("—");
                 let fires = j["fire_count"].as_i64().unwrap_or(0);
                 let max = j["max_fires"].as_i64().map(|n| format!("/{n}")).unwrap_or_default();
-                let age_bound = j["max_age_secs"].as_i64().map(|n| format!("  expires_in={}s_of_age", n)).unwrap_or_default();
+                let age_bound = j["expires_in_secs"].as_i64().map(|n| format!("  expires_in={n}s")).unwrap_or_default();
                 lines.push(format!(
                     "  {}  {}  [{}]  fires={fires}{max}  next={}  expr='{}'{age_bound}",
                     j["id"].as_str().unwrap_or("?"),
