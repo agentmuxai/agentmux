@@ -705,12 +705,22 @@ mod tests {
     /// still contains every agent — only the identity-name enrichment
     /// degrades, not the whole list.
     #[tokio::test]
-    async fn a_malformed_identity_account_row_degrades_that_source_without_zeroing_the_whole_list() {
+    async fn a_malformed_identity_account_row_is_tolerated_without_degrading_the_accounts_source() {
         let (state, engine, mut output_rx, _reg_dir, _def_dir) =
             setup_with_n_cross_channel_agents(2);
 
         // Same malformed shape as the real PR #2296 incident: a
         // `secret_ref.backend` tag no `SecretRef` variant matches.
+        //
+        // Updated for ANALYSIS_ARMORY_STASH_CREDENTIAL_VISIBILITY_GAP_2026_08_04:
+        // `identity_list` itself now skips a malformed row (with a warning)
+        // instead of erroring the whole call (backend/storage/identities.rs),
+        // so this scenario no longer reaches the `unwrap_or_else` degrade
+        // path below at all — the "accounts" source is no longer degraded
+        // by a single bad row, it's just quietly correct. The `degraded`
+        // push at that call site still exists and is still meaningful for a
+        // genuine `identity_list` error (e.g. a real DB failure); it's
+        // simply no longer reachable via this specific fixture.
         {
             let conn = state.wstore.conn().lock().unwrap();
             conn.execute(
@@ -742,17 +752,21 @@ mod tests {
             result.rows.len(),
             2,
             "a single malformed db_accounts row must not zero out the whole \
-             My Agents list — it must only degrade identity-name display for \
-             affected rows"
+             My Agents list"
         );
-        // reagent P1 on PR #2327: the degradation must reach the CALLER, not
-        // just a server-side log line — otherwise the frontend has no way to
-        // ever distinguish "a source failed" from "genuinely zero agents"
-        // when a failure DOES happen to zero out the row count (e.g. both
-        // instance sources failing at once, unlike this identity-only case).
+        // The improved behavior: identity_list's own per-row tolerance means
+        // this is no longer a "source failure" at all — nothing degraded,
+        // the malformed row was just silently excluded. Contrast with the
+        // OLD assertion this test used to make (`degraded` contains
+        // "accounts") — that was evidence of a real, if survivable, failure;
+        // this is evidence there wasn't one. The `degraded.push("accounts")`
+        // call site (above, in the handler) is still meaningful for a
+        // genuine `identity_list` error — just no longer reachable via this
+        // fixture.
         assert!(
-            result.degraded.contains(&"accounts".to_string()),
-            "the accounts source's failure must be reported in the response, got: {:?}",
+            !result.degraded.contains(&"accounts".to_string()),
+            "a single malformed row must not degrade the accounts source at all \
+             (identity_list now tolerates it internally), got: {:?}",
             result.degraded
         );
     }

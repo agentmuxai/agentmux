@@ -141,6 +141,46 @@ fn default_identity_status() -> String {
     "unknown".to_string()
 }
 
+/// Escape every backslash in `raw` that isn't already the start of a valid
+/// JSON escape sequence (`\"`, `\\`, `\/`, `\b`, `\f`, `\n`, `\r`, `\t`,
+/// `\uXXXX`). Targets exactly the one corruption shape seen in production —
+/// a raw Windows path (`C:\Users\...`) pasted into a JSON string without
+/// escaping — without touching JSON that's already correctly escaped, so
+/// it's safe to run against every row unconditionally (`identity_repair_
+/// malformed_secret_refs` only calls this on values that already failed to
+/// parse as-is). Not a general JSON repair tool — only handles this one bug
+/// class.
+fn repair_bare_backslashes(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut chars = raw.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.peek() {
+            Some('"' | '\\' | '/' | 'b' | 'f' | 'n' | 'r' | 't' | 'u') => {
+                // Already a valid escape sequence — copy BOTH characters
+                // through unchanged, consuming the second one now. Leaving
+                // it for the next loop iteration (a prior version of this
+                // function did) means a valid `\\` pair's second backslash
+                // gets reprocessed as if it were a fresh, standalone
+                // backslash — and since whatever follows it is very
+                // unlikely to itself be a valid escape starter, it gets
+                // doubled again, corrupting already-valid JSON.
+                out.push('\\');
+                out.push(chars.next().unwrap());
+            }
+            _ => {
+                // A bare backslash (or one at end-of-string) — double it.
+                out.push('\\');
+                out.push('\\');
+            }
+        }
+    }
+    out
+}
+
 /// Junction row: which identity an agent uses for a given provider.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentIdentityLink {
@@ -176,6 +216,15 @@ impl Store {
     /// List identity accounts. If `provider` is `Some`, filter to that
     /// provider; otherwise return every account, ordered by most recent
     /// update first (so the identity panel shows live accounts on top).
+    ///
+    /// A row whose `secret_ref`/`context` JSON fails to parse is skipped
+    /// (logged with its account id) rather than aborting the whole query —
+    /// one corrupted row must never hide every other account. This is the
+    /// isolation the `oauth_config_dir` tag-alias comment above already
+    /// flagged as missing ("`identity_list()` aborts entirely on the first
+    /// unparseable row") after that incident; this closes it at the source
+    /// instead of only patching the one wire-format mismatch that triggered
+    /// it. See `docs/analysis/ANALYSIS_ARMORY_STASH_CREDENTIAL_VISIBILITY_GAP_2026_08_04.md`.
     pub fn identity_list(
         &self,
         provider: Option<&str>,
@@ -183,21 +232,32 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         let mut rows_vec = Vec::new();
         let map_row = |row: &rusqlite::Row| -> rusqlite::Result<IdentityAccount> {
+            let id: String = row.get(0)?;
             let secret_ref_json: String = row.get(5)?;
             let context_json: String = row.get(6)?;
+            let secret_ref = match serde_json::from_str(&secret_ref_json) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!(
+                        target: "identity",
+                        account_id = %id,
+                        error = %e,
+                        "identity_list: skipping account with malformed secret_ref JSON",
+                    );
+                    return Err(rusqlite::Error::FromSqlConversionFailure(
+                        5,
+                        rusqlite::types::Type::Text,
+                        Box::new(e),
+                    ));
+                }
+            };
             Ok(IdentityAccount {
-                id: row.get(0)?,
+                id,
                 name: row.get(1)?,
                 provider: row.get(2)?,
                 kind: row.get(3)?,
                 display_name: row.get(4)?,
-                secret_ref: serde_json::from_str(&secret_ref_json).map_err(|e| {
-                    rusqlite::Error::FromSqlConversionFailure(
-                        5,
-                        rusqlite::types::Type::Text,
-                        Box::new(e),
-                    )
-                })?,
+                secret_ref,
                 context: serde_json::from_str(&context_json)
                     .unwrap_or_else(|_| serde_json::json!({})),
                 status: row.get(7)?,
@@ -216,7 +276,9 @@ impl Store {
                 )?;
                 let iter = stmt.query_map(params![p], map_row)?;
                 for r in iter {
-                    rows_vec.push(r?);
+                    if let Ok(account) = r {
+                        rows_vec.push(account);
+                    }
                 }
             }
             None => {
@@ -228,7 +290,9 @@ impl Store {
                 )?;
                 let iter = stmt.query_map([], map_row)?;
                 for r in iter {
-                    rows_vec.push(r?);
+                    if let Ok(account) = r {
+                        rows_vec.push(account);
+                    }
                 }
             }
         }
@@ -307,6 +371,67 @@ impl Store {
             ],
         )?;
         Ok(())
+    }
+
+    /// Migration-only repair pass (`m0019_repair_malformed_secret_ref`):
+    /// scan every `db_accounts.secret_ref` for JSON that fails to parse and
+    /// attempt to fix the one known corruption shape — a Windows path
+    /// pasted into the JSON string with its backslashes never escaped
+    /// (found live: `{"backend":"oauth_config_dir","dir":"C:\Users\..."}`,
+    /// not reproducible from any write path in this codebase — every real
+    /// caller goes through `identity_upsert` above, which always
+    /// `serde_json::to_string`s correctly; this shape only arises from an
+    /// out-of-band edit of the database file). Rows that still don't parse
+    /// after the repair attempt are left untouched and logged — never
+    /// deleted, since a broken row may still be linked via
+    /// `db_agent_identity_links` and `identity_list`'s per-row skip (above)
+    /// already makes leaving it alone safe. Returns the number of rows
+    /// repaired.
+    pub fn identity_repair_malformed_secret_refs(&self) -> Result<usize, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let candidates: Vec<(String, String)> = {
+            let mut stmt = conn.prepare("SELECT id, secret_ref FROM db_accounts")?;
+            let iter = stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?;
+            let mut out = Vec::new();
+            for r in iter {
+                out.push(r?);
+            }
+            out
+        };
+
+        let mut repaired = 0usize;
+        for (id, raw) in candidates {
+            if serde_json::from_str::<SecretRef>(&raw).is_ok() {
+                continue; // already valid — the common case
+            }
+            let candidate = repair_bare_backslashes(&raw);
+            match serde_json::from_str::<SecretRef>(&candidate) {
+                Ok(fixed) => {
+                    let canonical = serde_json::to_string(&fixed)?;
+                    conn.execute(
+                        "UPDATE db_accounts SET secret_ref = ?1 WHERE id = ?2",
+                        params![canonical, id],
+                    )?;
+                    repaired += 1;
+                    tracing::warn!(
+                        target: "identity",
+                        account_id = %id,
+                        "identity.repair: fixed malformed secret_ref JSON (unescaped backslashes)",
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        target: "identity",
+                        account_id = %id,
+                        error = %e,
+                        "identity.repair: secret_ref still unparseable after repair attempt — left as-is",
+                    );
+                }
+            }
+        }
+        Ok(repaired)
     }
 
     /// Delete an identity account AND every `db_agent_identity_links`
@@ -773,5 +898,154 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 0, "retired bundle-binding tables must not exist");
+    }
+
+    // ---- Malformed secret_ref tolerance (ANALYSIS_ARMORY_STASH_CREDENTIAL_VISIBILITY_GAP_2026_08_04) ----
+
+    /// Directly pins the production corruption: a raw Windows path pasted
+    /// into JSON with unescaped backslashes must round-trip through the
+    /// repair to a valid, semantically-equivalent `SecretRef`.
+    #[test]
+    fn repair_bare_backslashes_fixes_unescaped_windows_path() {
+        let broken = r#"{"backend":"oauth_config_dir","dir":"C:\Users\area54\.agentmux\shared\identities\34db876e-ccef-4bb4-a41f-5962d6212df5\claude"}"#;
+        assert!(
+            serde_json::from_str::<SecretRef>(broken).is_err(),
+            "fixture must reproduce the real parse failure"
+        );
+        let repaired = repair_bare_backslashes(broken);
+        let parsed: SecretRef =
+            serde_json::from_str(&repaired).expect("repair must produce valid JSON");
+        match parsed {
+            SecretRef::OAuthConfigDir { dir } => {
+                assert_eq!(
+                    dir,
+                    r"C:\Users\area54\.agentmux\shared\identities\34db876e-ccef-4bb4-a41f-5962d6212df5\claude"
+                );
+            }
+            other => panic!("expected OAuthConfigDir, got {other:?}"),
+        }
+    }
+
+    /// Already-valid JSON (the normal case — every real row written via
+    /// `identity_upsert`) must pass through byte-for-byte unchanged; the
+    /// repair must never double-escape a correctly-escaped value.
+    #[test]
+    fn repair_bare_backslashes_is_a_noop_on_valid_json() {
+        let valid = r#"{"backend":"oauth_config_dir","dir":"C:\\Users\\area54\\claude"}"#;
+        assert_eq!(repair_bare_backslashes(valid), valid);
+    }
+
+    /// `identity_list` must return the good rows and skip the malformed
+    /// one — not abort the whole query. This is the actual bug: one
+    /// corrupted account made 9 real accounts invisible everywhere
+    /// `identity_list` is called (Armory's account list, boot-time
+    /// identity sweep, post-login cache refresh).
+    #[test]
+    fn identity_list_skips_a_malformed_row_instead_of_failing_the_whole_query() {
+        let store = Store::open_in_memory().unwrap();
+        store
+            .identity_upsert(&sample_account("acct-good-1", "claude"))
+            .unwrap();
+        store
+            .identity_upsert(&sample_account("acct-good-2", "claude"))
+            .unwrap();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO db_accounts
+                    (id, name, provider, kind, display_name, secret_ref, context,
+                     status, created_at, updated_at)
+                 VALUES ('acct-bad', 'broken', 'claude', 'oauth', '',
+                         '{\"backend\":\"oauth_config_dir\",\"dir\":\"C:\\bad\\path\"}',
+                         '{}', 'unknown', 0, 0)",
+                [],
+            )
+            .unwrap();
+        }
+
+        let accounts = store
+            .identity_list(None)
+            .expect("must not fail even with a malformed row present");
+        let ids: Vec<&str> = accounts.iter().map(|a| a.id.as_str()).collect();
+        assert!(ids.contains(&"acct-good-1"));
+        assert!(ids.contains(&"acct-good-2"));
+        assert!(!ids.contains(&"acct-bad"), "malformed row must be excluded, not error the whole call");
+        assert_eq!(accounts.len(), 2);
+    }
+
+    /// End-to-end: the migration-facing repair method fixes the known
+    /// corruption shape in place, and a subsequent `identity_list` picks up
+    /// the repaired row.
+    #[test]
+    fn identity_repair_malformed_secret_refs_fixes_row_and_identity_list_recovers_it() {
+        let store = Store::open_in_memory().unwrap();
+        store
+            .identity_upsert(&sample_account("acct-good", "claude"))
+            .unwrap();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO db_accounts
+                    (id, name, provider, kind, display_name, secret_ref, context,
+                     status, created_at, updated_at)
+                 VALUES ('acct-broken', 'broken', 'claude', 'oauth', '',
+                         '{\"backend\":\"oauth_config_dir\",\"dir\":\"C:\\Users\\a\\claude\"}',
+                         '{}', 'unknown', 0, 0)",
+                [],
+            )
+            .unwrap();
+        }
+
+        // Before repair: identity_list tolerates it (previous test) but the
+        // account itself is invisible.
+        assert_eq!(store.identity_list(None).unwrap().len(), 1);
+
+        let repaired = store.identity_repair_malformed_secret_refs().unwrap();
+        assert_eq!(repaired, 1);
+
+        let accounts = store.identity_list(None).unwrap();
+        assert_eq!(accounts.len(), 2, "repaired row must now be visible");
+        let fixed = accounts.iter().find(|a| a.id == "acct-broken").unwrap();
+        match &fixed.secret_ref {
+            SecretRef::OAuthConfigDir { dir } => assert_eq!(dir, r"C:\Users\a\claude"),
+            other => panic!("expected OAuthConfigDir, got {other:?}"),
+        }
+
+        // Idempotent: running it again on an already-repaired store is a no-op.
+        assert_eq!(store.identity_repair_malformed_secret_refs().unwrap(), 0);
+    }
+
+    /// A row whose corruption ISN'T the known "bare backslash" shape (e.g. a
+    /// genuinely unrecognizable backend tag) must be left untouched rather
+    /// than mangled or deleted — the repair only handles the one known bug
+    /// class, per its own doc comment.
+    #[test]
+    fn identity_repair_leaves_unrecognized_corruption_untouched() {
+        let store = Store::open_in_memory().unwrap();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO db_accounts
+                    (id, name, provider, kind, display_name, secret_ref, context,
+                     status, created_at, updated_at)
+                 VALUES ('acct-weird', 'weird', 'claude', 'oauth', '',
+                         '{\"backend\":\"totally_unknown_backend\"}',
+                         '{}', 'unknown', 0, 0)",
+                [],
+            )
+            .unwrap();
+        }
+        let repaired = store.identity_repair_malformed_secret_refs().unwrap();
+        assert_eq!(repaired, 0, "unrecognized corruption must not be reported as repaired");
+        assert_eq!(
+            store.identity_list(None).unwrap().len(),
+            0,
+            "still-broken row stays invisible to identity_list (safe default) but is not deleted"
+        );
+        let conn = store.conn.lock().unwrap();
+        let count: i64 = conn
+            .query_row("SELECT count(*) FROM db_accounts WHERE id = 'acct-weird'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1, "row must survive an unsuccessful repair attempt");
     }
 }
