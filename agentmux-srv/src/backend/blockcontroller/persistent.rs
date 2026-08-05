@@ -2419,6 +2419,28 @@ impl PersistentSubprocessController {
                             }
                         }
                     }
+                    // Classify + surface a genuine, non-retried error result
+                    // (429/overloaded/auth/etc.) to the pane's failure-recovery
+                    // UI — SPEC_PERSISTENT_CONTROLLER_FAILURE_CLASSIFICATION.
+                    // Gated on `!hold_back_for_resume_retry`: when the stale-
+                    // `--resume` machinery above is still tracking this exact
+                    // error as a live retry candidate, it must stay invisible
+                    // to the user (per its own "must never reach the user"
+                    // invariant below at the ProcessExited/FireRetry arm) —
+                    // classify() only runs once this error is confirmed final.
+                    if is_error_result && !hold_back_for_resume_retry {
+                        let failure = crate::agents::failure::classify(None, None, "", Some(&parsed));
+                        core::persist_last_failure(&block_id_read, Some(&failure), &wstore_read, &event_bus_read);
+                        if let Some(ref broker) = broker_read {
+                            broker.publish(wps::WaveEvent {
+                                event: wps::EVENT_AGENT_FAILURE.to_string(),
+                                scopes: vec![format!("block:{}", block_id_read)],
+                                sender: String::new(),
+                                persist: 1,
+                                data: serde_json::to_value(&failure).ok(),
+                            });
+                        }
+                    }
                 }
 
                 if hold_back_for_resume_retry {
@@ -2469,6 +2491,10 @@ impl PersistentSubprocessController {
         let inner_wait = Arc::clone(&self.inner);
         let broker_wait = self.broker.clone();
         let wstore_wait = self.wstore.clone();
+        // Needed to persist a classified failure (rate-limit/overloaded/etc.)
+        // into block meta alongside the WPS publish below — mirrors
+        // `event_bus_read`'s equivalent clone for the stdout-reader task.
+        let event_bus_wait = self.event_bus.clone();
         let health_wait = Arc::clone(&self.health_monitor);
         // Needed only to flush a held-back `pending_error_result_line` when
         // the stale-resume retry is NOT confirmed (or is overridden by an
@@ -2710,6 +2736,26 @@ impl PersistentSubprocessController {
                                         filestore_wait.as_ref(),
                                         global_output_zone_wait.as_deref(),
                                     );
+                                }
+                                // Classify + surface this exit's error to the
+                                // pane's failure-recovery UI —
+                                // SPEC_PERSISTENT_CONTROLLER_FAILURE_CLASSIFICATION.
+                                // Reached only for PersistImmediately/FlushErrorLine
+                                // — the resume machinery has already decided this
+                                // exit is NOT being silently retried (contrast
+                                // FireRetry below, which must stay invisible to
+                                // the user).
+                                if let Some(failure) = classify_exit_line(exit_code, &line) {
+                                    core::persist_last_failure(&block_id_wait, Some(&failure), &wstore_wait, &event_bus_wait);
+                                    if let Some(ref broker) = broker_wait {
+                                        broker.publish(wps::WaveEvent {
+                                            event: wps::EVENT_AGENT_FAILURE.to_string(),
+                                            scopes: vec![format!("block:{}", block_id_wait)],
+                                            sender: String::new(),
+                                            persist: 1,
+                                            data: serde_json::to_value(&failure).ok(),
+                                        });
+                                    }
                                 }
                             }
                             persistent_resume::ResumeEffect::FireRetry { retry, held_error_line } => {
@@ -3092,6 +3138,86 @@ impl Controller for PersistentSubprocessController {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+}
+
+/// Classify a flushed exit-arm error line, if it's confident enough to
+/// surface to the pane's failure-recovery UI. `line` is usually the same
+/// result-frame JSON the mid-stream error-result path handles, but
+/// `persistent_resume::ResumeEffect::FlushErrorLine` can also carry an
+/// earlier held-back turn's line — falls back to raw-text keyword matching
+/// (the same `classify()` uses for a stderr tail) if it doesn't parse as
+/// JSON. Returns `None` for an unrecognized, non-retryable
+/// `FailureClass::UnknownNonZero` to avoid a low-confidence banner from
+/// noisy flushed text — every other recognized class is surfaced, not just
+/// the retryable ones, since the recovery banner has value for e.g. `Auth`
+/// too (see `SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md`'s per-class
+/// action matrix), just without auto-retry.
+/// See `SPEC_PERSISTENT_CONTROLLER_FAILURE_CLASSIFICATION_2026_08_04.md`.
+fn classify_exit_line(exit_code: i32, line: &str) -> Option<crate::agents::failure::AgentFailure> {
+    let parsed_line: Option<serde_json::Value> = serde_json::from_str(line).ok();
+    let stderr_text = if parsed_line.is_none() { line } else { "" };
+    let failure = crate::agents::failure::classify(Some(exit_code), None, stderr_text, parsed_line.as_ref());
+    if failure.retryable || failure.code != crate::agents::failure::FailureClass::UnknownNonZero {
+        Some(failure)
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod classify_exit_line_tests {
+    use super::*;
+    use crate::agents::failure::FailureClass;
+
+    #[test]
+    fn json_result_frame_with_overloaded_text_is_surfaced() {
+        let line = r#"{"type":"result","is_error":true,"result":"Overloaded"}"#;
+        let failure = classify_exit_line(1, line).expect("overloaded should surface");
+        assert_eq!(failure.code, FailureClass::Overloaded);
+        assert!(failure.retryable);
+    }
+
+    #[test]
+    fn json_result_frame_with_rate_limit_text_is_surfaced() {
+        let line = r#"{"type":"result","is_error":true,"result":"429 rate limited, please retry"}"#;
+        let failure = classify_exit_line(1, line).expect("rate-limited should surface");
+        assert_eq!(failure.code, FailureClass::RateLimited);
+        assert!(failure.retryable);
+    }
+
+    #[test]
+    fn non_json_raw_text_falls_back_to_keyword_matching() {
+        // FlushErrorLine can carry an earlier held-back turn's raw line,
+        // not guaranteed to be well-formed JSON — the fallback path must
+        // still classify it from the raw text.
+        let line = "connection error: rate limited (429)";
+        let failure = classify_exit_line(1, line).expect("raw-text 429 should surface");
+        assert_eq!(failure.code, FailureClass::RateLimited);
+    }
+
+    #[test]
+    fn unrecognized_json_error_is_suppressed() {
+        // A real error frame, but with no keyword classify() recognizes —
+        // must not produce a low-confidence UnknownNonZero banner.
+        let line = r#"{"type":"result","is_error":true,"result":"something unusual happened"}"#;
+        assert_eq!(classify_exit_line(1, line), None);
+    }
+
+    #[test]
+    fn unrecognized_raw_text_is_suppressed() {
+        let line = "some unrelated noise flushed from an earlier turn";
+        assert_eq!(classify_exit_line(1, line), None);
+    }
+
+    #[test]
+    fn auth_error_is_surfaced_even_though_not_retryable() {
+        // Non-retryable classes still have recovery-banner value (Login
+        // Again / Armory actions) — only UnknownNonZero is suppressed.
+        let line = r#"{"type":"result","is_error":true,"result":"invalid api key (401)"}"#;
+        let failure = classify_exit_line(1, line).expect("auth errors should still surface");
+        assert_eq!(failure.code, FailureClass::Auth);
+        assert!(!failure.retryable);
     }
 }
 
