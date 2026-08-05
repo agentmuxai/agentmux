@@ -10,9 +10,15 @@
  * old alias — otherwise the orphaned alias row lingers and the resolver's
  * inject.rs aborts every future spawn on it, even though a healthy
  * canonical "claude" link now exists right alongside it.
+ *
+ * Uses `screen.findByText` (document-wide), not `render()`'s own bound
+ * `findByText` — ClaudeLoginPanel now renders through the canonical `Modal`
+ * (ANALYSIS_ARMORY_STASH_CREDENTIAL_VISIBILITY_GAP_2026_08_04.md's Fix 3),
+ * which `<Portal>`s outside the test's render container; container-scoped
+ * queries can't see it.
  */
 
-import { cleanup, render, waitFor } from "@solidjs/testing-library";
+import { cleanup, render, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const hub = vi.hoisted(() => ({
@@ -53,6 +59,8 @@ vi.mock("@/app/view/identity/identity-model", () => ({
 }));
 
 import { ClaudeLoginPanel } from "./ClaudeLoginPanel";
+import { Modal } from "@/element/modal";
+import { createSignal } from "solid-js";
 
 beforeEach(() => {
     hub.runProviderLogin.mockReset();
@@ -145,11 +153,11 @@ describe("ClaudeLoginPanel — Stash link verification (codex P1 on PR #2414)", 
         });
         hub.listAgentIdentities.mockResolvedValue([]); // no link for this agent
 
-        const { findByText } = render(() => (
+        render(() => (
             <ClaudeLoginPanel onClose={() => {}} linkTarget={{ agentDefinitionId: "agent-1" }} />
         ));
 
-        await findByText(/couldn't confirm the account was linked/i);
+        await screen.findByText(/couldn't confirm the account was linked/i);
         expect(hub.refreshAccountCache).not.toHaveBeenCalled();
         expect(hub.unlinkAgentIdentity).not.toHaveBeenCalled();
     });
@@ -165,10 +173,10 @@ describe("ClaudeLoginPanel — Stash link verification (codex P1 on PR #2414)", 
         });
         hub.listAgentIdentities.mockResolvedValueOnce([]); // link never landed
 
-        const { findByText } = render(() => (
+        render(() => (
             <ClaudeLoginPanel onClose={() => {}} linkTarget={{ agentDefinitionId: "agent-1" }} />
         ));
-        const retryButton = await findByText("Retry");
+        const retryButton = await screen.findByText("Retry");
 
         // Second attempt (Retry): this time the link verification succeeds.
         hub.runProviderLogin.mockImplementationOnce(async (opts: any) => {
@@ -180,7 +188,7 @@ describe("ClaudeLoginPanel — Stash link verification (codex P1 on PR #2414)", 
         ]);
         retryButton.click();
 
-        await findByText(/signed in to claude/i);
+        await screen.findByText(/signed in to claude/i);
         // The whole point: Retry must refresh the SAME account
         // ("acct-new") the first attempt already minted and persisted, not
         // mint a brand-new one under the still-undefined original prop —
@@ -197,11 +205,11 @@ describe("ClaudeLoginPanel — Stash link verification (codex P1 on PR #2414)", 
             return "inapp-success";
         });
 
-        const { findByText } = render(() => (
+        render(() => (
             <ClaudeLoginPanel onClose={() => {}} linkTarget={{ agentDefinitionId: "agent-1" }} />
         ));
 
-        await findByText(/signed in to claude/i);
+        await screen.findByText(/signed in to claude/i);
         expect(hub.refreshAccountCache).toHaveBeenCalled();
     });
 
@@ -220,7 +228,7 @@ describe("ClaudeLoginPanel — Stash link verification (codex P1 on PR #2414)", 
             { agent_id: "agent-1", account_id: "acct-existing", provider: "claude-code" },
         ]);
 
-        const { findByText } = render(() => (
+        render(() => (
             <ClaudeLoginPanel
                 onClose={() => {}}
                 existingAccountId="acct-existing"
@@ -229,7 +237,7 @@ describe("ClaudeLoginPanel — Stash link verification (codex P1 on PR #2414)", 
             />
         ));
 
-        await findByText(/couldn't confirm the account was linked/i);
+        await screen.findByText(/couldn't confirm the account was linked/i);
         // Must NOT proceed to the stale-alias cleanup unlink — that would
         // delete the one link that actually works, leaving zero links.
         expect(hub.unlinkAgentIdentity).not.toHaveBeenCalled();
@@ -242,9 +250,9 @@ describe("ClaudeLoginPanel — Stash link verification (codex P1 on PR #2414)", 
             return "inapp-success";
         });
 
-        const { findByText } = render(() => <ClaudeLoginPanel onClose={() => {}} />);
+        render(() => <ClaudeLoginPanel onClose={() => {}} />);
 
-        await findByText(/signed in to claude/i);
+        await screen.findByText(/signed in to claude/i);
         expect(hub.listAgentIdentities).not.toHaveBeenCalled();
     });
 });
@@ -256,10 +264,10 @@ describe("ClaudeLoginPanel — unmount cleanup (codex P2 on PR #2414)", () => {
             return "inapp-success";
         });
 
-        const { findByText, unmount } = render(() => (
+        const { unmount } = render(() => (
             <ClaudeLoginPanel onClose={() => {}} linkTarget={{ agentDefinitionId: "agent-1" }} />
         ));
-        await findByText(/signed in to claude/i);
+        await screen.findByText(/signed in to claude/i);
         hub.cancelCliLogin.mockClear(); // clear whatever the login flow itself called
 
         unmount();
@@ -286,9 +294,50 @@ describe("ClaudeLoginPanel — login-runner rejection (codex P2 on PR #2414)", (
     it("surfaces a retryable error instead of leaving the panel stuck when runProviderLogin rejects outright", async () => {
         hub.runProviderLogin.mockRejectedValue(new Error("PTY spawn failed"));
 
-        const { findByText } = render(() => <ClaudeLoginPanel onClose={() => {}} />);
+        render(() => <ClaudeLoginPanel onClose={() => {}} />);
 
-        await findByText(/PTY spawn failed/i);
+        await screen.findByText(/PTY spawn failed/i);
         expect(hub.cancelCliLogin).toHaveBeenCalled();
+    });
+});
+
+describe("ClaudeLoginPanel — nested modal stacking (Fix 3 of ANALYSIS_ARMORY_STASH_CREDENTIAL_VISIBILITY_GAP_2026_08_04.md)", () => {
+    // ClaudeLoginPanel's own `Modal` is opened from INSIDE the Agent Stash's
+    // Accounts tab, which is itself already inside a canonical `Modal`
+    // (AgentStashModal, dispatched via modal-dispatch.tsx/ModalLayer.tsx).
+    // The real risk this guards against: if ClaudeLoginPanel were wired
+    // through `useModalLayer().open(...)` instead of a plain `<Modal>`
+    // (a mistake that's easy to make — that's the established pattern for
+    // most of this app's other dialogs), it would hit ModalLayer's
+    // single-`current`-signal "replace" semantics and CLOSE the Stash
+    // modal it's nested in, instead of stacking on top of it. Standing up
+    // the full `AgentStashModal` (many unrelated tabs/RPC deps) isn't
+    // needed to exercise this — the behavior lives entirely in the shared
+    // `Modal`/`modal-stack.ts` primitive, so a minimal outer `<Modal>`
+    // standing in for AgentStashModal is a faithful, much cheaper test of
+    // the same mechanism.
+    it("opening ClaudeLoginPanel from inside another open Modal does not close that outer Modal", async () => {
+        const [outerOpen, setOuterOpen] = createSignal(true);
+        const [innerOpen, setInnerOpen] = createSignal(false);
+
+        render(() => (
+            <Modal open={outerOpen()} onClose={() => setOuterOpen(false)} ariaLabel="Agent Stash">
+                <div>Stash content marker</div>
+                <button onClick={() => setInnerOpen(true)}>Connect</button>
+                {innerOpen() && <ClaudeLoginPanel onClose={() => setInnerOpen(false)} />}
+            </Modal>
+        ));
+
+        expect(screen.getByRole("dialog", { name: "Agent Stash" })).toBeInTheDocument();
+
+        screen.getByText("Connect").click();
+
+        // Both dialogs must be simultaneously present — the outer one must
+        // NOT have been closed/replaced by the inner one opening.
+        await waitFor(() => {
+            expect(screen.getByRole("dialog", { name: "Connect Anthropic" })).toBeInTheDocument();
+        });
+        expect(screen.getByRole("dialog", { name: "Agent Stash" })).toBeInTheDocument();
+        expect(screen.getByText("Stash content marker")).toBeInTheDocument();
     });
 });

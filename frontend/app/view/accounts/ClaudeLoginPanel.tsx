@@ -26,6 +26,7 @@ import { PROVIDERS } from "@/app/view/agent/providers/catalog";
 import { runProviderLogin, type ProviderLoginOutcome } from "@/app/view/agent/flows/run-provider-login";
 import { InAppLoginPanel, type InAppLoginPhase } from "@/app/view/agent/components/InAppLoginPanel";
 import { refreshAccountCache } from "@/app/view/identity/identity-model";
+import { Modal, type ModalScope } from "@/element/modal";
 
 const CLAUDE_PROVIDER = PROVIDERS["claude"];
 
@@ -53,14 +54,23 @@ export function ClaudeLoginPanel(props: {
      *  success, this panel unlinks `staleAliasProvider` for the same
      *  agent so only the canonical row remains. */
     staleAliasProvider?: string;
+    /** Which region the dialog locks — see `Modal`'s `scope` prop. Armory
+     *  (no ModalLayer ancestor) passes "tab"; the Agent Stash (already
+     *  inside agent-view.tsx's `ModalLayer scope="pane"`) passes "pane" so
+     *  this stacks correctly over the Stash modal instead of both
+     *  competing for the same window-level backdrop. */
+    scope?: ModalScope;
 }): JSX.Element {
     const [phase, setPhase] = createSignal<InAppLoginPhase>("starting");
     const [authUrl, setAuthUrl] = createSignal<string | undefined>(undefined);
     const [error, setError] = createSignal<string | null>(null);
     const [done, setDone] = createSignal(false);
+    // Signal (not a plain `let`) so `Modal`'s `closeOnBackdropClick` can
+    // reactively track it — preserves the original hand-rolled overlay's
+    // "don't dismiss on backdrop click mid-login" behavior.
+    const [inFlight, setInFlight] = createSignal(false);
     let cancelled = false;
     let terminalRequested = false;
-    let inFlight = false;
     // Set by onAccountRegistered — run-provider-login.ts fires it ONLY once
     // the account row is actually persisted (reagent P0 on #2263). A
     // credential can be validly seeded/pasted on disk while that persist
@@ -88,7 +98,7 @@ export function ClaudeLoginPanel(props: {
     // one.
     onCleanup(() => {
         cancelled = true;
-        if (inFlight) {
+        if (inFlight()) {
             getApi().cancelCliLogin().catch(() => {});
         }
     });
@@ -132,8 +142,8 @@ export function ClaudeLoginPanel(props: {
         });
 
     const start = async () => {
-        if (inFlight) return;
-        inFlight = true;
+        if (inFlight()) return;
+        setInFlight(true);
         setError(null);
         setPhase("starting");
         try {
@@ -285,7 +295,7 @@ export function ClaudeLoginPanel(props: {
             const t = translateError(e);
             setError(`${t.title}: ${t.message}${t.retry ? ` — ${t.retry}` : ""}`);
         } finally {
-            inFlight = false;
+            setInFlight(false);
         }
     };
 
@@ -298,55 +308,58 @@ export function ClaudeLoginPanel(props: {
     void start();
 
     return (
-        <div
-            class="accounts-chooser-overlay"
-            onClick={(e) => e.target === e.currentTarget && !inFlight && props.onClose()}
+        <Modal
+            open={true}
+            onClose={() => !inFlight() && props.onClose()}
+            scope={props.scope ?? "window"}
+            closeOnBackdropClick={!inFlight()}
+            size="md"
+            ariaLabel="Connect Anthropic"
+            panelClass="accounts-chooser"
         >
-            <div class="accounts-chooser" role="dialog" aria-label="Connect Anthropic">
+            <Show
+                when={!done()}
+                fallback={
+                    <div class="accounts-chooser-modes">
+                        <div class="oauth-byo-note">✓ Signed in to Claude.</div>
+                        <div class="identity-key-actions">
+                            <button class="identity-btn identity-btn-primary" onClick={() => props.onClose()}>
+                                Done
+                            </button>
+                        </div>
+                    </div>
+                }
+            >
                 <Show
-                    when={!done()}
+                    when={!error()}
                     fallback={
                         <div class="accounts-chooser-modes">
-                            <div class="oauth-byo-note">✓ Signed in to Claude.</div>
+                            <div class="oauth-byo-note">{error()}</div>
                             <div class="identity-key-actions">
-                                <button class="identity-btn identity-btn-primary" onClick={() => props.onClose()}>
-                                    Done
+                                <button class="identity-btn identity-btn-primary" onClick={() => void start()}>
+                                    Retry
+                                </button>
+                                <button class="identity-btn identity-btn-secondary" onClick={() => props.onClose()}>
+                                    Close
                                 </button>
                             </div>
                         </div>
                     }
                 >
-                    <Show
-                        when={!error()}
-                        fallback={
-                            <div class="accounts-chooser-modes">
-                                <div class="oauth-byo-note">{error()}</div>
-                                <div class="identity-key-actions">
-                                    <button class="identity-btn identity-btn-primary" onClick={() => void start()}>
-                                        Retry
-                                    </button>
-                                    <button class="identity-btn identity-btn-secondary" onClick={() => props.onClose()}>
-                                        Close
-                                    </button>
-                                </div>
-                            </div>
-                        }
-                    >
-                        <InAppLoginPanel
-                            providerId={CLAUDE_PROVIDER.id}
-                            providerLabel={CLAUDE_PROVIDER.displayName}
-                            authUrl={authUrl()}
-                            phase={phase()}
-                            onCancel={onCancel}
-                            onUseTerminal={() => {
-                                terminalRequested = true;
-                                setPhase("fallback");
-                            }}
-                        />
-                    </Show>
+                    <InAppLoginPanel
+                        providerId={CLAUDE_PROVIDER.id}
+                        providerLabel={CLAUDE_PROVIDER.displayName}
+                        authUrl={authUrl()}
+                        phase={phase()}
+                        onCancel={onCancel}
+                        onUseTerminal={() => {
+                            terminalRequested = true;
+                            setPhase("fallback");
+                        }}
+                    />
                 </Show>
-            </div>
-        </div>
+            </Show>
+        </Modal>
     );
 }
 
