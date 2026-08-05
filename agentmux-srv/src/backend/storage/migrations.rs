@@ -35,7 +35,11 @@ use super::error::StoreError;
 ///        (see agentmux-cloud's PLAN_PER_AGENT_CREDENTIAL_BINDING_2026_07_06.md)
 ///        instead of the single shared per-account MUXBUS_TOKEN for every
 ///        /reactive/* call.
-pub const SHARED_STORE_SCHEMA_VERSION: i64 = 4;
+///   v5 — db_cron_jobs.max_age_secs: optional hard expiry bound (seconds since
+///        created_at) alongside the existing max_fires bound. NULL = no expiry
+///        (existing rows unaffected). See
+///        docs/specs/SPEC_AGENT_POLLING_AND_WAKEUP_HARDENING_2026_08_04.md Phase 0.
+pub const SHARED_STORE_SCHEMA_VERSION: i64 = 5;
 
 /// `user_version` value stamped into `objects.db` after `run_object_schema`.
 /// The flat schema reset the counter to 1 (the pre-flatten chain never set
@@ -746,17 +750,18 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
         );
 
         CREATE TABLE IF NOT EXISTS db_cron_jobs (
-            id          TEXT PRIMARY KEY,
-            name        TEXT NOT NULL,
-            expression  TEXT NOT NULL,
-            prompt      TEXT NOT NULL,
-            target      TEXT NOT NULL,
-            created_by  TEXT NOT NULL DEFAULT '',
-            enabled     INTEGER NOT NULL DEFAULT 1,
-            last_fired  INTEGER,
-            fire_count  INTEGER NOT NULL DEFAULT 0,
-            max_fires   INTEGER,
-            created_at  INTEGER NOT NULL DEFAULT 0
+            id            TEXT PRIMARY KEY,
+            name          TEXT NOT NULL,
+            expression    TEXT NOT NULL,
+            prompt        TEXT NOT NULL,
+            target        TEXT NOT NULL,
+            created_by    TEXT NOT NULL DEFAULT '',
+            enabled       INTEGER NOT NULL DEFAULT 1,
+            last_fired    INTEGER,
+            fire_count    INTEGER NOT NULL DEFAULT 0,
+            max_fires     INTEGER,
+            created_at    INTEGER NOT NULL DEFAULT 0,
+            max_age_secs  INTEGER
         );
         CREATE INDEX IF NOT EXISTS idx_ss_cron_jobs_enabled
             ON db_cron_jobs(enabled);
@@ -784,6 +789,27 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
             (id, name, description, is_blank, created_at, updated_at)
          VALUES ('blank', '__blank__', 'Vanilla CLI — no instructions, no context', 1, 0, 0);",
     )?;
+
+    // ---- Additive column migrations (schema v5+) ----
+    // Same idempotent pattern as run_object_schema's ALTER-TABLE loop below:
+    // the flat CREATE batch above covers fresh DBs; these carry an existing
+    // shared store forward. "duplicate column" is swallowed so this is safe
+    // to run on every startup regardless of whether the column already exists.
+    //
+    // v5: db_cron_jobs.max_age_secs — optional hard expiry bound (seconds
+    //     since created_at), alongside the existing max_fires bound. NULL
+    //     for all existing rows = no behavior change for jobs created before
+    //     this column existed.
+    for stmt in &[
+        "ALTER TABLE db_cron_jobs ADD COLUMN max_age_secs INTEGER",
+    ] {
+        if let Err(e) = conn.execute_batch(stmt) {
+            let msg = e.to_string();
+            if !msg.contains("duplicate column") {
+                return Err(e.into());
+            }
+        }
+    }
 
     Ok(())
 }

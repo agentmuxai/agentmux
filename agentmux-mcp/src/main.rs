@@ -238,7 +238,7 @@ const OPEN_MEDIA_TOOL: &str = r#"{
 
 const LOOP_TOOL: &str = r#"{
   "name": "Loop",
-  "description": "Run a prompt or slash command on a recurring interval by re-injecting it into a conversation. AgentMux's analogue of Claude's /loop. Returns immediately with a loop_id; the prompt is injected on a fixed schedule until you call LoopStop(loop_id) or it exhausts max_iterations. Use for polling/babysitting tasks ('check the deploy every 5m', 'keep running /babysit-prs'). Loops stop automatically when the agent pane closes. Do NOT use for one-off tasks — use ScheduleWakeup for that.",
+  "description": "Cross-agent recurring inject: run a prompt or slash command on a recurring interval by injecting it into ANOTHER agent's conversation (or your own, if you explicitly need muxbus-delivered self-messaging). Returns immediately with a loop_id; the prompt is injected on a fixed schedule until you call LoopStop(loop_id) or it exhausts max_iterations. If you're scheduling your OWN future turn (a same-session self-check, no other agent involved) — prefer the native ScheduleWakeup (one-off or adaptive-delay recurring, via re-arming) or native CronCreate (durable, cron-expression) tools instead: they have zero delivery overhead (no cross-agent messaging envelope) and built-in cache-window-aware backoff guidance this tool doesn't have. Use THIS tool only when the target is a different agent, or you specifically need AgentMux-persisted delivery across a restart. Loops stop automatically when the agent pane closes.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -275,7 +275,7 @@ const LOOP_LIST_TOOL: &str = r#"{
 
 const CRON_CREATE_TOOL: &str = r#"{
   "name": "CronCreate",
-  "description": "Create a persistent scheduled cron job that survives agent pane restarts. Fires the prompt on a UTC cron schedule by injecting it into the target agent. Unlike Loop, cron jobs persist as long as agentmux-srv is running. Returns a job id and the next scheduled fire time.",
+  "description": "AgentMux's own cross-agent cron — NOT the same tool as the native (non-mcp__agentmux__-prefixed) CronCreate your harness may also expose, which schedules only your own session's future turn. Use this one specifically to target a DIFFERENT agent (or when you need AgentMux-persisted delivery independent of any single session). Creates a persistent scheduled cron job that survives agent pane restarts. Fires the prompt on a UTC cron schedule by injecting it into the target agent. Unlike Loop, cron jobs persist as long as agentmux-srv is running. Returns a job id and the next scheduled fire time. If you're scheduling your OWN future turn instead, prefer the native CronCreate/ScheduleWakeup tools — no cross-agent envelope overhead.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -283,7 +283,8 @@ const CRON_CREATE_TOOL: &str = r#"{
       "expression": { "type": "string",  "description": "5-field UTC cron expression: 'min hour dom month dow' (e.g. '0 9 * * 1-5' = 9am weekdays). Standard cron syntax; ranges, lists, and step values are supported." },
       "prompt":     { "type": "string",  "description": "The prompt or slash command to inject at each scheduled fire" },
       "to":         { "type": "string",  "description": "Target agent id to inject into. Required." },
-      "max_fires":  { "type": "integer", "description": "Auto-disable after this many fires (the job row stays in DB for audit; use CronDelete to remove it). Omit for unlimited." }
+      "max_fires":  { "type": "integer", "description": "Auto-disable after this many fires (the job row stays in DB for audit; use CronDelete to remove it). Omit for unlimited." },
+      "max_age_secs": { "type": "integer", "description": "Auto-disable this many seconds after creation, regardless of fire count (a hard staleness/stuck-loop bound, matching the spirit of native CronCreate's 7-day auto-expiry). Omit for no expiry — appropriate for genuinely long-running cross-agent automations; set this when babysitting something that should have a natural end (e.g. 'stop checking this PR after 6 hours even if it's still open')." }
     },
     "required": ["name", "expression", "prompt", "to"]
   }
@@ -291,7 +292,7 @@ const CRON_CREATE_TOOL: &str = r#"{
 
 const CRON_DELETE_TOOL: &str = r#"{
   "name": "CronDelete",
-  "description": "Delete a persistent cron job by id. Stops all future fires immediately.",
+  "description": "Delete a persistent AgentMux cross-agent cron job (created via this same mcp__agentmux__ tool family's CronCreate, not the native per-session one) by id. Stops all future fires immediately.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -303,7 +304,7 @@ const CRON_DELETE_TOOL: &str = r#"{
 
 const CRON_LIST_TOOL: &str = r#"{
   "name": "CronList",
-  "description": "List all persistent cron jobs (enabled and disabled). Returns each job's id, name, expression, next fire time, fire count, and enabled state.",
+  "description": "List all persistent AgentMux cross-agent cron jobs (created via this same mcp__agentmux__ tool family, not the native per-session ones). Returns each job's id, name, expression, next fire time, fire count, and enabled state.",
   "inputSchema": {
     "type": "object",
     "properties": {}
@@ -312,7 +313,7 @@ const CRON_LIST_TOOL: &str = r#"{
 
 const CRON_PAUSE_TOOL: &str = r#"{
   "name": "CronPause",
-  "description": "Pause a persistent cron job. The job definition is kept in the DB but no fires occur until CronResume is called.",
+  "description": "Pause a persistent AgentMux cross-agent cron job (this mcp__agentmux__ tool family, not the native per-session one — native cron has no pause/resume, only delete). The job definition is kept in the DB but no fires occur until CronResume is called.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -324,7 +325,7 @@ const CRON_PAUSE_TOOL: &str = r#"{
 
 const CRON_RESUME_TOOL: &str = r#"{
   "name": "CronResume",
-  "description": "Resume a paused cron job. The job will fire at its next scheduled UTC time.",
+  "description": "Resume a paused AgentMux cross-agent cron job (this mcp__agentmux__ tool family). The job will fire at its next scheduled UTC time.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -1453,12 +1454,14 @@ async fn call_tool(
             let target = arguments.get("to").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
                 .ok_or_else(|| anyhow::anyhow!("missing required parameter: to (target agent id)"))?;
             let max_fires = arguments.get("max_fires").and_then(|v| v.as_i64()).filter(|&n| n > 0);
+            let max_age_secs = arguments.get("max_age_secs").and_then(|v| v.as_i64()).filter(|&n| n > 0);
             let self_id = std::env::var("AGENTMUX_AGENT_ID").ok().filter(|s| !s.is_empty()).unwrap_or_default();
 
             let url = format!("{}/agentmux/cron", local_url.trim_end_matches('/'));
             let body = serde_json::json!({
                 "name": name, "expression": expression, "prompt": prompt,
                 "target": target, "created_by": self_id, "max_fires": max_fires,
+                "max_age_secs": max_age_secs,
             });
             let resp = client.post(&url).header("X-AuthKey", auth_key).json(&body).send().await
                 .map_err(|e| anyhow::anyhow!("cron create request failed: {e}"))?;
@@ -1516,8 +1519,9 @@ async fn call_tool(
                 let next = j["next_fire"].as_str().unwrap_or("—");
                 let fires = j["fire_count"].as_i64().unwrap_or(0);
                 let max = j["max_fires"].as_i64().map(|n| format!("/{n}")).unwrap_or_default();
+                let age_bound = j["expires_in_secs"].as_i64().map(|n| format!("  expires_in={n}s")).unwrap_or_default();
                 lines.push(format!(
-                    "  {}  {}  [{}]  fires={fires}{max}  next={}  expr='{}'",
+                    "  {}  {}  [{}]  fires={fires}{max}  next={}  expr='{}'{age_bound}",
                     j["id"].as_str().unwrap_or("?"),
                     j["name"].as_str().unwrap_or("?"),
                     status_str,
