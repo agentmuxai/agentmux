@@ -58,7 +58,6 @@ import { useAgentDecisions } from "./hooks/useAgentDecisions";
 import { useAgentQuestions } from "./hooks/useAgentQuestions";
 import { BlockService } from "@/app/store/services";
 import { makeWindowFocusSignal } from "@/app/window/window-focus";
-import { SETTLE_GRACE_MS, nextDoneCompletedAt, shouldNotifyOnReopen } from "./settled-grace";
 import { useAgentCloseConfirm } from "./hooks/useAgentCloseConfirm";
 import { handleAgentIdChange } from "@/app/view/term/termagent";
 import { DragOverlay } from "@/app/element/dragoverlay";
@@ -720,31 +719,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             updatedNodes: [],
         });
     };
-
-    // Settled-grace invariant — see settled-grace.ts's module doc for the
-    // full rationale (StreamFlushObserved's intentional Done.completed ->
-    // Streaming re-promotion for multi-round continuations, and why a
-    // SETTLED "Worked" must never silently un-happen). Purely additive: no
-    // reducer/TurnPhase changes, doesn't affect session-digest correctness.
-    // Decision logic lives in settled-grace.ts as pure, directly-testable
-    // functions; this effect is just the reactive wiring.
-    let doneCompletedAt: number | null = null;
-    createEffect(() => {
-        const phase = agentAtoms().turnPhaseAtom[0]();
-        const now = Date.now();
-        if (
-            phase.kind === "Streaming" &&
-            shouldNotifyOnReopen(doneCompletedAt, now, SETTLE_GRACE_MS)
-        ) {
-            postSystemNotification("Picked up more work — starting another round…", "info");
-        }
-        doneCompletedAt = nextDoneCompletedAt(
-            phase.kind,
-            phase.kind === "Done" ? phase.outcome : undefined,
-            doneCompletedAt,
-            now,
-        );
-    });
 
     const status = useAgentControllerStatus({
         blockId: model.blockId,
