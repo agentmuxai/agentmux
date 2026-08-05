@@ -141,44 +141,31 @@ fn default_identity_status() -> String {
     "unknown".to_string()
 }
 
-/// Escape every backslash in `raw` that isn't already the start of a valid
-/// JSON escape sequence (`\"`, `\\`, `\/`, `\b`, `\f`, `\n`, `\r`, `\t`,
-/// `\uXXXX`). Targets exactly the one corruption shape seen in production —
-/// a raw Windows path (`C:\Users\...`) pasted into a JSON string without
-/// escaping — without touching JSON that's already correctly escaped, so
-/// it's safe to run against every row unconditionally (`identity_repair_
-/// malformed_secret_refs` only calls this on values that already failed to
-/// parse as-is). Not a general JSON repair tool — only handles this one bug
-/// class.
+/// Escape every backslash in `raw` unconditionally. Targets exactly the one
+/// corruption shape seen in production — a raw Windows path (`C:\Users\...`)
+/// pasted into a JSON string with NO escaping at all — so every backslash in
+/// a still-unparseable row is a literal path separator, never an intentional
+/// JSON escape (a document containing even one real `\n`/`\t`/`\\` escape
+/// alongside bare backslashes would imply two different corruption
+/// mechanisms touched the same row, which has no evidence and isn't
+/// something this targeted repair needs to handle).
+///
+/// This is deliberately NOT a no-op on already-valid JSON — doubling a
+/// genuine `\\` pair would over-escape it. That's fine because the only
+/// caller (`identity_repair_malformed_secret_refs`) already checks
+/// `serde_json::from_str` first and skips rows that parse cleanly; this
+/// function must never be called on a value that isn't already confirmed
+/// invalid.
+///
+/// A prior version tried to distinguish "bare" backslashes from "already
+/// valid escape sequences" by peeking at the next character (`\b`, `\t`,
+/// `\n`, ... look like valid escapes). That's unsound for real Windows
+/// paths: a segment like `\bob\test` starts with `\b` and `\t`, which are
+/// themselves valid JSON escape shapes, so the heuristic left them
+/// un-doubled and silently produced a backspace/tab character instead of
+/// the literal path (caught by reagent review on PR #2419).
 fn repair_bare_backslashes(raw: &str) -> String {
-    let mut out = String::with_capacity(raw.len());
-    let mut chars = raw.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c != '\\' {
-            out.push(c);
-            continue;
-        }
-        match chars.peek() {
-            Some('"' | '\\' | '/' | 'b' | 'f' | 'n' | 'r' | 't' | 'u') => {
-                // Already a valid escape sequence — copy BOTH characters
-                // through unchanged, consuming the second one now. Leaving
-                // it for the next loop iteration (a prior version of this
-                // function did) means a valid `\\` pair's second backslash
-                // gets reprocessed as if it were a fresh, standalone
-                // backslash — and since whatever follows it is very
-                // unlikely to itself be a valid escape starter, it gets
-                // doubled again, corrupting already-valid JSON.
-                out.push('\\');
-                out.push(chars.next().unwrap());
-            }
-            _ => {
-                // A bare backslash (or one at end-of-string) — double it.
-                out.push('\\');
-                out.push('\\');
-            }
-        }
-    }
-    out
+    raw.replace('\\', "\\\\")
 }
 
 /// Junction row: which identity an agent uses for a given provider.
@@ -926,13 +913,37 @@ mod tests {
         }
     }
 
-    /// Already-valid JSON (the normal case — every real row written via
-    /// `identity_upsert`) must pass through byte-for-byte unchanged; the
-    /// repair must never double-escape a correctly-escaped value.
+    /// Regression for the P0 caught on PR #2419 review: a path segment that
+    /// starts with a letter matching a valid JSON escape (`\bob`, `\test`,
+    /// `\node_modules`, ...) must still get its backslash doubled, not
+    /// mistaken for an already-valid `\b`/`\t`/`\n` escape.
     #[test]
-    fn repair_bare_backslashes_is_a_noop_on_valid_json() {
+    fn repair_bare_backslashes_fixes_paths_with_escape_letter_prefixed_segments() {
+        let broken = r#"{"backend":"oauth_config_dir","dir":"C:\Users\bob\test\node_modules\uploads\format"}"#;
+        let repaired = repair_bare_backslashes(broken);
+        let parsed: SecretRef =
+            serde_json::from_str(&repaired).expect("repair must produce valid JSON");
+        match parsed {
+            SecretRef::OAuthConfigDir { dir } => {
+                assert_eq!(dir, r"C:\Users\bob\test\node_modules\uploads\format");
+            }
+            other => panic!("expected OAuthConfigDir, got {other:?}"),
+        }
+    }
+
+    /// `repair_bare_backslashes` is only ever called on rows that already
+    /// failed to parse as JSON (`identity_repair_malformed_secret_refs`
+    /// checks `serde_json::from_str` first and skips valid rows) — it must
+    /// never run against already-valid JSON, since unconditionally doubling
+    /// every backslash would over-escape a genuine `\\` pair.
+    #[test]
+    fn repair_bare_backslashes_over_escapes_already_valid_json_by_design() {
         let valid = r#"{"backend":"oauth_config_dir","dir":"C:\\Users\\area54\\claude"}"#;
-        assert_eq!(repair_bare_backslashes(valid), valid);
+        assert_ne!(
+            repair_bare_backslashes(valid),
+            valid,
+            "documents that callers must never invoke this on already-valid JSON"
+        );
     }
 
     /// `identity_list` must return the good rows and skip the malformed
