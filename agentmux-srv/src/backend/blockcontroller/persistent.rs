@@ -45,6 +45,34 @@ pub const PERSISTENT_OUTPUT_SUBJECT: &str = "output";
 
 pub const BLOCK_CONTROLLER_PERSISTENT: &str = "persistent";
 
+/// Builds the NDJSON line for a `persistent_resume::ResumeEffect::
+/// EmitSessionOutcome` — a free function (not a method) so it's callable
+/// both from `PersistentSubprocessController::emit_session_outcome_line`
+/// and directly from the stdout-reader/process-waiter tasks below, which
+/// only hold `_read`-suffixed clones, not `&self`. See
+/// SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md §2.1.
+fn session_outcome_line(
+    outcome: persistent_resume::SessionOutcome,
+    attempted_sid: String,
+    actual_sid: Option<String>,
+) -> String {
+    let outcome_str = match outcome {
+        persistent_resume::SessionOutcome::Resumed => "resumed",
+        persistent_resume::SessionOutcome::Fresh => "fresh",
+    };
+    format!(
+        "{}\n",
+        serde_json::json!({
+            "type": "system",
+            "subtype": "agentmux_session_outcome",
+            "outcome": outcome_str,
+            "attempted_sid": attempted_sid,
+            "actual_sid": actual_sid,
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+        })
+    )
+}
+
 /// Resolve the muxbus address (the agent's display name) from a spawn env map.
 /// `AGENTMUX_AGENT_ID` (= `agent.name`, set at block creation) is canonical;
 /// `WAVEMUX_AGENT_ID` is the legacy fallback. Returns `None` — i.e. not
@@ -2342,13 +2370,34 @@ impl PersistentSubprocessController {
                             // error line from an earlier turn on this
                             // same still-alive generation — execute it,
                             // same as every other `ResumeEffect` call
-                            // site in this module. `SessionCaptured`
-                            // never produces any other effect variant
-                            // (see `persistent_resume::update`'s own
-                            // handling), but this stays exhaustive rather
-                            // than assuming that never changes.
+                            // site in this module. `SessionCaptured` can
+                            // also now resolve tracking outright and
+                            // produce an `EmitSessionOutcome` (see
+                            // `persistent_resume::update`'s own handling,
+                            // SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md
+                            // §2.1) — handled explicitly below; anything
+                            // else falls to the catch-all, kept exhaustive
+                            // rather than assuming the effect set never
+                            // grows again.
                             for effect in capture_effects {
                                 match effect {
+                                    persistent_resume::ResumeEffect::EmitSessionOutcome {
+                                        outcome,
+                                        attempted_sid,
+                                        actual_sid,
+                                    } => {
+                                        if let Some(ref broker) = broker_read {
+                                            let line = session_outcome_line(outcome, attempted_sid, actual_sid);
+                                            super::shell::handle_append_block_file(
+                                                broker,
+                                                &block_id_read,
+                                                PERSISTENT_OUTPUT_SUBJECT,
+                                                line.as_bytes(),
+                                                filestore_read.as_ref(),
+                                                global_output_zone.as_deref(),
+                                            );
+                                        }
+                                    }
                                     persistent_resume::ResumeEffect::FlushErrorLine(line) => {
                                         if let Some(ref broker) = broker_read {
                                             super::shell::handle_append_block_file(
@@ -2813,6 +2862,29 @@ impl PersistentSubprocessController {
                     // RETRO_STALE_RESUME_SESSION_ID_ACROSS_CHANNELS_2026_07_29.md).
                     for effect in effects {
                         match effect {
+                            // SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md
+                            // §2.1: the `ConfirmedRetry` + `ProcessExited`
+                            // (not-stopped) arm now bundles this alongside
+                            // `FireRetry` — the resume's fate (Fresh) is
+                            // already known here, even though the retry
+                            // below hasn't launched yet.
+                            persistent_resume::ResumeEffect::EmitSessionOutcome {
+                                outcome,
+                                attempted_sid,
+                                actual_sid,
+                            } => {
+                                if let Some(ref broker) = broker_wait {
+                                    let line = session_outcome_line(outcome, attempted_sid, actual_sid);
+                                    super::shell::handle_append_block_file(
+                                        broker,
+                                        &block_id_wait,
+                                        PERSISTENT_OUTPUT_SUBJECT,
+                                        line.as_bytes(),
+                                        filestore_wait.as_ref(),
+                                        global_output_zone_wait.as_deref(),
+                                    );
+                                }
+                            }
                             persistent_resume::ResumeEffect::PersistImmediately(line)
                             | persistent_resume::ResumeEffect::FlushErrorLine(line) => {
                                 if let Some(ref broker) = broker_wait {
@@ -3071,6 +3143,19 @@ impl PersistentSubprocessController {
                             | persistent_resume::ResumeEffect::FlushErrorLine(line) => Some(line),
                             persistent_resume::ResumeEffect::FireRetry { held_error_line, .. } => held_error_line,
                             persistent_resume::ResumeEffect::PublishDone => None,
+                            // Not actually reachable here today — the "stop
+                            // wins" branch of `update()`'s ConfirmedRetry +
+                            // ProcessExited arm never produces this effect
+                            // (see SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md
+                            // §2.1) — but matched defensively, same as
+                            // `FireRetry` above, rather than assumed. Reuses
+                            // the same "append this line" path as every
+                            // other variant here.
+                            persistent_resume::ResumeEffect::EmitSessionOutcome {
+                                outcome,
+                                attempted_sid,
+                                actual_sid,
+                            } => Some(session_outcome_line(outcome, attempted_sid, actual_sid)),
                         };
                         if let Some(line) = line {
                         if let Some(ref broker) = broker_wait {
@@ -5065,7 +5150,14 @@ mod resume_poison_tests {
         let (_, effects) = inner.try_capture_session_id("dead-sid", 1, true);
         assert_eq!(
             effects,
-            vec![persistent_resume::ResumeEffect::FlushErrorLine("boom\n".to_string())],
+            vec![
+                persistent_resume::ResumeEffect::FlushErrorLine("boom\n".to_string()),
+                persistent_resume::ResumeEffect::EmitSessionOutcome {
+                    outcome: persistent_resume::SessionOutcome::Resumed,
+                    attempted_sid: "dead-sid".to_string(),
+                    actual_sid: None,
+                },
+            ],
             "a held-back error line from an earlier turn must be surfaced to the caller \
              when a later capture resolves tracking, not silently discarded"
         );

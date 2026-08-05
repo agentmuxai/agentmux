@@ -41,8 +41,9 @@ import { onCleanup, onMount } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
 import type { PendingMessage, SignalPair } from "./state";
 import { ClaudeCodeStreamParser } from "./stream-parser";
-import type { ContextCompactedNode, DocumentNode } from "./types";
+import type { ContextCompactedNode, DocumentNode, SessionOutcomeNode } from "./types";
 import { parseCompactBoundaryFrame, contextCompactedNodeId, contextCompactedLiveTimestamp } from "./compact-boundary";
+import { parseSessionOutcomeFrame, sessionOutcomeNodeId, sessionOutcomeLiveTimestamp } from "./session-outcome";
 import type { AgentPaneEvent, TurnPhase } from "@/app/store/agent-pane-state/types";
 import { getNodeIdSet } from "@/app/store/agent-document-store";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
@@ -432,6 +433,36 @@ export function useAgentStream({
                             frameTimestamp: compactBoundary.frameTimestamp,
                         });
                         pushContextCompactedNodes(paneEvents, queue, hasNodeId, addNodeId);
+                    }
+                    continue;
+                }
+
+                // AgentMux's own resume-outcome marker (not a provider frame —
+                // see docs/specs/SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md
+                // §2). Intercepted the same way as `compact_boundary` just
+                // above: no `StreamEvent` shape in the translator, shared
+                // parsing with `parseHistoryLines.ts` via `session-outcome.ts`
+                // so the two can't drift. No `dispatchPane` round-trip needed —
+                // unlike compaction, this has no live token-meter side effect,
+                // it's purely a transcript marker — so the node is pushed
+                // directly.
+                if (rawEvent.type === "system" && rawEvent.subtype === "agentmux_session_outcome") {
+                    parser.flushPending();
+                    const sessionOutcome = parseSessionOutcomeFrame(rawEvent);
+                    if (sessionOutcome) {
+                        const node: SessionOutcomeNode = {
+                            type: "session_outcome",
+                            id: sessionOutcomeNodeId(sessionOutcome),
+                            outcome: sessionOutcome.outcome,
+                            attemptedSid: sessionOutcome.attemptedSid,
+                            actualSid: sessionOutcome.actualSid,
+                            timestamp: sessionOutcomeLiveTimestamp(sessionOutcome.frameTimestamp),
+                        };
+                        if (!hasNodeId(node.id)) {
+                            addNodeId(node.id);
+                            queue.pushNewNode(node);
+                            queue.scheduleFlush();
+                        }
                     }
                     continue;
                 }
