@@ -129,7 +129,17 @@ export default defineConfig({
         strictPort: true,
         open: false,
         watch: {
-            ignored: ["dist/**", "**/*.md", "**/*.json"],
+            // target/** — the Rust/Cargo build output, including the CEF
+            // binary distribution's extraction. `task dev` runs this watcher
+            // concurrently with the Rust/CEF host build, and without this
+            // exclusion the dev-server's own file watcher is one more
+            // process touching the same files `download-cef`'s extraction
+            // (or its repair-cef-extract.sh fallback) is racing to move into
+            // place — see docs/retro/RETRO_CEF_EXTRACT_PARTIAL_REPAIR_GAP_AND_VITE_WATCHER_2026_08_05.md
+            // and the original docs/retro/RETRO_CEF_BUILD_RACE_2026_04_24.md.
+            // No functional loss: nothing under target/ is ever meant to
+            // trigger a frontend HMR reload.
+            ignored: ["dist/**", "target/**", "**/*.md", "**/*.json"],
         },
     },
     css: {
