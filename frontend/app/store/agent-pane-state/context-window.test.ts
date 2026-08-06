@@ -17,8 +17,16 @@ describe("contextWindowForModel", () => {
     test("Haiku resolves to 200K", () => {
         expect(contextWindowForModel("claude-haiku-4-5")).toBe(200_000);
     });
-    test("Sonnet seeds conservatively at 200K (learns up to 1M)", () => {
+    test("Sonnet 4.x seeds conservatively at 200K (learns up to 1M)", () => {
         expect(contextWindowForModel("claude-sonnet-4-6")).toBe(200_000);
+        expect(contextWindowForModel("claude-sonnet-4-5")).toBe(200_000);
+    });
+    test("Sonnet 5+ has no beta gate — seeds at 1M directly", () => {
+        expect(contextWindowForModel("claude-sonnet-5")).toBe(1_000_000);
+        expect(contextWindowForModel("CLAUDE-SONNET-5")).toBe(1_000_000);
+    });
+    test("bare 'sonnet' family alias (unresolved) stays conservative", () => {
+        expect(contextWindowForModel("sonnet")).toBe(200_000);
     });
     test("unknown / non-Claude models are undefined (caller falls back)", () => {
         expect(contextWindowForModel("gpt-5-codex")).toBeUndefined();
@@ -33,11 +41,17 @@ describe("learnContextWindow", () => {
         expect(learnContextWindow(null, 1_000, "claude-opus-4-8")).toBe(1_000_000);
         expect(learnContextWindow(null, 1_000, "claude-haiku-4-5")).toBe(200_000);
     });
-    test("Sonnet-1M: promotes 200K → 1M once context exceeds 200K", () => {
+    test("Sonnet-4.x-1M-beta: promotes 200K → 1M once context exceeds 200K", () => {
         const seed = learnContextWindow(null, 50_000, "claude-sonnet-4-6");
         expect(seed).toBe(200_000);
         // a later turn whose prompt exceeds the 200K seed proves it's the 1M variant
         expect(learnContextWindow(seed, 250_000, "claude-sonnet-4-6")).toBe(1_000_000);
+    });
+    test("Sonnet 5 seeds at 1M on first observation — no learning needed", () => {
+        expect(learnContextWindow(null, 50_000, "claude-sonnet-5")).toBe(1_000_000);
+    });
+    test("model switch mid-session Sonnet-4.6(learned 1M) → Sonnet 5 stays at 1M", () => {
+        expect(learnContextWindow(1_000_000, 50_000, "claude-sonnet-5", "claude-sonnet-4-6")).toBe(1_000_000);
     });
     test("learn-up-only: never shrinks within a session", () => {
         expect(learnContextWindow(1_000_000, 50_000, "claude-sonnet-4-6")).toBe(1_000_000);

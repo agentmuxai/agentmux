@@ -4,14 +4,16 @@
 /**
  * Per-model context-window resolution for the agent-pane context meter.
  *
- * The window is NOT a per-provider constant: the Claude provider spans
- * Opus/Sonnet (1M) and Haiku (200K), and Sonnet itself is 200K by default but
- * 1M with the `context-1m-2025-08-07` beta. The CLI never reports the effective
- * window (verified — `system/init` and `result` carry `model` but no window
- * field), so we (a) SEED from the resolved model id the stream reports and
- * (b) LEARN upward from observed usage: a prompt can never exceed the real
- * window, so if it ever does, promote to the next known tier (this is what
- * catches Sonnet-1M).
+ * The window is NOT a per-provider constant, and it isn't even uniform within
+ * the Sonnet family: Opus/Fable/Mythos are 1M, Haiku is 200K, and Sonnet 4.x
+ * is 200K by default but 1M with the `context-1m-2025-08-07` beta — while
+ * Sonnet 5 ships with a 1M window by default, no beta gate. The CLI never
+ * reports the effective window (verified — `system/init` and `result` carry
+ * `model` but no window field), so for the beta-gated 4.x models we (a) SEED
+ * conservatively from the resolved model id and (b) LEARN upward from
+ * observed usage: a prompt can never exceed the real window, so if it ever
+ * does, promote to the next known tier. Sonnet 5+ skips the seed-low dance
+ * entirely since there's nothing to learn — it's always 1M.
  *
  * Spec: docs/specs/SPEC_CONTEXT_VISIBILITY_2026_06_17.md §5 P1.
  * Follow-ups (not here): seed the catalog from the Anthropic Models API on CLI
@@ -28,16 +30,29 @@ const COMPACTION_BUFFER = 33_000;
 /**
  * Seed window from a resolved model id/alias. Returns `undefined` for models we
  * don't recognise (non-Claude, or future ids) — the caller falls back to the
- * provider's static window. Sonnet seeds CONSERVATIVELY at 200K; the high-water
- * upgrade promotes it to 1M the moment context exceeds 200K (its beta-gated ceiling).
+ * provider's static window. Sonnet 4.x and earlier seed CONSERVATIVELY at 200K;
+ * the high-water upgrade promotes to 1M the moment context exceeds 200K (its
+ * beta-gated ceiling). Sonnet 5+ has no beta gate — it seeds at 1M directly.
  */
 export function contextWindowForModel(model: string | null | undefined): number | undefined {
     if (!model) return undefined;
     const m = model.toLowerCase();
     if (m.includes("haiku")) return 200_000;
     if (m.includes("opus") || m.includes("fable") || m.includes("mythos")) return 1_000_000;
-    if (m.includes("sonnet")) return 200_000; // conservative seed; learns up to 1M
+    if (m.includes("sonnet")) return sonnetMajorVersion(m) >= 5 ? 1_000_000 : 200_000;
     return undefined;
+}
+
+/**
+ * Major version number following "sonnet" in a model id or alias, e.g.
+ * "claude-sonnet-5" → 5, "claude-sonnet-4-6" → 4. The bare family alias
+ * ("sonnet") carries no version digits and returns 0 — treated as pre-5
+ * (conservative) since the CLI resolves it to whatever the current pin is,
+ * and we can't tell which from the string alone.
+ */
+function sonnetMajorVersion(m: string): number {
+    const match = m.match(/sonnet-(\d+)/);
+    return match ? parseInt(match[1], 10) : 0;
 }
 
 /** Smallest known tier strictly greater than `n`; `n` itself if above all tiers. */
