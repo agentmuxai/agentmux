@@ -124,6 +124,13 @@ mod tests {
     fn linkless_record_flips_to_ambient_linked_record_stays() {
         let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
+        // isolated_auth_enabled() now also defaults on AGENTMUX_CHANNEL
+        // (SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md) — a leaked
+        // non-"stable" value from a sibling test file sharing ENV_LOCK
+        // would flip this test's "not isolated" precondition without this.
+        // reagentx P2 on PR #2431 — the three other files sharing this
+        // lock were patched for this exact leak class; this one was missed.
+        std::env::remove_var("AGENTMUX_CHANNEL");
         let home = tempfile::tempdir().unwrap();
         let def_dir = home.path().join("shared").join("agents").join("definitions");
         let def_store = registry::DefinitionStore::open(def_dir.clone()).unwrap();
@@ -186,6 +193,7 @@ mod tests {
     fn skips_global_registry_rewrite_when_isolated() {
         let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("AGENTMUX_ISOLATED_AUTH", "1");
+        std::env::remove_var("AGENTMUX_CHANNEL");
 
         let home = tempfile::tempdir().unwrap();
         let def_dir = home.path().join("shared").join("agents").join("definitions");
@@ -225,6 +233,7 @@ mod tests {
     fn missing_registry_dir_is_a_noop() {
         let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
+        std::env::remove_var("AGENTMUX_CHANNEL");
         let home = tempfile::tempdir().unwrap();
         let ctx = MigrationContext {
             home: home.path().to_path_buf(),
