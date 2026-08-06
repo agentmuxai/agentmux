@@ -63,8 +63,20 @@ set "PATH=%GIT_BIN%;%GIT_USR%;%PATH%"
 :: quoting the caller's own arguments already carry; wrapping it in an
 :: extra `"..."` pair (`set "ARGS=%*"`) breaks quote-parity and reopens
 :: the same injection when a caller-quoted value contains its own quotes.
+::
+:: reagentx P0 (round 2): cmd.exe's `SetEnvironmentVariable` has no
+:: defined-but-empty state — `set ARGS=%*` with no args passed, or an
+:: earlier version's `set "TITLE_ARG="` with no auto-title needed, both
+:: DELETE the variable entirely instead of setting it to "". An undefined
+:: `%VAR%` is then left as the literal text `%VAR%` when spliced into a
+:: command line (unlike delayed `!VAR!` expansion, which the detection
+:: logic below already relies on and which correctly reads an undefined
+:: variable as empty). That broke the bare no-args call, this script's
+:: PRIMARY documented usage. Fixed below by never expanding a possibly-
+:: undefined %ARGS%/title token directly into the final command line —
+:: each branch only ever expands a variable it has just confirmed
+:: (`if defined`) is actually set.
 set ARGS=%*
-set "TITLE_ARG="
 setlocal enabledelayedexpansion
 set "U=!ARGS!"
 set "U=!U:"=!"
@@ -75,9 +87,12 @@ set "U=!U:e=E!"
 set "HAS_TITLE="
 if "!U:~0,6!"=="TITLE=" set "HAS_TITLE=1"
 if not "!U!"=="!U: TITLE==!" set "HAS_TITLE=1"
-set "NEWTITLE="
-if not defined HAS_TITLE if not "%AGENTMUX_AGENT_ID%"=="" set "NEWTITLE=TITLE=%AGENTMUX_AGENT_ID%"
-endlocal & set "TITLE_ARG=%NEWTITLE%"
+:: Always assigned a real (non-empty) value on both branches — unlike
+:: TITLE_ARG above, "0"/"1" can safely round-trip through `endlocal & set`
+:: without hitting the same empty-value-undefines-it trap.
+set "NEED_AUTO_TITLE_INNER=0"
+if not defined HAS_TITLE if not "%AGENTMUX_AGENT_ID%"=="" set "NEED_AUTO_TITLE_INNER=1"
+endlocal & set "NEED_AUTO_TITLE=%NEED_AUTO_TITLE_INNER%"
 
 :: Call bare `task` (no extension) — this .cmd wrapper itself runs under cmd.exe
 :: (Gap A only applies to bash resolving .cmd files, not to us), so PATHEXT
@@ -86,4 +101,26 @@ endlocal & set "TITLE_ARG=%NEWTITLE%"
 :: depends on how `task` was installed on the machine.
 :: Merge stderr into stdout so shell viewers don't color build progress red
 :: (cargo writes all output to stderr, not stdout).
-task dev %ARGS% %TITLE_ARG% 2>&1
+::
+:: Four explicit branches (rather than building one command-line string in
+:: a variable) so every %ARGS%/%AGENTMUX_AGENT_ID% expansion happens
+:: directly at a real `task dev` invocation, never round-tripped through
+:: an intermediate `set "X=...token with embedded quotes..."` — cmd.exe's
+:: quote-nesting inside `set "VAR=...""..."""` is fragile enough to be its
+:: own bug source. The auto-generated title is quoted as ONE token
+:: (`"TITLE=%AGENTMUX_AGENT_ID%"`, matching the caller-supplied usage
+:: convention documented above) — reagentx P2 (round 2): unquoted, a
+:: multi-word AGENTMUX_AGENT_ID would split into separate positional args.
+if "%NEED_AUTO_TITLE%"=="1" (
+    if defined ARGS (
+        task dev %ARGS% "TITLE=%AGENTMUX_AGENT_ID%" 2>&1
+    ) else (
+        task dev "TITLE=%AGENTMUX_AGENT_ID%" 2>&1
+    )
+) else (
+    if defined ARGS (
+        task dev %ARGS% 2>&1
+    ) else (
+        task dev 2>&1
+    )
+)
