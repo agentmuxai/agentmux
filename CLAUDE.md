@@ -73,6 +73,22 @@ grep "shell\." ~/.agentmux/logs/agentmuxsrv-*.log.$(date +%Y-%m-%d)
 
 See `docs/retro/retro-task-dev-agent-shell-path-2026-06-27.md` for full analysis.
 
+#### Launching `task package` from an agent / MCP Shell (Windows)
+
+Same idea as `task dev` above, but `mcp__agentmux__Shell` spawns Windows commands via `cmd /C` directly (server-side, no bash/MSYS2 layer at all) — so the specific traps are different:
+
+- **Don't pass a Unix-style path** (`/c/Users/...`) as the `cwd`/in the command — `cmd.exe` can't parse it and fails instantly (`exit_code: 1`, ~1 line).
+- **Don't wrap the command in your own `cmd /C "..."`** — `ShellNodeRunner` already wraps every command in `cmd /C` itself; adding a second one produces a broken nested-quoting invocation (`exit_code: 1`, ~2 lines).
+- **`ShellStatus` cannot return output content** — only `running`/`exit_code`/`line_count`. Redirect the command's own stdout/stderr to a file and `Read` that file directly; there is no other way to inspect a shell's output after the fact.
+
+**Use `scripts\package-agent.cmd` instead of `task package` directly, with output redirected to a file:**
+
+```json
+{ "cmd": "C:\\<repo>\\scripts\\package-agent.cmd > C:\\<repo>\\pkg-build.log 2>&1" }
+```
+
+Then poll `ShellStatus` for `running: false` and `Read` the log file for progress/results. `task package` (full CEF host build) routinely exceeds the Bash tool's own timeout — this is the only reliable way to run it from an agent. See `docs/retro/retro-task-package-mcp-timeout-and-shell-output-gap-2026-08-06.md` for the full investigation (Bash-tool timeout, `nohup` not detaching, and this gap all confirmed there).
+
 ### Build Prerequisites
 
 CMake and Ninja are required for `cef-dll-sys` (builds CEF's C wrapper). Both must be on PATH.
