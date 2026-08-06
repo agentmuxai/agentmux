@@ -442,7 +442,15 @@ pub fn isolated_auth_enabled() -> bool {
 pub enum IsolatedAuthReason {
     /// `AGENTMUX_ISOLATED_AUTH=1`.
     ExplicitOptIn,
-    /// `AGENTMUX_ISOLATED_AUTH=0`.
+    /// `AGENTMUX_ISOLATED_AUTH` is set to anything other than exactly
+    /// `"1"` (`"0"`, `""`, a typo like `"false"`, anything). Fail-safe by
+    /// construction: before this default-by-channel change,
+    /// `isolated_auth_enabled()` was `.map(|v| v == "1")` — every
+    /// non-`"1"` value already meant global, including malformed ones.
+    /// Preserving that exact rule (rather than only special-casing `"0"`)
+    /// means a typo in an opt-out attempt can't silently isolate a
+    /// non-stable channel instead of the safe fallback (reagentx P2 on
+    /// PR #2431).
     ExplicitOptOut,
     /// No override; `AGENTMUX_CHANNEL` is set and isn't `"stable"`.
     ChannelDefaultIsolated,
@@ -467,10 +475,15 @@ impl IsolatedAuthReason {
 }
 
 pub fn isolated_auth_reason() -> IsolatedAuthReason {
-    match std::env::var("AGENTMUX_ISOLATED_AUTH").ok().as_deref() {
-        Some("1") => IsolatedAuthReason::ExplicitOptIn,
-        Some("0") => IsolatedAuthReason::ExplicitOptOut,
-        _ => match std::env::var("AGENTMUX_CHANNEL") {
+    match std::env::var("AGENTMUX_ISOLATED_AUTH") {
+        // Exactly "1" isolates. Any OTHER value the var is explicitly set
+        // to — "0", "", a typo — falls to ExplicitOptOut, not through to
+        // the channel default. See ExplicitOptOut's doc comment: this
+        // preserves the pre-existing `.map(|v| v == "1")` fail-safe rule
+        // for every malformed value, not just "0".
+        Ok(v) if v == "1" => IsolatedAuthReason::ExplicitOptIn,
+        Ok(_) => IsolatedAuthReason::ExplicitOptOut,
+        Err(_) => match std::env::var("AGENTMUX_CHANNEL") {
             Ok(ch) if ch != "stable" => IsolatedAuthReason::ChannelDefaultIsolated,
             _ => IsolatedAuthReason::ChannelDefaultGlobal,
         },
@@ -1192,6 +1205,32 @@ mod tests {
         clear_channel_env();
         assert_eq!(isolated_auth_reason(), IsolatedAuthReason::ChannelDefaultGlobal);
         assert!(!isolated_auth_reason().is_isolated());
+    }
+
+    #[test]
+    fn isolated_auth_reason_fails_safe_on_a_malformed_value_on_a_non_stable_channel() {
+        // reagentx P2 on PR #2431: a typo'd opt-out attempt (anything other
+        // than exactly "1") must land on ExplicitOptOut (global), matching
+        // the pre-existing `.map(|v| v == "1")` rule for every non-"1"
+        // value — it must NOT fall through to the channel default and
+        // silently isolate a non-stable channel just because the intended
+        // "0" was misspelled.
+        let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_channel_env();
+        std::env::set_var("AGENTMUX_CHANNEL", "dev-some-branch");
+
+        for malformed in ["false", "no", "TRUE", "2", ""] {
+            std::env::set_var("AGENTMUX_ISOLATED_AUTH", malformed);
+            assert_eq!(
+                isolated_auth_reason(),
+                IsolatedAuthReason::ExplicitOptOut,
+                "AGENTMUX_ISOLATED_AUTH={malformed:?} on a non-stable channel must fail safe to global, not isolate"
+            );
+            assert!(!isolated_auth_reason().is_isolated());
+        }
+
+        std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
+        clear_channel_env();
     }
 
     #[test]
