@@ -193,6 +193,17 @@ declare global {
         feedback?: string;
     };
 
+    // wshrpc.CommandDockNodeStatusData — fire-and-forget push whenever a
+    // ToolNode's status changes. Backs `muxspect dock`. Spec:
+    // docs/specs/SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06.md §3.1.
+    type CommandDockNodeStatusData = {
+        blockid: string;
+        node_id: string;
+        tool_name: string;
+        status: string;
+        timestamp?: number;
+    };
+
     // CommandAgentAnswerData — AskUserQuestion answer, delivered to the running
     // agent CLI via the Agent SDK control protocol (a control_response carrying
     // updatedInput.answers). Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.

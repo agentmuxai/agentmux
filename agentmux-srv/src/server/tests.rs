@@ -66,6 +66,7 @@ pub(crate) fn test_state() -> AppState {
         lsp_supervisor: Arc::new(crate::backend::lsp::LspSupervisor::new(event_bus.clone())),
         process_tracker,
         process_broker,
+        dock_snapshots: Arc::new(crate::backend::dock_snapshot::DockSnapshotCache::new()),
         // Phase E.2c.2 — workspace RPC dispatches through reducer.
         // Tests get fresh state + a dummy broadcast bus.
         srv_state: Arc::new(tokio::sync::Mutex::new(crate::state::State::default())),

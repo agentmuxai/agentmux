@@ -632,6 +632,35 @@ export function update(
                 ],
             };
         }
+
+        case "ForceCancelToolNode": {
+            const idx = findToolIndex(state, command.nodeId);
+            if (idx === -1) {
+                return {
+                    state,
+                    events: [
+                        {
+                            type: "tool-force-cancel-skipped",
+                            nodeId: command.nodeId,
+                            reason: nodeReasonFor(state, command.nodeId),
+                        },
+                    ],
+                };
+            }
+            const tool = state.nodes[idx] as ToolNode;
+            const closedLog = tool.log != null ? { ...tool.log, open: false } : tool.log;
+            const nextNodes = state.nodes.slice();
+            nextNodes[idx] = {
+                ...tool,
+                status: "canceled",
+                log: closedLog,
+                summary: "⏹ Canceled — cleared via muxspect",
+            };
+            return {
+                state: { ...state, nodes: nextNodes },
+                events: [{ type: "tool-force-canceled", nodeId: command.nodeId }],
+            };
+        }
     }
 }
 

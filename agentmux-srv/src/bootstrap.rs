@@ -1441,6 +1441,7 @@ pub fn build_app_state(
             }),
         process_tracker: net.process_tracker.clone(),
         process_broker: net.process_broker.clone(),
+        dock_snapshots: std::sync::Arc::new(crate::backend::dock_snapshot::DockSnapshotCache::new()),
         // Phase E.2c.2 — reducer state + event bus exposed to HTTP/WS
         // dispatch handlers. Workspace handlers route through the
         // reducer and publish events to `srv_events_tx`; the persist

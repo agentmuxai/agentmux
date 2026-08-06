@@ -116,6 +116,11 @@ pub struct AppState {
     /// directly at each call site. See `crate::broker::process` and
     /// `docs/specs/REPORT_PROCESS_ARCHITECTURE_STATE_AND_RETHINK_2026_07_22.md`.
     pub process_broker: Arc<crate::broker::ProcessBroker>,
+    /// In-memory, latest-per-block cache of Activity Dock `ToolNode` status
+    /// deltas pushed by the frontend. Backs `muxspect dock`/`muxspect dock
+    /// clear`. Never persisted — see
+    /// `docs/specs/SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06.md`.
+    pub dock_snapshots: Arc<crate::backend::dock_snapshot::DockSnapshotCache>,
     /// Live controller for mDNS-based LAN/host peer discovery. The controller
     /// owns a swappable daemon slot so the `network:lan_discovery` setting can
     /// be toggled at runtime without restarting the process.
@@ -366,6 +371,12 @@ pub fn build_router(state: AppState) -> Router {
         // own environment, no new IPC).
         .route("/api/v1/muxspect/list", get(muxspect_handlers::handle_muxspect_list))
         .route("/api/v1/muxspect/describe", get(muxspect_handlers::handle_muxspect_describe))
+        // Dock diagnosis/remediation extension (2026-08-06 spec) — `dock` is
+        // read-only like the two routes above; `dock/clear` is this module's
+        // first mutating route (narrowly scoped — see the handler's own doc
+        // comment for why).
+        .route("/api/v1/muxspect/dock", get(muxspect_handlers::handle_muxspect_dock))
+        .route("/api/v1/muxspect/dock/clear", post(muxspect_handlers::handle_muxspect_dock_clear))
         // Agent App API — identity / preset / memory namespaces, the MCP-facing
         // slice of the app-API RPC surface (SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28).
         // The agent identity (`agent_id`) is supplied by agentmux-mcp from its

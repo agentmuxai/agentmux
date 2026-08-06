@@ -657,6 +657,73 @@ describe("agent document reducer", () => {
         });
     });
 
+    describe("ForceCancelToolNode", () => {
+        it("flips a running tool node to canceled, with a distinguishing summary", () => {
+            const start = seed([tool("t1", { status: "running" })]);
+            const r = update(start, { type: "ForceCancelToolNode", nodeId: "t1" });
+            const t = r.state.nodes.find((n) => n.id === "t1") as ToolNode;
+            expect(t.status).toBe("canceled");
+            expect(t.summary).toBe("⏹ Canceled — cleared via muxspect");
+            expect(r.events[0]).toEqual({ type: "tool-force-canceled", nodeId: "t1" });
+        });
+
+        it("closes an open log when canceling", () => {
+            const start = seed([tool("t1", { status: "running", log: { chunks: [], open: true } })]);
+            const r = update(start, { type: "ForceCancelToolNode", nodeId: "t1" });
+            const t = r.state.nodes.find((n) => n.id === "t1") as ToolNode;
+            expect(t.log?.open).toBe(false);
+        });
+
+        it("can cancel a tool node regardless of its current status (not just running)", () => {
+            // muxspect dock clear is a manual override — it shouldn't refuse
+            // just because the node already resolved by the time it runs.
+            const start = seed([tool("t1", { status: "success" })]);
+            const r = update(start, { type: "ForceCancelToolNode", nodeId: "t1" });
+            const t = r.state.nodes.find((n) => n.id === "t1") as ToolNode;
+            expect(t.status).toBe("canceled");
+        });
+
+        it("no-ops on an unknown node id", () => {
+            const start = seed([tool("t1")]);
+            const r = update(start, { type: "ForceCancelToolNode", nodeId: "ghost" });
+            expect(r.state).toBe(start);
+            expect(r.events[0]).toEqual({
+                type: "tool-force-cancel-skipped",
+                nodeId: "ghost",
+                reason: "unknown-tool-id",
+            });
+        });
+
+        it("no-ops on a non-tool node (markdown id collision)", () => {
+            const start = seed([md("m1")]);
+            const r = update(start, { type: "ForceCancelToolNode", nodeId: "m1" });
+            expect(r.state).toBe(start);
+            expect(r.events[0]).toEqual({
+                type: "tool-force-cancel-skipped",
+                nodeId: "m1",
+                reason: "node-not-tool",
+            });
+        });
+
+        it("only mutates the targeted tool — siblings stay referentially equal", () => {
+            const t1 = tool("t1");
+            const t2 = tool("t2");
+            const start = seed([t1, t2]);
+            const r = update(start, { type: "ForceCancelToolNode", nodeId: "t1" });
+            expect(r.state.nodes[0]).not.toBe(start.nodes[0]);
+            expect(r.state.nodes[1]).toBe(start.nodes[1]);
+        });
+
+        it("is idempotent — canceling an already-canceled node is a no-op event-wise but still succeeds", () => {
+            const start = seed([tool("t1", { status: "running" })]);
+            const once = update(start, { type: "ForceCancelToolNode", nodeId: "t1" });
+            const twice = update(once.state, { type: "ForceCancelToolNode", nodeId: "t1" });
+            const t = twice.state.nodes.find((n) => n.id === "t1") as ToolNode;
+            expect(t.status).toBe("canceled");
+            expect(twice.events[0]).toEqual({ type: "tool-force-canceled", nodeId: "t1" });
+        });
+    });
+
     describe("StreamFlush + ToolChunkAppend interaction", () => {
         it("preserves log.chunks when tool_result replaces a running tool", () => {
             // 1. Tool starts running.

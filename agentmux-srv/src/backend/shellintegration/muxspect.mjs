@@ -32,6 +32,16 @@ Usage:
                                   full detail for one block (process status,
                                   controller status, OS process tree)
   muxspect watch <block_id>       poll 'describe' every 2s until Ctrl+C
+  muxspect dock <block_id> [--json]
+                                  Activity Dock ToolNode status snapshot for
+                                  one block — diagnoses stuck 'running'
+                                  entries (SPEC_MUXSPECT_DOCK_DIAGNOSIS_
+                                  AND_REMEDIATION_2026_08_06.md)
+  muxspect dock clear <block_id> <node_id>
+                                  force-clear one stuck dock entry, live, in
+                                  whatever renderer currently has that block
+                                  open — no pane reload needed. muxspect's
+                                  only mutating command; see the spec above.
   muxspect help                   this message
 
 Requires $AGENTMUX_LOCAL_URL and $AGENTMUX_AUTH_KEY in the environment.
@@ -77,6 +87,29 @@ async function apiGet(url, authKey, urlPath) {
     if (!resp.ok) {
         const body = await resp.text().catch(() => "");
         fail(`request failed (${resp.status}): ${body || resp.statusText}`);
+    }
+    return resp.json();
+}
+
+// `dock clear` is muxspect's first mutating call — see
+// docs/specs/SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06.md §2.
+// Same shape as apiGet (same auth header, same fail()-on-non-2xx contract,
+// including on the handler's 404 "no such node" response — from the CLI's
+// perspective, "the clear didn't happen" is a failure worth a non-zero exit).
+async function apiPost(url, authKey, urlPath, body) {
+    let resp;
+    try {
+        resp = await fetch(`${url}${urlPath}`, {
+            method: "POST",
+            headers: { "X-AuthKey": authKey, "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+        });
+    } catch (e) {
+        fail(`could not reach ${url} — instance unreachable (${e.message})`);
+    }
+    if (!resp.ok) {
+        const respBody = await resp.text().catch(() => "");
+        fail(`request failed (${resp.status}): ${respBody || resp.statusText}`);
     }
     return resp.json();
 }
@@ -178,29 +211,79 @@ function renderDescribe(data) {
     }
 }
 
+// Like ageString, but for a duration already expressed in ms (the `dock`
+// endpoint returns `age_ms` directly, not a timestamp to diff against
+// Date.now() — using ageString here would silently compute a bogus value).
+function msToAge(ms) {
+    if (ms < 1000) return `${ms}ms`;
+    if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+    return `${Math.round(ms / 60_000)}m`;
+}
+
+function renderDock(data) {
+    console.log(`block_id: ${data.block_id}`);
+    const nodes = data.nodes ?? [];
+    if (nodes.length === 0) {
+        console.log("(no tracked dock nodes for this block)");
+        return;
+    }
+    const rows = nodes.map((n) => ({
+        node_id: n.node_id,
+        tool: n.tool_name,
+        status: n.status,
+        age: msToAge(n.age_ms),
+        stuck: n.stuck ? "STUCK?" : "",
+    }));
+    const cols = ["node_id", "tool", "status", "age", "stuck"];
+    const widths = Object.fromEntries(
+        cols.map((c) => [c, Math.max(c.length, ...rows.map((r) => String(r[c]).length))])
+    );
+    const line = (r) => cols.map((c) => String(r[c]).padEnd(widths[c])).join("  ");
+    console.log(line(Object.fromEntries(cols.map((c) => [c, c]))));
+    for (const r of rows) console.log(line(r));
+    if (rows.some((r) => r.stuck)) {
+        console.log(`\nSTUCK? nodes: 'running' past the promotion threshold with nothing srv-side backing this block.`);
+        console.log(`Clear one with: muxspect dock clear ${data.block_id} <node_id>`);
+    }
+}
+
 /**
- * Split argv into `{ cmd, blockId, json, help }`, flags-and-positionals
- * separated regardless of ordering. Flags can legally appear before OR
- * after the positional args (both 'muxspect describe --json <id>' and
- * 'muxspect --json describe <id>' are natural to type) — filtering them out
- * first, then reading command/args positionally, is what makes both orders
- * work; indexing into the raw, flag-interspersed argv (the original
- * implementation) silently ran 'list' instead of 'describe' — or picked up
- * a flag string as the block_id — depending on where the flag landed
- * (reagent P2 on PR #2380). Exported (pure, no I/O) for
- * muxspect.test.mjs.
+ * Split argv into `{ cmd, sub, blockId, nodeId, json, help }`,
+ * flags-and-positionals separated regardless of ordering. Flags can
+ * legally appear before OR after the positional args (both 'muxspect
+ * describe --json <id>' and 'muxspect --json describe <id>' are natural to
+ * type) — filtering them out first, then reading command/args
+ * positionally, is what makes both orders work; indexing into the raw,
+ * flag-interspersed argv (the original implementation) silently ran
+ * 'list' instead of 'describe' — or picked up a flag string as the
+ * block_id — depending on where the flag landed (reagent P2 on PR #2380).
+ *
+ * `dock clear <block_id> <node_id>` doesn't fit the flat `{cmd, blockId}`
+ * shape the other subcommands use (three positionals after the flag
+ * filter, not two) — `sub` disambiguates `dock <block_id>` (read) from
+ * `dock clear <block_id> <node_id>` (write) so `main()` doesn't have to
+ * re-parse positional[1] itself.
+ *
+ * Exported (pure, no I/O) for muxspect.test.mjs.
  */
 export function parseArgs(argv) {
     const json = argv.includes("--json");
     const help = argv.includes("--help") || argv.includes("-h");
     const positional = argv.filter((a) => !a.startsWith("-"));
     const cmd = positional[0] ?? "list";
-    const blockId = positional[1];
-    return { cmd, blockId, json, help };
+    let sub, blockId, nodeId;
+    if (cmd === "dock" && positional[1] === "clear") {
+        sub = "clear";
+        blockId = positional[2];
+        nodeId = positional[3];
+    } else {
+        blockId = positional[1];
+    }
+    return { cmd, sub, blockId, nodeId, json, help };
 }
 
 async function main() {
-    const { cmd, blockId, json, help } = parseArgs(process.argv.slice(2));
+    const { cmd, sub, blockId, nodeId, json, help } = parseArgs(process.argv.slice(2));
 
     if (cmd === "help" || help) {
         console.log(USAGE);
@@ -213,6 +296,22 @@ async function main() {
         const data = await apiGet(url, authKey, "/api/v1/muxspect/list");
         if (json) console.log(JSON.stringify(data, null, 2));
         else renderList(data);
+        return;
+    }
+
+    if (cmd === "dock" && sub === "clear") {
+        if (!blockId || !nodeId) fail("dock clear requires a block_id and node_id — 'muxspect dock clear <block_id> <node_id>'");
+        const data = await apiPost(url, authKey, "/api/v1/muxspect/dock/clear", { block_id: blockId, node_id: nodeId });
+        if (json) console.log(JSON.stringify(data, null, 2));
+        else console.log(`cleared: node ${nodeId} in block ${blockId}`);
+        return;
+    }
+
+    if (cmd === "dock") {
+        if (!blockId) fail("dock requires a block_id — 'muxspect dock <block_id>'");
+        const data = await apiGet(url, authKey, `/api/v1/muxspect/dock?block_id=${encodeURIComponent(blockId)}`);
+        if (json) console.log(JSON.stringify(data, null, 2));
+        else renderDock(data);
         return;
     }
 
