@@ -53,7 +53,7 @@ export type InitState = {
 /**
  * Document node types that make up the agent's markdown document
  */
-export type DocumentNode = MarkdownNode | SectionNode | ToolNode | AgentMessageNode | UserMessageNode | ShellNode | AgentErrorNode | ContextCompactedNode | CompactionStartedNode | JektMessageNode;
+export type DocumentNode = MarkdownNode | SectionNode | ToolNode | AgentMessageNode | UserMessageNode | ShellNode | AgentErrorNode | ContextCompactedNode | CompactionStartedNode | JektMessageNode | SessionOutcomeNode;
 
 /**
  * Raw markdown text block
@@ -421,6 +421,24 @@ export interface CompactionStartedNode {
     id: string;
     trigger: "manual" | "auto";
     startedAt: number;
+}
+
+/**
+ * Transcript boundary marker for a `--resume` attempt's outcome — sourced
+ * from AgentMux's own `agentmux_session_outcome` frame (the backend's
+ * `persistent_resume` state machine, not the provider CLI). `"resumed"`
+ * means the CLI genuinely continued the prior session; `"fresh"` means it
+ * could not, and the model has none of the turns before this marker even
+ * though the pane's scrollback above it is still fully visible. See
+ * docs/specs/SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md §2.2.
+ */
+export interface SessionOutcomeNode {
+    type: "session_outcome";
+    id: string;
+    outcome: "resumed" | "fresh";
+    attemptedSid: string;
+    actualSid: string | null;
+    timestamp: number;
 }
 
 /**

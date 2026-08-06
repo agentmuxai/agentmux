@@ -151,6 +151,8 @@ export const STREAMING_CAPABLE: Record<NodeKind, boolean> = {
     compaction_started: false,
     // Arrives as a single complete user_message event, not chunk-by-chunk.
     jekt_message: false,
+    // One-shot marker, same as context_compacted — not chunked.
+    session_outcome: false,
 };
 
 /**
@@ -170,6 +172,7 @@ export function estimateNode(node: DocumentNode, state: DocumentState): number {
         case "agent_error":       return 64;
         case "context_compacted": return 48;
         case "compaction_started": return 32;
+        case "session_outcome":   return 48;
     }
 }
 
@@ -210,6 +213,7 @@ export function estimateNodeForState(
             case "agent_error":       return 64;
             case "context_compacted": return 48;
             case "compaction_started": return 32;
+            case "session_outcome":   return 48;
         }
     }
     // expanded
@@ -224,5 +228,6 @@ export function estimateNodeForState(
         case "agent_error":       return 64;
         case "context_compacted": return 48;
         case "compaction_started": return 32;
+        case "session_outcome":   return 48;
     }
 }

@@ -300,6 +300,24 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     );
                 })()}
             </Show>
+            <Show when={props.node() && props.node().type === "session_outcome"}>
+                {(() => {
+                    const n = props.node() as Extract<DocumentNode, { type: "session_outcome" }>;
+                    const resumed = n.outcome === "resumed";
+                    return (
+                        <div class={resumed ? "agent-session-outcome" : "agent-session-outcome agent-session-outcome-fresh"}>
+                            <div class="agent-session-outcome-label">
+                                {resumed ? "Session continued" : "New session started"}
+                            </div>
+                            <Show when={!resumed}>
+                                <div class="agent-session-outcome-detail">
+                                    Prior conversation is not available to this agent
+                                </div>
+                            </Show>
+                        </div>
+                    );
+                })()}
+            </Show>
         </>
     );
 }
