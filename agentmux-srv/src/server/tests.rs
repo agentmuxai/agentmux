@@ -1223,10 +1223,15 @@ async fn introspection_lists_return_collections() {
     }
 }
 
-/// `resolve_agent_definition_id` maps the S1-authenticated agent slug
-/// (instance_name) to the definition id that keys
-/// `db_agent_identity_links`, passes real definition ids through
-/// unchanged, and errors on unknown ids. Guards the #1624 PR-C fix for
+/// `resolve_agent_definition_id` maps the S1-authenticated agent's
+/// `AGENTMUX_AGENT_ID` — the persisted `slug` column, NOT `instance_name`
+/// (see `instance_get_by_slug`'s doc comment,
+/// SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md follow-up — reagentx
+/// P1 on PR #2428 caught this same slug/display-name conflation baked
+/// into this test itself: it used to pass the display name and call it
+/// "slug") — to the definition id that keys `db_agent_identity_links`,
+/// passes real definition ids through unchanged, and errors on unknown
+/// ids. Guards the #1624 PR-C fix for
 /// identity.account.upsert/self.accounts/self.unlink writing the slug
 /// into the link table (FK failure on per-channel stores; silent
 /// resolver-invisible rows on the shared store).
@@ -1234,10 +1239,13 @@ async fn introspection_lists_return_collections() {
 async fn resolve_agent_definition_id_maps_slug_and_passes_through_def_id() {
     let state = test_state();
 
+    // `slug` and `name`/`instance_name` deliberately differ (a stable
+    // routing slug vs. a renameable display name) so this test can't
+    // accidentally pass by conflating the two, the way it used to.
     let mut def: crate::backend::storage::AgentDefinition = serde_json::from_value(serde_json::json!({
         "id": "def-test-1", // caller-assigned; agent_def_insert stores it as-is
         "slug": "testslug",
-        "name": "TestSlug",
+        "name": "Test Slug Display",
         "icon": "robot",
         "provider": "claude",
         "description": "test agent",
@@ -1254,14 +1262,16 @@ async fn resolve_agent_definition_id_maps_slug_and_passes_through_def_id() {
         "created_at": 1,
         "identity_id": "",
         "memory_id": "",
-        "instance_name": "TestSlug",
+        "instance_name": "Test Slug Display",
         "working_directory": "",
     }))
     .expect("instance fixture");
     state.wstore.instance_create(&inst).expect("create instance");
 
-    // Slug → definition id.
-    let resolved = super::app_api::resolve_agent_definition_id(&state, "TestSlug")
+    // Slug (AGENTMUX_AGENT_ID, what a real MCP-tool caller actually sends)
+    // → definition id. NOT the display name — that's a different,
+    // deliberately-mismatched value in this fixture.
+    let resolved = super::app_api::resolve_agent_definition_id(&state, "testslug")
         .expect("slug resolves");
     assert_eq!(resolved, def.id);
 
@@ -1269,6 +1279,14 @@ async fn resolve_agent_definition_id_maps_slug_and_passes_through_def_id() {
     let passthrough = super::app_api::resolve_agent_definition_id(&state, &def.id)
         .expect("definition id passes through");
     assert_eq!(passthrough, def.id);
+
+    // The literal display name must NOT resolve — it lives in a
+    // different namespace than the slug (see instance_get_by_slug's doc
+    // comment for why merging the two was unsafe).
+    assert!(
+        super::app_api::resolve_agent_definition_id(&state, "Test Slug Display").is_err(),
+        "the display name is not the slug and must not resolve"
+    );
 
     // Unknown ids error instead of silently writing bogus link rows.
     assert!(super::app_api::resolve_agent_definition_id(&state, "no-such-agent").is_err());

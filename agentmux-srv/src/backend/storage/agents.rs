@@ -1596,6 +1596,23 @@ impl Store {
     /// detection only cares about identity / cwd; ContinueNamed only
     /// cares about `id` + bindings).
     /// Spec: docs/specs/SPEC_AGENT_ARCHITECTURE_2026_05_27.md §3b.
+    /// Resolve an instance by its literal `instance_name` — the
+    /// "named agent" continuation lookup (picker collision detection,
+    /// `ContinueNamed`). Matches ONLY `instance_name`; unrelated to App
+    /// API self-lookup (see `instance_get_by_slug` below) — kept
+    /// deliberately single-purpose after reagentx P1 on PR #2428 (round
+    /// 2): an earlier version of this function ALSO matched `OR slug =
+    /// ?1` in the same query, which meant a coincidental cross-namespace
+    /// collision (an unrelated agent's `instance_name` happening to equal
+    /// this agent's `slug`, or vice versa) could match both rows
+    /// simultaneously, with `ORDER BY updated_at DESC LIMIT 1` silently
+    /// picking whichever was touched most recently instead of ever
+    /// signaling the ambiguity — i.e. one agent's App-API self-lookup
+    /// could silently return a completely unrelated agent's memory/
+    /// identity/bundle. Two single-purpose, unambiguous functions (each
+    /// backed by an exact match on ONE column) instead of one function
+    /// serving two different namespaces closes that off entirely, rather
+    /// than trying to prioritize/tie-break between them.
     pub fn instance_get_by_name(
         &self,
         instance_name: &str,
@@ -1628,25 +1645,55 @@ impl Store {
              ORDER BY updated_at DESC, created_at DESC
              LIMIT 1",
         )?;
-        let result = stmt.query_row(params![instance_name], |row| {
-            Ok(AgentInstance {
-                id: row.get(0)?,
-                definition_id: row.get(1)?,
-                parent_instance_id: String::new(),
-                block_id: String::new(),
-                session_id: String::new(),
-                status: String::new(),
-                github_context: row.get(2)?,
-                started_at: row.get(3)?, // created_at — best proxy for the consolidated row
-                ended_at: 0,
-                created_at: row.get(3)?,
-                identity_id: row.get(4)?,
-                memory_id: row.get(5)?,
-                instance_name: row.get(6)?,
-                working_directory: row.get(7)?,
-                display_hidden: row.get::<_, i64>(8)? != 0,
-            })
-        });
+        let result = stmt.query_row(params![instance_name], map_agent_instance_row);
+        match result {
+            Ok(a) => Ok(Some(a)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Resolve an instance by its persisted `slug` — the App-API
+    /// self-lookup path (`memory.*`, `identity.self.*`,
+    /// `bundle.self.get`). Every one of those callers' `agent_id`
+    /// actually comes from `AGENTMUX_AGENT_ID`, the routing slug
+    /// stamped onto the MCP server's env straight from `agent.slug`
+    /// (`app_api::agent_open`) — the same stable, collision-resolved
+    /// value stored in `db_agents.slug` (`agent_def_insert_local_only`,
+    /// never changes after creation, unlike the renameable
+    /// `instance_name` — see `AgentDefinition::slug`'s own doc comment).
+    /// Deliberately does NOT also try `instance_name` — see
+    /// `instance_get_by_name`'s doc comment for why merging the two
+    /// namespaces into one query was unsafe (reagentx P1 on PR #2428).
+    /// `slug` is globally unique by construction (the collision-resolve
+    /// loop in `agent_def_insert_local_only`), so an exact match here is
+    /// unambiguous; `LIMIT 1` is a defensive no-op, not a tie-break.
+    ///
+    /// Confirmed live against a real agent named "AgentY" (slug
+    /// "agenty"): before this existed, `MemoryList` failed with "agent
+    /// agenty not found" and `IdentityAccounts` with "unknown agent
+    /// 'agenty'" — both resolved once App-API callers switched to this.
+    pub fn instance_get_by_slug(
+        &self,
+        slug: &str,
+    ) -> Result<Option<AgentInstance>, StoreError> {
+        if slug.is_empty() {
+            return Ok(None);
+        }
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, id AS def_id,
+                    github_context, created_at,
+                    identity_id, memory_id, instance_name, working_directory,
+                    user_hidden
+             FROM db_agents
+             WHERE slug = ?1
+               AND is_template = 0
+               AND user_hidden = 0
+             ORDER BY updated_at DESC, created_at DESC
+             LIMIT 1",
+        )?;
+        let result = stmt.query_row(params![slug], map_agent_instance_row);
         match result {
             Ok(a) => Ok(Some(a)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -1999,6 +2046,29 @@ fn map_instance_row(row: &rusqlite::Row) -> rusqlite::Result<AgentInstance> {
     })
 }
 
+/// Row mapper for `instance_get_by_name`'s two queries (exact-match and
+/// the slug-normalized fallback scan) — column order MUST match both
+/// SELECTs there.
+fn map_agent_instance_row(row: &rusqlite::Row) -> rusqlite::Result<AgentInstance> {
+    Ok(AgentInstance {
+        id: row.get(0)?,
+        definition_id: row.get(1)?,
+        parent_instance_id: String::new(),
+        block_id: String::new(),
+        session_id: String::new(),
+        status: String::new(),
+        github_context: row.get(2)?,
+        started_at: row.get(3)?, // created_at — best proxy for the consolidated row
+        ended_at: 0,
+        created_at: row.get(3)?,
+        identity_id: row.get(4)?,
+        memory_id: row.get(5)?,
+        instance_name: row.get(6)?,
+        working_directory: row.get(7)?,
+        display_hidden: row.get::<_, i64>(8)? != 0,
+    })
+}
+
 /// Row mapper for `db_agents` rows projected back into the
 /// `AgentDefinition` shape. The column order MUST match the SELECT in
 /// `agent_def_list`. `parent_template_id` maps to `parent_id` because
@@ -2132,6 +2202,159 @@ mod tests {
         // swallow a real error.
         let result = store.instance_create(&instance("inst-2", "nowhere"));
         assert!(result.is_err(), "instance_create must still fail for a truly orphaned definition_id");
+    }
+
+    // SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md follow-up: App-API
+    // self-lookup callers (MemoryList/Read/Write, IdentityAccounts,
+    // IdentityValidate, bundle.self.get) pass the AGENTMUX_AGENT_ID routing
+    // slug, not the literal display name. Confirmed live: a real agent
+    // named "AgentY" (slug "agenty") got "agent agenty not found" from
+    // every one of those endpoints before `instance_get_by_slug` existed.
+    #[test]
+    fn instance_get_by_slug_resolves_a_mixed_case_display_name_via_its_slug() {
+        let store = Store::open_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let def_store = Arc::new(DefinitionStore::open(tmp.path().join("definitions")).unwrap());
+        def_store.upsert(&global_user_agent("def-agenty", "AgentY")).unwrap();
+        store.set_def_registry(def_store);
+
+        let mut inst = instance("inst-agenty", "def-agenty");
+        inst.instance_name = "AgentY".to_string();
+        store.instance_create(&inst).unwrap();
+
+        // The routing slug ("agenty", what every MCP-tool-backed App-API
+        // endpoint actually has) must resolve to the display-cased row.
+        let found = store.instance_get_by_slug("agenty").unwrap();
+        assert!(found.is_some(), "must resolve via the persisted slug column");
+        assert_eq!(found.unwrap().instance_name, "AgentY");
+    }
+
+    #[test]
+    fn instance_get_by_slug_returns_none_for_a_genuinely_unrelated_slug() {
+        let store = Store::open_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let def_store = Arc::new(DefinitionStore::open(tmp.path().join("definitions")).unwrap());
+        def_store.upsert(&global_user_agent("def-agenty2", "AgentY")).unwrap();
+        store.set_def_registry(def_store);
+
+        let mut inst = instance("inst-agenty2", "def-agenty2");
+        inst.instance_name = "AgentY".to_string();
+        store.instance_create(&inst).unwrap();
+
+        let found = store.instance_get_by_slug("someone-else").unwrap();
+        assert!(found.is_none(), "an unrelated slug must not match by coincidence");
+    }
+
+    // reagentx P1 on PR #2428 (round 2): a slug-normalized re-derivation of
+    // the CURRENT display name (`derive_slug(instance_name)`) only equals
+    // the real routing slug when the display name has never changed and
+    // never collided with another agent's at creation. `slug` is stable
+    // and persisted once, `name`/`instance_name` are renameable — this
+    // test deliberately sets them to unrelated values (as if the agent
+    // were renamed, or its slug got a "-2" collision suffix at creation)
+    // to prove the fix resolves via the real persisted `slug` column, not
+    // a fresh re-derivation that a rename would silently invalidate.
+    #[test]
+    fn instance_get_by_slug_resolves_via_the_persisted_slug_even_after_a_rename() {
+        let store = Store::open_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let def_store = Arc::new(DefinitionStore::open(tmp.path().join("definitions")).unwrap());
+        // The registry's own `name` is the CURRENT (post-rename) display
+        // name — deliberately unrelated to `slug`, which was fixed at
+        // creation and never changes.
+        def_store
+            .upsert(&DefinitionRecord {
+                schema_version: DEF_MAX_SUPPORTED_SCHEMA,
+                data: DefinitionRecordV1 {
+                    id: "def-renamed".to_string(),
+                    slug: "agenty".to_string(),
+                    name: "Agent Y Renamed".to_string(),
+                    provider: "claude".to_string(),
+                    updated_at: 42,
+                    ..Default::default()
+                },
+            })
+            .unwrap();
+        store.set_def_registry(def_store);
+
+        let mut inst = instance("inst-renamed", "def-renamed");
+        inst.instance_name = "Agent Y Renamed".to_string();
+        store.instance_create(&inst).unwrap();
+
+        // derive_slug("Agent Y Renamed") would be "agent-y-renamed" — NOT
+        // "agenty". Only a lookup against the real persisted slug column
+        // resolves this; a re-derivation from the current name would miss
+        // it, reproducing the exact bug this test guards against.
+        let found = store.instance_get_by_slug("agenty").unwrap();
+        assert!(found.is_some(), "must resolve via the persisted slug, not a re-derivation of the current name");
+        assert_eq!(found.unwrap().instance_name, "Agent Y Renamed");
+    }
+
+    // reagentx P1 on PR #2428 (round 3): a single query matching
+    // `(instance_name = ?1 OR slug = ?1)` let a coincidental cross-
+    // namespace collision (one agent's literal `instance_name` equaling a
+    // DIFFERENT agent's `slug`) match both rows simultaneously, silently
+    // disambiguated by recency — meaning an App-API self-lookup call could
+    // return an unrelated agent's memory/identity/bundle. This test builds
+    // exactly that collision (agent A's `instance_name` == agent B's
+    // `slug` == "shared-name") and proves each single-purpose function
+    // stays within its own namespace: `instance_get_by_name` finds ONLY
+    // the literal-name match (A), `instance_get_by_slug` finds ONLY the
+    // slug match (B) — never each other's row.
+    #[test]
+    fn instance_get_by_name_and_by_slug_never_cross_the_others_namespace() {
+        let store = Store::open_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let def_store = Arc::new(DefinitionStore::open(tmp.path().join("definitions")).unwrap());
+
+        // Agent A: literal display name is exactly "shared-name"; its own
+        // slug is unrelated ("agent-a-slug").
+        def_store
+            .upsert(&DefinitionRecord {
+                schema_version: DEF_MAX_SUPPORTED_SCHEMA,
+                data: DefinitionRecordV1 {
+                    id: "def-a".to_string(),
+                    slug: "agent-a-slug".to_string(),
+                    name: "shared-name".to_string(),
+                    provider: "claude".to_string(),
+                    updated_at: 1,
+                    ..Default::default()
+                },
+            })
+            .unwrap();
+        // Agent B: slug is exactly "shared-name" (e.g. a rename left its
+        // slug pointing at a string that collides with A's literal name);
+        // its own display name is unrelated.
+        def_store
+            .upsert(&DefinitionRecord {
+                schema_version: DEF_MAX_SUPPORTED_SCHEMA,
+                data: DefinitionRecordV1 {
+                    id: "def-b".to_string(),
+                    slug: "shared-name".to_string(),
+                    name: "Agent B Display".to_string(),
+                    provider: "claude".to_string(),
+                    updated_at: 2,
+                    ..Default::default()
+                },
+            })
+            .unwrap();
+        store.set_def_registry(def_store);
+
+        let mut inst_a = instance("inst-a", "def-a");
+        inst_a.instance_name = "shared-name".to_string();
+        store.instance_create(&inst_a).unwrap();
+
+        let mut inst_b = instance("inst-b", "def-b");
+        inst_b.instance_name = "Agent B Display".to_string();
+        store.instance_create(&inst_b).unwrap();
+
+        let by_name = store.instance_get_by_name("shared-name").unwrap()
+            .expect("must find agent A by literal instance_name");
+        assert_eq!(by_name.id, "def-a", "instance_name lookup must never resolve to B's row");
+
+        let by_slug = store.instance_get_by_slug("shared-name").unwrap()
+            .expect("must find agent B by slug");
+        assert_eq!(by_slug.id, "def-b", "slug lookup must never resolve to A's row");
     }
 
     #[test]
