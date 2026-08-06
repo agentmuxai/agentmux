@@ -1599,17 +1599,29 @@ impl Store {
     /// Resolve an instance by `instance_name` — but App-API callers (App
     /// API self-lookup endpoints: `memory.*`, `identity.self.*`,
     /// `bundle.self.get`) actually pass the `AGENTMUX_AGENT_ID` routing
-    /// slug (`derive_slug(display_name)`, injected into the agent's MCP
-    /// server env — see `agent_config.rs::build_mcp_config`'s own doc
-    /// comment), NOT the literal display name. An exact match still wins
-    /// when it hits (cheap, indexed, and correct for any caller that DOES
-    /// pass the literal name), but a mixed-case display name (e.g.
-    /// "AgentY") never equals its own lowercased slug ("agenty") — so
-    /// every one of those App-API endpoints 404'd/500'd for any agent
-    /// whose name wasn't already all-lowercase. Confirmed live: `MemoryList`
-    /// ("agent agenty not found"), `IdentityAccounts` ("unknown agent
-    /// 'agenty'"). Falls back to a slug-normalized scan so both forms
-    /// resolve to the same row.
+    /// slug, not the literal display name — it's stamped onto the MCP
+    /// server's env straight from `agent.slug` (`app_api::agent_open`),
+    /// the same stable, collision-resolved value stored in
+    /// `db_agents.slug` (`agent_def_insert_local_only`, never changes
+    /// after creation — see `AgentDefinition::slug`'s own doc comment).
+    /// `instance_name` is the renameable display name, overwritten on
+    /// every launch/continuation (`dual_write.rs`) — it can drift
+    /// arbitrarily far from the slug (a rename, or a collision suffix
+    /// picked at creation, e.g. slug "agenty-2" for a still-literally-
+    /// "AgentY"-named instance_name). Matching `OR slug = ?1` handles
+    /// both: a literal-name caller still hits via `instance_name`, and a
+    /// slug-carrying caller matches the stable column directly,
+    /// regardless of any rename/collision since creation.
+    ///
+    /// (reagentx P1 on PR #2428: an earlier version of this fix
+    /// re-derived `derive_slug(instance_name)` at query time instead of
+    /// comparing against the already-persisted `slug` column — that
+    /// still failed for exactly the rename/collision cases above, since
+    /// a re-derived slug only equals the real one when the display name
+    /// has never changed and never collided. Confirmed live against a
+    /// real agent named "AgentY": `MemoryList` ("agent agenty not
+    /// found"), `IdentityAccounts` ("unknown agent 'agenty'") — both
+    /// resolved by this fix regardless of which form the caller passes.)
     pub fn instance_get_by_name(
         &self,
         instance_name: &str,
@@ -1636,7 +1648,7 @@ impl Store {
                     identity_id, memory_id, instance_name, working_directory,
                     user_hidden
              FROM db_agents
-             WHERE instance_name = ?1
+             WHERE (instance_name = ?1 OR slug = ?1)
                AND is_template = 0
                AND user_hidden = 0
              ORDER BY updated_at DESC, created_at DESC
@@ -1644,32 +1656,10 @@ impl Store {
         )?;
         let result = stmt.query_row(params![instance_name], map_agent_instance_row);
         match result {
-            Ok(a) => return Ok(Some(a)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => {}
-            Err(e) => return Err(e.into()),
+            Ok(a) => Ok(Some(a)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
         }
-        drop(stmt);
-
-        // Slug-normalized fallback — see the doc comment above.
-        let queried_slug = derive_slug(instance_name);
-        let mut fallback_stmt = conn.prepare(
-            "SELECT id, id AS def_id,
-                    github_context, created_at,
-                    identity_id, memory_id, instance_name, working_directory,
-                    user_hidden
-             FROM db_agents
-             WHERE is_template = 0
-               AND user_hidden = 0
-             ORDER BY updated_at DESC, created_at DESC",
-        )?;
-        let mut rows = fallback_stmt.query_map([], map_agent_instance_row)?;
-        while let Some(row) = rows.next() {
-            let instance = row?;
-            if derive_slug(&instance.instance_name) == queried_slug {
-                return Ok(Some(instance));
-            }
-        }
-        Ok(None)
     }
 
     /// Partial update of an instance's mutable runtime fields. Only
@@ -2220,6 +2210,51 @@ mod tests {
 
         let found = store.instance_get_by_name("someone-else").unwrap();
         assert!(found.is_none(), "an unrelated slug must not match by coincidence");
+    }
+
+    // reagentx P1 on PR #2428: a slug-normalized re-derivation of the
+    // CURRENT display name (`derive_slug(instance_name)`) only equals the
+    // real routing slug when the display name has never changed and never
+    // collided with another agent's at creation. `slug` is stable and
+    // persisted once, `name`/`instance_name` are renameable — this test
+    // deliberately sets them to unrelated values (as if the agent were
+    // renamed, or its slug got a "-2" collision suffix at creation) to
+    // prove the fix resolves via the real persisted `slug` column, not a
+    // fresh re-derivation that a rename would silently invalidate.
+    #[test]
+    fn instance_get_by_name_resolves_via_the_persisted_slug_even_after_a_rename() {
+        let store = Store::open_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let def_store = Arc::new(DefinitionStore::open(tmp.path().join("definitions")).unwrap());
+        // The registry's own `name` is the CURRENT (post-rename) display
+        // name — deliberately unrelated to `slug`, which was fixed at
+        // creation and never changes.
+        def_store
+            .upsert(&DefinitionRecord {
+                schema_version: DEF_MAX_SUPPORTED_SCHEMA,
+                data: DefinitionRecordV1 {
+                    id: "def-renamed".to_string(),
+                    slug: "agenty".to_string(),
+                    name: "Agent Y Renamed".to_string(),
+                    provider: "claude".to_string(),
+                    updated_at: 42,
+                    ..Default::default()
+                },
+            })
+            .unwrap();
+        store.set_def_registry(def_store);
+
+        let mut inst = instance("inst-renamed", "def-renamed");
+        inst.instance_name = "Agent Y Renamed".to_string();
+        store.instance_create(&inst).unwrap();
+
+        // derive_slug("Agent Y Renamed") would be "agent-y-renamed" — NOT
+        // "agenty". Only a lookup against the real persisted slug column
+        // resolves this; a re-derivation from the current name would miss
+        // it, reproducing the exact bug this test guards against.
+        let found = store.instance_get_by_name("agenty").unwrap();
+        assert!(found.is_some(), "must resolve via the persisted slug, not a re-derivation of the current name");
+        assert_eq!(found.unwrap().instance_name, "Agent Y Renamed");
     }
 
     #[test]
