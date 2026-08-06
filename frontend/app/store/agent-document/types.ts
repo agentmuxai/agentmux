@@ -200,6 +200,14 @@ export type AgentDocumentEvent =
           markdownCanceled: number;
           /** Tool nodes whose status flipped from "running" → "canceled". */
           toolsCanceled: number;
+          /**
+           * Every tool node whose status this scrub actually changed —
+           * `agent-document-store.ts`'s `dispatch()` pushes a final
+           * `docknodestatus` delta for each so the srv-side `muxspect dock`
+           * cache learns about the resolution instead of reporting an
+           * already-resolved node as stuck forever (reagentx P1, PR #2432).
+           */
+          resolvedToolNodes: Array<{ id: string; status: string; toolName: string }>;
       }
     | { type: "tool-force-canceled"; nodeId: string }
     | {

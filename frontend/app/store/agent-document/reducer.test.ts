@@ -840,7 +840,7 @@ describe("agent document reducer", () => {
             // Non-thinking node untouched.
             expect((r.state.nodes[0] as any).metadata).toBeUndefined();
             expect(r.events).toEqual([
-                { type: "orphans-scrubbed", markdownCanceled: 1, toolsCanceled: 0 },
+                { type: "orphans-scrubbed", markdownCanceled: 1, toolsCanceled: 0, resolvedToolNodes: [] },
             ]);
         });
 
@@ -879,7 +879,12 @@ describe("agent document reducer", () => {
             expect((r.state.nodes[0] as any).metadata.thinking).toBe(true);
             expect((r.state.nodes[2] as ToolNode).status).toBe("canceled");
             expect(r.events).toEqual([
-                { type: "orphans-scrubbed", markdownCanceled: 0, toolsCanceled: 1 },
+                {
+                    type: "orphans-scrubbed",
+                    markdownCanceled: 0,
+                    toolsCanceled: 1,
+                    resolvedToolNodes: [{ id: "t1", status: "canceled", toolName: "Bash" }],
+                },
             ]);
         });
 
@@ -894,7 +899,12 @@ describe("agent document reducer", () => {
             // Already-completed tool stays as-is.
             expect((r.state.nodes[1] as ToolNode).status).toBe("success");
             expect(r.events).toEqual([
-                { type: "orphans-scrubbed", markdownCanceled: 0, toolsCanceled: 1 },
+                {
+                    type: "orphans-scrubbed",
+                    markdownCanceled: 0,
+                    toolsCanceled: 1,
+                    resolvedToolNodes: [{ id: "t1", status: "canceled", toolName: "Bash" }],
+                },
             ]);
         });
 
@@ -914,7 +924,12 @@ describe("agent document reducer", () => {
             expect(scrubbed.question).toBeUndefined();
             expect(scrubbed.summary).toBe("❓ Question answered");
             expect(r.events).toEqual([
-                { type: "orphans-scrubbed", markdownCanceled: 0, toolsCanceled: 1 },
+                {
+                    type: "orphans-scrubbed",
+                    markdownCanceled: 0,
+                    toolsCanceled: 1,
+                    resolvedToolNodes: [{ id: "q1", status: "success", toolName: "Bash" }],
+                },
             ]);
         });
 
@@ -1007,7 +1022,12 @@ describe("agent document reducer", () => {
             expect((r.state.nodes[1] as any).metadata.canceled).toBe(true);
             expect(r.events).toEqual([
                 { type: "session-ended", at: 5000 },
-                { type: "orphans-scrubbed", markdownCanceled: 1, toolsCanceled: 1 },
+                {
+                    type: "orphans-scrubbed",
+                    markdownCanceled: 1,
+                    toolsCanceled: 1,
+                    resolvedToolNodes: [{ id: "k1", status: "canceled", toolName: "Bash" }],
+                },
             ]);
         });
 

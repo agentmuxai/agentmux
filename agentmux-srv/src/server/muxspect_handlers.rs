@@ -274,7 +274,7 @@ pub async fn handle_muxspect_dock(
     let lifecycle = state.process_broker.status(&q.block_id).lifecycle;
     let backed = lifecycle == crate::broker::process::Lifecycle::Running;
 
-    let nodes = dock_node_views(state.dock_snapshots.get(&q.block_id), now_ms, backed);
+    let nodes = dock_node_views(state.dock_snapshots.get(&q.block_id, now_ms), now_ms, backed);
 
     Json(json!({ "block_id": q.block_id, "nodes": nodes })).into_response()
 }

@@ -37,6 +37,19 @@ pub struct DockNodeSnapshot {
 /// same node overwrites rather than accumulates.
 type BlockNodes = HashMap<String, DockNodeSnapshot>;
 
+/// Defense-in-depth cap on how long an entry can survive without a fresh
+/// push before `get()` evicts it, regardless of status. The real fix for
+/// "an already-resolved node never gets reported" is pushing the
+/// resolution back (see `agent-document-store.ts`'s `pushResolvedDockNodes`,
+/// wired for every known resolution path — streaming AND the
+/// SessionEnd/HistoryLoaded/HistoryRestored/ScrubOrphanedInProgress scrub
+/// paths). This is the backstop for any path that isn't one of those
+/// (reagentx P1 on PR #2432 flagged the total absence of any bound at
+/// all — `evict_block` existed for whole-block removal but nothing
+/// time-based existed per-node). One hour comfortably exceeds any
+/// legitimate single tool-call duration.
+const MAX_NODE_AGE_MS: i64 = 60 * 60 * 1000;
+
 #[derive(Default)]
 pub struct DockSnapshotCache {
     inner: Mutex<HashMap<String, BlockNodes>>,
@@ -53,10 +66,15 @@ impl DockSnapshotCache {
         guard.entry(block_id.to_string()).or_default().insert(node.node_id.clone(), node);
     }
 
-    /// All tracked nodes for `block_id`, or empty if none/unknown block.
-    pub fn get(&self, block_id: &str) -> Vec<DockNodeSnapshot> {
-        let guard = self.inner.lock();
-        guard.get(block_id).map(|m| m.values().cloned().collect()).unwrap_or_default()
+    /// All tracked nodes for `block_id` younger than `MAX_NODE_AGE_MS` as
+    /// of `now_ms`, or empty if none/unknown block. Lazily evicts anything
+    /// older as a side effect — no background sweep needed, and every read
+    /// self-heals the cache instead of accumulating stale entries forever.
+    pub fn get(&self, block_id: &str, now_ms: i64) -> Vec<DockNodeSnapshot> {
+        let mut guard = self.inner.lock();
+        let Some(nodes) = guard.get_mut(block_id) else { return Vec::new() };
+        nodes.retain(|_, n| now_ms.saturating_sub(n.observed_at) < MAX_NODE_AGE_MS);
+        nodes.values().cloned().collect()
     }
 
     /// Whether `node_id` is currently tracked for `block_id` — used to
@@ -113,14 +131,14 @@ mod tests {
     #[test]
     fn get_on_unknown_block_is_empty() {
         let cache = DockSnapshotCache::new();
-        assert!(cache.get("no-such-block").is_empty());
+        assert!(cache.get("no-such-block", 2000).is_empty());
     }
 
     #[test]
     fn push_then_get_round_trips() {
         let cache = DockSnapshotCache::new();
         cache.push_delta("block-1", node("n1", "running"));
-        let got = cache.get("block-1");
+        let got = cache.get("block-1", 2000);
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].node_id, "n1");
         assert_eq!(got[0].status, "running");
@@ -131,7 +149,7 @@ mod tests {
         let cache = DockSnapshotCache::new();
         cache.push_delta("block-1", node("n1", "running"));
         cache.push_delta("block-1", node("n1", "success"));
-        let got = cache.get("block-1");
+        let got = cache.get("block-1", 2000);
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].status, "success");
     }
@@ -141,7 +159,29 @@ mod tests {
         let cache = DockSnapshotCache::new();
         cache.push_delta("block-1", node("n1", "running"));
         cache.push_delta("block-1", node("n2", "success"));
-        assert_eq!(cache.get("block-1").len(), 2);
+        assert_eq!(cache.get("block-1", 2000).len(), 2);
+    }
+
+    #[test]
+    fn get_evicts_entries_older_than_max_age() {
+        let cache = DockSnapshotCache::new();
+        cache.push_delta("block-1", node("n1", "running")); // observed_at: 2000
+        // Just under the 1h cap — still present.
+        assert_eq!(cache.get("block-1", 2000 + MAX_NODE_AGE_MS - 1).len(), 1);
+        // At/past the cap — evicted, regardless of status.
+        assert!(cache.get("block-1", 2000 + MAX_NODE_AGE_MS).is_empty());
+    }
+
+    #[test]
+    fn get_eviction_is_per_node_not_whole_block() {
+        let cache = DockSnapshotCache::new();
+        cache.push_delta("block-1", node("old", "running")); // observed_at: 2000
+        let mut fresh = node("fresh", "running");
+        fresh.observed_at = 2000 + MAX_NODE_AGE_MS - 1;
+        cache.push_delta("block-1", fresh);
+        let got = cache.get("block-1", 2000 + MAX_NODE_AGE_MS);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].node_id, "fresh");
     }
 
     #[test]
@@ -176,7 +216,7 @@ mod tests {
         cache.push_delta("block-1", node("n1", "running"));
         cache.push_delta("block-2", node("n1", "running"));
         cache.evict_block("block-1");
-        assert!(cache.get("block-1").is_empty());
-        assert_eq!(cache.get("block-2").len(), 1);
+        assert!(cache.get("block-1", 2000).is_empty());
+        assert_eq!(cache.get("block-2", 2000).len(), 1);
     }
 }
