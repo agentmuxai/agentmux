@@ -602,7 +602,25 @@ async fn run_cli_login_pty(
             })
             .map_err(|e| format!("openpty for {cli_path}: {e}"))?;
 
-        let mut cmd = CommandBuilder::new(&cli_path);
+        // Resolve past the `.cmd`/`.bat` npm shim before spawning under the
+        // PTY — CommandBuilder on the raw shim path forces Windows through
+        // `cmd.exe /c`, which hangs indefinitely under a real ConPTY (no
+        // output, target config dir never created, confirmed live). Every
+        // other spawn site in this codebase already resolves through this;
+        // this was the one PTY-specific gap.
+        //
+        // `None` means the shim didn't match either known npm shape — fail
+        // fast instead of falling back to `cmd.exe /C`, which hangs just as
+        // indefinitely under this real ConPTY as the raw shim path did
+        // (that's the exact bug this resolves; silently reintroducing it
+        // for an unrecognized shim shape would just move the 15s timeout
+        // somewhere less visible).
+        let (spawn_program, spawn_prefix_args) = agentmux_common::resolve_cli_spawn_target(&cli_path)
+            .ok_or_else(|| format!("could not resolve .cmd/.bat shim for spawn: {cli_path}"))?;
+        let mut cmd = CommandBuilder::new(&spawn_program);
+        for a in &spawn_prefix_args {
+            cmd.arg(a);
+        }
         for a in &login_args {
             cmd.arg(a);
         }
