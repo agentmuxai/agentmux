@@ -47,10 +47,9 @@ pub const BLOCK_CONTROLLER_PERSISTENT: &str = "persistent";
 
 /// Builds the NDJSON line for a `persistent_resume::ResumeEffect::
 /// EmitSessionOutcome` — a free function (not a method) so it's callable
-/// both from `PersistentSubprocessController::emit_session_outcome_line`
-/// and directly from the stdout-reader/process-waiter tasks below, which
-/// only hold `_read`-suffixed clones, not `&self`. See
-/// SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md §2.1.
+/// directly from the stdout-reader, process-waiter, and stop-path match
+/// arms below, which only hold `_read`/`_wait`-suffixed clones, not
+/// `&self`. See SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md §2.1.
 fn session_outcome_line(
     outcome: persistent_resume::SessionOutcome,
     attempted_sid: String,
