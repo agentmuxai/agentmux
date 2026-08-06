@@ -438,6 +438,7 @@ mod tests {
         std::env::remove_var("AGENTMUX_SHARED_DIR");
         std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
         std::env::remove_var("AGENTMUX_INSTANCE_DIR");
+        std::env::remove_var("AGENTMUX_CHANNEL");
     }
 
     /// The regression test that would have caught the `ctx.home` /
@@ -474,6 +475,40 @@ mod tests {
         assert_ne!(
             shared_store_path_default, shared_store_path_isolated,
             "resolve_shared_store_path() must actually change under isolation"
+        );
+
+        clear();
+    }
+
+    /// Same invariant as `home_is_invariant_to_isolated_auth`, but for
+    /// isolation reached via the channel-based default
+    /// (SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md) rather than
+    /// an explicit `AGENTMUX_ISOLATED_AUTH=1`. `resolve_home()` must
+    /// still anchor to the true global root even when a non-"stable"
+    /// `AGENTMUX_CHANNEL` alone is what triggers isolation.
+    #[test]
+    fn home_is_invariant_to_channel_default_isolation() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", "/tmp/test-home");
+
+        let home_default = resolve_home().unwrap();
+        let shared_store_path_default = resolve_shared_store_path().unwrap();
+
+        // No AGENTMUX_ISOLATED_AUTH set at all — only a non-"stable"
+        // channel, which is now sufficient on its own to isolate.
+        std::env::set_var("AGENTMUX_CHANNEL", "dev-some-branch");
+        std::env::set_var("AGENTMUX_INSTANCE_DIR", "/tmp/test-home/dev/some-branch");
+        let home_isolated = resolve_home().unwrap();
+        let shared_store_path_isolated = resolve_shared_store_path().unwrap();
+
+        assert_eq!(
+            home_default, home_isolated,
+            "resolve_home() must be invariant to channel-default isolation too"
+        );
+        assert_ne!(
+            shared_store_path_default, shared_store_path_isolated,
+            "resolve_shared_store_path() must actually isolate on channel default alone"
         );
 
         clear();

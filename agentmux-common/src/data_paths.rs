@@ -399,26 +399,82 @@ impl DataPaths {
     }
 }
 
-/// Opt-in flag for isolated per-channel auth (identity accounts + OAuth
-/// credential dirs), for destructive Armory testing (delete-account
-/// flows) that must never touch the real global identity store other
-/// channels/instances depend on. Read directly at every call site
-/// rather than cached on `DataPaths` so `identities_dir()` behaves
-/// consistently regardless of whether the caller built its `DataPaths`
-/// via `resolve()` (launcher) or `from_env()` (downstream host/srv).
+/// Isolated per-channel auth (identity accounts + OAuth credential dirs).
+/// Read directly at every call site rather than cached on `DataPaths` so
+/// `identities_dir()` behaves consistently regardless of whether the
+/// caller built its `DataPaths` via `resolve()` (launcher) or
+/// `from_env()` (downstream host/srv).
 ///
-/// Default (unset/false): zero behavior change from today — every
-/// channel/branch/instance shares one global identity store, exactly
-/// as before this flag existed. This is deliberate: re-authenticating
-/// every provider on every branch switch is real daily friction (it's
-/// the whole reason the seed-from-global login tier exists), so
-/// isolation must never be the default.
+/// Resolution order:
+/// 1. `AGENTMUX_ISOLATED_AUTH=1` / `=0` — explicit override, always wins.
+/// 2. Otherwise, defaults to isolated for every channel except
+///    `"stable"`. `stable` is the real release channel — the
+///    daily-driver install(s) this machine's actual work depends on —
+///    and keeps the old always-global behavior so nobody's production
+///    login gets wiped by a channel-name coincidence. Every `task dev`
+///    branch and every `task package` local build now starts with a
+///    genuinely empty identity store by default, so routine testing
+///    actually exercises the real OAuth login/relogin surfaces instead
+///    of silently inheriting a fully-authenticated global session.
+/// 3. If `AGENTMUX_CHANNEL` isn't set yet (e.g. a bare `cargo test`
+///    invocation before any `DataPaths` has been resolved/exported),
+///    stays global — conservative default when channel context is
+///    unknown, not a guess.
 ///
-/// See `docs/specs/SPEC_ISOLATED_AUTH_DEV_TESTING_2026_07_27.md`.
+/// See `docs/specs/SPEC_ISOLATED_AUTH_DEV_TESTING_2026_07_27.md` (the
+/// underlying mechanism — channel-scoped store + credential dirs — this
+/// flag drives, still authoritative) and
+/// `docs/specs/SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md` (this
+/// default, amending the July 27 spec's "isolation must never be the
+/// default" stance).
 pub fn isolated_auth_enabled() -> bool {
-    std::env::var("AGENTMUX_ISOLATED_AUTH")
-        .map(|v| v == "1")
-        .unwrap_or(false)
+    isolated_auth_reason().is_isolated()
+}
+
+/// Which rule decided [`isolated_auth_enabled`]'s result — for boot-time
+/// diagnostics (see `bootstrap.rs`'s "shared store: attached" log line)
+/// so a developer staring at a fresh, empty Armory can tell at a glance
+/// whether that's an explicit choice or the new channel default, rather
+/// than re-deriving it from two env vars by hand. Callers that only need
+/// the boolean should use [`isolated_auth_enabled`] directly — this
+/// exists purely so the two never drift (one resolution, two views).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IsolatedAuthReason {
+    /// `AGENTMUX_ISOLATED_AUTH=1`.
+    ExplicitOptIn,
+    /// `AGENTMUX_ISOLATED_AUTH=0`.
+    ExplicitOptOut,
+    /// No override; `AGENTMUX_CHANNEL` is set and isn't `"stable"`.
+    ChannelDefaultIsolated,
+    /// No override; `AGENTMUX_CHANNEL` is `"stable"` or unset entirely.
+    ChannelDefaultGlobal,
+}
+
+impl IsolatedAuthReason {
+    pub fn is_isolated(self) -> bool {
+        matches!(self, Self::ExplicitOptIn | Self::ChannelDefaultIsolated)
+    }
+
+    /// Short, log-friendly label.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ExplicitOptIn => "explicit opt-in",
+            Self::ExplicitOptOut => "explicit opt-out",
+            Self::ChannelDefaultIsolated => "channel default — isolated",
+            Self::ChannelDefaultGlobal => "channel default — global",
+        }
+    }
+}
+
+pub fn isolated_auth_reason() -> IsolatedAuthReason {
+    match std::env::var("AGENTMUX_ISOLATED_AUTH").ok().as_deref() {
+        Some("1") => IsolatedAuthReason::ExplicitOptIn,
+        Some("0") => IsolatedAuthReason::ExplicitOptOut,
+        _ => match std::env::var("AGENTMUX_CHANNEL") {
+            Ok(ch) if ch != "stable" => IsolatedAuthReason::ChannelDefaultIsolated,
+            _ => IsolatedAuthReason::ChannelDefaultGlobal,
+        },
+    }
 }
 
 /// `~/.agentmux/` root, or the test override via
@@ -989,32 +1045,76 @@ mod tests {
     }
 
     #[test]
-    fn identities_dir_is_shared_by_default() {
-        // Flag unset (the default): identical to today — channel/mode-
-        // independent, lives under shared_dir. Contrast case for the
-        // isolated test below; mirrors provider_auth_dir_is_shared_and_
-        // channel_independent's shape.
+    fn identities_dir_is_shared_on_stable_channel() {
+        // stable is the real release channel — the one default this
+        // spec (SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md)
+        // deliberately does not change. AGENTMUX_CHANNEL is set to
+        // "stable" explicitly (mirroring what a real host/srv process
+        // always has via from_env(), per to_env_vars()) rather than left
+        // unset, so this test exercises the "stable" branch of the
+        // resolution order specifically, not the "channel unknown"
+        // fallback covered by identities_dir_is_shared_when_channel_unset.
         with_home_override(|_root| {
             clear_channel_env();
             std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
             let installed = DataPaths::resolve("0.42.0", &RuntimeMode::Installed).unwrap();
+            assert_eq!(installed.channel, "stable");
+            std::env::set_var("AGENTMUX_CHANNEL", "stable");
+
+            assert!(installed.identities_dir().ends_with("shared/identities"));
+            std::env::remove_var("AGENTMUX_CHANNEL");
+        });
+    }
+
+    #[test]
+    fn identities_dir_is_isolated_by_default_on_non_stable_channel() {
+        // The behavior change this spec introduces: a task-dev branch
+        // (or any local task-package build, or a custom AGENTMUX_CHANNEL
+        // override) now gets an isolated identity store with NO explicit
+        // AGENTMUX_ISOLATED_AUTH set at all — contrast with the old
+        // identities_dir_is_shared_by_default, which asserted the
+        // opposite for this exact case.
+        with_home_override(|_root| {
+            clear_channel_env();
+            std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
             let dev = DataPaths::resolve(
                 "0.42.0",
                 &RuntimeMode::Dev { branch: "some-branch".into(), clone_id: None },
             )
             .unwrap();
+            std::env::set_var("AGENTMUX_CHANNEL", &dev.channel);
 
-            assert_eq!(
-                installed.identities_dir(),
-                dev.identities_dir(),
-                "identities_dir must not vary by channel/mode when isolation is off"
+            assert_eq!(dev.identities_dir(), dev.instance_dir.join("identities"));
+            assert!(
+                !dev.identities_dir().starts_with(&dev.shared_dir),
+                "isolated-by-default identities_dir must NOT live under the global shared_dir"
             );
-            assert!(installed.identities_dir().ends_with("shared/identities"));
+            std::env::remove_var("AGENTMUX_CHANNEL");
         });
     }
 
     #[test]
-    fn identities_dir_is_per_channel_when_isolated_auth_set() {
+    fn identities_dir_is_shared_when_channel_unset() {
+        // Conservative fallback: no AGENTMUX_CHANNEL in the process env
+        // at all (e.g. a bare `cargo test`/`cargo run` outside the
+        // launcher's from_env() chain) — stay global rather than guess.
+        with_home_override(|_root| {
+            clear_channel_env();
+            std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
+            let dev = DataPaths::resolve(
+                "0.42.0",
+                &RuntimeMode::Dev { branch: "some-branch".into(), clone_id: None },
+            )
+            .unwrap();
+            // AGENTMUX_CHANNEL deliberately left unset here, unlike the
+            // isolated-by-default test above.
+
+            assert!(dev.identities_dir().ends_with("shared/identities"));
+        });
+    }
+
+    #[test]
+    fn identities_dir_is_per_channel_when_isolated_auth_explicitly_set() {
         with_home_override(|_root| {
             clear_channel_env();
             std::env::set_var("AGENTMUX_ISOLATED_AUTH", "1");
@@ -1042,6 +1142,56 @@ mod tests {
                 "isolated identities_dir must NOT live under the global shared_dir"
             );
         });
+    }
+
+    #[test]
+    fn identities_dir_is_shared_when_isolated_auth_explicitly_disabled_on_non_stable_channel() {
+        // The escape hatch: AGENTMUX_ISOLATED_AUTH=0 overrides the new
+        // channel-based default back to global sharing, even on a
+        // non-stable channel.
+        with_home_override(|_root| {
+            clear_channel_env();
+            std::env::set_var("AGENTMUX_ISOLATED_AUTH", "0");
+            let _guard = IsolatedAuthGuard;
+
+            let dev = DataPaths::resolve(
+                "0.42.0",
+                &RuntimeMode::Dev { branch: "some-branch".into(), clone_id: None },
+            )
+            .unwrap();
+            std::env::set_var("AGENTMUX_CHANNEL", &dev.channel);
+
+            assert!(dev.identities_dir().ends_with("shared/identities"));
+            std::env::remove_var("AGENTMUX_CHANNEL");
+        });
+    }
+
+    #[test]
+    fn isolated_auth_reason_classifies_all_four_states() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
+        clear_channel_env();
+
+        std::env::set_var("AGENTMUX_ISOLATED_AUTH", "1");
+        assert_eq!(isolated_auth_reason(), IsolatedAuthReason::ExplicitOptIn);
+        assert!(isolated_auth_reason().is_isolated());
+
+        std::env::set_var("AGENTMUX_ISOLATED_AUTH", "0");
+        assert_eq!(isolated_auth_reason(), IsolatedAuthReason::ExplicitOptOut);
+        assert!(!isolated_auth_reason().is_isolated());
+
+        std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
+        std::env::set_var("AGENTMUX_CHANNEL", "dev-some-branch");
+        assert_eq!(isolated_auth_reason(), IsolatedAuthReason::ChannelDefaultIsolated);
+        assert!(isolated_auth_reason().is_isolated());
+
+        std::env::set_var("AGENTMUX_CHANNEL", "stable");
+        assert_eq!(isolated_auth_reason(), IsolatedAuthReason::ChannelDefaultGlobal);
+        assert!(!isolated_auth_reason().is_isolated());
+
+        clear_channel_env();
+        assert_eq!(isolated_auth_reason(), IsolatedAuthReason::ChannelDefaultGlobal);
+        assert!(!isolated_auth_reason().is_isolated());
     }
 
     #[test]

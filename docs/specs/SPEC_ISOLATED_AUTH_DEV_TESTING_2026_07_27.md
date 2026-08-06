@@ -1,9 +1,18 @@
 # Spec: Opt-in isolated auth for `task dev` testing
 
 **Date:** 2026-07-27
-**Status:** Implemented
+**Status:** Implemented — defaults amended by `docs/specs/SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md` (2026-08-06)
 **Related:** `docs/specs/REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md`,
 `docs/retro/retro-provider-auth-isolation-regression-2026-06-05.md`
+
+> **Amended 2026-08-06:** everything below describing the mechanism
+> (channel-scoped store, credential-dir isolation, the two load-bearing
+> migration fixes) is still accurate and authoritative. What changed is
+> the *default* — "When unset (the default): zero behavior change" and
+> "Isolation must never be the default" (§ below) are no longer true for
+> any channel except `stable`. See
+> `docs/specs/SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md` for
+> the current default and why it changed.
 
 ## The incident that motivated this
 
