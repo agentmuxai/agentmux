@@ -114,6 +114,12 @@ mod tests {
 
     fn clear() {
         std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
+        // isolated_auth_enabled() now also defaults on AGENTMUX_CHANNEL
+        // (SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md) — a leaked
+        // non-"stable" value from a sibling test file sharing ENV_LOCK
+        // would flip backfills_sibling_accounts_when_not_isolated's
+        // "not isolated" precondition without this.
+        std::env::remove_var("AGENTMUX_CHANNEL");
     }
 
     fn make_account(id: &str) -> IdentityAccount {

@@ -663,10 +663,11 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
             } else {
                 match Store::open_shared(&path) {
                     Ok(s) => {
-                        if agentmux_common::isolated_auth_enabled() {
-                            tracing::info!(path = %path.display(), "shared store: attached (ISOLATED — channel-scoped)");
+                        let reason = agentmux_common::isolated_auth_reason();
+                        if reason.is_isolated() {
+                            tracing::info!(path = %path.display(), reason = reason.as_str(), "shared store: attached (ISOLATED — channel-scoped)");
                         } else {
-                            tracing::info!(path = %path.display(), "shared store: attached");
+                            tracing::info!(path = %path.display(), reason = reason.as_str(), "shared store: attached");
                         }
                         Some(Arc::new(s))
                     }
