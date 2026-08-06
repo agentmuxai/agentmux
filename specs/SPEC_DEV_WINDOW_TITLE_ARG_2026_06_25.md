@@ -1,7 +1,11 @@
 # Spec: `task dev TITLE="..."` — per-session window title for dev builds
 
 **Date:** 2026-06-25  
-**Status:** Draft  
+**Status:** Implemented (this doc's own design shipped — confirmed by reading
+current `main`: `Taskfile.yml`'s `dev`/`dev:serve` tasks carry `TITLE` →
+`VITE_DEV_TITLE` exactly as designed, and `frontend/app-init.ts` applies it via
+`UpdateObjectMeta` — status was never updated after landing, corrected here).
+See "Addendum" below for a 2026-08-04 follow-up (agent auto-title).  
 **Branch:** `agentx/dev-window-title`  
 **Scope:** `Taskfile.yml` (dev task env), `frontend/app-init.ts`
 
@@ -159,3 +163,28 @@ window keeps whatever name it had before — either the prior dev-title or "Wind
 |---|---|
 | `Taskfile.yml` | Add `TITLE: ''` var + `VITE_DEV_TITLE: '{{.TITLE}}'` env to `dev` / `dev:serve` |
 | `frontend/app-init.ts` | After each `initWaveWrap` call site: read `VITE_DEV_TITLE`, call `UpdateObjectMeta` |
+
+---
+
+## Addendum (2026-08-04): agent auto-title in `dev-agent.cmd`
+
+**Problem:** the design above requires the caller to pass `TITLE="..."` explicitly.
+Agents invoking `task dev` via `scripts/dev-agent.cmd` (the CLAUDE.md-documented
+Windows entry point — see "Launching `task dev` from an agent / MCP Shell" in the
+repo's root `CLAUDE.md`) almost never did, so every agent-launched dev window
+still showed as plain "AgentMux" in the taskbar — indistinguishable from any other
+agent's parallel dev session.
+
+**Fix:** `scripts/dev-agent.cmd` now defaults `TITLE` to the caller's own
+`$AGENTMUX_AGENT_ID` (injected into every agent's shell at spawn) when the caller
+didn't already pass an explicit `TITLE=` argument. An explicit `TITLE=` from the
+caller always wins — this only fills the gap when the argument is absent entirely.
+
+No changes to `Taskfile.yml` or `frontend/app-init.ts` — the existing `TITLE=`
+data flow (see "Design" above) is reused unmodified; only the *caller* of `task dev`
+changed. This keeps the fix scoped to the one place (`dev-agent.cmd`) that agents
+are actually documented to invoke, rather than adding a second default mechanism
+inside the Taskfile itself.
+
+See `scripts/dev-agent.cmd` (top-of-file usage comment and the `TITLE_ARG`
+computation ahead of the final `task dev` invocation) for the implementation.
