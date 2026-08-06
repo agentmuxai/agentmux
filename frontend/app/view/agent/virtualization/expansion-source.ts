@@ -113,5 +113,9 @@ export function currentExpansion(
         case "compaction_started":
             // Fixed-height announcement — never collapsible.
             return OPEN_DEFAULT;
+
+        case "session_outcome":
+            // Fixed-height divider — never collapsible, same as context_compacted.
+            return OPEN_DEFAULT;
     }
 }

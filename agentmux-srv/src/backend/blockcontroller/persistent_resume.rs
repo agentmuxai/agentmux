@@ -177,6 +177,17 @@ pub(super) enum ResumeEvent {
     StopRequested { generation: u64 },
 }
 
+/// A resume attempt's outcome, once definitively known. See
+/// `ResumeEffect::EmitSessionOutcome`'s doc comment for how this is used.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) enum SessionOutcome {
+    /// The CLI continued the exact session `--resume` was given.
+    Resumed,
+    /// The CLI could not continue that session — a new one was (or is
+    /// about to be) started. The model has none of the prior turns.
+    Fresh,
+}
+
 /// What the caller must actually DO in response to an event — kept
 /// separate from `ResumeState` so `update()` stays a pure function with
 /// no I/O, fully exercisable in a unit test.
@@ -201,6 +212,16 @@ pub(super) enum ResumeEffect {
     FireRetry { retry: RetryPayload, held_error_line: Option<String> },
     /// Genuinely done, not retrying — publish the terminal status.
     PublishDone,
+    /// A `--resume <attempted_sid>` attempt's outcome just became
+    /// unambiguously known — surface it as a persisted transcript event
+    /// (not just a trace log line), so the pane's scrollback can never
+    /// silently disagree with what the model actually has in context.
+    /// `actual_sid` is `Some` when the CLI reported a different session id
+    /// in the same breath that resolved this generation (the
+    /// `SessionCaptured` divergence case); `None` for the `FireRetry` path,
+    /// where no fresh sid is known yet — the retry hasn't launched.
+    /// See SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md §2.1.
+    EmitSessionOutcome { outcome: SessionOutcome, attempted_sid: String, actual_sid: Option<String> },
 }
 
 /// Resolves a PRIOR generation's still-unresolved tracking
@@ -279,7 +300,18 @@ pub(super) fn update(state: ResumeState, event: ResumeEvent) -> (ResumeState, Ve
                 // generation held one back, before this LATER capture
                 // resolves tracking) must be flushed, not silently
                 // discarded along with the state.
-                let effects = held_error_line.map(|line| vec![ResumeEffect::FlushErrorLine(line)]).unwrap_or_default();
+                let mut effects: Vec<ResumeEffect> =
+                    held_error_line.map(ResumeEffect::FlushErrorLine).into_iter().collect();
+                // SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md §2.1: this
+                // is one of the two points where a resume attempt's fate
+                // becomes unambiguously known — surface it.
+                let outcome = if sid == attempted_sid && is_confirmed_success {
+                    SessionOutcome::Resumed
+                } else {
+                    SessionOutcome::Fresh
+                };
+                let actual_sid = if sid != attempted_sid { Some(sid) } else { None };
+                effects.push(ResumeEffect::EmitSessionOutcome { outcome, attempted_sid, actual_sid });
                 (ResumeState::NotTracking { current_generation: generation }, effects)
             } else {
                 (
@@ -311,7 +343,16 @@ pub(super) fn update(state: ResumeState, event: ResumeEvent) -> (ResumeState, Ve
             ResumeEvent::SessionCaptured { generation: g, sid, is_confirmed_success },
         ) if generation == g => {
             if sid != attempted_sid || is_confirmed_success {
-                let effects = held_error_line.map(|line| vec![ResumeEffect::FlushErrorLine(line)]).unwrap_or_default();
+                let mut effects: Vec<ResumeEffect> =
+                    held_error_line.map(ResumeEffect::FlushErrorLine).into_iter().collect();
+                // Same rationale as the `AwaitingOutcome` arm above.
+                let outcome = if sid == attempted_sid && is_confirmed_success {
+                    SessionOutcome::Resumed
+                } else {
+                    SessionOutcome::Fresh
+                };
+                let actual_sid = if sid != attempted_sid { Some(sid) } else { None };
+                effects.push(ResumeEffect::EmitSessionOutcome { outcome, attempted_sid, actual_sid });
                 (ResumeState::NotTracking { current_generation: generation }, effects)
             } else {
                 (
@@ -456,7 +497,7 @@ pub(super) fn update(state: ResumeState, event: ResumeEvent) -> (ResumeState, Ve
             (ResumeState::NotTracking { current_generation: generation }, effects)
         }
         (
-            ResumeState::ConfirmedRetry { generation, retry, held_error_line, stop_requested, .. },
+            ResumeState::ConfirmedRetry { generation, attempted_sid, retry, held_error_line, stop_requested },
             ResumeEvent::ProcessExited { generation: g },
         ) if generation == g => {
             let effects = if stop_requested {
@@ -477,7 +518,22 @@ pub(super) fn update(state: ResumeState, event: ResumeEvent) -> (ResumeState, Ve
                 // (it's determined later, asynchronously, by the
                 // caller's own spawn attempt), so it's bundled into the
                 // effect rather than pre-decided here.
-                vec![ResumeEffect::FireRetry { retry, held_error_line }]
+                //
+                // The resume was CONFIRMED unreachable (`ResumeUnreachable`
+                // already fired to reach `ConfirmedRetry`) — the retry
+                // about to fire clears `session_id` before respawning
+                // (`retry_after_resume_failure`), so this is unambiguously
+                // a Fresh outcome, known now even though the retry itself
+                // hasn't launched yet. See
+                // SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md §2.1.
+                vec![
+                    ResumeEffect::EmitSessionOutcome {
+                        outcome: SessionOutcome::Fresh,
+                        attempted_sid,
+                        actual_sid: None,
+                    },
+                    ResumeEffect::FireRetry { retry, held_error_line },
+                ]
             };
             (ResumeState::NotTracking { current_generation: generation }, effects)
         }
@@ -572,7 +628,14 @@ mod tests {
             },
         );
         assert_eq!(state, ResumeState::NotTracking { current_generation: 1 });
-        assert!(effects.is_empty());
+        assert_eq!(
+            effects,
+            vec![ResumeEffect::EmitSessionOutcome {
+                outcome: SessionOutcome::Resumed,
+                attempted_sid: "dead-sid".to_string(),
+                actual_sid: None,
+            }]
+        );
 
         // A later, unrelated exit on this now-resolved generation must
         // not retry or dredge up anything.
@@ -630,7 +693,14 @@ mod tests {
         assert_eq!(state, ResumeState::NotTracking { current_generation: 1 });
         assert_eq!(
             effects,
-            vec![ResumeEffect::FireRetry { retry: dummy_retry(), held_error_line: Some("boom".to_string()) }]
+            vec![
+                ResumeEffect::EmitSessionOutcome {
+                    outcome: SessionOutcome::Fresh,
+                    attempted_sid: "dead-sid".to_string(),
+                    actual_sid: None,
+                },
+                ResumeEffect::FireRetry { retry: dummy_retry(), held_error_line: Some("boom".to_string()) },
+            ]
         );
     }
 
@@ -685,7 +755,14 @@ mod tests {
         assert_eq!(state, ResumeState::NotTracking { current_generation: 1 });
         assert_eq!(
             effects,
-            vec![ResumeEffect::FireRetry { retry: dummy_retry(), held_error_line: Some("boom".to_string()) }]
+            vec![
+                ResumeEffect::EmitSessionOutcome {
+                    outcome: SessionOutcome::Fresh,
+                    attempted_sid: "dead-sid".to_string(),
+                    actual_sid: None,
+                },
+                ResumeEffect::FireRetry { retry: dummy_retry(), held_error_line: Some("boom".to_string()) },
+            ]
         );
     }
 
@@ -842,7 +919,14 @@ mod tests {
         assert_eq!(state, ResumeState::NotTracking { current_generation: 1 });
         assert_eq!(
             effects,
-            vec![ResumeEffect::FlushErrorLine("boom".to_string())],
+            vec![
+                ResumeEffect::FlushErrorLine("boom".to_string()),
+                ResumeEffect::EmitSessionOutcome {
+                    outcome: SessionOutcome::Resumed,
+                    attempted_sid: "dead-sid".to_string(),
+                    actual_sid: None,
+                },
+            ],
             "the held error must reach the user, not vanish along with the resolved tracking"
         );
     }
@@ -868,7 +952,17 @@ mod tests {
             ResumeEvent::SessionCaptured { generation: 1, sid: "dead-sid".to_string(), is_confirmed_success: true },
         );
         assert_eq!(state, ResumeState::NotTracking { current_generation: 1 });
-        assert_eq!(effects, vec![ResumeEffect::FlushErrorLine("boom".to_string())]);
+        assert_eq!(
+            effects,
+            vec![
+                ResumeEffect::FlushErrorLine("boom".to_string()),
+                ResumeEffect::EmitSessionOutcome {
+                    outcome: SessionOutcome::Resumed,
+                    attempted_sid: "dead-sid".to_string(),
+                    actual_sid: None,
+                },
+            ]
+        );
     }
 
     // reagentx P1 (round 9 on this PR, also flagged inline by codex): the
@@ -909,7 +1003,17 @@ mod tests {
         // The retry still fires normally once the process actually exits.
         let (state, effects) = update(state, ResumeEvent::ProcessExited { generation: 1 });
         assert_eq!(state, ResumeState::NotTracking { current_generation: 1 });
-        assert_eq!(effects, vec![ResumeEffect::FireRetry { retry: dummy_retry(), held_error_line: None }]);
+        assert_eq!(
+            effects,
+            vec![
+                ResumeEffect::EmitSessionOutcome {
+                    outcome: SessionOutcome::Fresh,
+                    attempted_sid: "dead-sid".to_string(),
+                    actual_sid: None,
+                },
+                ResumeEffect::FireRetry { retry: dummy_retry(), held_error_line: None },
+            ]
+        );
     }
 
     // reagentx P2 on PR #2373: an ErrorResultLine whose generation
@@ -1008,5 +1112,59 @@ mod tests {
         let (state, effects) = update(state, ResumeEvent::ProcessExited { generation: 1 });
         assert!(effects.is_empty(), "generation 1's stale exit must not fire its now-superseded retry");
         assert_eq!(state, ResumeState::NotTracking { current_generation: 2 });
+    }
+
+    // SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md §2.1: the CLI itself
+    // can silently roll to a DIFFERENT session id (rather than failing
+    // outright) before `ResumeUnreachable` ever gets a chance to fire — the
+    // `sid != attempted_sid` branch of the unambiguity check. This must
+    // still be reported as Fresh, with `actual_sid` carrying the id the CLI
+    // actually landed on.
+    #[test]
+    fn session_captured_with_a_different_sid_emits_fresh_outcome_with_actual_sid() {
+        let state = spawned_with_resume(1);
+        let (state, effects) = update(
+            state,
+            ResumeEvent::SessionCaptured {
+                generation: 1,
+                sid: "brand-new-sid".to_string(),
+                is_confirmed_success: false,
+            },
+        );
+        assert_eq!(state, ResumeState::NotTracking { current_generation: 1 });
+        assert_eq!(
+            effects,
+            vec![ResumeEffect::EmitSessionOutcome {
+                outcome: SessionOutcome::Fresh,
+                attempted_sid: "dead-sid".to_string(),
+                actual_sid: Some("brand-new-sid".to_string()),
+            }]
+        );
+    }
+
+    // Regression guard for SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md
+    // §2.1's "deliberately not touched" call: a fresh spawn with no resume
+    // attempt at all (no session existed yet — nothing to lose), and a
+    // resume attempt that's never confirmed either way (auth failure etc.,
+    // §2.1's `unrelated_error_never_confirmed_flushes_instead_of_retrying`
+    // case), must NOT emit a session-outcome event — there's no positively-
+    // known outcome to report in either case.
+    #[test]
+    fn spawned_fresh_and_never_confirmed_paths_never_emit_a_session_outcome() {
+        let (state, effects) = update(ResumeState::default(), ResumeEvent::SpawnedFresh { generation: 1 });
+        assert!(!effects.iter().any(|e| matches!(e, ResumeEffect::EmitSessionOutcome { .. })));
+
+        let state2 = spawned_with_resume(2);
+        let (state2, _) =
+            update(state2, ResumeEvent::ErrorResultLine { generation: 2, line: "auth failed".to_string() });
+        let (_, effects) = update(state2, ResumeEvent::ProcessExited { generation: 2 });
+        assert!(
+            !effects.iter().any(|e| matches!(e, ResumeEffect::EmitSessionOutcome { .. })),
+            "a never-confirmed resume attempt has no positively-known outcome to report"
+        );
+
+        // Keep `state` (generation 1) used so the compiler doesn't flag it —
+        // its only purpose above is exercising the SpawnedFresh path.
+        assert_eq!(state, ResumeState::NotTracking { current_generation: 1 });
     }
 }

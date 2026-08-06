@@ -12,7 +12,8 @@
 import { createTranslator } from "./providers/translator-factory";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import { parseCompactBoundaryFrame, contextCompactedNodeId } from "./compact-boundary";
-import type { ContextCompactedNode, DocumentNode, SessionStats } from "./types";
+import { parseSessionOutcomeFrame, sessionOutcomeNodeId } from "./session-outcome";
+import type { ContextCompactedNode, DocumentNode, SessionOutcomeNode, SessionStats } from "./types";
 
 export interface ParsedHistory {
     nodes: DocumentNode[];
@@ -130,6 +131,36 @@ export function parseHistoryLines(
                     source: "real",
                     trigger: data.trigger,
                     durationMs: data.durationMs,
+                };
+                const existing = indexById.get(node.id);
+                if (existing != null) {
+                    nodes[existing] = node;
+                } else {
+                    indexById.set(node.id, nodes.length);
+                    nodes.push(node);
+                }
+            }
+            continue;
+        }
+
+        // AgentMux's own resume-outcome marker — same raw-frame interception
+        // as useAgentStream.ts's live path (shared parsing via
+        // session-outcome.ts). See
+        // docs/specs/SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md §2.2.
+        if (rawEvent.type === "system" && rawEvent.subtype === "agentmux_session_outcome") {
+            parser.flushPending();
+            const data = parseSessionOutcomeFrame(rawEvent);
+            if (data) {
+                const parsedTs = typeof rawEvent.timestamp === "string" ? Date.parse(rawEvent.timestamp) : NaN;
+                const node: SessionOutcomeNode = {
+                    type: "session_outcome",
+                    // Shares useAgentStream.ts's exact id-construction
+                    // function — same rationale as context_compacted above.
+                    id: sessionOutcomeNodeId(data),
+                    outcome: data.outcome,
+                    attemptedSid: data.attemptedSid,
+                    actualSid: data.actualSid,
+                    timestamp: Number.isNaN(parsedTs) ? 0 : parsedTs,
                 };
                 const existing = indexById.get(node.id);
                 if (existing != null) {
