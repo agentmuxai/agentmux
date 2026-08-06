@@ -241,9 +241,10 @@ export function useAgentStream({
     useShellNodeStream({ blockId, queue });
     useCompactionStream({ blockId, model, queue, hasNodeId, addNodeId });
     // dock:clear doesn't push into `queue` — it's a rare, out-of-band
-    // mutation of one existing node (mirrors useAgentDecisions.ts's direct
-    // dispatchDoc for tool-decision replies), not a streaming producer.
-    useDockClearStream({ blockId });
+    // mutation of one existing node, not a streaming producer. Uses
+    // model.dispatchDoc (disposal-safe), not the raw dispatch, since this
+    // WPS handler can fire after the pane unregisters.
+    useDockClearStream({ blockId, model });
 
     onMount(() => {
         if (!enabled || !blockId) return;

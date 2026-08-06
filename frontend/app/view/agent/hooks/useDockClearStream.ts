@@ -22,12 +22,13 @@
  */
 
 import { onCleanup } from "solid-js";
-import { dispatch as dispatchDoc } from "@/app/store/agent-document-store";
+import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 
 export interface UseDockClearStreamOptions {
     blockId: string;
+    model: AgentPaneModel;
 }
 
 export function useDockClearStream(opts: UseDockClearStreamOptions): void {
@@ -39,7 +40,15 @@ export function useDockClearStream(opts: UseDockClearStreamOptions): void {
             if (!d || typeof d !== "object") return;
             const nodeId = typeof d.node_id === "string" ? d.node_id : "";
             if (!nodeId) return;
-            dispatchDoc(opts.blockId, { type: "ForceCancelToolNode", nodeId }, "system");
+            // model.dispatchDoc is the disposal-safe wrapper — required
+            // here, not the raw (throwing) dispatch: this handler can fire
+            // after the pane's slot unregisters (pane closed, or the
+            // documented CASCADE_DETECTED unmount race) and
+            // dispatchToSubjects in wps.ts invokes handlers with no
+            // try/catch, so a throw here would be uncaught. reagentx P1 on
+            // PR #2432 — mirrors useCompactionStream.ts's use of
+            // opts.model.dispatchPane for the identical reason.
+            opts.model.dispatchDoc({ type: "ForceCancelToolNode", nodeId }, "system");
         },
     });
     onCleanup(() => { try { unsub(); } catch { /* ignore */ } });
