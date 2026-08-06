@@ -140,7 +140,18 @@ export type AgentDocumentCommand =
      *
      * Spec: docs/specs/SPEC_ORPHAN_THINKING_NODES_2026_05_27.md.
      */
-    | { type: "ScrubOrphanedInProgress"; at: number };
+    | { type: "ScrubOrphanedInProgress"; at: number }
+    /**
+     * Force one specific `ToolNode` to `status: "canceled"`, regardless of
+     * how long it's been running or whether a session boundary has
+     * happened. Dispatched when a `dock:clear` WPS event arrives (a
+     * `muxspect dock clear` request for this pane's block) — the manual
+     * escape hatch for a stuck node, distinct from `ScrubOrphanedInProgress`'s
+     * blanket sweep. No-op (empty events) if `nodeId` isn't a currently
+     * tracked tool node — already resolved, or a stale/duplicate event.
+     * Spec: docs/specs/SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06.md §3.2.
+     */
+    | { type: "ForceCancelToolNode"; nodeId: string };
 
 /**
  * Audit events emitted by the reducer. v1 logs them via the dispatcher's
@@ -189,6 +200,21 @@ export type AgentDocumentEvent =
           markdownCanceled: number;
           /** Tool nodes whose status flipped from "running" → "canceled". */
           toolsCanceled: number;
+          /**
+           * Every tool node whose status this scrub actually changed —
+           * `agent-document-store.ts`'s `dispatch()` pushes a final
+           * `docknodestatus` delta for each so the srv-side `muxspect dock`
+           * cache learns about the resolution instead of reporting an
+           * already-resolved node as stuck forever (reagentx P1, PR #2432).
+           */
+          resolvedToolNodes: Array<{ id: string; status: string; toolName: string }>;
+      }
+    | { type: "tool-force-canceled"; nodeId: string }
+    | {
+          type: "tool-force-cancel-skipped";
+          nodeId: string;
+          /** Reason the target node wasn't found — same taxonomy as tool-chunk-dropped. */
+          reason: "unknown-tool-id" | "node-not-tool";
       };
 
 export interface ReducerResult {

@@ -40,4 +40,10 @@ export const WpsEvent = {
     UpgradeMigrationsComplete: "upgrade:migrations-complete",
     UpgradeMigrationsFailed:   "upgrade:migrations-failed",
     UpgradeSagaVacuumDone:     "upgrade:saga-vacuum-done",
+    // Published by `handle_muxspect_dock_clear` in response to a
+    // `muxspect dock clear` request. Scoped `block:<id>` — only a
+    // renderer currently displaying that block receives it. Payload:
+    // `{ node_id }`. See
+    // docs/specs/SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06.md §3.2.
+    DockClear: "dock:clear",
 } as const;

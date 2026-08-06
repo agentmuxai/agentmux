@@ -59,6 +59,13 @@ pub const COMMAND_DELETE_SUB_BLOCK: &str = "deletesubblock";
 /// docs/specs/SPEC_DECISION_PROMPT_2026_04_24.md §9.1.
 pub const COMMAND_TOOL_DECISION: &str = "tooldecision";
 
+/// Fire-and-forget push from the renderer whenever a `ToolNode`'s status
+/// changes (created, or transitions running→success/failed/canceled/etc).
+/// Backs `muxspect dock`'s diagnostic snapshot — see
+/// `docs/specs/SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06.md` §3.1.
+/// No reply expected; the frontend does not await this call.
+pub const COMMAND_DOCK_NODE_STATUS: &str = "docknodestatus";
+
 // Subprocess agent commands
 pub const COMMAND_SUBPROCESS_SPAWN: &str = "subprocessspawn";
 pub const COMMAND_AGENT_INPUT: &str = "agentinput";
