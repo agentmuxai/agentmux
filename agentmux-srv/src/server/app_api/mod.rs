@@ -1015,6 +1015,21 @@ pub(super) fn resolve_agent_definition_id(
     if let Ok(Some(_)) = state.wstore.agent_def_get(agent_id) {
         return Ok(agent_id.to_string());
     }
+    // reagentx P1 on PR #2428 (round 4): `instance_get_by_slug` only ever
+    // hits the local `db_agents` table — the common case (per
+    // `bundle_self_get_impl`'s own doc comment a few lines above: launching
+    // an agent does not create a `db_agents` row) is a live agent that only
+    // exists in the global named-agent registry. Without this fallback,
+    // `identity.self.accounts`/`IdentityAccounts` — the exact tool
+    // confirmed live-broken for a real registry-only agent — stayed broken
+    // even after `instance_get_by_slug` existed, since a slug-only agent
+    // never resolves via either branch above. Mirrors the same registry
+    // fallback `bundle_self_get_impl` already has.
+    if let Some(rec) = crate::server::native_memory_handlers::find_active_registry_record_by_slug(agent_id) {
+        if !rec.data.definition_id.is_empty() {
+            return Ok(rec.data.definition_id);
+        }
+    }
     Err(format!(
         "unknown agent '{agent_id}': no instance with that name and no definition with that id"
     ))
@@ -1945,6 +1960,96 @@ mod identity_self_accounts_tests {
             .expect("must not fail even with a malformed linked account present");
         let accounts = result["accounts"].as_array().unwrap();
         assert_eq!(accounts.len(), 1, "the malformed account must be skipped, not error the whole call");
+        assert_eq!(accounts[0]["account_id"], json!("acct-good"));
+    }
+
+    // reagentx P1 on PR #2428 (round 4): `resolve_agent_definition_id`
+    // (the shared resolver behind `identity.self.*`) only tried
+    // `instance_get_by_slug` (local `db_agents`) then `agent_def_get`
+    // (treating the slug as if it were a definition UUID, which it never
+    // is) — no registry fallback, unlike `bundle_self_get_impl`. So the
+    // common case (a live agent that only exists in the global
+    // named-agent registry, per that function's own doc comment) stayed
+    // broken for `IdentityAccounts` even after the slug/name namespace
+    // split — the exact tool this PR's own description cited as
+    // confirmed-live-broken.
+    #[tokio::test]
+    async fn resolve_agent_definition_id_falls_back_to_the_registry_for_a_slug_only_agent() {
+        use crate::test_support::ISOLATED_AUTH_ENV_LOCK as ENV_LOCK;
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        let state = test_state();
+        let mut def = AgentDefinition {
+            id: uuid::Uuid::new_v4().to_string(),
+            slug: "agenty".to_string(),
+            name: "AgentY".to_string(),
+            icon: String::new(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            environment: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+        };
+        state.wstore.agent_def_insert(&mut def).unwrap();
+        state.wstore.identity_upsert(&sample_account("acct-good", "claude")).unwrap();
+        state.wstore.agent_identity_link(&def.id, "acct-good", "claude").unwrap();
+
+        // Deliberately NO `instance_create` call — this agent exists only
+        // in the global registry, exactly like a real live-launched agent
+        // that never got a local `db_agents` instance row.
+        let tmp = tempfile::tempdir().unwrap();
+        let prev = std::env::var_os("AGENTMUX_HOME_OVERRIDE");
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", tmp.path());
+
+        let registry_dir = tmp.path().join("shared").join("agents").join("registry");
+        let registry = crate::registry::Registry::open(registry_dir).unwrap();
+        registry
+            .upsert(&crate::registry::NamedAgentRecord {
+                schema_version: 1,
+                data: crate::registry::NamedAgentRecordV1 {
+                    instance_id: "inst-agenty".to_string(),
+                    instance_name: "AgentY".to_string(),
+                    definition_id: def.id.clone(),
+                    identity_id: None,
+                    memory_id: None,
+                    session_id: None,
+                    working_dir: "agenty-0629j".to_string(),
+                    source_agents_base: None,
+                    created_at_ms: 1,
+                    last_launched_at_ms: 1,
+                    created_by_version: "test".to_string(),
+                    last_launched_by_version: "test".to_string(),
+                },
+            })
+            .unwrap();
+
+        let result = identity_self_accounts_impl(&state, "agenty").await;
+
+        match prev {
+            Some(v) => std::env::set_var("AGENTMUX_HOME_OVERRIDE", v),
+            None => std::env::remove_var("AGENTMUX_HOME_OVERRIDE"),
+        }
+
+        let result = result.expect("must resolve via the registry fallback, not error 'unknown agent'");
+        let accounts = result["accounts"].as_array().unwrap();
+        assert_eq!(accounts.len(), 1);
         assert_eq!(accounts[0]["account_id"], json!("acct-good"));
     }
 }
