@@ -104,8 +104,6 @@ const Markdown = (props: MarkdownProps) => {
         rehype = true,
         onClickExecute,
     } = props;
-    const textAtomValue = useAtomValueSafe<string>(textAtom as any);
-    const showToc = useAtomValueSafe(showTocAtom) ?? false;
     const [focusedHeading, setFocusedHeading] = createSignal<string | null>(null);
 
     let contentsEl!: HTMLDivElement;
@@ -115,7 +113,19 @@ const Markdown = (props: MarkdownProps) => {
 
     const [idPrefix] = createSignal<string>(crypto.randomUUID());
 
-    const resolvedText = createMemo(() => textAtomValue ?? props.text ?? "");
+    // `useAtomValueSafe(textAtom)` must be called INSIDE the memo, not hoisted
+    // to a plain outer `const`. `textAtom` (e.g. the editor's `() => liveDoc()`)
+    // is a live reactive getter — calling it once at component-setup time
+    // (before setup, before any effect has had a chance to seed the real
+    // value) froze the memo's only input, so it never recomputed again for
+    // the lifetime of this component instance. On a freshly-mounted markdown
+    // preview this snapshot was almost always "" (the seed value hasn't
+    // landed yet), producing a permanently blank preview — "fixed" only by
+    // remounting the component (e.g. toggling Source → Preview), which
+    // re-captures a fresh (by-then-correct) snapshot. Reading the accessor
+    // here makes the memo properly track its underlying signal.
+    const resolvedText = createMemo(() => useAtomValueSafe<string>(textAtom as any) ?? props.text ?? "");
+    const showToc = createMemo(() => useAtomValueSafe(showTocAtom) ?? false);
 
     const transformedOutput = createMemo(() => transformBlocks(resolvedText()));
     const transformedText = createMemo(() => transformedOutput().content);
@@ -315,10 +325,24 @@ const Markdown = (props: MarkdownProps) => {
                 }
             >
                 <div class={cn("content", contentClassName)} ref={contentsEl}>
-                    {renderedMarkdown().element}
+                    {/* OverlayScrollbars (below, onMount) restructures contentsEl's
+                        DOM once, moving whatever children exist AT INIT TIME into
+                        its generated .os-viewport. On first open, liveDoc/textAtom
+                        is often still "" when this initial move happens (the real
+                        content lands a beat later via a reactive update), which
+                        orphaned Solid's insertion anchor for {renderedMarkdown().element}
+                        outside the new viewport — a permanently blank preview until
+                        something (e.g. a Source/Preview toggle) fully remounted this
+                        component. A single, never-replaced wrapper div is the node
+                        OverlayScrollbars moves; Solid's reactive updates always target
+                        children of THIS stable node, so they keep landing correctly
+                        regardless of OverlayScrollbars' init timing. */}
+                    <div class="markdown-content-inner">
+                        {renderedMarkdown().element}
+                    </div>
                 </div>
             </Show>
-            <Show when={showToc && tocItems().length > 0}>
+            <Show when={showToc() && tocItems().length > 0}>
                 <div class="toc mt-1" ref={tocEl}>
                     <div class="toc-inner">
                         <h4 class="font-bold">Table of Contents</h4>
@@ -334,7 +358,7 @@ const Markdown = (props: MarkdownProps) => {
                     </div>
                 </div>
             </Show>
-            <Show when={showToc && tocItems().length === 0}>
+            <Show when={showToc() && tocItems().length === 0}>
                 <div class="toc mt-1">
                     <div class="toc-inner">
                         <h4 class="font-bold">Table of Contents</h4>
