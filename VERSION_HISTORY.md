@@ -1,5 +1,32 @@
 # AgentMux Version History
 
+## 0.54.11 — 2026-08-06
+
+- fix(migrations): stop trusting marker existence as proof of effect
+- fix(agent-pane): composer strip centers at wide widths, pairs HOST/SANDBOX with Shell
+- feat(launcher): detect srv hang-while-alive and force a recycle (#942)
+- fix(agent-pane): remove the model selector's misleading trailing caret
+- feat(auth): in-app Claude OAuth login — core session, catalog revival, and launch surface
+- feat(auth): revive in-app relogin on credential loss + fix spawn-gate stuck-pane classification
+- feat(armory): connect/re-login Claude OAuth accounts from Armory and Agent Stash
+- docs(auth): sweep stale 'dead end' claims after reviving in-app Claude OAuth login
+- fix(ambient): ghost-text suggestions read as direct instructions, not chat filler
+- fix(dev): default dev-agent.cmd window title to agent identity
+- feat(cron): AgentMux/native scheduling tool disambiguation + expiry bound
+- fix(identity): tolerate a malformed secret_ref row instead of hiding every account
+- fix(agent-pane): remove the 'Picked up more work' synthetic system notification
+- fix(agent): surface 429/overloaded failures from the persistent controller for retry
+- fix(agent-pane): decouple Working state from window focus
+- fix(login): resolve npm .cmd shims before spawning under a PTY on Windows
+- fix(accounts): unify ClaudeLoginPanel onto the canonical Modal, fix Stash nesting
+- fix(build): exclude target/ from the Vite dev-server watcher
+- feat(agent-pane): surface --resume outcome as an explicit transcript event
+- fix(agent-api): resolve App-API self-lookup by the agent's routing slug, not its display-cased name
+- fix(editor): markdown preview blank on first MCP/tree open
+- feat(identity): non-stable channels (task dev, task package) now default to isolated Armory accounts
+- feat(muxspect): diagnose and clear stuck Activity Dock entries (dock, dock clear)
+
+
 ## 0.54.10 — 2026-08-03
 
 - feat(muxspect): surface last persisted spawn/execution error in list/describe
