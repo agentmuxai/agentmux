@@ -7,6 +7,7 @@ pub mod agent_session;
 pub mod blockcontroller;
 pub mod bundle_export;
 pub mod bundle_import;
+pub mod dock_snapshot;
 pub mod mcp_probe;
 pub mod mcp_seed;
 /// Phase E.4.B Phase 4 — pure layout-tree helpers (Rust port of layoutTree.ts).

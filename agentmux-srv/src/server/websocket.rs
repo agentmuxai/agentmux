@@ -29,6 +29,7 @@ use crate::backend::rpc_types::{
     COMMAND_SET_META, COMMAND_SET_CONFIG, COMMAND_APP_INFO,
     COMMAND_TOOL_DECISION, COMMAND_AGENT_ANSWER,
     CommandAgentAnswerData,
+    COMMAND_DOCK_NODE_STATUS, CommandDockNodeStatusData,
 };
 use crate::backend::base::normalize_working_dir;
 use crate::backend::obj::{Block, TermSize, WaveObjUpdate, wave_obj_to_value};
@@ -1005,6 +1006,36 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                     scope = %cmd.scope,
                     has_feedback = cmd.feedback.is_some(),
                     "[tooldecision] received (delivery mechanism deferred to PR-3b/PR-4)"
+                );
+                Ok(None)
+            })
+        }),
+    );
+
+    // docknodestatus → fire-and-forget push of a ToolNode's latest status,
+    // cached in-memory per block for `muxspect dock` to read. See
+    // docs/specs/SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06.md §3.1.
+    let dock_snapshots_dns = state.dock_snapshots.clone();
+    engine.register_handler(
+        COMMAND_DOCK_NODE_STATUS,
+        Box::new(move |data, _ctx| {
+            let dock_snapshots = dock_snapshots_dns.clone();
+            Box::pin(async move {
+                let cmd: CommandDockNodeStatusData = serde_json::from_value(data)
+                    .map_err(|e| format!("docknodestatus: {e}"))?;
+                let observed_at = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as i64;
+                dock_snapshots.push_delta(
+                    &cmd.blockid,
+                    crate::backend::dock_snapshot::DockNodeSnapshot {
+                        node_id: cmd.node_id,
+                        tool_name: cmd.tool_name,
+                        status: cmd.status,
+                        timestamp: cmd.timestamp,
+                        observed_at,
+                    },
                 );
                 Ok(None)
             })

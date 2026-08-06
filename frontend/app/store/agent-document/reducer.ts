@@ -65,10 +65,25 @@ function scrubOrphanedInProgress(
          */
         hasContentAfter?: boolean;
     },
-): { nodes: DocumentNode[]; markdownCanceled: number; toolsCanceled: number } | null {
+): {
+    nodes: DocumentNode[];
+    markdownCanceled: number;
+    toolsCanceled: number;
+    /**
+     * Every tool node this pass changed the status of — the local
+     * resolution `muxspect dock`'s server-side snapshot cache never
+     * otherwise learns about (reagentx P1 on PR #2432: the scrub paths
+     * resolve stuck nodes purely client-side, so the cache could keep
+     * reporting an already-resolved node as STUCK? forever). Consumed
+     * by `agent-document-store.ts`'s `dispatch()` — the pure reducer
+     * itself does no I/O — to push a final status delta for each.
+     */
+    resolvedToolNodes: Array<{ id: string; status: ToolNode["status"]; toolName: string }>;
+} | null {
     let next: DocumentNode[] | null = null;
     let markdownCanceled = 0;
     let toolsCanceled = 0;
+    const resolvedToolNodes: Array<{ id: string; status: ToolNode["status"]; toolName: string }> = [];
 
     // Spec's "simple heuristic" (SPEC_ORPHAN_THINKING_NODES §Design):
     // a thinking markdown is orphaned only when it's the document's
@@ -115,6 +130,7 @@ function scrubOrphanedInProgress(
             const closedLog = n.log != null ? { ...n.log, open: false } : n.log;
             next[i] = { ...n, status: "canceled", log: closedLog };
             toolsCanceled++;
+            resolvedToolNodes.push({ id: n.id, status: "canceled", toolName: n.toolName ?? n.tool });
             continue;
         }
         // AskUserQuestion that has content AFTER it was answered (the
@@ -133,6 +149,7 @@ function scrubOrphanedInProgress(
                 summary: "❓ Question answered",
             };
             toolsCanceled++;
+            resolvedToolNodes.push({ id: n.id, status: "success", toolName: n.toolName ?? n.tool });
             continue;
         }
         if (n.type === "shell" && n.status === "running") {
@@ -144,7 +161,7 @@ function scrubOrphanedInProgress(
     }
 
     if (!next) return null;
-    return { nodes: next, markdownCanceled, toolsCanceled };
+    return { nodes: next, markdownCanceled, toolsCanceled, resolvedToolNodes };
 }
 
 export function update(
@@ -183,6 +200,7 @@ export function update(
                     type: "orphans-scrubbed",
                     markdownCanceled: scrub.markdownCanceled,
                     toolsCanceled: scrub.toolsCanceled,
+                    resolvedToolNodes: scrub.resolvedToolNodes,
                 });
                 return {
                     state: { ...state, sessionPhase: "ended", nodes: scrub.nodes },
@@ -264,6 +282,7 @@ export function update(
                     type: "orphans-scrubbed",
                     markdownCanceled: scrubResult.markdownCanceled,
                     toolsCanceled: scrubResult.toolsCanceled,
+                    resolvedToolNodes: scrubResult.resolvedToolNodes,
                 });
             }
             return {
@@ -343,6 +362,7 @@ export function update(
                     type: "orphans-scrubbed",
                     markdownCanceled: scrubResult.markdownCanceled,
                     toolsCanceled: scrubResult.toolsCanceled,
+                    resolvedToolNodes: scrubResult.resolvedToolNodes,
                 });
             }
             return {
@@ -628,8 +648,38 @@ export function update(
                         type: "orphans-scrubbed",
                         markdownCanceled: scrub.markdownCanceled,
                         toolsCanceled: scrub.toolsCanceled,
+                        resolvedToolNodes: scrub.resolvedToolNodes,
                     },
                 ],
+            };
+        }
+
+        case "ForceCancelToolNode": {
+            const idx = findToolIndex(state, command.nodeId);
+            if (idx === -1) {
+                return {
+                    state,
+                    events: [
+                        {
+                            type: "tool-force-cancel-skipped",
+                            nodeId: command.nodeId,
+                            reason: nodeReasonFor(state, command.nodeId),
+                        },
+                    ],
+                };
+            }
+            const tool = state.nodes[idx] as ToolNode;
+            const closedLog = tool.log != null ? { ...tool.log, open: false } : tool.log;
+            const nextNodes = state.nodes.slice();
+            nextNodes[idx] = {
+                ...tool,
+                status: "canceled",
+                log: closedLog,
+                summary: "⏹ Canceled — cleared via muxspect",
+            };
+            return {
+                state: { ...state, nodes: nextNodes },
+                events: [{ type: "tool-force-canceled", nodeId: command.nodeId }],
             };
         }
     }

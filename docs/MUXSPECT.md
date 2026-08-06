@@ -32,12 +32,39 @@ terminal (bash / zsh / pwsh / fish), delegating to a small Node core
 node ~/.agentmux/shell/muxspect.mjs list
 node ~/.agentmux/shell/muxspect.mjs describe <block_id>
 node ~/.agentmux/shell/muxspect.mjs watch <block_id>
+node ~/.agentmux/shell/muxspect.mjs dock <block_id>
+node ~/.agentmux/shell/muxspect.mjs dock clear <block_id> <node_id>
 node ~/.agentmux/shell/muxspect.mjs help
 ```
 
-Add `--json` to `list`/`describe` for structured output. Once the shell
-function actually works everywhere it's meant to, bare `muxspect ...` will
-work too — the wire protocol and commands are identical either way.
+Add `--json` to `list`/`describe`/`dock` for structured output. Once the
+shell function actually works everywhere it's meant to, bare `muxspect ...`
+will work too — the wire protocol and commands are identical either way.
+
+## Diagnosing and clearing a stuck Activity Dock entry (`dock`)
+
+`list`/`describe`/`watch` read `ProcessBroker`/controller state — they
+cannot see the Agent pane's Activity Dock (see "What it can and can't
+see" below): an in-renderer `ToolNode` that never received its
+terminating event (e.g. a tool call rejected by the outer CLI harness
+before it ever ran) can stay stuck at `status: "running"` in the dock
+indefinitely, invisible to every other `muxspect` command.
+
+`dock <block_id>` reads a lightweight snapshot the renderer itself pushes
+on every `ToolNode` status change (id, tool name, status, age — no
+transcript content) and flags entries that look stuck (`running`, past
+the 30s promotion threshold, with nothing srv-side backing the block).
+`dock clear <block_id> <node_id>` force-cancels one specific entry live,
+in whatever renderer currently has that block open — no pane reload
+needed. This is `muxspect`'s only mutating command; every other command
+is read-only diagnostics.
+
+Full design: `docs/specs/SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06.md`.
+This targets one specific, narrow bug class — it is not a fix for the
+underlying issue (a first-party in-renderer self-expiry fix is tracked
+separately, see that spec §1.2) and not general Activity Dock
+introspection (see "What it can and can't see" below, still accurate for
+everything except this one diagnostic snapshot).
 
 ## What it can and can't see
 

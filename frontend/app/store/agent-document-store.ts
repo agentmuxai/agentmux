@@ -17,6 +17,8 @@
 
 import type { DocumentNode } from "../view/agent/types";
 import { markDispatch } from "../view/agent/virtualization/perf-probe";
+import { RpcApi } from "./rpc-api";
+import { TabRpcClient } from "./rpc-util";
 import { update } from "./agent-document/reducer";
 import {
     AgentDocumentCommand,
@@ -26,6 +28,31 @@ import {
     initialState,
 } from "./agent-document/types";
 import { type CommandSource, recordDispatch } from "./command-source";
+
+/**
+ * Push a final `docknodestatus` delta for every tool node an
+ * `orphans-scrubbed` event resolved locally (SessionEnd/HistoryLoaded/
+ * HistoryRestored/ScrubOrphanedInProgress) — otherwise `muxspect dock`'s
+ * server-side snapshot cache never learns the node resolved and can keep
+ * reporting it as STUCK? forever (reagentx P1, PR #2432). Fire-and-forget,
+ * same as the streaming-path push in stream-flush-queue.ts's
+ * pushDockNodeStatus — this is the single choke point every dispatch path
+ * (streaming AND scrub) funnels through, so one push site here covers both
+ * instead of touching each of the 5 scrub call sites individually.
+ */
+function pushResolvedDockNodes(blockId: string, events: AgentDocumentEvent[]) {
+    for (const ev of events) {
+        if (ev.type !== "orphans-scrubbed") continue;
+        for (const n of ev.resolvedToolNodes) {
+            void RpcApi.DockNodeStatusCommand(TabRpcClient, {
+                blockid: blockId,
+                node_id: n.id,
+                tool_name: n.toolName,
+                status: n.status,
+            }).catch(() => {});
+        }
+    }
+}
 
 /** A pane's projection setter — typically the SignalPair[1] from createAgentAtoms. */
 type DocumentSetter = (nodes: DocumentNode[]) => void;
@@ -147,6 +174,7 @@ export function dispatch(
         }
     }
     for (const ev of result.events) eventSink(blockId, ev);
+    pushResolvedDockNodes(blockId, result.events);
     recordDispatch({
         slice: "agent-document",
         key: blockId,

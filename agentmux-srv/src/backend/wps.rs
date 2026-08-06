@@ -63,6 +63,15 @@ pub const EVENT_BLOCK_ACTIVITY: &str = "block:activity";
 /// `cron.ListActive` on receipt, the same "any event of this type ⇒ refetch"
 /// pattern `shell_node_create`/`shell_chunk(op:"exit")` already use.
 pub const EVENT_CRON_CHANGED: &str = "cron_changed";
+/// Fired by `handle_muxspect_dock_clear` when a `muxspect dock clear`
+/// request is served. Scoped `block:<id>`, same convention as
+/// `shell_node_create` — only a renderer currently displaying that block
+/// receives it. Payload: `{ node_id }`. The receiving renderer flips that
+/// one `ToolNode` to `status: "canceled"` via the `ForceCancelToolNode`
+/// document-reducer command; a renderer without that node (already
+/// resolved, or a different pane's block) no-ops.
+/// See `docs/specs/SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06.md` §3.2.
+pub const EVENT_DOCK_CLEAR: &str = "dock:clear";
 
 // File operation constants
 #[allow(dead_code)]

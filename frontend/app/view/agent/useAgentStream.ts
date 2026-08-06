@@ -51,6 +51,7 @@ import { createStreamFlushQueue, type StreamFlushQueue } from "./stream-flush-qu
 import { useToolChunkStream } from "./hooks/useToolChunkStream";
 import { useShellNodeStream } from "./hooks/useShellNodeStream";
 import { useCompactionStream } from "./hooks/useCompactionStream";
+import { useDockClearStream } from "./hooks/useDockClearStream";
 import { useTurnLifecycle } from "./hooks/useTurnLifecycle";
 import { usePendingMessageAcceptance } from "./hooks/usePendingMessageAcceptance";
 
@@ -239,6 +240,11 @@ export function useAgentStream({
     useToolChunkStream({ blockId, queue });
     useShellNodeStream({ blockId, queue });
     useCompactionStream({ blockId, model, queue, hasNodeId, addNodeId });
+    // dock:clear doesn't push into `queue` — it's a rare, out-of-band
+    // mutation of one existing node, not a streaming producer. Uses
+    // model.dispatchDoc (disposal-safe), not the raw dispatch, since this
+    // WPS handler can fire after the pane unregisters.
+    useDockClearStream({ blockId, model });
 
     onMount(() => {
         if (!enabled || !blockId) return;

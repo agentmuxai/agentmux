@@ -28,7 +28,30 @@
 
 import { batch } from "solid-js";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import type { DocumentNode, ShellNode, ToolLogChunk } from "./types";
+
+/**
+ * Fire-and-forget push of a `ToolNode`'s current status to srv, for
+ * `muxspect dock`'s diagnostic snapshot. Deliberately NOT routed through
+ * this module's batch()/RAF machinery — it's a plain network call with no
+ * DOM/reactive-store effect, so it doesn't interact with the crash history
+ * that machinery guards against (see module doc comment). Silently ignores
+ * non-tool nodes and RPC failures (best-effort telemetry, never blocks or
+ * surfaces an error for the actual document write).
+ * See docs/specs/SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06.md §3.1.
+ */
+function pushDockNodeStatus(model: AgentPaneModel, node: DocumentNode) {
+    if (node.type !== "tool") return;
+    void RpcApi.DockNodeStatusCommand(TabRpcClient, {
+        blockid: model.blockId,
+        node_id: node.id,
+        tool_name: node.toolName ?? node.tool,
+        status: node.status,
+        timestamp: node.timestamp,
+    }).catch(() => {});
+}
 
 type PendingChunk = { toolId: string; chunk: ToolLogChunk };
 type PendingShellCreate = { node: ShellNode };
@@ -159,8 +182,8 @@ export function createStreamFlushQueue(model: AgentPaneModel): StreamFlushQueue 
     }
 
     return {
-        pushNewNode(node) { pendingNew.push(node); },
-        pushUpdatedNode(node) { pendingUpdates.push(node); },
+        pushNewNode(node) { pendingNew.push(node); pushDockNodeStatus(model, node); },
+        pushUpdatedNode(node) { pendingUpdates.push(node); pushDockNodeStatus(model, node); },
         hasPendingNewOrUpdated() { return pendingNew.length > 0 || pendingUpdates.length > 0; },
         pushToolChunk(toolId, chunk) { pendingChunks.push({ toolId, chunk }); },
         pushShellCreate(node) { pendingShellCreates.push({ node }); },

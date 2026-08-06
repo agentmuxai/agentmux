@@ -35,6 +35,13 @@ export const BlockApi = {
         return client.rpcCall("tooldecision", data, opts);
     },
 
+    // Fire-and-forget push whenever a ToolNode's status changes. Backs
+    // `muxspect dock`'s diagnostic snapshot. Spec:
+    // docs/specs/SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06.md §3.1.
+    DockNodeStatusCommand(client: RpcClient, data: CommandDockNodeStatusData, opts?: RpcOpts): Promise<void> {
+        return client.rpcCall("docknodestatus", data, opts);
+    },
+
     // Deliver an AskUserQuestion answer to the running agent CLI as a
     // tool_result. Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md.
     AgentAnswerCommand(client: RpcClient, data: CommandAgentAnswerData, opts?: RpcOpts): Promise<void> {

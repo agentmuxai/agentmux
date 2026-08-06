@@ -67,4 +67,34 @@ describe("muxspect parseArgs", () => {
         expect(r.cmd).toBe("describe");
         expect(r.blockId, "no positional after 'describe' — must not be '--json'").toBeUndefined();
     });
+
+    it("'dock <id>' parses like describe (no sub, blockId in positional[1])", () => {
+        const r = parseArgs(["dock", "block-1"]);
+        expect(r.cmd).toBe("dock");
+        expect(r.sub).toBeUndefined();
+        expect(r.blockId).toBe("block-1");
+        expect(r.nodeId).toBeUndefined();
+    });
+
+    it("'dock clear <block_id> <node_id>' sets sub and both ids", () => {
+        const r = parseArgs(["dock", "clear", "block-1", "node-1"]);
+        expect(r.cmd).toBe("dock");
+        expect(r.sub).toBe("clear");
+        expect(r.blockId).toBe("block-1");
+        expect(r.nodeId).toBe("node-1");
+    });
+
+    it("'dock clear' tolerates a flag anywhere, same discipline as describe", () => {
+        const r = parseArgs(["dock", "--json", "clear", "block-1", "node-1"]);
+        expect(r.sub, "must still resolve to clear, not fall back to plain dock").toBe("clear");
+        expect(r.blockId).toBe("block-1");
+        expect(r.nodeId).toBe("node-1");
+        expect(r.json).toBe(true);
+    });
+
+    it("'dock' with only a block_id (no 'clear') never sets sub, even if positional[1] looks id-like", () => {
+        const r = parseArgs(["dock", "not-the-word-clear"]);
+        expect(r.sub).toBeUndefined();
+        expect(r.blockId).toBe("not-the-word-clear");
+    });
 });

@@ -138,6 +138,20 @@ pub struct CommandToolDecisionData {
     pub feedback: Option<String>,
 }
 
+/// Data for `docknodestatus` — a fire-and-forget push whenever a
+/// `ToolNode`'s status changes. Spec:
+/// docs/specs/SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06.md §3.1.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CommandDockNodeStatusData {
+    pub blockid: String,
+    pub node_id: String,
+    pub tool_name: String,
+    pub status: String,
+    /// `ToolNode.timestamp` (ms), if the pushing client had one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<i64>,
+}
+
 /// Data for AgentAnswerCommand — an AskUserQuestion answer delivered back to
 /// the running agent CLI via the Agent SDK control protocol (a `control_response`
 /// carrying `updatedInput.answers`). Spec:
