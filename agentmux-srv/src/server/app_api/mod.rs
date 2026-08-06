@@ -700,9 +700,9 @@ pub(crate) async fn bundle_self_get_impl(
     state: &AppState,
     agent_id: &str,
 ) -> Result<serde_json::Value, String> {
-    let instance = state.wstore.instance_get_by_name(agent_id)
+    let instance = state.wstore.instance_get_by_slug(agent_id)
         .map_err(|e| format!("bundle.self.get: {e}"))?;
-    // `instance_get_by_name` only ever hits the local `db_agents` table — a
+    // `instance_get_by_slug` only ever hits the local `db_agents` table — a
     // live agent that only exists in the global named-agent registry (never
     // created a `db_agents` instance row) falls through with `instance:
     // None` here. Without this fallback that silently read as "no bundle
@@ -1007,7 +1007,7 @@ pub(super) fn resolve_agent_definition_id(
     state: &AppState,
     agent_id: &str,
 ) -> Result<String, String> {
-    if let Ok(Some(instance)) = state.wstore.instance_get_by_name(agent_id) {
+    if let Ok(Some(instance)) = state.wstore.instance_get_by_slug(agent_id) {
         if !instance.definition_id.is_empty() {
             return Ok(instance.definition_id);
         }
@@ -1796,7 +1796,7 @@ mod bundle_upsert_input_tests {
 
 // SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md follow-up: `PresetGet`
 // self-mode (backed by `bundle_self_get_impl`) only ever checked the local
-// `db_agents` table via `instance_get_by_name`. A live agent that only
+// `db_agents` table via `instance_get_by_slug`. A live agent that only
 // exists in the global named-agent registry (the common case — launching
 // an agent does not create a `db_agents` row, see issue #1836, already
 // handled the same way by `native_memory_handlers::memory_dir_for_agent`)

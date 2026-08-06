@@ -85,10 +85,12 @@ pub(crate) fn memory_dir_for_agent(
     agent_id: &str,
 ) -> Result<std::path::PathBuf, String> {
     // agent_id arriving from App API is the agent slug (AGENTMUX_AGENT_ID /
-    // bus:register id), not a UUID — use instance_get_by_name for the slug
-    // lookup. agent_def_get queries by UUID and would always return None here.
+    // bus:register id), not a UUID and not the literal display name — use
+    // instance_get_by_slug (agent_def_get queries by UUID and would always
+    // return None here; instance_get_by_name matches the display name, a
+    // different namespace — see that function's own doc comment).
     if let Some(instance) = wstore
-        .instance_get_by_name(agent_id)
+        .instance_get_by_slug(agent_id)
         .map_err(|e| format!("memory: store: {e}"))?
     {
         if instance.working_directory.is_empty() {
