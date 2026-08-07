@@ -530,6 +530,14 @@ const MAX_DISPATCH_FEED_ENTRIES = 500;
  *  second hardcoded `60_000` that could drift out of sync. */
 export const AUTO_RETIRE_DELAY_MS = 60_000;
 
+/** One row's auto-linger countdown state — see `SwarmViewModel.
+ *  _countdownState`'s doc comment for the `pausedAt` freeze mechanism. */
+export interface CountdownEntry {
+    lastEventAt: number;
+    startedAt: number;
+    pausedAt: number | null;
+}
+
 /** Identifies one `DispatchActivityEntry` for de-dup purposes — an
  *  (agentId, timestamp, event payload) triple is stable across both the
  *  live `dispatch:activity` broadcast and a `GetHistory` backfill, since
@@ -772,12 +780,18 @@ export class SwarmViewModel implements ViewModel {
     // time, same snapshot-comparison idea `_retiredRowKeys` already uses so
     // genuinely new activity un-arms rather than lets a stale countdown
     // fire. `startedAt` (Date.now()) is what the visible remaining-seconds
-    // display renders against; pausing (hover) leaves this entry alone and
-    // only clears the pending timer, so the displayed number freezes
-    // instead of resetting — only resumeCountdown() rewrites startedAt.
-    private _countdownState = createSignal<Map<string, { lastEventAt: number; startedAt: number }>>(new Map());
-    countdownStateAtom: Accessor<Map<string, { lastEventAt: number; startedAt: number }>> = this._countdownState[0];
-    private setCountdownState: Setter<Map<string, { lastEventAt: number; startedAt: number }>> = this._countdownState[1];
+    // display renders against while live. `pausedAt`: null while counting
+    // down; set to Date.now() by pauseCountdown() so the DISPLAYED number
+    // actually freezes (countdownSecondsRemaining computes elapsed against
+    // pausedAt instead of the live clock while it's non-null) — merely
+    // clearing the pending timer, as an earlier draft of this did, stops
+    // the auto-retire from firing but does nothing to the wall-clock-
+    // derived display, which kept counting to and clamping at 0 while
+    // "paused" (reagentx P1 on #2440). resumeCountdown() clears pausedAt
+    // and resets startedAt for a fresh 60s window.
+    private _countdownState = createSignal<Map<string, CountdownEntry>>(new Map());
+    countdownStateAtom: Accessor<Map<string, CountdownEntry>> = this._countdownState[0];
+    private setCountdownState: Setter<Map<string, CountdownEntry>> = this._countdownState[1];
     private countdownTimers = new Map<string, ReturnType<typeof setTimeout>>();
     // The visible "Nn s" tick source lives in the view (useTick(1000),
     // frontend/app/hook/useTick.ts) — it's already the established,
@@ -1163,7 +1177,7 @@ export class SwarmViewModel implements ViewModel {
         if (existing && existing.lastEventAt === lastEventAt) return;
         this.setCountdownState((prev) => {
             const next = new Map(prev);
-            next.set(rowKey, { lastEventAt, startedAt: Date.now() });
+            next.set(rowKey, { lastEventAt, startedAt: Date.now(), pausedAt: null });
             return next;
         });
         this.armCountdownTimer(rowKey);
@@ -1187,28 +1201,38 @@ export class SwarmViewModel implements ViewModel {
         });
     }
 
-    /** Pause `rowKey`'s countdown on hover — clears only the pending timer,
-     *  leaving `_countdownState`'s entry (and therefore the displayed
-     *  number) untouched so it freezes rather than resets. No-op if this
-     *  row isn't actually counting down. */
+    /** Pause `rowKey`'s countdown on hover — clears the pending timer (so
+     *  the row can't auto-retire while being read) AND stamps `pausedAt`
+     *  so the DISPLAYED number actually freezes there too, rather than
+     *  continuing to count down against the live clock while merely the
+     *  timer is stopped (reagentx P1 on #2440 — see the entry's own doc
+     *  comment). No-op if this row isn't actually counting down. */
     pauseCountdown(rowKey: string): void {
         const timer = this.countdownTimers.get(rowKey);
         if (timer === undefined) return;
         clearTimeout(timer);
         this.countdownTimers.delete(rowKey);
+        this.setCountdownState((prev) => {
+            const entry = prev.get(rowKey);
+            if (entry === undefined) return prev;
+            const next = new Map(prev);
+            next.set(rowKey, { ...entry, pausedAt: Date.now() });
+            return next;
+        });
     }
 
     /** Resume `rowKey`'s countdown on mouse-leave with a FRESH 60s window,
      *  not the remaining time from before the pause — see
      *  SPEC_SWARM_ROW_AUTO_LINGER_COUNTDOWN_2026_08_06.md's "resume ≠
-     *  resume mid-count" decision. No-op if the row un-retired itself (or
-     *  was manually dismissed) while paused. */
+     *  resume mid-count" decision. Clears `pausedAt` so the display resumes
+     *  computing against the live clock again. No-op if the row un-retired
+     *  itself (or was manually dismissed) while paused. */
     resumeCountdown(rowKey: string): void {
         const entry = this.countdownStateAtom().get(rowKey);
         if (entry === undefined) return;
         this.setCountdownState((prev) => {
             const next = new Map(prev);
-            next.set(rowKey, { ...entry, startedAt: Date.now() });
+            next.set(rowKey, { ...entry, startedAt: Date.now(), pausedAt: null });
             return next;
         });
         this.armCountdownTimer(rowKey);

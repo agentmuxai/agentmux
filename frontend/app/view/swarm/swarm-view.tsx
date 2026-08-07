@@ -229,7 +229,12 @@ export function countdownSecondsRemaining(model: SwarmViewModel, rowKey: string,
     tick();
     const entry = model.countdownStateAtom().get(rowKey);
     if (entry === undefined) return null;
-    return Math.max(0, Math.ceil((AUTO_RETIRE_DELAY_MS - (Date.now() - entry.startedAt)) / 1000));
+    // While paused, freeze against the moment pauseCountdown() stamped
+    // pausedAt instead of the live clock — otherwise this kept counting
+    // down (and clamping at 0) while merely the auto-retire timer was
+    // stopped, contradicting the row visibly "pausing" (reagentx P1 on #2440).
+    const elapsedMs = (entry.pausedAt ?? Date.now()) - entry.startedAt;
+    return Math.max(0, Math.ceil((AUTO_RETIRE_DELAY_MS - elapsedMs) / 1000));
 }
 
 // ── Agent root row ───────────────────────────────────────────────────────
