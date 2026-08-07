@@ -186,7 +186,13 @@ describe("runLaunchFlow — Phase 3 (already authenticated)", () => {
         expect(phases).toEqual(["resolving-cli", "checking-auth", "verifying", "fresh-ready"]);
     });
 
-    it("notifies 'Resumed...' (not 'Ready...') when GetControllerStatus reports a prior turn (shellprocstatus: done)", async () => {
+    it("sets resumed-ready (not fresh-ready) when GetControllerStatus reports a prior turn (shellprocstatus: done), and posts no transcript notification", async () => {
+        // No "Resumed..." notification anymore (removed per
+        // docs/specs/REPORT_AGENT_PANE_SYNTHESIZED_TEXT_AUDIT_2026_08_06.md —
+        // it narrated nothing the user couldn't already see and rendered
+        // indistinguishably from the agent's own words). The phase
+        // transition is the behavioral contract that must survive; the
+        // notification was never anything more than an artifact of it.
         hub.getControllerStatus.mockResolvedValue({ shellprocstatus: "done" });
         const phases: string[] = [];
         const notices: Array<{ text: string; style: string }> = [];
@@ -204,11 +210,10 @@ describe("runLaunchFlow — Phase 3 (already authenticated)", () => {
         expect(result).toBe("success");
         expect(phases[phases.length - 1]).toBe("resumed-ready");
         expect(phases).not.toContain("fresh-ready");
-        const last = notices[notices.length - 1];
-        expect(last.text).toMatch(/resumed/i);
+        expect(notices).toEqual([]);
     });
 
-    it("reagent P1 on PR #2303: also notifies 'Resumed...' for shellprocstatus 'running' — a persistent controller can resume while still alive/mid-turn, not just 'done'", async () => {
+    it("reagent P1 on PR #2303: also sets resumed-ready for shellprocstatus 'running' — a persistent controller can resume while still alive/mid-turn, not just 'done'", async () => {
         hub.getControllerStatus.mockResolvedValue({ shellprocstatus: "running" });
         const phases: string[] = [];
         const notices: Array<{ text: string; style: string }> = [];
@@ -226,8 +231,7 @@ describe("runLaunchFlow — Phase 3 (already authenticated)", () => {
         expect(result).toBe("success");
         expect(phases[phases.length - 1]).toBe("resumed-ready");
         expect(phases).not.toContain("fresh-ready");
-        const last = notices[notices.length - 1];
-        expect(last.text).toMatch(/resumed/i);
+        expect(notices).toEqual([]);
     });
 
     it("reagent P1 on PR #2304: never posts a cheerful ready/resumed notification when ControllerResync itself fails", async () => {
