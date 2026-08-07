@@ -23,14 +23,17 @@
  * `log`/`handleShellTermReady`) — see `agentmux-ai/AGENT_PANE_ACTIVITY_LOG_SPEC.md`.
  */
 
-import { createSignal, onMount, Show, type Accessor, type JSX } from "solid-js";
-import { Button } from "@/element/button";
+import { Show, type Accessor, type JSX } from "solid-js";
 import type { SignalPair } from "../state";
 import type { DocumentNode, DocumentState } from "../types";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
 import type { LayoutView } from "@/app/store/agent-pane-layout-store";
 import { AgentDocumentVirtualList } from "../virtualization/AgentDocumentVirtualList";
 import { createAgentViewState } from "../virtualization/state";
+import { InAppLoginPanel } from "./InAppLoginPanel";
+import { PROVIDERS } from "../providers/catalog";
+import type { LaunchPhase } from "../flows/launch-phase";
+import { toInAppLoginPhase } from "./to-in-app-login-phase";
 
 interface AgentDocumentViewProps {
     documentAtom: SignalPair<DocumentNode[]>;
@@ -194,7 +197,7 @@ export interface AgentAuthPanelProps {
     authUrl?: Accessor<string | null>;
     /**
      * User-visible auth-recovery error (e.g. "Login Again" couldn't open a
-     * browser). Rendered as an error box below the auth-URL box, with a
+     * browser). Rendered as an error box below the login panel, with a
      * dismiss button. Never fail silently — see
      * retro-agent-auth-relogin-noop-2026-07-01 §5.1.
      */
@@ -203,11 +206,13 @@ export interface AgentAuthPanelProps {
     onDismissAuthNotice?: () => void;
     /** Provider ID for the active auth flow — used when submitting a pasted auth code. */
     authProviderId?: string;
+    /** Drives the in-app login panel's phase line — see `toInAppLoginPhase`. */
+    launchPhase?: Accessor<LaunchPhase | null>;
     /** Cancel the in-flight login (kills the host CLI child) — shown as a
-     *  button on the auth-URL box so a stuck login has an exit besides
+     *  button on the login panel so a stuck login has an exit besides
      *  closing the pane. Wired to useAgentControllerStatus's cancelLogin. */
     onCancelLogin?: () => void;
-    /** Explicit "Use terminal instead" fallback on the auth-URL box — mirrors
+    /** Explicit "Use terminal instead" fallback on the login panel — mirrors
      *  PreLaunchAuthPanel's identical secondary action
      *  (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.3 surface 2). Wired to
      *  useAgentControllerStatus's loginViaTerminal, which cancels this
@@ -220,19 +225,27 @@ export interface AgentAuthPanelProps {
  * Bottom-docked login UI. Rendered by agent-view.tsx as a flex sibling
  * after .agent-document-scroll-region, in the same slot band as
  * AgentDecisionPanel/AgentQuestionPanel — NOT inside AgentDocumentView's
- * scrollable header slot. It used to live there, which pinned it to the
- * top of the scroll area instead of near the composer (#2429 follow-up).
+ * scrollable header slot (that pinned it to the top of the scroll area,
+ * #2429 follow-up) and NOT a Modal (a floating dialog would dim/block the
+ * transcript, which the bottom-docked AgentQuestionPanel/AgentDecisionPanel
+ * pattern deliberately avoids — chosen over the modal for consistency).
+ *
+ * Renders the same InAppLoginPanel the Armory/Stash surfaces use (Fix 3a,
+ * PR #2423) instead of a hand-rolled copy — one fewer auth UI in the
+ * codebase — just without the Modal wrapper those surfaces use.
  */
 export function AgentAuthPanel(props: AgentAuthPanelProps): JSX.Element {
     return (
         <>
             <Show when={props.authUrl?.()}>
                 {(url) => (
-                    <AuthUrlBox
-                        url={url()}
-                        authProviderId={props.authProviderId}
-                        onCancel={props.onCancelLogin}
-                        onUseTerminal={props.onUseTerminal}
+                    <InAppLoginPanel
+                        providerId={props.authProviderId ?? ""}
+                        providerLabel={PROVIDERS[props.authProviderId ?? ""]?.displayName ?? props.authProviderId ?? "provider"}
+                        authUrl={url()}
+                        phase={toInAppLoginPhase(url(), props.launchPhase?.() ?? null)}
+                        onCancel={() => props.onCancelLogin?.()}
+                        onUseTerminal={() => props.onUseTerminal?.()}
                     />
                 )}
             </Show>
@@ -251,156 +264,5 @@ export function AgentAuthPanel(props: AgentAuthPanelProps): JSX.Element {
                 )}
             </Show>
         </>
-    );
-}
-
-interface AuthUrlBoxProps {
-    url: string;
-    authProviderId?: string;
-    onCancel?: () => void;
-    onUseTerminal?: () => void;
-}
-
-/**
- * OAuth code-paste box. Rendered by AgentAuthPanel while a login flow has
- * a pending auth URL.
- */
-function AuthUrlBox(props: AuthUrlBoxProps): JSX.Element {
-    const [pasteCode, setPasteCode] = createSignal("");
-    const [pasting, setPasting] = createSignal(false);
-    const [pasteResult, setPasteResult] = createSignal<string | null>(null);
-    const [switchingToTerminal, setSwitchingToTerminal] = createSignal(false);
-    let inputRef: HTMLInputElement | undefined;
-
-    // Grab focus when the box appears so the user's pasted code lands HERE,
-    // not in the main agent message input (which otherwise holds focus and
-    // silently swallows the paste — the login then stalls waiting on stdin).
-    // Deferred past the current focus cycle (the pane's focus-reclaim runs
-    // synchronously on render) so this wins the race.
-    onMount(() => {
-        requestAnimationFrame(() => inputRef?.focus());
-    });
-
-    const submitCode = async (explicit?: string): Promise<void> => {
-        // Read from the live input element as a fallback. If focus desynced and
-        // the controlled signal missed the paste, the DOM value still holds it —
-        // otherwise a pasted-then-submitted code can be silently dropped.
-        const code = (explicit ?? inputRef?.value ?? pasteCode()).trim();
-        if (!code) return;
-        setPasting(true);
-        setPasteResult(null);
-        try {
-            const { getApi } = await import("@/app/store/global");
-            await getApi().setProviderAuth(props.authProviderId ?? "claude", code);
-            setPasteResult("Code accepted — signing you in…");
-            setPasteCode("");
-        } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            setPasteResult(`Error: ${msg}`);
-        } finally {
-            setPasting(false);
-        }
-    };
-
-    return (
-        <div class="agent-auth-url-box">
-            <div class="agent-auth-title">Sign in to Claude</div>
-
-            <div class="agent-auth-url-label">1 · Authorize in your browser</div>
-            <div class="agent-auth-hint">
-                Your browser should have opened. If it didn't, open this link:
-            </div>
-            <div class="agent-auth-url-row">
-                <span class="agent-auth-url-text">{props.url}</span>
-                <button
-                    class="agent-auth-url-copy"
-                    title="Open this URL in your browser"
-                    onClick={() => {
-                        void import("../flows/open-oauth-pane").then(m => m.openOAuthBrowserPane(props.url));
-                    }}
-                >
-                    Open
-                </button>
-                <button
-                    class="agent-auth-url-copy"
-                    onClick={() => { import("@/util/clipboard").then(c => c.writeText(props.url)); }}
-                    title="Copy URL"
-                >
-                    Copy
-                </button>
-            </div>
-
-            <div class="agent-auth-url-label agent-auth-step-2">2 · Paste the code from that page</div>
-            <div class="agent-auth-hint">
-                After you authorize, the page shows an <strong>authorization code</strong> — copy it and paste it here.
-            </div>
-            <div class="agent-auth-paste-row">
-                <input
-                    ref={inputRef}
-                    class="agent-auth-paste-input"
-                    type="text"
-                    placeholder="Paste the authorization code…"
-                    value={pasteCode()}
-                    onInput={(e) => setPasteCode((e.target as HTMLInputElement).value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") void submitCode(); }}
-                    onPaste={(e) => {
-                        // Auto-submit on paste — pasting the code IS the intent to
-                        // submit, so the user doesn't have to also click a button.
-                        const text = (e.clipboardData?.getData("text") ?? "").trim();
-                        if (text) { setPasteCode(text); void submitCode(text); }
-                    }}
-                />
-                <button
-                    class="agent-auth-url-copy"
-                    title="Paste from clipboard and submit"
-                    onClick={() => {
-                        import("@/util/clipboard").then(c => c.readText()).then(text => {
-                            const trimmed = (text ?? "").trim();
-                            if (trimmed) { setPasteCode(trimmed); void submitCode(trimmed); }
-                        }).catch(() => {
-                            setPasteResult("Could not read clipboard — paste manually");
-                        });
-                    }}
-                >
-                    Paste &amp; submit
-                </button>
-                <button
-                    class="agent-auth-url-copy"
-                    onClick={() => { void submitCode(); }}
-                    disabled={pasting()}
-                >
-                    {pasting() ? "…" : "Submit"}
-                </button>
-            </div>
-            <Show when={pasteResult()}>
-                <div class="agent-auth-paste-result">{pasteResult()}</div>
-            </Show>
-            <div class="agent-auth-actions-row">
-                <Show when={props.onCancel}>
-                    <Button onClick={() => props.onCancel?.()}>Cancel login</Button>
-                </Show>
-                <Show when={props.onUseTerminal}>
-                    {/* Secondary fallback alongside Cancel — the URL/paste flow
-                        above is the default now (spec §3.2), but a browser that
-                        can't reach it (remote desktop, sandboxed host) still
-                        needs a way out besides giving up. Mirrors
-                        PreLaunchAuthPanel's identical secondary action. */}
-                    <Button
-                        className="grey"
-                        disabled={switchingToTerminal()}
-                        onClick={async () => {
-                            setSwitchingToTerminal(true);
-                            try {
-                                await props.onUseTerminal?.();
-                            } finally {
-                                setSwitchingToTerminal(false);
-                            }
-                        }}
-                    >
-                        {switchingToTerminal() ? "Switching…" : "Use terminal instead"}
-                    </Button>
-                </Show>
-            </div>
-        </div>
     );
 }
