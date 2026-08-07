@@ -45,6 +45,7 @@ See also:
 | [SPEC_AGENT_GLOBAL_PORTABILITY_2026-06-16](SPEC_AGENT_GLOBAL_PORTABILITY_2026-06-16.md) | Agent definitions shared across workspaces |
 | [SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13](SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md) | Cross-channel conversation continuity |
 | [SPEC_ASK_USER_QUESTION_2026_06_15](SPEC_ASK_USER_QUESTION_2026_06_15.md) | `ask_user_question` tool |
+| [SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06](SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md) | 30s auto-timeout + countdown, auto-selects the recommended option |
 | [SPEC_CONTEXT_VISIBILITY_2026_06_17](SPEC_CONTEXT_VISIBILITY_2026_06_17.md) | Context-meter / token-budget visibility |
 
 ## Shell / Terminal Pane

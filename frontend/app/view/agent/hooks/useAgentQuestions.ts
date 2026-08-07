@@ -110,6 +110,20 @@ export function useAgentQuestions(opts: UseAgentQuestionsOptions): UseAgentQuest
         // Optimistic transition: flip the node out of awaiting_answer so the
         // panel dismisses immediately. We snapshot the original node(s) so a
         // failed delivery can roll the transition back.
+        //
+        // The transcript summary prefix distinguishes three bands by how
+        // much of this outcome came from the 30s auto-timeout rather than
+        // the user (SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md §2.5):
+        // a plain boolean would have conflated "user answered some
+        // questions, the timeout filled the rest" with "user never touched
+        // anything," which matters for anyone auditing the transcript later.
+        const flatText = outcome.answer_text.replace(/\n/g, "; ");
+        const summary =
+            outcome.autoFilledCount === 0
+                ? `❓ Answered — ${flatText}`
+                : outcome.autoFilledCount === outcome.answers.length
+                  ? `⏱️ Auto-answered (no response in 30s) — ${flatText}`
+                  : `⏱️ Partly auto-answered (${outcome.autoFilledCount}/${outcome.answers.length} — no response in 30s) — ${flatText}`;
         const originals: ToolNode[] = [];
         const updated: ToolNode[] = [];
         for (const n of opts.getDocument()) {
@@ -120,7 +134,7 @@ export function useAgentQuestions(opts: UseAgentQuestionsOptions): UseAgentQuest
                 ...n,
                 status: "success",
                 question: undefined,
-                summary: `❓ Answered — ${outcome.answer_text.replace(/\n/g, "; ")}`,
+                summary,
             });
         }
         const applyDoc = (nodes: ToolNode[]) => {
