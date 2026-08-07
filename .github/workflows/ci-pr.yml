@@ -73,6 +73,11 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-      - run: npm ci
+      - name: DIAGNOSTIC - regenerate lockfile on linux
+        run: rm -rf node_modules package-lock.json && npm install
+      - uses: actions/upload-artifact@v4
+        with:
+          name: regenerated-package-lock
+          path: package-lock.json
       - name: vitest run
         run: npx vitest run
