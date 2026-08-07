@@ -8,6 +8,7 @@ import {
     buildShellRows,
     filterRetired,
     groupCacheKey,
+    hasRenderableBlock,
     mergeDispatchActivityEntries,
     mergeSubagentsPreservingIdentity,
     pruneGroupIdentityCache,
@@ -604,5 +605,31 @@ describe("buildCronRows", () => {
     it("returns an empty array for a null blockId", () => {
         const crons = [mkCron({ id: "c1", block_id: "block-a" })];
         expect(buildCronRows(crons, null)).toEqual([]);
+    });
+});
+
+describe("hasRenderableBlock", () => {
+    it("is false for undefined once loading has resolved — the case a genuinely orphaned parent_block_id reaches", () => {
+        expect(hasRenderableBlock(undefined, false)).toBe(false);
+    });
+
+    it("is false for null once loading has resolved", () => {
+        expect(hasRenderableBlock(null, false)).toBe(false);
+    });
+
+    it("is true for a real block object, even one with no meta set yet", () => {
+        expect(hasRenderableBlock({ oid: "block-a", meta: {} }, false)).toBe(true);
+    });
+
+    it("is true for undefined while still loading — a fresh WOS oref reads as null until GetObject resolves, indistinguishable from a phantom by value alone (reagentx P1 on #2438)", () => {
+        expect(hasRenderableBlock(undefined, true)).toBe(true);
+    });
+
+    it("is true for null while still loading, same reasoning", () => {
+        expect(hasRenderableBlock(null, true)).toBe(true);
+    });
+
+    it("is true for a real block while (implausibly) still marked loading — loading state never overrides a genuinely present value", () => {
+        expect(hasRenderableBlock({ oid: "block-a", meta: {} }, true)).toBe(true);
     });
 });
