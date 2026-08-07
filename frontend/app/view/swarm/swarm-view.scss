@@ -302,6 +302,17 @@
     flex-shrink: 0;
 }
 
+// Auto-linger countdown (SPEC_SWARM_ROW_AUTO_LINGER_COUNTDOWN_2026_08_06) —
+// shared by SubagentRow and WorkflowDispatchRow, sits alongside the
+// existing status chip/badge, same muted-secondary treatment as
+// .swarm-workflow-count so it reads as informational, not alarming.
+.swarm-subagent-countdown {
+    font-size: 10px;
+    color: var(--secondary-text-color);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
 .swarm-workflow-status-badge {
     font-size: 10px;
     font-weight: 600;

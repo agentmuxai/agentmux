@@ -523,6 +523,13 @@ export interface DispatchDetail {
  *  this redesign exists to avoid. Oldest entries drop first. */
 const MAX_DISPATCH_FEED_ENTRIES = 500;
 
+/** How long a clean-terminal row lingers before auto-retiring
+ *  (SPEC_SWARM_ROW_AUTO_LINGER_COUNTDOWN_2026_08_06). Exported so
+ *  swarm-view.tsx's countdown display computes remaining time against the
+ *  same constant the ViewModel's own timer actually runs on, rather than a
+ *  second hardcoded `60_000` that could drift out of sync. */
+export const AUTO_RETIRE_DELAY_MS = 60_000;
+
 /** Identifies one `DispatchActivityEntry` for de-dup purposes — an
  *  (agentId, timestamp, event payload) triple is stable across both the
  *  live `dispatch:activity` broadcast and a `GetHistory` backfill, since
@@ -758,6 +765,26 @@ export class SwarmViewModel implements ViewModel {
     retiredRowKeysAtom: Accessor<Map<string, number>> = this._retiredRowKeys[0];
     private setRetiredRowKeys: Setter<Map<string, number>> = this._retiredRowKeys[1];
 
+    // Auto-linger countdown on a row's first clean-terminal appearance
+    // (SPEC_SWARM_ROW_AUTO_LINGER_COUNTDOWN_2026_08_06) — same rowKey space
+    // as _retiredRowKeys above (subagentRowKey(agent_id) or a Workflow
+    // dispatchId). `lastEventAt` is the row's own value at arm/last-reset
+    // time, same snapshot-comparison idea `_retiredRowKeys` already uses so
+    // genuinely new activity un-arms rather than lets a stale countdown
+    // fire. `startedAt` (Date.now()) is what the visible remaining-seconds
+    // display renders against; pausing (hover) leaves this entry alone and
+    // only clears the pending timer, so the displayed number freezes
+    // instead of resetting — only resumeCountdown() rewrites startedAt.
+    private _countdownState = createSignal<Map<string, { lastEventAt: number; startedAt: number }>>(new Map());
+    countdownStateAtom: Accessor<Map<string, { lastEventAt: number; startedAt: number }>> = this._countdownState[0];
+    private setCountdownState: Setter<Map<string, { lastEventAt: number; startedAt: number }>> = this._countdownState[1];
+    private countdownTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    // The visible "Nn s" tick source lives in the view (useTick(1000),
+    // frontend/app/hook/useTick.ts) — it's already the established,
+    // ref-counted, auto-cleanup pattern this exact file uses elsewhere for
+    // relative-time displays, so the ViewModel only needs to own the
+    // start/lastEventAt state, not a second timer driving re-renders.
+
     // One DispatchDetail (concatenated activity feed) per currently-expanded
     // row — Agent Tool (solo) rows and Workflow rows alike, unified in
     // SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 §4 (retired the
@@ -948,6 +975,7 @@ export class SwarmViewModel implements ViewModel {
                 this.loadCrons(),
             ]);
             this.pruneRetiredRowKeys();
+            this.reconcileCountdowns();
         } finally {
             this.setLoading(false);
         }
@@ -1012,7 +1040,10 @@ export class SwarmViewModel implements ViewModel {
         }
         this.loadSubagentsDebounceTimer = setTimeout(() => {
             this.loadSubagentsDebounceTimer = undefined;
-            void Promise.all([this.loadSubagents(), this.loadDispatches()]).then(() => this.pruneRetiredRowKeys());
+            void Promise.all([this.loadSubagents(), this.loadDispatches()]).then(() => {
+                this.pruneRetiredRowKeys();
+                this.reconcileCountdowns();
+            });
         }, SwarmViewModel.LOAD_SUBAGENTS_DEBOUNCE_MS);
     };
 
@@ -1095,13 +1126,129 @@ export class SwarmViewModel implements ViewModel {
      *  for why this snapshot, not a bare membership set, is what makes a
      *  row un-retire itself automatically on new activity. Callers should
      *  only expose this for a terminal-status row (`"idle"`/`"interrupted"`)
-     *  — nothing to dismiss on a row still genuinely `"working"`. */
+     *  — nothing to dismiss on a row still genuinely `"working"`. Also
+     *  short-circuits any pending auto-linger countdown for this row (a
+     *  manual dismiss mid-countdown shouldn't leave an orphaned timer that
+     *  fires later against an already-retired key — harmless since
+     *  retireRow is idempotent, but pointless to leave running). */
     retireRow(rowKey: string, lastEventAt: number): void {
         this.setRetiredRowKeys((prev) => {
             const next = new Map(prev);
             next.set(rowKey, lastEventAt);
             return next;
         });
+        this.clearCountdown(rowKey);
+    }
+
+    // ── Auto-linger countdown (SPEC_SWARM_ROW_AUTO_LINGER_COUNTDOWN_2026_08_06) ──
+
+    private armCountdownTimer(rowKey: string): void {
+        const existingTimer = this.countdownTimers.get(rowKey);
+        if (existingTimer !== undefined) clearTimeout(existingTimer);
+        const timer = setTimeout(() => {
+            this.countdownTimers.delete(rowKey);
+            const entry = this.countdownStateAtom().get(rowKey);
+            if (entry === undefined) return; // already cleared — manually retired, or un-armed by new activity
+            this.retireRow(rowKey, entry.lastEventAt);
+        }, AUTO_RETIRE_DELAY_MS);
+        this.countdownTimers.set(rowKey, timer);
+    }
+
+    /** Arm a fresh 60s countdown for `rowKey`, or leave an already-running
+     *  one alone if it's counting down against the SAME `lastEventAt` (so
+     *  reconcileCountdowns(), called on every subagent/dispatch reload,
+     *  doesn't restart the visible number on every unrelated refresh). */
+    private armCountdown(rowKey: string, lastEventAt: number): void {
+        const existing = this.countdownStateAtom().get(rowKey);
+        if (existing && existing.lastEventAt === lastEventAt) return;
+        this.setCountdownState((prev) => {
+            const next = new Map(prev);
+            next.set(rowKey, { lastEventAt, startedAt: Date.now() });
+            return next;
+        });
+        this.armCountdownTimer(rowKey);
+    }
+
+    /** Clear a row's countdown entirely — pending timer + visible state.
+     *  Called on manual retire (short-circuit), new activity arriving on
+     *  the same key (un-arm — see reconcileCountdowns), or the timer's own
+     *  fire (via retireRow, which calls back into this). */
+    private clearCountdown(rowKey: string): void {
+        const timer = this.countdownTimers.get(rowKey);
+        if (timer !== undefined) {
+            clearTimeout(timer);
+            this.countdownTimers.delete(rowKey);
+        }
+        if (!this.countdownStateAtom().has(rowKey)) return;
+        this.setCountdownState((prev) => {
+            const next = new Map(prev);
+            next.delete(rowKey);
+            return next;
+        });
+    }
+
+    /** Pause `rowKey`'s countdown on hover — clears only the pending timer,
+     *  leaving `_countdownState`'s entry (and therefore the displayed
+     *  number) untouched so it freezes rather than resets. No-op if this
+     *  row isn't actually counting down. */
+    pauseCountdown(rowKey: string): void {
+        const timer = this.countdownTimers.get(rowKey);
+        if (timer === undefined) return;
+        clearTimeout(timer);
+        this.countdownTimers.delete(rowKey);
+    }
+
+    /** Resume `rowKey`'s countdown on mouse-leave with a FRESH 60s window,
+     *  not the remaining time from before the pause — see
+     *  SPEC_SWARM_ROW_AUTO_LINGER_COUNTDOWN_2026_08_06.md's "resume ≠
+     *  resume mid-count" decision. No-op if the row un-retired itself (or
+     *  was manually dismissed) while paused. */
+    resumeCountdown(rowKey: string): void {
+        const entry = this.countdownStateAtom().get(rowKey);
+        if (entry === undefined) return;
+        this.setCountdownState((prev) => {
+            const next = new Map(prev);
+            next.set(rowKey, { ...entry, startedAt: Date.now() });
+            return next;
+        });
+        this.armCountdownTimer(rowKey);
+    }
+
+    /** Arm/clear countdowns against current subagent/dispatch state — called
+     *  after loadSubagents()/loadDispatches() settle, same timing as
+     *  pruneRetiredRowKeys(). In scope: agentToolRows/workflowRows only,
+     *  per the spec's own "out of scope: shellRows/cronRows" note.
+     *
+     *  A subagent's `status === "completed"` is exactly
+     *  `subagentDisplayStatus()`'s (swarm-view.tsx) `"idle"` case regardless
+     *  of parent status — `"active"`/`"abandoned"` never map to `"idle"` —
+     *  so checking it directly here arms the same set that function's
+     *  `"idle"` would, without duplicating its parent-status branching or
+     *  importing across the model/view boundary. A `"completed"` Workflow
+     *  dispatch is this bucket's equivalent terminal state. Neither bucket
+     *  has a distinct dispatch-level "failed" status to exclude beyond
+     *  what's already excluded by only matching `"completed"` — an
+     *  `"abandoned"` subagent (interrupted) is never `"completed"`, so it's
+     *  already outside `liveTerminal` without a separate check.
+     */
+    private reconcileCountdowns(): void {
+        const liveTerminal = new Map<string, number>();
+        for (const sub of this.subagentsAtom()) {
+            if (sub.status === "completed") liveTerminal.set(subagentRowKey(sub.agent_id), sub.last_event_at);
+        }
+        for (const d of this.dispatchesAtom()) {
+            if (d.kind === "workflow" && d.status === "completed") liveTerminal.set(d.dispatch_id, d.last_event_at);
+        }
+
+        for (const [rowKey, entry] of this.countdownStateAtom()) {
+            const currentLastEventAt = liveTerminal.get(rowKey);
+            if (currentLastEventAt === undefined || currentLastEventAt !== entry.lastEventAt) {
+                this.clearCountdown(rowKey);
+            }
+        }
+        for (const [rowKey, lastEventAt] of liveTerminal) {
+            this.armCountdown(rowKey, lastEventAt);
+        }
     }
 
     /** Every row's toggle. `rowKey` must be a per-ROW-unique identity, NOT
@@ -1294,5 +1441,7 @@ export class SwarmViewModel implements ViewModel {
         for (const detail of this.dispatchDetailCache.values()) detail.dispose();
         this.dispatchDetailCache.clear();
         this.groupIdentityCache.clear();
+        for (const timer of this.countdownTimers.values()) clearTimeout(timer);
+        this.countdownTimers.clear();
     }
 }

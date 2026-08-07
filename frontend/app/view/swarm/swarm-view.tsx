@@ -1,9 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createMemo, createSignal, createEffect, onCleanup, For, onMount, Show, type JSX } from "solid-js";
+import { createMemo, createSignal, createEffect, onCleanup, For, onMount, Show, type Accessor, type JSX } from "solid-js";
 import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, ActiveShell, ActiveCron, WorkflowDispatch, SubagentEvent, DispatchActivityEntry } from "./swarm-model";
-import { subagentDisplayLabel, subagentRowKey } from "./swarm-model";
+import { subagentDisplayLabel, subagentRowKey, AUTO_RETIRE_DELAY_MS } from "./swarm-model";
 import { ProviderLogo } from "@/app/element/ProviderLogo";
 import { callBackendService } from "@/store/wos";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -215,6 +215,21 @@ export function subagentDisplayStatus(sub: ActiveSubagent, parentAgentStatus: "r
         return parentAgentStatus === "idle" ? "interrupted" : "working";
     }
     return "idle"; // completed
+}
+
+/**
+ * Seconds remaining on `rowKey`'s auto-linger countdown
+ * (SPEC_SWARM_ROW_AUTO_LINGER_COUNTDOWN_2026_08_06), or `null` if it isn't
+ * counting down. `tick` is a `useTick(1000)` accessor from the CALLING
+ * component — reading it here (rather than owning a timer in this function
+ * or the ViewModel) is what makes the returned value recompute every
+ * second; this function is otherwise a pure read of `countdownStateAtom`.
+ */
+export function countdownSecondsRemaining(model: SwarmViewModel, rowKey: string, tick: Accessor<number>): number | null {
+    tick();
+    const entry = model.countdownStateAtom().get(rowKey);
+    if (entry === undefined) return null;
+    return Math.max(0, Math.ceil((AUTO_RETIRE_DELAY_MS - (Date.now() - entry.startedAt)) / 1000));
 }
 
 // ── Agent root row ───────────────────────────────────────────────────────
@@ -494,11 +509,21 @@ function WorkflowDispatchRow({
         model.retireRow(group.dispatchId, group.lastEventAt);
     };
 
+    // Auto-linger countdown (SPEC_SWARM_ROW_AUTO_LINGER_COUNTDOWN_2026_08_06)
+    // — armed by reconcileCountdowns() (swarm-model.ts) once every member is
+    // done (AgentDispatch.status === "completed", this row's "retired").
+    const countdownTick = useTick(1000);
+    const countdownSeconds = createMemo(() => countdownSecondsRemaining(model, group.dispatchId, countdownTick));
+    const handleMouseEnter = () => model.pauseCountdown(group.dispatchId);
+    const handleMouseLeave = () => model.resumeCountdown(group.dispatchId);
+
     return (
         <div class={`swarm-workflow-group swarm-workflow-group--${group.status}`}>
             <div
                 class="swarm-workflow-header"
                 onClick={() => model.toggleDispatchExpanded(group.dispatchId)}
+                onMouseEnter={handleMouseEnter}
+                onMouseLeave={handleMouseLeave}
                 title={group.name}
             >
                 <i class={`fa-solid fa-${expanded() ? "chevron-down" : "chevron-right"} swarm-workflow-expand-icon`} />
@@ -511,6 +536,9 @@ function WorkflowDispatchRow({
                 <span class={`swarm-workflow-status-badge swarm-workflow-status-badge--${group.status}`}>
                     {group.status === "active" ? "Active" : "Retired"}
                 </span>
+                <Show when={countdownSeconds() != null}>
+                    <span class="swarm-subagent-countdown">disappearing in {countdownSeconds()}s</span>
+                </Show>
                 <Show when={group.status === "retired"}>
                     <button class="swarm-subagent-retire" title="Retire" onClick={handleRetire}>
                         <i class="fa-solid fa-xmark" />
@@ -703,16 +731,30 @@ function SubagentRow({
         model.retireRow(rowKey(), sub.last_event_at);
     };
 
+    // Auto-linger countdown (SPEC_SWARM_ROW_AUTO_LINGER_COUNTDOWN_2026_08_06)
+    // — only ever armed for a clean "idle" terminal by reconcileCountdowns()
+    // (swarm-model.ts), never "interrupted", so no separate check needed
+    // here beyond reading whatever's actually in countdownStateAtom.
+    const countdownTick = useTick(1000);
+    const countdownSeconds = createMemo(() => countdownSecondsRemaining(model, rowKey(), countdownTick));
+    const handleMouseEnter = () => model.pauseCountdown(rowKey());
+    const handleMouseLeave = () => model.resumeCountdown(rowKey());
+
     return (
         <div class={`swarm-subagent-group swarm-subagent-group--${dimVariant()}`}>
             <div
                 class={`swarm-subagent-row swarm-subagent-row--${dimVariant()}`}
                 onClick={handleToggle}
+                onMouseEnter={handleMouseEnter}
+                onMouseLeave={handleMouseLeave}
                 title={displayLabel()}
             >
                 <i class={`fa-solid fa-${expanded() ? "chevron-down" : "chevron-right"} swarm-subagent-expand-icon`} />
                 <span class="swarm-subagent-slug">{displayLabel()}</span>
                 <AgentStatusChip status={displayStatus()} />
+                <Show when={countdownSeconds() != null}>
+                    <span class="swarm-subagent-countdown">disappearing in {countdownSeconds()}s</span>
+                </Show>
                 <Show when={canRetire()}>
                     <button class="swarm-subagent-retire" title="Retire" onClick={handleRetire}>
                         <i class="fa-solid fa-xmark" />
