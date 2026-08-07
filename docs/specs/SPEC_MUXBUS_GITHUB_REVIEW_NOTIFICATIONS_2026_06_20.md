@@ -1,8 +1,18 @@
 # SPEC: MuxBus — GitHub PR review notifications (end-to-end MVP)
 
 **Date:** 2026-06-20
-**Status:** Planned
+**Status:** Planned (superseded in part — see note below)
 **Author:** smike
+
+> **2026-08-07 note:** §3.2 and §6's "Priority: extracted ID > static
+> mapping > regex pattern" (tag checked before username) describes the
+> ORIGINAL implementation and is no longer accurate — the priority was
+> reversed (username-first, tag-fallback) and agent-mapping.ts's numbered
+> pattern was made host-agnostic. See
+> `SPEC_AGENT_DETECTION_PRIORITY_2026_08_07.md` for the current behavior.
+> The rest of this doc (delivery architecture, M1/M4/M5 gaps) still
+> reflects real historical planning context but has not been re-verified
+> against current code as of this note.
 
 ---
 

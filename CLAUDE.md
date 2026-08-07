@@ -301,6 +301,15 @@ git push -u origin feature-name
 # IMPORTANT: Always include the agentmux agent ID comment in the PR body.
 # This enables MuxBus to route GitHub review notifications back to this agent.
 # $AGENTMUX_AGENT_ID is injected at spawn time (matches block.meta.agentName).
+#
+# The GitHub review consumer checks the PR author's own GitHub username FIRST
+# (SPEC_AGENT_DETECTION_PRIORITY_2026_08_07.md) — if you pushed via your own
+# dedicated PAT, this tag is redundant but harmless. It's load-bearing when
+# gh-agent.sh fell back to the shared GenericAgentX-<host> account (see
+# "Which GitHub account am I acting as?" below): that shared username can't
+# say which agent opened the PR, so without this tag your review
+# notifications are silently dropped. Always include it regardless, so you
+# don't have to track which case you're in.
 scripts/gh-agent.sh pr create --title "Feature" --body "$(cat <<EOF
 Description of the change.
 
