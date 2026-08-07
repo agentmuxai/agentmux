@@ -20,10 +20,15 @@
  *      affordance (wired to `relogin()`) to actually trigger a login attempt.
  *      A login opening with no prior user action was the exact bug this
  *      changed to fix — see docs/specs/SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26.md.
- *   3. Controller registration — ControllerResync on the tab, read status, post
- *      a visible "Resumed…"/"Ready…" notification (or, if the resync itself
- *      failed, an honest warning instead of a false all-clear — see
- *      `resyncFailed` below) depending on whether there's a prior turn.
+ *   3. Controller registration — ControllerResync on the tab, read status, set
+ *      the resulting `resumed-ready`/`fresh-ready` phase (or, if the resync
+ *      itself failed, post an honest warning instead of a false all-clear —
+ *      see `resyncFailed` below) depending on whether there's a prior turn.
+ *      No transcript notification for the plain resumed/fresh case — that
+ *      used to post "Resumed…"/"Ready…" via `notify`, but it narrated
+ *      nothing the user couldn't already see and rendered indistinguishably
+ *      from the agent's own words; removed per the same "no artificial
+ *      messages mixed into transcript content" rule as #2420/6191a1928.
  *
  * The caller provides a log sink and a phase/notify callback. All other
  * state is derived from the block_id + provider definition. `setAuthUrl`/
@@ -411,11 +416,20 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
         setPhase({ kind: "fresh-ready" });
         notify("Something went wrong finishing setup — if the agent doesn't respond, try reopening this pane.", "warning");
     } else if (resumed) {
+        // No transcript notification here (reagent P1 on #2420 / #6191a1928
+        // precedent): "Resumed — continuing where you left off" narrated
+        // nothing the user couldn't already see (the prior turn's own
+        // history is right there) and rendered with "info" style's empty
+        // prefix, indistinguishable from the agent's own words. `setPhase`
+        // still fires — `resumed-ready` currently renders no footer label
+        // either (formatPhaseLabel returns null for it), but keeping the
+        // state transition intact costs nothing and leaves a hook for a
+        // future non-transcript indicator if one is wanted later.
         setPhase({ kind: "resumed-ready" });
-        notify("Resumed — continuing where you left off", "info");
     } else {
+        // Same rationale — "Ready — type a message to start" narrated the
+        // empty composer sitting right below it.
         setPhase({ kind: "fresh-ready" });
-        notify("Ready — type a message to start", "info");
     }
     return "success";
 }
