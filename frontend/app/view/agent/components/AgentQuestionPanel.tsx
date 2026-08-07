@@ -193,6 +193,18 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
     // fully or partially — are left exactly as-is. Returns how many
     // questions were filled, for the transcript's audit trail (§2.5 of the
     // spec). Called only from the timeout below, never on manual submit.
+    //
+    // GUARANTEES every question is answered by the time this returns — even
+    // a malformed AskUserQuestion with a zero-length `options` array (so
+    // `recommendedOptions` has nothing to select) falls back to a free-text
+    // placeholder. This matters because the timer effect below clears its
+    // interval unconditionally before calling `submit()`: if a question
+    // came back from this function still unanswered, `submit()`'s
+    // `allAnswered()` gate would silently no-op and — with the interval
+    // already gone — the panel would be stuck forever with no further
+    // timeout retry, defeating the whole "work never stalls" guarantee for
+    // exactly the unattended-run case this feature exists to protect
+    // (reagent P1, PR #2441).
     const applyRecommendedDefaults = (): number => {
         const r = request();
         if (!r) return 0;
@@ -200,7 +212,15 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
         r.questions.forEach((q, i) => {
             if (questionAnswered(i)) return;
             count++;
-            setQ(i, { selected: recommendedOptions(q.options).map((o) => o.label), other: "" });
+            const recommended = recommendedOptions(q.options);
+            if (recommended.length > 0) {
+                setQ(i, { selected: recommended.map((o) => o.label), other: "" });
+            } else {
+                // No options at all to recommend — leave a free-text note
+                // rather than an unanswerable blank, so `allAnswered()`
+                // passes and the merged outcome can still submit.
+                setQ(i, { selected: [], other: "No option was available to auto-select" });
+            }
         });
         return count;
     };

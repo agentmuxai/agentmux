@@ -228,6 +228,40 @@ describe("AgentQuestionPanel 30s auto-timeout", () => {
         expect(outcome.autoFilledCount).toBe(1);
     });
 
+    // reagent P1, PR #2441: a malformed AskUserQuestion with a zero-length
+    // `options` array left `recommendedOptions` with nothing to select, so
+    // the question never became "answered" and `submit()`'s `allAnswered()`
+    // gate silently no-op'd — but the interval had already been cleared
+    // unconditionally, so the panel got stuck forever with no further
+    // timeout retry. Pin the fix: every question must be answerable after
+    // the timeout fires, regardless of how degenerate its `options` list is.
+    it("still auto-submits when a question has zero options — falls back to a free-text placeholder", () => {
+        const onAnswer = vi.fn();
+        const noOptionsQuestion: ToolNode = {
+            type: "tool",
+            id: "q3",
+            tool: "Other",
+            params: {},
+            status: "awaiting_answer",
+            collapsed: false,
+            summary: "❓ Waiting for your answer",
+            question: {
+                type: "ask_user_question",
+                tool_use_id: "q3",
+                questions: [{ question: "Pick one", header: "Test", multiSelect: false, options: [] }],
+            },
+        };
+        const [pending] = createSignal<ToolNode[]>([noOptionsQuestion]);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+
+        vi.advanceTimersByTime(30_000);
+
+        expect(onAnswer).toHaveBeenCalledTimes(1);
+        const outcome = onAnswer.mock.calls[0][0];
+        expect(outcome.answers_map["Pick one"]).toBe("No option was available to auto-select");
+        expect(outcome.autoFilledCount).toBe(1);
+    });
+
     it("a fully manual submit before 30s prevents any later auto-submit", async () => {
         const user = userEvent.setup({ delay: null });
         const onAnswer = vi.fn();

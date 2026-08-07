@@ -260,6 +260,7 @@ implementation-time judgment").
 | User submits manually with 1s left on the clock | Manual `submit()` simply runs first — the resulting `tool_use_id` change tears down the interval via `onCleanup`, so there's no race |
 | Pane closed while a question is pending | Existing `onCleanup` (unrelated to this change) already handles teardown; the timer's own `onCleanup` clears alongside it |
 | Timer fires while user is mid-keystroke in an "Other" field | Whatever text is currently in the reactive `state()` signal at that instant counts as "answered" (per `questionAnswered()`) and is kept as-is — no special-casing needed, since `setOther` already updates `state()` on every keystroke |
+| Question has a zero-length `options` array (malformed `AskUserQuestion` call) | `recommendedOptions([])` returns `[]`, so there's nothing to select. **Caught in review (reagent P1, PR #2441):** the original implementation left the question unanswered in this case, so `submit()`'s `allAnswered()` gate silently no-op'd — and since the timer's interval is cleared unconditionally *before* that check, the panel got stuck forever with no further timeout retry. Fixed: `applyRecommendedDefaults()` falls back to a free-text placeholder (`"No option was available to auto-select"`) for a question with no options, which is always sufficient to satisfy `questionAnswered()` and let the merged outcome submit. |
 
 ---
 
