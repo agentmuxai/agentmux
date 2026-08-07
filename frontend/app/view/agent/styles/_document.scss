@@ -60,19 +60,32 @@
 
     // Same shape at the OTHER end: AgentQuestionPanel/the disconnected
     // banner's own bottom margin (the same `margin: <space> 0` shorthand
-    // that caused the top-edge gap above) leaves a gap before
-    // AgentComposerStrip when it's the very next thing below — unrelated
-    // to the working row, so unconditional (unlike the top-edge fix
-    // above): the composer strip is always there, not something that
-    // only sometimes follows. Uses :has() to target the panel's own
-    // margin from a "what's my next sibling" condition, since CSS has no
+    // that caused the top-edge gap above) leaves a gap before whatever
+    // comes next — unrelated to the working row, so unconditional (unlike
+    // the top-edge fix above). Uses :has() to target the panel's own
+    // margin from a "what comes after me" condition, since CSS has no
     // parent/previous-sibling selector otherwise — already an accepted
     // pattern in this codebase (_pending-footer.scss, tabbar.scss, etc.).
-    // AgentDecisionPanel/the pending-message queue don't need this: they
-    // carry no bottom margin to begin with (see the comment above).
-    .agent-question-panel:has(+ .agent-composer-strip),
-    .agent-question-panel-minimized:has(+ .agent-composer-strip),
-    .agent-disconnected-banner:has(+ .agent-composer-strip) {
+    //
+    // ~ (general sibling), not + (adjacent) — reagent P2 caught the
+    // original + version: PendingMessagesPanel, AgentCredentialsRevokedChip
+    // (a PaneRow), the failure-recovery PaneRow, or ActivityDock can all
+    // legitimately render between AgentQuestionPanel and AgentComposerStrip
+    // (a pending question and a long-running shell are an entirely
+    // plausible combination), and + only matches when AgentComposerStrip
+    // is the LITERAL next element — any of those rendering in between
+    // silently defeated the fix. ~ matches regardless of what's between
+    // them. Safe unconditionally: every one of those possible in-between
+    // rows (.agent-pending-zone, .pane-row, .agent-activity-dock) carries
+    // its own border instead of a margin for spacing — same "pinned via
+    // border, not margin" convention .agent-pending-zone's own comment
+    // describes — so removing AgentQuestionPanel's/the disconnected
+    // banner's bottom margin never fights another row's own spacing;
+    // AgentDecisionPanel needs no rule here either, since it never carries
+    // a bottom margin to begin with (see the top-edge comment above).
+    .agent-question-panel:has(~ .agent-composer-strip),
+    .agent-question-panel-minimized:has(~ .agent-composer-strip),
+    .agent-disconnected-banner:has(~ .agent-composer-strip) {
         margin-bottom: 0;
     }
 
