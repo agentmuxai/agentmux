@@ -5,6 +5,7 @@ import { createMemo, createSignal, createEffect, onCleanup, For, onMount, Show, 
 import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, ActiveShell, ActiveCron, WorkflowDispatch, SubagentEvent, DispatchActivityEntry } from "./swarm-model";
 import { subagentDisplayLabel, subagentRowKey, AUTO_RETIRE_DELAY_MS } from "./swarm-model";
 import { ProviderLogo } from "@/app/element/ProviderLogo";
+import AnsiLine from "@/element/ansiline";
 import { callBackendService } from "@/store/wos";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -597,20 +598,50 @@ function DispatchActivityFeed({
 }): JSX.Element {
     const detail = model.getDispatchDetail(rowKey, dispatchId, backfillAgentId);
     const entries = detail.entriesAtom;
+    // A solo Agent Tool row's feed only ever contains that one agent's own
+    // events — tagging every line with the same, unchanging 7-char id is
+    // pure noise (2026-08-07: reported as "hex codes on nearly every
+    // line"). Only a genuine multi-member Workflow feed (no
+    // backfillAgentId — see the doc comment above) actually needs the tag
+    // to say which member a line belongs to.
+    const showAgentTag = backfillAgentId === undefined;
     return (
         <div class="swarm-dispatch-feed">
             <Show when={entries().length === 0}>
                 <div class="swarm-dispatch-feed-empty">No activity yet.</div>
             </Show>
-            <For each={entries()}>{(entry) => <DispatchActivityFeedEntry entry={entry} />}</For>
+            <For each={entries()}>{(entry) => <DispatchActivityFeedEntry entry={entry} showAgentTag={showAgentTag} />}</For>
         </div>
     );
 }
 
-function DispatchActivityFeedEntry({ entry }: { entry: DispatchActivityEntry }): JSX.Element {
+/** One line of a multi-line body, ANSI-colored via `AnsiLine` instead of
+ *  dumped as literal escape-sequence text — a subagent's tool call can
+ *  capture colorized shell output (e.g. `git diff --color`, a test
+ *  reporter) with zero sanitization on the backend
+ *  (`subagent_watcher/parse.rs`), unlike the Agent pane's own tool-result
+ *  view. Styled inline with the existing `.swarm-subagent-detail-text`
+ *  class rather than reusing `TerminalOutput` — that component's bordered
+ *  panel chrome doesn't match this feed's compact, unboxed line list. */
+function AnsiText(props: { text: string; class?: string }): JSX.Element {
+    const lines = createMemo(() => props.text.split("\n"));
+    return (
+        <div class={props.class}>
+            <For each={lines()}>{(line) => <AnsiLine line={line} />}</For>
+        </div>
+    );
+}
+
+export function DispatchActivityFeedEntry({
+    entry,
+    showAgentTag,
+}: {
+    entry: DispatchActivityEntry;
+    showAgentTag: boolean;
+}): JSX.Element {
     const et = entry.event.event_type;
     const [expanded, setExpanded] = createSignal(false);
-    const tag = <span class="swarm-dispatch-feed-tag">{entry.agentId.substring(0, 7)}</span>;
+    const tag = showAgentTag ? <span class="swarm-dispatch-feed-tag">{entry.agentId.substring(0, 7)}</span> : null;
 
     switch (et.type) {
         case "text":
@@ -618,7 +649,7 @@ function DispatchActivityFeedEntry({ entry }: { entry: DispatchActivityEntry }):
             return (
                 <div class="swarm-dispatch-feed-entry">
                     {tag}
-                    <pre class="swarm-subagent-detail-text">{et.content}</pre>
+                    <AnsiText class="swarm-subagent-detail-text" text={et.content} />
                 </div>
             );
         case "tool_use":
@@ -631,7 +662,7 @@ function DispatchActivityFeedEntry({ entry }: { entry: DispatchActivityEntry }):
                             <span class="swarm-subagent-detail-tool-name">{et.name}</span>
                         </div>
                         <Show when={expanded()}>
-                            <pre class="swarm-subagent-detail-text">{et.input_summary}</pre>
+                            <AnsiText class="swarm-subagent-detail-text" text={et.input_summary} />
                         </Show>
                     </div>
                 </div>
@@ -649,14 +680,20 @@ function DispatchActivityFeedEntry({ entry }: { entry: DispatchActivityEntry }):
                             <span>{et.is_error ? "Error" : "Result"}</span>
                         </div>
                         <Show when={expanded()}>
-                            <pre class={`swarm-subagent-detail-text ${et.is_error ? "swarm-subagent-detail-text--error" : ""}`}>
-                                {et.preview}
-                            </pre>
+                            <AnsiText
+                                class={`swarm-subagent-detail-text ${et.is_error ? "swarm-subagent-detail-text--error" : ""}`}
+                                text={et.preview}
+                            />
                         </Show>
                     </div>
                 </div>
             );
         case "progress":
+            // Not routed through AnsiText: progress output is a short,
+            // inline status label next to the spinner icon (never a
+            // captured command's stdout/stderr the way text/tool_use/
+            // tool_result can be), and AnsiText's per-line <div> would
+            // break this row's inline flex layout for no real benefit.
             return (
                 <div class="swarm-dispatch-feed-entry">
                     {tag}
