@@ -269,26 +269,40 @@ export function buildCronRows(crons: ActiveCron[], blockId: string | null): Acti
 
 /**
  * Whether a blockId in `buildTree()`'s row list should actually render a
- * row — false when no WOS object exists for it at all. This is distinct
- * from "the block exists but `agentName` hasn't propagated to its meta
- * yet" (the case `buildTree()`'s own `"Agent"` fallback string is for,
- * unchanged since 2026-06-22) — that's a real, transient loading state on
- * a real block. A `null`/`undefined` block here means the id itself never
- * resolved to anything: most commonly a subagent's `parent_block_id`
- * (added to `buildTree()`'s row-id set as a registration-ordering fallback
- * — see that comment) that never resolved to a fully-registered block, or
- * a pruned block whose subagent record outlived it (`prune_block` is
- * triggered by BlockDeleted/TabDeleted/WorkspaceDeleted; a block whose
- * OWN registration never completed was never "deleted," so nothing prunes
- * it). Rendering a placeholder `"Agent"` row for an id that structurally
- * doesn't exist is worse than not rendering it — indistinguishable from a
- * real agent to the user, and any dispatch grouped under it shows as an
- * empty "No activity yet" row beside it. Extracted as a pure predicate so
- * it's directly unit-testable without instantiating `SwarmViewModel` or
- * mocking WOS, same rationale as `buildShellRows`/`buildCronRows` above.
+ * row — false only when the id's WOS oref has been definitively resolved
+ * to nothing. This is distinct from "the block exists but `agentName`
+ * hasn't propagated to its meta yet" (the case `buildTree()`'s own
+ * `"Agent"` fallback string is for, unchanged since 2026-06-22) — that's a
+ * real, transient loading state on a real block, and from "the fetch for
+ * this oref just hasn't resolved yet" (`isLoading`) — `WOS.
+ * getWaveObjectAtom` seeds a freshly-tracked oref with `{ value: null,
+ * loading: true }` (`wos.ts:152-153`) until its async `GetObject` fetch
+ * resolves, so a genuinely real, just-spawned block's row would otherwise
+ * read identically to a phantom one on the very first `buildTree()` pass —
+ * reagentx P1 on #2438, and very plausibly the explanation for the
+ * separate "a live-spawned subagent wasn't observed in Swarm" symptom this
+ * retro originally left as an open, unconfirmed question. While loading,
+ * this returns `true` (render it, same as today's pre-existing behavior —
+ * self-corrects once the fetch resolves) rather than guessing either way.
+ *
+ * A `null`/`undefined` block with `isLoading === false` means the fetch
+ * completed and there is genuinely nothing there: most commonly a
+ * subagent's `parent_block_id` (added to `buildTree()`'s row-id set as a
+ * registration-ordering fallback — see that comment) that never resolved
+ * to a fully-registered block, or a pruned block whose subagent record
+ * outlived it (`prune_block` is triggered by BlockDeleted/TabDeleted/
+ * WorkspaceDeleted; a block whose OWN registration never completed was
+ * never "deleted," so nothing prunes it). Rendering a placeholder
+ * `"Agent"` row for an id that structurally doesn't exist is worse than
+ * not rendering it — indistinguishable from a real agent to the user, and
+ * any dispatch grouped under it shows as an empty "No activity yet" row
+ * beside it. Extracted as a pure predicate so it's directly unit-testable
+ * without instantiating `SwarmViewModel` or mocking WOS, same rationale as
+ * `buildShellRows`/`buildCronRows` above.
  * See RETRO_SWARM_PHANTOM_ROWS_AND_STALE_TRACKING_2026_08_06.md.
  */
-export function hasRenderableBlock<T>(block: T | null | undefined): block is T {
+export function hasRenderableBlock<T>(block: T | null | undefined, isLoading: boolean): boolean {
+    if (isLoading) return true;
     return block != null;
 }
 
@@ -1211,14 +1225,20 @@ export class SwarmViewModel implements ViewModel {
         const nodes = allBlockIds.flatMap((blockId) => {
             const blockAtom = WOS.getWaveObjectAtom<Block>(`block:${blockId}`);
             const block = blockAtom();
-            if (!hasRenderableBlock(block)) return [];
+            // isLoading distinguishes "this oref hasn't resolved yet" from
+            // "this oref resolved to nothing" — both read as block == null,
+            // but only the latter means the id is genuinely phantom.
+            // getWaveObjectLoadingAtom returns `null` while loading, `false`
+            // once GetObject has resolved either way (wos.ts:220-227).
+            const isLoading = WOS.getWaveObjectLoadingAtom(`block:${blockId}`)() !== false;
+            if (!hasRenderableBlock(block, isLoading)) return [];
             const agentName =
-                (block.meta?.["agentName"] as string | undefined)?.trim() ||
+                (block?.meta?.["agentName"] as string | undefined)?.trim() ||
                 "Agent";
             const agentProvider =
-                (block.meta?.["agentProvider"] as string | undefined)?.trim() || null;
-            const activitySummary = readActivitySummary(block.meta)?.trim() || null;
-            const rawCtx = block.meta?.["term:ctx-tokens"];
+                (block?.meta?.["agentProvider"] as string | undefined)?.trim() || null;
+            const activitySummary = readActivitySummary(block?.meta)?.trim() || null;
+            const rawCtx = block?.meta?.["term:ctx-tokens"];
             const contextTokens = typeof rawCtx === "number" ? rawCtx : null;
             const agentStatus = statuses.get(blockId) ?? "idle";
             const { agentToolRows: rawAgentToolRows, workflowRows: rawWorkflowRows } = buildDispatchBuckets(
