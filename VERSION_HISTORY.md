@@ -1,5 +1,18 @@
 # AgentMux Version History
 
+## 0.54.12 — 2026-08-07
+
+- feat(agent): wire in-app OAuth login into credential-loss relogin, retiring AuthUrlBox
+- docs: document task package MCP Shell invocation + retro
+- fix(context-meter): seed Claude Sonnet 5 context window at 1M (no beta gate)
+- fix(login): make tier-1 PTY capture actually work end-to-end
+- fix(agent-pane): remove meaningless Resumed/Ready transcript notifications
+- fix(swarm): stop rendering a phantom "Agent" row for a block that doesn't exist
+- fix(agent-pane): continuous Working row background through the scrollbar gutter
+- feat(swarm): auto-retire a finished row after a 60s countdown
+- fix(login): widen the login PTY so the OAuth URL never hard-wraps, and restyle the in-app login card
+
+
 ## 0.54.11 — 2026-08-06
 
 - fix(migrations): stop trusting marker existence as proof of effect
