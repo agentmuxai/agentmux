@@ -35,6 +35,67 @@
         overflow: hidden; // .agent-document inside owns the real scrolling
     }
 
+    // When AgentWorkingRow is visible, its color reaches this box's true
+    // bottom edge (.agent-working-row-backdrop above). The normal-flow
+    // rows between here and the composer that carry their own margin for
+    // standalone breathing room — AgentAuthPanel's two states
+    // (.agent-auth-panel-card during an active OAuth login,
+    // .agent-auth-notice after a failed one; both can co-occur with the
+    // working row, since AgentWorkingRow's own loading condition already
+    // covers launch/auth activity via showingLaunchActivity()),
+    // AgentQuestionPanel, and the disconnected banner — should sit flush
+    // against that color instead of leaving a gap, matching how the row
+    // already sits flush above the composer. Scoped to
+    // .agent-view--working-row-visible (agent-view.tsx, driven by the same
+    // workingRowVisible() memo that gates the row itself) so a panel
+    // appearing on its own, with no active working row above it, keeps
+    // its normal margin. Every OTHER row that can appear in this stack —
+    // AgentDecisionPanel, the retry bar, PendingMessagesPanel,
+    // PaneRow-based rows (AgentCredentialsRevokedChip, the
+    // failure-recovery pin), ActivityDock, InAppLoginPanel's own root
+    // (.pre-launch-auth-panel-waiting) — needs no rule here: confirmed via
+    // their own CSS that they carry a border (or nothing) instead of a
+    // margin in this direction, so they're already flush against whatever
+    // ends up next to them.
+    //
+    // ~ (general sibling), not + (adjacent): any of those border-only rows
+    // can legitimately render between .agent-document-scroll-region and
+    // the target panel (e.g. a disconnected stream with a queued message),
+    // and + only matches when the target is the LITERAL next element —
+    // reagent caught this fragility on round 1 for the bottom-margin rule
+    // below and on round 2 for this one.
+    &.agent-view--working-row-visible {
+        .agent-document-scroll-region ~ .agent-auth-panel-card,
+        .agent-document-scroll-region ~ .agent-auth-notice,
+        .agent-document-scroll-region ~ .agent-question-panel,
+        .agent-document-scroll-region ~ .agent-question-panel-minimized,
+        .agent-document-scroll-region ~ .agent-disconnected-banner {
+            margin-top: 0;
+        }
+    }
+
+    // Same shape at the OTHER end: these panels' own bottom margin (the
+    // same shorthand that caused the top-edge gap above) leaves a gap
+    // before whatever comes next — unrelated to the working row, so
+    // unconditional (unlike the top-edge fix above): the composer strip is
+    // always there eventually, not something that only sometimes follows.
+    // Uses :has() to target the panel's own margin from a "what comes
+    // after me" condition, since CSS has no parent/previous-sibling
+    // selector otherwise — already an accepted pattern in this codebase
+    // (_pending-footer.scss, tabbar.scss, etc.). ~ (general), not +
+    // (adjacent), for the same reason as the top-edge fix above — reagent
+    // P2 on the original + version. .agent-auth-notice is excluded here:
+    // it only carries margin-top, no margin-bottom (_activity-log.scss),
+    // so there's no gap on this end. AgentDecisionPanel needs no rule
+    // either, since it never carries a bottom margin to begin with (see
+    // the top-edge comment above).
+    .agent-auth-panel-card:has(~ .agent-composer-strip),
+    .agent-question-panel:has(~ .agent-composer-strip),
+    .agent-question-panel-minimized:has(~ .agent-composer-strip),
+    .agent-disconnected-banner:has(~ .agent-composer-strip) {
+        margin-bottom: 0;
+    }
+
     // === Document Container ===
     .agent-document {
         position: absolute;
@@ -44,7 +105,12 @@
         // top/bottom (e.g. OS-level swipe-navigation gestures). Nested tool
         // previews get their own `contain` too — see SPEC_TOOL_PREVIEW_SCROLL_CHAINING_2026_07_03.
         overscroll-behavior: contain;
-        padding: var(--space-0-5) var(--space-1);
+        // Right padding removed: content used to wrap var(--space-1) (4px)
+        // short of the scrollbar track, reading as a small but visible gap
+        // between the conversation and the scrollbar. Left padding kept for
+        // the pane's own left-edge breathing room, which nobody reported
+        // an issue with.
+        padding: var(--space-0-5) 0 var(--space-0-5) var(--space-1);
         // Reserves exactly AgentWorkingRow's current rendered height (0 when
         // hidden) so scrolling to true bottom leaves the last message above
         // the floating row, not hidden underneath it. Set on
