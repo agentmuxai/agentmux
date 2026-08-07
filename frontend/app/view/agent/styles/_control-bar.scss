@@ -162,6 +162,49 @@
     // No idle placeholder — component returns null when neither loading nor
     // has completed stats.
     // SPEC_AGENT_PANE_STATUS_GRADIENT_2026_06_14.md §2.
+    //
+    // Purely decorative full-width layer, .agent-document-scroll-region's
+    // FIRST child in DOM order and left at z-index: auto (the implicit
+    // "0/auto" stacking group, ordered by DOM order within that group per
+    // spec — see .agent-document-scroll-region's own z-index:0 comment in
+    // _document.scss) — so it paints below .agent-document (also in that
+    // group, but later in DOM order) and thus below .agent-document's own
+    // scrollbar, while .agent-working-row-anchor's explicit z-index: 2
+    // keeps the real text-bearing row above both, unchanged. Closes the
+    // gap .agent-working-row-anchor's own scrollbar-width inset
+    // (below) necessarily leaves empty — that inset stops the row's
+    // opaque background from ever covering the scrollbar, but does
+    // nothing to fill that gutter with a matching color, and the
+    // scrollbar track itself is fully transparent
+    // (--scrollbar-background-color, theme.scss), so the gutter used to
+    // show the plain pane background instead of continuing this color.
+    // See docs/specs/SPEC_AGENT_WORKING_ROW_SCROLLBAR_GAP_2026_08_06.md.
+    .agent-working-row-backdrop {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        // Same source of truth .agent-document's own padding-bottom uses
+        // (agent-view.tsx's ResizeObserver on the real row) — 0 whenever
+        // the row isn't rendered, so this never needs its own visibility
+        // logic beyond the <Show> that already gates it in agent-view.tsx.
+        height: var(--agent-working-row-height, 0px);
+        pointer-events: none;
+        // Default/fallback matches .agent-working-row--worked's own
+        // background exactly (below) — the common case once a turn
+        // completes, and a safe non-flashing color if this ever paints
+        // for a tick before the --loading class below applies.
+        background: var(--elevated-bg-color);
+
+        &--loading {
+            // Exact match to .agent-working-row--loading's own background
+            // (below), not an approximation — a visibly different tint in
+            // this 14px strip would look like a new, smaller version of
+            // the same bug this element exists to fix.
+            background: color-mix(in srgb, var(--accent-color) 4%, var(--elevated-bg-color));
+        }
+    }
+
     .agent-working-row-anchor {
         position: absolute;
         left: 0;

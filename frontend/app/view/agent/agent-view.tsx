@@ -1047,6 +1047,19 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // cascade through the DOM tree regardless of component boundaries.
     let workingRowAnchorRef: HTMLDivElement | undefined;
     const [workingRowHeight, setWorkingRowHeight] = createSignal(0);
+
+    // Shared by the anchor's <Show> and the backdrop's <Show>/color below
+    // (SPEC_AGENT_WORKING_ROW_SCROLLBAR_GAP_2026_08_06.md §5) so the two
+    // can't drift out of sync — both need to agree on "is the row visible
+    // at all" and "is it the loading (vs. worked) variant" independent of
+    // the anchor's own inset-from-scrollbar geometry.
+    const workingRowLoading = createMemo(
+        () => showingLaunchActivity() || workingFromPhase(agentAtoms().turnPhaseAtom[0]()),
+    );
+    const workingRowVisible = createMemo(
+        () => workingRowLoading() || agentAtoms().sessionStatsAtom[0]() != null,
+    );
+
     onMount(() => {
         if (typeof ResizeObserver === "undefined" || !workingRowAnchorRef) return;
         const ro = new ResizeObserver((entries) => {
@@ -1552,6 +1565,22 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 class="agent-document-scroll-region"
                 style={{ "--agent-working-row-height": `${workingRowHeight()}px` }}
             >
+                {/* Full-width decorative backdrop, stacked below
+                    .agent-document (and thus below its scrollbar) so the
+                    working row's color reaches the pane's true right edge
+                    without ever painting over the scrollbar — the anchor
+                    below stays inset from the scrollbar gutter for that
+                    reason, but nothing filled the gutter itself with a
+                    matching color until now (the scrollbar track is
+                    fully transparent). See
+                    docs/specs/SPEC_AGENT_WORKING_ROW_SCROLLBAR_GAP_2026_08_06.md. */}
+                <Show when={workingRowVisible()}>
+                    <div
+                        class="agent-working-row-backdrop"
+                        classList={{ "agent-working-row-backdrop--loading": workingRowLoading() }}
+                    />
+                </Show>
+
                 <AgentDocumentView
                     documentAtom={agentAtoms().documentAtom}
                     documentStateAtom={agentAtoms().documentStateAtom}
@@ -1593,13 +1622,9 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     Acts as a visual turn delimiter; stays until next message is sent.
                     See SPEC_AGENT_PANE_STATUS_GRADIENT_2026_06_14.md §2. */}
                 <div class="agent-working-row-anchor" ref={workingRowAnchorRef}>
-                    <Show when={
-                        showingLaunchActivity()
-                        || workingFromPhase(agentAtoms().turnPhaseAtom[0]())
-                        || agentAtoms().sessionStatsAtom[0]() != null
-                    }>
+                    <Show when={workingRowVisible()}>
                         <AgentWorkingRow
-                            loading={showingLaunchActivity() || workingFromPhase(agentAtoms().turnPhaseAtom[0]())}
+                            loading={workingRowLoading()}
                             stopping={agentAtoms().turnPhaseAtom[0]().kind === "Interrupting"}
                             currentTool={agentAtoms().currentToolAtom[0]()}
                             currentToolArg={agentAtoms().currentToolArgAtom[0]()}
