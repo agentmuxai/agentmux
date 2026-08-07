@@ -84,12 +84,34 @@
     }
 }
 
+// Bordered sub-section for each numbered step (URL / paste-code) — mirrors
+// AgentQuestionPanel's per-question fieldset treatment so the login panel
+// reads as organized steps instead of one flat block of text.
+.pre-launch-auth-panel-step {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1-5);
+    padding: var(--space-2) var(--space-2-5, var(--space-2));
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm, 0);
+
+    & + & {
+        margin-top: var(--space-1);
+    }
+}
+
 .pre-launch-auth-panel-url-row {
     display: flex;
     flex-direction: row;
-    align-items: center;
+    align-items: flex-start;
     gap: var(--space-2);
     min-width: 0;
+}
+
+.pre-launch-auth-panel-url-actions {
+    display: flex;
+    flex-direction: row;
+    gap: var(--space-2);
 }
 
 .pre-launch-auth-panel-callback-row {
@@ -113,13 +135,13 @@
     color: var(--secondary-text-color);
 }
 
-// The captured OAuth URL. One line, ellipsis-truncate so a 500-char
-// state= query string doesn't blow the panel layout. The full URL is
-// in the `title` attr for hover-reveal; clicking Copy grabs the
-// full value from the underlying signal.
+// The captured OAuth URL — this IS the backup link a user copies when the
+// browser didn't open, so it must be fully readable, not hidden behind a
+// hover tooltip. Wraps across lines (a 500-char state= query string can run
+// long) instead of the old single-line ellipsis-truncation.
 .pre-launch-auth-panel-url-text {
-    flex: 1 1 auto;
-    min-width: 0;
+    display: block;
+    width: 100%;
     padding: var(--space-2) var(--space-3);
     background-color: var(--input-bg, rgba(255, 255, 255, 0.04));
     border: 1px solid var(--border-color);
@@ -127,10 +149,9 @@
     color: var(--main-text-color);
     font-family: var(--mono-font-family);
     font-size: 12px;
-    line-height: 1.3;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    line-height: 1.4;
+    white-space: normal;
+    word-break: break-all;
     user-select: text;
 }
 

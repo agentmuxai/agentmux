@@ -113,92 +113,104 @@ export const InAppLoginPanel = (p: InAppLoginPanelProps): JSX.Element => {
             >
                 {(url) => (
                     <>
-                        <div class="pre-launch-auth-panel-url-label">
-                            1 · Authorize in your browser (it should have opened — if not, use this link):
+                        <div class="pre-launch-auth-panel-step">
+                            <div class="pre-launch-auth-panel-url-label">
+                                1 · Authorize in your browser
+                            </div>
+                            <div class="pre-launch-auth-panel-hint">
+                                Your browser should have opened automatically. If it didn't, copy this backup link and open it manually:
+                            </div>
+                            <div class="pre-launch-auth-panel-url-row">
+                                <code class="pre-launch-auth-panel-url-text" title={url()}>
+                                    {url()}
+                                </code>
+                            </div>
+                            <div class="pre-launch-auth-panel-url-actions">
+                                <Button
+                                    className="grey solid"
+                                    onClick={() => {
+                                        try {
+                                            getApi().openExternal(url());
+                                        } catch (e) {
+                                            console.warn(`[auth-diag] openExternal failed: ${(e as Error)?.message ?? String(e)}`);
+                                        }
+                                    }}
+                                >
+                                    Open link
+                                </Button>
+                                <Button
+                                    className="grey solid"
+                                    onClick={() => {
+                                        // CEF clipboard wrapper, not navigator.clipboard —
+                                        // SPEC_UNIFIED_CLIPBOARD_2026_05_18.md §3.3.
+                                        void clipboardWriteText(url()).catch((err) =>
+                                            console.log("clipboard write failed", err),
+                                        );
+                                    }}
+                                >
+                                    Copy link
+                                </Button>
+                            </div>
                         </div>
-                        <div class="pre-launch-auth-panel-url-row">
-                            <code class="pre-launch-auth-panel-url-text" title={url()}>
-                                {url()}
-                            </code>
-                            <Button
-                                className="grey solid"
-                                onClick={() => {
-                                    try {
-                                        getApi().openExternal(url());
-                                    } catch (e) {
-                                        console.warn(`[auth-diag] openExternal failed: ${(e as Error)?.message ?? String(e)}`);
-                                    }
-                                }}
-                            >
-                                Open
-                            </Button>
-                            <Button
-                                className="grey solid"
-                                onClick={() => {
-                                    // CEF clipboard wrapper, not navigator.clipboard —
-                                    // SPEC_UNIFIED_CLIPBOARD_2026_05_18.md §3.3.
-                                    void clipboardWriteText(url()).catch((err) =>
-                                        console.log("clipboard write failed", err),
-                                    );
-                                }}
-                            >
-                                Copy
-                            </Button>
+                        <div class="pre-launch-auth-panel-step">
+                            <div class="pre-launch-auth-panel-url-label">
+                                2 · Paste the authorization code
+                            </div>
+                            <div class="pre-launch-auth-panel-hint">
+                                After you authorize, the page shows a code — paste it here:
+                            </div>
+                            <div class="pre-launch-auth-panel-callback-row">
+                                <input
+                                    ref={inputRef}
+                                    class="pre-launch-auth-panel-url-input"
+                                    type="text"
+                                    placeholder="Paste the authorization code…"
+                                    value={pasteCode()}
+                                    onInput={(e) => setPasteCode(e.currentTarget.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === "Enter") void submitCode();
+                                    }}
+                                    onPaste={(e) => {
+                                        // Auto-submit on paste — pasting the code IS the
+                                        // intent to submit (same UX as AuthUrlBox).
+                                        const text = (e.clipboardData?.getData("text") ?? "").trim();
+                                        if (text) {
+                                            setPasteCode(text);
+                                            void submitCode(text);
+                                        }
+                                    }}
+                                />
+                                <Button
+                                    className="grey solid"
+                                    title="Paste from clipboard and submit"
+                                    onClick={() => {
+                                        clipboardReadText()
+                                            .then((text) => {
+                                                const trimmed = (text ?? "").trim();
+                                                if (trimmed) {
+                                                    setPasteCode(trimmed);
+                                                    void submitCode(trimmed);
+                                                }
+                                            })
+                                            .catch(() => {
+                                                setPasteResult("Could not read clipboard — paste manually");
+                                            });
+                                    }}
+                                >
+                                    Paste &amp; submit
+                                </Button>
+                                <Button
+                                    className="grey solid"
+                                    onClick={() => void submitCode()}
+                                    disabled={pasting()}
+                                >
+                                    {pasting() ? "…" : "Submit"}
+                                </Button>
+                            </div>
+                            <Show when={pasteResult()}>
+                                <div class="pre-launch-auth-panel-hint">{pasteResult()}</div>
+                            </Show>
                         </div>
-                        <div class="pre-launch-auth-panel-url-label">
-                            2 · If the page shows an authorization code, paste it here:
-                        </div>
-                        <div class="pre-launch-auth-panel-callback-row">
-                            <input
-                                ref={inputRef}
-                                class="pre-launch-auth-panel-url-input"
-                                type="text"
-                                placeholder="Paste the authorization code…"
-                                value={pasteCode()}
-                                onInput={(e) => setPasteCode(e.currentTarget.value)}
-                                onKeyDown={(e) => {
-                                    if (e.key === "Enter") void submitCode();
-                                }}
-                                onPaste={(e) => {
-                                    // Auto-submit on paste — pasting the code IS the
-                                    // intent to submit (same UX as AuthUrlBox).
-                                    const text = (e.clipboardData?.getData("text") ?? "").trim();
-                                    if (text) {
-                                        setPasteCode(text);
-                                        void submitCode(text);
-                                    }
-                                }}
-                            />
-                            <Button
-                                className="grey solid"
-                                title="Paste from clipboard and submit"
-                                onClick={() => {
-                                    clipboardReadText()
-                                        .then((text) => {
-                                            const trimmed = (text ?? "").trim();
-                                            if (trimmed) {
-                                                setPasteCode(trimmed);
-                                                void submitCode(trimmed);
-                                            }
-                                        })
-                                        .catch(() => {
-                                            setPasteResult("Could not read clipboard — paste manually");
-                                        });
-                                }}
-                            >
-                                Paste &amp; submit
-                            </Button>
-                            <Button
-                                className="grey solid"
-                                onClick={() => void submitCode()}
-                                disabled={pasting()}
-                            >
-                                {pasting() ? "…" : "Submit"}
-                            </Button>
-                        </div>
-                        <Show when={pasteResult()}>
-                            <div class="pre-launch-auth-panel-hint">{pasteResult()}</div>
-                        </Show>
                     </>
                 )}
             </Show>

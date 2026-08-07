@@ -239,14 +239,23 @@ export function AgentAuthPanel(props: AgentAuthPanelProps): JSX.Element {
         <>
             <Show when={props.authUrl?.()}>
                 {(url) => (
-                    <InAppLoginPanel
-                        providerId={props.authProviderId ?? ""}
-                        providerLabel={PROVIDERS[props.authProviderId ?? ""]?.displayName ?? props.authProviderId ?? "provider"}
-                        authUrl={url()}
-                        phase={toInAppLoginPhase(url(), props.launchPhase?.() ?? null)}
-                        onCancel={() => props.onCancelLogin?.()}
-                        onUseTerminal={() => props.onUseTerminal?.()}
-                    />
+                    // AgentQuestionPanel-style card chrome (border/bg/shadow) —
+                    // InAppLoginPanel itself ships with none, since its other
+                    // two callers (PreLaunchAuthPanel, the Armory/Stash Modal)
+                    // already provide their own box. This is the one context
+                    // that renders it bare in normal document flow, so it
+                    // needs its own card here to read as a distinct prompt
+                    // instead of loose, unbordered text.
+                    <div class="agent-auth-panel-card">
+                        <InAppLoginPanel
+                            providerId={props.authProviderId ?? ""}
+                            providerLabel={PROVIDERS[props.authProviderId ?? ""]?.displayName ?? props.authProviderId ?? "provider"}
+                            authUrl={url()}
+                            phase={toInAppLoginPhase(url(), props.launchPhase?.() ?? null)}
+                            onCancel={() => props.onCancelLogin?.()}
+                            onUseTerminal={() => props.onUseTerminal?.()}
+                        />
+                    </div>
                 )}
             </Show>
             <Show when={props.authNotice?.()}>
