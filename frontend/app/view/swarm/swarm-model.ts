@@ -1229,7 +1229,7 @@ export class SwarmViewModel implements ViewModel {
             // "this oref resolved to nothing" — both read as block == null,
             // but only the latter means the id is genuinely phantom.
             // getWaveObjectLoadingAtom returns `null` while loading, `false`
-            // once GetObject has resolved either way (wos.ts:220-227).
+            // once GetObject has resolved either way (wos.ts:232-238).
             const isLoading = WOS.getWaveObjectLoadingAtom(`block:${blockId}`)() !== false;
             if (!hasRenderableBlock(block, isLoading)) return [];
             const agentName =
