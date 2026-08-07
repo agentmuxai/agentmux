@@ -18,5 +18,14 @@ serde_json = "1"
 # layout (see docs/specs/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md).
 dirs = "5"
 
+# Windows page-file volume tracking (pagefile.rs), shared by agentmux-srv
+# and agentmux-cef — see docs/specs/SPEC_RAM_PAGEFILE_PRESSURE_SPLIT_2026_08_07.md §4.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_System_Registry",
+    "Win32_Storage_FileSystem",
+] }
+
 [dev-dependencies]
 tempfile = "3"

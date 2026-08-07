@@ -33,23 +33,44 @@
 
 use std::sync::atomic::{AtomicU8, Ordering};
 
-/// Commit-**free ratio** enter thresholds (free / total). Reagent-adjacent
-/// finding, `docs/retro/retro-commit-restart-reclaim-2026-07-16.md` §5.2: this
-/// classifier used to threshold on absolute free MB (1024 / 512), which on a
-/// large-commit-limit machine (60-80 GB seen live) never fires until far past
-/// the point the status bar already shows red — the frontend's gauge
-/// (`frontend/app/statusbar/SystemStats.tsx::commitColor`) has always been
-/// ratio-based (>95% used / >85% used). These are that same threshold,
-/// expressed as free-ratio (`1 - used/total`) so the two pipelines agree:
-/// used > 0.95 <=> free/total < 0.05, used > 0.85 <=> free/total < 0.15.
-const WARN_ENTER_FREE_RATIO: f64 = 0.15;
-const CRITICAL_ENTER_FREE_RATIO: f64 = 0.05;
-/// Hysteresis margin, in free-ratio points: to *leave* a pressure band,
-/// commit-free must recover this far past the enter threshold. Stops flap
-/// when commit hovers at a boundary — same role as the previous fixed-MB
-/// `HYSTERESIS_MB`, just expressed in ratio terms now that the thresholds
-/// themselves are ratios.
-const HYSTERESIS_RATIO: f64 = 0.03;
+/// Free-ratio thresholds (free / total) a `PressureTracker` classifies
+/// against. Originally module-level consts shared by a single commit
+/// tracker; made a field (`SPEC_RAM_PAGEFILE_PRESSURE_SPLIT_2026_08_07` §3)
+/// so a second, independent RAM tracker can share the same classifier logic
+/// without being forced to share the same numbers — today both trackers use
+/// `::default()` (identical to the original consts), but they can diverge
+/// later once there's real data to tune against, without another rewrite.
+///
+/// Reagent-adjacent finding, `docs/retro/retro-commit-restart-reclaim-2026-07-16.md`
+/// §5.2: the commit tracker used to threshold on absolute free MB
+/// (1024 / 512), which on a large-commit-limit machine (60-80 GB seen live)
+/// never fired until far past the point the status bar already shows red —
+/// the frontend's gauge (`frontend/app/statusbar/SystemStats.tsx::commitColor`)
+/// has always been ratio-based (>95% used / >85% used). The defaults below
+/// are that same threshold, expressed as free-ratio (`1 - used/total`) so the
+/// two pipelines agree: used > 0.95 <=> free/total < 0.05, used > 0.85 <=>
+/// free/total < 0.15.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PressureThresholds {
+    pub warn_enter_free_ratio: f64,
+    pub critical_enter_free_ratio: f64,
+    /// Margin, in free-ratio points: to *leave* a pressure band, free ratio
+    /// must recover this far past the enter threshold. Stops flap when the
+    /// reading hovers at a boundary — same role as the previous fixed-MB
+    /// `HYSTERESIS_MB`, just expressed in ratio terms now that the
+    /// thresholds themselves are ratios.
+    pub hysteresis_ratio: f64,
+}
+
+impl Default for PressureThresholds {
+    fn default() -> Self {
+        Self {
+            warn_enter_free_ratio: 0.15,
+            critical_enter_free_ratio: 0.05,
+            hysteresis_ratio: 0.03,
+        }
+    }
+}
 
 /// Debounced system memory-pressure level. Ordered Normal < Warn < Critical.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -92,17 +113,20 @@ pub fn current_level() -> PressureLevel {
     PressureLevel::from_u8(PRESSURE_LEVEL.load(Ordering::Relaxed))
 }
 
-/// Debounced pressure classifier. One instance lives in the heartbeat thread;
-/// `observe()` is fed each commit-free sample and returns `Some(new)` only on a
-/// level change (so callers log/act once per transition, not every tick).
+/// Debounced pressure classifier. One instance per tracked metric lives in
+/// the heartbeat thread (today: one for commit/page-file, one for physical
+/// RAM — `SPEC_RAM_PAGEFILE_PRESSURE_SPLIT_2026_08_07` §3); `observe()` is
+/// fed each sample and returns `Some(new)` only on a level change (so
+/// callers log/act once per transition, not every tick).
 #[derive(Debug, Clone, Copy)]
 pub struct PressureTracker {
     level: PressureLevel,
+    thresholds: PressureThresholds,
 }
 
 impl Default for PressureTracker {
     fn default() -> Self {
-        Self { level: PressureLevel::Normal }
+        Self { level: PressureLevel::Normal, thresholds: PressureThresholds::default() }
     }
 }
 
@@ -111,17 +135,26 @@ impl PressureTracker {
         Self::default()
     }
 
+    /// Construct with non-default thresholds. Not used yet — every tracker
+    /// today starts on `PressureThresholds::default()` (§3's "start with the
+    /// same ratios" call) — but kept available for the RAM tracker to diverge
+    /// from the commit tracker once there's real data to tune against.
+    #[allow(dead_code)]
+    pub fn with_thresholds(thresholds: PressureThresholds) -> Self {
+        Self { level: PressureLevel::Normal, thresholds }
+    }
+
     #[allow(dead_code)] // read by tests + future shedding responses
     pub fn level(&self) -> PressureLevel {
         self.level
     }
 
-    /// Feed a commit-free/commit-total reading (MB). Returns `Some(level)` iff
-    /// the debounced level changed, and publishes the new level to
-    /// `PRESSURE_LEVEL`. `commit_total_mb == 0` (not yet sampled) is treated
-    /// as "unknown — stay Normal" rather than dividing by zero.
-    pub fn observe(&mut self, commit_free_mb: u64, commit_total_mb: u64) -> Option<PressureLevel> {
-        let next = classify(commit_free_mb, commit_total_mb, self.level);
+    /// Feed a free/total reading (MB). Returns `Some(level)` iff the
+    /// debounced level changed, and publishes the new level to
+    /// `PRESSURE_LEVEL`. `total_mb == 0` (not yet sampled) is treated as
+    /// "unknown — stay Normal" rather than dividing by zero.
+    pub fn observe(&mut self, free_mb: u64, total_mb: u64) -> Option<PressureLevel> {
+        let next = classify(free_mb, total_mb, self.level, &self.thresholds);
         if next != self.level {
             self.level = next;
             PRESSURE_LEVEL.store(next as u8, Ordering::Relaxed);
@@ -133,36 +166,41 @@ impl PressureTracker {
 }
 
 /// Pure classifier with hysteresis: the *enter* thresholds are strict, but
-/// *leaving* a band requires recovering `HYSTERESIS_RATIO` past the enter
+/// *leaving* a band requires recovering `hysteresis_ratio` past the enter
 /// threshold, so a reading parked at a boundary doesn't oscillate.
-fn classify(free_mb: u64, total_mb: u64, current: PressureLevel) -> PressureLevel {
+fn classify(
+    free_mb: u64,
+    total_mb: u64,
+    current: PressureLevel,
+    t: &PressureThresholds,
+) -> PressureLevel {
     if total_mb == 0 {
         return PressureLevel::Normal;
     }
     let free_ratio = free_mb as f64 / total_mb as f64;
     match current {
         PressureLevel::Normal => {
-            if free_ratio < CRITICAL_ENTER_FREE_RATIO {
+            if free_ratio < t.critical_enter_free_ratio {
                 PressureLevel::Critical
-            } else if free_ratio < WARN_ENTER_FREE_RATIO {
+            } else if free_ratio < t.warn_enter_free_ratio {
                 PressureLevel::Warn
             } else {
                 PressureLevel::Normal
             }
         }
         PressureLevel::Warn => {
-            if free_ratio < CRITICAL_ENTER_FREE_RATIO {
+            if free_ratio < t.critical_enter_free_ratio {
                 PressureLevel::Critical
-            } else if free_ratio >= WARN_ENTER_FREE_RATIO + HYSTERESIS_RATIO {
+            } else if free_ratio >= t.warn_enter_free_ratio + t.hysteresis_ratio {
                 PressureLevel::Normal
             } else {
                 PressureLevel::Warn
             }
         }
         PressureLevel::Critical => {
-            if free_ratio >= WARN_ENTER_FREE_RATIO + HYSTERESIS_RATIO {
+            if free_ratio >= t.warn_enter_free_ratio + t.hysteresis_ratio {
                 PressureLevel::Normal
-            } else if free_ratio >= CRITICAL_ENTER_FREE_RATIO + HYSTERESIS_RATIO {
+            } else if free_ratio >= t.critical_enter_free_ratio + t.hysteresis_ratio {
                 PressureLevel::Warn
             } else {
                 PressureLevel::Critical

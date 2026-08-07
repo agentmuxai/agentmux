@@ -3,7 +3,13 @@
 
 import { describe, expect, it } from "vitest";
 
-import { severity, shouldShow, type PressureLevel } from "./memory-pressure-banner";
+import {
+    messageFor,
+    pagefileGuidance,
+    severity,
+    shouldShow,
+    type PressureLevel,
+} from "./memory-pressure-banner";
 
 describe("memory-pressure banner — severity", () => {
     it("orders normal < warn < critical", () => {
@@ -39,5 +45,51 @@ describe("memory-pressure banner — shouldShow", () => {
     it("stays hidden when pressure de-escalates below the dismissed level", () => {
         // Dismissed at critical, drops to warn → still hidden (less severe).
         expect(shouldShow("warn", "critical")).toBe(false);
+    });
+});
+
+describe("memory-pressure banner — pagefileGuidance", () => {
+    it("warns about a fixed-size page file regardless of free disk", () => {
+        expect(pagefileGuidance(false, 90)).toMatch(/fixed size/);
+        expect(pagefileGuidance(false, undefined)).toMatch(/fixed size/);
+    });
+
+    it("warns Windows can't grow the page file when disk is low and system-managed", () => {
+        expect(pagefileGuidance(true, 5)).toMatch(/can't grow/);
+        expect(pagefileGuidance(true, 19.9)).toMatch(/can't grow/);
+    });
+
+    it("uses the soft framing when system-managed with healthy free disk", () => {
+        expect(pagefileGuidance(true, 20)).toMatch(/expand virtual memory automatically/);
+        expect(pagefileGuidance(true, 80)).toMatch(/expand virtual memory automatically/);
+    });
+
+    it("returns no guidance when system-managed status is unknown (fail-open, no guess)", () => {
+        expect(pagefileGuidance(undefined, undefined)).toBe("");
+        expect(pagefileGuidance(undefined, 5)).toBe("");
+    });
+
+    it("falls back to the soft framing when managed is known but disk is unknown", () => {
+        // system_managed known + disk_free_pct missing -> can't tell if it's
+        // stuck, so default to the less alarming framing rather than silence.
+        expect(pagefileGuidance(true, undefined)).toMatch(/expand virtual memory automatically/);
+    });
+});
+
+describe("memory-pressure banner — messageFor", () => {
+    it("RAM messages never include page-file/disk guidance", () => {
+        const msg = messageFor("ram", "critical", { kind: "ram", level: "critical" });
+        expect(msg).toMatch(/RAM/);
+        expect(msg).not.toMatch(/page file|disk/i);
+    });
+
+    it("pagefile messages append disk-aware guidance", () => {
+        const msg = messageFor("pagefile", "critical", {
+            kind: "pagefile",
+            level: "critical",
+            system_managed: false,
+        });
+        expect(msg).toMatch(/page file/i);
+        expect(msg).toMatch(/fixed size/);
     });
 });
