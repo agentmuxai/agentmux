@@ -167,10 +167,21 @@ function createWaveValueObject<T extends WaveObj>(oref: string, shouldFetch: boo
         wov.pendingPromise = null;
         wov.setData({ value: val, loading: false });
         console.log("WaveObj resolved", oref, Date.now() - startTs + "ms");
-    }).catch(() => {
-        // fetch may fail transiently (e.g. endpoint not yet set at module init);
-        // caller can retry via getWaveObjectValue when ready
+    }).catch((err) => {
         wov.pendingPromise = null;
+        // A backend "not found" rejection (get_object_by_oref's
+        // `Err(format!("not found: {}", oref_str))`, object_helpers.rs) is a
+        // DEFINITIVE answer, not a transient failure — resolve loading so
+        // callers checking getWaveObjectLoadingAtom (e.g. swarm-model.ts's
+        // hasRenderableBlock) can actually distinguish "confirmed absent"
+        // from "still fetching" instead of this oref staying stuck at
+        // loading:true forever (reagentx P1 on #2438, second pass). Any
+        // OTHER error (network blip, endpoint not yet set at module init)
+        // keeps the prior behavior: leave loading as-is, caller can retry
+        // via getWaveObjectValue when ready.
+        if (err instanceof Error && err.message.includes("not found: " + oref)) {
+            wov.setData({ value: null, loading: false });
+        }
     });
     return wov;
 }
