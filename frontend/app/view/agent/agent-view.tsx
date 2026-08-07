@@ -68,7 +68,7 @@ import { AgentDecisionPanel } from "./components/AgentDecisionPanel";
 import { AgentQuestionPanel } from "./components/AgentQuestionPanel";
 import { AgentDisconnectedBanner } from "./components/AgentDisconnectedBanner";
 import { AgentCredentialsRevokedChip } from "./components/AgentCredentialsRevokedChip";
-import { AgentDocumentView } from "./components/AgentDocumentView";
+import { AgentDocumentView, AgentAuthPanel } from "./components/AgentDocumentView";
 import { AgentFooter, AgentWorkingRow } from "./components/AgentFooter";
 import { AgentComposerStrip } from "./components/AgentComposerStrip";
 import { AgentShellSubblock } from "./components/AgentShellSubblock";
@@ -1555,12 +1555,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 <AgentDocumentView
                     documentAtom={agentAtoms().documentAtom}
                     documentStateAtom={agentAtoms().documentStateAtom}
-                    authUrl={status.authUrl}
-                    authNotice={status.authNotice}
-                    onDismissAuthNotice={() => status.setAuthNotice(null)}
-                    onCancelLogin={status.cancelLogin}
-                    onUseTerminal={status.useTerminalInstead}
-                    authProviderId={provider()?.id ?? providerKey()}
                     onAgentErrorLogin={() => {
                         // Must match onLoginAgain above: the button is labeled "Login
                         // Again", so it has to force a fresh OAuth regardless of
@@ -1625,6 +1619,20 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     </Show>
                 </div>
             </div>
+
+            {/* Login UI — bottom-docked like AgentDecisionPanel/
+                AgentQuestionPanel below, not inside the scrollable document.
+                See #2429 follow-up: it used to render inside
+                AgentDocumentView's header slot, which pinned it to the top
+                of the scroll area. */}
+            <AgentAuthPanel
+                authUrl={status.authUrl}
+                authNotice={status.authNotice}
+                onDismissAuthNotice={() => status.setAuthNotice(null)}
+                onCancelLogin={status.cancelLogin}
+                onUseTerminal={status.useTerminalInstead}
+                authProviderId={provider()?.id ?? providerKey()}
+            />
 
             <Show when={status.canRetry()}>
                 <div class="agent-retry-bar">
