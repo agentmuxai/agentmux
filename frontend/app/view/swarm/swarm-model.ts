@@ -1243,6 +1243,27 @@ export class SwarmViewModel implements ViewModel {
      *  pruneRetiredRowKeys(). In scope: agentToolRows/workflowRows only,
      *  per the spec's own "out of scope: shellRows/cronRows" note.
      *
+     *  Critically, "agentToolRows" here means `buildDispatchBuckets()`'s
+     *  actual `agentToolRows` output (solo + orphaned-workflow-member
+     *  subagents) — NOT the raw, unfiltered `subagentsAtom()` list, which
+     *  also contains every NORMAL (non-orphaned) member of a still-tracked
+     *  Workflow dispatch. Those never get their own `SubagentRow` (SPEC §7
+     *  — a Workflow dispatch this large can't hold thousands of members'
+     *  rows, hence `WorkflowDispatchRow`'s aggregate-only display). Arming
+     *  a countdown per completed member of, say, a 1,030-member workflow
+     *  (a real scale documented elsewhere in this file) would reintroduce
+     *  exactly the per-member `setTimeout`/state-entry cost this design
+     *  otherwise avoids — AND permanently hide a member that later surfaces
+     *  through the `orphanedWorkflowMembers` fallback (a stale/failed
+     *  `ListDispatches` call): `retireRow` would already have marked its
+     *  `subagentRowKey` retired against its (unchanged, since it already
+     *  completed) `last_event_at`, so `filterRetired` suppresses it forever
+     *  the moment it needs that exact fallback to stay visible during the
+     *  lag (reagentx P1 on #2440, second pass). Reusing
+     *  `buildDispatchBuckets` directly — rather than re-deriving its
+     *  solo/orphaned logic here — keeps this arming scope byte-for-byte in
+     *  sync with what actually renders, including if that logic changes.
+     *
      *  A subagent's `status === "completed"` is exactly
      *  `subagentDisplayStatus()`'s (swarm-view.tsx) `"idle"` case regardless
      *  of parent status — `"active"`/`"abandoned"` never map to `"idle"` —
@@ -1256,11 +1277,14 @@ export class SwarmViewModel implements ViewModel {
      *  already outside `liveTerminal` without a separate check.
      */
     private reconcileCountdowns(): void {
+        const dispatches = this.dispatchesAtom();
+        const { agentToolRows } = buildDispatchBuckets(dispatches, this.subagentsAtom());
+
         const liveTerminal = new Map<string, number>();
-        for (const sub of this.subagentsAtom()) {
+        for (const sub of agentToolRows) {
             if (sub.status === "completed") liveTerminal.set(subagentRowKey(sub.agent_id), sub.last_event_at);
         }
-        for (const d of this.dispatchesAtom()) {
+        for (const d of dispatches) {
             if (d.kind === "workflow" && d.status === "completed") liveTerminal.set(d.dispatch_id, d.last_event_at);
         }
 
