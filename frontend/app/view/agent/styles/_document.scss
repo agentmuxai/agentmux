@@ -37,7 +37,7 @@
 
     // When AgentWorkingRow is visible, its color reaches this box's true
     // bottom edge (.agent-working-row-backdrop above). Whichever
-    // interposing row ends up adjacent to it — AgentAuthPanel,
+    // interposing row ends up adjacent to it — the auth-recovery notice,
     // AgentQuestionPanel, or the disconnected banner, the three
     // normal-flow rows between here and the composer that carry their own
     // top margin for standalone breathing room — should sit flush against
@@ -49,27 +49,37 @@
     // their own, with no active working row above them, keep their normal
     // margin unchanged. AgentDecisionPanel/the retry bar/the
     // pending-message queue/PaneRow-based rows (AgentCredentialsRevokedChip,
-    // the failure-recovery pin)/ActivityDock are unaffected: they only
-    // ever add a border, not a margin, in this direction, so they already
-    // sit flush against whatever ends up next to them.
+    // the failure-recovery pin)/ActivityDock/InAppLoginPanel
+    // (.pre-launch-auth-panel-waiting) are unaffected: they only ever add
+    // a border (or, for InAppLoginPanel, no spacing at all) rather than a
+    // margin in this direction, so they already sit flush against
+    // whatever ends up next to them.
     //
-    // ~ (general sibling), not + (adjacent) — reagent P2 on the re-review:
-    // AgentAuthPanel, the retry bar, PendingMessagesPanel,
+    // ~ (general sibling), not + (adjacent) — reagent P2 on round 1 of
+    // review: the retry bar, PendingMessagesPanel,
     // AgentCredentialsRevokedChip, or the failure-recovery PaneRow can all
     // legitimately render between .agent-document-scroll-region and the
     // target panel (e.g. a disconnected stream with a queued message, or
     // an auth retry with a pending question), and + only matches when the
-    // target is the LITERAL next element — any border-only row (all of
-    // the above except AgentAuthPanel) rendering in between would
-    // otherwise silently reintroduce the gap, same class of bug as the
-    // bottom-margin fix below. AgentAuthPanel itself is included in this
-    // rule (not just an "in-between" row) because it's a genuinely
-    // plausible working-row co-occurrence — AgentWorkingRow's own loading
-    // condition already covers launch/auth activity (showingLaunchActivity()) —
-    // and, unlike the border-only rows, it carries a real top margin
-    // (PreLaunchAuthPanel.scss) that needed the same fix.
+    // target is the LITERAL next element — any of those border-only rows
+    // rendering in between would otherwise silently reintroduce the gap,
+    // same class of bug as the bottom-margin fix below.
+    //
+    // .agent-auth-notice, not .pre-launch-auth-panel — reagent P1 on
+    // round 2: an earlier version of this rule targeted
+    // .pre-launch-auth-panel, which is dead CSS here. That class belongs
+    // to the separate PreLaunchAuthPanel component (AgentLaunchModal.tsx
+    // only, never a sibling of .agent-document-scroll-region) — an
+    // unrelated component with a confusingly similar name to the
+    // AgentAuthPanel actually rendered at agent-view.tsx:1654 (exported
+    // from AgentDocumentView.tsx). AgentAuthPanel renders either
+    // InAppLoginPanel (.pre-launch-auth-panel-waiting — no margin, needs
+    // no fix) or .agent-auth-notice (margin-top: var(--space-2) per
+    // _activity-log.scss — the actual element left with the unfixed gap,
+    // shown on a failed login where AgentWorkingRow's loading condition
+    // can still be true via showingLaunchActivity()).
     &.agent-view--working-row-visible {
-        .agent-document-scroll-region ~ .pre-launch-auth-panel,
+        .agent-document-scroll-region ~ .agent-auth-notice,
         .agent-document-scroll-region ~ .agent-question-panel,
         .agent-document-scroll-region ~ .agent-question-panel-minimized,
         .agent-document-scroll-region ~ .agent-disconnected-banner {
@@ -102,14 +112,12 @@
     // banner's bottom margin never fights another row's own spacing;
     // AgentDecisionPanel needs no rule here either, since it never carries
     // a bottom margin to begin with (see the top-edge comment above).
-    // AgentAuthPanel included too — same real (non-border) margin as the
-    // other two, and it can be the only thing between the scroll region
-    // and the composer during a pure auth/login flow with nothing else
-    // pending.
+    // .agent-auth-notice is not included here (unlike the top-edge fix
+    // above) — it only carries margin-top, no margin-bottom
+    // (_activity-log.scss), so there's no gap on this end to close.
     .agent-question-panel:has(~ .agent-composer-strip),
     .agent-question-panel-minimized:has(~ .agent-composer-strip),
-    .agent-disconnected-banner:has(~ .agent-composer-strip),
-    .pre-launch-auth-panel:has(~ .agent-composer-strip) {
+    .agent-disconnected-banner:has(~ .agent-composer-strip) {
         margin-bottom: 0;
     }
 
