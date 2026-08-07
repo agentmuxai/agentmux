@@ -1480,6 +1480,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         <div
             ref={rootRef}
             class="agent-view agent-view--presentation"
+            classList={{ "agent-view--working-row-visible": workingRowVisible() }}
             style={{ zoom: zoomFactor(), "--agent-pane-zoom": String(zoomFactor()) }}
             onContextMenu={handleContextMenu}
             tabIndex={-1}

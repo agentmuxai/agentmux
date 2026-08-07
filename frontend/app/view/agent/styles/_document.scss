@@ -35,6 +35,47 @@
         overflow: hidden; // .agent-document inside owns the real scrolling
     }
 
+    // When AgentWorkingRow is visible, its color reaches this box's true
+    // bottom edge (.agent-working-row-backdrop above). Whichever
+    // interposing row renders immediately after this box in the DOM —
+    // AgentQuestionPanel or the disconnected banner, the only two of the
+    // normal-flow rows between here and the composer that carry their own
+    // top margin for standalone breathing room — should sit flush against
+    // that color instead of leaving their usual gap, matching how the row
+    // already sits flush above the composer. Scoped to
+    // .agent-view--working-row-visible (agent-view.tsx, driven by the same
+    // workingRowVisible() memo that gates the row itself) so this only
+    // applies in that specific combined state — AgentQuestionPanel (etc.)
+    // appearing on its own, with no active working row above it, keeps its
+    // normal margin unchanged. AgentDecisionPanel/the retry bar/the
+    // pending-message queue are unaffected: they only ever add a border,
+    // not a margin, in this direction, so they already sit flush.
+    &.agent-view--working-row-visible {
+        .agent-document-scroll-region + .agent-question-panel,
+        .agent-document-scroll-region + .agent-question-panel-minimized,
+        .agent-document-scroll-region + .agent-disconnected-banner {
+            margin-top: 0;
+        }
+    }
+
+    // Same shape at the OTHER end: AgentQuestionPanel/the disconnected
+    // banner's own bottom margin (the same `margin: <space> 0` shorthand
+    // that caused the top-edge gap above) leaves a gap before
+    // AgentComposerStrip when it's the very next thing below — unrelated
+    // to the working row, so unconditional (unlike the top-edge fix
+    // above): the composer strip is always there, not something that
+    // only sometimes follows. Uses :has() to target the panel's own
+    // margin from a "what's my next sibling" condition, since CSS has no
+    // parent/previous-sibling selector otherwise — already an accepted
+    // pattern in this codebase (_pending-footer.scss, tabbar.scss, etc.).
+    // AgentDecisionPanel/the pending-message queue don't need this: they
+    // carry no bottom margin to begin with (see the comment above).
+    .agent-question-panel:has(+ .agent-composer-strip),
+    .agent-question-panel-minimized:has(+ .agent-composer-strip),
+    .agent-disconnected-banner:has(+ .agent-composer-strip) {
+        margin-bottom: 0;
+    }
+
     // === Document Container ===
     .agent-document {
         position: absolute;
@@ -44,7 +85,12 @@
         // top/bottom (e.g. OS-level swipe-navigation gestures). Nested tool
         // previews get their own `contain` too — see SPEC_TOOL_PREVIEW_SCROLL_CHAINING_2026_07_03.
         overscroll-behavior: contain;
-        padding: var(--space-0-5) var(--space-1);
+        // Right padding removed: content used to wrap var(--space-1) (4px)
+        // short of the scrollbar track, reading as a small but visible gap
+        // between the conversation and the scrollbar. Left padding kept for
+        // the pane's own left-edge breathing room, which nobody reported
+        // an issue with.
+        padding: var(--space-0-5) 0 var(--space-0-5) var(--space-1);
         // Reserves exactly AgentWorkingRow's current rendered height (0 when
         // hidden) so scrolling to true bottom leaves the last message above
         // the floating row, not hidden underneath it. Set on
