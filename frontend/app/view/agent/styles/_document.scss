@@ -36,49 +36,36 @@
     }
 
     // When AgentWorkingRow is visible, its color reaches this box's true
-    // bottom edge (.agent-working-row-backdrop above). Whichever
-    // interposing row ends up adjacent to it — the auth-recovery notice,
-    // AgentQuestionPanel, or the disconnected banner, the three
-    // normal-flow rows between here and the composer that carry their own
-    // top margin for standalone breathing room — should sit flush against
-    // that color instead of leaving their usual gap, matching how the row
+    // bottom edge (.agent-working-row-backdrop above). The normal-flow
+    // rows between here and the composer that carry their own margin for
+    // standalone breathing room — AgentAuthPanel's two states
+    // (.agent-auth-panel-card during an active OAuth login,
+    // .agent-auth-notice after a failed one; both can co-occur with the
+    // working row, since AgentWorkingRow's own loading condition already
+    // covers launch/auth activity via showingLaunchActivity()),
+    // AgentQuestionPanel, and the disconnected banner — should sit flush
+    // against that color instead of leaving a gap, matching how the row
     // already sits flush above the composer. Scoped to
     // .agent-view--working-row-visible (agent-view.tsx, driven by the same
-    // workingRowVisible() memo that gates the row itself) so this only
-    // applies in that specific combined state — these panels appearing on
-    // their own, with no active working row above them, keep their normal
-    // margin unchanged. AgentDecisionPanel/the retry bar/the
-    // pending-message queue/PaneRow-based rows (AgentCredentialsRevokedChip,
-    // the failure-recovery pin)/ActivityDock/InAppLoginPanel
-    // (.pre-launch-auth-panel-waiting) are unaffected: they only ever add
-    // a border (or, for InAppLoginPanel, no spacing at all) rather than a
-    // margin in this direction, so they already sit flush against
-    // whatever ends up next to them.
+    // workingRowVisible() memo that gates the row itself) so a panel
+    // appearing on its own, with no active working row above it, keeps
+    // its normal margin. Every OTHER row that can appear in this stack —
+    // AgentDecisionPanel, the retry bar, PendingMessagesPanel,
+    // PaneRow-based rows (AgentCredentialsRevokedChip, the
+    // failure-recovery pin), ActivityDock, InAppLoginPanel's own root
+    // (.pre-launch-auth-panel-waiting) — needs no rule here: confirmed via
+    // their own CSS that they carry a border (or nothing) instead of a
+    // margin in this direction, so they're already flush against whatever
+    // ends up next to them.
     //
-    // ~ (general sibling), not + (adjacent) — reagent P2 on round 1 of
-    // review: the retry bar, PendingMessagesPanel,
-    // AgentCredentialsRevokedChip, or the failure-recovery PaneRow can all
-    // legitimately render between .agent-document-scroll-region and the
-    // target panel (e.g. a disconnected stream with a queued message, or
-    // an auth retry with a pending question), and + only matches when the
-    // target is the LITERAL next element — any of those border-only rows
-    // rendering in between would otherwise silently reintroduce the gap,
-    // same class of bug as the bottom-margin fix below.
-    //
-    // .agent-auth-notice, not .pre-launch-auth-panel — reagent P1 on
-    // round 2: an earlier version of this rule targeted
-    // .pre-launch-auth-panel, which is dead CSS here. That class belongs
-    // to the separate PreLaunchAuthPanel component (AgentLaunchModal.tsx
-    // only, never a sibling of .agent-document-scroll-region) — an
-    // unrelated component with a confusingly similar name to the
-    // AgentAuthPanel actually rendered at agent-view.tsx:1654 (exported
-    // from AgentDocumentView.tsx). AgentAuthPanel renders either
-    // InAppLoginPanel (.pre-launch-auth-panel-waiting — no margin, needs
-    // no fix) or .agent-auth-notice (margin-top: var(--space-2) per
-    // _activity-log.scss — the actual element left with the unfixed gap,
-    // shown on a failed login where AgentWorkingRow's loading condition
-    // can still be true via showingLaunchActivity()).
+    // ~ (general sibling), not + (adjacent): any of those border-only rows
+    // can legitimately render between .agent-document-scroll-region and
+    // the target panel (e.g. a disconnected stream with a queued message),
+    // and + only matches when the target is the LITERAL next element —
+    // reagent caught this fragility on round 1 for the bottom-margin rule
+    // below and on round 2 for this one.
     &.agent-view--working-row-visible {
+        .agent-document-scroll-region ~ .agent-auth-panel-card,
         .agent-document-scroll-region ~ .agent-auth-notice,
         .agent-document-scroll-region ~ .agent-question-panel,
         .agent-document-scroll-region ~ .agent-question-panel-minimized,
@@ -87,34 +74,22 @@
         }
     }
 
-    // Same shape at the OTHER end: AgentQuestionPanel/the disconnected
-    // banner's own bottom margin (the same `margin: <space> 0` shorthand
-    // that caused the top-edge gap above) leaves a gap before whatever
-    // comes next — unrelated to the working row, so unconditional (unlike
-    // the top-edge fix above). Uses :has() to target the panel's own
-    // margin from a "what comes after me" condition, since CSS has no
-    // parent/previous-sibling selector otherwise — already an accepted
-    // pattern in this codebase (_pending-footer.scss, tabbar.scss, etc.).
-    //
-    // ~ (general sibling), not + (adjacent) — reagent P2 caught the
-    // original + version: PendingMessagesPanel, AgentCredentialsRevokedChip
-    // (a PaneRow), the failure-recovery PaneRow, or ActivityDock can all
-    // legitimately render between AgentQuestionPanel and AgentComposerStrip
-    // (a pending question and a long-running shell are an entirely
-    // plausible combination), and + only matches when AgentComposerStrip
-    // is the LITERAL next element — any of those rendering in between
-    // silently defeated the fix. ~ matches regardless of what's between
-    // them. Safe unconditionally: every one of those possible in-between
-    // rows (.agent-pending-zone, .pane-row, .agent-activity-dock) carries
-    // its own border instead of a margin for spacing — same "pinned via
-    // border, not margin" convention .agent-pending-zone's own comment
-    // describes — so removing AgentQuestionPanel's/the disconnected
-    // banner's bottom margin never fights another row's own spacing;
-    // AgentDecisionPanel needs no rule here either, since it never carries
-    // a bottom margin to begin with (see the top-edge comment above).
-    // .agent-auth-notice is not included here (unlike the top-edge fix
-    // above) — it only carries margin-top, no margin-bottom
-    // (_activity-log.scss), so there's no gap on this end to close.
+    // Same shape at the OTHER end: these panels' own bottom margin (the
+    // same shorthand that caused the top-edge gap above) leaves a gap
+    // before whatever comes next — unrelated to the working row, so
+    // unconditional (unlike the top-edge fix above): the composer strip is
+    // always there eventually, not something that only sometimes follows.
+    // Uses :has() to target the panel's own margin from a "what comes
+    // after me" condition, since CSS has no parent/previous-sibling
+    // selector otherwise — already an accepted pattern in this codebase
+    // (_pending-footer.scss, tabbar.scss, etc.). ~ (general), not +
+    // (adjacent), for the same reason as the top-edge fix above — reagent
+    // P2 on the original + version. .agent-auth-notice is excluded here:
+    // it only carries margin-top, no margin-bottom (_activity-log.scss),
+    // so there's no gap on this end. AgentDecisionPanel needs no rule
+    // either, since it never carries a bottom margin to begin with (see
+    // the top-edge comment above).
+    .agent-auth-panel-card:has(~ .agent-composer-strip),
     .agent-question-panel:has(~ .agent-composer-strip),
     .agent-question-panel-minimized:has(~ .agent-composer-strip),
     .agent-disconnected-banner:has(~ .agent-composer-strip) {
