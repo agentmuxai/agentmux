@@ -7,6 +7,21 @@
 // into the shell terminal (see agent-view.tsx's `log`/`handleShellTermReady`)
 // instead of a separate styled panel.
 .agent-view {
+    // Card chrome for AgentAuthPanel's InAppLoginPanel — mirrors
+    // .agent-question-panel's floating-card treatment (accent border,
+    // modal-bg background, shadow) so the bottom-docked login prompt reads
+    // as a distinct card next to AgentQuestionPanel/AgentDecisionPanel,
+    // instead of bare unbordered text (see #2429 follow-up).
+    .agent-auth-panel-card {
+        margin: var(--space-2) 0;
+        padding: var(--space-3);
+        background: var(--modal-bg-color, #232323);
+        border: 1px solid var(--accent-color);
+        border-radius: var(--radius-md, 0);
+        box-shadow: var(--shadow-lg, 0 12px 24px rgba(0, 0, 0, 0.35));
+        color: var(--main-text-color);
+    }
+
     // Auth-recovery error notice: shown when a login action failed visibly
     // (e.g. no OAuth URL could be captured, so no browser opened).
     .agent-auth-notice {

@@ -445,7 +445,12 @@ fn spawn_login_pty_unix(
     let mut slave_fd: libc::c_int = -1;
     let mut ws: libc::winsize = unsafe { std::mem::zeroed() };
     ws.ws_row = 24;
-    ws.ws_col = 80;
+    // Wide enough that the CLI's own line-wrapping never wraps the OAuth
+    // URL — see the matching Windows PtySize comment above for why (no
+    // OSC-8 hyperlink in the wild; the plain-text URL line hard-wraps at
+    // the reported column width and extract_url() only sees a truncated
+    // fragment).
+    ws.ws_col = 4096;
     let rc = unsafe {
         libc::openpty(
             &mut master_fd,
@@ -686,7 +691,15 @@ async fn run_cli_login_pty(
         let pair = pty_system
             .openpty(PtySize {
                 rows: 24,
-                cols: 80,
+                // Wide enough that the CLI's own line-wrapping never wraps
+                // the OAuth URL. At 80 cols it did — Claude Code prints
+                // "If the browser didn't open, visit: <url>" as plain text
+                // (no OSC-8 hyperlink in the wild, despite an earlier
+                // synthetic probe suggesting otherwise) and hard-wraps it
+                // mid-query-string, so extract_url() only ever saw a
+                // truncated fragment missing client_id and everything after
+                // it. 4096 comfortably covers any realistic query string.
+                cols: 4096,
                 pixel_width: 0,
                 pixel_height: 0,
             })
@@ -1041,12 +1054,17 @@ fn redact_url_query(url: &str) -> String {
 fn extract_url(line: &str) -> Option<String> {
     // Strip ANSI escapes. Two families matter here:
     //   * CSI  — `ESC [ … <final 0x40..=0x7e>` (colors, cursor moves)
-    //   * OSC  — `ESC ] … (BEL | ST)` — notably OSC-8 hyperlinks, which the
-    //     Claude CLI emits. OSC-8 embeds the URL in the sequence params AND
-    //     repeats it as visible link text, so a naive pass that only knew CSI
-    //     left the raw `]8;;https://…<BEL>` in place and captured the URL
-    //     twice (doubled), producing a broken link. We discard the OSC
-    //     sequence but stash any URI it carried as a fallback.
+    //   * OSC  — `ESC ] … (BEL | ST)` — the Claude CLI can, in principle,
+    //     emit an OSC-8 hyperlink here (embeds the URL in the sequence
+    //     params AND repeats it as visible link text), though a live
+    //     capture under the fixed PTY (see cols comment in run_cli_login)
+    //     only ever showed an OSC-0 window-title sequence, no OSC-8 — so
+    //     this is defense-in-depth, not the thing that actually fixed
+    //     #2429's client_id truncation (the PTY width did). A naive pass
+    //     that only knew CSI left the raw `]8;;https://…<BEL>` in place and
+    //     captured the URL twice (doubled) whenever OSC-8 IS present, so we
+    //     still discard the OSC sequence but stash any URI it carried as a
+    //     fallback.
     let mut clean = String::with_capacity(line.len());
     let mut osc_uris: Vec<String> = Vec::new();
     let bytes = line.as_bytes();
