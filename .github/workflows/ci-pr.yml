@@ -73,11 +73,13 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-      - name: DIAGNOSTIC - regenerate lockfile on linux
-        run: rm -rf node_modules package-lock.json && npm install
-      - uses: actions/upload-artifact@v4
-        with:
-          name: regenerated-package-lock
-          path: package-lock.json
+      # `npm ci` fails on this platform with EUSAGE ("Missing: @emnapi/core... from
+      # lock file") even though the lockfile is correct: @tailwindcss/oxide-wasm32-wasi
+      # is a cpu:wasm32-gated optional dep that declares @emnapi/* as bundleDependencies
+      # (vendored in its own tarball, never installed on real x64/arm64 hosts), and
+      # npm ci's lockfile-sync validator incorrectly expects separate top-level entries
+      # for them anyway. Known upstream bug: tailwindlabs/tailwindcss#20324.
+      # `npm install` doesn't run this overly-strict check and installs correctly.
+      - run: npm install
       - name: vitest run
         run: npx vitest run
