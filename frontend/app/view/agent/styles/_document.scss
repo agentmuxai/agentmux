@@ -19,6 +19,17 @@
     // See docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md §3.2.
     .agent-document-scroll-region {
         position: relative;
+        // Establishes a real stacking context (position + z-index together,
+        // per spec) for this box's three absolutely-positioned children —
+        // the .agent-working-row-backdrop, .agent-document, and
+        // .agent-working-row-anchor below. Without this, their relative
+        // paint order would depend on whatever stacking context happens to
+        // exist further up the ancestor tree, which isn't guaranteed to
+        // exist or behave predictably. With it, the three children's own
+        // z-index values (0/auto vs 2) are compared only against each
+        // other, isolated from anything outside this box — see
+        // docs/specs/SPEC_AGENT_WORKING_ROW_SCROLLBAR_GAP_2026_08_06.md §5.
+        z-index: 0;
         flex: 1;
         min-height: 0;
         overflow: hidden; // .agent-document inside owns the real scrolling
