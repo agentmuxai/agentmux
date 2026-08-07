@@ -575,6 +575,96 @@ fn spawn_login_pty_unix(
 ///   - Unix: `spawn_login_pty_unix` — portable_pty's spawn is UNUSABLE in
 ///     this host because its pre-exec fd cleanup trips libcef's interposed
 ///     close() and crashes the child before exec (see that fn's doc).
+
+/// Device Status Report cursor-position query — some CLIs (confirmed:
+/// Claude Code, on detecting a real TTY) send this immediately and BLOCK
+/// waiting for the terminal to reply with `ESC[<row>;<col>R` before
+/// printing anything else at all. A bare `portable_pty` handle has no
+/// attached terminal emulator to answer this automatically — nothing
+/// does, on any platform, without code specifically watching for it — so
+/// the child hangs forever and the whole capture loop below times out
+/// having seen zero bytes. This is the confirmed root cause of issue
+/// #2429 ("no PTY output captured... despite correct binary resolution"):
+/// isolated repro (a standalone portable_pty harness spawning the exact
+/// same binary/args) showed the child's first and ONLY output was these
+/// 4 bytes, then silence: answering this one query unblocked it
+/// immediately, and it printed its OAuth URL within half a second.
+const DSR_CURSOR_POSITION_QUERY: &[u8] = b"\x1b[6n";
+/// Synthetic "row 1, col 1" reply. The actual reported position doesn't
+/// matter to these CLIs — confirmed by the repro above — they only need
+/// *something* to answer so their TTY-capability probe stops blocking.
+const DSR_CURSOR_POSITION_REPLY: &[u8] = b"\x1b[1;1R";
+
+/// Wraps the raw PTY reader and transparently answers a cursor-position
+/// query (see [`DSR_CURSOR_POSITION_QUERY`]) the moment it appears
+/// anywhere in the stream — not just at startup, since a TUI could
+/// plausibly re-probe after a resize — passing every byte through
+/// unchanged to the caller (the query's own bytes included; they're
+/// harmless noise to the line-scanning loop below, not worth the extra
+/// complexity of stripping them from the pass-through).
+///
+/// Generic over `on_query` (rather than baking in `Arc<AppState>`
+/// directly) so the byte-scanning logic — the actually bug-prone part —
+/// is unit-testable without constructing a real `AppState`. The
+/// production call site's closure writes through `state.cli_login_stdin`
+/// — the SAME handle `set_provider_auth` uses to deliver a pasted OAuth
+/// code — rather than a second independent writer, since `portable_pty`'s
+/// writer is a single-owner handle already moved into that slot by the
+/// time this reader is constructed.
+struct DsrRespondingReader<R, F> {
+    inner: R,
+    on_query: F,
+    /// Carry-over from the previous `read()` call — bounded to
+    /// `DSR_CURSOR_POSITION_QUERY.len() - 1` bytes — so a query split
+    /// across two `read()` calls (e.g. a slow/busy child) is still
+    /// detected instead of silently missed at the chunk boundary.
+    tail: Vec<u8>,
+}
+
+impl<R, F: FnMut()> DsrRespondingReader<R, F> {
+    fn new(inner: R, on_query: F) -> Self {
+        Self { inner, on_query, tail: Vec::new() }
+    }
+}
+
+impl<R: std::io::Read, F: FnMut()> std::io::Read for DsrRespondingReader<R, F> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        if n == 0 {
+            return Ok(0);
+        }
+        self.tail.extend_from_slice(&buf[..n]);
+        if self
+            .tail
+            .windows(DSR_CURSOR_POSITION_QUERY.len())
+            .any(|w| w == DSR_CURSOR_POSITION_QUERY)
+        {
+            (self.on_query)();
+        }
+        let keep = DSR_CURSOR_POSITION_QUERY.len().saturating_sub(1);
+        if self.tail.len() > keep {
+            let drop = self.tail.len() - keep;
+            self.tail.drain(0..drop);
+        }
+        Ok(n)
+    }
+}
+
+/// Production `on_query` callback: writes [`DSR_CURSOR_POSITION_REPLY`]
+/// through `state.cli_login_stdin`. Separated from `DsrRespondingReader`
+/// itself (see its doc comment) purely so the reader's byte-scanning
+/// logic stays unit-testable without a real `AppState`.
+fn reply_to_dsr_via_cli_login_stdin(state: &Arc<AppState>) {
+    tracing::debug!(
+        target: "login_pty",
+        "[login-pty] answering cursor-position query (ESC[6n) — see issue #2429"
+    );
+    if let Some(CliLoginStdin::Pty(w)) = state.cli_login_stdin.lock().as_mut() {
+        let _ = w.write_all(DSR_CURSOR_POSITION_REPLY);
+        let _ = w.flush();
+    }
+}
+
 async fn run_cli_login_pty(
     state: Arc<AppState>,
     cli_path: String,
@@ -698,8 +788,15 @@ async fn run_cli_login_pty(
     // the frontend and let the wait task below reap the child whenever
     // it finishes naturally.
     let (url_tx, url_rx) = tokio::sync::oneshot::channel::<Option<String>>();
+    let state_for_dsr = state.clone();
     tokio::task::spawn_blocking(move || {
         use std::io::BufRead;
+        // See DsrRespondingReader's doc comment / issue #2429: without
+        // this, a child that probes cursor position on startup (Claude
+        // Code does) hangs forever before printing anything, and
+        // read_line below would never even see the query bytes (they
+        // carry no trailing newline) to know to respond.
+        let reader = DsrRespondingReader::new(reader, || reply_to_dsr_via_cli_login_stdin(&state_for_dsr));
         let mut reader = std::io::BufReader::new(reader);
         // Wrap the oneshot in an Option so we send the URL exactly once and then
         // keep reading. We LOG every line from the first byte AND scan for an
@@ -1015,8 +1112,16 @@ fn extract_url(line: &str) -> Option<String> {
         }
     };
 
-    // Prefer the visible (de-escaped) text; fall back to any OSC-8 URI.
-    pick(&clean).or_else(|| osc_uris.iter().find_map(|u| pick(u)))
+    // Prefer any OSC-8 URI: it's carried inside an escape-sequence payload,
+    // so it can never be truncated by the terminal's column-width wrapping.
+    // The visible text is only a fallback for CLIs that don't emit OSC-8 —
+    // it CAN be wrapped mid-URL by the PTY (see issue #2429 follow-up: the
+    // plain "If the browser didn't open, visit: ..." line got hard-wrapped
+    // at col 80, silently dropping `client_id` from the captured URL).
+    osc_uris
+        .iter()
+        .find_map(|u| pick(u))
+        .or_else(|| pick(&clean))
 }
 
 /// Kill the in-progress CLI login process. Covers both transports:
@@ -1462,6 +1567,102 @@ mod redact_url_queries_in_line_tests {
 }
 
 #[cfg(test)]
+mod dsr_responding_reader_tests {
+    use super::{DsrRespondingReader, DSR_CURSOR_POSITION_QUERY};
+    use std::cell::Cell;
+    use std::io::Read;
+
+    /// Yields each element of `chunks` on successive `read()` calls,
+    /// copying as much as fits in the caller's buffer — lets a test force
+    /// a specific byte-boundary split, which a plain `std::io::Cursor`
+    /// (single-buffer, fills as much as requested in one call) can't do.
+    struct ChunkedReader {
+        chunks: std::collections::VecDeque<Vec<u8>>,
+    }
+
+    impl ChunkedReader {
+        fn new(chunks: Vec<&[u8]>) -> Self {
+            Self { chunks: chunks.into_iter().map(|c| c.to_vec()).collect() }
+        }
+    }
+
+    impl Read for ChunkedReader {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            let Some(chunk) = self.chunks.front_mut() else { return Ok(0) };
+            let n = chunk.len().min(buf.len());
+            buf[..n].copy_from_slice(&chunk[..n]);
+            chunk.drain(..n);
+            if chunk.is_empty() {
+                self.chunks.pop_front();
+            }
+            Ok(n)
+        }
+    }
+
+    #[test]
+    fn invokes_callback_when_query_arrives_in_one_read() {
+        let inner = ChunkedReader::new(vec![DSR_CURSOR_POSITION_QUERY]);
+        let calls = Cell::new(0);
+        let mut r = DsrRespondingReader::new(inner, || calls.set(calls.get() + 1));
+        let mut buf = [0u8; 64];
+        let n = r.read(&mut buf).unwrap();
+        assert_eq!(&buf[..n], DSR_CURSOR_POSITION_QUERY);
+        assert_eq!(calls.get(), 1, "callback must fire exactly once for the query");
+    }
+
+    #[test]
+    fn does_not_invoke_callback_for_unrelated_bytes() {
+        let inner = ChunkedReader::new(vec![b"Opening browser to sign in...\r\n"]);
+        let calls = Cell::new(0);
+        let mut r = DsrRespondingReader::new(inner, || calls.set(calls.get() + 1));
+        let mut buf = [0u8; 64];
+        let n = r.read(&mut buf).unwrap();
+        assert_eq!(&buf[..n], b"Opening browser to sign in...\r\n");
+        assert_eq!(calls.get(), 0);
+    }
+
+    #[test]
+    fn detects_query_split_across_two_read_calls() {
+        // The exact failure mode a naive single-read scan would miss:
+        // "\x1b[6" in one chunk, "n" arriving in the next.
+        let inner = ChunkedReader::new(vec![b"\x1b[6", b"n"]);
+        let calls = Cell::new(0);
+        let mut r = DsrRespondingReader::new(inner, || calls.set(calls.get() + 1));
+        let mut buf = [0u8; 64];
+        let n1 = r.read(&mut buf).unwrap();
+        assert_eq!(&buf[..n1], b"\x1b[6");
+        assert_eq!(calls.get(), 0, "must not fire on the incomplete first half");
+        let n2 = r.read(&mut buf).unwrap();
+        assert_eq!(&buf[..n2], b"n");
+        assert_eq!(calls.get(), 1, "must fire once the second half completes the pattern");
+    }
+
+    #[test]
+    fn passes_every_byte_through_unchanged_query_included() {
+        // The query's own bytes are harmless noise to the line-scanning
+        // loop downstream — verify they're never stripped, only observed.
+        let payload = [DSR_CURSOR_POSITION_QUERY, b"Paste code here if prompted > "].concat();
+        let inner = ChunkedReader::new(vec![&payload]);
+        let mut r = DsrRespondingReader::new(inner, || {});
+        let mut out = Vec::new();
+        r.read_to_end(&mut out).unwrap();
+        assert_eq!(out, payload);
+    }
+
+    #[test]
+    fn does_not_refire_on_subsequent_unrelated_reads_after_the_query() {
+        let inner = ChunkedReader::new(vec![DSR_CURSOR_POSITION_QUERY, b"more output\r\n"]);
+        let calls = Cell::new(0);
+        let mut r = DsrRespondingReader::new(inner, || calls.set(calls.get() + 1));
+        let mut buf = [0u8; 64];
+        r.read(&mut buf).unwrap();
+        assert_eq!(calls.get(), 1);
+        r.read(&mut buf).unwrap();
+        assert_eq!(calls.get(), 1, "later unrelated bytes must not re-trigger the callback");
+    }
+}
+
+#[cfg(test)]
 mod capture_cred_baseline_tests {
     use super::capture_cred_baseline;
     use std::collections::HashMap;
@@ -1563,6 +1764,20 @@ mod extract_url_claude_authorize_tests {
     #[test]
     fn ignores_non_auth_urls() {
         assert_eq!(extract_url("see https://claude.com/docs for details"), None);
+    }
+
+    #[test]
+    fn prefers_osc8_uri_when_the_visible_fallback_line_was_wrapped_by_the_pty() {
+        // Regression for the #2429 follow-up: at an 80-column PTY width, the
+        // CLI's own line-wrapping of the plain "visit: ..." text can split
+        // the URL mid-query-string before a `\r\n` is ever reached, so the
+        // OSC-8 payload (never subject to that wrapping) is the only place
+        // the full URL — with client_id intact — actually appears.
+        let truncated_visible = "https://claude.com/cai/oauth/authorize?code=t";
+        let line = format!(
+            "\u{1b}]8;;{AUTHORIZE_URL}\u{7}link text\u{1b}]8;;\u{7}If the browser didn't open, visit: {truncated_visible}"
+        );
+        assert_eq!(extract_url(&line), Some(AUTHORIZE_URL.to_string()));
     }
 }
 

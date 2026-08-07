@@ -3,10 +3,14 @@
 
 /**
  * AgentDocumentView — owns the agent pane's data state interface
- * (collapsed/pinned toggles, auto-collapse policy, auth-url and
- * loading-older banner), then delegates list rendering to
- * AgentDocumentVirtualList (Phase 2 of the virtualization redesign,
- * see docs/specs/SPEC_AGENT_PANE_VIRTUALIZATION_REDESIGN.md).
+ * (collapsed/pinned toggles, auto-collapse policy, loading-older banner),
+ * then delegates list rendering to AgentDocumentVirtualList (Phase 2 of
+ * the virtualization redesign, see
+ * docs/specs/SPEC_AGENT_PANE_VIRTUALIZATION_REDESIGN.md).
+ *
+ * Also exports AgentAuthPanel (the login UI), a component agent-view.tsx
+ * renders separately as a bottom-docked sibling — not part of this
+ * component's own scrollable output.
  *
  * All scroll behavior — stick-to-bottom, anchor capture, jump-to-node,
  * pagination restore — lives in the VirtualList. This component is
@@ -31,29 +35,6 @@ import { createAgentViewState } from "../virtualization/state";
 interface AgentDocumentViewProps {
     documentAtom: SignalPair<DocumentNode[]>;
     documentStateAtom: SignalPair<DocumentState>;
-    authUrl?: Accessor<string | null>;
-    /**
-     * User-visible auth-recovery error (e.g. "Login Again" couldn't open a
-     * browser). Rendered as an error box in the same header slot as the
-     * auth-URL box, with a dismiss button. Never fail silently — see
-     * retro-agent-auth-relogin-noop-2026-07-01 §5.1.
-     */
-    authNotice?: Accessor<string | null>;
-    /** Dismiss handler for the auth notice (clears the signal). */
-    onDismissAuthNotice?: () => void;
-    /** Provider ID for the active auth flow — used when submitting a pasted auth code. */
-    authProviderId?: string;
-    /** Cancel the in-flight login (kills the host CLI child) — shown as a
-     *  button on the auth-URL box so a stuck login has an exit besides
-     *  closing the pane. Wired to useAgentControllerStatus's cancelLogin. */
-    onCancelLogin?: () => void;
-    /** Explicit "Use terminal instead" fallback on the auth-URL box — mirrors
-     *  PreLaunchAuthPanel's identical secondary action
-     *  (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.3 surface 2). Wired to
-     *  useAgentControllerStatus's loginViaTerminal, which cancels this
-     *  session's own login child itself (tier 1 starting a second one would
-     *  race against the one still open in this box). */
-    onUseTerminal?: () => void;
     /** Re-run the provider login flow — forwarded to the list so an inline
      *  auth-error node can offer a "Login Again" CTA (SPEC_REAUTH_FROM_AUTH_ERROR §7). */
     onAgentErrorLogin?: () => void;
@@ -167,40 +148,19 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
         });
     };
 
-    // Header slot: loading-older banner + optional auth-url box,
-    // rendered above the virtualizer inside the scroll container.
-    // VirtualList's scrollMargin (=virtualContainerRef.offsetTop)
-    // handles the offset automatically.
+    // Header slot: loading-older banner, rendered above the virtualizer
+    // inside the scroll container. VirtualList's scrollMargin
+    // (=virtualContainerRef.offsetTop) handles the offset automatically.
+    //
+    // The auth-URL box and auth-notice USED to render here too, but that
+    // pinned the login UI to the top of the scroll area instead of near the
+    // composer like AgentQuestionPanel/AgentDecisionPanel — see the #2429
+    // follow-up. They're now AgentAuthPanel, rendered by agent-view.tsx as a
+    // flex sibling after .agent-document-scroll-region.
     const headerSlot = (): JSX.Element => (
-        <>
-            <Show when={props.loadingOlder?.()}>
-                <div class="agent-history-loading">Loading older messages...</div>
-            </Show>
-            <Show when={props.authUrl?.()}>
-                {(url) => (
-                    <AuthUrlBox
-                        url={url()}
-                        authProviderId={props.authProviderId}
-                        onCancel={props.onCancelLogin}
-                        onUseTerminal={props.onUseTerminal}
-                    />
-                )}
-            </Show>
-            <Show when={props.authNotice?.()}>
-                {(notice) => (
-                    <div class="agent-auth-notice" role="alert">
-                        <span class="agent-auth-notice-text">{notice()}</span>
-                        <button
-                            class="agent-auth-notice-dismiss"
-                            title="Dismiss"
-                            onClick={() => props.onDismissAuthNotice?.()}
-                        >
-                            ✕
-                        </button>
-                    </div>
-                )}
-            </Show>
-        </>
+        <Show when={props.loadingOlder?.()}>
+            <div class="agent-history-loading">Loading older messages...</div>
+        </Show>
     );
 
     return (
@@ -228,7 +188,71 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
 
 AgentDocumentView.displayName = "AgentDocumentView";
 
-// ── Auth URL box ────────────────────────────────────────────────────────────
+// ── Auth panel (bottom-docked, sibling of AgentQuestionPanel) ──────────────
+
+export interface AgentAuthPanelProps {
+    authUrl?: Accessor<string | null>;
+    /**
+     * User-visible auth-recovery error (e.g. "Login Again" couldn't open a
+     * browser). Rendered as an error box below the auth-URL box, with a
+     * dismiss button. Never fail silently — see
+     * retro-agent-auth-relogin-noop-2026-07-01 §5.1.
+     */
+    authNotice?: Accessor<string | null>;
+    /** Dismiss handler for the auth notice (clears the signal). */
+    onDismissAuthNotice?: () => void;
+    /** Provider ID for the active auth flow — used when submitting a pasted auth code. */
+    authProviderId?: string;
+    /** Cancel the in-flight login (kills the host CLI child) — shown as a
+     *  button on the auth-URL box so a stuck login has an exit besides
+     *  closing the pane. Wired to useAgentControllerStatus's cancelLogin. */
+    onCancelLogin?: () => void;
+    /** Explicit "Use terminal instead" fallback on the auth-URL box — mirrors
+     *  PreLaunchAuthPanel's identical secondary action
+     *  (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.3 surface 2). Wired to
+     *  useAgentControllerStatus's loginViaTerminal, which cancels this
+     *  session's own login child itself (tier 1 starting a second one would
+     *  race against the one still open in this box). */
+    onUseTerminal?: () => void;
+}
+
+/**
+ * Bottom-docked login UI. Rendered by agent-view.tsx as a flex sibling
+ * after .agent-document-scroll-region, in the same slot band as
+ * AgentDecisionPanel/AgentQuestionPanel — NOT inside AgentDocumentView's
+ * scrollable header slot. It used to live there, which pinned it to the
+ * top of the scroll area instead of near the composer (#2429 follow-up).
+ */
+export function AgentAuthPanel(props: AgentAuthPanelProps): JSX.Element {
+    return (
+        <>
+            <Show when={props.authUrl?.()}>
+                {(url) => (
+                    <AuthUrlBox
+                        url={url()}
+                        authProviderId={props.authProviderId}
+                        onCancel={props.onCancelLogin}
+                        onUseTerminal={props.onUseTerminal}
+                    />
+                )}
+            </Show>
+            <Show when={props.authNotice?.()}>
+                {(notice) => (
+                    <div class="agent-auth-notice" role="alert">
+                        <span class="agent-auth-notice-text">{notice()}</span>
+                        <button
+                            class="agent-auth-notice-dismiss"
+                            title="Dismiss"
+                            onClick={() => props.onDismissAuthNotice?.()}
+                        >
+                            ✕
+                        </button>
+                    </div>
+                )}
+            </Show>
+        </>
+    );
+}
 
 interface AuthUrlBoxProps {
     url: string;
@@ -238,9 +262,8 @@ interface AuthUrlBoxProps {
 }
 
 /**
- * OAuth code-paste box. Rendered at the top of the scroll container
- * while a login flow has a pending auth URL. Previously inline in
- * AgentDocumentView; extracted as a sibling for the Phase 2 shell.
+ * OAuth code-paste box. Rendered by AgentAuthPanel while a login flow has
+ * a pending auth URL.
  */
 function AuthUrlBox(props: AuthUrlBoxProps): JSX.Element {
     const [pasteCode, setPasteCode] = createSignal("");
