@@ -97,6 +97,7 @@ describe("useAgentQuestions — handleAnswer fallback", () => {
             answers: [],
             answers_map: { "Pick one": "a" },
             answer_text: "Pick one: a",
+            autoFilledCount: 0,
         });
         await Promise.resolve();
         await Promise.resolve();
@@ -122,6 +123,7 @@ describe("useAgentQuestions — handleAnswer fallback", () => {
             answers: [],
             answers_map: { "Pick one": "a" },
             answer_text: "Pick one: a",
+            autoFilledCount: 0,
         });
         await Promise.resolve();
         await Promise.resolve();
@@ -160,6 +162,7 @@ describe("useAgentQuestions — handleAnswer fallback", () => {
             answers: [],
             answers_map: { "Pick one": "a" },
             answer_text: "Pick one: a",
+            autoFilledCount: 0,
         });
         await Promise.resolve();
         await Promise.resolve();
@@ -185,6 +188,7 @@ describe("useAgentQuestions — handleAnswer fallback", () => {
             answers: [],
             answers_map: { "Pick one": "a" },
             answer_text: "Pick one: a",
+            autoFilledCount: 0,
         });
         await Promise.resolve();
         await Promise.resolve();

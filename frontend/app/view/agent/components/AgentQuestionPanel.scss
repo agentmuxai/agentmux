@@ -3,7 +3,18 @@
 //
 // AgentQuestionPanel — interactive AskUserQuestion prompt floated over the
 // agent conversation. Colors bind to the global theme tokens.
-// Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md.
+// Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md,
+// docs/specs/SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md.
+
+// Subtle urgency pulse for the countdown chip's final 5 seconds — opacity
+// only (no color/size change here; color escalation is handled by the
+// --warning/--critical modifier classes below) so it reads as "urgent"
+// without being distracting.
+@keyframes amux-question-countdown-pulse {
+    50% {
+        opacity: 0.6;
+    }
+}
 
 .agent-question-panel {
     display: flex;
@@ -38,6 +49,32 @@
     margin-left: auto;
     font-size: var(--text-xs, 11px);
     color: var(--secondary-text-color);
+}
+
+// 30s auto-timeout countdown (SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md
+// §2.4). In the header it's pushed to the far right like `.agent-question-panel-queue`
+// (both can be present at once — flex auto-margins group them together with no gap
+// beyond the header's own `gap`); in the minimized chip it just flows inline.
+.agent-question-panel-header .agent-question-panel-countdown {
+    margin-left: auto;
+}
+
+.agent-question-panel-countdown {
+    font-size: var(--text-xs, 11px);
+    color: var(--secondary-text-color);
+    transition: color 120ms ease;
+    white-space: nowrap;
+
+    &--warning {
+        color: var(--warning-color);
+        font-weight: var(--font-weight-medium, 500);
+    }
+
+    &--critical {
+        color: var(--error-color);
+        font-weight: var(--font-weight-medium, 500);
+        animation: amux-question-countdown-pulse 1s ease-in-out infinite;
+    }
 }
 
 .agent-question-panel-q {
@@ -98,6 +135,16 @@
     &--checked {
         border-color: var(--accent-color);
         background: rgba(var(--accent-color-rgb, 65, 159, 224), 0.1);
+    }
+
+    // Marks which option(s) the 30s auto-timeout would pick if left
+    // untouched — a lighter-weight treatment than `--checked` (dashed
+    // border, no fill) so a genuinely checked option is still visually
+    // primary. Applies independently of `--checked`: an option can be both
+    // recommended AND already chosen by the user.
+    &--recommended {
+        border-style: dashed;
+        border-color: var(--accent-color);
     }
 }
 

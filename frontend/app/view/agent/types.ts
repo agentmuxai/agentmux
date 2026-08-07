@@ -588,7 +588,7 @@ type PermissionPreview =
  *
  * Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md.
  */
-interface AskUserQuestionOption {
+export interface AskUserQuestionOption {
     label: string;
     description?: string;
 }

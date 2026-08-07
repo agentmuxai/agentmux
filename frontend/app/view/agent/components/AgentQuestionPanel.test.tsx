@@ -12,14 +12,18 @@
  * panel (e.g. the Ctrl+F search bar, AgentSearchBar.tsx) as something Enter
  * shouldn't be stolen from, so pressing Enter there silently submitted a
  * fully-answered pending question.
+ *
+ * Also covers the 30s auto-timeout (recommended-option auto-select +
+ * countdown) added by
+ * docs/specs/SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md.
  */
 
 import { cleanup, render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { AgentQuestionPanel } from "./AgentQuestionPanel";
+import { AgentQuestionPanel, recommendedOptions } from "./AgentQuestionPanel";
 import type { ToolNode } from "../types";
 
 afterEach(() => {
@@ -43,6 +47,34 @@ const singleSelectQuestion = (toolUseId = "q1"): ToolNode => ({
                 header: "Test",
                 multiSelect: false,
                 options: [{ label: "Red" }, { label: "Blue" }],
+            },
+        ],
+    },
+});
+
+const twoQuestionSet = (toolUseId = "q2"): ToolNode => ({
+    type: "tool",
+    id: toolUseId,
+    tool: "Other",
+    params: {},
+    status: "awaiting_answer",
+    collapsed: false,
+    summary: "❓ Waiting for your answer",
+    question: {
+        type: "ask_user_question",
+        tool_use_id: toolUseId,
+        questions: [
+            {
+                question: "Pick a color",
+                header: "Color",
+                multiSelect: false,
+                options: [{ label: "Red" }, { label: "Blue" }],
+            },
+            {
+                question: "Pick a size",
+                header: "Size",
+                multiSelect: false,
+                options: [{ label: "Small" }, { label: "Large" }],
             },
         ],
     },
@@ -126,5 +158,147 @@ describe("AgentQuestionPanel keyboard handling", () => {
         escapeOn(document.body);
         expect(onDefer).toHaveBeenCalledTimes(1);
         expect(onAnswer).not.toHaveBeenCalled();
+    });
+});
+
+describe("recommendedOptions", () => {
+    it("returns the flagged option(s) when one label ends in '(Recommended)'", () => {
+        const opts = [{ label: "OAuth (Recommended)" }, { label: "API Key" }];
+        expect(recommendedOptions(opts)).toEqual([opts[0]]);
+    });
+
+    it("is case-insensitive and tolerates trailing whitespace", () => {
+        const opts = [{ label: "Foo (recommended)  " }, { label: "Bar" }];
+        expect(recommendedOptions(opts)).toEqual([opts[0]]);
+    });
+
+    it("returns every flagged option for a multi-select set", () => {
+        const opts = [{ label: "A (Recommended)" }, { label: "B (Recommended)" }, { label: "C" }];
+        expect(recommendedOptions(opts)).toEqual([opts[0], opts[1]]);
+    });
+
+    it("falls back to the first option when none are flagged", () => {
+        const opts = [{ label: "Red" }, { label: "Blue" }];
+        expect(recommendedOptions(opts)).toEqual([opts[0]]);
+    });
+
+    it("returns an empty array for an empty options list", () => {
+        expect(recommendedOptions([])).toEqual([]);
+    });
+});
+
+describe("AgentQuestionPanel 30s auto-timeout", () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    it("auto-submits the recommended (fallback: first) option after 30s of no interaction", () => {
+        const onAnswer = vi.fn();
+        const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+
+        vi.advanceTimersByTime(30_000);
+
+        expect(onAnswer).toHaveBeenCalledTimes(1);
+        const outcome = onAnswer.mock.calls[0][0];
+        expect(outcome.answers_map["Pick a color"]).toBe("Red");
+        expect(outcome.autoFilledCount).toBe(1);
+    });
+
+    it("merges: keeps a manually-answered question and only auto-fills the untouched one", async () => {
+        const user = userEvent.setup({ delay: null });
+        const onAnswer = vi.fn();
+        const [pending] = createSignal<ToolNode[]>([twoQuestionSet()]);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+
+        await user.click(screen.getByRole("radio", { name: /Blue/ }));
+        vi.advanceTimersByTime(30_000);
+
+        expect(onAnswer).toHaveBeenCalledTimes(1);
+        const outcome = onAnswer.mock.calls[0][0];
+        // Kept exactly as the user left it — NOT overwritten to "Red" (the
+        // fallback recommended default for this question).
+        expect(outcome.answers_map["Pick a color"]).toBe("Blue");
+        // Untouched question auto-filled with its own fallback default.
+        expect(outcome.answers_map["Pick a size"]).toBe("Small");
+        expect(outcome.autoFilledCount).toBe(1);
+    });
+
+    // reagent P1, PR #2441: a malformed AskUserQuestion with a zero-length
+    // `options` array left `recommendedOptions` with nothing to select, so
+    // the question never became "answered" and `submit()`'s `allAnswered()`
+    // gate silently no-op'd — but the interval had already been cleared
+    // unconditionally, so the panel got stuck forever with no further
+    // timeout retry. Pin the fix: every question must be answerable after
+    // the timeout fires, regardless of how degenerate its `options` list is.
+    it("still auto-submits when a question has zero options — falls back to a free-text placeholder", () => {
+        const onAnswer = vi.fn();
+        const noOptionsQuestion: ToolNode = {
+            type: "tool",
+            id: "q3",
+            tool: "Other",
+            params: {},
+            status: "awaiting_answer",
+            collapsed: false,
+            summary: "❓ Waiting for your answer",
+            question: {
+                type: "ask_user_question",
+                tool_use_id: "q3",
+                questions: [{ question: "Pick one", header: "Test", multiSelect: false, options: [] }],
+            },
+        };
+        const [pending] = createSignal<ToolNode[]>([noOptionsQuestion]);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+
+        vi.advanceTimersByTime(30_000);
+
+        expect(onAnswer).toHaveBeenCalledTimes(1);
+        const outcome = onAnswer.mock.calls[0][0];
+        expect(outcome.answers_map["Pick one"]).toBe("No option was available to auto-select");
+        expect(outcome.autoFilledCount).toBe(1);
+    });
+
+    it("a fully manual submit before 30s prevents any later auto-submit", async () => {
+        const user = userEvent.setup({ delay: null });
+        const onAnswer = vi.fn();
+        // Mirrors the real caller contract (useAgentQuestions.ts): answering
+        // removes the item from the pending queue, which is what tears down
+        // the panel's timer effect.
+        const [pending, setPending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
+        const handleAnswer = vi.fn((outcome: unknown) => {
+            onAnswer(outcome);
+            setPending([]);
+        });
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={handleAnswer} />);
+
+        await user.click(screen.getByRole("radio", { name: /Red/ }));
+        await user.click(screen.getByRole("button", { name: /Submit answer/ }));
+
+        expect(onAnswer).toHaveBeenCalledTimes(1);
+        expect(onAnswer.mock.calls[0][0].autoFilledCount).toBe(0);
+
+        vi.advanceTimersByTime(30_000);
+        expect(onAnswer).toHaveBeenCalledTimes(1);
+    });
+
+    it("countdown decrements once per second and reaches exactly 0 at 30s", () => {
+        const onAnswer = vi.fn();
+        const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+
+        expect(screen.getByText(/Auto-selects recommended in 30s/)).toBeTruthy();
+
+        vi.advanceTimersByTime(1_000);
+        expect(screen.getByText(/Auto-selects recommended in 29s/)).toBeTruthy();
+
+        vi.advanceTimersByTime(28_000);
+        expect(screen.getByText(/Auto-selects recommended in 1s/)).toBeTruthy();
+
+        vi.advanceTimersByTime(1_000);
+        expect(onAnswer).toHaveBeenCalledTimes(1);
     });
 });
