@@ -414,10 +414,14 @@ const AppInner = () => {
                 <AppFocusHandler />
                 <AppSettingsUpdater />
                 <Show when={!IS_FLOATING_PANE}>
-                    {/* Low-memory warning banner — app-wide, non-modal,
-                        dismissible. Driven by the host's mem_pressure level
-                        (SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16 §5.F). */}
-                    <MemoryPressureBanner />
+                    {/* Low-memory warning banners — app-wide, non-modal,
+                        dismissible. Driven by the host's mem_pressure level.
+                        RAM and Page File are independently-tracked signals
+                        (SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16 §5.F,
+                        SPEC_RAM_PAGEFILE_PRESSURE_SPLIT_2026_08_07) — both
+                        can show at once if both are true. */}
+                    <MemoryPressureBanner kind="ram" />
+                    <MemoryPressureBanner kind="pagefile" />
                 </Show>
                 <Show
                     when={IS_FLOATING_PANE}

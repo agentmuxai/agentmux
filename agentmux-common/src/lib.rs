@@ -9,6 +9,7 @@ pub mod data_paths;
 pub mod errors;
 pub mod ipc;
 pub mod layout_types;
+pub mod pagefile;
 pub mod runtime_mode;
 pub mod toolchain_path;
 

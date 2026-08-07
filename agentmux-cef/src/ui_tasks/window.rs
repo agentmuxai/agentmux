@@ -702,18 +702,37 @@ pub fn post_close_window(state: &Arc<AppState>, label: &str) {
 // ── Memory-pressure → frontend banner event ────────────────────────────────
 
 wrap_task! {
+    // `kind` distinguishes RAM pressure from Page File (commit) pressure —
+    // SPEC_RAM_PAGEFILE_PRESSURE_SPLIT_2026_08_07. `system_managed`/
+    // `disk_free_pct` are only meaningful (and only included in the emitted
+    // payload) for `kind == "pagefile"`; for `kind == "ram"` they're unused
+    // placeholders so the task struct stays one uniform shape.
     pub struct EmitMemoryPressureTask {
         state: Arc<AppState>,
+        kind: String,
         level: String,
-        commit_free_mb: u64,
+        free_mb: u64,
+        system_managed: bool,
+        disk_free_pct: f64,
     }
 
     impl Task {
         fn execute(&self) {
-            let payload = serde_json::json!({
-                "level": self.level,
-                "commit_free_mb": self.commit_free_mb,
-            });
+            let payload = if self.kind == "ram" {
+                serde_json::json!({
+                    "kind": self.kind,
+                    "level": self.level,
+                    "phys_free_mb": self.free_mb,
+                })
+            } else {
+                serde_json::json!({
+                    "kind": self.kind,
+                    "level": self.level,
+                    "commit_free_mb": self.free_mb,
+                    "system_managed": self.system_managed,
+                    "disk_free_pct": self.disk_free_pct,
+                })
+            };
             crate::events::emit_event_to_top_level_windows(
                 &self.state,
                 "memory-pressure",
@@ -723,12 +742,44 @@ wrap_task! {
     }
 }
 
-/// Push a memory-pressure level transition to the frontend banner. Callable
-/// from ANY thread (the memory heartbeat runs on a background std::thread); the
-/// emit itself (CEF JS execution) must run on the UI thread, so it's wrapped in
-/// a posted task. SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16 §5.F.
-pub fn post_memory_pressure(state: &Arc<AppState>, level: &str, commit_free_mb: u64) {
-    let mut task = EmitMemoryPressureTask::new(state.clone(), level.to_string(), commit_free_mb);
+/// Push a RAM-pressure level transition to the frontend banner. Callable from
+/// ANY thread (the memory heartbeat runs on a background std::thread); the
+/// emit itself (CEF JS execution) must run on the UI thread, so it's wrapped
+/// in a posted task. SPEC_RAM_PAGEFILE_PRESSURE_SPLIT_2026_08_07 §3/§5.
+pub fn post_memory_pressure_ram(state: &Arc<AppState>, level: &str, phys_free_mb: u64) {
+    let mut task = EmitMemoryPressureTask::new(
+        state.clone(),
+        "ram".to_string(),
+        level.to_string(),
+        phys_free_mb,
+        false,
+        0.0,
+    );
+    post_task(ThreadId::UI, Some(&mut task));
+}
+
+/// Push a Page File (commit) pressure level transition to the frontend
+/// banner, including whether Windows can actually grow the page file right
+/// now (`system_managed` + `disk_free_pct` on the volume backing it) so the
+/// banner can pick the correct guidance — SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29
+/// §5.2 P0 via SPEC_RAM_PAGEFILE_PRESSURE_SPLIT_2026_08_07 §4. Originally
+/// `post_memory_pressure` (SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16 §5.F);
+/// split by `kind` alongside `post_memory_pressure_ram`.
+pub fn post_memory_pressure_pagefile(
+    state: &Arc<AppState>,
+    level: &str,
+    commit_free_mb: u64,
+    system_managed: bool,
+    disk_free_pct: f64,
+) {
+    let mut task = EmitMemoryPressureTask::new(
+        state.clone(),
+        "pagefile".to_string(),
+        level.to_string(),
+        commit_free_mb,
+        system_managed,
+        disk_free_pct,
+    );
     post_task(ThreadId::UI, Some(&mut task));
 }
 
