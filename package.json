@@ -29,6 +29,9 @@
     "lint:scss": "stylelint \"frontend/**/*.scss\" --allow-empty-input"
   },
   "devDependencies": {
+    "@emnapi/core": "^1.11.1",
+    "@emnapi/runtime": "^1.11.1",
+    "@emnapi/wasi-threads": "^1.2.2",
     "@eslint/js": "^8.57.0",
     "@solidjs/testing-library": "^0.8.10",
     "@tailwindcss/vite": "^4.1.18",
