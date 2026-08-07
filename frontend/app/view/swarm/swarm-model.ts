@@ -268,6 +268,31 @@ export function buildCronRows(crons: ActiveCron[], blockId: string | null): Acti
 }
 
 /**
+ * Whether a blockId in `buildTree()`'s row list should actually render a
+ * row — false when no WOS object exists for it at all. This is distinct
+ * from "the block exists but `agentName` hasn't propagated to its meta
+ * yet" (the case `buildTree()`'s own `"Agent"` fallback string is for,
+ * unchanged since 2026-06-22) — that's a real, transient loading state on
+ * a real block. A `null`/`undefined` block here means the id itself never
+ * resolved to anything: most commonly a subagent's `parent_block_id`
+ * (added to `buildTree()`'s row-id set as a registration-ordering fallback
+ * — see that comment) that never resolved to a fully-registered block, or
+ * a pruned block whose subagent record outlived it (`prune_block` is
+ * triggered by BlockDeleted/TabDeleted/WorkspaceDeleted; a block whose
+ * OWN registration never completed was never "deleted," so nothing prunes
+ * it). Rendering a placeholder `"Agent"` row for an id that structurally
+ * doesn't exist is worse than not rendering it — indistinguishable from a
+ * real agent to the user, and any dispatch grouped under it shows as an
+ * empty "No activity yet" row beside it. Extracted as a pure predicate so
+ * it's directly unit-testable without instantiating `SwarmViewModel` or
+ * mocking WOS, same rationale as `buildShellRows`/`buildCronRows` above.
+ * See RETRO_SWARM_PHANTOM_ROWS_AND_STALE_TRACKING_2026_08_06.md.
+ */
+export function hasRenderableBlock<T>(block: T | null | undefined): block is T {
+    return block != null;
+}
+
+/**
  * Compute the label `SubagentRow` shows for a subagent, in priority order:
  * `display_name` (Haiku-resolved — as of
  * SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 Phase A, resolved
@@ -1183,16 +1208,17 @@ export class SwarmViewModel implements ViewModel {
         // rationale the pre-two-bucket design used for NameGroup keys.
         const liveGroupKeys = new Set<string>();
         const retired = this.retiredRowKeysAtom();
-        const nodes = allBlockIds.map((blockId) => {
+        const nodes = allBlockIds.flatMap((blockId) => {
             const blockAtom = WOS.getWaveObjectAtom<Block>(`block:${blockId}`);
             const block = blockAtom();
+            if (!hasRenderableBlock(block)) return [];
             const agentName =
-                (block?.meta?.["agentName"] as string | undefined)?.trim() ||
+                (block.meta?.["agentName"] as string | undefined)?.trim() ||
                 "Agent";
             const agentProvider =
-                (block?.meta?.["agentProvider"] as string | undefined)?.trim() || null;
-            const activitySummary = readActivitySummary(block?.meta)?.trim() || null;
-            const rawCtx = block?.meta?.["term:ctx-tokens"];
+                (block.meta?.["agentProvider"] as string | undefined)?.trim() || null;
+            const activitySummary = readActivitySummary(block.meta)?.trim() || null;
+            const rawCtx = block.meta?.["term:ctx-tokens"];
             const contextTokens = typeof rawCtx === "number" ? rawCtx : null;
             const agentStatus = statuses.get(blockId) ?? "idle";
             const { agentToolRows: rawAgentToolRows, workflowRows: rawWorkflowRows } = buildDispatchBuckets(

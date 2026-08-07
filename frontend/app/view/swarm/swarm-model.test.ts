@@ -8,6 +8,7 @@ import {
     buildShellRows,
     filterRetired,
     groupCacheKey,
+    hasRenderableBlock,
     mergeDispatchActivityEntries,
     mergeSubagentsPreservingIdentity,
     pruneGroupIdentityCache,
@@ -604,5 +605,19 @@ describe("buildCronRows", () => {
     it("returns an empty array for a null blockId", () => {
         const crons = [mkCron({ id: "c1", block_id: "block-a" })];
         expect(buildCronRows(crons, null)).toEqual([]);
+    });
+});
+
+describe("hasRenderableBlock", () => {
+    it("is false for undefined — the case a stale/orphaned parent_block_id resolves to", () => {
+        expect(hasRenderableBlock(undefined)).toBe(false);
+    });
+
+    it("is false for null", () => {
+        expect(hasRenderableBlock(null)).toBe(false);
+    });
+
+    it("is true for a real block object, even one with no meta set yet", () => {
+        expect(hasRenderableBlock({ oid: "block-a", meta: {} })).toBe(true);
     });
 });
