@@ -4,7 +4,7 @@
 **Status:** Planned (superseded in part — see note below)
 **Author:** smike
 
-> **2026-08-07 note:** §3.2 and §6's "Priority: extracted ID > static
+> **2026-08-07 note:** §3.2 and §5's "Priority: extracted ID > static
 > mapping > regex pattern" (tag checked before username) describes the
 > ORIGINAL implementation and is no longer accurate — the priority was
 > reversed (username-first, tag-fallback) and agent-mapping.ts's numbered

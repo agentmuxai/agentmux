@@ -4,7 +4,7 @@
 **Status:** Implemented
 **Author:** Agent3
 **Repos touched:** `agentmux-cloud` (implementation), `agentmux` (this doc + agent-facing policy)
-**Supersedes:** §3.2 and §6 of `SPEC_MUXBUS_GITHUB_REVIEW_NOTIFICATIONS_2026_06_20.md` — that doc's "Priority: extracted ID > static mapping > regex pattern" (tag checked first, username as fallback) is no longer accurate; see §1 below for why the order flipped.
+**Supersedes:** §3.2 and §5 of `SPEC_MUXBUS_GITHUB_REVIEW_NOTIFICATIONS_2026_06_20.md` — that doc's "Priority: extracted ID > static mapping > regex pattern" (tag checked first, username as fallback) is no longer accurate; see §1 below for why the order flipped.
 
 ---
 
