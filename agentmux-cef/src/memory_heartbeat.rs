@@ -139,7 +139,12 @@ pub fn start(state: std::sync::Arc<crate::state::AppState>) {
 
                 let ram_free = phys_free_mb();
                 let ram_total = phys_total_mb();
-                let ram_transition = ram_pressure.observe(ram_free, ram_total);
+                // `observe_local`, not `observe` — the RAM tracker must not
+                // publish to the shared PRESSURE_LEVEL atomic `current_level()`
+                // reads, or a RAM-only transition would clobber the commit
+                // tracker's published level and silently defeat pane-pool
+                // shedding (reagent-caught P0 on this PR).
+                let ram_transition = ram_pressure.observe_local(ram_free, ram_total);
                 let ram_level_now = ram_pressure.level();
 
                 if let Some(level) = transition {
@@ -187,13 +192,17 @@ pub fn start(state: std::sync::Arc<crate::state::AppState>) {
                 // unchanged level and a re-assert never un-dismisses); a steady
                 // Normal stays silent, so there's no traffic in the common case.
                 if transition.is_some() || level_now != crate::memory_pressure::PressureLevel::Normal {
-                    let (system_managed, disk_free_pct) = pagefile_disk_context().unwrap_or((true, 100.0));
+                    // Pass the Option straight through -- a `None` (read
+                    // failure) must reach the frontend as "no disk context",
+                    // not get collapsed into a fabricated "healthy" default
+                    // here (reagent-caught P1: that previously produced the
+                    // reassuring "expands automatically" copy even while
+                    // pressure was Critical).
                     crate::ui_tasks::post_memory_pressure_pagefile(
                         &state,
                         level_now.as_str(),
                         free,
-                        system_managed,
-                        disk_free_pct,
+                        pagefile_disk_context(),
                     );
                 }
                 if ram_transition.is_some() || ram_level_now != crate::memory_pressure::PressureLevel::Normal {
