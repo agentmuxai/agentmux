@@ -364,6 +364,7 @@ mod recent_sessions_tests {
             ),
             editor_file_watcher: None,
             media_file_watcher: None,
+            fs_watch_pool: crate::backend::fs_watch::FsWatchPool::new(),
         };
 
         // Seed: 1 SEEDED definition (template), 1 account + direct
@@ -683,6 +684,7 @@ mod recent_sessions_tests {
             ),
             editor_file_watcher: None,
             media_file_watcher: None,
+            fs_watch_pool: crate::backend::fs_watch::FsWatchPool::new(),
         };
 
         // One seeded template + one already-user-owned definition.

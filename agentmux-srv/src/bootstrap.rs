@@ -820,6 +820,7 @@ pub struct BackgroundSubsystems {
     pub broker: Arc<Broker>,
     pub editor_file_watcher: Option<Arc<backend::editor_file_watcher::EditorFileWatcher>>,
     pub media_file_watcher: Option<Arc<backend::media_file_watcher::MediaFileWatcher>>,
+    pub fs_watch_pool: Arc<backend::fs_watch::FsWatchPool>,
     pub config_watcher: Arc<wconfig::ConfigWatcher>,
     pub reactive_handler: &'static reactive::ReactiveHandler,
     pub poller: Arc<Poller>,
@@ -846,6 +847,12 @@ pub fn spawn_background_subsystems(
     // Bridge WPS events to WebSocket clients via EventBus
     let bridge = backend::eventbus::EventBusBridge::new(event_bus.clone());
     broker.set_client(Box::new(bridge));
+
+    // Shared filesystem-watcher framework — constructed once, before any
+    // consumer. `config_watcher_fs` below is its first consumer;
+    // `editor_file_watcher`/`media_file_watcher` haven't migrated onto it
+    // yet (see SPEC_SHARED_FS_WATCHER_FRAMEWORK_2026_08_07.md §5).
+    let fs_watch_pool = backend::fs_watch::FsWatchPool::new();
 
     // Watches files open in editor/preview panes, publishing a per-block
     // wake signal on external changes. See SPEC_EDITOR_LIVE_FILE_RELOAD_2026_07_18.md.
@@ -884,7 +891,8 @@ pub fn spawn_background_subsystems(
     backend::config_watcher_fs::load_settings_from_disk(&config_watcher);
 
     // Watch settings.json for changes and broadcast to WebSocket clients
-    let _settings_watcher = backend::config_watcher_fs::spawn_settings_watcher(
+    backend::config_watcher_fs::spawn_settings_watcher(
+        fs_watch_pool.clone(),
         config_watcher.clone(),
         event_bus.clone(),
     );
@@ -1153,6 +1161,7 @@ pub fn spawn_background_subsystems(
         broker,
         editor_file_watcher,
         media_file_watcher,
+        fs_watch_pool,
         config_watcher,
         reactive_handler,
         poller,
@@ -1491,6 +1500,7 @@ pub fn build_app_state(
         ),
         editor_file_watcher: bg.editor_file_watcher,
         media_file_watcher: bg.media_file_watcher,
+        fs_watch_pool: bg.fs_watch_pool,
     }
 }
 

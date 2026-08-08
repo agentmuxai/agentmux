@@ -88,6 +88,7 @@ pub(crate) fn test_state() -> AppState {
         ),
         editor_file_watcher: None,
         media_file_watcher: None,
+        fs_watch_pool: crate::backend::fs_watch::FsWatchPool::new(),
     }
 }
 

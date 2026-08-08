@@ -202,6 +202,15 @@ pub struct AppState {
     /// underlying `notify` watcher couldn't be created.
     /// See docs/specs/SPEC_MEDIA_PANE_2026_07_26.md.
     pub media_file_watcher: Option<std::sync::Arc<crate::backend::media_file_watcher::MediaFileWatcher>>,
+    /// Shared filesystem-watcher framework (retry/fallback/self-healing on
+    /// top of `notify`). `editor_file_watcher`/`media_file_watcher` above
+    /// predate this and haven't migrated onto it yet — see
+    /// docs/specs/SPEC_SHARED_FS_WATCHER_FRAMEWORK_2026_08_07.md §5 for the
+    /// migration path. Unlike those two, this always constructs
+    /// successfully (a construction-time failure degrades into
+    /// `FsWatchPool::health()`'s `degraded_paths` instead of `None`), so
+    /// there's no `Option` wrapper to check.
+    pub fs_watch_pool: std::sync::Arc<crate::backend::fs_watch::FsWatchPool>,
 }
 
 /// Build the Axum router with all routes, auth middleware, and CORS.
