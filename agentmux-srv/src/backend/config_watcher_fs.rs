@@ -3,16 +3,22 @@
 
 //! Filesystem watcher for settings.json — detects saves and pushes updated
 //! config to all connected WebSocket clients in real time.
+//!
+//! Migrated onto the shared `fs_watch::FsWatchPool`
+//! (SPEC_SHARED_FS_WATCHER_FRAMEWORK_2026_08_07.md) — this module keeps only
+//! its own domain-specific debounce/reload/broadcast logic; the actual
+//! `notify` construction, refcounting, and recovery-on-failure now live in
+//! the pool, shared with every other watcher that migrates onto it.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde_json::json;
-use tokio::sync::mpsc;
+use tokio::sync::broadcast;
 
 use super::eventbus::{EventBus, WSEventType, WS_EVENT_RPC};
+use super::fs_watch::FsWatchPool;
 use super::wconfig::{self, ConfigWatcher, SettingsType};
 
 /// Resolve the directory containing settings.json.
@@ -66,14 +72,28 @@ pub fn load_settings_from_disk(config_watcher: &ConfigWatcher) {
     tracing::info!("settings.json loaded successfully");
 }
 
-/// Spawn a filesystem watcher that monitors `settings.json` and broadcasts
+/// Whether a raw fs_watch event refers to `settings.json` specifically —
+/// the pool's broadcast stream carries events for every currently-watched
+/// path in the process, not just this module's. Matches the filename-only
+/// comparison the pre-migration code used
+/// (`event.paths.iter().any(|p| p.ends_with("settings.json"))`, which for a
+/// single-component pattern is exactly a filename check).
+fn is_settings_file_event(path: &std::path::Path) -> bool {
+    path.file_name().map(|n| n == wconfig::SETTINGS_FILE).unwrap_or(false)
+}
+
+/// Subscribe to `settings.json` via the shared `FsWatchPool` and broadcast
 /// config updates to all WebSocket clients on change.
 ///
-/// Returns a handle to the watcher (must be held alive for the duration of the app).
+/// Fire-and-forget — the returned subscription never needs to be
+/// unsubscribed (settings.json is watched for the app's entire lifetime),
+/// so unlike the pre-migration version there's no watcher handle for the
+/// caller to keep alive: the pool itself owns that now.
 pub fn spawn_settings_watcher(
+    pool: Arc<FsWatchPool>,
     config_watcher: Arc<ConfigWatcher>,
     event_bus: Arc<EventBus>,
-) -> Option<RecommendedWatcher> {
+) {
     let settings_dir = resolve_settings_dir();
     let settings_path = settings_dir.join(wconfig::SETTINGS_FILE);
 
@@ -82,68 +102,52 @@ pub fn spawn_settings_watcher(
             dir = %settings_dir.display(),
             "settings directory does not exist, file watcher not started"
         );
-        return None;
+        return;
     }
 
-    // Channel to bridge sync notify callbacks into async tokio
-    let (tx, mut rx) = mpsc::unbounded_channel::<()>();
-
-    let watched_path = settings_path.clone();
-    let mut watcher = match notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-        match res {
-            Ok(event) => {
-                let dominated = matches!(
-                    event.kind,
-                    EventKind::Modify(_) | EventKind::Create(_)
-                );
-                if dominated && event.paths.iter().any(|p| p.ends_with("settings.json")) {
-                    let _ = tx.send(());
-                }
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "filesystem watcher error");
-            }
-        }
-    }) {
-        Ok(w) => w,
-        Err(e) => {
-            tracing::warn!(error = %e, "failed to create settings file watcher");
-            return None;
-        }
-    };
-
-    if let Err(e) = watcher.watch(&settings_dir, RecursiveMode::NonRecursive) {
-        tracing::warn!(
-            dir = %settings_dir.display(),
-            error = %e,
-            "failed to watch settings directory"
-        );
-        return None;
-    }
+    // Deliberately dropped immediately — `Subscription` has no `Drop`
+    // side effect (unsubscribe is always an explicit call), so this settles
+    // into a permanent watch for the process's lifetime with nothing to
+    // hold onto, matching the pre-migration version's own "this is a
+    // once-at-startup, forever" contract.
+    let _ = pool.subscribe_file(&settings_path);
+    let mut events = pool.events();
 
     tracing::info!(
         path = %settings_path.display(),
         dir = %settings_dir.display(),
-        "filesystem watcher active for settings.json"
+        "fs_watch subscription active for settings.json"
     );
 
-    // Spawn async task: debounce notifications and reload config
+    let watched_path = settings_path.clone();
     tokio::spawn(async move {
         loop {
-            // Wait for first notification
-            if rx.recv().await.is_none() {
-                tracing::info!("settings watcher channel closed, stopping");
-                break;
+            match events.recv().await {
+                Ok(ev) if is_settings_file_event(&ev.path) => {}
+                Ok(_) => continue, // some other watched path — not ours
+                Err(broadcast::error::RecvError::Closed) => {
+                    tracing::info!("settings watcher event stream closed, stopping");
+                    break;
+                }
+                Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                    // We fell behind the pool's broadcast buffer. A lagged
+                    // receiver has definitely missed *some* event, so treat
+                    // it the same as "something changed" rather than
+                    // silently resubscribing to a fresh position and
+                    // potentially missing a real settings.json save.
+                    tracing::warn!(skipped, "settings watcher lagged; reloading defensively");
+                }
             }
-            // Debounce: drain any additional events within 300ms
+            // Debounce: drain whatever else is already queued within 300ms,
+            // same collapse-a-burst intent as before — this receiver is
+            // this task's own private clone of the broadcast stream, so
+            // draining it can't affect any other subscriber.
             tokio::time::sleep(Duration::from_millis(300)).await;
-            while rx.try_recv().is_ok() {}
+            while events.try_recv().is_ok() {}
 
             reload_and_broadcast(&watched_path, &config_watcher, &event_bus);
         }
     });
-
-    Some(watcher)
 }
 
 /// Merge new keys into the current in-memory SettingsType and return the result.
@@ -225,5 +229,65 @@ fn reload_and_broadcast(
         };
         event_bus.broadcast_event(&event);
         tracing::info!(clients = client_count, "config event broadcast complete");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// End-to-end regression for the migration onto `FsWatchPool`: a real
+    /// on-disk settings.json change is detected via the shared pool,
+    /// debounced, reloaded, and lands in `ConfigWatcher`. This is new
+    /// coverage — `spawn_settings_watcher` had no test before this module
+    /// existed to migrate onto.
+    #[tokio::test]
+    async fn settings_change_via_pool_reloads_config_watcher() {
+        let tmp = tempfile::tempdir().unwrap();
+        let prev = std::env::var_os("AGENTMUX_SETTINGS_DIR");
+        std::env::set_var("AGENTMUX_SETTINGS_DIR", tmp.path());
+
+        let settings_path = tmp.path().join(wconfig::SETTINGS_FILE);
+        std::fs::write(&settings_path, wconfig::SETTINGS_TEMPLATE).unwrap();
+
+        let pool = FsWatchPool::new();
+        let config_watcher = Arc::new(ConfigWatcher::new());
+        let event_bus = Arc::new(EventBus::new());
+        spawn_settings_watcher(pool.clone(), config_watcher.clone(), event_bus.clone());
+
+        // Give the watch a moment to actually register before writing —
+        // otherwise this is a "wrote before the watch was live" race, not a
+        // real assertion about the reload path.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        let mut new_keys = serde_json::Map::new();
+        new_keys.insert("app:defaultnewblock".to_string(), json!("fs-watch-test-marker"));
+        let merged = wconfig::merge_into_template(wconfig::SETTINGS_TEMPLATE, &new_keys);
+        std::fs::write(&settings_path, &merged).unwrap();
+
+        let saw_it = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if config_watcher.get_settings().app_default_new_block == "fs-watch-test-marker" {
+                    return true;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .unwrap_or(false);
+
+        match prev {
+            Some(v) => std::env::set_var("AGENTMUX_SETTINGS_DIR", v),
+            None => std::env::remove_var("AGENTMUX_SETTINGS_DIR"),
+        }
+
+        assert!(saw_it, "expected config_watcher to reload the updated setting after a settings.json change detected via FsWatchPool");
+    }
+
+    #[test]
+    fn is_settings_file_event_matches_only_the_settings_filename() {
+        assert!(is_settings_file_event(std::path::Path::new("/some/dir/settings.json")));
+        assert!(!is_settings_file_event(std::path::Path::new("/some/dir/other.json")));
+        assert!(!is_settings_file_event(std::path::Path::new("/some/dir")));
     }
 }
