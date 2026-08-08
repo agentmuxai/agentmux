@@ -1,0 +1,115 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Status-bar Disk readout button + per-drive panel — sibling of
+// _cpu-cores-popover.scss (same chrome, simpler content: one row tier).
+
+// Clickable Disk readout in the status bar (the <button> wrapping "Disk n%").
+.stat-disk-button {
+    background: transparent;
+    border: none;
+    color: inherit;
+    font-family: inherit;
+    font-size: inherit;
+    line-height: inherit;
+    padding: 0 2px;
+    margin: 0;
+    cursor: default;
+    border-radius: 0;
+    transition: background 80ms ease;
+
+    &:hover {
+        background: var(--hover-bg-color);
+    }
+
+    &:focus-visible {
+        outline: 1px solid var(--accent-color);
+        outline-offset: -1px;
+    }
+}
+
+.disk-volumes-popover {
+    background: var(--modal-bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 0;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    color: var(--main-text-color);
+    font-size: 12px;
+    zoom: var(--zoomfactor);
+    z-index: var(--zindex-modal-wrapper);
+    display: flex;
+    flex-direction: column;
+    padding: var(--space-2) 0;
+    user-select: none;
+
+    .disk-volumes-header {
+        padding: 0 var(--space-3) var(--space-1-5);
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: var(--space-2);
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .disk-volumes-title {
+        font-weight: 600;
+        font-size: 13px;
+    }
+
+    .disk-volumes-count {
+        color: var(--secondary-text-color);
+        font-size: 11px;
+    }
+
+    .disk-volumes-empty {
+        padding: var(--space-3);
+        color: var(--secondary-text-color);
+    }
+
+    .disk-volumes-list {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+        padding: var(--space-2) var(--space-3) var(--space-1);
+        max-height: 300px;
+        overflow-y: auto;
+    }
+
+    .disk-volume {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+    }
+
+    .disk-volume-label {
+        flex: 0 0 44px;
+        font-family: var(--monofontfamily, monospace);
+        color: var(--main-text-color);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    // Used-share bar: fill = used fraction, so a nearly-full drive reads as a
+    // nearly-full bar at a glance (free space is spelled out in the text).
+    .disk-volume-bar {
+        flex: 1 1 auto;
+        height: 6px;
+        background: color-mix(in srgb, var(--border-color) 60%, transparent);
+        overflow: hidden;
+        display: inline-block;
+    }
+
+    .disk-volume-bar-fill {
+        display: block;
+        height: 100%;
+        background: color-mix(in srgb, var(--accent-color) 45%, var(--secondary-text-color));
+    }
+
+    .disk-volume-free {
+        flex: 0 0 auto;
+        font-family: var(--monofontfamily, monospace);
+        font-size: 11px;
+        white-space: nowrap;
+    }
+}

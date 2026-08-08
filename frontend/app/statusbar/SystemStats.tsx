@@ -6,7 +6,9 @@ import { WpsEvent } from "@/app/store/wps-events";
 import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import { CpuCoresPopover } from "./CpuCoresPopover";
+import { DiskVolumesPopover } from "./DiskVolumesPopover";
 import { cpuColor } from "./cpu-color";
+import { diskTooltip, parseDiskVolumes, type DiskVolume } from "./disk-volumes";
 
 type SysStats = {
     cpu: number;
@@ -73,6 +75,9 @@ function pagefileDiskColor(freePct: number | null, systemManaged: boolean): stri
 
 const SystemStats = (): JSX.Element => {
     const [stats, setStats] = createSignal<SysStats | null>(null);
+    // Per-volume list — feeds the Disk readout's tooltip (naming the drive
+    // the % refers to) and is re-parsed live inside DiskVolumesPopover.
+    const [diskVolumes, setDiskVolumes] = createSignal<DiskVolume[]>([]);
 
     // Per-core CPU panel — opened by clicking the CPU readout. Mirrors the
     // TokenUsageIndicator → TokenBreakdownPopover interaction.
@@ -90,6 +95,21 @@ const SystemStats = (): JSX.Element => {
         setCpuPanelOpen(true);
     };
 
+    // Per-drive Disk panel — same interaction as the CPU panel above.
+    const [diskPanelOpen, setDiskPanelOpen] = createSignal(false);
+    const [diskAnchorRect, setDiskAnchorRect] = createSignal<DOMRect | null>(null);
+    let diskButtonRef: HTMLButtonElement | undefined;
+    let diskPopoverRef: HTMLDivElement | undefined;
+
+    const toggleDiskPanel = () => {
+        if (diskPanelOpen()) {
+            setDiskPanelOpen(false);
+            return;
+        }
+        if (diskButtonRef) setDiskAnchorRect(diskButtonRef.getBoundingClientRect());
+        setDiskPanelOpen(true);
+    };
+
     // Close on outside click (ignoring the button + popover) and on Esc.
     createEffect(() => {
         if (!cpuPanelOpen()) return;
@@ -102,6 +122,27 @@ const SystemStats = (): JSX.Element => {
             if (e.key === "Escape") {
                 e.stopPropagation();
                 setCpuPanelOpen(false);
+            }
+        };
+        document.addEventListener("mousedown", onDown, true);
+        window.addEventListener("keydown", onKey, true);
+        onCleanup(() => {
+            document.removeEventListener("mousedown", onDown, true);
+            window.removeEventListener("keydown", onKey, true);
+        });
+    });
+
+    createEffect(() => {
+        if (!diskPanelOpen()) return;
+        const onDown = (e: MouseEvent) => {
+            const t = e.target as Node;
+            if (diskButtonRef?.contains(t) || diskPopoverRef?.contains(t)) return;
+            setDiskPanelOpen(false);
+        };
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === "Escape") {
+                e.stopPropagation();
+                setDiskPanelOpen(false);
             }
         };
         document.addEventListener("mousedown", onDown, true);
@@ -134,6 +175,7 @@ const SystemStats = (): JSX.Element => {
                     pagefileVolumeFreePct: vals["disk:pagefile_volume:free_pct"] ?? null,
                     pagefileSystemManaged: (vals["disk:pagefile_system_managed"] ?? 0) > 0,
                 });
+                setDiskVolumes(parseDiskVolumes(vals));
             },
         });
         onCleanup(() => unsub?.());
@@ -195,26 +237,39 @@ const SystemStats = (): JSX.Element => {
                             PF {formatMemBytes(s().commitUsed)}/{formatMemBytes(s().commitTotal)}
                         </span>
                     </Show>
-                    {/* SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29 §5.2 P0 — surfaces the
-                        CAUSE the PF gauge above can't see: a system-managed page file
-                        that wants to grow but can't because its volume is low on free
-                        space. Only rendered once the backend has a reading (Windows-only
-                        gauge; absent elsewhere). */}
+                    {/* Free-space share of the system drive (the volume Windows backs
+                        its page file with — SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29
+                        §5.2 P0 is why THIS volume is the one watched, and the color
+                        thresholds still encode that risk). The tooltip deliberately
+                        explains only what the number is — free ÷ capacity, with live
+                        figures — the page-file significance belongs to the PF gauge's
+                        own tooltip. Click opens the per-drive breakdown (all volumes,
+                        free space each), mirroring the CPU per-core panel. Only
+                        rendered once the backend has a reading (Windows-only gauge;
+                        absent elsewhere). */}
                     <Show when={s().pagefileVolumeFreePct != null}>
                         <span class="stat-separator">|</span>
-                        <span
-                            class="stat-mono stat-pagefile-disk"
+                        <button
+                            type="button"
+                            ref={diskButtonRef}
+                            class="stat-mono stat-pagefile-disk stat-disk-button"
                             style={{ color: pagefileDiskColor(s().pagefileVolumeFreePct, s().pagefileSystemManaged) }}
-                            data-tip={
-                                (s().pagefileSystemManaged
-                                    ? "Free space on the page-file volume. Low free space can silently cap how large Windows lets the page file (and therefore the commit limit above) grow. "
-                                    : "Free space on the page-file volume. The page file here is a fixed size, so this isn't a growth-ceiling risk. ") +
-                                (s().pagefileVolumeFreeGb != null ? `${formatMemBytes(s().pagefileVolumeFreeGb!)} free.` : "")
-                            }
-                            aria-label="Page-file volume free disk space"
+                            onClick={toggleDiskPanel}
+                            data-tip={diskTooltip(diskVolumes())}
+                            aria-label="Free disk space, click for per-drive breakdown"
+                            aria-haspopup="dialog"
+                            aria-expanded={diskPanelOpen()}
                         >
                             Disk {Math.round(s().pagefileVolumeFreePct!)}%
-                        </span>
+                        </button>
+                        <Show when={diskPanelOpen()}>
+                            <Portal>
+                                <DiskVolumesPopover
+                                    anchorRect={diskAnchorRect()}
+                                    ref={(el) => { diskPopoverRef = el; }}
+                                />
+                            </Portal>
+                        </Show>
                     </Show>
                     {/* Network indicator stays mounted even at 0/0 so the user
                         can glance at the bar and see "nothing going in or out",
