@@ -25,6 +25,16 @@ pub struct NativeMemoryMirrorRow {
     pub size_bytes: i64,
     pub updated_at: i64,
     pub last_seen_path: String,
+    /// The live file's own on-disk mtime (ms epoch) as of the last upsert —
+    /// NOT `updated_at` (this row's own write time). Callers use this
+    /// together with `size_bytes` to detect whether a live file has
+    /// actually changed since it was last mirrored, without re-reading its
+    /// full content: size alone under-detects a same-byte-length edit
+    /// (reagent P1 on PR #2459 — a same-size edit made only on channel A,
+    /// never re-read there via `read_file`, would otherwise serve stale
+    /// content to channel B forever, since B has no live copy of its own to
+    /// self-correct with).
+    pub last_seen_mtime_ms: i64,
 }
 
 fn now_ms() -> i64 {
@@ -44,7 +54,7 @@ impl Store {
     ) -> Result<Vec<NativeMemoryMirrorRow>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT filename, '', metadata_type, size_bytes, updated_at, last_seen_path
+            "SELECT filename, '', metadata_type, size_bytes, updated_at, last_seen_path, last_seen_mtime_ms
              FROM db_agent_native_memory WHERE agent_id = ?1",
         )?;
         let rows = stmt
@@ -57,6 +67,7 @@ impl Store {
                     size_bytes: row.get(3)?,
                     updated_at: row.get(4)?,
                     last_seen_path: row.get(5)?,
+                    last_seen_mtime_ms: row.get(6)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -86,6 +97,13 @@ impl Store {
     /// every `agent:memory:list`/`read_file`/`write_file` RPC on every file
     /// it touches — cheap (one local SQLite write already on the request),
     /// and is what makes native memory durable across a channel switch.
+    ///
+    /// `mtime_ms` is the live file's own on-disk modified time (0 if
+    /// unavailable, e.g. a `write_file` call that hasn't re-stat'd the file
+    /// it just wrote) — stored as `last_seen_mtime_ms` so callers like
+    /// `agent:memory:list` can detect a real content change via
+    /// `(size_bytes, last_seen_mtime_ms)` without re-reading full content on
+    /// every call.
     pub fn agent_native_memory_upsert(
         &self,
         agent_id: &str,
@@ -93,18 +111,20 @@ impl Store {
         content: &str,
         metadata_type: Option<&str>,
         last_seen_path: &str,
+        mtime_ms: i64,
     ) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO db_agent_native_memory
-                 (agent_id, filename, content, metadata_type, size_bytes, updated_at, last_seen_path)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 (agent_id, filename, content, metadata_type, size_bytes, updated_at, last_seen_path, last_seen_mtime_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
              ON CONFLICT(agent_id, filename) DO UPDATE SET
                  content = excluded.content,
                  metadata_type = excluded.metadata_type,
                  size_bytes = excluded.size_bytes,
                  updated_at = excluded.updated_at,
-                 last_seen_path = excluded.last_seen_path",
+                 last_seen_path = excluded.last_seen_path,
+                 last_seen_mtime_ms = excluded.last_seen_mtime_ms",
             params![
                 agent_id,
                 filename,
@@ -113,6 +133,7 @@ impl Store {
                 content.len() as i64,
                 now_ms(),
                 last_seen_path,
+                mtime_ms,
             ],
         )?;
         Ok(())
@@ -132,7 +153,7 @@ mod tests {
     fn upsert_then_read_round_trips() {
         let store = shared_store();
         store
-            .agent_native_memory_upsert("agent-1", "MEMORY.md", "# hello", Some("user"), "/tmp/memory/MEMORY.md")
+            .agent_native_memory_upsert("agent-1", "MEMORY.md", "# hello", Some("user"), "/tmp/memory/MEMORY.md", 1000)
             .unwrap();
 
         let content = store.agent_native_memory_read("agent-1", "MEMORY.md").unwrap();
@@ -149,10 +170,10 @@ mod tests {
     fn upsert_is_idempotent_and_updates_in_place() {
         let store = shared_store();
         store
-            .agent_native_memory_upsert("agent-1", "MEMORY.md", "v1", None, "/a")
+            .agent_native_memory_upsert("agent-1", "MEMORY.md", "v1", None, "/a", 1000)
             .unwrap();
         store
-            .agent_native_memory_upsert("agent-1", "MEMORY.md", "v2", Some("user"), "/b")
+            .agent_native_memory_upsert("agent-1", "MEMORY.md", "v2", Some("user"), "/b", 2000)
             .unwrap();
 
         let content = store.agent_native_memory_read("agent-1", "MEMORY.md").unwrap();
@@ -163,13 +184,14 @@ mod tests {
         assert_eq!(meta[0].metadata_type, Some("user".to_string()));
         assert_eq!(meta[0].last_seen_path, "/b");
         assert_eq!(meta[0].size_bytes, 2);
+        assert_eq!(meta[0].last_seen_mtime_ms, 2000);
     }
 
     #[test]
     fn list_meta_scopes_to_the_requested_agent_only() {
         let store = shared_store();
-        store.agent_native_memory_upsert("agent-1", "a.md", "x", None, "/a").unwrap();
-        store.agent_native_memory_upsert("agent-2", "b.md", "y", None, "/b").unwrap();
+        store.agent_native_memory_upsert("agent-1", "a.md", "x", None, "/a", 1000).unwrap();
+        store.agent_native_memory_upsert("agent-2", "b.md", "y", None, "/b", 1000).unwrap();
 
         let meta = store.agent_native_memory_list_meta("agent-1").unwrap();
         assert_eq!(meta.len(), 1);
@@ -182,7 +204,7 @@ mod tests {
         // bodies (that's what agent_native_memory_read is for), so a large
         // mirrored file doesn't get loaded into memory just to render a list.
         let store = shared_store();
-        store.agent_native_memory_upsert("agent-1", "a.md", "big content", None, "/a").unwrap();
+        store.agent_native_memory_upsert("agent-1", "a.md", "big content", None, "/a", 1000).unwrap();
         let meta = store.agent_native_memory_list_meta("agent-1").unwrap();
         assert_eq!(meta[0].content, "");
     }
@@ -193,7 +215,7 @@ mod tests {
         // mirror is the only remaining copy once the live FS file is gone —
         // list/read must still return it from here.
         let store = shared_store();
-        store.agent_native_memory_upsert("agent-1", "MEMORY.md", "content", None, "/gone").unwrap();
+        store.agent_native_memory_upsert("agent-1", "MEMORY.md", "content", None, "/gone", 1000).unwrap();
 
         let meta = store.agent_native_memory_list_meta("agent-1").unwrap();
         assert_eq!(meta.len(), 1);

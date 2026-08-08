@@ -337,20 +337,27 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
 
                 // Existing mirror metadata (no content) for this agent, keyed by
                 // filename — lets the loop below skip the expensive full-content
-                // read+upsert for a file whose size hasn't changed since it was
-                // last mirrored, instead of doing it unconditionally on every
-                // list call (reagent P1 on PR #2459: `list` fires on every Stash
+                // read+upsert for a file that hasn't changed since it was last
+                // mirrored, instead of doing it unconditionally on every list
+                // call (reagent P1 on PR #2459: `list` fires on every Stash
                 // Memory tab open/refresh, so an unconditional full read + SQLite
                 // write per file would mean synchronous, potentially many-MB
                 // disk I/O on a call meant to be a lightweight metadata listing).
-                // A same-size-but-changed-content file is a known, accepted gap
-                // here — read_file always re-reads the live file fresh regardless,
-                // so this can only make the mirror (not the read path) briefly stale.
-                let mirrored_meta: std::collections::HashMap<String, i64> = id_store
+                //
+                // Compares BOTH size and mtime, not size alone: a same-byte-length
+                // edit is common (e.g. correcting a typo) and size-only comparison
+                // would silently leave the mirror stale for it. This matters for
+                // exactly the case this table exists for — a channel with no live
+                // copy of a file relies entirely on the mirror (reagent P1 on
+                // PR #2459's first pass: read_file only "always re-reads fresh"
+                // on the channel that still HAS a live copy; a channel that never
+                // did has nothing to self-correct with, so a stale mirror row
+                // there is permanent, not "briefly stale").
+                let mirrored_meta: std::collections::HashMap<String, (i64, i64)> = id_store
                     .agent_native_memory_list_meta(&agent.id)
                     .unwrap_or_default()
                     .into_iter()
-                    .map(|row| (row.filename, row.size_bytes))
+                    .map(|row| (row.filename, (row.size_bytes, row.last_seen_mtime_ms)))
                     .collect();
 
                 let mut files: Vec<NativeMemoryFileMeta> = Vec::new();
@@ -414,7 +421,8 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                         let metadata_type = parse_frontmatter_type(&preview_content);
                         let is_index = name == "MEMORY.md";
 
-                        let unchanged_since_last_mirror = mirrored_meta.get(&name) == Some(&(size_bytes as i64));
+                        let unchanged_since_last_mirror =
+                            mirrored_meta.get(&name) == Some(&(size_bytes as i64, modified_at));
                         if !unchanged_since_last_mirror {
                             let full_content = {
                                 use std::io::Read;
@@ -433,6 +441,7 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                                 &full_content,
                                 full_metadata_type.as_deref(),
                                 &entry.path().to_string_lossy(),
+                                modified_at,
                             ) {
                                 tracing::warn!(agent_id = %agent.id, filename = %name, error = %e, "agent:memory:list: mirror upsert failed (non-fatal)");
                             }
@@ -520,11 +529,11 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 // read for another reason (permissions, non-regular file)
                 // still surfaces as an error rather than silently masking it
                 // with stale mirrored content.
-                let live = std::fs::symlink_metadata(&path).ok().and_then(|m| {
-                    if m.file_type().is_file() { Some(()) } else { None }
-                });
+                let live_meta = std::fs::symlink_metadata(&path)
+                    .ok()
+                    .filter(|m| m.file_type().is_file());
 
-                let content = if live.is_some() {
+                let content = if let Some(live_meta) = live_meta {
                     let mut buf = Vec::new();
                     std::fs::File::open(&path)
                         .and_then(|f| {
@@ -535,12 +544,19 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                     let content = String::from_utf8_lossy(&buf).into_owned();
 
                     let metadata_type = parse_frontmatter_type(&content);
+                    let mtime_ms = live_meta
+                        .modified()
+                        .ok()
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_millis() as i64)
+                        .unwrap_or(0);
                     if let Err(e) = id_store.agent_native_memory_upsert(
                         &agent.id,
                         &cmd.filename,
                         &content,
                         metadata_type.as_deref(),
                         &path.to_string_lossy(),
+                        mtime_ms,
                     ) {
                         tracing::warn!(agent_id = %agent.id, filename = %cmd.filename, error = %e, "agent:memory:read_file: mirror upsert failed (non-fatal)");
                     }
@@ -620,12 +636,24 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 }
 
                 let metadata_type = parse_frontmatter_type(&cmd.content);
+                // Re-stat the just-written file for its real on-disk mtime rather
+                // than stamping now_ms() here — keeps this in exact agreement with
+                // what a subsequent list() will compute, so the size+mtime change
+                // check there doesn't spuriously treat this write as "changed
+                // again" due to clock/precision drift between the two.
+                let mtime_ms = std::fs::metadata(&dest)
+                    .ok()
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0);
                 if let Err(e) = id_store.agent_native_memory_upsert(
                     &agent.id,
                     &cmd.filename,
                     &cmd.content,
                     metadata_type.as_deref(),
                     &dest.to_string_lossy(),
+                    mtime_ms,
                 ) {
                     tracing::warn!(agent_id = %agent.id, filename = %cmd.filename, error = %e, "agent:memory:write_file: mirror upsert failed (non-fatal)");
                 }
@@ -928,7 +956,7 @@ mod tests {
         // Directly stamp a stale mirror row behind the live FS's back — the
         // read path must still prefer the live file, not this stale row.
         shared_id_store
-            .agent_native_memory_upsert("agent-shared-2", "MEMORY.md", "stale mirror content", None, "/nowhere")
+            .agent_native_memory_upsert("agent-shared-2", "MEMORY.md", "stale mirror content", None, "/nowhere", 0)
             .unwrap();
 
         let read: NativeMemoryReadFileResult = call_rpc(
@@ -1029,6 +1057,53 @@ mod tests {
         assert_eq!(
             first_updated_at, second_updated_at,
             "an unchanged file must not be re-upserted into the mirror on a second list() call"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_detects_a_same_size_content_change_via_mtime() {
+        // reagent P1 on PR #2459: comparing size alone would miss a same-byte-
+        // length edit (e.g. correcting a typo), leaving the mirror serving
+        // stale content forever to a channel that never had a live copy of
+        // its own to self-correct with. Confirm the mtime check catches it.
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let shared_id_store = Arc::new(Store::open_shared(tmp.path()).unwrap());
+        let config = tempfile::tempdir().unwrap();
+        let (engine, mut rx) = build_channel_state("agent-samesize", "/work/channel-a", config.path(), shared_id_store.clone());
+
+        let memory_dir = config.path().join("projects").join("-work-channel-a").join("memory");
+        std::fs::create_dir_all(&memory_dir).unwrap();
+        let file = memory_dir.join("MEMORY.md");
+        std::fs::write(&file, "content A!").unwrap();
+
+        let _: NativeMemoryListResult = call_rpc(
+            &engine,
+            &mut rx,
+            COMMAND_NATIVE_MEMORY_LIST,
+            serde_json::json!({ "agent_id": "agent-samesize" }),
+        )
+        .await;
+        assert_eq!(
+            shared_id_store.agent_native_memory_read("agent-samesize", "MEMORY.md").unwrap(),
+            Some("content A!".to_string())
+        );
+
+        // Same byte length, different content, comfortably past mtime resolution.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        std::fs::write(&file, "content B!").unwrap();
+        assert_eq!(file.metadata().unwrap().len(), "content A!".len() as u64);
+
+        let _: NativeMemoryListResult = call_rpc(
+            &engine,
+            &mut rx,
+            COMMAND_NATIVE_MEMORY_LIST,
+            serde_json::json!({ "agent_id": "agent-samesize" }),
+        )
+        .await;
+        assert_eq!(
+            shared_id_store.agent_native_memory_read("agent-samesize", "MEMORY.md").unwrap(),
+            Some("content B!".to_string()),
+            "a same-size content change must still be picked up by list() via mtime"
         );
     }
 

@@ -519,13 +519,14 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         -- that would read this table first 404s on agent_def_get, so a
         -- dangling mirror row is never reached, let alone surfaced.
         CREATE TABLE IF NOT EXISTS db_agent_native_memory (
-            agent_id       TEXT NOT NULL,
-            filename       TEXT NOT NULL,
-            content        TEXT NOT NULL,
-            metadata_type  TEXT NOT NULL DEFAULT '',
-            size_bytes     INTEGER NOT NULL DEFAULT 0,
-            updated_at     INTEGER NOT NULL DEFAULT 0,
-            last_seen_path TEXT NOT NULL DEFAULT '',
+            agent_id           TEXT NOT NULL,
+            filename           TEXT NOT NULL,
+            content            TEXT NOT NULL,
+            metadata_type      TEXT NOT NULL DEFAULT '',
+            size_bytes         INTEGER NOT NULL DEFAULT 0,
+            updated_at         INTEGER NOT NULL DEFAULT 0,
+            last_seen_path     TEXT NOT NULL DEFAULT '',
+            last_seen_mtime_ms INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (agent_id, filename)
         );",
     )?;
@@ -823,13 +824,14 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
         -- db_agent_credentials above) for id_store's per-channel fallback
         -- before 0011_shared_store_backfill has run.
         CREATE TABLE IF NOT EXISTS db_agent_native_memory (
-            agent_id       TEXT NOT NULL,
-            filename       TEXT NOT NULL,
-            content        TEXT NOT NULL,
-            metadata_type  TEXT NOT NULL DEFAULT '',
-            size_bytes     INTEGER NOT NULL DEFAULT 0,
-            updated_at     INTEGER NOT NULL DEFAULT 0,
-            last_seen_path TEXT NOT NULL DEFAULT '',
+            agent_id           TEXT NOT NULL,
+            filename           TEXT NOT NULL,
+            content            TEXT NOT NULL,
+            metadata_type      TEXT NOT NULL DEFAULT '',
+            size_bytes         INTEGER NOT NULL DEFAULT 0,
+            updated_at         INTEGER NOT NULL DEFAULT 0,
+            last_seen_path     TEXT NOT NULL DEFAULT '',
+            last_seen_mtime_ms INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (agent_id, filename)
         );",
     )?;
