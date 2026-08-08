@@ -192,24 +192,23 @@ pub struct AppState {
     /// Filesystem watcher for files open in editor/preview panes — publishes
     /// `EVENT_EDITOR_FILE_CHANGED` (scoped per-block) when a watched path
     /// changes on disk, so panes can refresh instead of silently going
-    /// stale. `None` when the underlying `notify` watcher couldn't be
-    /// created (live-reload is a nice-to-have, not a boot requirement).
+    /// stale. Migrated onto the shared `fs_watch_pool` below
+    /// (SPEC_SHARED_FS_WATCHER_FRAMEWORK_2026_08_07.md) — always constructs
+    /// successfully now (a construction-time failure degrades into
+    /// `fs_watch_pool.health()`'s `degraded_paths` instead of `None`), so
+    /// unlike before this field is no longer optional.
     /// See docs/specs/SPEC_EDITOR_LIVE_FILE_RELOAD_2026_07_18.md.
-    pub editor_file_watcher: Option<std::sync::Arc<crate::backend::editor_file_watcher::EditorFileWatcher>>,
+    pub editor_file_watcher: std::sync::Arc<crate::backend::editor_file_watcher::EditorFileWatcher>,
     /// Filesystem watcher for directories a Media pane is pointed at —
     /// publishes `EVENT_MEDIA_FILE_CHANGED` (scoped per-block) when a
-    /// matching-extension file is created/modified. `None` when the
-    /// underlying `notify` watcher couldn't be created.
+    /// matching-extension file is created/modified. Same migration and
+    /// no-longer-optional note as `editor_file_watcher` above.
     /// See docs/specs/SPEC_MEDIA_PANE_2026_07_26.md.
-    pub media_file_watcher: Option<std::sync::Arc<crate::backend::media_file_watcher::MediaFileWatcher>>,
+    pub media_file_watcher: std::sync::Arc<crate::backend::media_file_watcher::MediaFileWatcher>,
     /// Shared filesystem-watcher framework (retry/fallback/self-healing on
-    /// top of `notify`). `editor_file_watcher`/`media_file_watcher` above
-    /// predate this and haven't migrated onto it yet — see
-    /// docs/specs/SPEC_SHARED_FS_WATCHER_FRAMEWORK_2026_08_07.md §5 for the
-    /// migration path. Unlike those two, this always constructs
-    /// successfully (a construction-time failure degrades into
-    /// `FsWatchPool::health()`'s `degraded_paths` instead of `None`), so
-    /// there's no `Option` wrapper to check.
+    /// top of `notify`) that `editor_file_watcher`/`media_file_watcher`
+    /// above are built on. See
+    /// docs/specs/SPEC_SHARED_FS_WATCHER_FRAMEWORK_2026_08_07.md.
     pub fs_watch_pool: std::sync::Arc<crate::backend::fs_watch::FsWatchPool>,
 }
 
