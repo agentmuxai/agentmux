@@ -403,14 +403,35 @@
         font-size: 11px;
     }
 
-    // Composer region wraps AgentFooter + AgentControlBar at the pane
-    // bottom. Flex column so the footer sits above the control bar
-    // and the two read as a single unit.
+    // Composer region wraps AgentFooter + the shell drawer at the pane
+    // bottom. Flex column so the footer sits above the drawer and the
+    // two read as a single unit. flex-shrink: 1 + min-height: 0 lets the
+    // region give way when a tall persisted shell drawer
+    // (term:shellheight, up to 600px) can't fit a short pane — the
+    // internal chain (footer flex-shrink: 0, drawer min-height floor)
+    // routes all of that compression to the drawer instead of pushing
+    // the terminal's bottom rows past the pane's overflow:hidden edge
+    // (codex P2, PR #2466). Safe against the historical "long transcript
+    // squashes the composer" concern that motivated the previous
+    // flex-shrink: 0: .agent-document-scroll-region is `flex: 1` (basis
+    // 0%), so transcript length contributes nothing to over-full — the
+    // view only over-fills when the fixed rows themselves exceed it.
     .agent-composer-region {
         display: flex;
         flex-direction: column;
-        flex-shrink: 0;
+        flex-shrink: 1;
+        min-height: 0;
+    }
 
+    // Shell drawer + control bar wrapper — the one region child that
+    // yields (default flex-shrink: 1) when the capped region is
+    // over-full; the footer and slash panels keep their height.
+    // min-height: 0 lets the shrink propagate through to the resizable
+    // drawer inside.
+    .agent-composer-details {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
     }
 
 
