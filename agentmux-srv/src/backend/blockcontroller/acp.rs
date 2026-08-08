@@ -237,6 +237,14 @@ impl AcpController {
             "ACP agent process spawned"
         );
 
+        // Assign to this block's process tracker — same path SubprocessController
+        // and PersistentSubprocessController already use. Closes the Process
+        // Broker Phase B coverage gap for ACP-type agent panes (see
+        // docs/specs/SPEC_PROCESS_BROKER_PHASE_B_SHELL_ACP_REGISTRATION_2026_07_31.md).
+        if pid != 0 {
+            crate::backend::process_tracker::registry::track_spawned(&self.block_id, pid);
+        }
+
         let (kill_tx, kill_rx) = tokio::sync::oneshot::channel::<bool>();
         let stdin = child.stdin.take()
             .ok_or_else(|| format!("[acp] stdin not captured for block {}", self.block_id))?;
