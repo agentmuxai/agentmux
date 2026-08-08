@@ -115,13 +115,20 @@ pub fn spawn_settings_watcher(
         return;
     }
 
+    // events() MUST be called before subscribe_file() — a broadcast::Receiver
+    // only sees messages sent after it subscribes, so a change event delivered
+    // in the gap between starting the watch and creating this receiver would
+    // otherwise be silently missed (reagent P2 on PR #2456; see
+    // fs_watch::pool::tests::a_change_event_is_observable_on_the_broadcast_stream
+    // for the same ordering requirement enforced on the pool's own test).
+    let mut events = pool.events();
+
     // Deliberately dropped immediately — `Subscription` has no `Drop`
     // side effect (unsubscribe is always an explicit call), so this settles
     // into a permanent watch for the process's lifetime with nothing to
     // hold onto, matching the pre-migration version's own "this is a
     // once-at-startup, forever" contract.
     let _ = pool.subscribe_file(&settings_path);
-    let mut events = pool.events();
 
     tracing::info!(
         path = %settings_path.display(),
