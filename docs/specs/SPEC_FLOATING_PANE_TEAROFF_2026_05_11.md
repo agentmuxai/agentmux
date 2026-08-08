@@ -1,8 +1,14 @@
 # Floating pane tear-off (subordinate window, owned by mother instance)
 
-**Status:** Proposed
+**Status:** Proposed (implemented — see note below)
 **Owner:** AgentA
 **Date:** 2026-05-11
+
+> **2026-08-07 audit note:** Implemented, superseded by later tearoff specs
+> building on it (`CrossWindowDragMonitor.*`, `DragOverlay.tsx`,
+> `tear-off-pool-helper.ts`; e.g. `SPEC_PANE_DRAG_TO_TAB_2026_07_10.md`).
+> Status field was never updated. See
+> `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
 **Driving observation:** *"When tearing off panes, we don't create a new instance (no new taskbar icon). Instead it's a floating window owned by the mother instance. Panes currently tear off and create a new instance; instead they would tear to subpanels."*
 
 Today, tearing a tab off creates a new full AgentMux instance — own backend sidecar, own data dir, own taskbar entry. That's the right model for tabs (workspace-level isolation). For **panes** within a tab, the new ask is different: tear into a **floating subordinate window** owned by the source instance, like Photoshop's palettes or VSCode's "Move Editor into New Window".

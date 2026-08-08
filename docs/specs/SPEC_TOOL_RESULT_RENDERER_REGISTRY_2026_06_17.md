@@ -1,8 +1,13 @@
 # SPEC: Tool-result renderer registry (rich, per-tool result UIs that scale)
 
 **Date:** 2026-06-17
-**Status:** Proposed (analysis + design; not implemented)
+**Status:** Proposed (analysis + design; not implemented) (implemented — see note below)
 **Author:** smike
+
+> **2026-08-07 audit note:** Implemented, load-bearing — `registry.ts`/
+> `registry.test.ts` are the actual mechanism underpinning several other
+> still-stale-status specs (WebFetch, WebSearch, Write-MD content views).
+> See `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
 **Builds on:** `SPEC_TOOL_OUTPUT_TEE_AND_TERMINAL_RENDER_2026_06_17.md` (PR #1511 — `TerminalOutput` + `terminalText`, the first result-shape classifier)
 **Components:** `frontend/app/view/agent/stream-parser.ts`, `frontend/app/view/agent/types.ts`, `frontend/app/view/agent/components/ToolOverlayLog.tsx`, `…/components/*`
 

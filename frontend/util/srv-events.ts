@@ -14,7 +14,7 @@
 // **Phase E.6 additions:** the dispatcher now lives in
 // `util/event-buffer.ts::PerSourceTracker`. Behavior:
 //   - Per-source version monotonicity check: gaps log a warning + bump
-//     `droppedCount` (visible via `srvEventStats()`).
+//     `droppedCount`.
 //   - Saga buffering: events between `saga_started`/`saga_completed`
 //     coalesce into a single SolidJS-effect tick (so atom-router
 //     consumers see the saga as one atomic update). Per-event
@@ -30,8 +30,7 @@
 // and `docs/retro/next-steps-architecture-completeness-2026-05-01.md`
 // step 2 for the broader plan.
 
-import { createSignal } from "solid-js";
-import { PerSourceTracker, type EventCallback, type VersionedEvent, type PerSourceStats } from "./event-buffer";
+import { PerSourceTracker, type EventCallback, type VersionedEvent } from "./event-buffer";
 
 /**
  * Wire-format srv event. Matches the JSON serialization of
@@ -51,31 +50,11 @@ import { PerSourceTracker, type EventCallback, type VersionedEvent, type PerSour
  */
 export type SrvEvent = VersionedEvent;
 
-const [latestEvent, setLatestEvent] = createSignal<SrvEvent | null>(null);
-const [eventVersion, setEventVersion] = createSignal<number>(0);
-const [seenAnyEvent, setSeenAnyEvent] = createSignal<boolean>(false);
-
-/** Latest typed event delivered by the srv pipe. Null until the first event. */
-export const srvEvent = latestEvent;
-
-/** Monotonic version of the most recent event. 0 until the first event. */
-export const srvEventVersion = eventVersion;
-
-/**
- * True once we've received at least one srv typed event. Mirrors
- * `launcherEventsActive` — useful to E.6's resync flow to detect
- * "have we seen at least one srv event?" vs "fresh srv pipe."
- */
-export const srvEventsActive = seenAnyEvent;
-
-const tracker = new PerSourceTracker<SrvEvent>(
-    { source: "srv" },
-    {
-        setLatest: setLatestEvent,
-        setVersion: setEventVersion,
-        setSawAny: setSeenAnyEvent,
-    },
-);
+// No signal setters — nothing in the srv pipe reads a "latest
+// event"/"version"/"saw any" signal today (those were dead exports,
+// removed; see git history). `PerSourceTracker`'s setters are optional
+// for exactly this case: don't pay for signal writes nobody reads.
+const tracker = new PerSourceTracker<SrvEvent>({ source: "srv" }, {});
 
 /**
  * Per-event subscriber. Called once per srv event in source order,
@@ -83,19 +62,10 @@ const tracker = new PerSourceTracker<SrvEvent>(
  * an unsubscribe function.
  *
  * Use this for atom routers — every event matters for correct atom
- * state. Use the `srvEvent` signal for "what's the latest event?"
- * style consumers (which see one tick per saga, not one per step).
+ * state.
  */
 export function subscribeSrvEvent(cb: EventCallback<SrvEvent>): () => void {
     return tracker.subscribe(cb);
-}
-
-/**
- * Diagnostic snapshot of the srv pipe's tracker state. Used by
- * `--diag srv` (renderer-side) and by tests.
- */
-export function srvEventStats(): PerSourceStats {
-    return tracker.stats();
 }
 
 let installed = false;

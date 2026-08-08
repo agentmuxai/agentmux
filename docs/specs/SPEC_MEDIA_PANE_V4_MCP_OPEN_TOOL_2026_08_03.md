@@ -1,7 +1,11 @@
 # Spec: Media pane v4 — agent-facing `OpenMedia` MCP tool
 
-**Status:** Proposed
+**Status:** Proposed (implemented — see note below)
 **Author:** AgentY
+
+> **2026-08-07 audit note:** Implemented — `OpenMedia` MCP tool is live in
+> `agentmux-mcp/src/main.rs`. Status field was never updated. See
+> `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
 **Date:** 2026-08-03
 **Related:** `docs/specs/SPEC_MEDIA_PANE_2026_07_26.md` (v1 — implemented,
 PR #2299; this spec's target pane, unchanged here), `docs/specs/SPEC_MEDIA_PANE_V2_AGENT_WORKFLOW_GAPS_2026_07_28.md`,

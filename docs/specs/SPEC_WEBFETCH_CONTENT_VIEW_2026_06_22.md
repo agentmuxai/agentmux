@@ -1,8 +1,12 @@
 # SPEC: WebFetch content view
 
 **Date:** 2026-06-22
-**Status:** Planned
+**Status:** Planned (implemented — see note below)
 **Author:** Lark
+
+> **2026-08-07 audit note:** Implemented (`WebFetchResult.tsx`, PR #1706).
+> Status field was never updated. See
+> `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
 **Related:** `frontend/app/view/agent/components/tool-renderers/WebFetchResult.tsx`,
              `SPEC_TOOL_RESULT_RENDERER_REGISTRY_2026_06_17.md`,
              `RETRO_WEBSEARCH_RICHVIEW_SHIPPED_BROKEN_2026_06_22.md`

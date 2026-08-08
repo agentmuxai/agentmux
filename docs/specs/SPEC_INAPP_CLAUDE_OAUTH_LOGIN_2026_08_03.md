@@ -2,7 +2,13 @@
 
 **Date:** 2026-08-03
 **Author:** Nark
-**Status:** PROPOSED
+**Status:** PROPOSED (implemented — see note below)
+
+> **2026-08-07 audit note:** Implemented 4 days later —
+> `frontend/app/view/agent/providers/catalog.ts` directly cites and
+> implements this spec's findings, wired into `runProviderLogin`. Status
+> field was never updated. See
+> `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
 **Supersedes/updates:** the "in-app OAuth is a DEAD END for Claude v2.1.x" verdict in `frontend/app/view/agent/providers/catalog.ts` and `SPEC_HOST_CLI_LOGIN_CAPTURE_2026_06_20.md` §0's abandonment note; extends `REPORT_AUTH_ARCHITECTURE_STATE_AND_RETHINK_2026_07_21.md` §8 with new evidence.
 **Related:** `PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md` (single-point enforcement stays; this spec fills the "richer per-account Connect UX" follow-up it deferred).
 

@@ -1,8 +1,14 @@
 # SPEC — Cross-Channel Agent Persistence
 
 - **Date:** 2026-06-13
-- **Status:** Proposed — **high priority** (user-flagged "critical")
+- **Status:** Proposed — **high priority** (user-flagged "critical") (implemented — see note below)
 - **Owner:** AgentA
+
+> **2026-08-07 audit note:** Implemented, foundational — "cross-channel agent
+> persistence" is named directly in current code (`paths.rs`) and is
+> load-bearing per `CLAUDE.md`. Badly stale status for a doc flagged
+> critical-priority. See
+> `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
 - **Related:** `SPEC_VERSION_ISOLATION_2026_06_01.md` (§5 Phase 2 introduced per-version data), `SPEC_UNIFIED_AGENT_HISTORY_STORE_2026-06-10.md` (transcript store), data-isolation discussion **#1026**, `RESEARCH_PER_VERSION_DATA_ISOLATION_2026_05_24.md`, `scripts/import-agents.sh` (the current manual workaround this spec retires)
 
 ---

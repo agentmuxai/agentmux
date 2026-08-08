@@ -70,9 +70,6 @@ impl std::error::Error for SpawnGateError {}
 /// — they exist for tracing visibility, not control flow.
 #[derive(Debug, thiserror::Error)]
 pub enum ResolverError {
-    #[error("account not found: {0}")]
-    AccountNotFound(String),
-
     #[error("env var not set in srv environment: {0}")]
     EnvVarMissing(String),
 

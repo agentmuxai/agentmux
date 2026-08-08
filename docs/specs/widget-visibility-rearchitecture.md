@@ -1,6 +1,12 @@
 # Widget Visibility Re-Architecture
 **Date:** 2026-03-11
-**Status:** Proposed
+**Status:** Proposed (implemented — see note below)
+
+> **2026-08-07 audit note:** Implemented — confirmed the "Edit widgets.json"
+> menu entry this spec proposed removing is absent from current code; the
+> pinned/More-dropdown model matches this spec and `CLAUDE.md`'s widget
+> table. 5-month-stale status for shipped code. See
+> `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
 
 ---
 

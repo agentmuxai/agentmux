@@ -21,8 +21,6 @@ impl BrowserPaneManager {
     /// that frontend module (browser-pane content is unreachable from the
     /// DOM — see the module doc on `AppState::browser_pane_zoom`).
     const ZOOM_STEP: f64 = 0.05;
-    const ZOOM_MIN: f64 = 0.5;
-    const ZOOM_MAX: f64 = 2.0;
 
     pub fn zoom_in(&self, block_id: &str, state: &Arc<AppState>) {
         self.step_zoom(block_id, state, Self::ZOOM_STEP);

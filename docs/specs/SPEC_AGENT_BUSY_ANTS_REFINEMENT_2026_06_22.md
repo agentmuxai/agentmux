@@ -2,7 +2,11 @@
 
 **Date:** 2026-06-22
 **Owner:** AgentC
-**Status:** Proposed (design)
+**Status:** Proposed (design) (implemented — see note below)
+
+> **2026-08-07 audit note:** Implemented — the marching-ants bar exists in
+> `_control-bar.scss`. Status field was never updated. See
+> `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
 **Scope:** `frontend/app/view/agent/styles/_control-bar.scss`
 **Builds on:** [`SPEC_AGENT_BUSY_ANIMATION_2026_06_21.md`](./SPEC_AGENT_BUSY_ANIMATION_2026_06_21.md) and PR #1694
 (`feat(agent-pane): replace gradient sweep with marching-ants progress bar`)

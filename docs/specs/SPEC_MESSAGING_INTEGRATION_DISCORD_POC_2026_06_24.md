@@ -1,8 +1,13 @@
 # Spec: Messaging App Integration — Discord POC
 
 **Date:** 2026-06-24  
-**Status:** Draft  
+**Status:** Draft (superseded — see note below)
 **Scope:** Research + POC design for extending AgentMux integrations to messaging apps, starting with Discord
+
+> **2026-08-07 audit note:** Implemented same day (PR #1763) and substantially
+> extended since (`agentmux-srv/src/messaging/discord/{gateway,rest,mod,types}.rs`,
+> through 2026-07-29). This POC's "no cloud server" framing no longer matches
+> the shipped architecture. See `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
 
 ---
 

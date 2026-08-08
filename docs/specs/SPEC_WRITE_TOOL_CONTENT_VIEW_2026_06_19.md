@@ -1,8 +1,13 @@
 # SPEC: Write tool expanded content view
 
 **Date:** 2026-06-19
-**Status:** Planned
+**Status:** Planned (implemented — see note below)
 **Author:** smike
+
+> **2026-08-07 audit note:** Implemented (`renderWrite()` in
+> `ToolOverlayLog.tsx`, PR #1601 — also confirmed by the extending spec
+> below citing it as implemented). Status field was never updated. See
+> `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
 **Related:** `frontend/app/view/agent/components/ToolOverlayLog.tsx` (`renderWrite`),
              `frontend/app/view/agent/components/HighlightedCode.tsx`,
              `frontend/app/view/agent/types.ts` (`WriteParams`, `WriteResult`)

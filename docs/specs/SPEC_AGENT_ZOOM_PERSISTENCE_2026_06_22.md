@@ -1,8 +1,13 @@
 # Per-agent zoom persistence
 
 **Date:** 2026-06-22
-**Status:** Proposed (design)
+**Status:** Proposed (design) (superseded — see note below)
 **Owner:** AgentC
+
+> **2026-08-07 audit note:** Superseded by the generalized universal-zoom
+> framework (`term:zoom` block-meta key), not the agent-specific design
+> proposed here. See
+> `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
 **Area:** agent pane / view zoom, per-agent content storage
 
 ---

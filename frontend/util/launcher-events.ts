@@ -20,7 +20,7 @@
 // See `docs/specs/SPEC_B_7_3_LAUNCHER_EVENTS_TO_RENDERER_2026_04_29.md`.
 
 import { createSignal } from "solid-js";
-import { PerSourceTracker, type EventCallback, type VersionedEvent, type PerSourceStats } from "./event-buffer";
+import { PerSourceTracker, type EventCallback, type VersionedEvent } from "./event-buffer";
 
 /**
  * Wire-format launcher event. Matches the JSON serialization of
@@ -85,11 +85,6 @@ const tracker = new PerSourceTracker<LauncherEvent>(
  */
 export function subscribeLauncherEvent(cb: EventCallback<LauncherEvent>): () => void {
     return tracker.subscribe(cb);
-}
-
-/** Diagnostic snapshot. Used by `--diag launcher` / tests. */
-export function launcherEventStats(): PerSourceStats {
-    return tracker.stats();
 }
 
 let installed = false;

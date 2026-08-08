@@ -1,7 +1,12 @@
 # Migration Framework Spec
 **Date:** 2026-06-24  
-**Status:** Proposed  
+**Status:** Proposed (implemented — see note below)
 **Scope:** agentmux-srv, agentmux-launcher
+
+> **2026-08-07 audit note:** Implemented, foundational — `agentmux-srv/src/migrations/`
+> is a fully built, actively-used framework, directly referenced by the later
+> `SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md`. Badly stale status. See
+> `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
 
 ---
 
