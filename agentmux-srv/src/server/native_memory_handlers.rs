@@ -450,6 +450,7 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                                         &full_content,
                                         full_metadata_type.as_deref(),
                                         &entry.path().to_string_lossy(),
+                                        size_bytes as i64,
                                         modified_at,
                                     ) {
                                         tracing::warn!(agent_id = %agent.id, filename = %name, error = %e, "agent:memory:list: mirror upsert failed (non-fatal)");
@@ -577,6 +578,7 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                             &content,
                             metadata_type.as_deref(),
                             &path.to_string_lossy(),
+                            live_meta.len() as i64,
                             mtime_ms,
                         ) {
                             tracing::warn!(agent_id = %agent.id, filename = %cmd.filename, error = %e, "agent:memory:read_file: mirror upsert failed (non-fatal)");
@@ -663,13 +665,14 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 }
 
                 let metadata_type = parse_frontmatter_type(&cmd.content);
-                // Re-stat the just-written file for its real on-disk mtime rather
-                // than stamping now_ms() here — keeps this in exact agreement with
-                // what a subsequent list() will compute, so the size+mtime change
-                // check there doesn't spuriously treat this write as "changed
-                // again" due to clock/precision drift between the two.
-                let mtime_ms = std::fs::metadata(&dest)
-                    .ok()
+                // Re-stat the just-written file for its real on-disk size/mtime
+                // rather than deriving them from cmd.content here — keeps this
+                // in exact agreement with what a subsequent list() will compute,
+                // so the size+mtime change check there doesn't spuriously treat
+                // this write as "changed again" due to clock/precision drift.
+                let dest_meta = std::fs::metadata(&dest).ok();
+                let size_bytes = dest_meta.as_ref().map(|m| m.len() as i64).unwrap_or(cmd.content.len() as i64);
+                let mtime_ms = dest_meta
                     .and_then(|m| m.modified().ok())
                     .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                     .map(|d| d.as_millis() as i64)
@@ -680,6 +683,7 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                     &cmd.content,
                     metadata_type.as_deref(),
                     &dest.to_string_lossy(),
+                    size_bytes,
                     mtime_ms,
                 ) {
                     tracing::warn!(agent_id = %agent.id, filename = %cmd.filename, error = %e, "agent:memory:write_file: mirror upsert failed (non-fatal)");
@@ -983,7 +987,7 @@ mod tests {
         // Directly stamp a stale mirror row behind the live FS's back — the
         // read path must still prefer the live file, not this stale row.
         shared_id_store
-            .agent_native_memory_upsert("agent-shared-2", "MEMORY.md", "stale mirror content", None, "/nowhere", 0)
+            .agent_native_memory_upsert("agent-shared-2", "MEMORY.md", "stale mirror content", None, "/nowhere", "stale mirror content".len() as i64, 0)
             .unwrap();
 
         let read: NativeMemoryReadFileResult = call_rpc(
@@ -1026,7 +1030,7 @@ mod tests {
         // Pre-mirror some content, so a bug that treats this as "absent" would
         // wrongly succeed by serving it instead of erroring.
         shared_id_store
-            .agent_native_memory_upsert("agent-wrongtype", "MEMORY.md", "mirrored content", None, "/elsewhere", 0)
+            .agent_native_memory_upsert("agent-wrongtype", "MEMORY.md", "mirrored content", None, "/elsewhere", "mirrored content".len() as i64, 0)
             .unwrap();
         let (engine, mut rx) = build_channel_state("agent-wrongtype", "/work/channel-a", config.path(), shared_id_store);
 

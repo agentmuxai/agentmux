@@ -98,12 +98,20 @@ impl Store {
     /// it touches — cheap (one local SQLite write already on the request),
     /// and is what makes native memory durable across a channel switch.
     ///
+    /// `size_bytes` is the file's REAL on-disk size, not necessarily
+    /// `content.len()` — `content` may be truncated at the RPC layer's
+    /// `MAX_MEMORY_FILE_BYTES` cap for a file Claude Code wrote directly
+    /// (bypassing `write_file`'s own size guard). Storing the real size (not
+    /// the capped one) is what lets `agent:memory:list`'s change-detection
+    /// via `(size_bytes, last_seen_mtime_ms)` still work correctly for an
+    /// oversized file — comparing against a capped mirror size would never
+    /// match the live (larger) size, forcing a full re-read + rewrite on
+    /// every single list() call forever (reagent P1 on PR #2459, fourth pass).
+    ///
     /// `mtime_ms` is the live file's own on-disk modified time (0 if
     /// unavailable, e.g. a `write_file` call that hasn't re-stat'd the file
-    /// it just wrote) — stored as `last_seen_mtime_ms` so callers like
-    /// `agent:memory:list` can detect a real content change via
-    /// `(size_bytes, last_seen_mtime_ms)` without re-reading full content on
-    /// every call.
+    /// it just wrote) — stored as `last_seen_mtime_ms` for the same
+    /// change-detection purpose.
     pub fn agent_native_memory_upsert(
         &self,
         agent_id: &str,
@@ -111,6 +119,7 @@ impl Store {
         content: &str,
         metadata_type: Option<&str>,
         last_seen_path: &str,
+        size_bytes: i64,
         mtime_ms: i64,
     ) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
@@ -130,7 +139,7 @@ impl Store {
                 filename,
                 content,
                 metadata_type.unwrap_or(""),
-                content.len() as i64,
+                size_bytes,
                 now_ms(),
                 last_seen_path,
                 mtime_ms,
@@ -153,7 +162,7 @@ mod tests {
     fn upsert_then_read_round_trips() {
         let store = shared_store();
         store
-            .agent_native_memory_upsert("agent-1", "MEMORY.md", "# hello", Some("user"), "/tmp/memory/MEMORY.md", 1000)
+            .agent_native_memory_upsert("agent-1", "MEMORY.md", "# hello", Some("user"), "/tmp/memory/MEMORY.md", 7, 1000)
             .unwrap();
 
         let content = store.agent_native_memory_read("agent-1", "MEMORY.md").unwrap();
@@ -170,10 +179,10 @@ mod tests {
     fn upsert_is_idempotent_and_updates_in_place() {
         let store = shared_store();
         store
-            .agent_native_memory_upsert("agent-1", "MEMORY.md", "v1", None, "/a", 1000)
+            .agent_native_memory_upsert("agent-1", "MEMORY.md", "v1", None, "/a", 2, 1000)
             .unwrap();
         store
-            .agent_native_memory_upsert("agent-1", "MEMORY.md", "v2", Some("user"), "/b", 2000)
+            .agent_native_memory_upsert("agent-1", "MEMORY.md", "v2", Some("user"), "/b", 2, 2000)
             .unwrap();
 
         let content = store.agent_native_memory_read("agent-1", "MEMORY.md").unwrap();
@@ -188,10 +197,28 @@ mod tests {
     }
 
     #[test]
+    fn upsert_stores_the_caller_supplied_size_not_the_content_length() {
+        // reagent P1 on PR #2459 (fourth pass): for a file exceeding the RPC
+        // layer's MAX_MEMORY_FILE_BYTES cap, `content` is truncated but the
+        // real on-disk size is larger — callers pass that real size
+        // explicitly so a later comparison against the live file's actual
+        // size still matches. Deriving size_bytes from content.len() instead
+        // would make an oversized file's mirror row NEVER match the live
+        // size, forcing a full re-read on every single list() call forever.
+        let store = shared_store();
+        store
+            .agent_native_memory_upsert("agent-1", "MEMORY.md", "truncated...", None, "/a", 50_000_000, 1000)
+            .unwrap();
+
+        let meta = store.agent_native_memory_list_meta("agent-1").unwrap();
+        assert_eq!(meta[0].size_bytes, 50_000_000, "size_bytes must be the caller-supplied real size, not content.len()");
+    }
+
+    #[test]
     fn list_meta_scopes_to_the_requested_agent_only() {
         let store = shared_store();
-        store.agent_native_memory_upsert("agent-1", "a.md", "x", None, "/a", 1000).unwrap();
-        store.agent_native_memory_upsert("agent-2", "b.md", "y", None, "/b", 1000).unwrap();
+        store.agent_native_memory_upsert("agent-1", "a.md", "x", None, "/a", 1, 1000).unwrap();
+        store.agent_native_memory_upsert("agent-2", "b.md", "y", None, "/b", 1, 1000).unwrap();
 
         let meta = store.agent_native_memory_list_meta("agent-1").unwrap();
         assert_eq!(meta.len(), 1);
@@ -204,7 +231,7 @@ mod tests {
         // bodies (that's what agent_native_memory_read is for), so a large
         // mirrored file doesn't get loaded into memory just to render a list.
         let store = shared_store();
-        store.agent_native_memory_upsert("agent-1", "a.md", "big content", None, "/a", 1000).unwrap();
+        store.agent_native_memory_upsert("agent-1", "a.md", "big content", None, "/a", 11, 1000).unwrap();
         let meta = store.agent_native_memory_list_meta("agent-1").unwrap();
         assert_eq!(meta[0].content, "");
     }
@@ -215,7 +242,7 @@ mod tests {
         // mirror is the only remaining copy once the live FS file is gone —
         // list/read must still return it from here.
         let store = shared_store();
-        store.agent_native_memory_upsert("agent-1", "MEMORY.md", "content", None, "/gone", 1000).unwrap();
+        store.agent_native_memory_upsert("agent-1", "MEMORY.md", "content", None, "/gone", 7, 1000).unwrap();
 
         let meta = store.agent_native_memory_list_meta("agent-1").unwrap();
         assert_eq!(meta.len(), 1);
