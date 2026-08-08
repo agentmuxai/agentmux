@@ -43,7 +43,15 @@
     overflow-x: auto;
     overflow-y: auto;
     overscroll-behavior: contain;
-    padding: var(--space-1-5) 10px var(--space-1-5) var(--space-2);
+    // The enclosing .agent-tool-panel has ZERO padding (see its comment in
+    // _document-nodes.scss) so this box — and therefore its scrollbars —
+    // reaches the panel's edges. This padding is the content's own inset,
+    // measured from the true surface edge: left/top/bottom carry the
+    // breathing room the panel used to provide; right is deliberately
+    // smaller because it only separates content from the scrollbar (the
+    // scrollbar itself now provides the edge separation).
+    // SPEC_TOOL_PREVIEW_SCROLLBAR_EDGE_PADDING_2026_08_08.md.
+    padding: var(--space-1-5) var(--space-1) var(--space-1-5) var(--space-2);
 
     .agent-tool-log-line {
         margin: 0;
