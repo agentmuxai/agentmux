@@ -18,6 +18,7 @@ import { readActivitySummary } from "@/app/store/activitySummary";
 import { buildConfigFiles } from "./agent-config-builder";
 import { checkNodejsForProvider, agentmuxHome, resolveCliDir } from "./agent-launch-env";
 import { looksLikeRealAccountId } from "./identity-carry-over";
+import { loadAccounts } from "@/app/view/identity/identity-model";
 
 export class AgentViewModel implements ViewModel {
     viewType = "agent";
@@ -657,19 +658,23 @@ export class AgentViewModel implements ViewModel {
             // fails gracefully and just logs a warning. See
             // docs/specs/SPEC_IDENTITY_DIRECT_LINKS_PHASE3_PRC_2026_07_10.md.
             //
-            // #2463 Finding 1: `looksLikeRealAccountId` (not just `!==
-            // "blank"`) is the defense-in-depth check here — every known
-            // call site already filters its own `accountId` before it
-            // reaches `launchAgentDefinition`, but a non-UUID sentinel
-            // ("default", a stale bundle id, any future legacy literal)
-            // reaching this RPC throws `FOREIGN KEY constraint failed`
-            // against `db_accounts`, which this try/catch silently
-            // swallows — so validating here too means a missed call site
-            // fails safe (no link attempt, no swallowed crash) instead of
-            // depending on every caller remembering to filter.
+            // #2463 Finding 1: defense-in-depth — every known call site
+            // already filters its own `accountId` before it reaches
+            // `launchAgentDefinition`, but a stale reference reaching this
+            // RPC throws `FOREIGN KEY constraint failed` against
+            // `db_accounts`, which this try/catch silently swallows. A
+            // UUID-shape check alone (`looksLikeRealAccountId`) isn't
+            // enough: pre-#1624-PR-C identity-bundle ids were ALSO
+            // UUID-formatted, just not account ids (codex P1 on this fix's
+            // PR) — cross-checking against the live account cache closes
+            // that gap too, so a missed/future call site fails safe
+            // instead of depending on every caller filtering perfectly.
             try {
                 const accountId = overrides?.accountId;
-                if (looksLikeRealAccountId(accountId)) {
+                if (
+                    looksLikeRealAccountId(accountId) &&
+                    loadAccounts().some((a) => a.id === accountId)
+                ) {
                     await RpcApi.LinkAgentIdentityCommand(TabRpcClient, {
                         agent_id: agent.id,
                         account_id: accountId,
