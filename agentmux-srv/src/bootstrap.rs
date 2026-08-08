@@ -818,8 +818,8 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
 pub struct BackgroundSubsystems {
     pub event_bus: Arc<EventBus>,
     pub broker: Arc<Broker>,
-    pub editor_file_watcher: Option<Arc<backend::editor_file_watcher::EditorFileWatcher>>,
-    pub media_file_watcher: Option<Arc<backend::media_file_watcher::MediaFileWatcher>>,
+    pub editor_file_watcher: Arc<backend::editor_file_watcher::EditorFileWatcher>,
+    pub media_file_watcher: Arc<backend::media_file_watcher::MediaFileWatcher>,
     pub fs_watch_pool: Arc<backend::fs_watch::FsWatchPool>,
     pub config_watcher: Arc<wconfig::ConfigWatcher>,
     pub reactive_handler: &'static reactive::ReactiveHandler,
@@ -849,25 +849,20 @@ pub fn spawn_background_subsystems(
     broker.set_client(Box::new(bridge));
 
     // Shared filesystem-watcher framework — constructed once, before any
-    // consumer. `config_watcher_fs` below is its first consumer;
-    // `editor_file_watcher`/`media_file_watcher` haven't migrated onto it
-    // yet (see SPEC_SHARED_FS_WATCHER_FRAMEWORK_2026_08_07.md §5).
+    // consumer, all three of which now build on it (see
+    // SPEC_SHARED_FS_WATCHER_FRAMEWORK_2026_08_07.md §5's migration order:
+    // config_watcher_fs first, editor+media here, native memory as a future
+    // consumer).
     let fs_watch_pool = backend::fs_watch::FsWatchPool::new();
 
     // Watches files open in editor/preview panes, publishing a per-block
     // wake signal on external changes. See SPEC_EDITOR_LIVE_FILE_RELOAD_2026_07_18.md.
-    let editor_file_watcher = backend::editor_file_watcher::EditorFileWatcher::new(broker.clone());
-    if editor_file_watcher.is_none() {
-        tracing::warn!("editor file watcher not started; editor panes will not live-reload on external changes");
-    }
+    let editor_file_watcher = backend::editor_file_watcher::EditorFileWatcher::new(fs_watch_pool.clone(), broker.clone());
 
     // Watches directories a Media pane is pointed at, publishing a per-block
     // wake signal when a matching-extension file changes. See
     // SPEC_MEDIA_PANE_2026_07_26.md.
-    let media_file_watcher = backend::media_file_watcher::MediaFileWatcher::new(broker.clone());
-    if media_file_watcher.is_none() {
-        tracing::warn!("media file watcher not started; media panes will not live-update on new/changed files");
-    }
+    let media_file_watcher = backend::media_file_watcher::MediaFileWatcher::new(fs_watch_pool.clone(), broker.clone());
 
     // Deploy shell integration scripts (muxlog.mjs/muxspect.mjs + rcfiles)
     // unconditionally at startup, not opportunistically from a specific

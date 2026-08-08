@@ -7,11 +7,13 @@
 //! matching file changed" wake signal so panes update without a manual
 //! reload.
 //!
-//! Directory-mode sibling of `editor_file_watcher.rs`'s single-file watcher:
-//! that one watches individually-opened files (one entry per open tab);
-//! this one watches whole directories directly, filtered by a per-subscriber
-//! extension set, since a Media pane's job is "show me the latest render in
-//! this folder," not "watch this one exact file."
+//! Migrated onto the shared `fs_watch::FsWatchPool`
+//! (SPEC_SHARED_FS_WATCHER_FRAMEWORK_2026_08_07.md), alongside
+//! `editor_file_watcher.rs` in the same PR. Directory-mode sibling of that
+//! file: that one watches individually-opened files (one entry per open
+//! tab); this one watches whole directories directly, filtered by a
+//! per-subscriber extension set, since a Media pane's job is "show me the
+//! latest render in this folder," not "watch this one exact file."
 //!
 //! Spec: docs/specs/SPEC_MEDIA_PANE_2026_07_26.md
 
@@ -21,10 +23,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde_json::json;
-use tokio::sync::mpsc;
+use tokio::sync::broadcast;
 
+use super::fs_watch::{FsWatchPool, Subscription};
 use super::wps::{Broker, WaveEvent};
 
 /// WPS event fired when a file matching a Media pane's extension filter is
@@ -39,9 +41,13 @@ const DEBOUNCE: Duration = Duration::from_millis(300);
 
 struct Inner {
     /// Canonicalized directory -> (block id -> lowercase extensions that
-    /// block cares about, no leading dot). A directory is under active OS
-    /// watch exactly while this map has at least one entry for it.
+    /// block cares about, no leading dot). A directory has a live pool
+    /// subscription exactly while this map has at least one entry for it.
     watched_dirs: HashMap<PathBuf, HashMap<String, HashSet<String>>>,
+    /// One pool subscription per watched directory — see
+    /// `editor_file_watcher.rs::Inner::pool_subs`'s doc comment for why this
+    /// bookkeeping is separate from the pool's own OS-level refcounting.
+    pool_subs: HashMap<PathBuf, Subscription>,
 }
 
 /// Per-file debounce generation counters, same collapsing-burst-writes
@@ -51,55 +57,39 @@ struct Inner {
 type DebounceGens = Mutex<HashMap<PathBuf, Arc<AtomicU64>>>;
 
 pub struct MediaFileWatcher {
-    _watcher: Mutex<RecommendedWatcher>,
+    pool: Arc<FsWatchPool>,
     inner: Mutex<Inner>,
     debounce_gens: DebounceGens,
     broker: Arc<Broker>,
 }
 
 impl MediaFileWatcher {
-    /// Construct and start the watcher. Returns `None` if the underlying
-    /// `notify` watcher can't be created — live-update is a nice-to-have,
-    /// not a boot requirement (matches `EditorFileWatcher::new`).
-    pub fn new(broker: Arc<Broker>) -> Option<Arc<Self>> {
-        let (tx, mut rx) = mpsc::unbounded_channel::<PathBuf>();
-
-        let watcher = match notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-            match res {
-                Ok(event) => {
-                    if matches!(event.kind, EventKind::Modify(_) | EventKind::Create(_)) {
-                        for path in event.paths {
-                            let _ = tx.send(path);
-                        }
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, "media file watcher error");
-                }
-            }
-        }) {
-            Ok(w) => w,
-            Err(e) => {
-                tracing::warn!(error = %e, "failed to create media file watcher");
-                return None;
-            }
-        };
-
+    /// Construct and start the watcher, subscribing to `pool`'s shared
+    /// broadcast stream. Always succeeds — see `EditorFileWatcher::new`'s
+    /// doc comment for why there's no `Option` to check anymore.
+    pub fn new(pool: Arc<FsWatchPool>, broker: Arc<Broker>) -> Arc<Self> {
         let this = Arc::new(Self {
-            _watcher: Mutex::new(watcher),
-            inner: Mutex::new(Inner { watched_dirs: HashMap::new() }),
+            pool: pool.clone(),
+            inner: Mutex::new(Inner { watched_dirs: HashMap::new(), pool_subs: HashMap::new() }),
             debounce_gens: Mutex::new(HashMap::new()),
             broker,
         });
 
+        let mut events = pool.events();
         let worker = this.clone();
         tokio::spawn(async move {
-            while let Some(changed_path) = rx.recv().await {
-                worker.handle_fs_event(changed_path);
+            loop {
+                match events.recv().await {
+                    Ok(ev) => worker.handle_fs_event(ev.path),
+                    Err(broadcast::error::RecvError::Closed) => break,
+                    Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                        tracing::warn!(skipped, "media file watcher lagged behind the fs_watch broadcast stream");
+                    }
+                }
             }
         });
 
-        Some(this)
+        this
     }
 
     /// Start watching `dir` on behalf of `block_id`, notifying only for
@@ -117,10 +107,8 @@ impl MediaFileWatcher {
         subscribers.insert(block_id.to_string(), ext_set);
 
         if is_new_dir {
-            let mut w = self._watcher.lock().unwrap();
-            if let Err(e) = w.watch(&canonical, RecursiveMode::NonRecursive) {
-                tracing::warn!(dir = %canonical.display(), error = %e, "failed to watch media directory");
-            }
+            let sub = self.pool.subscribe_dir(&canonical);
+            inner.pool_subs.insert(canonical.clone(), sub);
         }
         tracing::debug!(dir = %canonical.display(), block_id, "media dir watch: started/updated");
     }
@@ -138,11 +126,10 @@ impl MediaFileWatcher {
             return;
         }
         inner.watched_dirs.remove(&canonical);
+        if let Some(sub) = inner.pool_subs.remove(&canonical) {
+            self.pool.unsubscribe(sub);
+        }
         drop(inner);
-
-        let mut w = self._watcher.lock().unwrap();
-        let _ = w.unwatch(&canonical);
-        drop(w);
 
         // Prune debounce entries for files under this now-unwatched dir —
         // same rationale as EditorFileWatcher::unwatch_path: don't let
@@ -239,7 +226,8 @@ mod tests {
     #[tokio::test]
     async fn test_watch_unwatch_refcounting_does_not_panic() {
         let broker = Arc::new(Broker::new());
-        let watcher = MediaFileWatcher::new(broker).expect("watcher should construct");
+        let pool = FsWatchPool::new();
+        let watcher = MediaFileWatcher::new(pool, broker);
 
         let tmp_dir = std::env::temp_dir().join("agentmux_media_watch_test");
         std::fs::create_dir_all(&tmp_dir).unwrap();
@@ -316,5 +304,49 @@ mod tests {
 
         let events = client.events.lock().unwrap();
         assert_eq!(events.len(), 0, "png-only block must not receive a .webm change event");
+    }
+
+    #[tokio::test]
+    async fn test_end_to_end_real_fs_write_triggers_publish_for_matching_extension() {
+        // Regression for the migration itself: a real notify event flowing
+        // through the shared pool must still reach this watcher's own
+        // extension-filter + debounce + publish path.
+        let broker = Arc::new(Broker::new());
+        let client = Arc::new(TestClient { events: StdMutex::new(Vec::new()) });
+        broker.set_client(Box::new(client.clone()));
+        broker.subscribe(
+            "route-e2e",
+            super::super::wps::SubscriptionRequest {
+                event: EVENT_MEDIA_FILE_CHANGED.to_string(),
+                scopes: vec!["block:e2e".to_string()],
+                allscopes: false,
+            },
+        );
+
+        let pool = FsWatchPool::new();
+        let watcher = MediaFileWatcher::new(pool, broker);
+
+        let dir = std::env::temp_dir().join("agentmux_media_watch_e2e_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        watcher.watch_directory(&dir, "e2e", &["webm".to_string()]);
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        std::fs::write(dir.join("render.webm"), b"fake video bytes").unwrap();
+
+        let saw_it = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if !client.events.lock().unwrap().is_empty() {
+                    return true;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .unwrap_or(false);
+
+        assert!(saw_it, "expected a real .webm write to reach the publish path via the shared pool");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
