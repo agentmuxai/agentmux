@@ -21,6 +21,7 @@ import { For, onCleanup, Show, type JSX } from "solid-js";
 
 import { PrimitiveListDetail } from "@/app/element/primitive-list-detail";
 import { useModalLayer } from "@/app/element/modal-layer";
+import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { type MemoryDraft, MemoryViewModel } from "./memory-model";
 
 import "./memory-view.scss";
@@ -245,6 +246,7 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
                                     type="text"
                                     value={draft().name}
                                     onInput={(e) => updateDraft("name", e.currentTarget.value)}
+                                    onContextMenu={showTextInputContextMenu}
                                     placeholder="e.g. Claude-coder"
                                     required
                                 />
@@ -259,6 +261,7 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
                                     onInput={(e) =>
                                         updateDraft("description", e.currentTarget.value)
                                     }
+                                    onContextMenu={showTextInputContextMenu}
                                     placeholder="Short label shown in the launch picker"
                                 />
                             </label>
@@ -276,6 +279,7 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
                                     onInput={(e) =>
                                         updateDraft("instructions", e.currentTarget.value)
                                     }
+                                    onContextMenu={showTextInputContextMenu}
                                     placeholder="System prompt. The agent's soul."
                                 />
                             </label>

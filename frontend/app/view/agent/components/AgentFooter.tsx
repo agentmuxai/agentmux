@@ -11,6 +11,7 @@ import { getVoiceSession, type PaneVoiceHandle } from "@/app/hook/useVoiceInput"
 import { markEnd, markStart } from "@/perf";
 import { makeORef } from "@/app/store/wos";
 import { atoms } from "@/app/store/global";
+import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { ObjectService } from "@/app/store/services";
 import { fireAndForget } from "@/util/util";
 import { formatCompactNumber } from "@/util/format-count";
@@ -854,6 +855,13 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
                         // dropdown reflects the committed text.
                         updateAutocomplete();
                     }}
+                    // The pane body's own onContextMenu (blockframe.tsx) only
+                    // ever offers Copy-on-selection and never Paste (agent
+                    // panes aren't `view: "term"`) — without this, right-click
+                    // here silently shows a useless disabled-Copy menu instead
+                    // of letting the user paste. See
+                    // docs/specs/REPORT_CONTEXT_MENU_GAP_AUDIT_2026_08_07.md.
+                    onContextMenu={showTextInputContextMenu}
                     rows={1}
                 />
                 {/* Pinned to the composer's right edge instead of the pane's

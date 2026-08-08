@@ -19,6 +19,7 @@
 
 import { createEffect, createMemo, createSignal, createUniqueId, For, onCleanup, Show, type Accessor, type JSX } from "solid-js";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
+import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import type { PermissionRequestEvent, ToolNode } from "../types";
 
 export interface DecisionOutcome {
@@ -390,6 +391,7 @@ export const AgentDecisionPanel = (props: AgentDecisionPanelProps): JSX.Element 
                                 setFeedback(e.currentTarget.value);
                                 if (denyError()) setDenyError(null);
                             }}
+                            onContextMenu={showTextInputContextMenu}
                             rows={3}
                             autofocus
                             aria-invalid={denyError() != null}

@@ -8,14 +8,14 @@ import "./diag/replace-child-diagnostic";
 
 import { Workspace } from "@/app/workspace/workspace";
 import { FloatingPaneWorkspace } from "@/app/workspace/floating-pane-workspace";
-import { ContextMenuModel } from "@/store/contextmenu";
+import { showTextInputContextMenu } from "@/store/contextmenu";
 import { LIGHT_THEME_IDS } from "@/app/menu/base-menus";
-import { atoms, getApi, getSettingsPrefixAtom, isDev, openLink, removeFlashError, flashErrors } from "@/store/global";
+import { atoms, getApi, getSettingsPrefixAtom, isDev, removeFlashError, flashErrors } from "@/store/global";
 import { appHandleKeyDown, keyboardMouseDownHandler } from "@/store/keymodel";
 import { chromeZoomIn, chromeZoomOut, zoomBlockIn, zoomBlockOut, WHEEL_STEP } from "@/store/zoom.platform";
 import { getElemAsStr } from "@/util/focusutil";
 import * as keyutil from "@/util/keyutil";
-import { readText as clipboardReadText, writeText as clipboardWriteText } from "@/util/clipboard";
+import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { PLATFORM } from "@/util/platformutil";
 import * as util from "@/util/util";
 import clsx from "clsx";
@@ -48,80 +48,6 @@ const focusLog = debug("wave:focus");
 const App = () => {
     return <AppInner />;
 };
-
-function isContentEditableBeingEdited(): boolean {
-    const activeElement = document.activeElement;
-    return (
-        activeElement &&
-        activeElement.getAttribute("contenteditable") !== null &&
-        activeElement.getAttribute("contenteditable") !== "false"
-    );
-}
-
-function canEnablePaste(): boolean {
-    const activeElement = document.activeElement;
-    return activeElement.tagName === "INPUT" || activeElement.tagName === "TEXTAREA" || isContentEditableBeingEdited();
-}
-
-function canEnableCopy(): boolean {
-    const sel = window.getSelection();
-    return !util.isBlank(sel?.toString());
-}
-
-function canEnableCut(): boolean {
-    const sel = window.getSelection();
-    if (document.activeElement?.classList.contains("xterm-helper-textarea")) {
-        return false;
-    }
-    return !util.isBlank(sel?.toString()) && canEnablePaste();
-}
-
-async function getClipboardURL(): Promise<URL> {
-    try {
-        const clipboardText = await clipboardReadText();
-        if (clipboardText == null) {
-            return null;
-        }
-        const url = new URL(clipboardText);
-        if (!url.protocol.startsWith("http")) {
-            return null;
-        }
-        return url;
-    } catch (e) {
-        return null;
-    }
-}
-
-async function handleContextMenu(e: MouseEvent) {
-    e.preventDefault();
-    const canPaste = canEnablePaste();
-    const canCopy = canEnableCopy();
-    const canCut = canEnableCut();
-    const clipboardURL = await getClipboardURL();
-    if (!canPaste && !canCopy && !canCut && !clipboardURL) {
-        return;
-    }
-    let menu: ContextMenuItem[] = [];
-    if (canCut) {
-        menu.push({ label: "Cut", role: "cut" });
-    }
-    if (canCopy) {
-        menu.push({ label: "Copy", role: "copy" });
-    }
-    if (canPaste) {
-        menu.push({ label: "Paste", role: "paste" });
-    }
-    if (clipboardURL) {
-        menu.push({ type: "separator" });
-        menu.push({
-            label: "Open Clipboard URL (" + clipboardURL.hostname + ")",
-            click: () => {
-                openLink(clipboardURL.toString());
-            },
-        });
-    }
-    ContextMenuModel.showContextMenu(menu, e);
-}
 
 function AppSettingsUpdater() {
     const windowSettingsAtom = getSettingsPrefixAtom("window");
@@ -406,7 +332,7 @@ const AppInner = () => {
                     "prefers-reduced-motion": prefersReducedMotion(),
                     "floating-pane-mode": IS_FLOATING_PANE,
                 })}
-                onContextMenu={handleContextMenu}
+                onContextMenu={showTextInputContextMenu}
             >
                 <AppBackground />
                 <AppKeyHandlers />

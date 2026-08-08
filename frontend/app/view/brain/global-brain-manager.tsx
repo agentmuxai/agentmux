@@ -12,6 +12,7 @@
 // bundle_* RPCs. Spec: specs/archive/SPEC_TRUST_CENTER_GLOBAL_BRAIN_2026_06_19.md.
 
 import { createSignal, For, onCleanup, Show, type JSX } from "solid-js";
+import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { GlobalBrainViewModel, NEW_SECTION_ID } from "./global-brain-model";
 import "./global-brain.scss";
 
@@ -27,6 +28,7 @@ function SectionEditor(props: { model: GlobalBrainViewModel; isNew: boolean }): 
                     type="text"
                     value={model.draftNameAtom()}
                     onInput={(e) => model.setDraftName(e.currentTarget.value)}
+                    onContextMenu={showTextInputContextMenu}
                     placeholder="e.g. Coding Standards"
                 />
             </label>
@@ -37,6 +39,7 @@ function SectionEditor(props: { model: GlobalBrainViewModel; isNew: boolean }): 
                     rows={8}
                     value={model.draftInstructionsAtom()}
                     onInput={(e) => model.setDraftInstructions(e.currentTarget.value)}
+                    onContextMenu={showTextInputContextMenu}
                     placeholder="Markdown injected into every agent's CLAUDE.md under a # [Workspace] heading."
                     spellcheck={false}
                 />
