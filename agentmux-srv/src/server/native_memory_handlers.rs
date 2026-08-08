@@ -335,13 +335,39 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                     .unwrap_or_default();
                 let memory_dir = memory_dir_for_cwd(&config_dir, &agent.working_directory);
 
+                // Existing mirror metadata (no content) for this agent, keyed by
+                // filename — lets the loop below skip the expensive full-content
+                // read+upsert for a file whose size hasn't changed since it was
+                // last mirrored, instead of doing it unconditionally on every
+                // list call (reagent P1 on PR #2459: `list` fires on every Stash
+                // Memory tab open/refresh, so an unconditional full read + SQLite
+                // write per file would mean synchronous, potentially many-MB
+                // disk I/O on a call meant to be a lightweight metadata listing).
+                // A same-size-but-changed-content file is a known, accepted gap
+                // here — read_file always re-reads the live file fresh regardless,
+                // so this can only make the mirror (not the read path) briefly stale.
+                let mirrored_meta: std::collections::HashMap<String, i64> = id_store
+                    .agent_native_memory_list_meta(&agent.id)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|row| (row.filename, row.size_bytes))
+                    .collect();
+
                 let mut files: Vec<NativeMemoryFileMeta> = Vec::new();
                 let mut live_filenames: std::collections::HashSet<String> = std::collections::HashSet::new();
-                // Treat both "dir doesn't exist" and the TOCTOU case where the dir
-                // is deleted between exists() and read_dir() as an empty result —
-                // the mirror merge below still runs, so a wiped live folder
-                // doesn't lose durability for files it mirrored previously.
-                let entries = std::fs::read_dir(&memory_dir).ok();
+                // Only a missing directory (never-yet-written, or wiped after this
+                // channel last had files) is treated as "no live files" — any
+                // other read_dir error (permissions, I/O) propagates, matching the
+                // pre-mirror behavior (reagent P2 on PR #2459: silently swallowing
+                // every error here would hide a real access problem behind what
+                // looks like an empty listing). The mirror merge below still runs
+                // regardless, so a wiped live folder doesn't lose durability for
+                // files it mirrored previously.
+                let entries = match std::fs::read_dir(&memory_dir) {
+                    Ok(e) => Some(e),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+                    Err(e) => return Err(format!("agent:memory:list: read_dir: {e}")),
+                };
 
                 if let Some(entries) = entries {
                     for entry in entries {
@@ -372,30 +398,44 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                             .map(|d| d.as_millis() as i64)
                             .unwrap_or(0);
 
-                        // Read the full file (same cap as read_file) — both for
-                        // frontmatter parsing and to write through into the
-                        // durable mirror below.
-                        let content = {
+                        // Read up to 512 bytes for frontmatter type parsing — same
+                        // cheap preview the pre-mirror code used. Take + read_to_end
+                        // loops internally to fill the buffer.
+                        let preview_content = {
                             use std::io::Read;
                             std::fs::File::open(entry.path())
                                 .map(|f| {
-                                    let mut buf = Vec::new();
-                                    f.take(MAX_MEMORY_FILE_BYTES).read_to_end(&mut buf).ok();
+                                    let mut buf = Vec::with_capacity(512);
+                                    f.take(512).read_to_end(&mut buf).ok();
                                     String::from_utf8_lossy(&buf).into_owned()
                                 })
                                 .unwrap_or_default()
                         };
-                        let metadata_type = parse_frontmatter_type(&content);
+                        let metadata_type = parse_frontmatter_type(&preview_content);
                         let is_index = name == "MEMORY.md";
 
-                        if let Err(e) = id_store.agent_native_memory_upsert(
-                            &agent.id,
-                            &name,
-                            &content,
-                            metadata_type.as_deref(),
-                            &entry.path().to_string_lossy(),
-                        ) {
-                            tracing::warn!(agent_id = %agent.id, filename = %name, error = %e, "agent:memory:list: mirror upsert failed (non-fatal)");
+                        let unchanged_since_last_mirror = mirrored_meta.get(&name) == Some(&(size_bytes as i64));
+                        if !unchanged_since_last_mirror {
+                            let full_content = {
+                                use std::io::Read;
+                                std::fs::File::open(entry.path())
+                                    .map(|f| {
+                                        let mut buf = Vec::new();
+                                        f.take(MAX_MEMORY_FILE_BYTES).read_to_end(&mut buf).ok();
+                                        String::from_utf8_lossy(&buf).into_owned()
+                                    })
+                                    .unwrap_or_default()
+                            };
+                            let full_metadata_type = parse_frontmatter_type(&full_content);
+                            if let Err(e) = id_store.agent_native_memory_upsert(
+                                &agent.id,
+                                &name,
+                                &full_content,
+                                full_metadata_type.as_deref(),
+                                &entry.path().to_string_lossy(),
+                            ) {
+                                tracing::warn!(agent_id = %agent.id, filename = %name, error = %e, "agent:memory:list: mirror upsert failed (non-fatal)");
+                            }
                         }
                         live_filenames.insert(name.clone());
 
@@ -916,6 +956,80 @@ mod tests {
         )
         .await;
         assert!(err.contains("not found"), "unexpected error: {err}");
+    }
+
+    #[tokio::test]
+    async fn list_propagates_a_real_read_dir_error_instead_of_treating_it_as_empty() {
+        // reagent P2 on PR #2459: `std::fs::read_dir(&memory_dir).ok()` used to
+        // swallow every error (permissions, I/O — not just the legitimate
+        // "directory doesn't exist yet" case), silently reporting an empty
+        // listing instead of surfacing a real access problem. Force a
+        // non-NotFound read_dir error by making the "memory" path a regular
+        // file instead of a directory.
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let shared_id_store = Arc::new(Store::open_shared(tmp.path()).unwrap());
+        let config = tempfile::tempdir().unwrap();
+
+        // memory_dir_for_cwd sanitizes "/work/channel-a" to "-work-channel-a".
+        let projects_dir = config.path().join("projects").join("-work-channel-a");
+        std::fs::create_dir_all(&projects_dir).unwrap();
+        std::fs::write(projects_dir.join("memory"), b"not a directory").unwrap();
+
+        let (engine, mut rx) = build_channel_state("agent-baddir", "/work/channel-a", config.path(), shared_id_store);
+
+        let err = call_rpc_expect_error(
+            &engine,
+            &mut rx,
+            COMMAND_NATIVE_MEMORY_LIST,
+            serde_json::json!({ "agent_id": "agent-baddir" }),
+        )
+        .await;
+        assert!(err.contains("read_dir"), "expected a propagated read_dir error, got: {err}");
+    }
+
+    #[tokio::test]
+    async fn list_does_not_re_upsert_an_unchanged_file_on_a_second_call() {
+        // reagent P1 on PR #2459: list() must not do a full-content read +
+        // SQLite write for every file on every call — only for a file whose
+        // size differs from what's already mirrored. Two back-to-back list()
+        // calls on an untouched file should produce exactly one mirror write.
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let shared_id_store = Arc::new(Store::open_shared(tmp.path()).unwrap());
+        let config = tempfile::tempdir().unwrap();
+        let (engine, mut rx) = build_channel_state("agent-unchanged", "/work/channel-a", config.path(), shared_id_store.clone());
+
+        let memory_dir = config.path().join("projects").join("-work-channel-a").join("memory");
+        std::fs::create_dir_all(&memory_dir).unwrap();
+        std::fs::write(memory_dir.join("MEMORY.md"), "stable content").unwrap();
+
+        let _: NativeMemoryListResult = call_rpc(
+            &engine,
+            &mut rx,
+            COMMAND_NATIVE_MEMORY_LIST,
+            serde_json::json!({ "agent_id": "agent-unchanged" }),
+        )
+        .await;
+        let first_updated_at = shared_id_store
+            .agent_native_memory_list_meta("agent-unchanged")
+            .unwrap()[0]
+            .updated_at;
+
+        let _: NativeMemoryListResult = call_rpc(
+            &engine,
+            &mut rx,
+            COMMAND_NATIVE_MEMORY_LIST,
+            serde_json::json!({ "agent_id": "agent-unchanged" }),
+        )
+        .await;
+        let second_updated_at = shared_id_store
+            .agent_native_memory_list_meta("agent-unchanged")
+            .unwrap()[0]
+            .updated_at;
+
+        assert_eq!(
+            first_updated_at, second_updated_at,
+            "an unchanged file must not be re-upserted into the mirror on a second list() call"
+        );
     }
 
     #[test]
