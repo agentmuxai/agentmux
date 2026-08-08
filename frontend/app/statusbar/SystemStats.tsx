@@ -266,6 +266,7 @@ const SystemStats = (): JSX.Element => {
                             <Portal>
                                 <DiskVolumesPopover
                                     anchorRect={diskAnchorRect()}
+                                    initialVolumes={diskVolumes()}
                                     ref={(el) => { diskPopoverRef = el; }}
                                 />
                             </Portal>

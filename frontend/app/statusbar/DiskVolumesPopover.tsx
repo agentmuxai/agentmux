@@ -21,6 +21,11 @@ import { diskFreeColor, formatDiskGb, parseDiskVolumes, type DiskVolume } from "
 
 interface DiskVolumesPopoverProps {
     anchorRect: DOMRect | null;
+    /** Parent's latest parsed snapshot — seeds the list so opening the panel
+     *  shows data immediately instead of "Reading drives…" until the next
+     *  sysinfo tick (the WPS route suppresses event replay for this second
+     *  subscription, so a fresh mount would otherwise start empty). */
+    initialVolumes?: DiskVolume[];
     ref?: (el: HTMLDivElement) => void;
 }
 
@@ -31,7 +36,7 @@ export const DiskVolumesPopover = (props: DiskVolumesPopoverProps): JSX.Element 
     // bar overlaps — same primitive as CpuCoresPopover / TokenBreakdownPopover.
     usePaneOverlay(() => rootRef);
 
-    const [volumes, setVolumes] = createSignal<DiskVolume[]>([]);
+    const [volumes, setVolumes] = createSignal<DiskVolume[]>(props.initialVolumes ?? []);
 
     onMount(() => {
         const unsub = waveEventSubscribe({
