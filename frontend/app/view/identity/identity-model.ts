@@ -11,6 +11,7 @@ import { BlockNodeModel } from "@/app/block/blocktypes";
 import { createSignal, type Accessor, type Setter } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { waveEventSubscribe } from "@/app/store/wps";
 import { Logger } from "@/util/logger";
 import { brandForProvider } from "@/app/view/accounts/provider-brand";
 
@@ -314,9 +315,32 @@ export async function refreshAccountCache(): Promise<Account[]> {
     }
 }
 
+let _liveSyncInstalled = false;
+
 /** Run once at app startup. Idempotent — repeated calls just refresh. */
 export function primeAccountCache(): void {
     void refreshAccountCache();
+    // Live sync: refresh the cache on every backend `identityaccounts:changed`
+    // broadcast, so accounts created/edited/deleted by ANY path — the in-app
+    // OAuth login persist, API-key verify, upsert/delete RPCs from another
+    // tab, the spawn-time expiry probe — propagate to every cache consumer
+    // (Armory Accounts tab, launch modal, pickers) without a reload.
+    // Previously the cache was only refreshed by its own CRUD methods'
+    // explicit calls, so backend-originated account creation (e.g. completing
+    // an in-app OAuth login) left the Armory stale until reopen/reload, and
+    // each consumer that wanted liveness had to hand-roll its own event
+    // subscription (AgentLaunchModal did exactly that).
+    //
+    // App-lifetime subscription, deliberately never unsubscribed — the cache
+    // itself is module-level app-lifetime state. Guarded so repeated
+    // primeAccountCache() calls don't stack duplicate handlers.
+    if (!_liveSyncInstalled) {
+        _liveSyncInstalled = true;
+        waveEventSubscribe({
+            eventType: "identityaccounts:changed",
+            handler: () => void refreshAccountCache(),
+        });
+    }
 }
 
 // ── ViewModel ────────────────────────────────────────────────────────────────
