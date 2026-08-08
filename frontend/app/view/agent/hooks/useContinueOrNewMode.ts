@@ -26,7 +26,8 @@ import {
     continueLocksMemory as flowContinueLocksMemory,
     type LaunchFlowStore,
 } from "@/app/store/launch-flow-state";
-import { looksLikeRealAccountId } from "@/app/view/agent/identity-carry-over";
+import { realAccountIdOrEmpty } from "@/app/view/agent/identity-carry-over";
+import { refreshAccountCache } from "@/app/view/identity/identity-model";
 
 export interface UseContinueOrNewModeOpts {
     /** The launch-flow reactive store — pass BY REFERENCE (the whole
@@ -95,30 +96,54 @@ export function useContinueOrNewMode(opts: UseContinueOrNewModeOpts) {
     const continueLocksIdentity = createMemo(() => flowContinueLocksIdentity(flow.state));
     const continueLocksMemory = createMemo(() => flowContinueLocksMemory(flow.state));
 
-    const handleContinueSelect = (rawId: string) => {
+    // Sequencing guard (reagentx P1 on #2464): handleContinueSelect awaits
+    // an RPC round-trip (refreshAccountCache) before dispatching, which it
+    // didn't when this was fully synchronous. Without this, two calls in
+    // flight at once (e.g. the user changes the dropdown selection again
+    // before the first fetch resolves) could resolve out of order, and a
+    // stale call finishing last would dispatch over a newer selection —
+    // silently locking the form to the wrong prior instance's account
+    // while the UI shows a different one. Only the most-recently-STARTED
+    // call is allowed to dispatch; every earlier in-flight call drops its
+    // result silently once superseded.
+    let continueSelectSeq = 0;
+    const handleContinueSelect = async (rawId: string) => {
+        const seq = ++continueSelectSeq;
         const id = rawId === "" ? null : rawId;
         const row =
             id === null
                 ? null
                 : (namedAgents() ?? []).find((r) => r.instance_id === id) ?? null;
-        // Legacy rows may carry "" or "blank" identity_id/memory_id
-        // from before the blank-removal, or (pre-issue-#1624-PR-C rows)
-        // a legacy sentinel like "default" that no longer resolves to
-        // a real account. Treat all of these as "no carry-over" so the
-        // user must pick a real account for the continuation — an
-        // unresolvable carried id already falls back to "re-pick" here
-        // rather than needing a backend resolution step. Forwarding one
-        // of these as accountId causes a real FOREIGN KEY failure in
-        // linkagentidentity (see identity-carry-over.ts), so this is a
-        // UUID-shape allowlist, not a per-literal blacklist — it covers
-        // every legacy sentinel, not just the ones observed so far.
+        // Legacy rows may carry "" or "blank" identity_id from before the
+        // blank-removal, or (pre-issue-#1624-PR-C rows) a legacy sentinel
+        // like "default" that no longer resolves to a real account. Treat
+        // all of these as "no carry-over" so the user must pick a real
+        // account for the continuation — an unresolvable carried id
+        // already falls back to "re-pick" here rather than needing a
+        // backend resolution step. Forwarding one of these as accountId
+        // causes a real FOREIGN KEY failure in linkagentidentity (see
+        // identity-carry-over.ts's realAccountIdOrEmpty). A UUID-shape
+        // check alone isn't enough — a pre-#1624-PR-C identity-bundle id
+        // was also UUID-formatted, just not an account id — so this cross-
+        // checks against a fresh account fetch (reagentx P2 on #2464,
+        // flagging this call site was still on the shape-only check while
+        // AgentPicker.tsx's sibling call sites got the stronger one).
+        //
+        // memoryId intentionally does NOT get the same treatment: unlike
+        // account_id, memory_id has no FK constraint, and legitimate
+        // bundle ids are routinely non-UUID ("blank", "seed-*" —
+        // memory_bundles.rs/bundle.rs) rather than legacy garbage — a
+        // UUID-shape filter here would silently drop a real carry-over
+        // (reagentx P2 on #2464, which found the same mistake newly
+        // introduced elsewhere).
         const carry = row
             ? {
                   name: row.instance_name,
-                  accountId: looksLikeRealAccountId(row.identity_id) ? row.identity_id : "",
-                  memoryId: looksLikeRealAccountId(row.memory_id) ? row.memory_id : "",
+                  accountId: realAccountIdOrEmpty(row.identity_id, (await refreshAccountCache()).map((a) => a.id)),
+                  memoryId: row.memory_id,
               }
             : undefined;
+        if (seq !== continueSelectSeq) return; // superseded by a later call — drop this stale dispatch
         flow.dispatch({ type: "ContinueOfChanged", continueOfId: id, carry });
     };
 

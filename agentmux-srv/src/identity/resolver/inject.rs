@@ -38,9 +38,14 @@ use super::secret::resolve_secret;
 /// 1. Look up the active `AgentInstance` for this block. If none
 ///    exists, the caller didn't go through the launch modal — return
 ///    immediately, no injection.
-/// 2. Read its `identity_id`. Empty / "blank" → no injection (the
-///    user picked the blank singleton at launch, meaning "use ambient
-///    creds").
+/// 2. Read its `identity_id`. Empty / "blank" no longer short-circuits to
+///    ambient creds (see #2463 — this used to bypass the layer-3 gate
+///    entirely, so whether a spawn required a bound account depended on
+///    whether a stray ambient credential happened to exist on the test
+///    machine). It now falls through to the same steps below, which gate
+///    purely on the agent definition's own provider — identical to how a
+///    non-empty-but-unresolvable `identity_id` (e.g. a legacy sentinel)
+///    already behaved.
 /// 3. Read the `db_agent_identity_links` rows for the instance's definition.
 /// 4. For each binding: fetch the account, resolve its `SecretRef`,
 ///    look up the provider's env-var matrix, write each var into
@@ -246,23 +251,29 @@ pub fn inject_identity_env_with_broker(
     };
 
     // Step 2: identity_id check.
+    //
+    // #2463 Finding 2: this used to `return Ok(())` here (silent ambient-
+    // creds fallback), which bypassed the layer-3 "must have a bound
+    // account" gate below entirely — a genuinely brand-new agent launched
+    // with no account selected got identity_id="" and spawned on whatever
+    // ambient credential happened to be sitting on disk, with nothing
+    // bound in Armory. Observed behavior therefore depended on whether the
+    // test machine happened to have a stray credential file, not on any
+    // actual policy decision. The UI no longer produces empty/"blank"
+    // identity_id for new launches (identity is required at submit-time —
+    // SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md), so seeing one here
+    // means a legacy continuation row or a UI regression; either way it
+    // must be gated the same as any other unresolvable identity_id rather
+    // than silently bypassed. `resolve_bindings_for_instance` below keys
+    // strictly off `instance.definition_id`, not `identity_id`, so falling
+    // through here is safe regardless of what identity_id contains.
     if instance.identity_id.is_empty() || instance.identity_id == "blank" {
-        // Empty or legacy "blank" sentinel → ambient creds (no
-        // injection). The UI no longer produces these for new
-        // launches (identity is now required at submit-time —
-        // SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md), so seeing
-        // one here means either a legacy continuation row or a UI
-        // regression. Warn so the regression is visible in logs.
-        // Deliberately NOT gated by layer 3: this sentinel predates the
-        // managed-account model and was an explicit "ambient creds"
-        // choice at launch time, not a silent fallback.
         tracing::warn!(
             target: "identity",
-            "instance {} has empty/blank identity_id — falling back to ambient creds. \
-             Legacy row or UI regression?",
+            "instance {} has empty/blank identity_id — falling through to the \
+             layer-3 gate instead of ambient creds. Legacy row or UI regression?",
             block_id
         );
-        return Ok(());
     }
 
     // Layer-3 gate inputs: the agent definition's ambient opt-in flag and
@@ -1022,49 +1033,57 @@ mod tests {
     }
 
     #[test]
-    fn inject_blank_identity_does_nothing() {
+    fn inject_blank_identity_is_gated_same_as_any_other_unresolvable_identity() {
+        // #2463 Finding 2: this test used to assert the OPPOSITE — that a
+        // blank identity_id was NOT gated by layer 3 and silently fell
+        // back to ambient creds even with use_ambient_login=0. That let a
+        // brand-new agent launch with no account selected spawn on
+        // whatever ambient credential happened to be on disk, with
+        // nothing bound in Armory — observably different behavior on two
+        // machines running the identical code, purely as a function of
+        // which one had a stray credential file. A blank/empty
+        // identity_id must be gated exactly like any other unresolvable
+        // one (see `spawn_blocked_when_oauth_def_provider_has_no_binding_
+        // and_flag_false`, the non-blank equivalent of this test).
         let store = make_store();
-        // Need a definition for the FK on db_agent_instances.
-        let mut def = crate::backend::storage::store::AgentDefinition {
-            id: "def-1".to_string(),
-            slug: String::new(),
-            name: "T".to_string(),
-            icon: "✦".to_string(),
-            provider: "claude".to_string(),
-            description: String::new(),
-            working_directory: String::new(),
-            shell: String::new(),
-            provider_flags: String::new(),
-            auto_start: 0,
-            restart_on_crash: 0,
-            idle_timeout_minutes: 0,
-            created_at: 0,
-            agent_type: String::new(),
-            environment: String::new(),
-            agent_bus_id: String::new(),
-            is_seeded: 0,
-            accounts: String::new(),
-            parent_id: String::new(),
-            branch_label: String::new(),
-            updated_at: 0,
-            user_hidden: 0,
-            container_image: String::new(),
-            container_volumes: "[]".to_string(),
-            container_name: String::new(),
-            use_ambient_login: 0,
-        };
+        let mut def = gate_def(0);
         store.agent_def_insert(&mut def).unwrap();
 
         insert_block_for_agent(&store, "block-blank", "def-1");
-        let mut inst = make_instance("block-blank", "blank");
+        let inst = make_instance("block-blank", "blank");
         store.instance_create(&inst).unwrap();
-        let _ = inst; // keep clippy happy
 
         let mut env: HashMap<String, String> = HashMap::new();
-        // The blank sentinel is the pre-managed-accounts explicit "ambient
-        // creds" launch choice — NOT gated by layer 3 (Ok even with
-        // use_ambient_login=0).
-        inject_identity_env(store.clone(), store, "block-blank", &mut env).unwrap();
+        let res = inject_identity_env(store.clone(), store, "block-blank", &mut env);
+
+        assert_eq!(
+            res,
+            Err(SpawnGateError::MissingCredentials { provider: "claude".to_string() }),
+        );
+        assert!(env.is_empty());
+    }
+
+    #[test]
+    fn inject_empty_identity_is_gated_same_as_blank() {
+        // Same as the blank case above, but the genuinely-empty string —
+        // what a real brand-new-agent launch with no account selected
+        // actually produces (#2463 Finding 2's exact repro), as opposed to
+        // the legacy "blank" singleton literal.
+        let store = make_store();
+        let mut def = gate_def(0);
+        store.agent_def_insert(&mut def).unwrap();
+
+        insert_block_for_agent(&store, "block-empty", "def-1");
+        let inst = make_instance("block-empty", "");
+        store.instance_create(&inst).unwrap();
+
+        let mut env: HashMap<String, String> = HashMap::new();
+        let res = inject_identity_env(store.clone(), store, "block-empty", &mut env);
+
+        assert_eq!(
+            res,
+            Err(SpawnGateError::MissingCredentials { provider: "claude".to_string() }),
+        );
         assert!(env.is_empty());
     }
 
