@@ -463,6 +463,7 @@ impl Controller for ShellController {
             let mut inner = self.inner.lock().unwrap();
             if let Some(pid) = child.process_id() {
                 super::super::pidregistry::register(&self.block_id, pid);
+                crate::backend::process_tracker::registry::track_spawned(&self.block_id, pid);
                 inner.child_pid = Some(pid);
             }
             inner.spawn_ts_ms = Some(spawn_ts_ms);
