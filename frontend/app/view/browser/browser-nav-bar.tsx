@@ -3,6 +3,7 @@
 
 import { createEffect, createSignal, Show, type JSX } from "solid-js";
 import { invokeCommand } from "@/app/platform/ipc";
+import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import type { BrowserViewModel } from "./browser-model";
 
 // Compact tag for an Element — used by diag log lines to identify the
@@ -112,6 +113,7 @@ export function BrowserNavBar(props: {
                     value={addressBar()}
                     onInput={(e) => setAddressBar(e.currentTarget.value)}
                     onKeyDown={handleAddressKeyDown}
+                    onContextMenu={showTextInputContextMenu}
                     onMouseDown={() => {
                         // Fire main_window_focus on mousedown — BEFORE focus
                         // moves — so OS keyboard focus reclaims from the pane

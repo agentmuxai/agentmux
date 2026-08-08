@@ -5,6 +5,7 @@ import { createResource, createSignal, For, onCleanup, onMount, Show, type JSX }
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { abbreviateText } from "@/util/format-text";
 import { BLOCK_KINDS, blockMeta } from "./block-registry";
 import type { DroneViewModel } from "./drone-model";
@@ -47,6 +48,7 @@ const NodeTypeBar = (p: { model: DroneViewModel }): JSX.Element => {
                 class="drone-bar-name"
                 value={m.draftAtom().name}
                 onInput={(e) => m.setName(e.currentTarget.value)}
+                onContextMenu={showTextInputContextMenu}
                 placeholder="Untitled Drone"
                 aria-label="Drone name"
             />
@@ -647,6 +649,7 @@ const NodeFields = (p: { model: DroneViewModel; node: FlowNode }): JSX.Element =
                             autoGrow(e.currentTarget);
                         }}
                         onFocus={(e) => autoGrow(e.currentTarget)}
+                        onContextMenu={showTextInputContextMenu}
                     />
                 </NodeField>
                 <AgentResultPanel model={p.model} blockId={p.node.id} />
@@ -670,6 +673,7 @@ const NodeFields = (p: { model: DroneViewModel; node: FlowNode }): JSX.Element =
                         class="drone-input nodrag"
                         value={(p.node.data["url"] as string) ?? ""}
                         onInput={(e) => update({ url: e.currentTarget.value })}
+                        onContextMenu={showTextInputContextMenu}
                         placeholder="https://…/{{var.path}}"
                     />
                 </NodeField>
@@ -684,6 +688,7 @@ const NodeFields = (p: { model: DroneViewModel; node: FlowNode }): JSX.Element =
                             autoGrow(e.currentTarget);
                         }}
                         onFocus={(e) => autoGrow(e.currentTarget)}
+                        onContextMenu={showTextInputContextMenu}
                     />
                 </NodeField>
             </Show>
@@ -693,6 +698,7 @@ const NodeFields = (p: { model: DroneViewModel; node: FlowNode }): JSX.Element =
                         class="drone-input nodrag"
                         value={(p.node.data["expr"] as string) ?? ""}
                         onInput={(e) => update({ expr: e.currentTarget.value })}
+                        onContextMenu={showTextInputContextMenu}
                         placeholder="{{var.count}} > 0"
                     />
                 </NodeField>
@@ -709,6 +715,7 @@ const NodeFields = (p: { model: DroneViewModel; node: FlowNode }): JSX.Element =
                             autoGrow(e.currentTarget);
                         }}
                         onFocus={(e) => autoGrow(e.currentTarget)}
+                        onContextMenu={showTextInputContextMenu}
                     />
                 </NodeField>
             </Show>
@@ -755,12 +762,14 @@ const VariablesEditor = (p: {
                             class="drone-input nodrag"
                             value={entry.name}
                             onInput={(e) => update(i(), { name: e.currentTarget.value })}
+                            onContextMenu={showTextInputContextMenu}
                             placeholder="name"
                         />
                         <input
                             class="drone-input nodrag"
                             value={entry.value}
                             onInput={(e) => update(i(), { value: e.currentTarget.value })}
+                            onContextMenu={showTextInputContextMenu}
                             placeholder="value"
                         />
                         <button
@@ -852,6 +861,7 @@ const AgentRefEditor = (p: {
                     class="drone-input nodrag"
                     value={ref().instanceName}
                     onInput={(e) => setRef({ instanceName: e.currentTarget.value })}
+                    onContextMenu={showTextInputContextMenu}
                     placeholder="blank = one-shot"
                 />
             </NodeField>

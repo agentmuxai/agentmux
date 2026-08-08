@@ -20,6 +20,7 @@
 
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, type Accessor, type JSX } from "solid-js";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
+import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import type { AskUserQuestionAnswer, AskUserQuestionOption, AskUserQuestionRequest, ToolNode } from "../types";
 import "./AgentQuestionPanel.scss";
 
@@ -428,6 +429,7 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
                                                 placeholder="Type a custom answer…"
                                                 value={state()[qi()]?.other ?? ""}
                                                 onInput={(e) => setOther(qi(), e.currentTarget.value, q.multiSelect)}
+                                                onContextMenu={showTextInputContextMenu}
                                             />
                                         </label>
                                     </div>

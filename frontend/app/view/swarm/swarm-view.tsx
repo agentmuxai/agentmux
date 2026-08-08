@@ -10,6 +10,8 @@ import { callBackendService } from "@/store/wos";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { WOS, workspace, setActiveTab, atoms, getApi } from "@/app/store/global";
+import { ContextMenuModel } from "@/app/store/contextmenu";
+import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import { getBlockTurnPhase } from "@/app/store/agentActivity";
 import { WorkspaceService } from "@/app/store/services";
@@ -274,6 +276,24 @@ function AgentRow({
     });
     onCleanup(() => clearTimeout(flashTimer));
 
+    // Rows are `user-select: none` (swarm-view.scss) for the drag/click UX,
+    // so unlike a normal text pane there's no way to select-and-Copy — the
+    // pane body's generic Copy-on-selection context menu (block/pane-
+    // actions.ts) can never fire anything here. This is the only way to
+    // copy an agent's name or block id out of Swarm. See
+    // docs/specs/REPORT_CONTEXT_MENU_GAP_AUDIT_2026_08_07.md.
+    const handleAgentRowContextMenu = (e: MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const menu: ContextMenuItem[] = [
+            { label: "Copy agent name", click: () => clipboardWriteText(node.agentName) },
+        ];
+        if (node.blockId) {
+            menu.push({ label: "Copy block ID", click: () => clipboardWriteText(node.blockId!) });
+        }
+        ContextMenuModel.showContextMenu(menu, e);
+    };
+
     return (
         <div class="swarm-agent-group">
             <div
@@ -283,6 +303,7 @@ function AgentRow({
                     "swarm-agent-card--active": focusedBlockId() === node.blockId,
                 }}
                 onClick={() => node.blockId && model.toggleAgentCollapsed(node.blockId)}
+                onContextMenu={handleAgentRowContextMenu}
                 title={node.agentName}
             >
                 <div class="swarm-agent-row">

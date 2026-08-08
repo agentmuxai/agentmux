@@ -12,6 +12,7 @@
 import { onCleanup, For, Show, type JSX } from "solid-js";
 import { Markdown } from "@/app/element/markdown";
 import { PrimitiveListDetail } from "@/app/element/primitive-list-detail";
+import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { SkillCatalogModel } from "./skill-model";
 import "../agent/components/AgentPrimitiveModal.scss";
 
@@ -146,6 +147,7 @@ export const SkillManager = (): JSX.Element => {
                                     type="text"
                                     value={draft().name}
                                     onInput={(e) => model.setDraft({ ...draft(), name: e.currentTarget.value })}
+                                    onContextMenu={showTextInputContextMenu}
                                     placeholder="e.g. pdf-extraction"
                                     required
                                 />
@@ -165,6 +167,7 @@ export const SkillManager = (): JSX.Element => {
                                         type="text"
                                         value={draft().trigger}
                                         onInput={(e) => model.setDraft({ ...draft(), trigger: e.currentTarget.value })}
+                                        onContextMenu={showTextInputContextMenu}
                                         placeholder="When should this skill be invoked?"
                                     />
                                 </Show>
@@ -174,6 +177,7 @@ export const SkillManager = (): JSX.Element => {
                                     type="text"
                                     value={draft().description}
                                     onInput={(e) => model.setDraft({ ...draft(), description: e.currentTarget.value })}
+                                    onContextMenu={showTextInputContextMenu}
                                 />
                                 <span class="agent-primitive-modal-field-label">Content</span>
                                 <textarea
@@ -181,6 +185,7 @@ export const SkillManager = (): JSX.Element => {
                                     rows={8}
                                     value={draft().content}
                                     onInput={(e) => model.setDraft({ ...draft(), content: e.currentTarget.value })}
+                                    onContextMenu={showTextInputContextMenu}
                                     spellcheck={false}
                                 />
                                 <div class="agent-primitive-modal-actions">
