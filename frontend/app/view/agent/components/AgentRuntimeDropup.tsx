@@ -19,7 +19,11 @@
  * (live-overlaid from the providers.models RPC, same as the prior three-pill
  * implementation) so an API-sourced catalog surfaces new labels automatically.
  *
- * Spec: docs/specs/SPEC_AGENT_RUNTIME_DROPUP_2026_07_09.md.
+ * Also closes via an explicit button (top-right of the panel) in addition to
+ * Esc/outside-click/re-clicking the trigger.
+ *
+ * Spec: docs/specs/SPEC_AGENT_RUNTIME_DROPUP_2026_07_09.md,
+ * docs/specs/SPEC_AGENT_RUNTIME_DROPUP_CLOSE_BUTTON_2026_08_07.md.
  */
 
 import { assertMenuInPaintableArea, computeMenuPosition } from "@/app/util/menu-position";
@@ -297,43 +301,66 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
                         class="menu agent-runtime-dropup-panel"
                         style={floatingStyle()}
                         data-pane-overlay
-                        role="listbox"
-                        aria-label="Runtime settings"
                     >
-                        <For each={build().rows}>
-                            {(row) => {
-                                if (row.kind === "header") {
-                                    return <div class="agent-runtime-dropup-section">{row.section}</div>;
-                                }
-                                const optIndex = () =>
-                                    build().options.findIndex(
-                                        (o) => o.section === row.section && o.value === row.value
+                        {/* Sibling of the listbox below, not a child of it — a
+                            role="listbox" should only contain role="option"
+                            rows (plus an optional label); an interactive
+                            button dropped inside it would be an invalid
+                            listbox structure for assistive tech. Placed first
+                            (matching Modal's showCloseButton convention) so
+                            it's the first Tab stop after the trigger. */}
+                        <button
+                            type="button"
+                            class="agent-runtime-dropup-close-btn"
+                            aria-label="Close"
+                            onClick={() => setOpen(false)}
+                        >
+                            {"✕"}
+                        </button>
+                        <div role="listbox" aria-label="Runtime settings">
+                            <For each={build().rows}>
+                                {(row) => {
+                                    if (row.kind === "header") {
+                                        return <div class="agent-runtime-dropup-section">{row.section}</div>;
+                                    }
+                                    const optIndex = () =>
+                                        build().options.findIndex(
+                                            (o) => o.section === row.section && o.value === row.value
+                                        );
+                                    return (
+                                        <div
+                                            class="menu-item agent-runtime-dropup-row"
+                                            classList={{ active: optIndex() === selectedOptIndex() }}
+                                            role="option"
+                                            aria-selected={row.current}
+                                            onMouseEnter={() => setSelectedOptIndex(optIndex())}
+                                            // These rows are plain non-focusable divs — without this, a
+                                            // mousedown here blurs the trigger and shifts
+                                            // document.activeElement to <body> (outside the panel), which
+                                            // handleFocusChange reads as "focus left" and closes on. That
+                                            // made every selection close the panel despite §9.2's
+                                            // stays-open decision already being implemented correctly —
+                                            // this was a second, independent close path.
+                                            onMouseDown={(e) => e.preventDefault()}
+                                            onClick={() => {
+                                                const idx = optIndex();
+                                                setSelectedOptIndex(idx);
+                                                void applySelection(idx);
+                                            }}
+                                        >
+                                            <i
+                                                class={`fa-solid fa-fw menu-item-icon menu-item-check${row.current ? " fa-check" : ""}`}
+                                                style={row.color ? { color: row.color } : undefined}
+                                            />
+                                            <span class="label">{row.label}</span>
+                                            <Show when={row.description}>
+                                                <span class="agent-runtime-dropup-description">{row.description}</span>
+                                            </Show>
+                                        </div>
                                     );
-                                return (
-                                    <div
-                                        class="menu-item agent-runtime-dropup-row"
-                                        classList={{ active: optIndex() === selectedOptIndex() }}
-                                        role="option"
-                                        aria-selected={row.current}
-                                        onMouseEnter={() => setSelectedOptIndex(optIndex())}
-                                        onClick={() => {
-                                            const idx = optIndex();
-                                            setSelectedOptIndex(idx);
-                                            void applySelection(idx);
-                                        }}
-                                    >
-                                        <i
-                                            class={`fa-solid fa-fw menu-item-icon menu-item-check${row.current ? " fa-check" : ""}`}
-                                            style={row.color ? { color: row.color } : undefined}
-                                        />
-                                        <span class="label">{row.label}</span>
-                                        <Show when={row.description}>
-                                            <span class="agent-runtime-dropup-description">{row.description}</span>
-                                        </Show>
-                                    </div>
-                                );
-                            }}
-                        </For>
+                                }}
+                            </For>
+                        </div>
                     </div>
                 </Portal>
             </Show>
