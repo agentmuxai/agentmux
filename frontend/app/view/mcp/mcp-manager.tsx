@@ -11,6 +11,7 @@
 
 import { onCleanup, For, Show, type JSX } from "solid-js";
 import { PrimitiveListDetail } from "@/app/element/primitive-list-detail";
+import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { McpCatalogModel } from "./mcp-model";
 import { McpCatalogPicker } from "./McpCatalogPicker";
 import { findPreloadEntryByName } from "./mcp-preload-catalog";
@@ -185,6 +186,7 @@ export const McpManager = (): JSX.Element => {
                                     type="text"
                                     value={draft().name}
                                     onInput={(e) => model.setDraft({ ...draft(), name: e.currentTarget.value })}
+                                    onContextMenu={showTextInputContextMenu}
                                     placeholder="e.g. filesystem"
                                     required
                                 />
@@ -194,6 +196,7 @@ export const McpManager = (): JSX.Element => {
                                     type="text"
                                     value={draft().transport}
                                     onInput={(e) => model.setDraft({ ...draft(), transport: e.currentTarget.value })}
+                                    onContextMenu={showTextInputContextMenu}
                                     placeholder="stdio"
                                 />
                                 <span class="agent-primitive-modal-field-label">Config (JSON)</span>
@@ -202,6 +205,7 @@ export const McpManager = (): JSX.Element => {
                                     rows={6}
                                     value={draft().config}
                                     onInput={(e) => model.setDraft({ ...draft(), config: e.currentTarget.value })}
+                                    onContextMenu={showTextInputContextMenu}
                                     spellcheck={false}
                                 />
                                 <div class="agent-primitive-modal-actions">
