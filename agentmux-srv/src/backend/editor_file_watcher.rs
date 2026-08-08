@@ -27,7 +27,7 @@ use std::time::Duration;
 use serde_json::json;
 use tokio::sync::broadcast;
 
-use super::fs_watch::{FsWatchPool, Subscription};
+use super::fs_watch::{FsWatchEventKind, FsWatchPool, Subscription};
 use super::wps::{Broker, WaveEvent};
 
 /// WPS event fired when a file open in at least one editor tab changes on
@@ -83,7 +83,14 @@ impl EditorFileWatcher {
         tokio::spawn(async move {
             loop {
                 match events.recv().await {
-                    Ok(ev) => worker.handle_fs_event(ev.path),
+                    // Match the pre-migration filter exactly: only Create/Modify
+                    // trigger a reload wake — a Removed event otherwise makes a
+                    // pane try to reload a file that's no longer there (reagent
+                    // P1 on PR #2458).
+                    Ok(ev) if matches!(ev.kind, FsWatchEventKind::Created | FsWatchEventKind::Modified) => {
+                        worker.handle_fs_event(ev.path)
+                    }
+                    Ok(_) => continue,
                     Err(broadcast::error::RecvError::Closed) => break,
                     Err(broadcast::error::RecvError::Lagged(skipped)) => {
                         tracing::warn!(skipped, "editor file watcher lagged behind the fs_watch broadcast stream");
@@ -349,6 +356,48 @@ mod tests {
         .unwrap_or(false);
 
         assert!(saw_it, "expected a real on-disk change to reach the publish path via the shared pool");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn test_removed_event_does_not_trigger_publish() {
+        // reagent P1 on PR #2458: the migration to FsWatchPool initially
+        // dropped the pre-migration Create/Modify-only filter, so a Removed
+        // event (deleting the watched file) would wake the pane to reload a
+        // file that's no longer there. Confirm the filter is back.
+        let broker = Arc::new(Broker::new());
+        let client = Arc::new(TestClient { events: StdMutex::new(Vec::new()) });
+        broker.set_client(Box::new(client.clone()));
+        broker.subscribe(
+            "route-removed",
+            super::super::wps::SubscriptionRequest {
+                event: EVENT_EDITOR_FILE_CHANGED.to_string(),
+                scopes: vec!["block:removed".to_string()],
+                allscopes: false,
+            },
+        );
+
+        let pool = FsWatchPool::new();
+        let watcher = EditorFileWatcher::new(pool, broker);
+
+        let dir = std::env::temp_dir().join("agentmux_editor_watch_removed_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("watched.md");
+        std::fs::write(&file, "v1").unwrap();
+
+        watcher.watch_path(&file, "removed");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        std::fs::remove_file(&file).unwrap();
+
+        // Give the pool's fs backend time to deliver (and this watcher time
+        // to wrongly act on) the Removed event before asserting silence.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(
+            client.events.lock().unwrap().is_empty(),
+            "a Removed event must not trigger EVENT_EDITOR_FILE_CHANGED"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
