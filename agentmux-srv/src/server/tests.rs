@@ -514,6 +514,90 @@ async fn self_endpoint_missing_block_id_is_400() {
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
+// ── SPEC_WINDOW_NAME_API_HARDENING_2026_08_08 — phantom ids + status codes ──
+
+fn window_name_request(body: serde_json::Value) -> Request<Body> {
+    Request::builder()
+        .method(Method::POST)
+        .uri("/api/v1/window/name")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap()
+}
+
+/// A well-formed UUID that matches no window must 404, not report
+/// success — this used to sail through the guardless reducer arm into a
+/// silent persist no-op (spec §2.1, found by live probe).
+#[tokio::test]
+async fn window_name_phantom_uuid_is_404() {
+    let app = test_router();
+    let resp = app
+        .oneshot(window_name_request(serde_json::json!({
+            "window_id": "00000000-dead-beef-0000-000000000000",
+            "name": "phantom",
+        })))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+/// A malformed (non-UUID) window id is a caller error, not a server fault.
+#[tokio::test]
+async fn window_name_malformed_id_is_400() {
+    let app = test_router();
+    let resp = app
+        .oneshot(window_name_request(serde_json::json!({
+            "window_id": "no-such-window-xyz",
+            "name": "ghost",
+        })))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+/// Happy path: renaming the seeded window succeeds and persists
+/// `window:displayname` in wstore. srv_state is hydrated from wstore via
+/// the same `bootstrap_state_from_wstore` production runs, so the new
+/// reducer existence guard sees the seeded window exactly as it would live.
+#[tokio::test]
+async fn window_name_renames_seeded_window_and_persists() {
+    let state = test_state();
+    crate::persist::bootstrap_state_from_wstore(&state.srv_state, &state.wstore).await;
+    let wstore = state.wstore.clone();
+    let window = wstore
+        .get_all::<crate::backend::obj::Window>()
+        .unwrap()
+        .into_iter()
+        .next()
+        .expect("seeded window");
+    let app = build_router(state);
+
+    let resp = app
+        .oneshot(window_name_request(serde_json::json!({
+            "window_id": window.oid,
+            "name": "renamed-by-test",
+        })))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["success"], true);
+    assert_eq!(json["name"], "renamed-by-test");
+
+    let reread = wstore
+        .get::<crate::backend::obj::Window>(&window.oid)
+        .unwrap()
+        .expect("window still exists");
+    assert_eq!(
+        reread.meta.get("window:displayname").and_then(|v| v.as_str()),
+        Some("renamed-by-test"),
+        "display name must be persisted in wstore meta"
+    );
+}
+
 // ── SPEC_864 Phase 2 — UpdateObject routes layout pushes through the reducer ──
 
 /// End-to-end over the HTTP service: a frontend-style full-row layout push
