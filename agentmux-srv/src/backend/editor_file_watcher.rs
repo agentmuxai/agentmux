@@ -6,10 +6,15 @@
 //! second AgentMux window) and pushes a per-block "this file changed on
 //! disk" wake signal so panes can refresh instead of silently going stale.
 //!
-//! Generalizes `config_watcher_fs.rs`'s single-file `notify`-watcher pattern
-//! to an arbitrary, dynamically-changing set of paths anywhere under the
-//! user's home directory — one per open editor tab, refcounted by block id
-//! so a path is watched only while at least one tab has it open.
+//! Migrated onto the shared `fs_watch::FsWatchPool`
+//! (SPEC_SHARED_FS_WATCHER_FRAMEWORK_2026_08_07.md) — this module keeps only
+//! its own domain-specific bookkeeping (which block ids have which paths
+//! open, per-path debounce, and the `EVENT_EDITOR_FILE_CHANGED` publish
+//! shape). The actual `notify` construction, OS-level watch/unwatch, and
+//! recovery-on-failure now live in the pool, shared with every other
+//! watcher that migrates onto it (`config_watcher_fs.rs` already has;
+//! `media_file_watcher.rs`, below in the same PR, is the directory-mode
+//! sibling migrating alongside this one).
 //!
 //! Spec: docs/specs/SPEC_EDITOR_LIVE_FILE_RELOAD_2026_07_18.md
 
@@ -19,10 +24,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde_json::json;
-use tokio::sync::mpsc;
+use tokio::sync::broadcast;
 
+use super::fs_watch::{FsWatchEventKind, FsWatchPool, Subscription};
 use super::wps::{Broker, WaveEvent};
 
 /// WPS event fired when a file open in at least one editor tab changes on
@@ -38,11 +43,12 @@ const DEBOUNCE: Duration = Duration::from_millis(300);
 struct Inner {
     /// Canonicalized file path -> block ids with a tab open on it.
     watched_paths: HashMap<PathBuf, std::collections::HashSet<String>>,
-    /// Parent directory -> number of distinct watched paths under it.
-    /// `notify` watches directories (non-recursive) rather than individual
-    /// files, matching `config_watcher_fs.rs`'s approach; this refcount
-    /// decides when a directory watch is added/removed.
-    watched_dirs: HashMap<PathBuf, usize>,
+    /// One pool subscription per watched path — held so it can be handed
+    /// back to `pool.unsubscribe` once the last block id for that path
+    /// unsubscribes. The pool does its own OS-level refcounting internally;
+    /// this is a *different* refcount (by block id, which the pool has no
+    /// concept of), so both layers of bookkeeping are genuinely needed.
+    pool_subs: HashMap<PathBuf, Subscription>,
 }
 
 /// Per-path debounce generation counters. A new fs event for a path bumps
@@ -52,60 +58,48 @@ struct Inner {
 type DebounceGens = Mutex<HashMap<PathBuf, Arc<AtomicU64>>>;
 
 pub struct EditorFileWatcher {
-    // Held only to keep the watcher alive — never read directly outside `new`.
-    _watcher: Mutex<RecommendedWatcher>,
+    pool: Arc<FsWatchPool>,
     inner: Mutex<Inner>,
     debounce_gens: DebounceGens,
     broker: Arc<Broker>,
 }
 
 impl EditorFileWatcher {
-    /// Construct and start the watcher. Returns `None` if the underlying
-    /// `notify` watcher can't be created (matches
-    /// `config_watcher_fs::spawn_settings_watcher`'s fallible-but-non-fatal
-    /// convention — live-reload is a nice-to-have, not a boot requirement).
-    pub fn new(broker: Arc<Broker>) -> Option<Arc<Self>> {
-        let (tx, mut rx) = mpsc::unbounded_channel::<PathBuf>();
-
-        let watcher = match notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-            match res {
-                Ok(event) => {
-                    if matches!(event.kind, EventKind::Modify(_) | EventKind::Create(_)) {
-                        for path in event.paths {
-                            let _ = tx.send(path);
-                        }
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, "editor file watcher error");
-                }
-            }
-        }) {
-            Ok(w) => w,
-            Err(e) => {
-                tracing::warn!(error = %e, "failed to create editor file watcher");
-                return None;
-            }
-        };
-
+    /// Construct and start the watcher, subscribing to `pool`'s shared
+    /// broadcast stream. Unlike the pre-migration version, this always
+    /// succeeds — `FsWatchPool` itself absorbs the "can the OS backend even
+    /// construct" failure mode (see its own `health()`), so there's no
+    /// `Option` for callers to check anymore.
+    pub fn new(pool: Arc<FsWatchPool>, broker: Arc<Broker>) -> Arc<Self> {
         let this = Arc::new(Self {
-            _watcher: Mutex::new(watcher),
-            inner: Mutex::new(Inner {
-                watched_paths: HashMap::new(),
-                watched_dirs: HashMap::new(),
-            }),
+            pool: pool.clone(),
+            inner: Mutex::new(Inner { watched_paths: HashMap::new(), pool_subs: HashMap::new() }),
             debounce_gens: Mutex::new(HashMap::new()),
             broker,
         });
 
+        let mut events = pool.events();
         let worker = this.clone();
         tokio::spawn(async move {
-            while let Some(changed_path) = rx.recv().await {
-                worker.handle_fs_event(changed_path);
+            loop {
+                match events.recv().await {
+                    // Match the pre-migration filter exactly: only Create/Modify
+                    // trigger a reload wake — a Removed event otherwise makes a
+                    // pane try to reload a file that's no longer there (reagent
+                    // P1 on PR #2458).
+                    Ok(ev) if matches!(ev.kind, FsWatchEventKind::Created | FsWatchEventKind::Modified) => {
+                        worker.handle_fs_event(ev.path)
+                    }
+                    Ok(_) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                    Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                        tracing::warn!(skipped, "editor file watcher lagged behind the fs_watch broadcast stream");
+                    }
+                }
             }
         });
 
-        Some(this)
+        this
     }
 
     /// Start watching `path` on behalf of `block_id`. Idempotent — calling
@@ -124,17 +118,8 @@ impl EditorFileWatcher {
             return;
         }
 
-        let Some(dir) = canonical.parent().map(Path::to_path_buf) else {
-            return;
-        };
-        let refcount = inner.watched_dirs.entry(dir.clone()).or_insert(0);
-        *refcount += 1;
-        if *refcount == 1 {
-            let mut w = self._watcher.lock().unwrap();
-            if let Err(e) = w.watch(&dir, RecursiveMode::NonRecursive) {
-                tracing::warn!(dir = %dir.display(), error = %e, "failed to watch editor file directory");
-            }
-        }
+        let sub = self.pool.subscribe_file(&canonical);
+        inner.pool_subs.insert(canonical.clone(), sub);
         tracing::debug!(path = %canonical.display(), block_id, "editor file watch: started");
     }
 
@@ -151,16 +136,8 @@ impl EditorFileWatcher {
             return;
         }
         inner.watched_paths.remove(&canonical);
-
-        if let Some(dir) = canonical.parent().map(Path::to_path_buf) {
-            if let Some(refcount) = inner.watched_dirs.get_mut(&dir) {
-                *refcount -= 1;
-                if *refcount == 0 {
-                    inner.watched_dirs.remove(&dir);
-                    let mut w = self._watcher.lock().unwrap();
-                    let _ = w.unwatch(&dir);
-                }
-            }
+        if let Some(sub) = inner.pool_subs.remove(&canonical) {
+            self.pool.unsubscribe(sub);
         }
         drop(inner);
 
@@ -253,10 +230,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_watch_unwatch_refcounting_does_not_panic() {
-        // Exercises the refcount bookkeeping without touching the real
-        // filesystem watcher backend (CI sandboxes may not support inotify).
         let broker = Arc::new(Broker::new());
-        let watcher = EditorFileWatcher::new(broker).expect("watcher should construct");
+        let pool = FsWatchPool::new();
+        let watcher = EditorFileWatcher::new(pool, broker);
 
         let tmp = std::env::temp_dir().join("agentmux_editor_watch_test.txt");
         std::fs::write(&tmp, "hello").unwrap();
@@ -293,7 +269,8 @@ mod tests {
         // the last watcher for that path unsubscribed, so the map grew
         // unbounded over a long-running process's lifetime.
         let broker = Arc::new(Broker::new());
-        let watcher = EditorFileWatcher::new(broker).expect("watcher should construct");
+        let pool = FsWatchPool::new();
+        let watcher = EditorFileWatcher::new(pool, broker);
 
         let tmp = std::env::temp_dir().join("agentmux_editor_watch_debounce_test.txt");
         std::fs::write(&tmp, "hello").unwrap();
@@ -335,5 +312,93 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].0, "route-1");
         assert_eq!(events[0].1.event, EVENT_EDITOR_FILE_CHANGED);
+    }
+
+    #[tokio::test]
+    async fn test_end_to_end_real_fs_write_triggers_publish() {
+        // Regression for the migration itself: a real notify event flowing
+        // through the shared pool must still reach this watcher's own
+        // debounce + publish path, not just the bookkeeping unit tests above.
+        let broker = Arc::new(Broker::new());
+        let client = Arc::new(TestClient { events: StdMutex::new(Vec::new()) });
+        broker.set_client(Box::new(client.clone()));
+        broker.subscribe(
+            "route-e2e",
+            super::super::wps::SubscriptionRequest {
+                event: EVENT_EDITOR_FILE_CHANGED.to_string(),
+                scopes: vec!["block:e2e".to_string()],
+                allscopes: false,
+            },
+        );
+
+        let pool = FsWatchPool::new();
+        let watcher = EditorFileWatcher::new(pool, broker);
+
+        let dir = std::env::temp_dir().join("agentmux_editor_watch_e2e_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("watched.md");
+        std::fs::write(&file, "v1").unwrap();
+
+        watcher.watch_path(&file, "e2e");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        std::fs::write(&file, "v2").unwrap();
+
+        let saw_it = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if !client.events.lock().unwrap().is_empty() {
+                    return true;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .unwrap_or(false);
+
+        assert!(saw_it, "expected a real on-disk change to reach the publish path via the shared pool");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn test_removed_event_does_not_trigger_publish() {
+        // reagent P1 on PR #2458: the migration to FsWatchPool initially
+        // dropped the pre-migration Create/Modify-only filter, so a Removed
+        // event (deleting the watched file) would wake the pane to reload a
+        // file that's no longer there. Confirm the filter is back.
+        let broker = Arc::new(Broker::new());
+        let client = Arc::new(TestClient { events: StdMutex::new(Vec::new()) });
+        broker.set_client(Box::new(client.clone()));
+        broker.subscribe(
+            "route-removed",
+            super::super::wps::SubscriptionRequest {
+                event: EVENT_EDITOR_FILE_CHANGED.to_string(),
+                scopes: vec!["block:removed".to_string()],
+                allscopes: false,
+            },
+        );
+
+        let pool = FsWatchPool::new();
+        let watcher = EditorFileWatcher::new(pool, broker);
+
+        let dir = std::env::temp_dir().join("agentmux_editor_watch_removed_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("watched.md");
+        std::fs::write(&file, "v1").unwrap();
+
+        watcher.watch_path(&file, "removed");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        std::fs::remove_file(&file).unwrap();
+
+        // Give the pool's fs backend time to deliver (and this watcher time
+        // to wrongly act on) the Removed event before asserting silence.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(
+            client.events.lock().unwrap().is_empty(),
+            "a Removed event must not trigger EVENT_EDITOR_FILE_CHANGED"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

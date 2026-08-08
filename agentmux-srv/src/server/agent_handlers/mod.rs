@@ -315,6 +315,7 @@ mod recent_sessions_tests {
             crate::backend::process_tracker::registry::AgentProcessRegistry::new(Some(broker.clone())),
         );
         let process_broker = Arc::new(crate::broker::ProcessBroker::new(Some(broker.clone())));
+        let fs_watch_pool = crate::backend::fs_watch::FsWatchPool::new();
         let state = AppState {
             auth_key: "test".to_string(),
             boot_id: std::sync::Arc::from("test-boot"),
@@ -360,11 +361,17 @@ mod recent_sessions_tests {
                 reqwest::Client::new(),
                 String::new(),
                 "test".to_string(),
-                broker,
+                broker.clone(),
             ),
-            editor_file_watcher: None,
-            media_file_watcher: None,
-            fs_watch_pool: crate::backend::fs_watch::FsWatchPool::new(),
+            editor_file_watcher: crate::backend::editor_file_watcher::EditorFileWatcher::new(
+                fs_watch_pool.clone(),
+                broker.clone(),
+            ),
+            media_file_watcher: crate::backend::media_file_watcher::MediaFileWatcher::new(
+                fs_watch_pool.clone(),
+                broker.clone(),
+            ),
+            fs_watch_pool: fs_watch_pool.clone(),
         };
 
         // Seed: 1 SEEDED definition (template), 1 account + direct
@@ -635,6 +642,7 @@ mod recent_sessions_tests {
             crate::backend::process_tracker::registry::AgentProcessRegistry::new(Some(broker.clone())),
         );
         let process_broker = Arc::new(crate::broker::ProcessBroker::new(Some(broker.clone())));
+        let fs_watch_pool = crate::backend::fs_watch::FsWatchPool::new();
         let state = AppState {
             auth_key: "test".to_string(),
             boot_id: std::sync::Arc::from("test-boot"),
@@ -680,11 +688,17 @@ mod recent_sessions_tests {
                 reqwest::Client::new(),
                 String::new(),
                 "test".to_string(),
-                broker,
+                broker.clone(),
             ),
-            editor_file_watcher: None,
-            media_file_watcher: None,
-            fs_watch_pool: crate::backend::fs_watch::FsWatchPool::new(),
+            editor_file_watcher: crate::backend::editor_file_watcher::EditorFileWatcher::new(
+                fs_watch_pool.clone(),
+                broker.clone(),
+            ),
+            media_file_watcher: crate::backend::media_file_watcher::MediaFileWatcher::new(
+                fs_watch_pool.clone(),
+                broker.clone(),
+            ),
+            fs_watch_pool: fs_watch_pool.clone(),
         };
 
         // One seeded template + one already-user-owned definition.

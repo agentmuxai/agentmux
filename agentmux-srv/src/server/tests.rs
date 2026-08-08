@@ -34,6 +34,7 @@ pub(crate) fn test_state() -> AppState {
         crate::backend::process_tracker::registry::AgentProcessRegistry::new(Some(broker.clone())),
     );
     let process_broker = Arc::new(crate::broker::ProcessBroker::new(Some(broker.clone())));
+    let fs_watch_pool = crate::backend::fs_watch::FsWatchPool::new();
 
     AppState {
         auth_key: "test-secret-key".to_string(),
@@ -84,11 +85,17 @@ pub(crate) fn test_state() -> AppState {
             reqwest::Client::new(),
             String::new(),
             "test-secret-key".to_string(),
-            broker,
+            broker.clone(),
         ),
-        editor_file_watcher: None,
-        media_file_watcher: None,
-        fs_watch_pool: crate::backend::fs_watch::FsWatchPool::new(),
+        editor_file_watcher: crate::backend::editor_file_watcher::EditorFileWatcher::new(
+            fs_watch_pool.clone(),
+            broker.clone(),
+        ),
+        media_file_watcher: crate::backend::media_file_watcher::MediaFileWatcher::new(
+            fs_watch_pool.clone(),
+            broker.clone(),
+        ),
+        fs_watch_pool: fs_watch_pool.clone(),
     }
 }
 

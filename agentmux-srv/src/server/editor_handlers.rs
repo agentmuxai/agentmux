@@ -111,8 +111,11 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     // watcheditorfile → start live-reload watching for a (path, block_id)
     // pair. Called by the frontend once a tab's content finishes loading.
-    // No-op (not an error) if the watcher failed to start at boot — editor
-    // panes still work, they just don't live-reload.
+    // Since the migration onto the shared FsWatchPool
+    // (SPEC_SHARED_FS_WATCHER_FRAMEWORK_2026_08_07.md), the watcher itself
+    // always exists — a construction-time failure now degrades into
+    // FsWatchPool::health()'s degraded_paths instead of a missing watcher,
+    // so there's nothing to check here.
     // Spec: docs/specs/SPEC_EDITOR_LIVE_FILE_RELOAD_2026_07_18.md
     {
         let watcher = editor_file_watcher.clone();
@@ -125,10 +128,8 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     struct Cmd { path: String, block_id: String }
                     let cmd: Cmd = serde_json::from_value(data)
                         .map_err(|e| format!("watcheditorfile: {e}"))?;
-                    if let Some(w) = watcher {
-                        let expanded = expand_home_dir_safe(&cmd.path);
-                        w.watch_path(expanded.as_path(), &cmd.block_id);
-                    }
+                    let expanded = expand_home_dir_safe(&cmd.path);
+                    watcher.watch_path(expanded.as_path(), &cmd.block_id);
                     Ok(None)
                 })
             }),
@@ -148,10 +149,8 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     struct Cmd { path: String, block_id: String }
                     let cmd: Cmd = serde_json::from_value(data)
                         .map_err(|e| format!("unwatcheditorfile: {e}"))?;
-                    if let Some(w) = watcher {
-                        let expanded = expand_home_dir_safe(&cmd.path);
-                        w.unwatch_path(expanded.as_path(), &cmd.block_id);
-                    }
+                    let expanded = expand_home_dir_safe(&cmd.path);
+                    watcher.unwatch_path(expanded.as_path(), &cmd.block_id);
                     Ok(None)
                 })
             }),
@@ -174,10 +173,8 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     struct Cmd { path: String, block_id: String, extensions: Vec<String> }
                     let cmd: Cmd = serde_json::from_value(data)
                         .map_err(|e| format!("watchmediadir: {e}"))?;
-                    if let Some(w) = watcher {
-                        let expanded = expand_home_dir_safe(&cmd.path);
-                        w.watch_directory(expanded.as_path(), &cmd.block_id, &cmd.extensions);
-                    }
+                    let expanded = expand_home_dir_safe(&cmd.path);
+                    watcher.watch_directory(expanded.as_path(), &cmd.block_id, &cmd.extensions);
                     Ok(None)
                 })
             }),
@@ -197,10 +194,8 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     struct Cmd { path: String, block_id: String }
                     let cmd: Cmd = serde_json::from_value(data)
                         .map_err(|e| format!("unwatchmediadir: {e}"))?;
-                    if let Some(w) = watcher {
-                        let expanded = expand_home_dir_safe(&cmd.path);
-                        w.unwatch_directory(expanded.as_path(), &cmd.block_id);
-                    }
+                    let expanded = expand_home_dir_safe(&cmd.path);
+                    watcher.unwatch_directory(expanded.as_path(), &cmd.block_id);
                     Ok(None)
                 })
             }),
