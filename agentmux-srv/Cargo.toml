@@ -80,7 +80,10 @@ windows-sys = { version = "0.59", features = [
     "Win32_System_Threading",
     "Win32_System_ProcessStatus",
     "Win32_System_SystemInformation",
-    "Win32_System_Registry",
+    # Win32_System_Registry dropped: its only caller (the PagingFiles
+    # registry read) moved to agentmux-common/src/pagefile.rs, which
+    # declares its own windows-sys dependency with that feature —
+    # SPEC_RAM_PAGEFILE_PRESSURE_SPLIT_2026_08_07 §4.
     "Win32_Storage_FileSystem",
     "Win32_System_IO",
 ] }
