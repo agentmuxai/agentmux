@@ -486,7 +486,7 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                                 is_index: row.filename == "MEMORY.md",
                                 metadata_type: row.metadata_type,
                                 size_bytes: row.size_bytes as u64,
-                                modified_at: row.updated_at,
+                                modified_at: row.last_seen_mtime_ms,
                                 filename: row.filename,
                             });
                         }
@@ -959,6 +959,40 @@ mod tests {
         )
         .await;
         assert_eq!(read.content, "written from channel A");
+    }
+
+    #[tokio::test]
+    async fn list_reports_the_files_real_mtime_for_a_mirror_only_entry() {
+        // reagent P1 on PR #2459 (fifth pass): a mirror-only listing entry
+        // (no live copy on this channel) must report the FILE's real
+        // last-modified time (last_seen_mtime_ms), not the mirror row's own
+        // sync timestamp (updated_at) — those are two different clocks that
+        // just happen to be close together right after a write.
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let shared_id_store = Arc::new(Store::open_shared(tmp.path()).unwrap());
+        let config = tempfile::tempdir().unwrap();
+
+        // A deliberately old, obviously-not-"just synced" mtime — upsert's
+        // own now_ms() for updated_at will always land far later than this.
+        const REAL_FILE_MTIME_MS: i64 = 12_345;
+        shared_id_store
+            .agent_native_memory_upsert("agent-mtime", "MEMORY.md", "content", None, "/elsewhere", 7, REAL_FILE_MTIME_MS)
+            .unwrap();
+
+        let (engine, mut rx) = build_channel_state("agent-mtime", "/work/channel-a", config.path(), shared_id_store);
+
+        let listed: NativeMemoryListResult = call_rpc(
+            &engine,
+            &mut rx,
+            COMMAND_NATIVE_MEMORY_LIST,
+            serde_json::json!({ "agent_id": "agent-mtime" }),
+        )
+        .await;
+        assert_eq!(listed.files.len(), 1);
+        assert_eq!(
+            listed.files[0].modified_at, REAL_FILE_MTIME_MS,
+            "mirror-only entries must report the file's real mtime, not the mirror's own sync timestamp"
+        );
     }
 
     #[tokio::test]

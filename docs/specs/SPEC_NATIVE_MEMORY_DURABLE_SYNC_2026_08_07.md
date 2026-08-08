@@ -157,8 +157,15 @@ independently of where the live folder happens to sit.
   reliable way to enumerate "every agent that ever existed across every
   channel" from a fresh install anyway; organic backfill-on-read is the only
   option that's actually complete over time).
-- **Agent deletion:** `ON DELETE CASCADE` on `agent_id` — mirror rows die
-  with the agent definition, matching every other per-agent table.
+- **Agent deletion:** no FK, no cascade. `db_agent_definitions` lives in a
+  separate SQLite file from this table (duplicated into both objects.db and
+  the shared store.db — §2.1), and SQLite can't enforce a foreign key across
+  database files. Orphaned rows after an agent's deleted are inert rather
+  than actively cleaned up: every RPC handler that would read this table
+  first resolves and 404s on `agent_def_get`, so a dangling mirror row is
+  never reached, let alone surfaced. (Updated from the original "ON DELETE
+  CASCADE" draft above once the cross-database-file constraint surfaced
+  during implementation — reagent P2 on PR #2459.)
 - **Identity rebinding** (an agent's bound account changes, moving its
   `CLAUDE_CONFIG_DIR` root): the live FS path changes, but the mirror is
   keyed by `agent_id` alone, not by path — old content stays visible
