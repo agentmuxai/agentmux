@@ -101,22 +101,30 @@ export function useContinueOrNewMode(opts: UseContinueOrNewModeOpts) {
             id === null
                 ? null
                 : (namedAgents() ?? []).find((r) => r.instance_id === id) ?? null;
-        // Legacy rows may carry "" or "blank" identity_id/memory_id
-        // from before the blank-removal, or (pre-issue-#1624-PR-C rows)
-        // a legacy sentinel like "default" that no longer resolves to
-        // a real account. Treat all of these as "no carry-over" so the
-        // user must pick a real account for the continuation — an
-        // unresolvable carried id already falls back to "re-pick" here
-        // rather than needing a backend resolution step. Forwarding one
-        // of these as accountId causes a real FOREIGN KEY failure in
-        // linkagentidentity (see identity-carry-over.ts), so this is a
-        // UUID-shape allowlist, not a per-literal blacklist — it covers
-        // every legacy sentinel, not just the ones observed so far.
+        // Legacy rows may carry "" or "blank" identity_id from before the
+        // blank-removal, or (pre-issue-#1624-PR-C rows) a legacy sentinel
+        // like "default" that no longer resolves to a real account. Treat
+        // all of these as "no carry-over" so the user must pick a real
+        // account for the continuation — an unresolvable carried id
+        // already falls back to "re-pick" here rather than needing a
+        // backend resolution step. Forwarding one of these as accountId
+        // causes a real FOREIGN KEY failure in linkagentidentity (see
+        // identity-carry-over.ts), so this is a UUID-shape allowlist, not
+        // a per-literal blacklist — it covers every legacy sentinel, not
+        // just the ones observed so far.
+        //
+        // memoryId intentionally does NOT get the same treatment: unlike
+        // account_id, memory_id has no FK constraint, and legitimate
+        // bundle ids are routinely non-UUID ("blank", "seed-*" —
+        // memory_bundles.rs/bundle.rs) rather than legacy garbage — a
+        // UUID-shape filter here would silently drop a real carry-over
+        // (reagentx P2 on #2464, which found the same mistake newly
+        // introduced elsewhere).
         const carry = row
             ? {
                   name: row.instance_name,
                   accountId: looksLikeRealAccountId(row.identity_id) ? row.identity_id : "",
-                  memoryId: looksLikeRealAccountId(row.memory_id) ? row.memory_id : "",
+                  memoryId: row.memory_id,
               }
             : undefined;
         flow.dispatch({ type: "ContinueOfChanged", continueOfId: id, carry });

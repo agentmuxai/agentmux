@@ -17,7 +17,7 @@ import type { LaunchOverrides } from "./components/AgentLaunchModal";
 import { readActivitySummary } from "@/app/store/activitySummary";
 import { buildConfigFiles } from "./agent-config-builder";
 import { checkNodejsForProvider, agentmuxHome, resolveCliDir } from "./agent-launch-env";
-import { looksLikeRealAccountId } from "./identity-carry-over";
+import { realAccountIdOrEmpty } from "./identity-carry-over";
 import { loadAccounts } from "@/app/view/identity/identity-model";
 
 export class AgentViewModel implements ViewModel {
@@ -662,19 +662,18 @@ export class AgentViewModel implements ViewModel {
             // already filters its own `accountId` before it reaches
             // `launchAgentDefinition`, but a stale reference reaching this
             // RPC throws `FOREIGN KEY constraint failed` against
-            // `db_accounts`, which this try/catch silently swallows. A
-            // UUID-shape check alone (`looksLikeRealAccountId`) isn't
-            // enough: pre-#1624-PR-C identity-bundle ids were ALSO
-            // UUID-formatted, just not account ids (codex P1 on this fix's
-            // PR) — cross-checking against the live account cache closes
-            // that gap too, so a missed/future call site fails safe
-            // instead of depending on every caller filtering perfectly.
+            // `db_accounts`, which this try/catch silently swallows.
+            // `realAccountIdOrEmpty` cross-checks against the live account
+            // cache (not just UUID shape — a legacy identity-bundle id
+            // would pass a shape-only check too, codex P1 on this fix's
+            // PR), so a missed/future call site fails safe instead of
+            // depending on every caller filtering perfectly.
             try {
-                const accountId = overrides?.accountId;
-                if (
-                    looksLikeRealAccountId(accountId) &&
-                    loadAccounts().some((a) => a.id === accountId)
-                ) {
+                const accountId = realAccountIdOrEmpty(
+                    overrides?.accountId ?? "",
+                    loadAccounts().map((a) => a.id),
+                );
+                if (accountId) {
                     await RpcApi.LinkAgentIdentityCommand(TabRpcClient, {
                         agent_id: agent.id,
                         account_id: accountId,

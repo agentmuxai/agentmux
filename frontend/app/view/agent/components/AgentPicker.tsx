@@ -42,29 +42,13 @@ import { getOpenDefinitionMap } from "@/app/store/agent-pane-state-store";
 import { subscribeToPaneLifecycle } from "@/app/store/agent-pane-registration";
 import type { AgentViewModel } from "../agent-model";
 import { getProvider } from "../providers";
-import { looksLikeRealAccountId } from "../identity-carry-over";
+import { looksLikeRealAccountId, realAccountIdOrEmpty } from "../identity-carry-over";
 import { loadAccounts } from "@/app/view/identity/identity-model";
 import { AgentCard } from "./AgentCard";
 import { AgentActionBar } from "./AgentActionBar";
 import { HiddenTemplatesSection } from "./HiddenTemplatesSection";
 import type { LaunchOverrides } from "./AgentLaunchModal";
 import { MyAgentsList } from "./MyAgentsList";
-
-// ── Carried-over identity_id validation (#2463 Finding 1) ──────────────────
-//
-// `looksLikeRealAccountId`'s UUID-shape check alone isn't sufficient here:
-// pre-#1624-PR-C identity-bundle ids were ALSO UUID-formatted, just not
-// account ids — a legacy row carrying one would pass the shape check, still
-// hit LinkAgentIdentityCommand's FOREIGN KEY constraint against db_accounts,
-// and still get silently swallowed by the write-through's try/catch (codex
-// P1 on this fix). Cross-checking against the live account cache closes
-// that gap. `loadAccounts()` is a synchronous best-effort read of a cache
-// primed at app startup — by the time a user clicks reattach/fork on an
-// existing row, priming has long since completed.
-function realAccountIdOrEmpty(id: string): string {
-    if (!looksLikeRealAccountId(id)) return "";
-    return loadAccounts().some((a) => a.id === id) ? id : "";
-}
 
 // ── useAgentDefinitions hook ───────────────────────────────────────────────────────
 
@@ -296,14 +280,13 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                 // stale/legacy value from before the account-linking system
                 // — forwarding it unfiltered as accountId crashes the
                 // write-through's FOREIGN KEY insert (see
-                // identity-carry-over.ts's header comment and
-                // realAccountIdOrEmpty's above). memory_id does NOT need
-                // this: unlike account_id it has no FK constraint, and
-                // legitimate bundle ids are routinely non-UUID ("blank",
-                // "seed-*" — memory_bundles.rs/bundle.rs) rather than legacy
-                // garbage, so filtering it would silently drop a real
-                // carry-over (reagent P2 on this PR).
-                accountId: realAccountIdOrEmpty(row.identity_id),
+                // identity-carry-over.ts's realAccountIdOrEmpty). memory_id
+                // does NOT need this: unlike account_id it has no FK
+                // constraint, and legitimate bundle ids are routinely
+                // non-UUID ("blank", "seed-*" — memory_bundles.rs/bundle.rs)
+                // rather than legacy garbage, so filtering it would silently
+                // drop a real carry-over (reagent P2 on this PR).
+                accountId: realAccountIdOrEmpty(row.identity_id, loadAccounts().map((a) => a.id)),
                 memoryId: row.memory_id,
                 continueOfInstanceId: row.instance_id,
                 workDirOverride: row.working_directory,
@@ -337,7 +320,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                 environment: forkedDef.agent_type === "container" ? "docker" : "local",
                 // #2463 Finding 1 — see handleReattach's comment above.
                 // memoryId intentionally unfiltered — same reasoning.
-                accountId: realAccountIdOrEmpty(row.identity_id),
+                accountId: realAccountIdOrEmpty(row.identity_id, loadAccounts().map((a) => a.id)),
                 memoryId: row.memory_id,
             });
         } finally {
