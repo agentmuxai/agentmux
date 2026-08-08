@@ -109,19 +109,34 @@ pub(super) fn handle_switch_workspace(
 /// through the reducer's broadcast bus" so the WaveObjUpdate bridge
 /// can fan out to the frontend.
 ///
-/// The validation is best-effort: reducer state's `windows` map only
-/// holds windows for which a workspace mapping has been registered
-/// (via `handle_create_window`). Windows created via wcore-direct
-/// paths (legacy bootstrap) won't appear there but still exist in
-/// wstore. So we don't error on missing — the persist subscriber's
-/// `apply_window_meta_updated` will silently no-op if the window
-/// genuinely doesn't exist in wstore either, matching the
-/// idempotency contract for the bridge to broadcast (or skip).
+/// Validates the window exists, matching its three sibling meta arms
+/// (`handle_update_workspace_meta` / `handle_update_tab_meta` /
+/// `handle_update_block_meta`) — this arm used to be the sole outlier
+/// with no guard, which made `POST /api/v1/window/name` report success
+/// for well-formed-but-nonexistent window ids (the persist subscriber's
+/// `apply_window_meta_updated` silently no-ops on a wstore miss, so
+/// nothing downstream caught it either). The guard is safe because
+/// `state.windows` reliably mirrors real windows: every runtime
+/// creation goes through `handle_create_window`, and
+/// `persist::bootstrap_state_from_wstore` hydrates pre-existing windows
+/// (including the wcore-seeded first-launch window, created before
+/// hydration runs) at startup. The old "wcore-direct paths won't appear
+/// here" caveat this comment used to carry predates that hydration.
+/// SPEC_WINDOW_NAME_API_HARDENING_2026_08_08.md §3.1.
 pub(super) fn handle_update_window_meta(
     state: &mut State,
     window_id: String,
     meta_patch: serde_json::Value,
 ) -> Vec<Event> {
+    if !state.windows.contains_key(&window_id) {
+        let v = state.bump_version();
+        return vec![Event::Error {
+            code: ErrorCode::InvalidCommand,
+            message: format!("UpdateWindowMeta: window not found: {}", window_id),
+            fatal: false,
+            version: v,
+        }];
+    }
     let v = state.bump_version();
     vec![Event::WindowMetaUpdated {
         window_id,
@@ -229,6 +244,55 @@ mod tests {
             &ctx(1),
         );
         assert!(events.is_empty());
+    }
+
+    #[test]
+    fn update_window_meta_errors_on_unknown_window() {
+        // Regression for SPEC_WINDOW_NAME_API_HARDENING_2026_08_08.md §2.1:
+        // this arm used to emit WindowMetaUpdated unconditionally, so a
+        // well-formed-but-nonexistent window id sailed through to a silent
+        // persist no-op and POST /api/v1/window/name reported success.
+        let mut state = State::default();
+        let events = update(
+            &mut state,
+            Command::UpdateWindowMeta {
+                window_id: "00000000-dead-beef-0000-000000000000".into(),
+                meta_patch: serde_json::json!({ "window:displayname": "phantom" }),
+            },
+            &ctx(1),
+        );
+        assert!(
+            matches!(&events[0], Event::Error { message, .. } if message.contains("window not found")),
+            "expected window-not-found error, got {:?}",
+            events
+        );
+    }
+
+    #[test]
+    fn update_window_meta_emits_event_for_known_window() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "a");
+        let _ = update(
+            &mut state,
+            Command::CreateWindow {
+                window_id: "win-1".into(),
+                workspace_id: ws_id,
+            },
+            &ctx(2),
+        );
+        let events = update(
+            &mut state,
+            Command::UpdateWindowMeta {
+                window_id: "win-1".into(),
+                meta_patch: serde_json::json!({ "window:displayname": "named" }),
+            },
+            &ctx(3),
+        );
+        assert!(
+            matches!(&events[0], Event::WindowMetaUpdated { window_id, .. } if window_id == "win-1"),
+            "expected WindowMetaUpdated, got {:?}",
+            events
+        );
     }
 
     #[test]
