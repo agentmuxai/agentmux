@@ -76,14 +76,17 @@ export interface VersionedEvent {
 export type EventCallback<E extends VersionedEvent> = (evt: E) => void;
 
 /**
- * Solid signal setters the tracker drives on every dispatch.
- * Kept as a tuple of plain functions so the tracker is unit-testable
- * without a Solid runtime (tests pass mock setters).
+ * Solid signal setters the tracker drives on every dispatch. Optional —
+ * a source with no signal-reading consumers (e.g. srv-events.ts, whose
+ * `srvEvent`/`srvEventVersion`/`srvEventsActive` signals were removed as
+ * dead exports) can omit any/all of them rather than pay for signal
+ * writes nobody reads. Kept as plain functions (not a Solid primitive)
+ * so the tracker is unit-testable without a Solid runtime.
  */
 export interface SignalSetters<E extends VersionedEvent> {
-    setLatest: (evt: E) => void;
-    setVersion: (v: number) => void;
-    setSawAny: (b: boolean) => void;
+    setLatest?: (evt: E) => void;
+    setVersion?: (v: number) => void;
+    setSawAny?: (b: boolean) => void;
 }
 
 export interface PerSourceTrackerOptions {
@@ -249,7 +252,7 @@ export class PerSourceTracker<E extends VersionedEvent = VersionedEvent> {
 
         if (!this.sawAnyEvent) {
             this.sawAnyEvent = true;
-            this.setters.setSawAny(true);
+            this.setters.setSawAny?.(true);
         }
 
         // SagaStarted: open a new saga buffer.
@@ -346,8 +349,8 @@ export class PerSourceTracker<E extends VersionedEvent = VersionedEvent> {
     }
 
     private dispatch(evt: E): void {
-        this.setters.setLatest(evt);
-        this.setters.setVersion(evt.version);
+        this.setters.setLatest?.(evt);
+        this.setters.setVersion?.(evt.version);
         for (const cb of this.subscribers) {
             try {
                 cb(evt);

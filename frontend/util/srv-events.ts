@@ -30,7 +30,6 @@
 // and `docs/retro/next-steps-architecture-completeness-2026-05-01.md`
 // step 2 for the broader plan.
 
-import { createSignal } from "solid-js";
 import { PerSourceTracker, type EventCallback, type VersionedEvent } from "./event-buffer";
 
 /**
@@ -51,18 +50,11 @@ import { PerSourceTracker, type EventCallback, type VersionedEvent } from "./eve
  */
 export type SrvEvent = VersionedEvent;
 
-const [, setLatestEvent] = createSignal<SrvEvent | null>(null);
-const [, setEventVersion] = createSignal<number>(0);
-const [, setSeenAnyEvent] = createSignal<boolean>(false);
-
-const tracker = new PerSourceTracker<SrvEvent>(
-    { source: "srv" },
-    {
-        setLatest: setLatestEvent,
-        setVersion: setEventVersion,
-        setSawAny: setSeenAnyEvent,
-    },
-);
+// No signal setters — nothing in the srv pipe reads a "latest
+// event"/"version"/"saw any" signal today (those were dead exports,
+// removed; see git history). `PerSourceTracker`'s setters are optional
+// for exactly this case: don't pay for signal writes nobody reads.
+const tracker = new PerSourceTracker<SrvEvent>({ source: "srv" }, {});
 
 /**
  * Per-event subscriber. Called once per srv event in source order,
