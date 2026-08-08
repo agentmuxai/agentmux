@@ -39,7 +39,10 @@ use super::error::StoreError;
 ///        created_at) alongside the existing max_fires bound. NULL = no expiry
 ///        (existing rows unaffected). See
 ///        docs/specs/SPEC_AGENT_POLLING_AND_WAKEUP_HARDENING_2026_08_04.md Phase 0.
-pub const SHARED_STORE_SCHEMA_VERSION: i64 = 5;
+///   v6 — db_agent_native_memory: durable, location-consistent mirror of
+///        each agent's native memory files, keyed by (agent_id, filename).
+///        See docs/specs/SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07.md.
+pub const SHARED_STORE_SCHEMA_VERSION: i64 = 6;
 
 /// `user_version` value stamped into `objects.db` after `run_object_schema`.
 /// The flat schema reset the counter to 1 (the pre-flatten chain never set
@@ -81,7 +84,12 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 5;
 ///        back to this (per-channel) schema on installs that haven't yet
 ///        applied 0011_shared_store_backfill, so cloud_subscriber's calls
 ///        must not assume the shared-schema copy (v4 there) is the one in use.
-pub const OBJECT_SCHEMA_VERSION: i64 = 13;
+///   v14 — db_agent_native_memory: durable mirror of each agent's native
+///        memory files, keyed by (agent_id, filename). Same both-schemas
+///        duplication as db_agent_credentials, for the same id_store
+///        fallback reason. See
+///        docs/specs/SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07.md.
+pub const OBJECT_SCHEMA_VERSION: i64 = 14;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -498,6 +506,27 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             access_token   TEXT NOT NULL DEFAULT '',
             expires_at     INTEGER NOT NULL DEFAULT 0,
             created_at     INTEGER NOT NULL DEFAULT 0
+        );
+
+        -- v14: per-agent native-memory durable mirror — see
+        -- db_agent_native_memory in run_shared_store_schema's doc comment for
+        -- the full rationale (SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07.md).
+        -- No FK to db_agent_definitions: this table is duplicated into the
+        -- shared store below (same pattern as db_agent_credentials, for
+        -- id_store's per-channel fallback before 0011_shared_store_backfill),
+        -- and SQLite can't enforce a FK across separate database files.
+        -- Orphan rows after an agent's deleted are inert: every RPC handler
+        -- that would read this table first 404s on agent_def_get, so a
+        -- dangling mirror row is never reached, let alone surfaced.
+        CREATE TABLE IF NOT EXISTS db_agent_native_memory (
+            agent_id       TEXT NOT NULL,
+            filename       TEXT NOT NULL,
+            content        TEXT NOT NULL,
+            metadata_type  TEXT NOT NULL DEFAULT '',
+            size_bytes     INTEGER NOT NULL DEFAULT 0,
+            updated_at     INTEGER NOT NULL DEFAULT 0,
+            last_seen_path TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (agent_id, filename)
         );",
     )?;
 
@@ -779,6 +808,29 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
             access_token   TEXT NOT NULL DEFAULT '',
             expires_at     INTEGER NOT NULL DEFAULT 0,
             created_at     INTEGER NOT NULL DEFAULT 0
+        );
+
+        -- v6: durable mirror of each agent's native (Claude Code) memory
+        -- files, keyed by the stable AgentDefinition.id rather than any live
+        -- filesystem path — the live path is channel-relative by design
+        -- (per-build-channel filesystem isolation), so the same agent opened
+        -- from two channels resolves two different on-disk memory dirs. This
+        -- table is what makes native memory durable and location-consistent
+        -- across channels: agent:memory:list/read_file upsert into it on
+        -- every read, and merge the live-FS view with it in the response —
+        -- see docs/specs/SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07.md.
+        -- Duplicated into run_object_schema (same both-schemas pattern as
+        -- db_agent_credentials above) for id_store's per-channel fallback
+        -- before 0011_shared_store_backfill has run.
+        CREATE TABLE IF NOT EXISTS db_agent_native_memory (
+            agent_id       TEXT NOT NULL,
+            filename       TEXT NOT NULL,
+            content        TEXT NOT NULL,
+            metadata_type  TEXT NOT NULL DEFAULT '',
+            size_bytes     INTEGER NOT NULL DEFAULT 0,
+            updated_at     INTEGER NOT NULL DEFAULT 0,
+            last_seen_path TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (agent_id, filename)
         );",
     )?;
 

@@ -10,6 +10,14 @@
 //!   agent:memory:write_file — write/create one file atomically (tmp→rename)
 //!
 //! Spec: docs/specs/SPEC_AGENT_PANE_MEMORY_IDENTITY_MODALS_2026_06_19.md §7
+//!
+//! All three also write through into `db_agent_native_memory` (via
+//! `state.id_store`) — a durable mirror keyed by the stable
+//! `AgentDefinition.id`, since the live filesystem path above is
+//! channel-relative by design and not the same across channels/instances for
+//! the same logical agent. `list`/`read_file` merge the live-FS view with
+//! the mirror so a file written from one channel stays visible from another.
+//! See docs/specs/SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07.md.
 
 use std::sync::Arc;
 use std::path::PathBuf;
@@ -293,12 +301,18 @@ fn parse_frontmatter_type(content: &str) -> Option<String> {
     None
 }
 
+/// Cap for both live-FS reads and mirror upserts — one shared limit so a
+/// file that's readable stays within the size the mirror can also store.
+const MAX_MEMORY_FILE_BYTES: u64 = 10 * 1024 * 1024;
+
 pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore_list = state.wstore.clone();
+    let id_store_list = state.id_store.clone();
     engine.register_handler(
         COMMAND_NATIVE_MEMORY_LIST,
         Box::new(move |data, _ctx| {
             let wstore = wstore_list.clone();
+            let id_store = id_store_list.clone();
             Box::pin(async move {
                 let cmd: CommandNativeMemoryListData = serde_json::from_value(data)
                     .map_err(|e| format!("agent:memory:list: {e}"))?;
@@ -322,67 +336,100 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 let memory_dir = memory_dir_for_cwd(&config_dir, &agent.working_directory);
 
                 let mut files: Vec<NativeMemoryFileMeta> = Vec::new();
+                let mut live_filenames: std::collections::HashSet<String> = std::collections::HashSet::new();
                 // Treat both "dir doesn't exist" and the TOCTOU case where the dir
-                // is deleted between exists() and read_dir() as an empty result.
-                let entries = match std::fs::read_dir(&memory_dir) {
-                    Ok(e) => e,
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                        return Ok(Some(serde_json::to_value(NativeMemoryListResult { files: vec![] }).map_err(|e| e.to_string())?));
-                    }
-                    Err(e) => return Err(format!("agent:memory:list: read_dir: {e}")),
-                };
+                // is deleted between exists() and read_dir() as an empty result —
+                // the mirror merge below still runs, so a wiped live folder
+                // doesn't lose durability for files it mirrored previously.
+                let entries = std::fs::read_dir(&memory_dir).ok();
 
-                for entry in entries {
-                    let entry = entry.map_err(|e| format!("agent:memory:list: read_dir entry: {e}"))?;
-                    let name = entry.file_name().to_string_lossy().into_owned();
-                    if !name.ends_with(".md") {
-                        continue;
-                    }
-                    // Reject symlinks — entry.file_type() does NOT follow symlinks.
-                    let file_type = entry
-                        .file_type()
-                        .map_err(|e| format!("agent:memory:list: file_type {name}: {e}"))?;
-                    if !file_type.is_file() {
-                        continue;
-                    }
-                    // The file may be deleted after read_dir but before metadata —
-                    // skip the entry on NotFound rather than aborting the whole listing.
-                    let meta = match entry.metadata() {
-                        Ok(m) => m,
-                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-                        Err(e) => return Err(format!("agent:memory:list: metadata {name}: {e}")),
-                    };
-                    let size_bytes = meta.len();
-                    let modified_at = meta
-                        .modified()
-                        .ok()
-                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                        .map(|d| d.as_millis() as i64)
-                        .unwrap_or(0);
+                if let Some(entries) = entries {
+                    for entry in entries {
+                        let entry = entry.map_err(|e| format!("agent:memory:list: read_dir entry: {e}"))?;
+                        let name = entry.file_name().to_string_lossy().into_owned();
+                        if !name.ends_with(".md") {
+                            continue;
+                        }
+                        // Reject symlinks — entry.file_type() does NOT follow symlinks.
+                        let file_type = entry
+                            .file_type()
+                            .map_err(|e| format!("agent:memory:list: file_type {name}: {e}"))?;
+                        if !file_type.is_file() {
+                            continue;
+                        }
+                        // The file may be deleted after read_dir but before metadata —
+                        // skip the entry on NotFound rather than aborting the whole listing.
+                        let meta = match entry.metadata() {
+                            Ok(m) => m,
+                            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                            Err(e) => return Err(format!("agent:memory:list: metadata {name}: {e}")),
+                        };
+                        let size_bytes = meta.len();
+                        let modified_at = meta
+                            .modified()
+                            .ok()
+                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                            .map(|d| d.as_millis() as i64)
+                            .unwrap_or(0);
 
-                    // Read up to 512 bytes for frontmatter type parsing.
-                    // Take + read_to_end loops internally to fill the buffer —
-                    // a single read() call may return fewer bytes on the first try.
-                    let preview_content = {
-                        use std::io::Read;
-                        std::fs::File::open(entry.path())
-                            .map(|f| {
-                                let mut buf = Vec::with_capacity(512);
-                                f.take(512).read_to_end(&mut buf).ok();
-                                String::from_utf8_lossy(&buf).into_owned()
-                            })
-                            .unwrap_or_default()
-                    };
-                    let metadata_type = parse_frontmatter_type(&preview_content);
-                    let is_index = name == "MEMORY.md";
+                        // Read the full file (same cap as read_file) — both for
+                        // frontmatter parsing and to write through into the
+                        // durable mirror below.
+                        let content = {
+                            use std::io::Read;
+                            std::fs::File::open(entry.path())
+                                .map(|f| {
+                                    let mut buf = Vec::new();
+                                    f.take(MAX_MEMORY_FILE_BYTES).read_to_end(&mut buf).ok();
+                                    String::from_utf8_lossy(&buf).into_owned()
+                                })
+                                .unwrap_or_default()
+                        };
+                        let metadata_type = parse_frontmatter_type(&content);
+                        let is_index = name == "MEMORY.md";
 
-                    files.push(NativeMemoryFileMeta {
-                        filename: name,
-                        is_index,
-                        metadata_type,
-                        size_bytes,
-                        modified_at,
-                    });
+                        if let Err(e) = id_store.agent_native_memory_upsert(
+                            &agent.id,
+                            &name,
+                            &content,
+                            metadata_type.as_deref(),
+                            &entry.path().to_string_lossy(),
+                        ) {
+                            tracing::warn!(agent_id = %agent.id, filename = %name, error = %e, "agent:memory:list: mirror upsert failed (non-fatal)");
+                        }
+                        live_filenames.insert(name.clone());
+
+                        files.push(NativeMemoryFileMeta {
+                            filename: name,
+                            is_index,
+                            metadata_type,
+                            size_bytes,
+                            modified_at,
+                        });
+                    }
+                }
+
+                // Merge in mirror-only files — present in a different channel's
+                // write (or the live folder was wiped) but not on this channel's
+                // live FS. Served transparently, with no distinguishing treatment.
+                match id_store.agent_native_memory_list_meta(&agent.id) {
+                    Ok(mirrored) => {
+                        for row in mirrored {
+                            if live_filenames.contains(&row.filename) {
+                                continue;
+                            }
+                            files.push(NativeMemoryFileMeta {
+                                is_index: row.filename == "MEMORY.md",
+                                metadata_type: row.metadata_type,
+                                size_bytes: row.size_bytes as u64,
+                                modified_at: row.updated_at,
+                                filename: row.filename,
+                            });
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(agent_id = %agent.id, error = %e, "agent:memory:list: mirror list failed (non-fatal)");
+                    }
                 }
 
                 // MEMORY.md first, then alphabetical
@@ -396,10 +443,12 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
     );
 
     let wstore_read = state.wstore.clone();
+    let id_store_read = state.id_store.clone();
     engine.register_handler(
         COMMAND_NATIVE_MEMORY_READ_FILE,
         Box::new(move |data, _ctx| {
             let wstore = wstore_read.clone();
+            let id_store = id_store_read.clone();
             Box::pin(async move {
                 let cmd: CommandNativeMemoryReadFileData = serde_json::from_value(data)
                     .map_err(|e| format!("agent:memory:read_file: {e}"))?;
@@ -422,24 +471,51 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                     .map(|c| parse_claude_config_dir(&c.content))
                     .unwrap_or_default();
                 let path = memory_dir_for_cwd(&config_dir, &agent.working_directory).join(&cmd.filename);
-                // Reject symlinks — consistent with list handler's file_type check.
-                let file_type = std::fs::symlink_metadata(&path)
-                    .map_err(|e| format!("agent:memory:read_file: {}: {e}", cmd.filename))?
-                    .file_type();
-                if !file_type.is_file() {
-                    return Err(format!("agent:memory:read_file: {} is not a regular file", cmd.filename));
-                }
-                // Cap at 10 MiB; use read_to_end + from_utf8_lossy so a boundary
-                // mid-UTF-8 sequence doesn't surface as InvalidData.
-                const MAX_READ_BYTES: u64 = 10 * 1024 * 1024;
-                let mut buf = Vec::new();
-                std::fs::File::open(&path)
-                    .and_then(|f| {
-                        use std::io::Read;
-                        f.take(MAX_READ_BYTES).read_to_end(&mut buf)
-                    })
-                    .map_err(|e| format!("agent:memory:read_file: {}: {e}", cmd.filename))?;
-                let content = String::from_utf8_lossy(&buf).into_owned();
+
+                // Live FS is the freshest copy when present — Claude may have
+                // written moments ago, before this call's mirror upsert even
+                // runs. Fall back to the mirror only when the live file is
+                // genuinely absent (a different channel's write, or the live
+                // folder was wiped) — a live path that exists but fails to
+                // read for another reason (permissions, non-regular file)
+                // still surfaces as an error rather than silently masking it
+                // with stale mirrored content.
+                let live = std::fs::symlink_metadata(&path).ok().and_then(|m| {
+                    if m.file_type().is_file() { Some(()) } else { None }
+                });
+
+                let content = if live.is_some() {
+                    let mut buf = Vec::new();
+                    std::fs::File::open(&path)
+                        .and_then(|f| {
+                            use std::io::Read;
+                            f.take(MAX_MEMORY_FILE_BYTES).read_to_end(&mut buf)
+                        })
+                        .map_err(|e| format!("agent:memory:read_file: {}: {e}", cmd.filename))?;
+                    let content = String::from_utf8_lossy(&buf).into_owned();
+
+                    let metadata_type = parse_frontmatter_type(&content);
+                    if let Err(e) = id_store.agent_native_memory_upsert(
+                        &agent.id,
+                        &cmd.filename,
+                        &content,
+                        metadata_type.as_deref(),
+                        &path.to_string_lossy(),
+                    ) {
+                        tracing::warn!(agent_id = %agent.id, filename = %cmd.filename, error = %e, "agent:memory:read_file: mirror upsert failed (non-fatal)");
+                    }
+                    content
+                } else {
+                    match id_store.agent_native_memory_read(&agent.id, &cmd.filename) {
+                        Ok(Some(mirrored)) => mirrored,
+                        Ok(None) => {
+                            return Err(format!("agent:memory:read_file: {}: not found", cmd.filename));
+                        }
+                        Err(e) => {
+                            return Err(format!("agent:memory:read_file: {}: not found on this channel and mirror lookup failed: {e}", cmd.filename));
+                        }
+                    }
+                };
 
                 Ok(Some(serde_json::to_value(NativeMemoryReadFileResult { content }).map_err(|e| e.to_string())?))
             })
@@ -447,10 +523,12 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
     );
 
     let wstore_write = state.wstore.clone();
+    let id_store_write = state.id_store.clone();
     engine.register_handler(
         COMMAND_NATIVE_MEMORY_WRITE_FILE,
         Box::new(move |data, _ctx| {
             let wstore = wstore_write.clone();
+            let id_store = id_store_write.clone();
             Box::pin(async move {
                 let cmd: CommandNativeMemoryWriteFileData = serde_json::from_value(data)
                     .map_err(|e| format!("agent:memory:write_file: {e}"))?;
@@ -499,6 +577,17 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 if let Err(e) = std::fs::rename(&tmp, &dest) {
                     let _ = std::fs::remove_file(&tmp);
                     return Err(format!("agent:memory:write_file: rename: {e}"));
+                }
+
+                let metadata_type = parse_frontmatter_type(&cmd.content);
+                if let Err(e) = id_store.agent_native_memory_upsert(
+                    &agent.id,
+                    &cmd.filename,
+                    &cmd.content,
+                    metadata_type.as_deref(),
+                    &dest.to_string_lossy(),
+                ) {
+                    tracing::warn!(agent_id = %agent.id, filename = %cmd.filename, error = %e, "agent:memory:write_file: mirror upsert failed (non-fatal)");
                 }
 
                 tracing::info!(
@@ -602,6 +691,231 @@ mod tests {
             Some(v) => std::env::set_var("AGENTMUX_SHARED_DIR", v),
             None => std::env::remove_var("AGENTMUX_SHARED_DIR"),
         }
+    }
+
+    // ---- Durable sync integration tests ----------------------------------
+    // SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07.md §5: simulate two
+    // "channels" against the same agent.id by pointing each AppState's
+    // wstore at a different working_directory (so memory_dir_for_cwd
+    // resolves two different live paths) while sharing one id_store — the
+    // same topology production uses (each channel's own objects.db caches
+    // the same global AgentDefinition.id; one shared store.db backs id_store).
+
+    use crate::backend::rpc::engine::WshRpcEngine;
+    use crate::backend::storage::store::Store;
+    use crate::backend::storage::AgentDefinition;
+    use crate::backend::rpc_types::{RpcMessage};
+
+    fn agent_def(id: &str, working_directory: &str) -> AgentDefinition {
+        AgentDefinition {
+            id: id.to_string(),
+            slug: id.to_string(),
+            name: "Test Agent".to_string(),
+            icon: String::new(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: working_directory.to_string(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: "host".to_string(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+        }
+    }
+
+    /// Build a channel's AppState: its own per-channel wstore (holding the
+    /// agent definition, keyed by the same `agent_id` every channel shares)
+    /// plus the given shared `id_store` (the durable mirror).
+    /// `claude_config_dir` must be a per-test temp directory — an empty
+    /// value would make `memory_dir_for_cwd` fall back to the REAL
+    /// `~/.agentmux/shared/providers/claude/`, writing test fixtures into
+    /// the developer's actual home directory (caught live: a prior version
+    /// of these tests left `-work-channel-a/` behind under the real home).
+    fn build_channel_state(
+        agent_id: &str,
+        working_directory: &str,
+        claude_config_dir: &std::path::Path,
+        id_store: Arc<Store>,
+    ) -> (Arc<WshRpcEngine>, tokio::sync::mpsc::UnboundedReceiver<RpcMessage>) {
+        let wstore = Arc::new(Store::open_in_memory().unwrap());
+        let mut def = agent_def(agent_id, working_directory);
+        wstore.agent_def_insert(&mut def).unwrap();
+        wstore
+            .agent_content_set(&crate::backend::storage::AgentContent {
+                agent_id: agent_id.to_string(),
+                content_type: "env".to_string(),
+                content: format!("CLAUDE_CONFIG_DIR={}\n", claude_config_dir.display()),
+                updated_at: 0,
+            })
+            .unwrap();
+
+        let mut state = crate::server::tests::test_state();
+        state.wstore = wstore.clone();
+        state.id_store = id_store;
+
+        let (engine, rx) = WshRpcEngine::new();
+        register_native_memory_handlers(&engine, &state);
+        (engine, rx)
+    }
+
+    async fn call_rpc<T: serde::de::DeserializeOwned>(
+        engine: &Arc<WshRpcEngine>,
+        rx: &mut tokio::sync::mpsc::UnboundedReceiver<RpcMessage>,
+        command: &str,
+        data: serde_json::Value,
+    ) -> T {
+        let req_id = format!("test-{}", uuid::Uuid::new_v4());
+        let msg = RpcMessage {
+            command: command.to_string(),
+            reqid: req_id.clone(),
+            data: Some(data),
+            ..Default::default()
+        };
+        engine.handle_message(msg);
+        let resp = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+            .await
+            .expect("handler timed out")
+            .expect("output channel closed");
+        assert_eq!(resp.resid, req_id, "unexpected response id");
+        assert!(resp.error.is_empty(), "handler returned error: {}", resp.error);
+        serde_json::from_value(resp.data.unwrap_or(serde_json::Value::Null)).expect("response deserialize")
+    }
+
+    async fn call_rpc_expect_error(
+        engine: &Arc<WshRpcEngine>,
+        rx: &mut tokio::sync::mpsc::UnboundedReceiver<RpcMessage>,
+        command: &str,
+        data: serde_json::Value,
+    ) -> String {
+        let req_id = format!("test-{}", uuid::Uuid::new_v4());
+        let msg = RpcMessage {
+            command: command.to_string(),
+            reqid: req_id.clone(),
+            data: Some(data),
+            ..Default::default()
+        };
+        engine.handle_message(msg);
+        let resp = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+            .await
+            .expect("handler timed out")
+            .expect("output channel closed");
+        assert_eq!(resp.resid, req_id);
+        assert!(!resp.error.is_empty(), "expected error, got success: {:?}", resp.data);
+        resp.error
+    }
+
+    #[tokio::test]
+    async fn a_file_written_from_one_channel_is_visible_from_another() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let shared_id_store = Arc::new(Store::open_shared(tmp.path()).unwrap());
+        let config_a = tempfile::tempdir().unwrap();
+        let config_b = tempfile::tempdir().unwrap();
+
+        let (engine_a, mut rx_a) = build_channel_state("agent-shared-1", "/work/channel-a", config_a.path(), shared_id_store.clone());
+        let (engine_b, mut rx_b) = build_channel_state("agent-shared-1", "/work/channel-b", config_b.path(), shared_id_store.clone());
+
+        call_rpc::<Option<serde_json::Value>>(
+            &engine_a,
+            &mut rx_a,
+            COMMAND_NATIVE_MEMORY_WRITE_FILE,
+            serde_json::json!({
+                "agent_id": "agent-shared-1",
+                "filename": "MEMORY.md",
+                "content": "written from channel A",
+            }),
+        )
+        .await;
+
+        // Channel B's live FS never had this file — list must still surface
+        // it (via the shared mirror), and read_file must return its content.
+        let listed: NativeMemoryListResult = call_rpc(
+            &engine_b,
+            &mut rx_b,
+            COMMAND_NATIVE_MEMORY_LIST,
+            serde_json::json!({ "agent_id": "agent-shared-1" }),
+        )
+        .await;
+        assert_eq!(listed.files.len(), 1, "channel B must see channel A's mirrored file");
+        assert_eq!(listed.files[0].filename, "MEMORY.md");
+
+        let read: NativeMemoryReadFileResult = call_rpc(
+            &engine_b,
+            &mut rx_b,
+            COMMAND_NATIVE_MEMORY_READ_FILE,
+            serde_json::json!({ "agent_id": "agent-shared-1", "filename": "MEMORY.md" }),
+        )
+        .await;
+        assert_eq!(read.content, "written from channel A");
+    }
+
+    #[tokio::test]
+    async fn live_fs_content_wins_over_a_stale_mirror_row() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let shared_id_store = Arc::new(Store::open_shared(tmp.path()).unwrap());
+        let config_a = tempfile::tempdir().unwrap();
+
+        let (engine_a, mut rx_a) = build_channel_state("agent-shared-2", "/work/channel-a", config_a.path(), shared_id_store.clone());
+
+        call_rpc::<Option<serde_json::Value>>(
+            &engine_a,
+            &mut rx_a,
+            COMMAND_NATIVE_MEMORY_WRITE_FILE,
+            serde_json::json!({ "agent_id": "agent-shared-2", "filename": "MEMORY.md", "content": "v1" }),
+        )
+        .await;
+        call_rpc::<Option<serde_json::Value>>(
+            &engine_a,
+            &mut rx_a,
+            COMMAND_NATIVE_MEMORY_WRITE_FILE,
+            serde_json::json!({ "agent_id": "agent-shared-2", "filename": "MEMORY.md", "content": "v2 — freshest" }),
+        )
+        .await;
+
+        // Directly stamp a stale mirror row behind the live FS's back — the
+        // read path must still prefer the live file, not this stale row.
+        shared_id_store
+            .agent_native_memory_upsert("agent-shared-2", "MEMORY.md", "stale mirror content", None, "/nowhere")
+            .unwrap();
+
+        let read: NativeMemoryReadFileResult = call_rpc(
+            &engine_a,
+            &mut rx_a,
+            COMMAND_NATIVE_MEMORY_READ_FILE,
+            serde_json::json!({ "agent_id": "agent-shared-2", "filename": "MEMORY.md" }),
+        )
+        .await;
+        assert_eq!(read.content, "v2 — freshest", "live FS must win over a stale mirror row");
+    }
+
+    #[tokio::test]
+    async fn read_file_errors_when_absent_from_both_live_fs_and_mirror() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let shared_id_store = Arc::new(Store::open_shared(tmp.path()).unwrap());
+        let config_a = tempfile::tempdir().unwrap();
+        let (engine, mut rx) = build_channel_state("agent-shared-3", "/work/channel-a", config_a.path(), shared_id_store);
+
+        let err = call_rpc_expect_error(
+            &engine,
+            &mut rx,
+            COMMAND_NATIVE_MEMORY_READ_FILE,
+            serde_json::json!({ "agent_id": "agent-shared-3", "filename": "MEMORY.md" }),
+        )
+        .await;
+        assert!(err.contains("not found"), "unexpected error: {err}");
     }
 
     #[test]
