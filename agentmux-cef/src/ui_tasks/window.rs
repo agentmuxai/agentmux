@@ -702,18 +702,52 @@ pub fn post_close_window(state: &Arc<AppState>, label: &str) {
 // ── Memory-pressure → frontend banner event ────────────────────────────────
 
 wrap_task! {
+    // `kind` distinguishes RAM pressure from Page File (commit) pressure —
+    // SPEC_RAM_PAGEFILE_PRESSURE_SPLIT_2026_08_07. `system_managed`/
+    // `disk_free_pct` are only meaningful for `kind == "pagefile"`, and even
+    // then only when `has_disk_context` is true — a `GetDiskFreeSpaceExW`/
+    // registry read failure (or `kind == "ram"`, where the concept doesn't
+    // apply at all) must genuinely OMIT those two keys from the emitted
+    // payload rather than substitute a value, or `pagefileGuidance()` on the
+    // frontend renders a confident-sounding guess (reagent-caught P1: an
+    // earlier version defaulted to "system-managed, disk healthy" on read
+    // failure, which produces the reassuring message even while pressure is
+    // Critical). Plain `bool`/`f64` fields (not `Option<T>`) because
+    // `wrap_task!`'s generated struct is untested against `Option` fields —
+    // the extra flag reaches the same "no guess" outcome without that risk.
     pub struct EmitMemoryPressureTask {
         state: Arc<AppState>,
+        kind: String,
         level: String,
-        commit_free_mb: u64,
+        free_mb: u64,
+        has_disk_context: bool,
+        system_managed: bool,
+        disk_free_pct: f64,
     }
 
     impl Task {
         fn execute(&self) {
-            let payload = serde_json::json!({
-                "level": self.level,
-                "commit_free_mb": self.commit_free_mb,
-            });
+            let payload = if self.kind == "ram" {
+                serde_json::json!({
+                    "kind": self.kind,
+                    "level": self.level,
+                    "phys_free_mb": self.free_mb,
+                })
+            } else if self.has_disk_context {
+                serde_json::json!({
+                    "kind": self.kind,
+                    "level": self.level,
+                    "commit_free_mb": self.free_mb,
+                    "system_managed": self.system_managed,
+                    "disk_free_pct": self.disk_free_pct,
+                })
+            } else {
+                serde_json::json!({
+                    "kind": self.kind,
+                    "level": self.level,
+                    "commit_free_mb": self.free_mb,
+                })
+            };
             crate::events::emit_event_to_top_level_windows(
                 &self.state,
                 "memory-pressure",
@@ -723,12 +757,54 @@ wrap_task! {
     }
 }
 
-/// Push a memory-pressure level transition to the frontend banner. Callable
-/// from ANY thread (the memory heartbeat runs on a background std::thread); the
-/// emit itself (CEF JS execution) must run on the UI thread, so it's wrapped in
-/// a posted task. SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16 §5.F.
-pub fn post_memory_pressure(state: &Arc<AppState>, level: &str, commit_free_mb: u64) {
-    let mut task = EmitMemoryPressureTask::new(state.clone(), level.to_string(), commit_free_mb);
+/// Push a RAM-pressure level transition to the frontend banner. Callable from
+/// ANY thread (the memory heartbeat runs on a background std::thread); the
+/// emit itself (CEF JS execution) must run on the UI thread, so it's wrapped
+/// in a posted task. SPEC_RAM_PAGEFILE_PRESSURE_SPLIT_2026_08_07 §3/§5.
+pub fn post_memory_pressure_ram(state: &Arc<AppState>, level: &str, phys_free_mb: u64) {
+    let mut task = EmitMemoryPressureTask::new(
+        state.clone(),
+        "ram".to_string(),
+        level.to_string(),
+        phys_free_mb,
+        false,
+        false,
+        0.0,
+    );
+    post_task(ThreadId::UI, Some(&mut task));
+}
+
+/// Push a Page File (commit) pressure level transition to the frontend
+/// banner. `disk_context`, when `Some`, carries whether Windows can actually
+/// grow the page file right now (`system_managed` + `disk_free_pct` on the
+/// volume backing it) so the banner can pick the correct guidance —
+/// SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29 §5.2 P0 via
+/// SPEC_RAM_PAGEFILE_PRESSURE_SPLIT_2026_08_07 §4. `None` means the disk/
+/// registry read failed this tick — the payload omits both fields entirely
+/// (not a guessed default) so the frontend's own fail-open "no guidance"
+/// path (`pagefileGuidance`) is what actually renders, not a false "healthy"
+/// claim. Originally `post_memory_pressure`
+/// (SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16 §5.F); split by `kind`
+/// alongside `post_memory_pressure_ram`.
+pub fn post_memory_pressure_pagefile(
+    state: &Arc<AppState>,
+    level: &str,
+    commit_free_mb: u64,
+    disk_context: Option<(bool, f64)>,
+) {
+    let (has_disk_context, system_managed, disk_free_pct) = match disk_context {
+        Some((system_managed, disk_free_pct)) => (true, system_managed, disk_free_pct),
+        None => (false, false, 0.0),
+    };
+    let mut task = EmitMemoryPressureTask::new(
+        state.clone(),
+        "pagefile".to_string(),
+        level.to_string(),
+        commit_free_mb,
+        has_disk_context,
+        system_managed,
+        disk_free_pct,
+    );
     post_task(ThreadId::UI, Some(&mut task));
 }
 
