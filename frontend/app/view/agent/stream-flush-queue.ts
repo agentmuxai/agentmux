@@ -76,6 +76,21 @@ export interface StreamFlushQueue {
     pushShellExit(shellId: string, status: ShellNode["status"], exitCode: number, exitedAt: number): void;
     /** Arm the shared RAF if one isn't already pending. THE single requestAnimationFrame call site for this hook. */
     scheduleFlush(): void;
+    /**
+     * Flush everything pending synchronously, right now, instead of waiting
+     * for the armed RAF. Exists for exactly one caller: the `session_end`
+     * path must land the turn's own trailing document nodes BEFORE
+     * dispatching `TurnEnd` — otherwise the tail flush arrives a frame
+     * after the phase settles to Done.completed, and the reducer's
+     * StreamFlushObserved re-promotion (deliberately kept by #2420 for
+     * genuine multi-round continuations) reads the turn's own tail as "the
+     * agent picked up another round," leaving the pane stuck on "Working…"
+     * after the turn genuinely ended (log-confirmed: TurnEnd at t, Done →
+     * Streaming via StreamFlushObserved at t+6ms, then nothing). Safe to
+     * call with an RAF still armed: the eventual RAF callback finds empty
+     * queues and no-ops, so no empty StreamFlushObserved is ever dispatched.
+     */
+    flushNow(): void;
     /** Cancel any in-flight RAF and clear every pending queue (nodes, chunks, shell state). Used by the truncate-reset path. */
     resetAll(): void;
     /**
@@ -190,6 +205,13 @@ export function createStreamFlushQueue(model: AgentPaneModel): StreamFlushQueue 
         pushShellChunk(shellId, chunk) { pendingShellChunks.push({ shellId, chunk }); },
         pushShellExit(shellId, status, exitCode, exitedAt) { pendingShellExits.push({ shellId, status, exitCode, exitedAt }); },
         scheduleFlush,
+        flushNow() {
+            // Cancel the armed RAF too (not just rely on its empty-queue
+            // no-op) so the id doesn't linger pointing at an already-served
+            // frame.
+            if (flushRafId != null) { cancelAnimationFrame(flushRafId); flushRafId = null; }
+            flushPendingNodes();
+        },
         resetAll() {
             if (flushRafId != null) { cancelAnimationFrame(flushRafId); flushRafId = null; }
             pendingNew = [];

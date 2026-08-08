@@ -520,6 +520,19 @@ export function useAgentStream({
                     // NEXT turn creates fresh nodes instead of appending to the
                     // previous response (which sits above the user's message).
                     if (event.type === "session_end") {
+                        // Land the turn's own trailing document nodes BEFORE
+                        // TurnEnd settles the phase. Without this, the tail
+                        // sits in the RAF queue while finalizeTurn dispatches
+                        // TurnEnd synchronously; the flush then arrives a
+                        // frame later in Done.completed, where the reducer's
+                        // StreamFlushObserved re-promotion reads it as a new
+                        // round — a permanent false "Working…" after any turn
+                        // whose final text shares the last stream batch with
+                        // its session_end (log-confirmed live: TurnEnd at t,
+                        // Done → Streaming at t+6ms, then nothing). Genuine
+                        // multi-round continuations still re-promote — their
+                        // flushes arrive after this point.
+                        queue.flushNow();
                         finalizeTurn(event.stats ?? null);
                         continue;
                     }
