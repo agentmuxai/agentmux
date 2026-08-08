@@ -1,7 +1,12 @@
 # Agent Input Auto-Grow Textarea
 
-**Status:** Proposed
+**Status:** Proposed (implemented — see note below)
 **Date:** 2026-04-09
+
+> **2026-08-07 audit note:** Implemented, differently than proposed here —
+> shipped via plain CSS `field-sizing: content` rather than the JS resize
+> handler this doc describes. See
+> `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
 
 ## Summary
 

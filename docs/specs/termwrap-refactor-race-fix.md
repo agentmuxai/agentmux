@@ -1,8 +1,14 @@
 # Spec: TermWrap Refactor — Fix Terminal Init Race Condition
 
 **Date:** 2026-03-08
-**Status:** Proposed
+**Status:** Proposed (superseded — see note below)
 **Related:** `docs/investigations/terminal-black-screen-race-condition.md`
+
+> **2026-08-07 audit note:** Superseded — the terminal subsystem has been
+> substantially reworked since (`SPEC_BULLETPROOF_TERMINALS_2026_05_21.md`,
+> `SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md`); this doc almost
+> certainly no longer describes current `termwrap.ts`. 5 months stale. See
+> `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
 
 ---
 

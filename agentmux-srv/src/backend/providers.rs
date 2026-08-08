@@ -34,8 +34,6 @@ pub enum ControllerType {
 pub struct ProviderConfig {
     /// Canonical provider identifier (e.g. `"claude"`).
     pub id: &'static str,
-    /// Human-readable name shown in the UI.
-    pub display_name: &'static str,
     /// Executable name on PATH (e.g. `"claude"`).
     pub cli_command: &'static str,
     /// Whether the provider keeps a persistent subprocess or spawns per turn.
@@ -75,11 +73,6 @@ pub struct ProviderConfig {
     pub npm_package: &'static str,
     /// Version string passed to `npm install`, e.g. `"latest"` or `"0.116.0"`.
     pub pinned_version: &'static str,
-    // ── Misc ─────────────────────────────────────────────────────────────────
-    /// Icon identifier used by the frontend.
-    pub icon: &'static str,
-    /// URL of the provider's documentation.
-    pub docs_url: &'static str,
 }
 
 impl ProviderConfig {
@@ -97,7 +90,6 @@ impl ProviderConfig {
 
 static CLAUDE: ProviderConfig = ProviderConfig {
     id: "claude",
-    display_name: "Claude Code",
     cli_command: "claude",
     // Persistent (bidirectional stream-json) + the Agent SDK CONTROL PROTOCOL is
     // the only way AskUserQuestion (and interactive tool-permission) works headless.
@@ -162,13 +154,10 @@ static CLAUDE: ProviderConfig = ProviderConfig {
     // .github/workflows/container-image.yml `claude_version` default — enforced by
     // frontend/app/view/agent/providers/pin-consistency.test.ts.
     pinned_version: "2.1.198",
-    icon: "sparkles",
-    docs_url: "https://docs.anthropic.com/claude-code",
 };
 
 static CODEX: ProviderConfig = ProviderConfig {
     id: "codex",
-    display_name: "Codex CLI",
     cli_command: "codex",
     controller_type: ControllerType::Subprocess,
     // exec subcommand runs non-interactively; --json emits NDJSON events; - reads prompt from stdin
@@ -190,13 +179,10 @@ static CODEX: ProviderConfig = ProviderConfig {
     unset_env: &[],
     npm_package: "@openai/codex",
     pinned_version: "0.116.0",
-    icon: "robot",
-    docs_url: "https://platform.openai.com/docs/codex",
 };
 
 static GEMINI: ProviderConfig = ProviderConfig {
     id: "gemini",
-    display_name: "Gemini CLI",
     cli_command: "gemini",
     controller_type: ControllerType::Subprocess,
     // --output-format stream-json: NDJSON events; --yolo: auto-approve all tools;
@@ -212,8 +198,6 @@ static GEMINI: ProviderConfig = ProviderConfig {
     unset_env: &[],
     npm_package: "@google/gemini-cli",
     pinned_version: "0.32.1",
-    icon: "diamond",
-    docs_url: "https://ai.google.dev/gemini-cli",
 };
 
 // Qwen Code — Alibaba's open-source coding agent, a fork of Gemini CLI.
@@ -222,7 +206,6 @@ static GEMINI: ProviderConfig = ProviderConfig {
 // + OPENAI_API_KEY/OPENAI_MODEL), so it runs any OpenRouter model.
 static QWEN: ProviderConfig = ProviderConfig {
     id: "qwen",
-    display_name: "Qwen Code",
     cli_command: "qwen",
     controller_type: ControllerType::Subprocess,
     // -p: non-interactive; --output-format stream-json: NDJSON events;
@@ -243,13 +226,10 @@ static QWEN: ProviderConfig = ProviderConfig {
     unset_env: &[],
     npm_package: "@qwen-code/qwen-code",
     pinned_version: "0.19.2",
-    icon: "feather",
-    docs_url: "https://qwenlm.github.io/qwen-code-docs",
 };
 
 static KIMI: ProviderConfig = ProviderConfig {
     id: "kimi",
-    display_name: "Kimi Code CLI",
     cli_command: "kimi",
     controller_type: ControllerType::Subprocess,
     launch_args: &[
@@ -270,13 +250,10 @@ static KIMI: ProviderConfig = ProviderConfig {
     unset_env: &[],
     npm_package: "",
     pinned_version: "",
-    icon: "moon",
-    docs_url: "https://moonshotai.github.io/kimi-cli/",
 };
 
 static OPENCLAW: ProviderConfig = ProviderConfig {
     id: "openclaw",
-    display_name: "OpenClaw",
     // `openclaw acp` runs OpenClaw's ACP bridge — speaks ACP over stdio
     // for IDE/tool clients (us) and forwards turns to the local
     // OpenClaw Gateway over WebSocket. The Gateway is OpenClaw's own
@@ -302,13 +279,10 @@ static OPENCLAW: ProviderConfig = ProviderConfig {
     unset_env: &[],
     npm_package: "openclaw",
     pinned_version: "2026.6.10",
-    icon: "lobster",
-    docs_url: "https://docs.openclaw.ai",
 };
 
 static PI: ProviderConfig = ProviderConfig {
     id: "pi",
-    display_name: "Pi",
     cli_command: "pi",
     controller_type: ControllerType::Acp,
     launch_args: &["--json"],
@@ -322,8 +296,6 @@ static PI: ProviderConfig = ProviderConfig {
     unset_env: &[],
     npm_package: "@mariozechner/pi-coding-agent",
     pinned_version: "0.73.1",
-    icon: "terminal",
-    docs_url: "https://github.com/badlogic/pi-mono",
 };
 
 // Mux Code — AgentMux's first-party agentic coding CLI.
@@ -334,7 +306,6 @@ static PI: ProviderConfig = ProviderConfig {
 // session.  npm: `@agentmuxai/muxcode`.
 static MUX_CODE: ProviderConfig = ProviderConfig {
     id: "muxcode",
-    display_name: "Mux Code",
     cli_command: "muxcode",
     controller_type: ControllerType::Subprocess,
     // muxcode emits NDJSON unconditionally; no --output-format flag exists.
@@ -352,8 +323,6 @@ static MUX_CODE: ProviderConfig = ProviderConfig {
     unset_env: &[],
     npm_package: "@agentmuxai/muxcode",
     pinned_version: "0.1.0",
-    icon: "brain",
-    docs_url: "https://github.com/agentmuxai/muxcode",
 };
 
 // GitHub Copilot CLI — Microsoft's coding agent. Runs in ACP mode via
@@ -362,7 +331,6 @@ static MUX_CODE: ProviderConfig = ProviderConfig {
 // #1046), hence ACP.
 static COPILOT: ProviderConfig = ProviderConfig {
     id: "copilot",
-    display_name: "GitHub Copilot CLI",
     cli_command: "copilot",
     controller_type: ControllerType::Acp,
     launch_args: &["--acp"],
@@ -376,8 +344,6 @@ static COPILOT: ProviderConfig = ProviderConfig {
     unset_env: &[],
     npm_package: "@github/copilot",
     pinned_version: "1.0.65",
-    icon: "github",
-    docs_url: "https://docs.github.com/copilot/concepts/agents/about-copilot-cli",
 };
 
 // ─── Static registry ─────────────────────────────────────────────────────────

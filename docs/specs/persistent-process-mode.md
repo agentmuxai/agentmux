@@ -1,7 +1,13 @@
 # Persistent Process Mode for Agent Pane
 
-**Status:** Proposed
+**Status:** Proposed (implemented — see note below)
 **Date:** 2026-04-09
+
+> **2026-08-07 audit note:** Implemented — this became the persistent
+> controller (`agentmux-srv/src/backend/blockcontroller/persistent.rs`),
+> foundational to how the app runs today (referenced throughout `CLAUDE.md`).
+> Badly stale status for long-shipped, load-bearing code. See
+> `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
 
 ## Summary
 

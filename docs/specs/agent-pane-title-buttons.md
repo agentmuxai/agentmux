@@ -2,7 +2,12 @@
 
 **Date:** 2026-04-15  
 **Author:** AgentA  
-**Status:** Proposed
+**Status:** Proposed (superseded — see note below)
+
+> **2026-08-07 audit note:** Superseded — references a "Forge" tab /
+> `AgentCardSettingsPanel` no longer in code, replaced by the Identity/Armory
+> consolidation (see `CLAUDE.md`'s "Not widgets" table). See
+> `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
 
 ---
 

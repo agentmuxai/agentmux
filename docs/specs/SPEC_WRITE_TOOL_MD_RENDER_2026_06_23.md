@@ -1,8 +1,12 @@
 # SPEC: Render `.md` content as markdown in the Write tool overlay
 
 **Date:** 2026-06-23
-**Status:** Planned
+**Status:** Planned (implemented — see note below)
 **Author:** clamk
+
+> **2026-08-07 audit note:** Implemented (`isMarkdown` detection in
+> `renderRead`/`renderWrite`, `ToolOverlayLog.tsx`). Status field was never
+> updated. See `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
 **Extends:** `SPEC_WRITE_TOOL_CONTENT_VIEW_2026_06_19.md` (implemented in PR #1601)
 **Related:** `frontend/app/view/agent/components/ToolOverlayLog.tsx` (`renderWrite`),
              `frontend/app/element/markdown.tsx` (`Markdown`)
