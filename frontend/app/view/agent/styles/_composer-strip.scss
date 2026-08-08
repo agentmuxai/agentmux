@@ -518,7 +518,13 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    flex-shrink: 0;
+    // The inline height is the PREFERRED size; when the pane is too
+    // short to fit it (composer region capped at max-height: 100%),
+    // flexbox compresses the drawer down to this floor rather than
+    // letting the terminal's bottom rows overflow the pane (codex P2,
+    // PR #2466). Floor matches the drag clamp's MIN_HEIGHT.
+    flex-shrink: 1;
+    min-height: 120px;
 }
 
 .agent-composer-details-resize-handle {

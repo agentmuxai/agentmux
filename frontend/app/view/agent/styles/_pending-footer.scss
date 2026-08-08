@@ -68,6 +68,10 @@
         border-top: 1px solid var(--border-color);
         background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
         padding: var(--space-0-5) var(--space-0-5);
+        // Never compress the composer when .agent-composer-region hits
+        // its max-height cap — the shell drawer below is the flex item
+        // that yields (codex P2, PR #2466).
+        flex-shrink: 0;
 
         .agent-input-container {
             display: flex;

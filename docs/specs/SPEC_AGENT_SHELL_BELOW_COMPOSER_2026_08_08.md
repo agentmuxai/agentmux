@@ -149,7 +149,45 @@ changes, to explain the docked-below-composer / pinned-bottom-edge geometry
 instead of the old "docked above the composer" description. No SCSS changes
 (`border-top` on the handle remains the correct free-edge accent).
 
-### 3.3 Nothing else references drawer placement
+### 3.3 Short-pane overflow: let the drawer yield, never the composer
+
+Flagged by codex review on the PR: with the drawer below the footer, a tall
+persisted `term:shellheight` (up to 600px) in a short pane pushed the
+drawer's bottom rows — including the terminal prompt — past the pane's
+`overflow: hidden` edge, unreachable. (The pre-reorder layout had the same
+over-full geometry, but it clipped the composer bottom rather than the
+terminal prompt.)
+
+Fix is CSS-only, a shrink chain that routes all compression to the drawer:
+
+- `.agent-composer-region` (`_control-bar.scss`): `flex-shrink: 0` →
+  `flex-shrink: 1; min-height: 0`. Safe against the historical "long
+  transcript squashes the composer" concern that motivated the shrink-0:
+  `.agent-document-scroll-region` is `flex: 1` (basis 0%), so transcript
+  length contributes nothing to flex over-full — the view only over-fills
+  when the fixed rows themselves exceed the pane. (A first attempt used
+  `max-height: 100%` on the region instead; live verification showed it
+  overshoots by the height of the fixed siblings above the region — the
+  composer strip's ~29px — because the cap is against the whole pane, not
+  the space actually available to the region.)
+- `.agent-footer` (`_pending-footer.scss`): explicit `flex-shrink: 0` — the
+  composer never compresses.
+- `.agent-composer-details` (`_control-bar.scss`, new rule): flex column
+  with `min-height: 0` so the shrink propagates through the wrapper
+  (`AgentControlBar` inside already has `flex-shrink: 0`).
+- `.agent-composer-details-resizable` (`_composer-strip.scss`):
+  `flex-shrink: 0` → `flex-shrink: 1; min-height: 120px`. The inline
+  `height` becomes the *preferred* size; flexbox compresses below it only
+  when the pane is too short, down to the same 120px floor as the drag
+  clamp. The persisted `term:shellheight` is untouched, so the drawer
+  springs back when space returns.
+
+Verified live via CDP `Emulation.setDeviceMetricsOverride`: with a 400px
+preferred drawer in a 347px-tall pane, the drawer renders at 270px, the
+footer stays fully visible, drawer bottom overflow is 0px; restoring the
+viewport restores the full 400px.
+
+### 3.4 Nothing else references drawer placement
 
 Confirmed no other file assumes "shell above composer":
 - `AgentComposerStrip.tsx`'s Shell button (`:298-306`) only toggles
@@ -188,6 +226,11 @@ frozen in place.
       via synthesized pointer events: height responds 1:1 to drag delta).
 - [ ] Close and reopen the pane (or reload) — persisted `term:shellheight`
       still restores the same height.
+- [x] Short pane + tall persisted drawer — drawer compresses (floor 120px)
+      instead of pushing the terminal prompt past the pane edge; composer
+      stays fully visible; drawer springs back when the pane grows
+      (verified live via CDP viewport emulation: 400px preferred drawer in
+      a 347px pane renders at 270px, 0px overflow).
 - [x] Slash-command help/picker (`/` at start of composer) still renders
       directly above the composer, unaffected by the drawer's new position
       (unchanged DOM position before `AgentFooter`).
@@ -201,3 +244,6 @@ frozen in place.
 |------|--------|
 | `frontend/app/view/agent/agent-view.tsx` | Move the `detailsOpenAtom` `Show` block to after `AgentFooter`; swap `AgentControlBar`/`ResizableDetailsDrawer` order within it (§3.1) |
 | `frontend/app/view/agent/components/ResizableDetailsDrawer.tsx` | Doc-comment update only — handle stays on the top edge, drag math unchanged (§3.2) |
+| `frontend/app/view/agent/styles/_control-bar.scss` | Region: `flex-shrink: 1; min-height: 0`; new `.agent-composer-details` flex-column rule (§3.3) |
+| `frontend/app/view/agent/styles/_composer-strip.scss` | Drawer: `flex-shrink: 1; min-height: 120px` — inline height becomes preferred, not fixed (§3.3) |
+| `frontend/app/view/agent/styles/_pending-footer.scss` | `.agent-footer`: explicit `flex-shrink: 0` (§3.3) |
