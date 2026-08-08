@@ -18,7 +18,7 @@ use serde_json::json;
 use tokio::sync::broadcast;
 
 use super::eventbus::{EventBus, WSEventType, WS_EVENT_RPC};
-use super::fs_watch::FsWatchPool;
+use super::fs_watch::{FsWatchEvent, FsWatchEventKind, FsWatchPool};
 use super::wconfig::{self, ConfigWatcher, SettingsType};
 
 /// Resolve the directory containing settings.json.
@@ -72,14 +72,24 @@ pub fn load_settings_from_disk(config_watcher: &ConfigWatcher) {
     tracing::info!("settings.json loaded successfully");
 }
 
-/// Whether a raw fs_watch event refers to `settings.json` specifically —
-/// the pool's broadcast stream carries events for every currently-watched
-/// path in the process, not just this module's. Matches the filename-only
-/// comparison the pre-migration code used
-/// (`event.paths.iter().any(|p| p.ends_with("settings.json"))`, which for a
-/// single-component pattern is exactly a filename check).
-fn is_settings_file_event(path: &std::path::Path) -> bool {
-    path.file_name().map(|n| n == wconfig::SETTINGS_FILE).unwrap_or(false)
+/// Whether a raw fs_watch event refers to a `settings.json` save specifically
+/// — the pool's broadcast stream carries events for every currently-watched
+/// path in the process, not just this module's. Matches the pre-migration
+/// code's filter exactly: filename must be `settings.json` (was
+/// `event.paths.iter().any(|p| p.ends_with("settings.json"))`) AND the event
+/// must be a `Create`/`Modify` (was `EventKind::Modify(_) | EventKind::Create(_)`).
+/// A `Removed` event (external delete, or an editor's unlink+recreate save) is
+/// deliberately excluded — `read_config_file` treats a missing file as success
+/// (defaults, no errors), so reacting to `Remove` would reset the live config
+/// and broadcast it to every client.
+fn is_settings_file_event(event: &FsWatchEvent) -> bool {
+    let is_settings_file = event
+        .path
+        .file_name()
+        .map(|n| n == wconfig::SETTINGS_FILE)
+        .unwrap_or(false);
+    is_settings_file
+        && matches!(event.kind, FsWatchEventKind::Created | FsWatchEventKind::Modified)
 }
 
 /// Subscribe to `settings.json` via the shared `FsWatchPool` and broadcast
@@ -123,7 +133,7 @@ pub fn spawn_settings_watcher(
     tokio::spawn(async move {
         loop {
             match events.recv().await {
-                Ok(ev) if is_settings_file_event(&ev.path) => {}
+                Ok(ev) if is_settings_file_event(&ev) => {}
                 Ok(_) => continue, // some other watched path — not ours
                 Err(broadcast::error::RecvError::Closed) => {
                     tracing::info!("settings watcher event stream closed, stopping");
@@ -284,10 +294,25 @@ mod tests {
         assert!(saw_it, "expected config_watcher to reload the updated setting after a settings.json change detected via FsWatchPool");
     }
 
+    fn evt(path: &str, kind: FsWatchEventKind) -> FsWatchEvent {
+        FsWatchEvent { path: PathBuf::from(path), kind }
+    }
+
     #[test]
     fn is_settings_file_event_matches_only_the_settings_filename() {
-        assert!(is_settings_file_event(std::path::Path::new("/some/dir/settings.json")));
-        assert!(!is_settings_file_event(std::path::Path::new("/some/dir/other.json")));
-        assert!(!is_settings_file_event(std::path::Path::new("/some/dir")));
+        assert!(is_settings_file_event(&evt("/some/dir/settings.json", FsWatchEventKind::Modified)));
+        assert!(is_settings_file_event(&evt("/some/dir/settings.json", FsWatchEventKind::Created)));
+        assert!(!is_settings_file_event(&evt("/some/dir/other.json", FsWatchEventKind::Modified)));
+        assert!(!is_settings_file_event(&evt("/some/dir", FsWatchEventKind::Modified)));
+    }
+
+    #[test]
+    fn is_settings_file_event_ignores_removed_events() {
+        // A Remove event for settings.json (external delete, or an editor's
+        // unlink+recreate save) must NOT trigger a reload — read_config_file
+        // treats a missing file as success-with-defaults, so reacting here
+        // would reset the live config and broadcast defaults to every client.
+        assert!(!is_settings_file_event(&evt("/some/dir/settings.json", FsWatchEventKind::Removed)));
+        assert!(!is_settings_file_event(&evt("/some/dir/settings.json", FsWatchEventKind::Other)));
     }
 }
