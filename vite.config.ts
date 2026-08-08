@@ -65,6 +65,42 @@ function platformResolve(): Plugin {
 }
 
 /**
+ * Fails a production build outright when VITE_MUXBUS_CLIENT_ID resolves
+ * empty. The MuxBus Cloud UI (HostPopover / AgentMuxConnectPanel /
+ * accounts-manager) is gated on `isConfigured()` — client ID baked in at
+ * compile time — so a build that silently loses the env var ships with the
+ * entire MuxBus section invisibly absent, indistinguishable from a good
+ * build until someone notices missing UI. That exact failure shipped in the
+ * 2026-08-05 portable (frontend/.env.production was present and correct,
+ * but that one build run didn't load it — cause transient, never
+ * reproduced). The env file is committed, so a correctly-functioning build
+ * can never trip this; if it fires, the env pipeline itself is broken and
+ * the build MUST not ship.
+ *
+ * Production mode only: `--mode dev` builds and the dev server are never
+ * blocked (dev loads .env.development live, and a dev loop shouldn't die
+ * over cloud-login config).
+ */
+function requireMuxBusClientId(): Plugin {
+    return {
+        name: "require-muxbus-client-id",
+        apply: "build",
+        configResolved(config) {
+            if (config.mode !== "production") return;
+            if (!config.env.VITE_MUXBUS_CLIENT_ID) {
+                throw new Error(
+                    "[require-muxbus-client-id] VITE_MUXBUS_CLIENT_ID is empty in a production build. " +
+                        "It should have been loaded from frontend/.env.production (committed). " +
+                        "An empty ID compiles isConfigured() to false and silently hides all MuxBus Cloud UI — " +
+                        "refusing to build. Check envDir resolution and that nothing in the build " +
+                        "environment shadows VITE_MUXBUS_CLIENT_ID with an empty value.",
+                );
+            }
+        },
+    };
+}
+
+/**
  * Strips redundant KaTeX font formats (TTF, WOFF) from the build output.
  * KaTeX CSS lists woff2/woff/ttf as @font-face fallbacks; CEF's bundled
  * Chromium only needs woff2, so the others are dead weight (~876 KB).
@@ -148,6 +184,7 @@ export default defineConfig({
         },
     },
     plugins: [
+        requireMuxBusClientId(),
         platformResolve(),
         tsconfigPaths(),
         svgr({
