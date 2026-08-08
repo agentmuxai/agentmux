@@ -362,7 +362,15 @@
             // shade is what the user actually sees for every tool type.
             background: color-mix(in srgb, var(--main-text-color) 4%, var(--main-bg-color));
             border-radius: 0;
-            padding: 6px 8px;
+            // Zero padding — the inset lives on the children
+            // (.agent-tool-overlay-header / .agent-tool-overlay-log) so the
+            // log's scrollbars sit flush at THIS surface's edges. A
+            // ::-webkit-scrollbar renders inside its owning element's box,
+            // so any padding here pushes the scroll container — track and
+            // all — inboard of the visible panel edge, leaving a dead strip
+            // outboard of the scrollbar.
+            // SPEC_TOOL_PREVIEW_SCROLLBAR_EDGE_PADDING_2026_08_08.md.
+            padding: 0;
             max-height: 50vh;
             min-height: 0;
             overflow: hidden;
