@@ -42,8 +42,8 @@ import { getOpenDefinitionMap } from "@/app/store/agent-pane-state-store";
 import { subscribeToPaneLifecycle } from "@/app/store/agent-pane-registration";
 import type { AgentViewModel } from "../agent-model";
 import { getProvider } from "../providers";
-import { looksLikeRealAccountId, realAccountIdOrEmpty } from "../identity-carry-over";
-import { loadAccounts } from "@/app/view/identity/identity-model";
+import { realAccountIdOrEmpty } from "../identity-carry-over";
+import { refreshAccountCache } from "@/app/view/identity/identity-model";
 import { AgentCard } from "./AgentCard";
 import { AgentActionBar } from "./AgentActionBar";
 import { HiddenTemplatesSection } from "./HiddenTemplatesSection";
@@ -280,13 +280,16 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                 // stale/legacy value from before the account-linking system
                 // — forwarding it unfiltered as accountId crashes the
                 // write-through's FOREIGN KEY insert (see
-                // identity-carry-over.ts's realAccountIdOrEmpty). memory_id
-                // does NOT need this: unlike account_id it has no FK
-                // constraint, and legitimate bundle ids are routinely
+                // identity-carry-over.ts's realAccountIdOrEmpty).
+                // refreshAccountCache() (not the synchronous loadAccounts()
+                // cache, which can still be mid-priming — reagentx P2 on
+                // #2464) guarantees a fresh list to check against.
+                // memory_id does NOT need this: unlike account_id it has no
+                // FK constraint, and legitimate bundle ids are routinely
                 // non-UUID ("blank", "seed-*" — memory_bundles.rs/bundle.rs)
                 // rather than legacy garbage, so filtering it would silently
                 // drop a real carry-over (reagent P2 on this PR).
-                accountId: realAccountIdOrEmpty(row.identity_id, loadAccounts().map((a) => a.id)),
+                accountId: realAccountIdOrEmpty(row.identity_id, (await refreshAccountCache()).map((a) => a.id)),
                 memoryId: row.memory_id,
                 continueOfInstanceId: row.instance_id,
                 workDirOverride: row.working_directory,
@@ -320,7 +323,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                 environment: forkedDef.agent_type === "container" ? "docker" : "local",
                 // #2463 Finding 1 — see handleReattach's comment above.
                 // memoryId intentionally unfiltered — same reasoning.
-                accountId: realAccountIdOrEmpty(row.identity_id, loadAccounts().map((a) => a.id)),
+                accountId: realAccountIdOrEmpty(row.identity_id, (await refreshAccountCache()).map((a) => a.id)),
                 memoryId: row.memory_id,
             });
         } finally {
@@ -443,13 +446,21 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                     (a, b) => (b.started_at ?? 0) - (a.started_at ?? 0),
                 )[0];
                 if (mostRecent) {
-                    // See identity-carry-over.ts — a UUID-shape check,
-                    // not a per-literal blacklist, so legacy sentinels
-                    // like "default" (which would otherwise fail
-                    // linkagentidentity's FOREIGN KEY constraint) are
-                    // filtered along with "blank"/"".
-                    accountId = looksLikeRealAccountId(mostRecent.identity_id) ? mostRecent.identity_id : "";
-                    memoryId = looksLikeRealAccountId(mostRecent.memory_id) ? mostRecent.memory_id : "";
+                    // See identity-carry-over.ts's realAccountIdOrEmpty —
+                    // cross-checks against a fresh account fetch (not the
+                    // synchronous loadAccounts() cache, which can still be
+                    // mid-priming this early after app startup — reagentx
+                    // P2 on #2464) so a legacy sentinel like "default", or
+                    // a UUID-shaped-but-not-a-real-account legacy bundle
+                    // id, can't slip through and still fail
+                    // linkagentidentity's FOREIGN KEY constraint.
+                    // memoryId is intentionally NOT filtered — see
+                    // handleReattach's comment above.
+                    accountId = realAccountIdOrEmpty(
+                        mostRecent.identity_id,
+                        (await refreshAccountCache()).map((a) => a.id),
+                    );
+                    memoryId = mostRecent.memory_id;
                 }
             } catch {
                 // best-effort — fall through with empty bundles.

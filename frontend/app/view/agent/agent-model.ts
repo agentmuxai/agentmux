@@ -18,7 +18,7 @@ import { readActivitySummary } from "@/app/store/activitySummary";
 import { buildConfigFiles } from "./agent-config-builder";
 import { checkNodejsForProvider, agentmuxHome, resolveCliDir } from "./agent-launch-env";
 import { realAccountIdOrEmpty } from "./identity-carry-over";
-import { loadAccounts } from "@/app/view/identity/identity-model";
+import { refreshAccountCache } from "@/app/view/identity/identity-model";
 
 export class AgentViewModel implements ViewModel {
     viewType = "agent";
@@ -663,15 +663,17 @@ export class AgentViewModel implements ViewModel {
             // `launchAgentDefinition`, but a stale reference reaching this
             // RPC throws `FOREIGN KEY constraint failed` against
             // `db_accounts`, which this try/catch silently swallows.
-            // `realAccountIdOrEmpty` cross-checks against the live account
-            // cache (not just UUID shape — a legacy identity-bundle id
+            // `realAccountIdOrEmpty` cross-checks against a fresh account
+            // fetch (not just UUID shape — a legacy identity-bundle id
             // would pass a shape-only check too, codex P1 on this fix's
-            // PR), so a missed/future call site fails safe instead of
-            // depending on every caller filtering perfectly.
+            // PR; not the synchronous loadAccounts() cache either, which
+            // can still be mid-priming — reagentx P2 on the same PR), so a
+            // missed/future call site fails safe instead of depending on
+            // every caller filtering perfectly.
             try {
                 const accountId = realAccountIdOrEmpty(
                     overrides?.accountId ?? "",
-                    loadAccounts().map((a) => a.id),
+                    (await refreshAccountCache()).map((a) => a.id),
                 );
                 if (accountId) {
                     await RpcApi.LinkAgentIdentityCommand(TabRpcClient, {

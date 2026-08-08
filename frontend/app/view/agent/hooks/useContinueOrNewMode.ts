@@ -26,7 +26,8 @@ import {
     continueLocksMemory as flowContinueLocksMemory,
     type LaunchFlowStore,
 } from "@/app/store/launch-flow-state";
-import { looksLikeRealAccountId } from "@/app/view/agent/identity-carry-over";
+import { realAccountIdOrEmpty } from "@/app/view/agent/identity-carry-over";
+import { refreshAccountCache } from "@/app/view/identity/identity-model";
 
 export interface UseContinueOrNewModeOpts {
     /** The launch-flow reactive store — pass BY REFERENCE (the whole
@@ -95,7 +96,7 @@ export function useContinueOrNewMode(opts: UseContinueOrNewModeOpts) {
     const continueLocksIdentity = createMemo(() => flowContinueLocksIdentity(flow.state));
     const continueLocksMemory = createMemo(() => flowContinueLocksMemory(flow.state));
 
-    const handleContinueSelect = (rawId: string) => {
+    const handleContinueSelect = async (rawId: string) => {
         const id = rawId === "" ? null : rawId;
         const row =
             id === null
@@ -109,9 +110,12 @@ export function useContinueOrNewMode(opts: UseContinueOrNewModeOpts) {
         // already falls back to "re-pick" here rather than needing a
         // backend resolution step. Forwarding one of these as accountId
         // causes a real FOREIGN KEY failure in linkagentidentity (see
-        // identity-carry-over.ts), so this is a UUID-shape allowlist, not
-        // a per-literal blacklist — it covers every legacy sentinel, not
-        // just the ones observed so far.
+        // identity-carry-over.ts's realAccountIdOrEmpty). A UUID-shape
+        // check alone isn't enough — a pre-#1624-PR-C identity-bundle id
+        // was also UUID-formatted, just not an account id — so this cross-
+        // checks against a fresh account fetch (reagentx P2 on #2464,
+        // flagging this call site was still on the shape-only check while
+        // AgentPicker.tsx's sibling call sites got the stronger one).
         //
         // memoryId intentionally does NOT get the same treatment: unlike
         // account_id, memory_id has no FK constraint, and legitimate
@@ -123,7 +127,7 @@ export function useContinueOrNewMode(opts: UseContinueOrNewModeOpts) {
         const carry = row
             ? {
                   name: row.instance_name,
-                  accountId: looksLikeRealAccountId(row.identity_id) ? row.identity_id : "",
+                  accountId: realAccountIdOrEmpty(row.identity_id, (await refreshAccountCache()).map((a) => a.id)),
                   memoryId: row.memory_id,
               }
             : undefined;
