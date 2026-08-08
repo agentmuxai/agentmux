@@ -1,5 +1,29 @@
 # AgentMux Version History
 
+## 0.54.13 — 2026-08-08
+
+- feat(process-tracker): register ShellController/AcpController spawns with process_tracker::registry (Process Broker Phase B, shell+acp coverage)
+- feat(agent-pane): AskUserQuestion auto-selects the recommended option after 30s
+- fix(agent-pane): flush AskQuestion/disconnected-banner margins and remove scrollbar padding gap
+- fix(ci): pin @emnapi/* devDependencies to fix npm ci EUSAGE on Linux
+- docs: clarify PR agent_id tag is load-bearing only for the generic GitHub account
+- fix(swarm): drop redundant agent-id tag on solo feeds, colorize ANSI in activity feed
+- feat(memory): split low-memory banner into independent RAM and Page File signals
+- feat(backend): add shared FsWatchPool filesystem-watcher framework
+- fix(backend): migrate config_watcher_fs onto the shared FsWatchPool
+- feat(context-menu): Swarm copy menu, agent-pane composer paste menu, and shared Cut/Copy/Paste fix for every in-pane text input missing it
+- fix(backend): migrate editor and media file watchers onto the shared FsWatchPool
+- feat(backend): durable, cross-channel native memory mirror
+- fix(agent-pane): runtime dropup stays open on select for real, add close button
+- chore: cleanup pass - remove dead Rust fields and frontend exports
+- fix(identity): close two single-point-enforcement gaps — legacy identity_id sentinel FK-crash and blank identity_id bypassing the layer-3 auth gate
+- fix(agent-pane): open the Shell drawer below the composer text input
+- fix(agent-pane): tool preview scrollbar sits flush at the panel edge
+- fix(build): fail production builds when VITE_MUXBUS_CLIENT_ID resolves empty
+- fix(agent-stream): don't end the turn on mid-turn narration text (stop_reason gate)
+- fix(agent-stream): flush the turn's tail before TurnEnd so panes don't stick on Working
+
+
 ## 0.54.12 — 2026-08-07
 
 - feat(agent): wire in-app OAuth login into credential-loss relogin, retiring AuthUrlBox
