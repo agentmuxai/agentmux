@@ -24,6 +24,28 @@ static COMMIT_FREE_MB: AtomicU64 = AtomicU64::new(u64::MAX);
 /// bar already gauges by ratio; the pressure classifier didn't, until now).
 static COMMIT_TOTAL_MB: AtomicU64 = AtomicU64::new(0);
 
+/// Latest observed **physical RAM** free/total in MB — `SPEC_RAM_PAGEFILE_PRESSURE_SPLIT_2026_08_07`
+/// §3. Distinct from `COMMIT_FREE_MB`/`COMMIT_TOTAL_MB` above: commit is RAM +
+/// page file combined, so a machine can be tight on RAM while commit (backed
+/// by a healthy page file) stays comfortable, or vice versa — conflating the
+/// two is exactly the bug that spec fixes. Populated from the same
+/// `GlobalMemoryStatusEx` call `log_memory_stats()` already makes (`ullAvailPhys`/
+/// `ullTotalPhys`), so this costs no extra syscall.
+static PHYS_FREE_MB: AtomicU64 = AtomicU64::new(u64::MAX);
+static PHYS_TOTAL_MB: AtomicU64 = AtomicU64::new(0);
+
+/// Latest published physical-RAM-free reading, in MB. `u64::MAX` until the
+/// first sample (mirrors `COMMIT_FREE_MB`'s "treat as ample" convention).
+pub fn phys_free_mb() -> u64 {
+    PHYS_FREE_MB.load(Ordering::Relaxed)
+}
+
+/// Latest published physical-RAM-total reading, in MB. `0` until the first
+/// sample — `memory_pressure.rs` treats a zero total as "not yet known".
+pub fn phys_total_mb() -> u64 {
+    PHYS_TOTAL_MB.load(Ordering::Relaxed)
+}
+
 /// On-demand synchronous probe of system commit-free (available page file), in
 /// MB. ~microsecond cost (a single `GlobalMemoryStatusEx`). Republishes the
 /// atomic so `last_commit_free_mb()` stays fresh. On non-Windows returns
@@ -57,6 +79,34 @@ pub fn commit_total_mb() -> u64 {
     COMMIT_TOTAL_MB.load(Ordering::Relaxed)
 }
 
+/// Page-file disk/OS-managed context for the current tick:
+/// `(system_managed, disk_free_pct)` on the volume backing the page file.
+/// `None` on non-Windows or any read failure (fail-open — the banner then
+/// omits the disk-aware guidance rather than showing a wrong one).
+/// `SPEC_RAM_PAGEFILE_PRESSURE_SPLIT_2026_08_07` §4: reuses
+/// `agentmux_common::pagefile`, the same implementation
+/// `agentmux-srv/src/backend/sysinfo.rs`'s StatusBar telemetry already
+/// calls, so the two processes can't independently drift on "system
+/// managed?" the way the commit-ratio classifier and the StatusBar gauge
+/// once did (issue #2218). Registry read is `OnceLock`-cached inside that
+/// module (once per process lifetime); the disk-free check is a real syscall
+/// but runs on this heartbeat's own dedicated thread, not the Tokio runtime
+/// `agentmux-srv` has to protect with `block_in_place` — safe to call
+/// directly every 20s tick.
+#[cfg(target_os = "windows")]
+fn pagefile_disk_context() -> Option<(bool, f64)> {
+    let (drive, system_managed) = agentmux_common::pagefile::pagefile_watch_target();
+    agentmux_common::pagefile::drive_free_total_gb(drive).map(|(free_gb, total_gb)| {
+        let free_pct = if total_gb > 0.0 { (free_gb / total_gb) * 100.0 } else { 0.0 };
+        (system_managed, free_pct)
+    })
+}
+
+#[cfg(not(target_os = "windows"))]
+fn pagefile_disk_context() -> Option<(bool, f64)> {
+    None
+}
+
 /// Spawn a background thread that logs memory stats at a fixed interval.
 /// Also refreshes the log pointer file on UTC date rollover.
 /// Runs for the lifetime of the process — no shutdown signal needed.
@@ -65,12 +115,18 @@ pub fn start(state: std::sync::Arc<crate::state::AppState>) {
         .name("mem-heartbeat".into())
         .spawn(move || {
             let mut last_date = String::new();
-            let mut pressure = crate::memory_pressure::PressureTracker::new();
+            // Two independent trackers (SPEC_RAM_PAGEFILE_PRESSURE_SPLIT_2026_08_07
+            // §3/§4): `commit_pressure` is the original signal (RAM + page
+            // file combined) driving the pane-pool shedding response and the
+            // Page File banner; `ram_pressure` is new, physical-RAM-only,
+            // banner-only (no shedding — see the spec's §6 non-goals).
+            let mut commit_pressure = crate::memory_pressure::PressureTracker::new();
+            let mut ram_pressure = crate::memory_pressure::PressureTracker::new();
             loop {
                 std::thread::sleep(Duration::from_secs(20));
                 log_memory_stats();
-                // Feed the debounced memory-pressure tracker from the just-
-                // sampled commit-free; on a level transition, log it AND push
+                // Feed the debounced memory-pressure trackers from the just-
+                // sampled readings; on a level transition, log it AND push
                 // the new level to the frontend low-memory banner
                 // (SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16 §5.A/§5.F). The
                 // emit is posted to the CEF UI thread (this is a background
@@ -78,14 +134,26 @@ pub fn start(state: std::sync::Arc<crate::state::AppState>) {
                 // return to Normal.
                 let free = commit_free_mb();
                 let total = commit_total_mb();
-                let transition = pressure.observe(free, total);
-                let level_now = pressure.level();
+                let transition = commit_pressure.observe(free, total);
+                let level_now = commit_pressure.level();
+
+                let ram_free = phys_free_mb();
+                let ram_total = phys_total_mb();
+                // `observe_local`, not `observe` — the RAM tracker must not
+                // publish to the shared PRESSURE_LEVEL atomic `current_level()`
+                // reads, or a RAM-only transition would clobber the commit
+                // tracker's published level and silently defeat pane-pool
+                // shedding (reagent-caught P0 on this PR).
+                let ram_transition = ram_pressure.observe_local(ram_free, ram_total);
+                let ram_level_now = ram_pressure.level();
+
                 if let Some(level) = transition {
                     tracing::warn!(
                         target: "mem_pressure",
+                        kind = "pagefile",
                         level = level.as_str(),
                         commit_free_mb = free,
-                        "system memory pressure changed"
+                        "page file (commit) pressure changed"
                     );
                     // B.5 Part 1 (issue #2218): react to the transition, not
                     // just log it. Entering Warn/Critical trims the pane pool
@@ -95,13 +163,25 @@ pub fn start(state: std::sync::Arc<crate::state::AppState>) {
                     // transient pressure blip doesn't leave them starved for
                     // the rest of the session. Both spawn_* fns are already
                     // internally single-flight + target-size-gated, so calling
-                    // them unconditionally here is safe.
+                    // them unconditionally here is safe. Commit-only: RAM
+                    // pressure alone (with healthy commit) doesn't risk a
+                    // crash the way commit pressure does, so it doesn't
+                    // trigger shedding — SPEC_RAM_PAGEFILE_PRESSURE_SPLIT_2026_08_07 §6.
                     if level != crate::memory_pressure::PressureLevel::Normal {
                         while crate::commands::window_pool::evict_idle_pane_pool_window(&state) {}
                     } else {
                         crate::commands::window_pool::spawn_pane_pool_window(&state);
                         crate::commands::window_pool::spawn_pool_window(&state);
                     }
+                }
+                if let Some(level) = ram_transition {
+                    tracing::warn!(
+                        target: "mem_pressure",
+                        kind = "ram",
+                        level = level.as_str(),
+                        phys_free_mb = ram_free,
+                        "RAM pressure changed"
+                    );
                 }
                 // Push to the banner on a transition (to show or clear it), AND
                 // re-assert a steady non-Normal level each tick so a window
@@ -112,7 +192,21 @@ pub fn start(state: std::sync::Arc<crate::state::AppState>) {
                 // unchanged level and a re-assert never un-dismisses); a steady
                 // Normal stays silent, so there's no traffic in the common case.
                 if transition.is_some() || level_now != crate::memory_pressure::PressureLevel::Normal {
-                    crate::ui_tasks::post_memory_pressure(&state, level_now.as_str(), free);
+                    // Pass the Option straight through -- a `None` (read
+                    // failure) must reach the frontend as "no disk context",
+                    // not get collapsed into a fabricated "healthy" default
+                    // here (reagent-caught P1: that previously produced the
+                    // reassuring "expands automatically" copy even while
+                    // pressure was Critical).
+                    crate::ui_tasks::post_memory_pressure_pagefile(
+                        &state,
+                        level_now.as_str(),
+                        free,
+                        pagefile_disk_context(),
+                    );
+                }
+                if ram_transition.is_some() || ram_level_now != crate::memory_pressure::PressureLevel::Normal {
+                    crate::ui_tasks::post_memory_pressure_ram(&state, ram_level_now.as_str(), ram_free);
                 }
                 refresh_log_pointer(&mut last_date);
             }
@@ -202,6 +296,11 @@ fn log_memory_stats() {
 
         // Publish commit-free for the gated renderer recovery path (§6.A).
         COMMIT_FREE_MB.store((mem.ullAvailPageFile / (1024 * 1024)) as u64, Ordering::Relaxed);
+        // Publish physical RAM free/total for the RAM pressure tracker
+        // (SPEC_RAM_PAGEFILE_PRESSURE_SPLIT_2026_08_07 §3) — same `mem`
+        // struct already fetched above, no extra syscall.
+        PHYS_FREE_MB.store((mem.ullAvailPhys / (1024 * 1024)) as u64, Ordering::Relaxed);
+        PHYS_TOTAL_MB.store((mem.ullTotalPhys / (1024 * 1024)) as u64, Ordering::Relaxed);
 
         tracing::info!(
             target: "mem_heartbeat",
