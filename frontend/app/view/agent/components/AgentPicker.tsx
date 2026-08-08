@@ -275,8 +275,14 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                 instanceName: row.instance_name,
                 agentType: (def.agent_type as "host" | "container") || "host",
                 environment: def.agent_type === "container" ? "docker" : "local",
-                accountId: row.identity_id,
-                memoryId: row.memory_id,
+                // #2463 Finding 1: a legacy row's identity_id can carry a
+                // non-UUID sentinel ("default", "blank", "") from before
+                // the account-linking system — forwarding it unfiltered as
+                // accountId crashes the write-through's FOREIGN KEY insert
+                // (see identity-carry-over.ts's header comment). Same guard
+                // already used for the auto-continue path below.
+                accountId: looksLikeRealAccountId(row.identity_id) ? row.identity_id : "",
+                memoryId: looksLikeRealAccountId(row.memory_id) ? row.memory_id : "",
                 continueOfInstanceId: row.instance_id,
                 workDirOverride: row.working_directory,
                 // Carry the CLI-emitted session id forward so the new
@@ -307,8 +313,9 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                 instanceName: branchLabel,
                 agentType: (forkedDef.agent_type as "host" | "container") || "host",
                 environment: forkedDef.agent_type === "container" ? "docker" : "local",
-                accountId: row.identity_id,
-                memoryId: row.memory_id,
+                // #2463 Finding 1 — see handleReattach's comment above.
+                accountId: looksLikeRealAccountId(row.identity_id) ? row.identity_id : "",
+                memoryId: looksLikeRealAccountId(row.memory_id) ? row.memory_id : "",
             });
         } finally {
             setLaunching(null);

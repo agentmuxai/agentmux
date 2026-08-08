@@ -17,6 +17,7 @@ import type { LaunchOverrides } from "./components/AgentLaunchModal";
 import { readActivitySummary } from "@/app/store/activitySummary";
 import { buildConfigFiles } from "./agent-config-builder";
 import { checkNodejsForProvider, agentmuxHome, resolveCliDir } from "./agent-launch-env";
+import { looksLikeRealAccountId } from "./identity-carry-over";
 
 export class AgentViewModel implements ViewModel {
     viewType = "agent";
@@ -602,13 +603,15 @@ export class AgentViewModel implements ViewModel {
                     definition_id: agent.id,
                     block_id: blockId,
                     // PR-F.3: launch modal carries the user's bundle
-                    // picks. Empty / "blank" → backend resolver short-
-                    // circuits so the agent inherits ambient creds.
-                    // Issue #1624 PR-C Part B — `accountId` replaces
-                    // the old bundle-id `identityId`; this column
-                    // keeps its name (`identity_id`) since it's a
-                    // legacy `db_agent_instances` field, not part of
-                    // the new direct-link system.
+                    // picks. Empty / "blank" no longer buys ambient-creds
+                    // fallback — the backend resolver's layer-3 gate now
+                    // requires a real bound account for any oauth-class
+                    // provider regardless of identity_id's value (#2463
+                    // Finding 2). Issue #1624 PR-C Part B — `accountId`
+                    // replaces the old bundle-id `identityId`; this column
+                    // keeps its name (`identity_id`) since it's a legacy
+                    // `db_agent_instances` field, not part of the new
+                    // direct-link system.
                     identity_id: overrides?.accountId,
                     memory_id: overrides?.memoryId,
                     // v8: named-agent continuation. The instance name
@@ -653,9 +656,20 @@ export class AgentViewModel implements ViewModel {
             // stale bundle id instead of a real account id — the RPC
             // fails gracefully and just logs a warning. See
             // docs/specs/SPEC_IDENTITY_DIRECT_LINKS_PHASE3_PRC_2026_07_10.md.
+            //
+            // #2463 Finding 1: `looksLikeRealAccountId` (not just `!==
+            // "blank"`) is the defense-in-depth check here — every known
+            // call site already filters its own `accountId` before it
+            // reaches `launchAgentDefinition`, but a non-UUID sentinel
+            // ("default", a stale bundle id, any future legacy literal)
+            // reaching this RPC throws `FOREIGN KEY constraint failed`
+            // against `db_accounts`, which this try/catch silently
+            // swallows — so validating here too means a missed call site
+            // fails safe (no link attempt, no swallowed crash) instead of
+            // depending on every caller remembering to filter.
             try {
                 const accountId = overrides?.accountId;
-                if (accountId && accountId !== "blank") {
+                if (looksLikeRealAccountId(accountId)) {
                     await RpcApi.LinkAgentIdentityCommand(TabRpcClient, {
                         agent_id: agent.id,
                         account_id: accountId,
