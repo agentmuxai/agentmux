@@ -424,26 +424,40 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                         let unchanged_since_last_mirror =
                             mirrored_meta.get(&name) == Some(&(size_bytes as i64, modified_at));
                         if !unchanged_since_last_mirror {
-                            let full_content = {
+                            // A read failure here (permission change, TOCTOU
+                            // delete, AV/NFS lock, concurrent editor) must NOT
+                            // upsert an empty string — that would overwrite any
+                            // previously-durable mirrored content, destroying the
+                            // exact cross-channel durability guarantee this table
+                            // exists for on the very first transient read hiccup
+                            // (reagent P0 on PR #2459). Skip the upsert entirely
+                            // this round instead; it retries on the next list().
+                            let full_content_read = {
                                 use std::io::Read;
-                                std::fs::File::open(entry.path())
-                                    .map(|f| {
-                                        let mut buf = Vec::new();
-                                        f.take(MAX_MEMORY_FILE_BYTES).read_to_end(&mut buf).ok();
-                                        String::from_utf8_lossy(&buf).into_owned()
-                                    })
-                                    .unwrap_or_default()
+                                std::fs::File::open(entry.path()).and_then(|f| {
+                                    let mut buf = Vec::new();
+                                    f.take(MAX_MEMORY_FILE_BYTES).read_to_end(&mut buf)?;
+                                    Ok(buf)
+                                })
                             };
-                            let full_metadata_type = parse_frontmatter_type(&full_content);
-                            if let Err(e) = id_store.agent_native_memory_upsert(
-                                &agent.id,
-                                &name,
-                                &full_content,
-                                full_metadata_type.as_deref(),
-                                &entry.path().to_string_lossy(),
-                                modified_at,
-                            ) {
-                                tracing::warn!(agent_id = %agent.id, filename = %name, error = %e, "agent:memory:list: mirror upsert failed (non-fatal)");
+                            match full_content_read {
+                                Ok(buf) => {
+                                    let full_content = String::from_utf8_lossy(&buf).into_owned();
+                                    let full_metadata_type = parse_frontmatter_type(&full_content);
+                                    if let Err(e) = id_store.agent_native_memory_upsert(
+                                        &agent.id,
+                                        &name,
+                                        &full_content,
+                                        full_metadata_type.as_deref(),
+                                        &entry.path().to_string_lossy(),
+                                        modified_at,
+                                    ) {
+                                        tracing::warn!(agent_id = %agent.id, filename = %name, error = %e, "agent:memory:list: mirror upsert failed (non-fatal)");
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::warn!(agent_id = %agent.id, filename = %name, error = %e, "agent:memory:list: full-content read failed, skipping mirror upsert this round (non-fatal)");
+                                }
                             }
                         }
                         live_filenames.insert(name.clone());
@@ -529,40 +543,53 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 // read for another reason (permissions, non-regular file)
                 // still surfaces as an error rather than silently masking it
                 // with stale mirrored content.
-                let live_meta = std::fs::symlink_metadata(&path)
-                    .ok()
-                    .filter(|m| m.file_type().is_file());
+                // Distinguish "genuinely absent" (fall back to the mirror) from
+                // every other symlink_metadata outcome, matching the
+                // pre-durable-sync behavior exactly: a real access error
+                // (permissions, I/O) must surface as an error, not silently
+                // fall back to possibly-stale mirrored content, and an existing
+                // non-regular-file path must be explicitly rejected, not treated
+                // as "absent" either (reagent P1 on PR #2459, second pass —
+                // collapsing every outcome into "absent" the first time around
+                // could serve stale content or a misleading "not found" for a
+                // path that actually exists but errored or is the wrong type).
+                let content = match std::fs::symlink_metadata(&path) {
+                    Ok(live_meta) if live_meta.file_type().is_file() => {
+                        let mut buf = Vec::new();
+                        std::fs::File::open(&path)
+                            .and_then(|f| {
+                                use std::io::Read;
+                                f.take(MAX_MEMORY_FILE_BYTES).read_to_end(&mut buf)
+                            })
+                            .map_err(|e| format!("agent:memory:read_file: {}: {e}", cmd.filename))?;
+                        let content = String::from_utf8_lossy(&buf).into_owned();
 
-                let content = if let Some(live_meta) = live_meta {
-                    let mut buf = Vec::new();
-                    std::fs::File::open(&path)
-                        .and_then(|f| {
-                            use std::io::Read;
-                            f.take(MAX_MEMORY_FILE_BYTES).read_to_end(&mut buf)
-                        })
-                        .map_err(|e| format!("agent:memory:read_file: {}: {e}", cmd.filename))?;
-                    let content = String::from_utf8_lossy(&buf).into_owned();
-
-                    let metadata_type = parse_frontmatter_type(&content);
-                    let mtime_ms = live_meta
-                        .modified()
-                        .ok()
-                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                        .map(|d| d.as_millis() as i64)
-                        .unwrap_or(0);
-                    if let Err(e) = id_store.agent_native_memory_upsert(
-                        &agent.id,
-                        &cmd.filename,
-                        &content,
-                        metadata_type.as_deref(),
-                        &path.to_string_lossy(),
-                        mtime_ms,
-                    ) {
-                        tracing::warn!(agent_id = %agent.id, filename = %cmd.filename, error = %e, "agent:memory:read_file: mirror upsert failed (non-fatal)");
+                        let metadata_type = parse_frontmatter_type(&content);
+                        let mtime_ms = live_meta
+                            .modified()
+                            .ok()
+                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                            .map(|d| d.as_millis() as i64)
+                            .unwrap_or(0);
+                        if let Err(e) = id_store.agent_native_memory_upsert(
+                            &agent.id,
+                            &cmd.filename,
+                            &content,
+                            metadata_type.as_deref(),
+                            &path.to_string_lossy(),
+                            mtime_ms,
+                        ) {
+                            tracing::warn!(agent_id = %agent.id, filename = %cmd.filename, error = %e, "agent:memory:read_file: mirror upsert failed (non-fatal)");
+                        }
+                        content
                     }
-                    content
-                } else {
-                    match id_store.agent_native_memory_read(&agent.id, &cmd.filename) {
+                    Ok(_) => {
+                        return Err(format!("agent:memory:read_file: {} is not a regular file", cmd.filename));
+                    }
+                    Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                        return Err(format!("agent:memory:read_file: {}: {e}", cmd.filename));
+                    }
+                    Err(_) => match id_store.agent_native_memory_read(&agent.id, &cmd.filename) {
                         Ok(Some(mirrored)) => mirrored,
                         Ok(None) => {
                             return Err(format!("agent:memory:read_file: {}: not found", cmd.filename));
@@ -984,6 +1011,36 @@ mod tests {
         )
         .await;
         assert!(err.contains("not found"), "unexpected error: {err}");
+    }
+
+    #[tokio::test]
+    async fn read_file_rejects_a_non_regular_file_instead_of_falling_back_to_the_mirror() {
+        // reagent P1 on PR #2459 (second pass): a path that exists but isn't a
+        // regular file (e.g. a directory landed at the expected filename) must
+        // be rejected explicitly — collapsing it into "absent, fall back to
+        // mirror" could serve stale mirrored content for a path that actually
+        // exists but is the wrong type.
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let shared_id_store = Arc::new(Store::open_shared(tmp.path()).unwrap());
+        let config = tempfile::tempdir().unwrap();
+        // Pre-mirror some content, so a bug that treats this as "absent" would
+        // wrongly succeed by serving it instead of erroring.
+        shared_id_store
+            .agent_native_memory_upsert("agent-wrongtype", "MEMORY.md", "mirrored content", None, "/elsewhere", 0)
+            .unwrap();
+        let (engine, mut rx) = build_channel_state("agent-wrongtype", "/work/channel-a", config.path(), shared_id_store);
+
+        let memory_dir = config.path().join("projects").join("-work-channel-a").join("memory");
+        std::fs::create_dir_all(memory_dir.join("MEMORY.md")).unwrap(); // a directory, not a file
+
+        let err = call_rpc_expect_error(
+            &engine,
+            &mut rx,
+            COMMAND_NATIVE_MEMORY_READ_FILE,
+            serde_json::json!({ "agent_id": "agent-wrongtype", "filename": "MEMORY.md" }),
+        )
+        .await;
+        assert!(err.contains("not a regular file"), "unexpected error: {err}");
     }
 
     #[tokio::test]
