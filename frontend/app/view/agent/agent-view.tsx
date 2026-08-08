@@ -1812,48 +1812,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             />
 
             <div class="agent-composer-region">
-                {/* Details panel — just the shell + control bar now. Activity-log
-                    lines write directly into the terminal (handleShellTermReady)
-                    instead of a separate panel here. */}
-                <Show when={agentAtoms().detailsOpenAtom[0]()}>
-                    <div class="agent-composer-details" id={`agent-composer-details-${model.blockId}`}>
-                        {/* Drag-to-height drawer wrapping the terminal — the actual
-                            scrollable/resizable content. AgentControlBar stays
-                            outside it as a fixed-height footer. */}
-                        <ResizableDetailsDrawer
-                            blockId={model.blockId}
-                            persistedHeight={block()?.meta?.["term:shellheight"] as number | undefined}
-                        >
-                            {/* Phase 0 spike (SPEC_AGENT_SHELL_XTERM_TERMINAL_2026_07_03.md):
-                                real xterm+PTY terminal, spawned lazily on first
-                                drawer open via a headless term sub-block. */}
-                            <AgentShellSubblock
-                                parentBlockId={model.blockId}
-                                cwd={block()?.meta?.["cmd:cwd"] ?? ""}
-                                existingSubBlockId={block()?.meta?.["term:shellsubblockid"] as string | undefined}
-                                // Passed so the shell can cancel it out of its own
-                                // font-size math -- total decoupling: the pane's
-                                // zoom (this) and the shell's own zoom (term:zoom
-                                // on the sub-block) are independent controls, and
-                                // neither should visually leak into the other.
-                                agentPaneZoom={zoomFactor}
-                                onSubBlockCreated={(subBlockId) => {
-                                    void RpcApi.SetMetaCommand(TabRpcClient, {
-                                        oref: WOS.makeORef("block", model.blockId),
-                                        meta: { "term:shellsubblockid": subBlockId } as any,
-                                    });
-                                }}
-                                onTermReady={handleShellTermReady}
-                                onTermDispose={handleShellTermDispose}
-                            />
-                        </ResizableDetailsDrawer>
-                        <AgentControlBar
-                            blockId={model.blockId}
-                            blockAtom={block}
-                            providerId={provider()?.id ?? ""}
-                        />
-                    </div>
-                </Show>
                 <Show when={commands.helpVisible()}>
                     <SlashHelpPanel
                         commands={commands.availableCommands()}
@@ -1896,6 +1854,50 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     viewModel={model}
                     isComposerEmptyRef={(fn) => { composerIsEmptyFn = fn; }}
                 />
+                {/* Details panel — just the shell + control bar now. Activity-log
+                    lines write directly into the terminal (handleShellTermReady)
+                    instead of a separate panel here. Docked BELOW the composer
+                    (SPEC_AGENT_SHELL_BELOW_COMPOSER_2026_08_08.md): the shell
+                    stacks under the text input (which shifts up to make room,
+                    since this region hugs the pane bottom). */}
+                <Show when={agentAtoms().detailsOpenAtom[0]()}>
+                    <div class="agent-composer-details" id={`agent-composer-details-${model.blockId}`}>
+                        <AgentControlBar
+                            blockId={model.blockId}
+                            blockAtom={block}
+                            providerId={provider()?.id ?? ""}
+                        />
+                        {/* Drag-to-height drawer wrapping the terminal — the actual
+                            scrollable/resizable content. */}
+                        <ResizableDetailsDrawer
+                            blockId={model.blockId}
+                            persistedHeight={block()?.meta?.["term:shellheight"] as number | undefined}
+                        >
+                            {/* Phase 0 spike (SPEC_AGENT_SHELL_XTERM_TERMINAL_2026_07_03.md):
+                                real xterm+PTY terminal, spawned lazily on first
+                                drawer open via a headless term sub-block. */}
+                            <AgentShellSubblock
+                                parentBlockId={model.blockId}
+                                cwd={block()?.meta?.["cmd:cwd"] ?? ""}
+                                existingSubBlockId={block()?.meta?.["term:shellsubblockid"] as string | undefined}
+                                // Passed so the shell can cancel it out of its own
+                                // font-size math -- total decoupling: the pane's
+                                // zoom (this) and the shell's own zoom (term:zoom
+                                // on the sub-block) are independent controls, and
+                                // neither should visually leak into the other.
+                                agentPaneZoom={zoomFactor}
+                                onSubBlockCreated={(subBlockId) => {
+                                    void RpcApi.SetMetaCommand(TabRpcClient, {
+                                        oref: WOS.makeORef("block", model.blockId),
+                                        meta: { "term:shellsubblockid": subBlockId } as any,
+                                    });
+                                }}
+                                onTermReady={handleShellTermReady}
+                                onTermDispose={handleShellTermDispose}
+                            />
+                        </ResizableDetailsDrawer>
+                    </div>
+                </Show>
             </div>
             {/* AgentActionBar (Add / Import / Export) lives in the
                 AgentPicker view only. Once an agent is loaded the user

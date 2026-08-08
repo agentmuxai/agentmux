@@ -5,11 +5,17 @@
  * ResizableDetailsDrawer — drag-to-height wrapper for the composer details
  * region's content (AgentShellSubblock — bang-command/slash-command
  * ("system"-tagged) activity-log lines write directly into its terminal
- * rather than a separate panel). The drag handle
- * sits on the drawer's top edge (the drawer itself is docked above the
- * composer, so dragging the top edge up grows it). Height is persisted on
- * the agent block's meta (`term:shellheight`) so it's remembered per pane
- * across drawer close/reopen, mirroring how `term:zoom` persists per shell.
+ * rather than a separate panel). The drawer is docked below the composer
+ * (SPEC_AGENT_SHELL_BELOW_COMPOSER_2026_08_08.md), and the composer region
+ * hugs the pane bottom — so the drawer's BOTTOM edge is pinned and growth
+ * happens at its TOP edge. The drag handle therefore sits on the top edge
+ * and dragging it UP grows the drawer (the IDE bottom-panel pattern, e.g.
+ * VS Code's terminal): the handle is the drawer's one free edge and tracks
+ * the cursor 1:1. A bottom-edge handle would sit pinned at the pane bottom
+ * with almost no downward travel before the cursor leaves the window.
+ * Height is persisted on the agent block's meta (`term:shellheight`) so
+ * it's remembered per pane across drawer close/reopen, mirroring how
+ * `term:zoom` persists per shell.
  *
  * Per SPEC_LOG_TO_SHELL_PANE_2026_07_02.md §5.1: "make the region a
  * resizable drawer ... not the current fixed short strip."
@@ -41,7 +47,8 @@ export const ResizableDetailsDrawer = (props: ResizableDetailsDrawerProps): JSX.
 
     const onPointerMove = (ev: PointerEvent) => {
         // Dragging the TOP handle up (negative clientY delta) grows the
-        // drawer, since it's anchored to the bottom of its own flex column.
+        // drawer: its bottom edge is pinned to the pane bottom, so the top
+        // edge is the free one and moves up as the drawer grows.
         const delta = dragStartY - ev.clientY;
         setHeight(clampHeight(dragStartHeight + delta));
     };
