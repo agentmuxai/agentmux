@@ -1,9 +1,14 @@
 # Spec: Make isolated auth the default for every non-`stable` channel
 
 **Date:** 2026-08-06
-**Status:** Proposed
+**Status:** Proposed (implemented — see note below)
 **Amends:** `docs/specs/SPEC_ISOLATED_AUTH_DEV_TESTING_2026_07_27.md` (all plumbing/mechanism described there is unchanged and remains authoritative — this spec changes only the default-computation, from "opt-in via `AGENTMUX_ISOLATED_AUTH=1`" to "on by default for any channel other than `stable`, still overridable")
 **Related:** `docs/specs/SPEC_GLOBAL_IDENTITY_MEMORY_DRONE_2026_06_24.md`, `docs/specs/SPEC_DATA_CHANNELS_2026_05_24.md`, issue #2429 (tier-1 Claude in-app login broken), PR #2425 (mid-session credential-loss relogin modal), retro family #2164/#2165/#2167/#2195 (isolation-vs-global reconciliation incidents)
+
+> **2026-08-07 audit note:** Implemented same day (commit `9f6cc2824`, PR
+> #2431) — `CLAUDE.md` itself now documents this as current default
+> behavior. Status field was never updated. See
+> `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
 
 ## 0. Motivation
 

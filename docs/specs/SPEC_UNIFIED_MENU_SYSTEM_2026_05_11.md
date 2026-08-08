@@ -1,8 +1,14 @@
 # Unified menu system
 
-**Status:** Proposed
+**Status:** Proposed (stale — see note below)
 **Owner:** AgentA
 **Date:** 2026-05-11
+
+> **2026-08-07 audit note:** No evidence of consolidation — `FlyoutMenu` and
+> `ContextMenuModel`/`showJsContextMenu` still exist as two separate systems,
+> the exact duplication this spec proposed to unify. 3 months stale, likely
+> never actioned. See
+> `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
 **Driving observation:** *"I like the menu styles on the hamburger, but the right-click context menus are different. Let's reconcile them into a cohesive system."*
 
 The hamburger uses `FlyoutMenu` (Solid + themed SCSS). Right-click menus elsewhere route through `ContextMenuModel.showContextMenu()` → `showJsContextMenu()` (vanilla DOM with inline styles in `frontend/util/cef-api.ts`). The tab color/rename popover is yet a third surface (`TabContextPanel` in `tab.tsx`). All three look different. Goal: one visual system, one mental model.

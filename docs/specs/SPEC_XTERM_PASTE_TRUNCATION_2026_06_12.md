@@ -1,9 +1,20 @@
 # SPEC: xterm Terminal Paste Truncation Fix
 
 **Date:** 2026-06-12  
-**Status:** Proposed  
+**Status:** Proposed (implemented — see note below)
 **Area:** Terminal (xterm pane)  
-**Severity:** P1 — data loss, silent
+**Severity:** P1 — data loss, silent (fixed)
+
+> **2026-08-07 audit note:** Verified fixed, all three fixes shipped —
+> confirmed by reading the current code directly, not just this Status
+> field, given the P1/silent-data-loss severity: (1) the input channel is
+> now `mpsc::unbounded_channel()` in `shell/controller.rs`, explicitly
+> documented as closing this exact truncation bug; (2) frontend chunked
+> paste at the same 4KB/5ms values this spec proposed
+> (`termViewModel.ts` `PASTE_CHUNK_BYTES`/`PASTE_CHUNK_DELAY_MS`); (3)
+> bracketed paste mode now defaults to `true` (`term.tsx`,
+> `termBPMAtom() ?? true`). No live bug. See
+> `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
 
 ---
 

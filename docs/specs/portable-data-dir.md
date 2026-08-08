@@ -2,7 +2,11 @@
 
 **Date:** 2026-04-15  
 **Author:** AgentA  
-**Status:** Proposed
+**Status:** Proposed (implemented — see note below)
+
+> **2026-08-07 audit note:** Implemented (`agentmux-launcher/src/data_dir.rs`),
+> a documented `task package` feature. Status field was never updated. See
+> `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
 
 ---
 

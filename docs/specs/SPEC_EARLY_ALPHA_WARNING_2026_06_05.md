@@ -1,8 +1,12 @@
 # SPEC: Early Alpha Warning — README & Microsoft Store Partner Center
 
 **Date:** 2026-06-05
-**Status:** Proposed
+**Status:** Proposed (implemented — see note below)
 **Owner:** TBD
+
+> **2026-08-07 audit note:** Implemented — `README.md` directly cites and
+> implements this spec by name. Status field was never updated. See
+> `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
 **Scope:** Top-of-README banner + Microsoft Store Partner Center listing copy
 
 ---

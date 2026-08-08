@@ -1,13 +1,18 @@
 # SPEC — Global Identity, Memory, and Drone Definitions
 
 **Date:** 2026-06-24  
-**Status:** Proposed  
+**Status:** Proposed (implemented — see note below)
 **Supercedes:** `docs/specs/archive/SPEC_SHARED_BUNDLES_AND_DEFINITIONS_2026_05_19.md` (Draft; agent-definition portion already shipped via #1387–#1396)  
 **Related:**
 - `SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md` — the agent-persistence ship that set the pattern
 - `docs/specs/archive/SPEC_TRUST_CENTER_GLOBAL_BRAIN_2026_06_19.md`
 - `agentmux-srv/src/registry/paths.rs` — `resolve_global_shared_root()` and sibling resolvers
 - `agentmux-srv/src/backend/storage/migrations.rs` — current `objects.db` schema
+
+> **2026-08-07 audit note:** Implemented — `resolve_global_shared_root()` is
+> load-bearing in `paths.rs`, further extended by
+> `SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md` (also stale-status).
+> See `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
 
 ---
 

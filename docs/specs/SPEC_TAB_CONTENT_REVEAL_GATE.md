@@ -1,8 +1,13 @@
 # Tab content reveal gate
 
-**Status:** Proposed
+**Status:** Proposed (implemented — see note below)
 **Owner:** AgentA
 **Date:** 2026-05-09
+
+> **2026-08-07 audit note:** Implemented — `tab-reveal.ts`/`tab-reveal.test.ts`
+> exist, wired into `startup-splash.ts` and `editor-model.ts`. Status field
+> was never updated. See
+> `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
 **Driving observation:** Switching tabs in AgentMux reveals content in stages — title bar updates first, then pane shells, then block content fills in pane-by-pane, then final layout settles. The user perceives this as visual jank: "different parts of the window appear at different times." Reported as a general cleanup concern, not specific to any one pane type.
 
 ## Symptom
