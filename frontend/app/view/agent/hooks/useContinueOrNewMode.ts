@@ -96,7 +96,19 @@ export function useContinueOrNewMode(opts: UseContinueOrNewModeOpts) {
     const continueLocksIdentity = createMemo(() => flowContinueLocksIdentity(flow.state));
     const continueLocksMemory = createMemo(() => flowContinueLocksMemory(flow.state));
 
+    // Sequencing guard (reagentx P1 on #2464): handleContinueSelect awaits
+    // an RPC round-trip (refreshAccountCache) before dispatching, which it
+    // didn't when this was fully synchronous. Without this, two calls in
+    // flight at once (e.g. the user changes the dropdown selection again
+    // before the first fetch resolves) could resolve out of order, and a
+    // stale call finishing last would dispatch over a newer selection —
+    // silently locking the form to the wrong prior instance's account
+    // while the UI shows a different one. Only the most-recently-STARTED
+    // call is allowed to dispatch; every earlier in-flight call drops its
+    // result silently once superseded.
+    let continueSelectSeq = 0;
     const handleContinueSelect = async (rawId: string) => {
+        const seq = ++continueSelectSeq;
         const id = rawId === "" ? null : rawId;
         const row =
             id === null
@@ -131,6 +143,7 @@ export function useContinueOrNewMode(opts: UseContinueOrNewModeOpts) {
                   memoryId: row.memory_id,
               }
             : undefined;
+        if (seq !== continueSelectSeq) return; // superseded by a later call — drop this stale dispatch
         flow.dispatch({ type: "ContinueOfChanged", continueOfId: id, carry });
     };
 
