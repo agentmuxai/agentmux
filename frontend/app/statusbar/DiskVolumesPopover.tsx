@@ -8,7 +8,9 @@
  * of the status bar consumes (`disk:vol:<mount>:free_gb` / `:total_gb`, see
  * sysinfo.rs::get_disk_data), so this is a pure-frontend view — the sibling
  * of CpuCoresPopover's per-core panel, sharing its positioning + airspace
- * pattern (usePaneOverlay, computeMenuPosition top-end, autoUpdate).
+ * pattern (usePaneOverlay, computeMenuPosition, autoUpdate) but left-aligned
+ * to the pill (top-start) rather than CPU's right-aligned (top-end) — per
+ * request, the panel's left edge lines up with the pill's left edge.
  */
 
 import { createSignal, Index, onCleanup, onMount, Show, type JSX } from "solid-js";
@@ -68,7 +70,7 @@ export const DiskVolumesPopover = (props: DiskVolumesPopoverProps): JSX.Element 
             const update = async () => {
                 const cur = props.anchorRect;
                 if (!cur) return;
-                const pos = await computeMenuPosition({ anchor: cur, placement: "top-end", avoidNativePanes: false }, el);
+                const pos = await computeMenuPosition({ anchor: cur, placement: "top-start", avoidNativePanes: false }, el);
                 setFloatingStyle(pos.style);
             };
             cleanupAutoUpdate?.();
