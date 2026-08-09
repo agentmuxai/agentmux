@@ -70,13 +70,28 @@ for defs created by paths §3.3 doesn't cover, if no color exists, assign
 one here (write-through) before seeding — every agent that gets opened ends
 up colored.
 
-Discovered while implementing: nothing in the frontend writes
-`frame:bordercolor` today — `SPEC_COLOR_PALETTE_EXPANSION_REUSE_2026_06_30.md`'s
+Discovered while implementing: nothing in the frontend writes the literal
+`frame:bordercolor` KEY today — `SPEC_COLOR_PALETTE_EXPANSION_REUSE_2026_06_30.md`'s
 pane-header swatch palette only shipped for tabs (`ColorSwatchPalette`'s
-sole consumer is `tab.tsx`). So this seed is currently the only writer of
-these keys and there is no user-override conflict to design around; if the
-pane palette lands later, a per-block SetMeta after open will still win
-over the open-time seed for that block's lifetime.
+sole consumer is `tab.tsx`). **This check was incomplete** (reagent P1 on
+the PR): it missed that `blockframe.tsx`'s border-color computation ALSO
+reads `frame:hue`, written by the already-shipped, all-pane-types "Pane
+Color" picker (`pane-color-menu.ts::setHue`, wired into every block's
+header context menu — a *different*, already-shipped feature from the
+06-30 spec, not the tab-only swatch grid). Before the fix below, once an
+agent pane's `frame:activebordercolor` was seeded, it was checked AFTER
+`frame:hue` in the focused-state style memo and unconditionally
+overwrote it — so picking a hue on an agent pane had no visible effect,
+permanently, for that block's lifetime (the seed is a one-time write, but
+`blockData()` re-reads it on every render). Fixed in
+`frontend/app/block/blockframe.tsx`'s focused-state branch by checking
+`frame:activebordercolor` BEFORE `frame:hue` instead — the explicit user
+choice now always wins when present; clearing the hue picker
+(`frame:hue: null`) correctly falls through to the agent's default color
+rather than to no color at all. The unfocused-state branch has no
+`frame:hue`-derived value to conflict with (`hueToActiveBorder`'s hue
+rendering only ever existed for the focused ring), so `frame:bordercolor`
+needed no equivalent change there.
 
 ### 3.5 Architectural discovery: agent launch has TWO independent meta-building paths
 
@@ -184,3 +199,4 @@ reading the persisted block meta from the channel's SQLite store.
 | `frontend/app/view/agent/agent-color.ts` (new) | TS counterpart of `agent_color.rs` — §3.5 |
 | `frontend/app/view/agent/agent-color.test.ts` (new) | Mirrors the Rust unit tests |
 | `frontend/app/view/agent/agent-model.ts` | `launchAgentDefinition`: seed `term:zoom` + both frame color keys — the actual picker-flow fix, §3.5 |
+| `frontend/app/block/blockframe.tsx` | Focused-state border-color memo: check `frame:activebordercolor` before `frame:hue` so the explicit "Pane Color" picker keeps working on agent panes (§3.4 note, reagent P1) |
