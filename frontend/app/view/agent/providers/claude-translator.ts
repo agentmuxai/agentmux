@@ -79,9 +79,23 @@ export class ClaudeTranslator implements OutputTranslator {
                 const code = typeof rawEvent.api_error_status === "number"
                     ? rawEvent.api_error_status
                     : 0; // 0 = non-HTTP error (network / CLI crash)
+                // Field priority mirrors the backend classifier's
+                // frame_error_text (agents/failure.rs): error.message →
+                // error (string) → result → generic fallback. AgentMux's
+                // own synthesized frames (e.g. the identity spawn gate's
+                // error_during_execution refusal, agent_io.rs/input.rs)
+                // carry their detail in `error.message`, NOT `result` —
+                // reading only `result` rendered every gate refusal as a
+                // bare "Agent encountered an error" with the actionable
+                // "bind an account in the Armory" text silently dropped
+                // (live repro: claudius v0.54.14 Agent1, 2026-08-09).
                 const message = typeof rawEvent.result === "string"
                     ? rawEvent.result
-                    : code > 0 ? `API error ${code}` : "Agent encountered an error";
+                    : typeof rawEvent.error?.message === "string"
+                        ? rawEvent.error.message
+                        : typeof rawEvent.error === "string"
+                            ? rawEvent.error
+                            : code > 0 ? `API error ${code}` : "Agent encountered an error";
                 events.push({ type: "error_result", code, message });
             }
             const stats: SessionStats = {};
