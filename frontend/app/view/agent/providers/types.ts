@@ -116,4 +116,15 @@ export interface ProviderDefinition {
      * docs/providers/PROVIDER_MODELS_EFFORT_SETTINGS_2026-06.md.
      */
     models?: ProviderModel[];
+    /** Decoupled agent harness CLI execution engine (e.g. "claude", "agy", "codex", "gemini", "openclaw", "muxcode"). */
+    harnessEngine?: HarnessEngine;
+    /** Supported intelligence model vendors for this harness (e.g. ["anthropic", "openrouter"]). */
+    supportedVendors?: ModelVendor[];
 }
+
+/** Harness execution engine identifier */
+export type HarnessEngine = "claude" | "agy" | "codex" | "gemini" | "openclaw" | "pi" | "copilot" | "muxcode" | "custom";
+
+/** Model vendor intelligence provider */
+export type ModelVendor = "anthropic" | "google" | "openai" | "openrouter" | "ollama" | "custom";
+

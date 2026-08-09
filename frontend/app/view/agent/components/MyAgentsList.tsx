@@ -52,7 +52,7 @@ import { useTick } from "@/app/hook/useTick";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { waveEventSubscribe } from "@/app/store/wps";
-import { ProviderLogo } from "@/element/ProviderLogo";
+import { DualProviderLogo } from "@/element/DualProviderLogo";
 import { Logger } from "@/util/logger";
 import { formatTimeAgo } from "@/util/format-time";
 import { RuntimeBadge } from "./RuntimeBadge";
@@ -372,8 +372,9 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                         aria-label={`Continue ${row.instance_name}`}
                                         data-testid="agent-my-agents-entry"
                                     >
-                                        <ProviderLogo
-                                            provider={row.provider}
+                                        <DualProviderLogo
+                                            harness={row.harness_engine || row.provider}
+                                            vendor={row.model_vendor}
                                             size={24}
                                             class="agent-recent-sessions-icon"
                                         />

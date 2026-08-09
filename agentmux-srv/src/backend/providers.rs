@@ -73,6 +73,11 @@ pub struct ProviderConfig {
     pub npm_package: &'static str,
     /// Version string passed to `npm install`, e.g. `"latest"` or `"0.116.0"`.
     pub pinned_version: &'static str,
+    // ── Harness & Vendor Decoupling ──────────────────────────────────────────
+    /// Harness CLI execution engine name (e.g. `"claude"`, `"agy"`, `"codex"`).
+    pub harness_engine: &'static str,
+    /// Supported intelligence model vendor names (e.g. `&["anthropic", "openrouter"]`).
+    pub supported_vendors: &'static [&'static str],
 }
 
 impl ProviderConfig {
@@ -154,6 +159,8 @@ static CLAUDE: ProviderConfig = ProviderConfig {
     // .github/workflows/container-image.yml `claude_version` default — enforced by
     // frontend/app/view/agent/providers/pin-consistency.test.ts.
     pinned_version: "2.1.198",
+    harness_engine: "claude",
+    supported_vendors: &["anthropic", "openrouter", "custom"],
 };
 
 static CODEX: ProviderConfig = ProviderConfig {
@@ -179,6 +186,8 @@ static CODEX: ProviderConfig = ProviderConfig {
     unset_env: &[],
     npm_package: "@openai/codex",
     pinned_version: "0.116.0",
+    harness_engine: "codex",
+    supported_vendors: &["openai", "custom"],
 };
 
 static GEMINI: ProviderConfig = ProviderConfig {
@@ -198,6 +207,8 @@ static GEMINI: ProviderConfig = ProviderConfig {
     unset_env: &[],
     npm_package: "@google/gemini-cli",
     pinned_version: "0.32.1",
+    harness_engine: "gemini",
+    supported_vendors: &["google", "custom"],
 };
 
 // Qwen Code — Alibaba's open-source coding agent, a fork of Gemini CLI.
@@ -226,6 +237,8 @@ static QWEN: ProviderConfig = ProviderConfig {
     unset_env: &[],
     npm_package: "@qwen-code/qwen-code",
     pinned_version: "0.19.2",
+    harness_engine: "gemini",
+    supported_vendors: &["openrouter", "custom"],
 };
 
 static KIMI: ProviderConfig = ProviderConfig {
@@ -250,6 +263,8 @@ static KIMI: ProviderConfig = ProviderConfig {
     unset_env: &[],
     npm_package: "",
     pinned_version: "",
+    harness_engine: "kimi",
+    supported_vendors: &["moonshot", "custom"],
 };
 
 static OPENCLAW: ProviderConfig = ProviderConfig {
@@ -279,6 +294,8 @@ static OPENCLAW: ProviderConfig = ProviderConfig {
     unset_env: &[],
     npm_package: "openclaw",
     pinned_version: "2026.6.10",
+    harness_engine: "openclaw",
+    supported_vendors: &["openai", "anthropic", "google", "pi", "custom"],
 };
 
 static PI: ProviderConfig = ProviderConfig {
@@ -296,6 +313,8 @@ static PI: ProviderConfig = ProviderConfig {
     unset_env: &[],
     npm_package: "@mariozechner/pi-coding-agent",
     pinned_version: "0.73.1",
+    harness_engine: "pi",
+    supported_vendors: &["pi", "custom"],
 };
 
 // Mux Code — AgentMux's first-party agentic coding CLI.
@@ -323,6 +342,8 @@ static MUX_CODE: ProviderConfig = ProviderConfig {
     unset_env: &[],
     npm_package: "@agentmuxai/muxcode",
     pinned_version: "0.1.0",
+    harness_engine: "muxcode",
+    supported_vendors: &["ollama", "anthropic", "openai", "custom"],
 };
 
 // GitHub Copilot CLI — Microsoft's coding agent. Runs in ACP mode via
@@ -344,6 +365,30 @@ static COPILOT: ProviderConfig = ProviderConfig {
     unset_env: &[],
     npm_package: "@github/copilot",
     pinned_version: "1.0.65",
+    harness_engine: "copilot",
+    supported_vendors: &["github", "custom"],
+};
+
+// Antigravity (AGY) — Google DeepMind's agentic AI coding CLI harness.
+// High-throughput subprocess execution with Gemini 3.6 Flash / 2.5 Pro models,
+// native skill discovery, MCP integration, and subagent support.
+static ANTIGRAVITY: ProviderConfig = ProviderConfig {
+    id: "antigravity",
+    cli_command: "agy",
+    controller_type: ControllerType::Subprocess,
+    launch_args: &["--output-format", "stream-json", "--yolo", "-p", ""],
+    persistent_launch_args: None,
+    resume_flag: Some("-r"),
+    session_id_field: "session_id",
+    styled_output_format: "gemini-json",
+    auth_config_dir_env_var: "ANTIGRAVITY_CONFIG_DIR",
+    auth_dir_name: "antigravity",
+    auth_extra_env: &[("ANTIGRAVITY_FORCE_FILE_STORAGE", "true")],
+    unset_env: &[],
+    npm_package: "@google/antigravity-cli",
+    pinned_version: "1.0.0",
+    harness_engine: "agy",
+    supported_vendors: &["google", "custom"],
 };
 
 // ─── Static registry ─────────────────────────────────────────────────────────
@@ -359,6 +404,7 @@ static REGISTRY: LazyLock<HashMap<&'static str, &'static ProviderConfig>> = Lazy
     m.insert(PI.id, &PI);
     m.insert(COPILOT.id, &COPILOT);
     m.insert(MUX_CODE.id, &MUX_CODE);
+    m.insert(ANTIGRAVITY.id, &ANTIGRAVITY);
     m
 });
 
@@ -380,6 +426,9 @@ static ALIASES: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(||
     m.insert("copilot_cli", "copilot");
     m.insert("mux-code", "muxcode");
     m.insert("mux_code", "muxcode");
+    m.insert("agy", "antigravity");
+    m.insert("antigravity-cli", "antigravity");
+    m.insert("antigravity_cli", "antigravity");
     m
 });
 
@@ -429,6 +478,7 @@ mod tests {
         assert!(get_provider("openclaw").is_some());
         assert!(get_provider("qwen").is_some());
         assert!(get_provider("muxcode").is_some());
+        assert!(get_provider("antigravity").is_some());
     }
 
     #[test]
@@ -455,6 +505,20 @@ mod tests {
         assert_eq!(get_provider("qwen3-coder").unwrap().id, "qwen");
         assert_eq!(get_provider("kimi-cli").unwrap().id, "kimi");
         assert_eq!(get_provider("openclaw-cli").unwrap().id, "openclaw");
+        assert_eq!(get_provider("agy").unwrap().id, "antigravity");
+        assert_eq!(get_provider("antigravity-cli").unwrap().id, "antigravity");
+    }
+
+    #[test]
+    fn antigravity_is_subprocess_controller() {
+        let p = get_provider("antigravity").unwrap();
+        assert_eq!(p.controller_type, ControllerType::Subprocess);
+        assert_eq!(p.controller_type_str(), "subprocess");
+        assert_eq!(p.styled_output_format, "gemini-json");
+        assert_eq!(p.cli_command, "agy");
+        assert_eq!(p.session_id_field, "session_id");
+        assert_eq!(p.resume_flag, Some("-r"));
+        assert_eq!(p.npm_package, "@google/antigravity-cli");
     }
 
     #[test]
