@@ -1,0 +1,6 @@
+{"type":"thread.started","thread_id":"00000000-0000-0000-0000-000000000003"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"Creating fixture.txt."}}
+{"type":"item.completed","item":{"id":"item_1","type":"file_change","changes":[{"path":"C:\\fixture-workspace\\fixture.txt","kind":"add"}],"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"fixture-written"}}
+{"type":"turn.completed","usage":{"input_tokens":23285,"cached_input_tokens":21248,"output_tokens":146}}

@@ -23,7 +23,7 @@ use crate::backend::blockcontroller::{
 };
 use crate::backend::wps;
 
-use super::{SubprocessController, SubprocessSpawnConfig, SUBPROCESS_OUTPUT_SUBJECT};
+use super::{argv::build_turn_argv, SubprocessController, SubprocessSpawnConfig, SUBPROCESS_OUTPUT_SUBJECT};
 
 impl SubprocessController {
     /// Spawn a single turn of the agent CLI.
@@ -61,6 +61,22 @@ impl SubprocessController {
         // both by the lease claim below and by the resume-flag args
         // built after it.
         let session_id_hint = self.inner.lock().unwrap().session_id.clone();
+
+        // Build continuation argv before claiming the lease or acknowledging
+        // the message. A malformed provider configuration must fail as an
+        // unstarted turn, not strand the pane in an accepted/running state.
+        let args = match build_turn_argv(
+            &config.cli_args,
+            &config.resume_strategy,
+            &config.resume_flag,
+            session_id_hint.as_deref(),
+        ) {
+            Ok(args) => args,
+            Err(error) => {
+                self.unlock_run();
+                return Err(error);
+            }
+        };
 
         // Claim the cross-process session-ownership lease BEFORE
         // `emit_message_accepted` / flipping status to running — a
@@ -114,15 +130,6 @@ impl SubprocessController {
         // reached once the lease claim above has succeeded (or was a
         // no-op) — see that block's comment.
         self.emit_message_accepted(&config);
-
-        // Build CLI args, appending resume flag + session_id if we have one and the provider supports it
-        let mut args = config.cli_args.clone();
-        if let Some(ref sid) = session_id_hint {
-            if !config.resume_flag.is_empty() {
-                args.push(config.resume_flag.clone());
-                args.push(sid.clone());
-            }
-        }
 
         // Update status to running
         {

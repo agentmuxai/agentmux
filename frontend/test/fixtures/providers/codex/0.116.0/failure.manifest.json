@@ -1,0 +1,10 @@
+{
+    "provider": "codex",
+    "cli_version": "0.116.0",
+    "platform": "windows-x64",
+    "container": false,
+    "scenario": "turn-failed",
+    "captured_at": "2026-08-09T10:10:39Z",
+    "invocation_shape": "exec --ephemeral --json --skip-git-repo-check -C <workspace> <prompt>",
+    "redactions": ["thread_id", "absolute_paths", "usernames", "prompt", "provider_error_message"]
+}

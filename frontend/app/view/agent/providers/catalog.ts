@@ -145,8 +145,8 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         authDirName: "codex",
         launchArgs: ["exec", "--json", "--dangerously-bypass-approvals-and-sandbox", "-"],
         // Codex resume requires a subcommand change (exec resume <id>), not a simple flag.
-        // Multi-turn is handled by re-running exec; null disables automatic --resume append.
         resumeFlag: null,
+        resumeStrategy: "codex-exec",
         sessionIdField: "thread_id",
         controllerType: "subprocess",
         contextWindow: 200_000,
