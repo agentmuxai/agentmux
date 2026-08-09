@@ -74,22 +74,18 @@ describe("formatDiskGb", () => {
 });
 
 describe("diskTooltip", () => {
-    it("names the watch drive with live figures and never mentions the page file", () => {
+    it("matches the short stat-tooltip format, naming the drive, never mentioning the page file", () => {
         const tip = diskTooltip([
             { label: "C:", freeGb: 120.5, totalGb: 460.2, isWatch: true },
             { label: "D:", freeGb: 900, totalGb: 1000, isWatch: false },
         ]);
-        expect(tip).toContain("C:");
-        expect(tip).toContain("120.5G free of 460.2G");
-        expect(tip).toContain("free ÷ capacity");
+        expect(tip).toBe("Free share of system drive (C:)");
         expect(tip.toLowerCase()).not.toContain("page");
         expect(tip).not.toContain("PF");
     });
 
-    it("falls back to a generic explanation when no watch volume is known yet", () => {
-        const tip = diskTooltip([]);
-        expect(tip).toContain("free ÷ capacity");
-        expect(tip.toLowerCase()).not.toContain("page");
+    it("falls back to the driveless form when no watch volume is known yet", () => {
+        expect(diskTooltip([])).toBe("Free share of system drive");
     });
 });
 

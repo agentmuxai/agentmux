@@ -61,20 +61,19 @@ export function formatDiskGb(gb: number): string {
 }
 
 /**
- * Tooltip for the status-bar Disk % readout. Explains what the number IS —
- * free ÷ capacity on the named drive — with the live figures. Deliberately
- * says nothing about the page file: that operational significance lives in
- * the PF gauge's own tooltip, not here.
+ * Tooltip for the status-bar Disk % readout. Short and descriptive like the
+ * other stat tooltips ("Per-core CPU usage", "Memory used and total", ...):
+ * names what the % is a share OF, and nothing else. Deliberately says
+ * nothing about the page file — that operational significance lives in the
+ * PF gauge's own tooltip, not here. Live figures belong in the click-open
+ * panel, not the hover.
  */
 export function diskTooltip(volumes: DiskVolume[]): string {
     const watch = volumes.find((v) => v.isWatch);
     if (watch) {
-        return (
-            `Free space on ${watch.label} — ${formatDiskGb(watch.freeGb)} free of ` +
-            `${formatDiskGb(watch.totalGb)} (% = free ÷ capacity). Click for all drives.`
-        );
+        return `Free share of system drive (${watch.label})`;
     }
-    return "Free share of the system drive (% = free ÷ capacity). Click for all drives.";
+    return "Free share of system drive";
 }
 
 /**
