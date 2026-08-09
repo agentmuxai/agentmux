@@ -1,7 +1,11 @@
 # SPEC — Account adoption: piggyback an unlinked agent onto an existing login
 
 **Date:** 2026-08-09
-**Status:** Proposed
+**Status:** Proposed — Surface A superseded by
+`SPEC_ARMORY_BIND_TO_AGENT_CONTEXT_MENU_2026_08_09.md` (user-preferred
+direction: bind from the Armory, not from the failure row). Surface B
+(Identity-tab "Link existing account…") remains proposed as the
+agent-side complement; see that spec's §6.
 **Trigger:** Live v0.54.14 testing on a second machine (claudius). A
 pre-existing legacy agent ("Agent1", blank `identity_id`, no direct link)
 was correctly refused by the layer-3 spawn gate (#2463/#2464) and — after
