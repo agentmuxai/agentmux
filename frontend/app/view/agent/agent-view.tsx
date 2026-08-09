@@ -51,7 +51,7 @@ import { PaneRow } from "./components/PaneRow";
 import { PaneTabStrip } from "@/app/element/PaneTabStrip";
 import { PaneTabRenameInput } from "@/app/element/PaneTabRenameInput";
 import { useForkSet } from "./fork/useForkSet";
-import { getLayoutModelForStaticTab, pushBlockOntoStack, setActiveBlockInStack } from "@/layout/index";
+import { closeBlockInStack, getLayoutModelForStaticTab, pushBlockOntoStack, setActiveBlockInStack } from "@/layout/index";
 import { useAgentDropAttach } from "./hooks/useAgentDropAttach";
 import { useSnapshotPersistence } from "./hooks/useSnapshotPersistence";
 import { useAgentDecisions } from "./hooks/useAgentDecisions";
@@ -270,6 +270,18 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
         }
         pushBlockOntoStack(layoutModel, node.id, paneOpenResult.block_id);
     };
+    // × on a tab (also middle-click, via PaneTabStrip's onMouseDown).
+    // Mirrors term.tsx's handleTermTabClose: resolve the block's OWNING
+    // node — for a stack member that's this pane (pop it out, delete just
+    // that block; last member closes the pane), for a cross-pane fork tab
+    // it's that other pane (same semantics apply there). closeBlockInStack
+    // guards against a blockId that isn't a member, so a stale tab entry
+    // can't close the wrong thing.
+    const handleTabClose = (targetBlockId: string) => {
+        const node = layoutModel.getNodeByBlockId(targetBlockId);
+        if (!node) return;
+        void closeBlockInStack(layoutModel, node.id, targetBlockId);
+    };
     // Double-click a tab to rename it (only meaningful once it has launched
     // an agent — a still-blank picker tab has nothing to rename). No local
     // override needed: the RPC broadcasts `agents:changed`, which
@@ -315,6 +327,7 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
                     getId={(t) => t.blockId}
                     getLabel={(t) => t.label}
                     onActivate={handleTabSwitch}
+                    onClose={handleTabClose}
                     onTabDoubleClick={(t) => t.definitionId && setRenamingBlockId(t.blockId)}
                     renderLabel={(t) =>
                         renamingBlockId() === t.blockId && t.definitionId ? (
