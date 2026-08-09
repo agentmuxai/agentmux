@@ -1,5 +1,12 @@
 # AgentMux Version History
 
+## 0.54.14 — 2026-08-09
+
+- feat(statusbar): Disk readout explains its % in the tooltip; click opens a per-drive free-space popover
+- fix(armory): accounts appear live everywhere - subscribe the shared account cache to identityaccounts:changed
+- fix(app-api): window rename validates existence; naming routes return real status codes
+
+
 ## 0.54.13 — 2026-08-08
 
 - feat(process-tracker): register ShellController/AcpController spawns with process_tracker::registry (Process Broker Phase B, shell+acp coverage)
