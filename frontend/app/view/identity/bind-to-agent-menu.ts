@@ -11,7 +11,7 @@
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { WOS } from "@/app/store/global";
+import { WOS, workspace } from "@/app/store/global";
 import { getOpenDefinitionMap } from "@/app/store/agent-pane-state-store";
 import { getProvider, resolveProviderAlias } from "@/app/view/agent/providers";
 import { Logger } from "@/util/logger";
@@ -98,21 +98,51 @@ export function candidateSublabel(c: BindCandidate): string {
     return [running, binding].filter(Boolean).join("  ·  ");
 }
 
+/** Find the current workspace's tab holding `blockId`, for
+ *  ControllerResyncCommand's required `tabid`. Same fast-path lookup
+ *  swarm-view's focusBlock uses; returns null for a block in another
+ *  window (resync is then skipped — see bindAccountToAgent). */
+function findTabIdForBlock(blockId: string): string | null {
+    const ws = workspace();
+    if (!ws) return null;
+    for (const tabId of [...(ws.pinnedtabids ?? []), ...(ws.tabids ?? [])]) {
+        const tab = WOS.getObjectValue<Tab>(WOS.makeORef("tab", tabId));
+        if (tab?.blockids?.includes(blockId)) return tabId;
+    }
+    return null;
+}
+
 /**
  * Bind `account` to `candidate`'s agent (spec §2): link upsert, then — for
- * a running agent — the same `cmd:env` config-dir refresh
- * `useAgentControllerStatus.useGlobalLogin()` performs after linking, so
- * the new binding takes effect on the next turn without a restart (a stale
- * static `cmd:env` override would otherwise shadow the new link at the
- * next spawn).
+ * a running agent — the same live-apply pair
+ * `useAgentControllerStatus.useGlobalLogin()` performs after linking:
+ * (1) refresh the block's `cmd:env` config-dir override (a stale static
+ * override would otherwise shadow the new link at the next spawn), and
+ * (2) `ControllerResyncCommand{forcerestart:true}` — a persistent
+ * controller's already-alive CLI writes messages straight to the running
+ * process's stdin and never re-reads env, so without the forced,
+ * session-preserving respawn (`--resume`) the new binding would silently
+ * not apply until a manual restart (reagentx P1 on #2485).
+ *
+ * The link upsert is the one step that must succeed — it throws on
+ * failure so callers can surface it. The live-apply steps are best-effort
+ * (logged, swallowed): the binding still applies at the next clean spawn.
  */
 export async function bindAccountToAgent(account: Account, candidate: BindCandidate): Promise<void> {
     const provider = resolveProviderAlias(account.provider);
-    await RpcApi.LinkAgentIdentityCommand(TabRpcClient, {
-        agent_id: candidate.agentId,
-        account_id: account.id,
-        provider,
-    });
+    try {
+        await RpcApi.LinkAgentIdentityCommand(TabRpcClient, {
+            agent_id: candidate.agentId,
+            account_id: account.id,
+            provider,
+        });
+    } catch (e: any) {
+        Logger.error(
+            "identity",
+            `armory bind FAILED: account ${account.id} → agent ${candidate.agentId}: ${e?.message ?? e}`,
+        );
+        throw e;
+    }
     Logger.info(
         "identity",
         `armory bind: account ${account.id} (${account.name}) → agent ${candidate.agentId} (${candidate.agentName})`,
@@ -134,10 +164,23 @@ export async function bindAccountToAgent(account: Account, candidate: BindCandid
             oref: WOS.makeORef("block", blockId),
             meta: { "cmd:env": { ...prevEnv, [envVar]: dir } },
         });
+        const tabId = findTabIdForBlock(blockId);
+        if (tabId) {
+            await RpcApi.ControllerResyncCommand(TabRpcClient, {
+                tabid: tabId,
+                blockid: blockId,
+                forcerestart: true,
+            });
+        } else {
+            Logger.warn(
+                "identity",
+                `armory bind: pane ${blockId} not in this window's tabs — binding applies on its next spawn`,
+            );
+        }
     } catch (e: any) {
         // The link itself succeeded — the binding applies at the next
-        // clean spawn even if the live env refresh failed. Log, don't throw.
-        Logger.warn("identity", `armory bind: live cmd:env refresh failed: ${e?.message ?? e}`);
+        // clean spawn even if the live apply failed. Log, don't throw.
+        Logger.warn("identity", `armory bind: live apply failed: ${e?.message ?? e}`);
     }
 }
 
@@ -151,6 +194,10 @@ export async function buildAccountRowMenu(
     account: Account,
     agents: AgentDefinition[],
     accounts: Account[],
+    /** Failure feedback — a failed bind RPC must reach the user, not just
+     *  the logs (reagentx P1 on #2485). AccountsTab passes the model's
+     *  notice banner. */
+    onBindError?: (message: string) => void,
     onBound?: () => void,
 ): Promise<ContextMenuItem[]> {
     let allLinks: AgentDefinitionIdentity[] = [];
@@ -187,7 +234,13 @@ export async function buildAccountRowMenu(
                       checked: c.boundHere,
                       sublabel: candidateSublabel(c) || undefined,
                       click: () => {
-                          void bindAccountToAgent(account, c).then(() => onBound?.());
+                          void bindAccountToAgent(account, c)
+                              .then(() => onBound?.())
+                              .catch((e: any) => {
+                                  onBindError?.(
+                                      `Couldn't bind "${account.name}" to ${c.agentName}: ${e?.message ?? e}`,
+                                  );
+                              });
                       },
                   })),
               };

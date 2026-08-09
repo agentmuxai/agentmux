@@ -37,7 +37,9 @@ export function AccountsTab({ model }: { model: IdentityViewModel }): JSX.Elemen
     const handleRowContextMenu = (account: Account, e: MouseEvent) => {
         e.preventDefault();
         e.stopPropagation();
-        void buildAccountRowMenu(account, agents(), model.accountsAtom()).then((items) => {
+        void buildAccountRowMenu(account, agents(), model.accountsAtom(), (msg) =>
+            model.showNotice(msg),
+        ).then((items) => {
             ContextMenuModel.showContextMenu(items, e);
         });
     };

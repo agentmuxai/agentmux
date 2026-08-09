@@ -62,14 +62,23 @@ binding to an agent that already has an account for this provider
   existing links subscriptions — no reload.
 
 **Running-agent live apply:** if the target agent has an open pane
-(`getOpenDefinitionMap()` gives the blockId), mirror the `cmd:env`
-config-dir refresh `useAgentControllerStatus.useGlobalLogin()` already
-performs after linking (SetMetaCommand on the block's `cmd:env` with the
-provider's `authConfigDirEnvVar` → the account's `OAuthConfigDir` dir), so
-the new binding takes effect on the next turn without a restart — the
-same no-restart semantics the existing recovery flows promise. Without
-this step a stale static `cmd:env` override could shadow the new link at
-the next spawn.
+(`getOpenDefinitionMap()` gives the blockId), mirror the live-apply PAIR
+`useAgentControllerStatus.useGlobalLogin()` performs after linking:
+1. the `cmd:env` config-dir refresh (SetMetaCommand with the provider's
+   `authConfigDirEnvVar` → the account's `OAuthConfigDir` dir) — a stale
+   static override would otherwise shadow the new link at the next spawn;
+2. `ControllerResyncCommand{forcerestart:true}` — a persistent
+   controller's already-alive CLI receives messages on its running
+   process's stdin and never re-reads env; env only applies on a fresh
+   spawn. The forced respawn is session-preserving (`--resume`), the same
+   mechanism every recovery flow already uses. Without it the new binding
+   would silently not apply until a manual restart (reagentx P1 on the
+   implementation PR caught an earlier draft claiming otherwise).
+
+Both live-apply steps are best-effort (logged, non-fatal — the binding
+still applies at the next clean spawn); the link upsert itself is the one
+step that must succeed, and its failure surfaces in the Accounts tab's
+notice banner.
 
 ## 3. Candidate agents (menu contents)
 
