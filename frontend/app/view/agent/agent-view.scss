@@ -33,6 +33,27 @@
 @use "styles/shell-node";
 @use "styles/loading-overlay";
 
+// Wrapper stack for the pane-level tab strip (AgentViewWrapper): strip on
+// top, content region filling the remainder. ModalLayer's mount is a plain
+// 100%-height box, so without this the strip's height ADDS to
+// .agent-view's height:100% and the composer gets clipped off the bottom.
+.agent-pane-stack {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    width: 100%;
+
+    > .pane-tab-strip {
+        flex: 0 0 auto;
+    }
+}
+
+.agent-pane-stack-content {
+    flex: 1 1 auto;
+    min-height: 0;
+    position: relative;
+}
+
 .agent-view {
     container-type: inline-size;
     container-name: agent-pane;
