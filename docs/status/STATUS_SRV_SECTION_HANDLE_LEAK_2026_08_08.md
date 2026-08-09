@@ -1,5 +1,10 @@
 # Status: `agentmux-srv` Leaking Windows Section Handles — Live Finding (2026-08-08)
 
+> **Update 2026-08-09, ~13:22 UTC — the leaked process died and was
+> auto-recovered before the manual restart in §5 was ever executed.** Root
+> cause is still NOT fixed in code; this is a live data point on the
+> self-healing path, not a resolution. See §17.
+
 **Related, but a different mechanism:** `docs/status/STATUS_PF_COMMIT_GROWTH_INVESTIGATION_2026_07_24.md`
 (RESOLVED 2026-07-25 — that investigation's root cause was an **Audiosrv**
 Section-handle leak, unrelated to AgentMux, fixed by `Restart-Service
@@ -166,3 +171,103 @@ Audiosrv case where `Restart-Service` only affected one unrelated OS service.
    growth rate changes proportionally — the same "suspend and watch the
    rate" bisection technique the 07-24 doc used for Traktor/Audiosrv (§16.2
    there).
+
+## 17. Update 2026-08-09 — PID 45728 went down on its own; auto-recovery worked exactly as designed
+
+Between the original write-up (§1-16, 2026-08-08) and this update, nobody
+executed the manual restart §5 held off on. The leaked process died by
+itself and the launcher's existing supervised-recovery path (traced in this
+same conversation, separately, when checking whether that path was safe to
+trigger deliberately) handled it automatically. **This section is a live
+data point, not confirmation of a code fix** — the root cause from §4
+remains unpatched, so the same trajectory can recur on the replacement
+process.
+
+### 17.1 What happened, from the launcher log directly
+
+`agentmux-launcher.log` (channel `local-main-b28b7a-92c05375`) for PID 45728:
+
+- **2026-08-09T11:57:57Z** — the last live log lines from PID 45728: a burst
+  of `agent health transition ... old=Idle new=Exited` and
+  `session_recovery: failed to clear active pid ... error=not found` across
+  every block it was tracking (including this conversation's own block at
+  the time, `97c97310-...`). No panic message, no explicit error, no crash
+  dump written to `C:\CrashDumps\agentmuxsrv\` for this PID — the process
+  simply stopped logging. Given §3's live reading shortly before this
+  (system commit at 133.12 GB / 140.37 GB, 95%, with PID 45728 itself
+  holding 215,705 handles), an externally-forced termination (OOM-adjacent
+  kill, allocation failure) fits the evidence better than a clean
+  self-detected crash — but this is inference from absence of a dump/panic,
+  not a confirmed mechanism.
+- **2026-08-09T12:04:03Z** (~6 minutes later) — a fresh `agentmux-srv`
+  (PID 62888, same version 0.54.10) logs `agentmuxsrv starting`. This is
+  the launcher's exit-triggered respawn (`agentmux-launcher/src/supervisor/`,
+  traced in the same conversation as this update — see the "is it safe to
+  restart" investigation for the mechanism this exercised for real).
+- **2026-08-09T13:22:27Z** (host recycle + reproject landed later, once
+  this pane's tab resumed activity) — this conversation's own persistent
+  CLI process respawned with `--resume 556ddd36-dcdd-4798-b8b7-70ad8c233632`
+  — its own real session id, matching this very conversation. **First-hand
+  confirmation the documented recovery path
+  (`docs/specs/SPEC_SRV_SUPERVISION_RECYCLE_2026_07_11.md`) works as
+  designed**: this conversation was not visibly interrupted (the crash
+  landed between turns, not mid-turn, so there was nothing in flight to
+  lose), and resumed on the new process with full history intact via the
+  CLI's own `--resume`, not a fresh conversation.
+- Block ids changed across the recycle (this pane's own block id is now
+  `93000821-...`, not the original `97c97310-...`) — consistent with
+  `SPEC_PILLAR1_HOST_REPROJECT_DESIGN_2026_06_30.md`'s "transient/in-flight
+  state is dropped on reproject, re-derived from durable topology instead
+  of preserved 1:1" model already documented for this recovery path.
+
+### 17.2 Commit charge: partially reclaimed, not fully
+
+| | Before (§3, 2026-08-08) | After (2026-08-09, ~13:24 UTC) |
+|---|---|---|
+| System commit | 133.12 GB / 140.37 GB (95%) | 76.65 GB / 86.45 GB (**88.7%**) |
+| Leaked PID | 45728, 215,705 handles (214,636 Section) | gone |
+
+Note the **commit limit itself also dropped** (140.37 → 86.45 GB) — this
+machine's pagefile is system-managed (per the original
+`STATUS_PF_COMMIT_GROWTH_INVESTIGATION_2026_07_24.md`'s own findings on
+this same box), so the ceiling floats with recent demand/disk headroom, not
+just the numerator. System uptime is unrelated (`LastBootUpTime` confirmed
+unchanged, ~13 days) — no reboot happened, only the one process restarted.
+
+88.7% is still elevated, not a clean baseline — some of that is the
+now-familiar mix of concurrent AgentMux dev/portable instances (§3's
+process list) plus whatever else is running on this shared dev machine, not
+attributable to this specific leak. Not investigated further this session.
+
+### 17.3 The replacement process, checked immediately
+
+PID 62888, ~1h22min old at check time:
+
+```
+Total handles: 942
+Section: 172
+```
+
+Low/normal baseline — the leak has **not** measurably recurred yet on the
+fresh process. Consistent with §16.4's arithmetic (the original PID took
+~69 hours to accumulate to a problematic level) — too early to conclude
+anything from this alone, just recorded here as the starting point for
+whoever next checks this process's handle count.
+
+### 17.4 What this update does and doesn't change
+
+- **Does not fix the root cause.** §4's leading hypothesis (`sysinfo`'s 30s
+  whole-machine process refresh, `agentmux-srv/src/backend/sysinfo.rs:148`)
+  is unpatched. Nothing in this update touched code.
+- **Does confirm the supervised-recovery path is real and works**, for
+  whoever is deciding whether a manual `taskkill /PID <srv> /F` is safe to
+  use as a stopgap the next time commit climbs dangerously high: yes, per
+  this live, unplanned exercise of the exact same path — expect a full
+  host recycle (all windows reproject, brief visible interruption) and any
+  in-flight turn to be cut and resumed via `--resume` on the next message,
+  not preserved mid-turn.
+- **Does not mean this can be left alone.** The same trajectory — slow
+  Section-handle growth, unclear exact trigger, eventual forced
+  termination — will very likely repeat on PID 62888 (or whatever succeeds
+  it) on a similar timescale, until §4's actual leak source is found and
+  patched. This status remains open.
