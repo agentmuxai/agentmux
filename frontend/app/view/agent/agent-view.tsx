@@ -296,39 +296,49 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
 
     return (
         <ModalLayer scope="pane">
-            {/* Top region, above everything else, matching the editor's own
-                tab-strip placement and every general tabbed-UI convention.
-                The "+" always renders — that's how you'd get to a second
-                tab — but the tab pill itself stays hidden until there's
-                something to switch BETWEEN (see visibleTabs above).
-                SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md. */}
-            <PaneTabStrip
-                tabs={visibleTabs()}
-                activeId={activeBlockId()}
-                getId={(t) => t.blockId}
-                getLabel={(t) => t.label}
-                onActivate={handleTabSwitch}
-                onTabDoubleClick={(t) => t.definitionId && setRenamingBlockId(t.blockId)}
-                renderLabel={(t) =>
-                    renamingBlockId() === t.blockId && t.definitionId ? (
-                        <PaneTabRenameInput
-                            initialValue={t.label}
-                            onConfirm={(title) => void handleTabRenameConfirm(t.definitionId, title)}
-                            onCancel={() => setRenamingBlockId(null)}
-                        />
-                    ) : (
-                        <span class="pane-tab-label">{t.label}</span>
-                    )
-                }
-                onAdd={() => void handleNewAgentTab()}
-                addTitle="New tab"
-            />
-            <Show
-                when={agentId()}
-                fallback={<AgentPicker model={model} />}
-            >
-                <AgentPresentationView model={model} agentId={agentId()} />
-            </Show>
+            {/* Flex-column stack: strip on top, content filling the rest.
+                Required because ModalLayer's mount is a plain 100%-height
+                box, NOT a flex column — without this wrapper the strip's
+                own height ADDS to `.agent-view`'s height:100%, overflowing
+                the pane and clipping the composer off the bottom (found
+                live 2026-08-09: "agent pane has no text input"). */}
+            <div class="agent-pane-stack">
+                {/* Top region, above everything else, matching the editor's own
+                    tab-strip placement and every general tabbed-UI convention.
+                    The "+" always renders — that's how you'd get to a second
+                    tab — but the tab pill itself stays hidden until there's
+                    something to switch BETWEEN (see visibleTabs above).
+                    SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md. */}
+                <PaneTabStrip
+                    tabs={visibleTabs()}
+                    activeId={activeBlockId()}
+                    getId={(t) => t.blockId}
+                    getLabel={(t) => t.label}
+                    onActivate={handleTabSwitch}
+                    onTabDoubleClick={(t) => t.definitionId && setRenamingBlockId(t.blockId)}
+                    renderLabel={(t) =>
+                        renamingBlockId() === t.blockId && t.definitionId ? (
+                            <PaneTabRenameInput
+                                initialValue={t.label}
+                                onConfirm={(title) => void handleTabRenameConfirm(t.definitionId, title)}
+                                onCancel={() => setRenamingBlockId(null)}
+                            />
+                        ) : (
+                            <span class="pane-tab-label">{t.label}</span>
+                        )
+                    }
+                    onAdd={() => void handleNewAgentTab()}
+                    addTitle="New tab"
+                />
+                <div class="agent-pane-stack-content">
+                    <Show
+                        when={agentId()}
+                        fallback={<AgentPicker model={model} />}
+                    >
+                        <AgentPresentationView model={model} agentId={agentId()} />
+                    </Show>
+                </div>
+            </div>
         </ModalLayer>
     );
 };
