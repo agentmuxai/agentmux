@@ -181,6 +181,12 @@ impl SubprocessController {
                                 cfg,
                             ) {
                                 tracing::warn!(error = %e, "failed to spawn queued container turn");
+                                Self::publish_queued_spawn_error(
+                                    &block_id,
+                                    &e,
+                                    &broker,
+                                    &filestore,
+                                );
                             }
                         }
                     }
@@ -395,12 +401,47 @@ impl SubprocessController {
                         cfg,
                     ) {
                         tracing::warn!(error = %e, "failed to spawn queued container turn");
+                        Self::publish_queued_spawn_error(
+                            &block_id,
+                            &e,
+                            &broker,
+                            &filestore,
+                        );
                     }
                 }
             }
         });
 
         Ok(())
+    }
+
+    /// A queued message has already been removed from `pending_messages` when
+    /// its next spawn is attempted. If provider argv validation rejects that
+    /// spawn, persist a transcript error so the message does not disappear
+    /// with only a server log. Mirrors the host queue-drain failure path.
+    fn publish_queued_spawn_error(
+        block_id: &str,
+        error: &str,
+        broker: &Option<Arc<crate::backend::wps::Broker>>,
+        filestore: &Option<Arc<crate::backend::storage::filestore::FileStore>>,
+    ) {
+        let Some(broker) = broker else {
+            return;
+        };
+        let error_frame = serde_json::json!({
+            "type": "result",
+            "is_error": true,
+            "subtype": "error_during_execution",
+            "error": {"message": format!("[AgentMux] queued message could not be sent: {error}")}
+        }).to_string();
+        shell::handle_append_block_file(
+            broker,
+            block_id,
+            SUBPROCESS_OUTPUT_SUBJECT,
+            format!("{error_frame}\n").as_bytes(),
+            filestore.as_ref(),
+            None,
+        );
     }
 
     /// Publish a single NDJSON line from container exec output: session-id capture,
