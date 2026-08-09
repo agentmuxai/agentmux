@@ -420,6 +420,14 @@ export class IdentityViewModel implements ViewModel {
         this.setDeleteNotice(null);
     };
 
+    /** Surface a transient notice in the Accounts tab's banner row (the
+     *  same dismissible UI the delete disclosure uses). Added for the
+     *  Bind-to-Agent menu's failure feedback (reagentx P1 on #2485) —
+     *  a failed bind RPC must not vanish into logs only. */
+    showNotice = (text: string): void => {
+        this.setDeleteNotice(text);
+    };
+
     /** Unsubscribe from the account cache; assigned in the constructor,
      *  invoked in dispose() so direct callers don't leak a listener. */
     private _unsubAccounts: (() => void) | null = null;
