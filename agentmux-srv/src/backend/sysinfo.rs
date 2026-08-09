@@ -306,6 +306,22 @@ fn get_pagefile_volume_data(_values: &mut HashMap<String, f64>) {
             // rides in the key. Mount format matches sysinfo's Windows
             // mount_point() ("C:\").
             _values.insert(format!("disk:vol:{}:\\:watch", drive), 1.0);
+            // Whether the watched (page-file) volume is also the OS's own
+            // system drive -- usually true, but a custom PagingFiles entry
+            // can point the page file at a different volume than
+            // %SystemDrive% (e.g. `E:\pagefile.sys 0 0` with SystemDrive=C).
+            // Lets the status-bar tooltip say "system drive (C:)" only when
+            // that's actually true, rather than mislabeling a page-file-only
+            // volume as the system drive (reagent finding on #2479).
+            let is_system_drive = std::env::var("SystemDrive")
+                .ok()
+                .and_then(|s| s.chars().next())
+                .map(|c| c.to_ascii_uppercase() == drive)
+                .unwrap_or(false);
+            _values.insert(
+                format!("disk:vol:{}:\\:is_system_drive", drive),
+                if is_system_drive { 1.0 } else { 0.0 },
+            );
         }
     }
 }
