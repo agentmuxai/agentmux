@@ -21,7 +21,7 @@ vi.mock("@/app/store/wps", () => ({
 const listAccountsMock = vi.fn(async () => [] as unknown[]);
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
-        ListIdentityAccountsCommand: (...args: unknown[]) => listAccountsMock(...args),
+        ListIdentityAccountsCommand: () => listAccountsMock(),
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -70,5 +70,42 @@ describe("account cache live sync (identityaccounts:changed)", () => {
         await vi.waitFor(() => expect(seen.length).toBeGreaterThan(0));
         expect(loadAccounts().some((a) => a.name === "new-account")).toBe(true);
         unsub();
+    });
+
+    it("a superseded refresh does not overwrite a newer one (latest-call-wins, codex P2 on #2474)", async () => {
+        const { refreshAccountCache } = await import("./identity-model");
+        const mkRow = (name: string) => ({
+            id: "550e8400-e29b-41d4-a716-446655440001",
+            name,
+            provider: "claude",
+            kind: "oauth",
+            display_name: "",
+            secret_ref: { oauth_config_dir: { dir: "/tmp/x" } },
+            context: {},
+            status: "valid",
+            created_at: 0,
+            updated_at: 0,
+        });
+
+        // First (older) request resolves LAST — after the second (newer)
+        // request already landed. Without the seq guard, "older" would
+        // overwrite "newer" in the cache.
+        let releaseOlder!: (rows: unknown[]) => void;
+        const olderGate = new Promise<unknown[]>((res) => (releaseOlder = res));
+        listAccountsMock.mockImplementationOnce(() => olderGate);
+        listAccountsMock.mockResolvedValueOnce([mkRow("newer")]);
+
+        const older = refreshAccountCache();
+        const newer = refreshAccountCache();
+        await newer;
+        expect(loadAccounts().some((a) => a.name === "newer")).toBe(true);
+
+        releaseOlder([mkRow("older")]);
+        const olderResult = await older;
+        // Cache keeps the newer snapshot; the superseded call returns the
+        // live (newer) cache rather than its own stale fetch.
+        expect(loadAccounts().some((a) => a.name === "newer")).toBe(true);
+        expect(loadAccounts().some((a) => a.name === "older")).toBe(false);
+        expect(olderResult.some((a) => a.name === "newer")).toBe(true);
     });
 });

@@ -302,10 +302,24 @@ function accountToBackend(a: Account): Partial<IdentityAccount> {
     };
 }
 
-/** Pull the latest account list from the DB and update the cache. */
+/** Pull the latest account list from the DB and update the cache.
+ *
+ * Latest-call-wins: two rapid `identityaccounts:changed` broadcasts (or a
+ * broadcast racing a CRUD method's own refresh) launch overlapping RPCs,
+ * and the backend handles requests on separate tasks — the request that
+ * captured the OLDER account snapshot can resolve last. Without this
+ * guard it would overwrite the newer result with no further broadcast to
+ * correct it, leaving every consumer stale (codex P2 on #2474). A
+ * superseded call skips the cache write and returns the live cache
+ * (fresher than its own stale fetch) so awaiting callers still see the
+ * newest data.
+ */
+let _refreshSeq = 0;
 export async function refreshAccountCache(): Promise<Account[]> {
+    const seq = ++_refreshSeq;
     try {
         const rows = await RpcApi.ListIdentityAccountsCommand(TabRpcClient, {});
+        if (seq !== _refreshSeq) return _accountCache; // superseded by a newer refresh
         const mapped = rows.map(backendToAccount);
         setCache(mapped);
         return mapped;

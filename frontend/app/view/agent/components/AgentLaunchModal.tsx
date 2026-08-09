@@ -20,7 +20,6 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { isAvailable, watchCapability } from "@/app/store/toolchain-capabilities";
 
-import { waveEventSubscribe } from "@/app/store/wps";
 import { createLaunchFlowStore, accountsForProvider, realMemories } from "@/app/store/launch-flow-state";
 
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
@@ -29,7 +28,7 @@ import { buildInstanceSlug, slugifyInstanceName } from "../defaults/instance-slu
 import { getProvider } from "../providers";
 import { PreLaunchAuthPanel } from "./PreLaunchAuthPanel";
 import { AuthFlowController } from "../auth";
-import { refreshAccountCache } from "@/app/view/identity/identity-model";
+import { refreshAccountCache, subscribeAccountChanges } from "@/app/view/identity/identity-model";
 import { useContinueOrNewMode } from "../hooks/useContinueOrNewMode";
 import { useLaunchAuthGate } from "../hooks/useLaunchAuthGate";
 
@@ -207,17 +206,17 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     const memories = () => flow.state.memories.list;
 
     // Cross-tab + cross-pane reactivity: the shared account cache
-    // (`identity-model.ts`) isn't itself subscribed to the backend's
-    // `identityaccounts:changed` broadcast — callers refresh it
-    // explicitly. Subscribe here so an account created/verified from
-    // another tab (or this modal's own OAuth/API-key flows) keeps the
-    // dropdown + status live without a manual reopen. Replaces the
-    // old `identitybundlebindings:changed:<id>` subscription (bundle
-    // bindings no longer exist in this flow).
+    // (`identity-model.ts`) self-subscribes to the backend's
+    // `identityaccounts:changed` broadcast as of #2474 and refreshes
+    // itself, so this modal only needs to mirror cache updates into its
+    // flow state — no separate event subscription or second RPC round-trip
+    // (this replaces the hand-rolled `waveEventSubscribe` workaround that
+    // predated the cache's own live sync). Keeps the dropdown + status
+    // live when an account is created/verified from another tab or this
+    // modal's own OAuth/API-key flows, without a manual reopen.
     createEffect(() => {
-        const unsub = waveEventSubscribe({
-            eventType: "identityaccounts:changed",
-            handler: () => void loadAccountsIntoForm(),
+        const unsub = subscribeAccountChanges((list) => {
+            flow.dispatch({ type: "AccountsLoaded", list });
         });
         onCleanup(unsub);
     });
