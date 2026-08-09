@@ -9,6 +9,8 @@ import { ProviderLogo } from "@/element/ProviderLogo";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { brandForProvider, isCliOAuthProvider } from "@/app/view/accounts/provider-brand";
+import { ContextMenuModel } from "@/app/store/contextmenu";
+import { buildAccountRowMenu } from "./bind-to-agent-menu";
 import { Modal, ModalBody, ModalFooter, ModalHeader } from "@/app/element/modal";
 import "./identity-view.scss";
 
@@ -24,6 +26,21 @@ const STATUS_DOT: Record<string, string> = {
 
 export function AccountsTab({ model }: { model: IdentityViewModel }): JSX.Element {
     const groups = () => model.accountsByProvider();
+    const agents = useAgentDefinitions();
+
+    // Right-click an account row → "Bind to Agent" submenu + Copy account ID
+    // (SPEC_ARMORY_BIND_TO_AGENT_CONTEXT_MENU_2026_08_09.md). Menu contents
+    // are computed fresh per open (links + open-pane snapshot), so the
+    // binding annotations are current without any subscription here. The
+    // account list itself re-renders via the shared cache's live sync
+    // (identityaccounts:changed → #2474) after a bind.
+    const handleRowContextMenu = (account: Account, e: MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        void buildAccountRowMenu(account, agents(), model.accountsAtom()).then((items) => {
+            ContextMenuModel.showContextMenu(items, e);
+        });
+    };
 
     return (
         <>
@@ -72,6 +89,7 @@ export function AccountsTab({ model }: { model: IdentityViewModel }): JSX.Elemen
                                                 account={account}
                                                 selected={model.selectedAccountAtom()?.id === account.id}
                                                 onClick={() => model.setSelectedAccount(account)}
+                                                onContextMenu={(e) => handleRowContextMenu(account, e)}
                                             />
                                         )}
                                     </For>
@@ -98,12 +116,18 @@ export function AccountsTab({ model }: { model: IdentityViewModel }): JSX.Elemen
     );
 }
 
-function AccountRow(props: { account: Account; selected: boolean; onClick: () => void }): JSX.Element {
+function AccountRow(props: {
+    account: Account;
+    selected: boolean;
+    onClick: () => void;
+    onContextMenu?: (e: MouseEvent) => void;
+}): JSX.Element {
     const a = props.account;
     return (
         <div
             class={`identity-account-row${props.selected ? " selected" : ""}`}
             onClick={props.onClick}
+            onContextMenu={(e) => props.onContextMenu?.(e)}
         >
             <span class={`identity-provider-badge provider-${a.provider}`}>
                 <ProviderLogo provider={a.provider} size={16} />
