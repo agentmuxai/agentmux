@@ -11,6 +11,7 @@ import { BlockNodeModel } from "@/app/block/blocktypes";
 import { createSignal, type Accessor, type Setter } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { waveEventSubscribe } from "@/app/store/wps";
 import { Logger } from "@/util/logger";
 import { brandForProvider } from "@/app/view/accounts/provider-brand";
 
@@ -301,10 +302,24 @@ function accountToBackend(a: Account): Partial<IdentityAccount> {
     };
 }
 
-/** Pull the latest account list from the DB and update the cache. */
+/** Pull the latest account list from the DB and update the cache.
+ *
+ * Latest-call-wins: two rapid `identityaccounts:changed` broadcasts (or a
+ * broadcast racing a CRUD method's own refresh) launch overlapping RPCs,
+ * and the backend handles requests on separate tasks — the request that
+ * captured the OLDER account snapshot can resolve last. Without this
+ * guard it would overwrite the newer result with no further broadcast to
+ * correct it, leaving every consumer stale (codex P2 on #2474). A
+ * superseded call skips the cache write and returns the live cache
+ * (fresher than its own stale fetch) so awaiting callers still see the
+ * newest data.
+ */
+let _refreshSeq = 0;
 export async function refreshAccountCache(): Promise<Account[]> {
+    const seq = ++_refreshSeq;
     try {
         const rows = await RpcApi.ListIdentityAccountsCommand(TabRpcClient, {});
+        if (seq !== _refreshSeq) return _accountCache; // superseded by a newer refresh
         const mapped = rows.map(backendToAccount);
         setCache(mapped);
         return mapped;
@@ -314,9 +329,32 @@ export async function refreshAccountCache(): Promise<Account[]> {
     }
 }
 
+let _liveSyncInstalled = false;
+
 /** Run once at app startup. Idempotent — repeated calls just refresh. */
 export function primeAccountCache(): void {
     void refreshAccountCache();
+    // Live sync: refresh the cache on every backend `identityaccounts:changed`
+    // broadcast, so accounts created/edited/deleted by ANY path — the in-app
+    // OAuth login persist, API-key verify, upsert/delete RPCs from another
+    // tab, the spawn-time expiry probe — propagate to every cache consumer
+    // (Armory Accounts tab, launch modal, pickers) without a reload.
+    // Previously the cache was only refreshed by its own CRUD methods'
+    // explicit calls, so backend-originated account creation (e.g. completing
+    // an in-app OAuth login) left the Armory stale until reopen/reload, and
+    // each consumer that wanted liveness had to hand-roll its own event
+    // subscription (AgentLaunchModal did exactly that).
+    //
+    // App-lifetime subscription, deliberately never unsubscribed — the cache
+    // itself is module-level app-lifetime state. Guarded so repeated
+    // primeAccountCache() calls don't stack duplicate handlers.
+    if (!_liveSyncInstalled) {
+        _liveSyncInstalled = true;
+        waveEventSubscribe({
+            eventType: "identityaccounts:changed",
+            handler: () => void refreshAccountCache(),
+        });
+    }
 }
 
 // ── ViewModel ────────────────────────────────────────────────────────────────
