@@ -7,7 +7,7 @@ members = ["agentmux-srv", "agentmux-cef", "agentmux-launcher", "agentmux-common
 # RFC #857 Phase 1.
 [workspace.package]
 
-version = "0.54.13"
+version = "0.54.14"
 
 [profile.release]
 strip = true
