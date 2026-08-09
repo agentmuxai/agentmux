@@ -1061,11 +1061,12 @@ async fn handle_window_name(
             json!({ "window:displayname": name }),
         ],
     };
-    let result = service::run_service_call(&state, &call).await;
-    if let Some(err) = result.error {
-        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": err }))).into_response();
-    }
-    Json(json!({ "success": true, "window_id": window_id, "name": name })).into_response()
+    finish_name_call(
+        &state,
+        call,
+        json!({ "success": true, "window_id": window_id, "name": name }),
+    )
+    .await
 }
 
 /// Trim a user-supplied name and clamp to `max` chars; `None` if empty.
@@ -1189,9 +1190,27 @@ async fn finish_name_call(
 ) -> Response {
     let result = service::run_service_call(state, &call).await;
     if let Some(err) = result.error {
-        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": err }))).into_response();
+        return (name_call_error_status(&err), Json(json!({ "error": err }))).into_response();
     }
     Json(ok_body).into_response()
+}
+
+/// Map a naming service-call error to an HTTP status. The service layer
+/// returns plain `String` errors, so this matches on error text — the same
+/// established pattern as `app_api_error_status` above, but with not-found
+/// split out as a real 404 (that helper lumps it into 400): a caller
+/// holding a stale window/tab/workspace id from an earlier `Layout` call
+/// is a not-found, not a malformed request. Everything unrecognized stays
+/// 500 (genuine service faults, e.g. SQLite write failures).
+/// SPEC_WINDOW_NAME_API_HARDENING_2026_08_08.md §3.2.
+fn name_call_error_status(e: &str) -> StatusCode {
+    if e.contains("not found") {
+        StatusCode::NOT_FOUND
+    } else if e.contains("invalid") {
+        StatusCode::BAD_REQUEST
+    } else {
+        StatusCode::INTERNAL_SERVER_ERROR
+    }
 }
 
 /// `GET /api/v1/layout` — read-only window → workspace → tab → pane tree.

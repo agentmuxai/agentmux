@@ -238,7 +238,21 @@ export class ClaudeTranslator implements OutputTranslator {
         // SPEC_PERSISTENT_TURN_END_TEXT_GATE_2026_07_30.md. In subprocess
         // (--print) mode the "result" event fires a duplicate TurnEnd, which
         // is a no-op (first-done-wins in the reducer).
-        if (!hasToolUse && hasText) {
+        //
+        // stop_reason check (2026-08-08 recurrence of the same symptom the
+        // text gate was built for): the CLI splits each API message into ONE
+        // assistant frame PER content block — a real session showed zero
+        // combined [text, tool_use] frames across 1,790 assistant frames.
+        // Narration text preceding a tool call therefore arrives as its own
+        // text-only frame (hasText, no tool_use) and passed the gate, ending
+        // the turn mid-work — 377 of 409 text-only frames in that session
+        // were this mid-turn kind, all stamped stop_reason "tool_use", while
+        // genuine finals carry "end_turn"/"stop_sequence". Only suppress on
+        // an AFFIRMATIVE "tool_use" — null/undefined (an older CLI that
+        // doesn't stamp it) and every terminal reason still end the turn, so
+        // this cannot reintroduce #1757's stuck-forever failure; the 180s
+        // liveness watchdog remains the backstop either way.
+        if (!hasToolUse && hasText && message.stop_reason !== "tool_use") {
             events.push({ type: "session_end", stats: {} });
         }
         return events;

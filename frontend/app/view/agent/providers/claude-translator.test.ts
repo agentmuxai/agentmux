@@ -51,6 +51,61 @@ describe("ClaudeTranslator", () => {
             expect(events).toHaveLength(0);
         });
 
+        it("does NOT end the turn on a text-only frame stamped stop_reason 'tool_use' (mid-turn narration)", () => {
+            // 2026-08-08 recurrence: the CLI emits one assistant frame PER
+            // content block, so narration text before a tool call arrives as
+            // its own text-only frame — with the API message's stop_reason
+            // ("tool_use") stamped on it. That frame must not settle the UI
+            // to "Worked": the tool call from the same message is still
+            // coming in the next frame. 377 of 409 text-only frames in a
+            // real captured session were this kind.
+            const t = new ClaudeTranslator();
+            const events = t.translate({
+                type: "assistant",
+                message: {
+                    content: [{ type: "text", text: "Now let me check the config file." }],
+                    stop_reason: "tool_use",
+                },
+            });
+            expect(events).toHaveLength(0);
+        });
+
+        it("ends the turn on a text-only frame stamped stop_reason 'end_turn' (genuine final)", () => {
+            const t = new ClaudeTranslator();
+            const events = t.translate({
+                type: "assistant",
+                message: {
+                    content: [{ type: "text", text: "All done — the fix is merged." }],
+                    stop_reason: "end_turn",
+                },
+            });
+            expect(events).toHaveLength(1);
+            expect(events[0].type).toBe("session_end");
+        });
+
+        it("ends the turn on a text-only frame with NO stop_reason (older CLI compat — cannot reintroduce #1757 stuck-forever)", () => {
+            const t = new ClaudeTranslator();
+            const events = t.translate({
+                type: "assistant",
+                message: { content: [{ type: "text", text: "Done." }] },
+            });
+            expect(events).toHaveLength(1);
+            expect(events[0].type).toBe("session_end");
+        });
+
+        it("ends the turn on stop_reason 'stop_sequence' (terminal, just not end_turn)", () => {
+            const t = new ClaudeTranslator();
+            const events = t.translate({
+                type: "assistant",
+                message: {
+                    content: [{ type: "text", text: "output" }],
+                    stop_reason: "stop_sequence",
+                },
+            });
+            expect(events).toHaveLength(1);
+            expect(events[0].type).toBe("session_end");
+        });
+
         it("does NOT emit session_end when tool_use is accompanied by text in the same message", () => {
             const t = new ClaudeTranslator();
             const events = t.translate({

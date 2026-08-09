@@ -5,9 +5,7 @@
 //! and publishes them via the WPS broker. Sampling interval is configurable
 //! via the `telemetry:interval` setting (0.1s–2.0s, default 1.0s).
 
-use std::collections::HashMap;
-#[cfg(target_os = "windows")]
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -301,6 +299,13 @@ fn get_pagefile_volume_data(_values: &mut HashMap<String, f64>) {
                 "disk:pagefile_system_managed".to_string(),
                 if system_managed { 1.0 } else { 0.0 },
             );
+            // Marks which disk:vol:<mount>:* volume (get_disk_data) the
+            // pagefile-volume gauge above refers to, so the status bar can
+            // name the drive ("C:") in its Disk readout without a separate
+            // string channel — the values map is f64-only, so the letter
+            // rides in the key. Mount format matches sysinfo's Windows
+            // mount_point() ("C:\").
+            _values.insert(format!("disk:vol:{}:\\:watch", drive), 1.0);
         }
     }
 }
@@ -460,6 +465,35 @@ impl NetState {
 /// sysinfo Disk::usage() returns deltas (bytes since last refresh) so we
 /// divide by elapsed time to get rates.
 fn get_disk_data(disks: &Disks, elapsed_secs: f64, values: &mut HashMap<String, f64>) {
+    // Per-volume capacity/free, keyed by mount point:
+    //   disk:vol:<mount>:free_gb / disk:vol:<mount>:total_gb
+    // (e.g. `disk:vol:C:\:free_gb` — the mount's own colons/backslashes are
+    // fine inside the key; consumers anchor on the `disk:vol:` prefix and the
+    // known suffix). Feeds the status bar's Disk popover (per-drive free
+    // space). Deduped by mount point — sysinfo can list one volume once per
+    // physical disk it spans — and zero-capacity entries (empty card
+    // readers, unformatted media) are skipped rather than shown as "0G".
+    let mut seen_mounts: HashSet<&std::path::Path> = HashSet::new();
+    for disk in disks.list() {
+        let mount = disk.mount_point();
+        if !seen_mounts.insert(mount) {
+            continue;
+        }
+        let total = disk.total_space();
+        if total == 0 {
+            continue;
+        }
+        let mount_str = mount.to_string_lossy();
+        values.insert(
+            format!("disk:vol:{}:free_gb", mount_str),
+            disk.available_space() as f64 / BYTES_PER_GB,
+        );
+        values.insert(
+            format!("disk:vol:{}:total_gb", mount_str),
+            total as f64 / BYTES_PER_GB,
+        );
+    }
+
     if elapsed_secs <= 0.0 {
         return;
     }
