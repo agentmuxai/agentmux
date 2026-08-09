@@ -34,12 +34,19 @@ export function AccountsTab({ model }: { model: IdentityViewModel }): JSX.Elemen
     // binding annotations are current without any subscription here. The
     // account list itself re-renders via the shared cache's live sync
     // (identityaccounts:changed → #2474) after a bind.
+    // Latest-right-click-wins: buildAccountRowMenu awaits an RPC, so a
+    // second right-click on a different row before the first resolves could
+    // otherwise let the earlier request's menu win the race and open for
+    // the wrong account (reagentx P2 on #2485).
+    let menuSeq = 0;
     const handleRowContextMenu = (account: Account, e: MouseEvent) => {
         e.preventDefault();
         e.stopPropagation();
+        const seq = ++menuSeq;
         void buildAccountRowMenu(account, agents(), model.accountsAtom(), (msg) =>
             model.showNotice(msg),
         ).then((items) => {
+            if (seq !== menuSeq) return; // superseded by a later right-click
             ContextMenuModel.showContextMenu(items, e);
         });
     };

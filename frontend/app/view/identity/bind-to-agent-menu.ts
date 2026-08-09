@@ -131,6 +131,31 @@ function findTabIdForBlock(blockId: string): string | null {
 export async function bindAccountToAgent(account: Account, candidate: BindCandidate): Promise<void> {
     const provider = resolveProviderAlias(account.provider);
     try {
+        // Alias-row cleanup BEFORE the upsert (reagentx P1 on #2485, second
+        // round): the backend upserts on the RAW provider string
+        // (ON CONFLICT(agent_id, provider)), so linking canonical "claude"
+        // does not replace an existing link stored under a legacy alias
+        // ("claude-code") — both rows survive, injection processes them
+        // ORDER BY provider, and the alphabetically-later alias row applies
+        // last and silently wins. Unlink every alias-stored row for this
+        // canonical provider first (fetched fresh at click time — the
+        // menu-build snapshot may be stale). `silent: true` is the flag
+        // purpose-built for alias migration: the replacement link lands in
+        // the same call, so a credentials-revoked broadcast would be noise.
+        // Cleanup is part of the must-succeed path — proceeding past a
+        // failed unlink would reintroduce the silent-wrong-account bug.
+        const links = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, {
+            agent_id: candidate.agentId,
+        });
+        for (const l of links ?? []) {
+            if (l.provider !== provider && resolveProviderAlias(l.provider) === provider) {
+                await RpcApi.UnlinkAgentIdentityCommand(TabRpcClient, {
+                    agent_id: candidate.agentId,
+                    provider: l.provider,
+                    silent: true,
+                });
+            }
+        }
         await RpcApi.LinkAgentIdentityCommand(TabRpcClient, {
             agent_id: candidate.agentId,
             account_id: account.id,

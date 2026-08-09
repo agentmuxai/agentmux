@@ -4,14 +4,29 @@
 // Tests for the "Bind to Agent" menu's pure candidate computation —
 // SPEC_ARMORY_BIND_TO_AGENT_CONTEXT_MENU_2026_08_09.md §3/§5.
 
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/app/store/rpc-api", () => ({ RpcApi: {} }));
+const rpcCalls: Array<{ cmd: string; data: unknown }> = [];
+const listAgentIdentitiesMock = vi.fn(async (): Promise<AgentDefinitionIdentity[]> => []);
+vi.mock("@/app/store/rpc-api", () => ({
+    RpcApi: {
+        ListAgentIdentitiesCommand: (_c: unknown, data: { agent_id: string }) => {
+            rpcCalls.push({ cmd: "list", data });
+            return listAgentIdentitiesMock();
+        },
+        UnlinkAgentIdentityCommand: async (_c: unknown, data: unknown) => {
+            rpcCalls.push({ cmd: "unlink", data });
+        },
+        LinkAgentIdentityCommand: async (_c: unknown, data: unknown) => {
+            rpcCalls.push({ cmd: "link", data });
+        },
+    },
+}));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
-vi.mock("@/app/store/global", () => ({ WOS: {} }));
+vi.mock("@/app/store/global", () => ({ WOS: {}, workspace: () => null }));
 vi.mock("@/app/store/agent-pane-state-store", () => ({ getOpenDefinitionMap: () => new Map() }));
 
-import { computeBindCandidates, candidateSublabel } from "./bind-to-agent-menu";
+import { computeBindCandidates, candidateSublabel, bindAccountToAgent } from "./bind-to-agent-menu";
 import type { Account } from "./identity-model";
 
 function mkAccount(over: Partial<Account> = {}): Account {
@@ -124,6 +139,50 @@ describe("computeBindCandidates", () => {
         const out = computeBindCandidates(mkAccount(), agents, NO_LINKS, open, NO_NAMES);
         expect(out.map((c) => c.agentName)).toEqual(["RunningOne", "Alpha", "Zeta"]);
         expect(out[0].runningBlockId).toBe("block-r");
+    });
+});
+
+describe("bindAccountToAgent — alias-row cleanup (reagentx P1 on #2485, round 2)", () => {
+    const CANDIDATE = {
+        agentId: "agent-1",
+        agentName: "AgentA",
+        runningBlockId: null,
+        boundHere: false,
+        boundElsewhereName: null,
+    };
+
+    beforeEach(() => {
+        rpcCalls.length = 0;
+        listAgentIdentitiesMock.mockReset();
+        listAgentIdentitiesMock.mockResolvedValue([]);
+    });
+
+    it("unlinks an alias-stored link for the same canonical provider BEFORE linking", async () => {
+        // Existing link under legacy alias "claude-code" — the backend's
+        // upsert (keyed on the raw provider string) would NOT replace it,
+        // and injection's ORDER BY provider would apply it last, silently
+        // keeping the old account.
+        listAgentIdentitiesMock.mockResolvedValue([
+            { agent_id: "agent-1", account_id: "acct-OLD", provider: "claude-code" },
+        ]);
+        await bindAccountToAgent(mkAccount(), CANDIDATE);
+
+        const unlinks = rpcCalls.filter((c) => c.cmd === "unlink");
+        expect(unlinks).toHaveLength(1);
+        expect(unlinks[0].data).toEqual({ agent_id: "agent-1", provider: "claude-code", silent: true });
+        // Cleanup precedes the link.
+        expect(rpcCalls.map((c) => c.cmd)).toEqual(["list", "unlink", "link"]);
+        expect(rpcCalls[2].data).toMatchObject({ account_id: "acct-1", provider: "claude" });
+    });
+
+    it("does not unlink a canonical-provider link (the upsert replaces it) or other providers' links", async () => {
+        listAgentIdentitiesMock.mockResolvedValue([
+            { agent_id: "agent-1", account_id: "acct-OLD", provider: "claude" },
+            { agent_id: "agent-1", account_id: "acct-gh", provider: "github" },
+        ]);
+        await bindAccountToAgent(mkAccount(), CANDIDATE);
+        expect(rpcCalls.filter((c) => c.cmd === "unlink")).toHaveLength(0);
+        expect(rpcCalls.filter((c) => c.cmd === "link")).toHaveLength(1);
     });
 });
 
