@@ -196,6 +196,17 @@ impl MediaFileWatcher {
             if gen_counter.load(Ordering::SeqCst) != my_gen {
                 return; // superseded by a later event for this file
             }
+            // Belt-and-suspenders on top of the `Created | Modified` filter
+            // in `new()`'s event loop — see EditorFileWatcher::handle_fs_event's
+            // matching comment: on macOS, FSEvents' directory-granularity
+            // reporting can get a plain file removal reclassified as
+            // `Modify` by `notify`'s own heuristic (confirmed failing on
+            // macOS CI, test_removed_event_does_not_trigger_publish; passes
+            // on Windows/Linux). Re-check real existence at publish time
+            // instead of trusting the EventKind alone.
+            if !changed_path.exists() {
+                return;
+            }
             publish_media_file_changed(&this.broker, &changed_path, &matched_block_ids);
         });
     }
