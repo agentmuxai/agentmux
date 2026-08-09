@@ -30,7 +30,7 @@ import {
     StreamingState,
     TurnTokens,
 } from "./types";
-import type { CompactionState, InitPhase, PaneFailure, TurnPhase } from "@/app/store/agent-pane-state/types";
+import type { AttachedTaskState, CompactionState, InitPhase, PaneFailure, TurnPhase } from "@/app/store/agent-pane-state/types";
 
 /**
  * A signal pair: [getter, setter]
@@ -124,6 +124,13 @@ export interface AgentAtoms {
      * docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md.
      */
     compactingAtom: SignalPair<CompactionState | null>;
+    /**
+     * Live "≥1 agent-declared long-running activity attached" state, or
+     * null. Reducer-owned (see `AgentPaneState.attachedTask`). Drives the
+     * "Running…" footer status once `turnPhase` is otherwise idle — see
+     * docs/specs/SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md.
+     */
+    attachedTaskAtom: SignalPair<AttachedTaskState | null>;
 }
 
 /**
@@ -191,5 +198,6 @@ export function createAgentAtoms(agentId: string): AgentAtoms {
         currentToolArgAtom: createSignal<string | null>(null),
         failureAtom: createSignal<PaneFailure | null>(null),
         compactingAtom: createSignal<CompactionState | null>(null),
+        attachedTaskAtom: createSignal<AttachedTaskState | null>(null),
     };
 }
