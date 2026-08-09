@@ -20,6 +20,7 @@ import { checkNodejsForProvider, agentmuxHome, resolveCliDir } from "./agent-lau
 import { realAccountIdOrEmpty } from "./identity-carry-over";
 import { refreshAccountCache } from "@/app/view/identity/identity-model";
 import { dimAgentColor, isValidAgentColor, pickAgentColor } from "./agent-color";
+import { parseSeedZoom } from "./agent-zoom-seed";
 
 export class AgentViewModel implements ViewModel {
     viewType = "agent";
@@ -567,27 +568,14 @@ export class AgentViewModel implements ViewModel {
             // Per-agent zoom persistence (SPEC_AGENT_ZOOM_PERSISTENCE_2026_06_22.md):
             // seed term:zoom from the agent's saved ui:zoom (already loaded
             // into contentMap above) so reopening the same agent restores
-            // its zoom instead of resetting to 1.0. Mirrors
-            // app_api/mod.rs::parse_seed_zoom, which this path never went
-            // through (this function builds meta independently of the
-            // backend's agent.open RPC — see this file's own launch
-            // pipeline vs. agent_open.rs::register_agent_open).
-            //
-            // Set UNCONDITIONALLY, same reasoning as agent:sessionid above:
-            // SetMetaCommand MERGES meta, and targetBlockId can reuse a
-            // block that previously hosted a different agent (fork/relaunch
-            // flows). Omitting the key when this agent has no saved zoom
-            // would leave a stale term:zoom from whatever agent was here
-            // before (reagent/codex P2, PR #2477). null is term.tsx's own
-            // "reset to default" sentinel (term.tsx:347), so it round-trips
-            // through the same read path the drag-to-zoom handler uses.
-            const rawZoom = contentMap["ui:zoom"]?.trim();
-            const seedZoom = rawZoom ? Number(rawZoom) : NaN;
-            const validSeedZoom =
-                Number.isFinite(seedZoom) && seedZoom !== 1 && seedZoom >= 0.5 && seedZoom <= 2
-                    ? seedZoom
-                    : null;
-            const zoomMeta: Record<string, unknown> = { "term:zoom": validSeedZoom };
+            // its zoom instead of resetting to 1.0. This path never went
+            // through the backend's own seed (agent_open.rs::
+            // register_agent_open) — see this file's own launch pipeline.
+            // Set UNCONDITIONALLY (parseSeedZoom's null, not an omitted
+            // key) — see that function's doc comment for why.
+            const zoomMeta: Record<string, unknown> = {
+                "term:zoom": parseSeedZoom(contentMap["ui:zoom"]),
+            };
 
             // Per-agent color (SPEC_AGENT_COLOR_2026_08_08.md): seed the
             // frame border colors from the agent's stored ui:color —
