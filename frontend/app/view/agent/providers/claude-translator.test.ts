@@ -379,6 +379,49 @@ describe("ClaudeTranslator", () => {
             expect((events[0] as any).message).toBe("API error 429");
         });
 
+        it("surfaces error.message when result is absent — the spawn gate's error_during_execution frame shape", () => {
+            // AgentMux's own synthesized frames (identity spawn gate,
+            // agent_io.rs/input.rs) carry detail in error.message, not
+            // result. This used to render as a bare "Agent encountered an
+            // error" with the actionable text dropped (claudius v0.54.14
+            // Agent1 live repro, 2026-08-09).
+            const t = new ClaudeTranslator();
+            const events = t.translate({
+                type: "result",
+                is_error: true,
+                subtype: "error_during_execution",
+                error: {
+                    message:
+                        "[AgentMux] no credentials for claude: the bound account was deleted or is unresolvable. Bind an account for this provider in the Armory.",
+                },
+            });
+            expect(events[0].type).toBe("error_result");
+            expect((events[0] as any).code).toBe(0);
+            expect((events[0] as any).message).toContain("Bind an account for this provider in the Armory");
+        });
+
+        it("surfaces a string-typed error field when result and error.message are absent", () => {
+            const t = new ClaudeTranslator();
+            const events = t.translate({
+                type: "result",
+                is_error: true,
+                error: "plain string error detail",
+            });
+            expect(events[0].type).toBe("error_result");
+            expect((events[0] as any).message).toBe("plain string error detail");
+        });
+
+        it("prefers result over error.message when both are present", () => {
+            const t = new ClaudeTranslator();
+            const events = t.translate({
+                type: "result",
+                is_error: true,
+                result: "from result",
+                error: { message: "from error.message" },
+            });
+            expect((events[0] as any).message).toBe("from result");
+        });
+
         it("emits error_result with code 0 when is_error:true but no api_error_status (network/CLI error)", () => {
             const t = new ClaudeTranslator();
             const events = t.translate({
