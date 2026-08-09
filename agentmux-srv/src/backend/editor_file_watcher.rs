@@ -195,6 +195,23 @@ impl EditorFileWatcher {
             if block_ids.is_empty() {
                 return; // last watcher unsubscribed while we were debouncing
             }
+            // Belt-and-suspenders on top of the `Created | Modified` filter
+            // in `new()`'s event loop: on macOS, FSEvents (without the
+            // per-file-events flag `notify`'s recommended_watcher doesn't
+            // request) reports changes at directory granularity, and the
+            // crate's own heuristic for turning that into an EventKind can
+            // misclassify a plain `remove_file` as `Modify` rather than
+            // `Remove` — confirmed failing on macOS CI
+            // (test_removed_event_does_not_trigger_publish) while passing on
+            // Windows/Linux, whose backends report Remove correctly for this
+            // exact case. Re-check real existence at publish time rather
+            // than trusting the EventKind alone — this also correctly keeps
+            // firing for the legitimate "temp-write-then-rename" atomic-save
+            // pattern, since the file exists again well before DEBOUNCE
+            // elapses.
+            if !path.exists() {
+                return;
+            }
             publish_editor_file_changed(&this.broker, &path, &block_ids);
         });
     }
