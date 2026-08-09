@@ -12,12 +12,16 @@ export interface DiskVolume {
     totalGb: number;
     /** True for the volume the status-bar Disk % refers to (the backend's watch target). */
     isWatch: boolean;
+    /** True when the watch volume is also %SystemDrive% — usually true, but a
+     *  custom PagingFiles entry can place the page file on a different
+     *  volume. Only meaningful when `isWatch` is true. */
+    isSystemDrive: boolean;
 }
 
 // Matches disk:vol:<mount>:<field> — the mount itself may contain colons and
 // backslashes ("C:\"), so the field suffix anchors the parse and the mount is
 // whatever sits between the fixed prefix and the last-colon suffix.
-const VOL_KEY = /^disk:vol:(.+):(free_gb|total_gb|watch)$/;
+const VOL_KEY = /^disk:vol:(.+):(free_gb|total_gb|watch|is_system_drive)$/;
 
 /** Trim a mount point for display: "C:\" → "C:", "/home/" stays "/home", "/" stays "/". */
 function displayLabel(mount: string): string {
@@ -33,7 +37,7 @@ function displayLabel(mount: string): string {
  * rather than rendered with a fabricated 0.
  */
 export function parseDiskVolumes(vals: Record<string, number>): DiskVolume[] {
-    const partial = new Map<string, { freeGb?: number; totalGb?: number; isWatch?: boolean }>();
+    const partial = new Map<string, { freeGb?: number; totalGb?: number; isWatch?: boolean; isSystemDrive?: boolean }>();
     for (const key in vals) {
         const m = VOL_KEY.exec(key);
         if (!m) continue;
@@ -41,13 +45,20 @@ export function parseDiskVolumes(vals: Record<string, number>): DiskVolume[] {
         const entry = partial.get(mount) ?? {};
         if (m[2] === "free_gb") entry.freeGb = vals[key];
         else if (m[2] === "total_gb") entry.totalGb = vals[key];
-        else entry.isWatch = (vals[key] ?? 0) > 0;
+        else if (m[2] === "watch") entry.isWatch = (vals[key] ?? 0) > 0;
+        else entry.isSystemDrive = (vals[key] ?? 0) > 0;
         partial.set(mount, entry);
     }
     const out: DiskVolume[] = [];
     for (const [mount, e] of partial) {
         if (e.freeGb == null || e.totalGb == null || e.totalGb <= 0) continue;
-        out.push({ label: displayLabel(mount), freeGb: e.freeGb, totalGb: e.totalGb, isWatch: !!e.isWatch });
+        out.push({
+            label: displayLabel(mount),
+            freeGb: e.freeGb,
+            totalGb: e.totalGb,
+            isWatch: !!e.isWatch,
+            isSystemDrive: !!e.isSystemDrive,
+        });
     }
     out.sort((a, b) => a.label.localeCompare(b.label));
     return out;
@@ -61,20 +72,24 @@ export function formatDiskGb(gb: number): string {
 }
 
 /**
- * Tooltip for the status-bar Disk % readout. Explains what the number IS —
- * free ÷ capacity on the named drive — with the live figures. Deliberately
- * says nothing about the page file: that operational significance lives in
- * the PF gauge's own tooltip, not here.
+ * Tooltip for the status-bar Disk % readout. Short and descriptive like the
+ * other stat tooltips ("Per-core CPU usage", "Memory used and total", ...):
+ * names what the % is a share OF, and nothing else. Deliberately says
+ * nothing about the page file — that lives in the PF gauge's own tooltip,
+ * not here. Live figures belong in the click-open panel, not the hover.
+ *
+ * "System drive (C:)" only when the watched volume actually IS
+ * %SystemDrive% (the common case). A custom PagingFiles entry can place
+ * the page file on a different volume than the system drive (e.g.
+ * `E:\pagefile.sys 0 0` with `SystemDrive=C`) — "system drive (E:)" would
+ * be self-contradictory there, so that case just names the drive plainly
+ * instead of asserting it's the system drive (reagent finding on #2479).
  */
 export function diskTooltip(volumes: DiskVolume[]): string {
     const watch = volumes.find((v) => v.isWatch);
-    if (watch) {
-        return (
-            `Free space on ${watch.label} — ${formatDiskGb(watch.freeGb)} free of ` +
-            `${formatDiskGb(watch.totalGb)} (% = free ÷ capacity). Click for all drives.`
-        );
-    }
-    return "Free share of the system drive (% = free ÷ capacity). Click for all drives.";
+    if (!watch) return "Free share of system drive";
+    if (watch.isSystemDrive) return `Free share of system drive (${watch.label})`;
+    return `Free share of ${watch.label}`;
 }
 
 /**

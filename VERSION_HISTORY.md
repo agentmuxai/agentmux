@@ -1,5 +1,14 @@
 # AgentMux Version History
 
+## 0.55.0 — 2026-08-09
+
+- fix(statusbar): shorten the Disk pill's hover tooltip to match the other stat pills
+- fix(backend): editor/media file watchers no longer misfire on a macOS remove
+- fix(agent-pane): surface the spawn gate's actual refusal text instead of the bare 'Agent encountered an error'
+- feat(diagnostics): mem_attribution logs unattributed commit gap + handle-count anomalies
+- feat(armory): right-click an account row to bind it to an agent - Bind to Agent submenu with live binding overview
+
+
 ## 0.54.14 — 2026-08-09
 
 - feat(statusbar): Disk readout explains its % in the tooltip; click opens a per-drive free-space popover
@@ -2381,6 +2390,7 @@ Auto-appended by `scripts/package-cef-portable.sh`. Newest first.
 
 | Version | Date | ZIP (compressed) | Folder (uncompressed) | Note |
 |---------|------|------------------|-----------------------|------|
+| 0.54.14 | 2026-08-09 | 171.9 MiB | 370.8 MiB | |
 | 0.52.2 | 2026-07-09 | 171.6 MiB | 369.5 MiB | |
 | 0.52.1 | 2026-07-09 | 171.6 MiB | 369.5 MiB | |
 | 0.44.0 | 2026-06-10 | 163.9 MiB | 349.8 MiB | |
