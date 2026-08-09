@@ -59,9 +59,21 @@ pointed at Audiosrv-style service leaks and "metering" as the right approach
   **overwhelmingly unnamed/anonymous** — one legitimate named exception
   (`\Sessions\1\BaseNamedObjects\windows_shell_global_counters`, a normal
   per-process object every process has), the rest have no name field at all.
-  This is the *identical fingerprint* to the Audiosrv bug (anonymous
-  pagefile-backed Section objects, never closed) — but this time genuinely
-  inside AgentMux's own process, not an unrelated Windows service.
+  This *resembles* the Audiosrv bug's fingerprint (anonymous Section
+  objects, never closed) — but this time inside AgentMux's own process, not
+  an unrelated Windows service. **Caveat (codex P1 on the PR for this
+  doc): an anonymous Section handle does not by itself prove the section
+  is pagefile-backed or how much commit it holds** — the Audiosrv case
+  verified the commit link with a decisive before/after restart
+  measurement (16.4 GB reclaimed in ~9s, §16.3 of the 07-24 doc); nothing
+  equivalent was captured here at write-up time, so "these handles ARE the
+  commit growth" was a hypothesis, not established. §17.2's later data is
+  *consistent with* the link (commit dropped 133→76.65 GB across the
+  process's death) but is not a clean single-variable measurement (the
+  commit limit moved too, and other processes churned in the same window).
+  The clean verification, if this recurs: snapshot commit, kill/restart
+  just that PID, snapshot again within a minute — or VMMap the process and
+  read the actual committed size of its Section objects before acting.
 - **Process uptime**: started 2026-08-05 02:49, ~69h old at check time.
   215,705 handles ÷ ~248,783s uptime ≈ **0.87 handles/sec average** over the
   process's whole life.
@@ -81,18 +93,21 @@ against source (`Cargo.lock` versions, then the actual crate source under
 |---|---|---|
 | `memmap2` (0.8.0 / 0.9.10, both in the tree) | **Doesn't fit** | Only pulled in via `minidump-writer` (crash-dump generation — fires on an actual crash, not continuously) and `smithay-client-toolkit`/`xkbcommon` (Linux/Wayland-only, irrelevant on Windows). |
 | `portable-pty` 0.9.0 (the CLI subprocess PTY layer) | **Ruled out** | Zero `CreateFileMapping`/`MapViewOfFile`/`Section` references anywhere in its source. |
-| `sysinfo` 0.34.2 | **Leading hypothesis, not proven** | Powers `agentmux-srv`'s 30s memory-attribution loop (`agentmux-srv/src/backend/sysinfo.rs:148`, `sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing().with_memory())` — refreshes *every* process on the machine, every cycle). Its own docs disclose it "keeps a number of file descriptors open... for better performance when refreshing processes" — a real, by-design caching behavior. Zero literal `Section`/`CreateFileMapping` references found in its Windows backend source (`sysinfo-0.34.2/src/windows/*.rs`) though, so I could not point to one exact API call/line. `sysinfo-0.34.2/src/windows/process.rs:242` calls `GetModuleFileNameExW` once per newly-discovered PID (`ProcessInner::new`) — a very widely-used, not-typically-leaky API on its own, but the one Section-adjacent(ish) call found. |
+| `sysinfo` 0.34.2 | **Leading hypothesis, not proven** | Powers `agentmux-srv`'s whole-machine process refreshes. **Two independent call paths, not one (codex P1 on the PR for this doc — the original version of this row named only the first):** (a) the 30s memory-attribution snapshot (`agentmux-srv/src/backend/sysinfo.rs:148`, `refresh_processes_specifics(ProcessesToUpdate::All, ..., nothing().with_memory())`), and (b) **the main telemetry tick** — `run_sysinfo_loop` also calls `refresh_processes_specifics(ProcessesToUpdate::All, ...)` every 0.2–2s whenever `pidregistry` is nonempty (`sysinfo.rs:617-621`, plus a per-pane deep refresh at `:647-651`). The per-tick path runs ~15–150× more often than the attribution path, so any per-refresh leak indictment applies to it first. sysinfo's own docs disclose it "keeps a number of file descriptors open... for better performance when refreshing processes" — real, by-design caching. Zero literal `Section`/`CreateFileMapping` references in its Windows backend source, so no exact API call/line was pinned; `GetModuleFileNameExW` per newly-discovered PID (`process.rs:242`) is the one Section-adjacent(ish) call found. |
 
-**Arithmetic check that supports (but doesn't prove) the sysinfo/process-churn
-theory**: 69.1h uptime ÷ 30s attribution cycle ≈ 8,292 cycles.
-214,635 handles ÷ 8,292 cycles ≈ **~26 handles leaked per cycle** — a very
-plausible number if a subset of ~26 processes per cycle (protected/SYSTEM
-processes agentmux-srv can enumerate but not fully query, or newly-spawned
-short-lived dev-tool processes like `git`/`cargo`/`npm`/`node`/`tsc`, which
-this machine has constantly, including from this very agent's own work) each
-leak one handle on a partial-permission or error path. **Not confirmed at
-the code level** — this is a plausible-fit hypothesis from the numbers, not
-a proven mechanism.
+**Arithmetic check — corrected (codex P1):** the original version of this
+section divided 214,635 handles by the 30s attribution cadence alone
+(≈8,292 cycles → "~26 handles/cycle") to argue plausibility. That
+arithmetic wrongly singled out the attribution loop: with the per-tick
+whole-machine refresh (path (b) above) also running — at 1s default
+interval, ~248,000 ticks over the same 69h — the same total is equally
+consistent with **<1 handle per tick** on the far more frequent path.
+The observed ~0.87/sec average is in fact *closer* to "roughly one per
+1s telemetry tick" than to "~26 per 30s cycle." Both remain unproven;
+the actionable consequence is that any bisection experiment must
+instrument or disable **both** paths (or stagger their intervals so a
+30s-vs-1s growth staircase would distinguish them) — widening only
+`ATTRIBUTION_INTERVAL` and seeing no change would NOT clear `sysinfo`.
 
 **No prior documentation of this exact issue was found** — grepped
 `agentmux-srv/src`, `docs/retro/`, `docs/specs/` for "section handle",
@@ -165,12 +180,15 @@ Audiosrv case where `Restart-Service` only affected one unrelated OS service.
    AgentMux process's own handle count exceeds some threshold, e.g. 10K)
    would have caught this automatically instead of requiring a manual
    Sysinternals pass.
-4. **Bisect the sysinfo hypothesis**, if pursued further: temporarily widen
-   the `mem_attribution` refresh interval or narrow `ProcessesToUpdate::All`
-   to a smaller process set on a test build, and see if the Section-handle
-   growth rate changes proportionally — the same "suspend and watch the
-   rate" bisection technique the 07-24 doc used for Traktor/Audiosrv (§16.2
-   there).
+4. **Bisect the sysinfo hypothesis**, if pursued further — covering BOTH
+   whole-machine refresh paths (§4's correction), not just the attribution
+   loop: stagger the two intervals (e.g. attribution at 30s, telemetry tick
+   at 1s) and look for a matching growth staircase, or disable each path in
+   turn on a test build and watch the Section-handle rate — the same
+   "suspend and watch the rate" bisection technique the 07-24 doc used for
+   Traktor/Audiosrv (§16.2 there). Widening only `ATTRIBUTION_INTERVAL`
+   and seeing no change would NOT clear `sysinfo`, since the per-tick path
+   would still be running.
 
 ## 17. Update 2026-08-09 — PID 45728 went down on its own; auto-recovery worked exactly as designed
 
