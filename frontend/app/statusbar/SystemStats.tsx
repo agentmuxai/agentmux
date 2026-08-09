@@ -237,15 +237,18 @@ const SystemStats = (): JSX.Element => {
                             PF {formatMemBytes(s().commitUsed)}/{formatMemBytes(s().commitTotal)}
                         </span>
                     </Show>
-                    {/* Free-space share of the system drive (the volume Windows backs
-                        its page file with — SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29
-                        §5.2 P0 is why THIS volume is the one watched, and the color
-                        thresholds still encode that risk). The tooltip deliberately
-                        explains only what the number is — free ÷ capacity, with live
-                        figures — the page-file significance belongs to the PF gauge's
-                        own tooltip. Click opens the per-drive breakdown (all volumes,
-                        free space each), mirroring the CPU per-core panel. Only
-                        rendered once the backend has a reading (Windows-only gauge;
+                    {/* Free-space share of the page-file volume (usually the system
+                        drive — SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29 §5.2 P0 is
+                        why THIS volume is the one watched, and the color thresholds
+                        still encode that risk). The tooltip is a short label only
+                        ("Free share of system drive (C:)"), matching the terse form
+                        every other stat tooltip uses — no math, no live figures, and
+                        no page-file mention (that significance belongs to the PF
+                        gauge's own tooltip); see diskTooltip() in disk-volumes.ts for
+                        the system-drive-vs-page-file-volume wording rule. Live figures
+                        and the drive list live in the click-open panel, mirroring the
+                        CPU per-core panel. Only rendered once the backend has a
+                        reading (Windows-only gauge;
                         absent elsewhere). */}
                     <Show when={s().pagefileVolumeFreePct != null}>
                         <span class="stat-separator">|</span>
