@@ -79,6 +79,15 @@ interface AgentWorkingRowProps {
      *  launchPhase to "waiting-for-login-completion" too, so without this the
      *  row rendered a second, redundant Cancel button alongside AuthUrlBox's. */
     hasAuthUrl?: boolean;
+    /** Unix ms the current attached-task episode began (reducer
+     *  `attachedTask.since`), or null when nothing long-running is attached.
+     *  When set and the turn is otherwise idle, the row shows a calm
+     *  "Running in background · Ns" state instead of "✓ Worked" / nothing —
+     *  the honest third status for a live dev server / background shell,
+     *  distinct from both "Working…" (turn in flight) and idle. See
+     *  SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md §6.2 and
+     *  retro-persistent-agent-working-status-stuck-2026-07-16.md. */
+    attachedSince?: number | null;
 }
 
 // reagent P2 on PR #2304: "waiting-for-login-link" (tier 1's own up-to-15s
@@ -241,18 +250,38 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
             CANCELLABLE_LAUNCH_PHASES.has(props.launchPhase.kind),
     );
 
+    // Attached-task state wins over the "✓ Worked" summary: a live dev
+    // server / background shell is the pane's current truth; the completed
+    // turn's stats return once the task ends (attachedSince → null).
+    const attachedElapsed = createMemo((): string | null => {
+        const s = props.attachedSince;
+        if (s == null) return null;
+        return formatElapsedCompact((tick(), Date.now()) - s);
+    });
+
     return (
         <Show
             when={props.loading}
             fallback={
-                <Show when={workedSummary()}>
-                    <span class="agent-working-row agent-working-row--worked">
-                        <span class="agent-working-row-left">{workedSummary()}</span>
-                        <span class="agent-working-row-right">
-                            <Show when={workedSecondary()}>
-                                <span class="agent-working-row-secondary">{workedSecondary()}</span>
-                            </Show>
-                        </span>
+                <Show
+                    when={attachedElapsed()}
+                    fallback={
+                        <Show when={workedSummary()}>
+                            <span class="agent-working-row agent-working-row--worked">
+                                <span class="agent-working-row-left">{workedSummary()}</span>
+                                <span class="agent-working-row-right">
+                                    <Show when={workedSecondary()}>
+                                        <span class="agent-working-row-secondary">{workedSecondary()}</span>
+                                    </Show>
+                                </span>
+                            </span>
+                        </Show>
+                    }
+                >
+                    <span class="agent-working-row agent-working-row--attached">
+                        <span class="agent-spinner-dot" />
+                        <span class="agent-working-row-left">Running in background</span>
+                        <span class="agent-working-row-right">{attachedElapsed()}</span>
                     </span>
                 </Show>
             }
