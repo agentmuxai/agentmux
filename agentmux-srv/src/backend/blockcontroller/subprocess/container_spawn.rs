@@ -22,7 +22,7 @@ use crate::backend::blockcontroller::{
     core, health, publish_controller_status, session_stats, shell, STATUS_DONE, STATUS_RUNNING,
 };
 
-use super::{SubprocessController, SubprocessControllerInner, SubprocessSpawnConfig, SUBPROCESS_OUTPUT_SUBJECT};
+use super::{argv::build_turn_argv, SubprocessController, SubprocessControllerInner, SubprocessSpawnConfig, SUBPROCESS_OUTPUT_SUBJECT};
 
 impl SubprocessController {
     /// Spawn a container agent turn via Docker socket (P1a: no secrets in argv).
@@ -66,8 +66,22 @@ impl SubprocessController {
             return Ok(());
         }
 
-        self.emit_message_accepted(&config);
         self.hydrate_session_id_from_config(config.session_id.as_deref());
+
+        let session_id_hint = self.inner.lock().unwrap().session_id.clone();
+        let cmd = match build_turn_argv(
+            &base_cmd,
+            &config.resume_strategy,
+            &config.resume_flag,
+            session_id_hint.as_deref(),
+        ) {
+            Ok(cmd) => cmd,
+            Err(error) => {
+                self.unlock_run();
+                return Err(error);
+            }
+        };
+        self.emit_message_accepted(&config);
 
         // Derive the exec env from THIS message's own env_vars (apply the
         // container denylist here, per-turn) rather than carrying a pre-filtered
@@ -87,18 +101,6 @@ impl SubprocessController {
         // the reader select below). base_cmd[0] is the container-local CLI (e.g.
         // `claude`); -f matches its full cmdline inside the container.
         let kill_pattern = base_cmd.first().cloned().unwrap_or_else(|| "claude".to_string());
-
-        // Build final command: append --resume <sid> if we have a prior session.
-        let mut cmd = base_cmd;
-        {
-            let inner = self.inner.lock().unwrap();
-            if let Some(ref sid) = inner.session_id {
-                if !config.resume_flag.is_empty() {
-                    cmd.push(config.resume_flag.clone());
-                    cmd.push(sid.clone());
-                }
-            }
-        }
 
         // Clone all self fields needed by the inner tokio::spawn so we don't
         // borrow `self` across the async boundary (which would make the future

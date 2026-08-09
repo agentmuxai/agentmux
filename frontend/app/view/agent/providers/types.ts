@@ -69,6 +69,9 @@ export interface ProviderDefinition {
     // Resume flag — how to pass a session ID for multi-turn continuity.
     // null means this provider does not support simple-flag resume (e.g. Codex uses a subcommand).
     resumeFlag: string | null;
+    // Provider-specific session continuation argv strategy. Omitted providers
+    // infer "flag" from resumeFlag or "none" when resumeFlag is null.
+    resumeStrategy?: "none" | "flag" | "codex-exec";
     // JSON field name containing the session/thread ID in the CLI's init event.
     sessionIdField: string;
     // Controller type: "persistent" keeps a long-running process with stdin streaming,
