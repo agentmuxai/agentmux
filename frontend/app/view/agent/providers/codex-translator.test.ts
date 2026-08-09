@@ -93,6 +93,49 @@ describe("CodexTranslator", () => {
         );
     });
 
+    it("suppresses non-monotonic text replacements after content was rendered", () => {
+        const translator = new CodexTranslator();
+        const item = { id: "message", type: "agent_message" };
+        expect(translator.translate({ type: "item.started", item: { ...item, text: "draft answer" } })).toEqual([
+            { type: "text", content: "draft answer" },
+        ]);
+        expect(translator.translate({ type: "item.updated", item: { ...item, text: "final" } })).toEqual([]);
+        expect(translator.translate({ type: "item.completed", item: { ...item, text: "final answer" } })).toEqual([]);
+    });
+
+    it("suppresses non-monotonic command-output replacements but preserves the final result", () => {
+        const translator = new CodexTranslator();
+        const item = {
+            id: "cmd",
+            type: "command_execution",
+            command: "echo hi",
+            exit_code: null,
+            status: "in_progress",
+        };
+        translator.translate({ type: "item.started", item: { ...item, aggregated_output: "draft output" } });
+        expect(
+            translator.translate({
+                type: "item.updated",
+                item: { ...item, aggregated_output: "final" },
+            })
+        ).toEqual([]);
+        expect(
+            translator.translate({
+                type: "item.completed",
+                item: { ...item, aggregated_output: "final output", exit_code: 0, status: "completed" },
+            })
+        ).toEqual([
+            {
+                type: "tool_result",
+                tool: "Shell",
+                id: "cmd",
+                status: "success",
+                result: { output: "final output", status: "completed" },
+                exitCode: 0,
+            },
+        ]);
+    });
+
     it("uses first-terminal-wins semantics", () => {
         const translator = new CodexTranslator();
         expect(translator.translate({ type: "turn.completed", usage: { input_tokens: 1 } })).toEqual([

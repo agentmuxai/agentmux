@@ -152,8 +152,10 @@ export class CodexTranslator implements OutputTranslator {
 
         const output = typeof item.aggregated_output === "string" ? item.aggregated_output : "";
         const chunk = this.snapshotSuffix(state.lastOutput, output);
-        if (chunk) events.push({ type: "tool_chunk", id: itemId, kind: "stdout", content: chunk });
-        state.lastOutput = output;
+        if (chunk) {
+            events.push({ type: "tool_chunk", id: itemId, kind: "stdout", content: chunk });
+            state.lastOutput = output;
+        }
 
         if (completed) {
             const succeeded = item.status === "completed" && (item.exit_code == null || item.exit_code === 0);
@@ -207,7 +209,7 @@ export class CodexTranslator implements OutputTranslator {
     ): StreamEvent[] {
         const text = typeof value === "string" ? value : "";
         const suffix = this.snapshotSuffix(state.lastText, text);
-        state.lastText = text;
+        if (suffix) state.lastText = text;
         state.completed = completed;
         return suffix ? [{ type, content: suffix }] : [];
     }
@@ -244,7 +246,8 @@ export class CodexTranslator implements OutputTranslator {
 
     private snapshotSuffix(previous: string, next: string): string {
         if (!next || next === previous) return "";
-        return next.startsWith(previous) ? next.slice(previous.length) : next;
+        if (!previous) return next;
+        return next.startsWith(previous) ? next.slice(previous.length) : "";
     }
 
     private parseError(value: any, fallback = "unknown error"): { code: number; message: string } {
