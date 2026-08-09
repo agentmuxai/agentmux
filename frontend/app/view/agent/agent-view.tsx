@@ -181,13 +181,19 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
          *  undefined for a still-blank picker tab (nothing to rename). */
         definitionId?: string;
     }
+    // Rename overrides, keyed by blockId — set synchronously by
+    // handleTabRenameConfirm below so a just-renamed tab (including a
+    // dormant, non-active member whose block meta isn't reactively tracked
+    // here) reflects its new label immediately, without waiting on the
+    // SetMetaCommand round-trip (term.tsx's titleOverrides precedent).
+    const [titleOverrides, setTitleOverrides] = createSignal<Record<string, string>>({});
     const labelForBlock = (id: string): PaneTab => {
         // The currently-mounted member reads its own reactive block meta;
         // every other (dormant) stack member isn't mounted here — read its
         // last-persisted meta directly, same as term.tsx's termTabs does.
         const meta = id === model.blockId ? block()?.meta : WOS.getObjectValue<Block>(WOS.makeORef("block", id))?.meta;
         const definitionId = meta?.["agentId"] as string | undefined;
-        const label = (meta?.["agentName"] as string) ?? definitionId ?? "New Agent";
+        const label = titleOverrides()[id] ?? (meta?.["agentName"] as string) ?? definitionId ?? "New Agent";
         return { blockId: id, label, definitionId };
     };
     const stackTabs = createMemo<PaneTab[]>(() => {
@@ -283,17 +289,26 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
         void closeBlockInStack(layoutModel, node.id, targetBlockId);
     };
     // Double-click a tab to rename it (only meaningful once it has launched
-    // an agent — a still-blank picker tab has nothing to rename). No local
-    // override needed: the RPC broadcasts `agents:changed`, which
-    // `useAgentDefinitions()` subscribes to, so `forks()` picks up the new
-    // title through the normal reactive chain once the round-trip
-    // completes; a stack tab re-reads meta on the next `stackTabs()` recompute.
+    // an agent — a still-blank picker tab has nothing to rename). TWO writes
+    // are required (reagent P1 on PR #2488): stack-tab labels read
+    // `block.meta.agentName` (labelForBlock above), which
+    // RenameAgentDefinitionTitleCommand does NOT touch — it renames only the
+    // AgentDefinition row (name/branch_label), which is what fork tabs and
+    // the picker's agent list read. Writing only the definition left a
+    // stack tab's pill (and its pane title) showing the stale name forever;
+    // writing only block meta would leave fork tabs/the picker stale. The
+    // titleOverrides entry gives the pill its new label synchronously.
     const [renamingBlockId, setRenamingBlockId] = createSignal<string | null>(null);
-    const handleTabRenameConfirm = async (definitionId: string | undefined, title: string): Promise<void> => {
+    const handleTabRenameConfirm = async (tab: PaneTab, title: string): Promise<void> => {
         setRenamingBlockId(null);
-        if (!definitionId) return;
+        if (!tab.definitionId) return;
+        setTitleOverrides((prev) => ({ ...prev, [tab.blockId]: title }));
         try {
-            await RpcApi.RenameAgentDefinitionTitleCommand(TabRpcClient, { id: definitionId, title });
+            await RpcApi.SetMetaCommand(TabRpcClient, {
+                oref: WOS.makeORef("block", tab.blockId),
+                meta: { agentName: title } as any,
+            });
+            await RpcApi.RenameAgentDefinitionTitleCommand(TabRpcClient, { id: tab.definitionId, title });
         } catch (e: unknown) {
             pushNotification({
                 icon: "fa-triangle-exclamation",
@@ -333,7 +348,7 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
                         renamingBlockId() === t.blockId && t.definitionId ? (
                             <PaneTabRenameInput
                                 initialValue={t.label}
-                                onConfirm={(title) => void handleTabRenameConfirm(t.definitionId, title)}
+                                onConfirm={(title) => void handleTabRenameConfirm(t, title)}
                                 onCancel={() => setRenamingBlockId(null)}
                             />
                         ) : (
@@ -348,7 +363,7 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
                         when={agentId()}
                         fallback={<AgentPicker model={model} />}
                     >
-                        <AgentPresentationView model={model} agentId={agentId()} />
+                        <AgentPresentationView model={model} agentId={agentId()} agentDefinitions={agentDefinitions} />
                     </Show>
                 </div>
             </div>
@@ -361,7 +376,20 @@ AgentViewWrapper.displayName = "AgentViewWrapper";
 // Launch flow lives in `flows/launch-flow.ts` — Step 2 of
 // specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md.
 
-const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agentId: string }): JSX.Element => {
+const AgentPresentationView = ({
+    model,
+    agentId,
+    agentDefinitions,
+}: {
+    model: AgentViewModel;
+    agentId: string;
+    /** The wrapper's own reactive definition list, passed down instead of a
+     *  second `useAgentDefinitions()` call here — each call issues its own
+     *  ListAgentDefinitionsCommand RPC + `agents:changed` subscription, and
+     *  this component is always co-mounted with the wrapper (reagent P2 on
+     *  PR #2488). */
+    agentDefinitions: () => AgentDefinition[];
+}): JSX.Element => {
     const block = model.blockAtom;
     const providerKey = (): string => block()?.meta?.["agentProvider"] ?? agentId;
     const provider = () => getProvider(providerKey());
@@ -373,9 +401,8 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // the agent without remounting the pane.
     const agentName = (): string => block()?.meta?.["agentName"] ?? agentId;
 
-    // Reactive agent-definition list — used to resolve the current AgentDefinition object
-    // for identity/memory modal requests.
-    const agentDefinitions = useAgentDefinitions();
+    // Reactive agent-definition list (from the wrapper) — used to resolve
+    // the current AgentDefinition object for identity/memory modal requests.
     const currentAgent = createMemo(() => agentDefinitions().find((a) => a.id === agentId));
 
     // Fork tab strip + in-pane "+" tab logic moved up to AgentViewWrapper
