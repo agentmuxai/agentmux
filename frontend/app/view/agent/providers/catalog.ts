@@ -219,6 +219,45 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         sessionIdField: "session_id",
         controllerType: "subprocess",
         contextWindow: 1_000_000,
+        harnessEngine: "gemini",
+        supportedVendors: ["google", "custom"],
+    },
+    // Antigravity (AGY) — Google DeepMind's agentic AI coding CLI harness.
+    // Supports Gemini 3.6 Flash, Gemini 2.5 Pro, native skills, subagents, and custom MCP.
+    antigravity: {
+        id: "antigravity",
+        displayName: "Antigravity (AGY)",
+        cliCommand: "agy",
+        defaultArgs: [],
+        styledArgs: ["--output-format", "stream-json", "--yolo", "-p", ""],
+        outputFormat: "raw",
+        styledOutputFormat: "gemini-json",
+        authType: "oauth",
+        authCheckCommand: ["auth", "status"],
+        authLoginCommand: ["auth", "login"],
+        npmPackage: "@google/antigravity-cli",
+        pinnedVersion: "1.0.0",
+        docsUrl: "https://ai.google.dev/antigravity",
+        windowsInstallCommand: "npm install -g @google/antigravity-cli",
+        unixInstallCommand: "npm install -g @google/antigravity-cli",
+        icon: "zap",
+        authConfigDirEnvVar: "ANTIGRAVITY_CONFIG_DIR",
+        authDirName: "antigravity",
+        authExtraEnv: { ANTIGRAVITY_FORCE_FILE_STORAGE: "true" },
+        launchArgs: ["--output-format", "stream-json", "--yolo", "-p", ""],
+        resumeFlag: "-r",
+        sessionIdField: "session_id",
+        controllerType: "subprocess",
+        contextWindow: 1_000_000,
+        harnessEngine: "agy",
+        supportedVendors: ["google", "custom"],
+        models: [
+            { value: "gemini-3.6-flash", label: "Gemini 3.6 Flash", default: true, description: "Fast, highly capable frontier model with 1M context" },
+            { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro", description: "Deep reasoning and complex coding" },
+            { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash", description: "Balanced performance and speed" },
+            { value: "gemini-2.0-flash-thinking", label: "Gemini 2.0 Flash Thinking", description: "Chain-of-thought agentic reasoning" },
+            { value: "flash_lite", label: "Flash Lite", description: "Ultra-fast lightweight execution" },
+        ],
     },
     // Qwen Code — Alibaba's open-source coding agent, a fork of Gemini CLI.
     // Same stream-json headless surface → reuses the gemini translator
@@ -421,7 +460,10 @@ export const PROVIDER_ALIASES: Record<string, string> = {
     "github-copilot": "copilot",
     "copilot_cli": "copilot",
     "mux-code": "muxcode",
-    "mux_code": "muxcode",
+    mux_code: "muxcode",
+    agy: "antigravity",
+    "antigravity-cli": "antigravity",
+    antigravity_cli: "antigravity",
 };
 
 export function resolveProviderAlias(id: string): string {

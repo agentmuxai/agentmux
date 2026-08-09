@@ -204,6 +204,21 @@ export const AgentCreateFromTemplateModalPanel = (
                         data-testid="create-from-template-name-input"
                     />
                 </label>
+                <div class="agent-new-bundle-modal-field" style={{ "margin-bottom": "12px", padding: "8px", "background-color": "var(--bg-subtle, rgba(255, 255, 255, 0.03))", "border-radius": "4px" }}>
+                    <span class="agent-new-bundle-modal-label" style={{ font-size: "12px", color: "var(--text-muted)" }}>Execution Harness Driver</span>
+                    <div style={{ font-weight: "600", "margin-top": "2px" }}>
+                        {getCliCatalogEntry(props.template.provider)?.displayName || props.template.provider}
+                    </div>
+                </div>
+                <div class="agent-new-bundle-modal-field" style={{ "margin-bottom": "12px", padding: "8px", "background-color": "var(--bg-subtle, rgba(255, 255, 255, 0.03))", "border-radius": "4px" }}>
+                    <span class="agent-new-bundle-modal-label" style={{ font-size: "12px", color: "var(--text-muted)" }}>Default Intelligence Model Vendor</span>
+                    <div style={{ font-weight: "600", "margin-top": "2px" }}>
+                        {props.template.provider === "antigravity" || props.template.provider === "gemini" ? "Google Gemini (Gemini 3.6 Flash)" :
+                         props.template.provider === "claude" ? "Anthropic (Claude Sonnet 5 / Opus 4.8)" :
+                         props.template.provider === "codex" ? "OpenAI (GPT-5.5 / Codex)" :
+                         "Multi-Vendor / Custom Proxy"}
+                    </div>
+                </div>
                 <label class="agent-new-bundle-modal-field">
                     <span class="agent-new-bundle-modal-label">Runtime</span>
                     <select
