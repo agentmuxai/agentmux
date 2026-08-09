@@ -21,15 +21,37 @@ import { shellActivities } from "./shell-adapter";
 import { subagentActivities } from "./subagent-adapter";
 import { toolActivities } from "./tool-adapter";
 
+/** Unix ms the EARLIEST currently-running activity started, or null when
+ *  nothing is live. The start time (not the observation time) is what
+ *  `AttachedTaskObserved` must carry as `at` — `AttachedTaskState.since`
+ *  is "when this episode began": a promoted Bash call has already been
+ *  running ≥30s when first observed, and a pane reopened over an
+ *  already-running shell must not restart the elapsed counter at 0
+ *  (reagent P1 on PR #2489). */
+export function earliestLiveAttachedStartMs(
+    nodes: ReadonlyArray<DocumentNode>,
+    allSubagents: ReadonlyArray<ActiveSubagent>,
+    blockId: string,
+    now: number,
+): number | null {
+    let earliest: number | null = null;
+    const all = [
+        ...shellActivities(nodes),
+        ...subagentActivities(allSubagents, blockId),
+        ...toolActivities(nodes, now),
+    ];
+    for (const a of all) {
+        if (a.status !== "running") continue;
+        if (earliest == null || a.startedAt < earliest) earliest = a.startedAt;
+    }
+    return earliest;
+}
+
 export function hasLiveAttachedActivity(
     nodes: ReadonlyArray<DocumentNode>,
     allSubagents: ReadonlyArray<ActiveSubagent>,
     blockId: string,
     now: number,
 ): boolean {
-    return (
-        shellActivities(nodes).some((a) => a.status === "running") ||
-        subagentActivities(allSubagents, blockId).some((a) => a.status === "running") ||
-        toolActivities(nodes, now).some((a) => a.status === "running")
-    );
+    return earliestLiveAttachedStartMs(nodes, allSubagents, blockId, now) != null;
 }

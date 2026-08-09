@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import type { ActiveSubagent } from "../../swarm/swarm-model";
 import type { DocumentNode, ShellNode, ToolNode } from "../types";
-import { hasLiveAttachedActivity } from "./attached-task";
+import { earliestLiveAttachedStartMs, hasLiveAttachedActivity } from "./attached-task";
 import { TOOL_PROMOTION_MS } from "./tool-adapter";
 
 function mkShell(overrides: Partial<ShellNode> = {}): ShellNode {
@@ -77,5 +77,25 @@ describe("hasLiveAttachedActivity", () => {
     it("a finished promoted Bash call (lingering in dock retention) does NOT count as live", () => {
         const nodes: DocumentNode[] = [mkBash({ status: "success", timestamp: 1000, duration: 60 })];
         expect(hasLiveAttachedActivity(nodes, [], "block-1", 1000 + 120_000)).toBe(false);
+    });
+});
+
+describe("earliestLiveAttachedStartMs", () => {
+    it("null when nothing is running", () => {
+        expect(earliestLiveAttachedStartMs([], [], "block-1", 0)).toBeNull();
+    });
+
+    it("returns the activity's REAL start time, not the observation time", () => {
+        // A promoted Bash call has already been running ≥30s when the axis
+        // first observes it — `since` must be its startedAt, so the elapsed
+        // counter doesn't restart at 0 (reagent P1 on PR #2489).
+        const nodes: DocumentNode[] = [mkBash({ timestamp: 1000 })];
+        expect(earliestLiveAttachedStartMs(nodes, [], "block-1", 1000 + TOOL_PROMOTION_MS + 5_000)).toBe(1000);
+    });
+
+    it("returns the EARLIEST start across multiple running activities", () => {
+        const nodes: DocumentNode[] = [mkShell({ id: "s1", spawnedAt: 500 })];
+        const subs = [mkSub({ agent_id: "a1", spawned_at: 2000 })];
+        expect(earliestLiveAttachedStartMs(nodes, subs, "block-1", 10_000)).toBe(500);
     });
 });

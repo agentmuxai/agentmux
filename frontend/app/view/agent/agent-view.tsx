@@ -64,7 +64,7 @@ import { DragOverlay } from "@/app/element/dragoverlay";
 import { AgentControlBar } from "./components/AgentControlBar";
 import { ActivityDock } from "./components/ActivityDock";
 import { hasRunningPromotedTool, nextToolPromotionAt } from "./activity/tool-adapter";
-import { hasLiveAttachedActivity } from "./activity/attached-task";
+import { earliestLiveAttachedStartMs } from "./activity/attached-task";
 import { allSubagentsAtom } from "./activity/subagent-source";
 import { AgentDecisionPanel } from "./components/AgentDecisionPanel";
 import { AgentQuestionPanel } from "./components/AgentQuestionPanel";
@@ -1242,12 +1242,18 @@ const AgentPresentationView = ({
         const nodes = agentAtoms().documentAtom[0]();
         const subs = allSubagentsAtom();
         const now = Date.now();
-        const live = hasLiveAttachedActivity(nodes, subs, model.blockId, now);
+        // `at` carries the earliest running activity's REAL start time, not
+        // the observation time — a promoted Bash call has already been
+        // running ≥30s when this first fires, and a pane reopened over an
+        // already-running shell must not restart the elapsed counter at 0
+        // (reagent P1 on PR #2489; matches AttachedTaskState.since's
+        // "when this episode began" contract).
+        const startMs = earliestLiveAttachedStartMs(nodes, subs, model.blockId, now);
         const current = agentAtoms().attachedTaskAtom[0]() != null;
-        if (live !== current) {
+        if ((startMs != null) !== current) {
             dispatchPaneIfRegistered(
                 model.blockId,
-                live ? { type: "AttachedTaskObserved", at: now } : { type: "AttachedTaskCleared" },
+                startMs != null ? { type: "AttachedTaskObserved", at: startMs } : { type: "AttachedTaskCleared" },
                 "system",
             );
         }
