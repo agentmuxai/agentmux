@@ -125,6 +125,89 @@ fn classify_commit_attribution(
     }
 }
 
+/// Handle-count anomaly thresholds. Both real incidents this detects were
+/// found manually with Sysinternals Handle after weeks of commit growth
+/// (docs/status/STATUS_PF_COMMIT_GROWTH_INVESTIGATION_2026_07_24.md §16:
+/// Audiosrv at ~85K handles ≈ 18GB of leaked pagefile-backed Sections;
+/// docs/status/STATUS_SRV_SECTION_HANDLE_LEAK_2026_08_08.md: agentmux-srv
+/// itself at ~215K, 99.5% Sections). A leaking process crosses these within
+/// hours of a healthy baseline (both incidents' healthy baselines were
+/// under 1K handles), while legitimately handle-heavy processes
+/// (System/svchost/browsers) sit well below the external threshold —
+/// 24,797 was the highest non-leaking count observed on the 08-08
+/// machine snapshot.
+#[cfg(target_os = "windows")]
+const HANDLE_WARN_AGENTMUX: u32 = 20_000;
+#[cfg(target_os = "windows")]
+const HANDLE_WARN_EXTERNAL: u32 = 50_000;
+#[cfg(target_os = "windows")]
+const HANDLE_TOP_N: usize = 3;
+
+/// One process's handle-count sample for anomaly classification.
+#[cfg(target_os = "windows")]
+struct HandleSample {
+    pid: u32,
+    name: String,
+    handles: u32,
+}
+
+#[cfg(target_os = "windows")]
+struct HandleAnomaly {
+    pid: u32,
+    name: String,
+    handles: u32,
+    /// True → one of our own processes (leak in AgentMux code, actionable
+    /// by us); false → an external process (Audiosrv-class OS leak — the
+    /// remediation is restarting *that* service, not AgentMux).
+    is_agentmux: bool,
+}
+
+/// Pure anomaly classification, factored out for unit testing like
+/// `classify_commit_attribution` above. AgentMux's own processes get the
+/// lower threshold (we know their healthy baseline is well under 1K); any
+/// other process only trips the higher one.
+#[cfg(target_os = "windows")]
+fn classify_handle_anomalies(samples: &[HandleSample]) -> Vec<HandleAnomaly> {
+    let mut anomalies: Vec<HandleAnomaly> = samples
+        .iter()
+        .filter_map(|s| {
+            let is_agentmux = s.name.to_ascii_lowercase().starts_with("agentmux");
+            let threshold = if is_agentmux { HANDLE_WARN_AGENTMUX } else { HANDLE_WARN_EXTERNAL };
+            (s.handles >= threshold).then(|| HandleAnomaly {
+                pid: s.pid,
+                name: s.name.clone(),
+                handles: s.handles,
+                is_agentmux,
+            })
+        })
+        .collect();
+    anomalies.sort_by(|a, b| b.handles.cmp(&a.handles));
+    anomalies
+}
+
+/// Open-query-close a process's total handle count. Returns `None` for
+/// PIDs we can't open (protected/system processes) — expected, skipped
+/// silently. The handle opened here is closed unconditionally on both the
+/// success and failure path; leaking handles from the handle-leak detector
+/// would be a bit much.
+#[cfg(target_os = "windows")]
+fn process_handle_count(pid: u32) -> Option<u32> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        GetProcessHandleCount, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    unsafe {
+        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if h.is_null() {
+            return None;
+        }
+        let mut count: u32 = 0;
+        let ok = GetProcessHandleCount(h, &mut count);
+        CloseHandle(h);
+        (ok != 0).then_some(count)
+    }
+}
+
 /// Full-system commit snapshot: refresh every process (heavier than the
 /// per-block passes above, but only ever called on the attribution
 /// cadence — every 30s in steady state, or debounced-urgent under
@@ -186,6 +269,66 @@ fn log_memory_attribution(sys: &mut sysinfo::System, commit_used_gb: f64, commit
         .collect::<Vec<_>>()
         .join(", ");
 
+    // The two diagnostics both prior pagefile-exhaustion incidents needed
+    // (and had to gather manually with Sysinternals — see the doc refs on
+    // HANDLE_WARN_AGENTMUX above): the *unattributed* commit gap, and
+    // per-process handle counts. Process-private buckets alone are blind to
+    // exactly the leak class that caused both incidents: pagefile-backed
+    // Section objects held via leaked handles are charged to system commit
+    // but to no process's private bytes, so `agentmux_mb + panes_mb +
+    // other_mb` stays flat while `commit_used_gb` climbs — the gap IS the
+    // signal. Handle counts then attribute the gap to the owning process
+    // (which the commit numbers can't), the way the manual handle.exe sweep
+    // did both times.
+    let attributed_gb = (result.agentmux_mb + result.panes_mb + result.other_mb) / 1024.0;
+    let unattributed_gb = (commit_used_gb - attributed_gb).max(0.0);
+
+    // One OpenProcess/GetProcessHandleCount/CloseHandle triplet per live
+    // process, on the same 30s cadence as the rest of this function —
+    // microseconds each, no handles retained (see process_handle_count).
+    let handle_samples: Vec<HandleSample> = samples
+        .iter()
+        .filter_map(|s| {
+            process_handle_count(s.pid).map(|handles| HandleSample {
+                pid: s.pid,
+                name: s.name.clone(),
+                handles,
+            })
+        })
+        .collect();
+    let mut top_handles: Vec<&HandleSample> = handle_samples.iter().collect();
+    top_handles.sort_by(|a, b| b.handles.cmp(&a.handles));
+    let handles_top_str = top_handles
+        .iter()
+        .take(HANDLE_TOP_N)
+        .map(|s| format!("{}:{}:{}", s.name, s.pid, s.handles))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    for anomaly in classify_handle_anomalies(&handle_samples) {
+        if anomaly.is_agentmux {
+            tracing::warn!(
+                target: "mem_attribution",
+                pid = anomaly.pid,
+                name = %anomaly.name,
+                handles = anomaly.handles,
+                "possible handle leak in an AgentMux process — a healthy baseline is under ~1K; \
+                 run `handle64 -s -p <pid>` for the type breakdown (a huge Section count is the \
+                 known leak signature, docs/status/STATUS_SRV_SECTION_HANDLE_LEAK_2026_08_08.md)"
+            );
+        } else {
+            tracing::warn!(
+                target: "mem_attribution",
+                pid = anomaly.pid,
+                name = %anomaly.name,
+                handles = anomaly.handles,
+                "external process handle-count anomaly (Audiosrv-class OS leak?) — if commit is \
+                 also climbing unattributed, restarting that process/service reclaims it \
+                 (docs/status/STATUS_PF_COMMIT_GROWTH_INVESTIGATION_2026_07_24.md §16)"
+            );
+        }
+    }
+
     tracing::info!(
         target: "mem_attribution",
         commit_used_gb = format!("{:.2}", commit_used_gb),
@@ -194,6 +337,8 @@ fn log_memory_attribution(sys: &mut sysinfo::System, commit_used_gb: f64, commit
         panes_mb = format!("{:.0}", result.panes_mb),
         other_mb = format!("{:.0}", result.other_mb),
         other_top = %other_top_str,
+        unattributed_gb = format!("{:.2}", unattributed_gb),
+        handles_top = %handles_top_str,
         process_count = samples.len(),
         "commit attribution"
     );
@@ -307,6 +452,68 @@ fn get_pagefile_volume_data(_values: &mut HashMap<String, f64>) {
             // mount_point() ("C:\").
             _values.insert(format!("disk:vol:{}:\\:watch", drive), 1.0);
         }
+    }
+}
+
+#[cfg(all(test, target_os = "windows"))]
+mod handle_anomaly_tests {
+    use super::*;
+
+    fn hsample(pid: u32, name: &str, handles: u32) -> HandleSample {
+        HandleSample { pid, name: name.to_string(), handles }
+    }
+
+    #[test]
+    fn healthy_baselines_trip_nothing() {
+        let samples = vec![
+            hsample(1, "agentmux-srv.exe", 950),
+            hsample(2, "svchost.exe", 3_000),
+            hsample(3, "chrome.exe", 11_000),
+        ];
+        assert!(classify_handle_anomalies(&samples).is_empty());
+    }
+
+    #[test]
+    fn agentmux_process_trips_at_the_lower_threshold() {
+        // The real 08-08 incident profile: an agentmux process far above
+        // its healthy baseline but an external process (chrome-scale) that
+        // is high-but-normal must not be flagged alongside it.
+        let samples = vec![
+            hsample(1, "agentmux-srv-0.54.10-windows.x64.exe", HANDLE_WARN_AGENTMUX),
+            hsample(2, "chrome.exe", HANDLE_WARN_AGENTMUX + 5_000),
+        ];
+        let anomalies = classify_handle_anomalies(&samples);
+        assert_eq!(anomalies.len(), 1);
+        assert!(anomalies[0].is_agentmux);
+        assert_eq!(anomalies[0].pid, 1);
+    }
+
+    #[test]
+    fn external_process_trips_only_at_the_higher_threshold() {
+        // The real 07-24 incident profile: Audiosrv's svchost at ~85K.
+        let samples = vec![hsample(9, "svchost.exe", 85_000)];
+        let anomalies = classify_handle_anomalies(&samples);
+        assert_eq!(anomalies.len(), 1);
+        assert!(!anomalies[0].is_agentmux);
+    }
+
+    #[test]
+    fn anomalies_are_sorted_worst_first() {
+        let samples = vec![
+            hsample(1, "agentmux-srv.exe", 25_000),
+            hsample(2, "svchost.exe", 85_000),
+        ];
+        let anomalies = classify_handle_anomalies(&samples);
+        assert_eq!(anomalies[0].pid, 2);
+        assert_eq!(anomalies[1].pid, 1);
+    }
+
+    #[test]
+    fn own_process_handle_count_is_queryable_and_nonzero() {
+        // Live smoke test of the winapi wrapper against this test process
+        // itself — a running process always has at least a few handles.
+        let count = process_handle_count(std::process::id());
+        assert!(count.is_some_and(|c| c > 0), "got {count:?}");
     }
 }
 
