@@ -299,6 +299,49 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         meta.insert("term:zoom".to_string(), json!(z));
                     }
                 }
+                // Per-agent color (SPEC_AGENT_COLOR_2026_08_08.md): seed the
+                // new block's frame border colors from the agent's stored
+                // ui:color so the existing pane-frame rendering shows it —
+                // full-strength on the focused border
+                // (frame:activebordercolor), dimmed on the unfocused one
+                // (frame:bordercolor) so the color is visible either way
+                // while focus stays distinguishable by brightness.
+                // Assign-if-missing write-through covers defs created by
+                // paths the createagent handler doesn't own (forks,
+                // imports) and any def that predates migration m0020 on
+                // this channel. Strict #rrggbb validation so a corrupt row
+                // can't inject arbitrary CSS.
+                {
+                    use crate::backend::agent_color::{dim_agent_color, is_valid_agent_color, pick_agent_color};
+                    let stored = wstore
+                        .agent_content_get(&agent.id, "ui:color")
+                        .ok()
+                        .flatten()
+                        .map(|c| c.content.trim().to_string())
+                        .filter(|c| is_valid_agent_color(c));
+                    let color = match stored {
+                        Some(c) => c,
+                        None => {
+                            let picked = pick_agent_color(&agent.id).to_string();
+                            let now_ms = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_millis() as i64)
+                                .unwrap_or(0);
+                            // Best-effort: a store error here shouldn't block
+                            // opening the agent — the pane just stays uncolored
+                            // this session and we retry next open.
+                            let _ = wstore.agent_content_set(&crate::backend::storage::store::AgentContent {
+                                agent_id: agent.id.clone(),
+                                content_type: "ui:color".to_string(),
+                                content: picked.clone(),
+                                updated_at: now_ms,
+                            });
+                            picked
+                        }
+                    };
+                    meta.insert("frame:activebordercolor".to_string(), json!(&color));
+                    meta.insert("frame:bordercolor".to_string(), json!(dim_agent_color(&color)));
+                }
                 meta.insert("agentProvider".to_string(), json!(&agent.provider));
                 meta.insert("agentName".to_string(), json!(&agent.name));
                 meta.insert("agentIcon".to_string(), json!(if agent.icon.is_empty() { "sparkles" } else { &agent.icon }));
