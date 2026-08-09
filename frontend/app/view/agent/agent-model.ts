@@ -19,6 +19,7 @@ import { buildConfigFiles } from "./agent-config-builder";
 import { checkNodejsForProvider, agentmuxHome, resolveCliDir } from "./agent-launch-env";
 import { realAccountIdOrEmpty } from "./identity-carry-over";
 import { refreshAccountCache } from "@/app/view/identity/identity-model";
+import { dimAgentColor, isValidAgentColor, pickAgentColor } from "./agent-color";
 
 export class AgentViewModel implements ViewModel {
     viewType = "agent";
@@ -562,6 +563,46 @@ export class AgentViewModel implements ViewModel {
             // overrides whatever value lands here on subsequent
             // turns.
             const continueSid = overrides?.continueSessionId?.trim() ?? "";
+
+            // Per-agent zoom persistence (SPEC_AGENT_ZOOM_PERSISTENCE_2026_06_22.md):
+            // seed term:zoom from the agent's saved ui:zoom (already loaded
+            // into contentMap above) so reopening the same agent restores
+            // its zoom instead of resetting to 1.0. Stored only for
+            // non-default, in-range values — mirrors
+            // app_api/mod.rs::parse_seed_zoom, which this path never went
+            // through (this function builds meta independently of the
+            // backend's agent.open RPC — see this file's own launch
+            // pipeline vs. agent_open.rs::register_agent_open).
+            const rawZoom = contentMap["ui:zoom"]?.trim();
+            const seedZoom = rawZoom ? Number(rawZoom) : NaN;
+            const zoomMeta: Record<string, unknown> =
+                Number.isFinite(seedZoom) && seedZoom !== 1 && seedZoom >= 0.5 && seedZoom <= 2
+                    ? { "term:zoom": seedZoom }
+                    : {};
+
+            // Per-agent color (SPEC_AGENT_COLOR_2026_08_08.md): seed the
+            // frame border colors from the agent's stored ui:color —
+            // full-strength on the focused border
+            // (frame:activebordercolor), dimmed on the unfocused one
+            // (frame:bordercolor) so the color is visible either way while
+            // focus stays distinguishable by brightness. Assign-if-missing
+            // write-through covers an agent that predates migration m0020
+            // or was created before this path existed.
+            const rawColor = contentMap["ui:color"]?.trim();
+            let agentColor: string;
+            if (isValidAgentColor(rawColor)) {
+                agentColor = rawColor;
+            } else {
+                agentColor = pickAgentColor(agent.id);
+                RpcApi.SetAgentContentCommand(TabRpcClient, {
+                    agent_id: agent.id,
+                    content_type: "ui:color",
+                    content: agentColor,
+                }).catch((e: any) => {
+                    Logger.warn("agent", "Failed to persist assigned agent color", { error: String(e) });
+                });
+            }
+
             const meta: Record<string, unknown> = {
                 agentId: agent.id,
                 agentProvider: agent.provider,
@@ -578,6 +619,9 @@ export class AgentViewModel implements ViewModel {
                 "agent:resume_flag": provider.resumeFlag ?? "",
                 "agent:session_id_field": provider.sessionIdField,
                 "agent:sessionid": continueSid,
+                ...zoomMeta,
+                "frame:activebordercolor": agentColor,
+                "frame:bordercolor": dimAgentColor(agentColor),
             };
             await RpcApi.SetMetaCommand(TabRpcClient, {
                 oref,
