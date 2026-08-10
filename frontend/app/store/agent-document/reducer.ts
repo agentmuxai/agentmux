@@ -64,6 +64,14 @@ function scrubOrphanedInProgress(
          * on PR #1104 (HistoryLoaded.loadOlder pagination case).
          */
         hasContentAfter?: boolean;
+        /**
+         * Restrict the sweep to running `tool` nodes — the turn-end
+         * scrub scope. Thinking markdown, shells, and awaiting_answer
+         * questions have session-bounded (not turn-bounded) lifecycles
+         * and must survive a mid-session pass. See the
+         * `ScrubOrphanedInProgress` command's doc comment.
+         */
+        toolsOnly?: boolean;
     },
 ): {
     nodes: DocumentNode[];
@@ -97,11 +105,13 @@ function scrubOrphanedInProgress(
     // Tools have an explicit status field so scrub them anywhere
     // they appear with status:"running".
     const hasContentAfter = opts?.hasContentAfter === true;
+    const toolsOnly = opts?.toolsOnly === true;
     const lastIdx = hasContentAfter ? -1 : nodes.length - 1;
 
     for (let i = 0; i < nodes.length; i++) {
         const n = nodes[i];
         if (
+            !toolsOnly &&
             n.type === "markdown" &&
             n.metadata?.thinking === true &&
             i === lastIdx
@@ -140,7 +150,7 @@ function scrubOrphanedInProgress(
         // still be answerable — a one-shot agent that just asked (SessionEnd
         // fires while the question is the tail) or a resumable reopened
         // session. Using the same last-node heuristic as the thinking scrub.
-        if (n.type === "tool" && n.status === "awaiting_answer" && i !== lastIdx) {
+        if (!toolsOnly && n.type === "tool" && n.status === "awaiting_answer" && i !== lastIdx) {
             if (!next) next = nodes.slice();
             next[i] = {
                 ...n,
@@ -152,7 +162,7 @@ function scrubOrphanedInProgress(
             resolvedToolNodes.push({ id: n.id, status: "success", toolName: n.toolName ?? n.tool });
             continue;
         }
-        if (n.type === "shell" && n.status === "running") {
+        if (!toolsOnly && n.type === "shell" && n.status === "running") {
             if (!next) next = nodes.slice();
             next[i] = { ...n, status: "stopped", exitedAt: at, log: { ...n.log, open: false } };
             toolsCanceled++;
@@ -639,7 +649,11 @@ export function update(
             // exists for explicit dispatchers and for testability.
             // Idempotent: returns state unchanged if nothing's
             // in-progress.
-            const scrub = scrubOrphanedInProgress(state.nodes, command.at);
+            const scrub = scrubOrphanedInProgress(
+                state.nodes,
+                command.at,
+                command.scope === "tools-only" ? { toolsOnly: true } : undefined,
+            );
             if (!scrub) return { state, events: [] };
             return {
                 state: { ...state, nodes: scrub.nodes },
