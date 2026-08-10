@@ -112,6 +112,45 @@ describe("parseHistoryLines", () => {
         expect(lastSessionStats).toEqual({ input_tokens: 500, output_tokens: 50 });
     });
 
+    // §3.5 of SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW
+    // _2026_08_09.md: `fresh` outcomes materialize as divider nodes; `resumed`
+    // outcomes are demoted — persisted line kept, no working-view node.
+    describe("agentmux_session_outcome replay (session-scoped scrollback §3.5)", () => {
+        const outcomeLine = (outcome: "fresh" | "resumed"): string =>
+            JSON.stringify({
+                type: "system",
+                subtype: "agentmux_session_outcome",
+                outcome,
+                attempted_sid: "sid-1",
+                actual_sid: null,
+                timestamp: "2026-08-09T12:00:00Z",
+            });
+
+        it("materializes a fresh outcome as a session_outcome node", () => {
+            const lines = [
+                line({ type: "text", content: "before" }),
+                outcomeLine("fresh"),
+                line({ type: "text", content: "after" }),
+            ];
+            const { nodes } = parseHistoryLines(lines, "claude-stream-json");
+            const outcomes = nodes.filter((n) => n.type === "session_outcome");
+            expect(outcomes).toHaveLength(1);
+            expect((outcomes[0] as { outcome: string }).outcome).toBe("fresh");
+        });
+
+        it("does NOT materialize a resumed outcome (demoted, §3.5)", () => {
+            const lines = [
+                line({ type: "text", content: "before" }),
+                outcomeLine("resumed"),
+                line({ type: "text", content: "after" }),
+            ];
+            const { nodes } = parseHistoryLines(lines, "claude-stream-json");
+            expect(nodes.some((n) => n.type === "session_outcome")).toBe(false);
+            // The surrounding conversation still replays.
+            expect(nodes.filter((n) => n.type === "markdown").length).toBeGreaterThan(0);
+        });
+    });
+
     describe("compact_boundary replay (Codex P2, PR #2378 round 2)", () => {
         // Before this fix, a raw `system`/`compact_boundary` frame had no
         // StreamEvent shape in the provider translator, so parseHistoryLines
