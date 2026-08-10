@@ -73,6 +73,16 @@ pub struct ProviderConfig {
     pub npm_package: &'static str,
     /// Version string passed to `npm install`, e.g. `"latest"` or `"0.116.0"`.
     pub pinned_version: &'static str,
+    // ── Model vendor (harness vs. model vendor decoupling) ──────────────────
+    /// Environment variable this harness reads to redirect its model vendor
+    /// backend (e.g. Claude Code's `ANTHROPIC_BASE_URL`, pointing it at a
+    /// proxy/Bedrock/OpenRouter instead of Anthropic's default endpoint).
+    /// `None` when a harness isn't confirmed to support redirection — the
+    /// harness (CLI driving the session) and the model vendor (LLM backend
+    /// actually serving responses) are independent dimensions; this is the
+    /// declared capability side of that split. Set only where independently
+    /// verified, not guessed. See docs/specs for the harness/vendor concept.
+    pub base_url_env_var: Option<&'static str>,
 }
 
 impl ProviderConfig {
@@ -167,6 +177,9 @@ static CLAUDE: ProviderConfig = ProviderConfig {
     // .github/workflows/container-image.yml `claude_version` default — enforced by
     // frontend/app/view/agent/providers/pin-consistency.test.ts.
     pinned_version: "2.1.198",
+    // Documented Claude Code behavior: redirects the CLI at a non-Anthropic
+    // (or proxied) backend — Bedrock, Vertex, OpenRouter, a custom proxy.
+    base_url_env_var: Some("ANTHROPIC_BASE_URL"),
 };
 
 static CODEX: ProviderConfig = ProviderConfig {
@@ -192,6 +205,7 @@ static CODEX: ProviderConfig = ProviderConfig {
     unset_env: &[],
     npm_package: "@openai/codex",
     pinned_version: "0.116.0",
+    base_url_env_var: None,
 };
 
 static GEMINI: ProviderConfig = ProviderConfig {
@@ -211,6 +225,7 @@ static GEMINI: ProviderConfig = ProviderConfig {
     unset_env: &[],
     npm_package: "@google/gemini-cli",
     pinned_version: "0.32.1",
+    base_url_env_var: None,
 };
 
 // Qwen Code — Alibaba's open-source coding agent, a fork of Gemini CLI.
@@ -239,6 +254,11 @@ static QWEN: ProviderConfig = ProviderConfig {
     unset_env: &[],
     npm_package: "@qwen-code/qwen-code",
     pinned_version: "0.19.2",
+    // Note: qwen's default backend already routes through an OpenAI-compatible
+    // endpoint (see comment above) as a fixed part of its auth setup — but
+    // that's baked-in default routing, not a confirmed user-configurable
+    // override mechanism, so this stays unset rather than guessed.
+    base_url_env_var: None,
 };
 
 static KIMI: ProviderConfig = ProviderConfig {
@@ -263,6 +283,7 @@ static KIMI: ProviderConfig = ProviderConfig {
     unset_env: &[],
     npm_package: "",
     pinned_version: "",
+    base_url_env_var: None,
 };
 
 static OPENCLAW: ProviderConfig = ProviderConfig {
@@ -292,6 +313,7 @@ static OPENCLAW: ProviderConfig = ProviderConfig {
     unset_env: &[],
     npm_package: "openclaw",
     pinned_version: "2026.6.10",
+    base_url_env_var: None,
 };
 
 static PI: ProviderConfig = ProviderConfig {
@@ -309,6 +331,7 @@ static PI: ProviderConfig = ProviderConfig {
     unset_env: &[],
     npm_package: "@mariozechner/pi-coding-agent",
     pinned_version: "0.73.1",
+    base_url_env_var: None,
 };
 
 // Mux Code — AgentMux's first-party agentic coding CLI.
@@ -336,6 +359,7 @@ static MUX_CODE: ProviderConfig = ProviderConfig {
     unset_env: &[],
     npm_package: "@agentmuxai/muxcode",
     pinned_version: "0.1.0",
+    base_url_env_var: None,
 };
 
 // GitHub Copilot CLI — Microsoft's coding agent. Runs in ACP mode via
@@ -357,6 +381,7 @@ static COPILOT: ProviderConfig = ProviderConfig {
     unset_env: &[],
     npm_package: "@github/copilot",
     pinned_version: "1.0.65",
+    base_url_env_var: None,
 };
 
 // ─── Static registry ─────────────────────────────────────────────────────────
@@ -530,5 +555,25 @@ mod tests {
         assert_eq!(p.styled_output_format, "acp");
         assert_eq!(p.cli_command, "pi");
         assert_eq!(p.npm_package, "@mariozechner/pi-coding-agent");
+    }
+
+    // Harness vs. model vendor decoupling: only claude has a verified,
+    // documented way to redirect its backend (ANTHROPIC_BASE_URL). Every
+    // other provider is explicit None rather than a guessed env var name.
+    #[test]
+    fn claude_declares_base_url_env_var() {
+        let p = get_provider("claude").unwrap();
+        assert_eq!(p.base_url_env_var, Some("ANTHROPIC_BASE_URL"));
+    }
+
+    #[test]
+    fn non_claude_providers_have_no_base_url_env_var() {
+        for id in ["codex", "gemini", "qwen", "kimi", "openclaw", "pi", "copilot", "muxcode"] {
+            let p = get_provider(id).unwrap();
+            assert!(
+                p.base_url_env_var.is_none(),
+                "provider '{id}' should not declare base_url_env_var yet (unverified)"
+            );
+        }
     }
 }

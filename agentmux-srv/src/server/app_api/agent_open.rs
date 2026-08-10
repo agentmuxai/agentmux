@@ -31,6 +31,93 @@ fn agent_open_lock(agent_id: &str) -> Arc<tokio::sync::Mutex<()>> {
         .clone()
 }
 
+/// Resolve the `(env_var, value)` pair to inject for this agent's model
+/// vendor override, if any — redirects the harness at a non-default
+/// backend (e.g. `ANTHROPIC_BASE_URL` for a `claude`-provider agent).
+/// Pure — no I/O — so it's directly unit-testable without the full
+/// async spawn-time harness this is called from.
+///
+/// `None` when there's nothing to override (empty `model_vendor_base_url`)
+/// OR the provider doesn't declare `base_url_env_var` — the latter should
+/// already be impossible by the time an agent reaches spawn (rejected at
+/// `agent.define`), but this stays defensive rather than trusting that
+/// write-time validation is the only thing that can ever set this field.
+fn resolve_vendor_env_override(
+    provider: &providers::ProviderConfig,
+    agent: &AgentDefinition,
+) -> Option<(&'static str, String)> {
+    if agent.model_vendor_base_url.is_empty() {
+        return None;
+    }
+    provider
+        .base_url_env_var
+        .map(|var| (var, agent.model_vendor_base_url.clone()))
+}
+
+#[cfg(test)]
+mod resolve_vendor_env_override_tests {
+    use super::*;
+
+    fn base_agent(model_vendor_base_url: &str) -> AgentDefinition {
+        AgentDefinition {
+            id: "a1".to_string(),
+            slug: "a1".to_string(),
+            name: "T".to_string(),
+            icon: String::new(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: "host".to_string(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+            model_vendor_base_url: model_vendor_base_url.to_string(),
+        }
+    }
+
+    #[test]
+    fn returns_none_when_override_is_unset() {
+        let provider = providers::get_provider("claude").unwrap();
+        let agent = base_agent("");
+        assert!(resolve_vendor_env_override(provider, &agent).is_none());
+    }
+
+    #[test]
+    fn returns_the_env_var_and_value_for_a_supporting_provider() {
+        let provider = providers::get_provider("claude").unwrap();
+        let agent = base_agent("https://my-proxy.example.com");
+        assert_eq!(
+            resolve_vendor_env_override(provider, &agent),
+            Some(("ANTHROPIC_BASE_URL", "https://my-proxy.example.com".to_string()))
+        );
+    }
+
+    #[test]
+    fn returns_none_for_a_non_supporting_provider_even_if_the_field_is_set() {
+        // Defensive: shouldn't be reachable in practice (agent.define
+        // rejects this combination), but a non-supporting provider must
+        // never get a spurious env var injected.
+        let provider = providers::get_provider("codex").unwrap();
+        let agent = base_agent("https://my-proxy.example.com");
+        assert!(resolve_vendor_env_override(provider, &agent).is_none());
+    }
+}
+
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_agent_open(engine, state);
 }
@@ -203,6 +290,16 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 env_vars.insert(provider.auth_config_dir_env_var.to_string(), json!(auth_dir));
                 for (k, v) in provider.auth_extra_env {
                     env_vars.insert(k.to_string(), json!(v));
+                }
+                // Model vendor override (harness vs. model-vendor decoupling)
+                // — e.g. ANTHROPIC_BASE_URL for a claude-provider agent
+                // pointed at a proxy/Bedrock/OpenRouter instead of
+                // Anthropic's default endpoint. Inserted before the
+                // free-form env blob below so it wins if a definition-level
+                // KEY=VALUE line collides with it (structured field over
+                // free-form blob, same precedence as the auth entries above).
+                if let Some((var, value)) = resolve_vendor_env_override(provider, &agent) {
+                    env_vars.insert(var.to_string(), json!(value));
                 }
                 // Merge env vars from the definition's persisted env content blob (KEY=VALUE lines).
                 // Provider/auth entries inserted above take precedence; definition-level vars
@@ -748,6 +845,7 @@ mod write_agent_config_files_tests {
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            model_vendor_base_url: String::new(),
         }
     }
 

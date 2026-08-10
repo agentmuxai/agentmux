@@ -399,6 +399,14 @@ pub(crate) async fn agent_define_core(
         .unwrap_or_default()
         .as_millis() as i64;
 
+    // Gates the fresh-insert path below (the "no existing match" case, where
+    // `def` — built from `provider` — is what actually gets written). The
+    // "update" branch further down re-validates against the EXISTING
+    // agent's actual provider (not this possibly-defaulted `provider`,
+    // which may not reflect an unspecified `cmd.provider` on an update
+    // call) right before its own write — this check doesn't gate that path.
+    agent_define::validate_vendor_base_url(&provider, &cmd.model_vendor_base_url)?;
+
     // Build the new definition struct up-front so agent_def_find_or_insert
     // can use it as both the lookup key and the insert payload.
     // agent_def_find_or_insert holds a single mutex guard for the check +
@@ -436,6 +444,7 @@ pub(crate) async fn agent_define_core(
         container_volumes: cmd.container_volumes.clone(),
         container_name: String::new(), // assigned by ContainerManager on first spawn
         use_ambient_login: 0,
+        model_vendor_base_url: cmd.model_vendor_base_url.clone(),
     };
 
     // Atomic check-then-insert.
@@ -505,6 +514,14 @@ pub(crate) async fn agent_define_core(
                 if !cmd.description.is_empty() { updated.description = cmd.description.clone(); }
                 if !cmd.working_directory.is_empty() { updated.working_directory = cmd.working_directory.clone(); }
                 if !cmd.shell.is_empty()    { updated.shell = cmd.shell.clone(); }
+                if !cmd.model_vendor_base_url.is_empty() { updated.model_vendor_base_url = cmd.model_vendor_base_url.clone(); }
+                // Authoritative check for this write: validates the FINAL
+                // effective (provider, override) pair — catches both a
+                // freshly-supplied override against the real provider, and a
+                // provider change that leaves a stale override from before
+                // now invalid (the caller must clear it explicitly rather
+                // than silently carrying an inconsistent combination).
+                agent_define::validate_vendor_base_url(&updated.provider, &updated.model_vendor_base_url)?;
                 if !cmd.environment.is_empty() { updated.environment = cmd.environment.clone(); }
                 // name update intentionally omitted — the slug is immutable;
                 // renaming would create a slug mismatch. Use updateagent for renames.
@@ -1935,6 +1952,7 @@ mod identity_self_accounts_tests {
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            model_vendor_base_url: String::new(),
         };
         state.wstore.agent_def_insert(&mut def).unwrap();
 
@@ -2006,6 +2024,7 @@ mod identity_self_accounts_tests {
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            model_vendor_base_url: String::new(),
         };
         state.wstore.agent_def_insert(&mut def).unwrap();
         state.wstore.identity_upsert(&sample_account("acct-good", "claude")).unwrap();

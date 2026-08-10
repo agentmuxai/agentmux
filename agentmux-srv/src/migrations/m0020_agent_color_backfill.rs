@@ -174,6 +174,7 @@ mod tests {
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            model_vendor_base_url: String::new(),
         };
         wstore.agent_def_insert(&mut def).unwrap();
         def.id
