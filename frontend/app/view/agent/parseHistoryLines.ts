@@ -199,6 +199,16 @@ export function parseHistoryLines(
             // flushPending() above still runs — the accumulator split at
             // this line predates this change and keeps replay/live node
             // ids aligned.
+            if (data && data.outcome === "fresh") {
+                // codex P2 on PR #2507: a usage-bearing `session_end` seen
+                // BEFORE this boundary belongs to the old session — the
+                // fresh model has none of those tokens in context. Without
+                // this reset, a restore window shaped [old result → fresh
+                // boundary → no new result yet] hydrates the context-fill
+                // bar (`ReconcileContextFromHistory`) with the dead
+                // session's count. Only post-boundary usage may seed it.
+                lastSessionStats = null;
+            }
             if (data && data.outcome !== "resumed") {
                 const parsedTs = typeof rawEvent.timestamp === "string" ? Date.parse(rawEvent.timestamp) : NaN;
                 const node: SessionOutcomeNode = {

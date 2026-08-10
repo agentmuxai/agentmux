@@ -691,6 +691,36 @@ use std::sync::Arc;
         assert_eq!(entries[1].0, line1.len() as u64);
     }
 
+    /// codex P2 on PR #2508: the tsidx stamp must be the offset the append
+    /// ACTUALLY landed at (append_data_at reads size + writes under one
+    /// store lock), so interleaved appends can't mislabel a batch.
+    #[test]
+    fn tsidx_offsets_match_actual_append_positions() {
+        use crate::backend::storage::filestore::FileStore;
+        use std::sync::Arc;
+
+        let broker = wps::Broker::new();
+        let fs = Arc::new(FileStore::open_in_memory().unwrap());
+        let block_id = "tsidx-offset-block";
+        let lines: [&[u8]; 3] = [b"{\"n\":1}
+", b"{\"nn\":22}
+", b"{\"nnn\":333}
+"];
+        for l in lines {
+            handle_append_block_file(&broker, block_id, "output", l, Some(&fs), Some("agent:tsidx-offsets:current"));
+        }
+        let entries = read_tsidx(&fs, block_id);
+        assert_eq!(entries.len(), 3);
+        let mut expected = 0u64;
+        for (i, l) in lines.iter().enumerate() {
+            assert_eq!(entries[i].0, expected, "entry {i} offset");
+            expected += l.len() as u64;
+        }
+        // And the offsets agree with the output file's actual size.
+        let stat = fs.stat(block_id, "output").unwrap().unwrap();
+        assert_eq!(stat.size as u64, expected);
+    }
+
     /// `persist_to_blockfile_silent` (user-message lines) stamps the
     /// per-channel sidecar too — those lines are transcript content.
     #[test]

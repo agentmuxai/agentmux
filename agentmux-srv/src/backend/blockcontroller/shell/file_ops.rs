@@ -65,9 +65,9 @@ pub fn persist_to_blockfile_silent(
     global_output_zone: Option<&str>,
 ) {
     if let Some(fs) = filestore {
-        let (needs_create, batch_start): (bool, u64) = match fs.stat(block_id, filename) {
-            Ok(None) => (true, 0),
-            Ok(Some(info)) => (false, info.size as u64),
+        let needs_create: bool = match fs.stat(block_id, filename) {
+            Ok(None) => true,
+            Ok(Some(_)) => false,
             Err(e) => {
                 tracing::warn!(
                     block_id = %block_id, filename = %filename, error = %e,
@@ -93,12 +93,15 @@ pub fn persist_to_blockfile_silent(
                 }
             }
         }
-        match fs.append_data(block_id, filename, data) {
-            Ok(()) => {
+        // append_data_at returns the offset the batch ACTUALLY landed at,
+        // read under the store's own lock - a caller-side pre-append stat
+        // can be stale under concurrent appenders (codex P2 on PR #2508).
+        match fs.append_data_at(block_id, filename, data) {
+            Ok(actual_start) => {
                 // Only agent transcript streams carry a global zone; those are
                 // the streams the tsidx sidecar exists for (§4.4).
                 if global_output_zone.is_some() {
-                    append_tsidx_entry(fs, block_id, batch_start, unix_ms_now());
+                    append_tsidx_entry(fs, block_id, actual_start.max(0) as u64, unix_ms_now());
                 }
             }
             Err(e) => {
@@ -231,17 +234,20 @@ pub fn handle_append_block_file(
             }
         }
 
-        match fs.append_data(block_id, filename, data) {
-            Ok(()) => {
+        match fs.append_data_at(block_id, filename, data) {
+            Ok(actual_start) => {
                 // Receive-time stamp for this batch (§4.4). Gated on
                 // `global_output_zone` — only agent transcript appends carry
                 // one; PTY `term` data and non-agent blocks never get a
-                // sidecar. `start_offset` is Some here (Error stat already
-                // returned above).
+                // sidecar. Stamped at the offset the append itself reports
+                // (read under the store lock), not the pre-append stat —
+                // codex P2 on PR #2508: the stat can go stale when writers
+                // interleave, and a mis-keyed stamp gives replayed lines
+                // another batch's time. (The broadcast event's `offset`
+                // still uses the pre-append stat — pre-existing contract,
+                // reconcile-only consumer, unchanged here.)
                 if global_output_zone.is_some() {
-                    if let Some(start) = start_offset {
-                        append_tsidx_entry(fs, block_id, start, unix_ms_now());
-                    }
+                    append_tsidx_entry(fs, block_id, actual_start.max(0) as u64, unix_ms_now());
                 }
             }
             Err(e) => {
@@ -282,7 +288,7 @@ pub(super) fn mirror_append_to_global(gfs: &Arc<FileStore>, zone: &str, data: &[
     use crate::backend::agent_session::OUTPUT_FILE;
     use crate::backend::storage::error::StoreError;
 
-    let batch_start: u64 = match gfs.stat(zone, OUTPUT_FILE) {
+    match gfs.stat(zone, OUTPUT_FILE) {
         Ok(None) => {
             if let Err(e) = gfs.make_file(
                 zone,
@@ -295,21 +301,21 @@ pub(super) fn mirror_append_to_global(gfs: &Arc<FileStore>, zone: &str, data: &[
                     return;
                 }
             }
-            0
         }
-        Ok(Some(info)) => info.size as u64,
+        Ok(Some(_)) => {}
         Err(e) => {
             tracing::warn!(zone = %zone, error = %e, "global transcripts: stat failed; skipping mirror");
             return;
         }
-    };
-    match gfs.append_data(zone, OUTPUT_FILE, data) {
-        Ok(()) => {
+    }
+    match gfs.append_data_at(zone, OUTPUT_FILE, data) {
+        Ok(actual_start) => {
             // Global zones are agent transcripts by construction — always
-            // stamp (§4.4). Cross-channel mirrors from concurrent srv
-            // instances serialize on the store, so offsets stay monotonic;
-            // the read-side join sorts defensively regardless.
-            append_tsidx_entry(gfs, zone, batch_start, unix_ms_now());
+            // stamp (§4.4), keyed at the offset this append actually
+            // landed at (codex P2 on PR #2508 — cross-channel mirrors from
+            // concurrent srv instances can interleave; the store-lock-read
+            // offset is exact where a pre-append stat is not).
+            append_tsidx_entry(gfs, zone, actual_start.max(0) as u64, unix_ms_now());
         }
         Err(e) => {
             tracing::warn!(zone = %zone, error = %e, "global transcripts: append_data failed");

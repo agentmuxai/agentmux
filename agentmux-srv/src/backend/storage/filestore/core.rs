@@ -453,20 +453,46 @@ impl FileStore {
         if data.is_empty() {
             return Ok(());
         }
+        self.append_data_at(zone_id, name, data).map(|_| ())
+    }
 
+    /// Append data to the end of a file and return the byte offset the
+    /// batch actually landed at. Unlike a caller-side stat-then-append,
+    /// the size read and the part writes happen under ONE connection
+    /// lock, so the returned offset is exact even when concurrent
+    /// appenders interleave — codex P2 on PR #2508: the `output.tsidx`
+    /// sidecar keys batch receive-times by offset, and a racy pre-append
+    /// stat could stamp a batch with another batch's position.
+    pub fn append_data_at(
+        &self,
+        zone_id: &str,
+        name: &str,
+        data: &[u8],
+    ) -> Result<i64, StoreError> {
         let key = (zone_id.to_string(), name.to_string());
         let now = Self::now_ms();
 
-        let file = self.stat(zone_id, name)?.ok_or(StoreError::NotFound)?;
-        let new_size = file.size + data.len() as i64;
+        // Size read + writes under the same lock (self.stat would
+        // re-acquire this non-reentrant mutex, hence the direct query).
+        let conn = self.conn.lock().unwrap();
+        let file_size: i64 = match conn.query_row(
+            "SELECT size FROM db_wave_file WHERE zoneid = ?1 AND name = ?2",
+            params![zone_id, name],
+            |row| row.get(0),
+        ) {
+            Ok(s) => s,
+            Err(rusqlite::Error::QueryReturnedNoRows) => return Err(StoreError::NotFound),
+            Err(e) => return Err(e.into()),
+        };
+        if data.is_empty() {
+            return Ok(file_size);
+        }
+        let new_size = file_size + data.len() as i64;
 
         // Figure out which part to start writing at
-        let start_offset = file.size;
+        let start_offset = file_size;
         let start_part = (start_offset / PART_DATA_SIZE as i64) as i32;
         let offset_in_part = (start_offset % PART_DATA_SIZE as i64) as usize;
-
-        // Load the last part if we need to append to it
-        let conn = self.conn.lock().unwrap();
         let mut data_offset = 0usize;
         let mut current_part = start_part;
 
@@ -535,7 +561,7 @@ impl FileStore {
         }
         self.evict_to_cap();
 
-        Ok(())
+        Ok(start_offset)
     }
 
     /// Write metadata. If `merge` is true, only specified keys are updated;

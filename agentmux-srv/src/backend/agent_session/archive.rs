@@ -7,7 +7,7 @@ use crate::backend::storage::filestore::FileStore;
 
 use super::global_store::global_transcript_store;
 use super::helpers::{now_ms, write_zone_file};
-use super::session_io::{OUTPUT_FILE, SNAPSHOT_FILE};
+use super::session_io::{OUTPUT_FILE, SNAPSHOT_FILE, TSIDX_FILE};
 use super::zone_naming::{agent_archive_zone, is_valid_definition_id, validate_and_current};
 
 /// Archive `agent:<defId>:current` to `agent:<defId>:archive:<now_ms>`.
@@ -91,6 +91,13 @@ pub fn archive_session(
         if !output_bytes.is_empty() {
             write_zone_file(filestore, &archive_zone, OUTPUT_FILE, &output_bytes)?;
         }
+        // The tsidx sidecar travels with output (codex P2 on PR #2508):
+        // without it, archived history loses its receive-time stamps and —
+        // worse — a stale sidecar left in :current would mis-time the NEXT
+        // session (fresh output restarts at offset 0 under old entries).
+        // Best-effort: the sidecar is auxiliary and must never abort an
+        // archive.
+        copy_tsidx_best_effort(filestore, &current_zone, filestore, &archive_zone);
     }
 
     // Archive write succeeded. Now safe to clear the current zone.
@@ -109,6 +116,17 @@ pub fn archive_session(
                 definition_id = %definition_id,
                 error = %e,
                 "agent_session: failed to clear current output after archive (archive already persisted)"
+            );
+        }
+    }
+    // Clear the sidecar with output — a stale tsidx under a fresh (offset-0)
+    // output would mis-time the next session's lines (codex P2 on PR #2508).
+    if let Ok(Some(_)) = filestore.stat(&current_zone, TSIDX_FILE) {
+        if let Err(e) = filestore.delete_file(&current_zone, TSIDX_FILE) {
+            tracing::warn!(
+                definition_id = %definition_id,
+                error = %e,
+                "agent_session: failed to clear current tsidx after archive"
             );
         }
     }
@@ -164,6 +182,9 @@ pub fn archive_global_current(
     }
     if has_out {
         write_zone_file(filestore, &archive_zone, OUTPUT_FILE, out.as_ref().unwrap())?;
+        // Sidecar travels with output — same rationale as the per-channel
+        // path (codex P2 on PR #2508).
+        copy_tsidx_best_effort(gfs, &current_zone, filestore, &archive_zone);
     }
     tracing::info!(
         definition_id = %definition_id,
@@ -184,12 +205,29 @@ fn read_snapshot_bytes(store: &FileStore, zone: &str, name: &str) -> Result<Opti
     }
 }
 
+/// Copy the `output.tsidx` sidecar from `src` zone to `dst` zone,
+/// best-effort: absence is normal (pre-sidecar history), and no failure
+/// here may abort the surrounding archive — the sidecar is auxiliary
+/// timing data, not conversation content.
+fn copy_tsidx_best_effort(src_store: &FileStore, src_zone: &str, dst_store: &FileStore, dst_zone: &str) {
+    let bytes = match src_store.stat(src_zone, TSIDX_FILE) {
+        Ok(Some(f)) if f.size > 0 => match src_store.read_file(src_zone, TSIDX_FILE) {
+            Ok(Some(b)) if !b.is_empty() => b,
+            _ => return,
+        },
+        _ => return,
+    };
+    if let Err(e) = write_zone_file(dst_store, dst_zone, TSIDX_FILE, &bytes) {
+        tracing::warn!(src = %src_zone, dst = %dst_zone, error = %e, "agent_session: tsidx sidecar copy failed (archive content unaffected)");
+    }
+}
+
 /// Delete `output.state.json` + `output` from a per-channel `:current` zone,
 /// only for files that are present (so absence isn't logged as an error).
 /// Best-effort — used after the global-preferred archive has persisted the
 /// content, to retire this channel's (subset) copy.
 pub fn clear_local_current_zone(filestore: &FileStore, zone: &str) {
-    for name in [SNAPSHOT_FILE, OUTPUT_FILE] {
+    for name in [SNAPSHOT_FILE, OUTPUT_FILE, TSIDX_FILE] {
         match filestore.stat(zone, name) {
             Ok(Some(_)) => {
                 if let Err(e) = filestore.delete_file(zone, name) {
@@ -214,7 +252,7 @@ pub fn clear_global_current_zone(definition_id: &str) {
     let Ok(zone) = validate_and_current(definition_id) else {
         return;
     };
-    for name in [SNAPSHOT_FILE, OUTPUT_FILE] {
+    for name in [SNAPSHOT_FILE, OUTPUT_FILE, TSIDX_FILE] {
         // Only delete what's present, so an absent file isn't logged as an error.
         match gfs.stat(&zone, name) {
             Ok(Some(_)) => {

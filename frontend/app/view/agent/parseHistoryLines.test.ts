@@ -95,6 +95,44 @@ describe("parseHistoryLines", () => {
         expect(lastSessionStats).toBeNull();
     });
 
+    it("resets lastSessionStats at a fresh session boundary (codex P2 on PR #2507)", () => {
+        // Window shape: [old result -> fresh boundary -> no new result].
+        // The old session's usage must NOT hydrate the fresh session's
+        // context-fill bar — the fresh model has none of those tokens.
+        const lines = [
+            line({ type: "text", content: "old turn" }),
+            line({ type: "session_end", stats: { input_tokens: 900, output_tokens: 90 } }),
+            JSON.stringify({
+                type: "system",
+                subtype: "agentmux_session_outcome",
+                outcome: "fresh",
+                attempted_sid: "sid-1",
+                actual_sid: null,
+                timestamp: "2026-08-10T08:00:00Z",
+            }),
+            line({ type: "text", content: "new turn" }),
+        ];
+        const { lastSessionStats } = parseHistoryLines(lines, "claude-stream-json");
+        expect(lastSessionStats).toBeNull();
+    });
+
+    it("post-boundary usage still hydrates after a fresh boundary", () => {
+        const lines = [
+            line({ type: "session_end", stats: { input_tokens: 900, output_tokens: 90 } }),
+            JSON.stringify({
+                type: "system",
+                subtype: "agentmux_session_outcome",
+                outcome: "fresh",
+                attempted_sid: "sid-1",
+                actual_sid: null,
+                timestamp: "2026-08-10T08:00:00Z",
+            }),
+            line({ type: "session_end", stats: { input_tokens: 40, output_tokens: 4 } }),
+        ];
+        const { lastSessionStats } = parseHistoryLines(lines, "claude-stream-json");
+        expect(lastSessionStats).toEqual({ input_tokens: 40, output_tokens: 4 });
+    });
+
     it("does not let a later empty-stats session_end clobber real historical stats", () => {
         // reagent P1 on PR #2059: Claude's persistent-mode controller emits a
         // session_end with stats: {} after EVERY plain-text turn (the per-turn
