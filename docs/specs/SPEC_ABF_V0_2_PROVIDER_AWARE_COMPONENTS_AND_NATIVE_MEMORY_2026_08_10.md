@@ -209,14 +209,17 @@ deprecated as they are today, untouched by this spec. The existing flat
 `instructions` column keeps meaning "default," unchanged.
 
 **Authoring:** the Armory bundle editor (`memory-model.ts` /
-`MemoryDraft`) needs a real, new UI affordance to add a labeled
-per-provider instruction variant — a list of `{provider, content}` pairs
-alongside the existing single instructions textarea, serialized into
-`instructions_by_provider` on save. No implementation detail beyond "this
-needs to exist" is specified here; it's an Armory UI change with its own
-design pass, out of this spec's scope to lay out in full, but calling out
-explicitly since the original draft incorrectly claimed no UI change was
-needed at all.
+`MemoryDraft`) needs a new `instructions_by_provider: Array<{provider:
+string; content: string}>` field on `MemoryDraft`, mirroring
+`context_files`'s existing `Array<{path: string; content: string}>` shape
+(`memory-model.ts:37-38`) — same list-add/list-remove editing pattern
+already built for that field, with `provider` as a dropdown constrained to
+`providers.rs`'s canonical IDs instead of a free-text path. `draftToWire`
+serializes it to the new `instructions_by_provider` JSON column the same
+way it already serializes `context_files` (`memory-model.ts:112-113`).
+This reuses an existing, shipped UI pattern rather than inventing a new
+one — the remaining work is wiring a new list section into the bundle
+editor's existing form, not designing new interaction patterns.
 
 **Export:** `export_bundle()` writes the flat `instructions` to
 `instructions/AGENTS.md` (default, unchanged from v0.1) and one
