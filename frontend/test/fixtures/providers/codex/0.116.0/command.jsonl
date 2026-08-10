@@ -1,0 +1,7 @@
+{"type":"thread.started","thread_id":"00000000-0000-0000-0000-000000000002"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"Running the requested shell command."}}
+{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"pwsh -Command Write-Output fixture-command-output","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"pwsh -Command Write-Output fixture-command-output","aggregated_output":"fixture-command-output\r\n","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"fixture-done"}}
+{"type":"turn.completed","usage":{"input_tokens":23315,"cached_input_tokens":13056,"output_tokens":194}}

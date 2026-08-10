@@ -49,6 +49,7 @@ use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::store::Store;
 use crate::backend::wps;
 
+mod argv;
 mod container_spawn;
 mod host_spawn;
 mod session;
@@ -76,6 +77,10 @@ pub struct SubprocessSpawnConfig {
     /// Flag used to resume a previous session, e.g. "--resume" (Claude), "-r" (Gemini).
     /// Empty string means this provider does not support simple-flag resume.
     pub resume_flag: String,
+    /// Resume argv strategy: `none`, `flag`, or `codex-exec`.
+    /// Empty preserves compatibility with blocks created before this metadata
+    /// existed by inferring `flag` from a non-empty `resume_flag`.
+    pub resume_strategy: String,
     /// JSON field name in the CLI's init event that contains the session/thread ID.
     /// e.g. "session_id" (Claude/Gemini) or "thread_id" (Codex).
     pub session_id_field: String,

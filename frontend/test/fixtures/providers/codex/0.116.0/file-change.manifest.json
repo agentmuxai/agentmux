@@ -1,0 +1,10 @@
+{
+    "provider": "codex",
+    "cli_version": "0.116.0",
+    "platform": "windows-x64",
+    "container": false,
+    "scenario": "file-change",
+    "captured_at": "2026-08-09T10:12:18Z",
+    "invocation_shape": "exec --ephemeral --json --skip-git-repo-check --full-auto -C <workspace> -m gpt-5.4 <prompt>",
+    "redactions": ["thread_id", "absolute_paths", "usernames", "prompt", "assistant_preamble"]
+}

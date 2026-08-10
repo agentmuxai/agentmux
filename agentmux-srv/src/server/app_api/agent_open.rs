@@ -376,6 +376,7 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 meta.insert("cmd:cwd".to_string(), json!(&work_dir));
                 meta.insert("cmd:env".to_string(), serde_json::Value::Object(env_vars));
                 meta.insert("agent:resume_flag".to_string(), json!(provider.resume_flag.unwrap_or("")));
+                meta.insert("agent:resume_strategy".to_string(), json!(provider.resume_strategy_str()));
                 meta.insert("agent:session_id_field".to_string(), json!(provider.session_id_field));
                 if let Some(sid) = &resume_session_id {
                     meta.insert("agent:sessionid".to_string(), json!(sid));
