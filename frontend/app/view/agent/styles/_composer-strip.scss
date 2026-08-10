@@ -562,3 +562,22 @@
     font-size: 11px;
     font-family: var(--termfontfamily, monospace);
 }
+
+// Loading-brain overlay covering the shell drawer from mount until the
+// persisted term:zoom is seeded and the terminal is constructed with its
+// final font size — see docs/specs/SPEC_AGENT_SHELL_ZOOM_SEED_RACE_2026-08-10.md.
+// Same shape as browser-view.scss's .browser-loading-overlay (no
+// data-pane-overlay tag here: unlike the browser pane, this drawer's content
+// is a plain xterm.js canvas, not a native HWND layer needing a clip hole).
+.agent-shell-loading-overlay {
+    position: absolute;
+    inset: 0;
+    background-color: rgb(from var(--block-bg-color) r g b);
+    opacity: 1;
+
+    &.is-fading {
+        opacity: 0;
+        transition: opacity 200ms ease-out;
+        pointer-events: none;
+    }
+}
