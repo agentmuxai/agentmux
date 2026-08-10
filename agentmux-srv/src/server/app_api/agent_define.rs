@@ -4,6 +4,24 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_agent_define(engine, state);
 }
 
+/// Rejects a non-empty `model_vendor_base_url` unless `provider_id`'s
+/// `ProviderConfig` declares support for redirection via
+/// `base_url_env_var`. Pure — no I/O — so it's directly unit-testable
+/// without the async `Store`/`Broker` harness `agent_define_core` needs.
+/// An empty `base_url` is always fine — that's "use the harness's default
+/// vendor endpoint," never rejected regardless of provider.
+pub(super) fn validate_vendor_base_url(provider_id: &str, base_url: &str) -> Result<(), String> {
+    if base_url.is_empty() {
+        return Ok(());
+    }
+    match providers::get_provider(provider_id) {
+        Some(p) if p.base_url_env_var.is_some() => Ok(()),
+        _ => Err(format!(
+            "agent.define: provider '{provider_id}' does not support a custom model vendor base URL"
+        )),
+    }
+}
+
 /// Infer a provider slug from a model name prefix.
 /// Only maps prefixes that correspond to a registered provider slug.
 /// Callers must still validate the result via `providers::get_provider`.
@@ -121,4 +139,35 @@ fn register_agent_define(engine: &Arc<WshRpcEngine>, state: &AppState) {
             })
         }),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_base_url_is_always_valid() {
+        // Even for a provider with no base_url_env_var — "unset" never needs
+        // the capability to exist.
+        assert!(validate_vendor_base_url("codex", "").is_ok());
+        assert!(validate_vendor_base_url("claude", "").is_ok());
+        assert!(validate_vendor_base_url("nonexistent-provider", "").is_ok());
+    }
+
+    #[test]
+    fn non_empty_base_url_accepted_for_a_supporting_provider() {
+        assert!(validate_vendor_base_url("claude", "https://my-proxy.example.com").is_ok());
+    }
+
+    #[test]
+    fn non_empty_base_url_rejected_for_a_non_supporting_provider() {
+        let err = validate_vendor_base_url("codex", "https://my-proxy.example.com").unwrap_err();
+        assert!(err.contains("codex"));
+        assert!(err.contains("does not support"));
+    }
+
+    #[test]
+    fn non_empty_base_url_rejected_for_an_unknown_provider() {
+        assert!(validate_vendor_base_url("not-a-real-provider", "https://x").is_err());
+    }
 }

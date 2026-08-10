@@ -318,6 +318,7 @@
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            model_vendor_base_url: String::new(),
         };
         store.agent_def_insert(&mut a1).unwrap();
         // "Agent X" → "agent-x"
@@ -385,6 +386,7 @@
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            model_vendor_base_url: String::new(),
         };
         store.agent_def_insert(&mut a1).unwrap();
         assert_eq!(a1.slug, "explicit");
@@ -447,6 +449,7 @@
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            model_vendor_base_url: String::new(),
         }
     }
 
@@ -2339,6 +2342,7 @@
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            model_vendor_base_url: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
         // db_agents row exists, projected as template.
@@ -2379,6 +2383,7 @@
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            model_vendor_base_url: String::new(),
         };
         store.agent_def_insert(&mut tpl).unwrap();
         // User-cloned def has is_seeded=0 + parent_id pointing at template.
@@ -2425,6 +2430,7 @@
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            model_vendor_base_url: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
         def.name = "New Name".to_string();
@@ -2472,6 +2478,7 @@
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            model_vendor_base_url: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
         def.branch_label = "New Branch".to_string();
@@ -2516,6 +2523,7 @@
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            model_vendor_base_url: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
         assert_eq!(count_agents(&store, "id = 'tpl-del'"), 1);
@@ -2554,6 +2562,7 @@
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            model_vendor_base_url: String::new(),
         };
         store.agent_def_insert(&mut tpl).unwrap();
 
@@ -2640,6 +2649,7 @@
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            model_vendor_base_url: String::new(),
         };
         store.agent_def_insert(&mut tpl).unwrap();
 
@@ -2735,6 +2745,7 @@
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            model_vendor_base_url: String::new(),
         };
         store.agent_def_insert(&mut tpl).unwrap();
         let inst = AgentInstance {
@@ -2792,6 +2803,7 @@
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            model_vendor_base_url: String::new(),
         };
         store.agent_def_insert(&mut tpl).unwrap();
         let inst = AgentInstance {
@@ -2847,6 +2859,7 @@
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            model_vendor_base_url: String::new(),
         };
         store.agent_def_insert(&mut tpl_a).unwrap();
         let mut tpl_b = tpl_a.clone();
@@ -2914,6 +2927,7 @@
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            model_vendor_base_url: String::new(),
             };
             store.agent_def_insert(&mut d).unwrap();
         }
@@ -2956,6 +2970,7 @@
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            model_vendor_base_url: String::new(),
         };
         store.agent_def_insert(&mut tpl).unwrap();
         // User-clone DEF of that template (Phase 1 created this).
@@ -3030,6 +3045,7 @@
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            model_vendor_base_url: String::new(),
         };
         store.agent_def_insert(&mut tpl).unwrap();
         let mut clone = AgentDefinition {

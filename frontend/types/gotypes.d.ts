@@ -326,6 +326,15 @@ declare global {
          * SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md §2.3.
          */
         use_ambient_login?: number;
+        /**
+         * Redirects this agent's harness (CLI) at a non-default model vendor
+         * backend — e.g. a custom `ANTHROPIC_BASE_URL` for a claude-provider
+         * agent. Empty/absent = use the harness's default vendor endpoint.
+         * Schema v15. Only settable via `agent.define` today; the human
+         * "New Agent"/edit UI (createagent/updateagent) doesn't surface it
+         * yet — see `agent_define_core`'s `validate_vendor_base_url`.
+         */
+        model_vendor_base_url?: string;
     };
 
     // ── v6: identity, instance, junction ────────────────────────────────────

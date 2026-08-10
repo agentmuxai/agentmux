@@ -11,6 +11,7 @@ import { SignalAtom } from "@/util/util";
 import { AgentViewWrapper } from "./agent-view";
 import { buildAgentPaneIcon } from "./components/AgentPaneIcon";
 import { PROVIDERS, resolveProviderAlias } from "./providers";
+import { resolveVendorEnvOverride } from "./providers/vendor-env";
 import { Logger } from "@/util/logger";
 import { buildInstanceSlug } from "./defaults/instance-slug";
 import type { LaunchOverrides } from "./components/AgentLaunchModal";
@@ -475,6 +476,18 @@ export class AgentViewModel implements ViewModel {
         }
         if (provider.authExtraEnv) {
             Object.assign(envVars, provider.authExtraEnv);
+        }
+        // Model vendor override (harness vs. model-vendor decoupling) — e.g.
+        // ANTHROPIC_BASE_URL for a claude-provider agent pointed at a proxy/
+        // Bedrock/OpenRouter instead of Anthropic's default endpoint. Mirrors
+        // agent_open.rs's resolve_vendor_env_override: only injected when
+        // both the agent has a non-empty override AND the provider declares
+        // support for it (should already be guaranteed by agent.define's
+        // validation, but this doesn't trust that as the only gate).
+        const vendorOverride = resolveVendorEnvOverride(agent.model_vendor_base_url, provider.baseUrlEnvVar);
+        if (vendorOverride) {
+            const [envVar, value] = vendorOverride;
+            envVars[envVar] = value;
         }
         // Only set exit delay for subprocess mode — persistent processes must stay alive
         if (provider.controllerType !== "persistent") {

@@ -118,6 +118,11 @@ pub(super) fn record_to_agent_definition(rec: &DefinitionRecord) -> AgentDefinit
         container_volumes: d.container_volumes.clone(),
         container_name: d.container_name.clone(),
         use_ambient_login: d.use_ambient_login,
+        // Deliberately not carried by DefinitionRecordV1 (see its module
+        // doc) — a model vendor override is channel-local only for now;
+        // a cross-channel agent reopened from the global registry starts
+        // with the harness's default vendor. Known limitation, not a bug.
+        model_vendor_base_url: String::new(),
     }
 }
 
@@ -339,6 +344,7 @@ mod tests {
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            model_vendor_base_url: String::new(),
         }
     }
 

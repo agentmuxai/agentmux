@@ -117,6 +117,17 @@ pub struct AgentDefinition {
     /// SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md (§2.2-§2.4).
     #[serde(default)]
     pub use_ambient_login: i64,
+    /// Redirects this agent's harness (CLI) at a non-default model vendor
+    /// backend — e.g. `"https://my-proxy.example.com"` for a `claude`-provider
+    /// agent, injected into `ANTHROPIC_BASE_URL` at spawn time. Empty string
+    /// (default) = use the harness's default vendor endpoint. Only settable
+    /// when the resolved provider declares `ProviderConfig::base_url_env_var`
+    /// (validated in `agent_define_core`) — see docs/specs for the harness
+    /// vs. model-vendor concept this formalizes. Schema v15. Channel-local:
+    /// does not currently survive a cross-channel reopen of the same agent
+    /// (known limitation, not wired into the registry mirror).
+    #[serde(default)]
+    pub model_vendor_base_url: String,
 }
 
 /// Derive a filesystem-safe slug from a display name. Lowercase,
@@ -299,7 +310,7 @@ impl Store {
                     agent_type, environment, agent_bus_id, is_seeded,
                     accounts, parent_id, branch_label, updated_at,
                     user_hidden, container_image, container_volumes, container_name,
-                    use_ambient_login
+                    use_ambient_login, model_vendor_base_url
              FROM db_agent_definitions
              WHERE is_seeded = 0 AND parent_id = ?1
              ORDER BY updated_at DESC, created_at DESC",
@@ -360,7 +371,7 @@ impl Store {
                     agent_type, environment, agent_bus_id, is_seeded,
                     accounts, parent_id, branch_label, updated_at,
                     user_hidden, container_image, container_volumes, container_name,
-                    use_ambient_login
+                    use_ambient_login, model_vendor_base_url
              FROM db_agent_definitions
              WHERE id = ?1",
         )?;
@@ -382,7 +393,7 @@ impl Store {
                         agent_type, environment, agent_bus_id, is_seeded,
                         accounts, parent_template_id, branch_label, updated_at,
                         user_hidden, container_image, container_volumes, container_name,
-                        use_ambient_login
+                        use_ambient_login, model_vendor_base_url
                  FROM db_agents
                  ORDER BY updated_at DESC, created_at ASC",
             )?;
@@ -548,9 +559,10 @@ impl Store {
              working_directory, shell, provider_flags, auto_start, restart_on_crash,
              idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id,
              is_seeded, accounts, parent_id, branch_label, updated_at, user_hidden,
-             container_image, container_volumes, container_name, use_ambient_login)
+             container_image, container_volumes, container_name, use_ambient_login,
+             model_vendor_base_url)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                     ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
+                     ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)",
             params![
                 agent.id,
                 agent.slug,
@@ -587,6 +599,7 @@ impl Store {
                 agent.container_volumes,
                 agent.container_name,
                 agent.use_ambient_login,
+                agent.model_vendor_base_url,
             ],
         )?;
         // Persist the stamped updated_at before we leave the lock so the
@@ -712,7 +725,7 @@ impl Store {
                         agent_type, environment, agent_bus_id, is_seeded,
                         accounts, parent_id, branch_label, updated_at,
                         user_hidden, container_image, container_volumes, container_name,
-                        use_ambient_login
+                        use_ambient_login, model_vendor_base_url
                  FROM db_agent_definitions
                  WHERE (lower(trim(name)) = ?1 OR slug = ?2)
                    AND is_seeded = 0
@@ -761,10 +774,11 @@ impl Store {
                     working_directory, shell, provider_flags, auto_start, restart_on_crash,
                     idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id,
                     is_seeded, accounts, parent_id, branch_label, updated_at, user_hidden,
-                    container_image, container_volumes, container_name, use_ambient_login)
+                    container_image, container_volumes, container_name, use_ambient_login,
+                    model_vendor_base_url)
                  VALUES
                    (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                    ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
+                    ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)",
                 params![
                     agent.id, agent.slug, agent.name, agent.icon, agent.provider,
                     agent.description, agent.working_directory, agent.shell,
@@ -776,6 +790,7 @@ impl Store {
                     agent.user_hidden,
                     agent.container_image, agent.container_volumes, agent.container_name,
                     agent.use_ambient_login,
+                    agent.model_vendor_base_url,
                 ],
             )?;
             agent.created_at
@@ -883,7 +898,7 @@ impl Store {
                  restart_on_crash=?9, idle_timeout_minutes=?10,
                  agent_type=?11, environment=?12, agent_bus_id=?13, accounts=?14, updated_at=?15,
                  container_image=?17, container_volumes=?18, container_name=?19,
-                 use_ambient_login=?20, branch_label=?21
+                 use_ambient_login=?20, branch_label=?21, model_vendor_base_url=?22
                  WHERE id=?16",
                 params![
                     agent.name,
@@ -907,6 +922,7 @@ impl Store {
                     agent.container_name,
                     agent.use_ambient_login,
                     agent.branch_label,
+                    agent.model_vendor_base_url,
                 ],
             )?
         };
@@ -2102,6 +2118,7 @@ fn map_agent_definition_row(row: &rusqlite::Row) -> rusqlite::Result<AgentDefini
         container_volumes: row.get(23)?,
         container_name: row.get(24)?,
         use_ambient_login: row.get(25)?,
+        model_vendor_base_url: row.get(26)?,
     })
 }
 

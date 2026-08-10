@@ -80,6 +80,10 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         unsetEnv: ["CLAUDECODE"],
         authConfigDirEnvVar: "CLAUDE_CONFIG_DIR",
         authDirName: "claude",
+        // Documented Claude Code behavior: redirects the CLI at a non-Anthropic
+        // (or proxied) backend — Bedrock, Vertex, OpenRouter, a custom proxy.
+        // Mirrors agentmux-srv/src/backend/providers.rs `base_url_env_var`.
+        baseUrlEnvVar: "ANTHROPIC_BASE_URL",
         launchArgs: ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--dangerously-skip-permissions"],
         resumeFlag: "--resume",
         sessionIdField: "session_id",

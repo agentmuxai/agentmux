@@ -112,6 +112,13 @@ pub struct CommandAgentDefineData {
     /// JSON array of volume mount specs. Empty array (`"[]"`) for host agents.
     #[serde(default = "default_container_volumes")]
     pub container_volumes: String,
+    /// Redirects this agent's harness at a non-default model vendor backend
+    /// (e.g. a custom `ANTHROPIC_BASE_URL` for a `claude`-provider agent).
+    /// Empty (default) = use the harness's default vendor endpoint. Rejected
+    /// at define-time unless the resolved provider declares
+    /// `ProviderConfig::base_url_env_var` — see `agent_define_core`.
+    #[serde(default)]
+    pub model_vendor_base_url: String,
 }
 
 fn default_host_agent_type() -> String {
