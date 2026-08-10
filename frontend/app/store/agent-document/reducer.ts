@@ -13,7 +13,7 @@
  * on every mount. Issue #728 gap 4.
  */
 
-import type { DocumentNode, ShellNode, ToolLogChunk, ToolNode, ToolStreamingLog } from "../../view/agent/types";
+import type { BashParams, DocumentNode, ShellNode, ToolLogChunk, ToolNode, ToolStreamingLog } from "../../view/agent/types";
 import { lastFreshBoundaryIndex } from "../../view/agent/session-outcome";
 import {
     AgentDocumentCommand,
@@ -120,13 +120,21 @@ function scrubOrphanedInProgress(
      * reporting an already-resolved node as STUCK? forever). Consumed
      * by `agent-document-store.ts`'s `dispatch()` — the pure reducer
      * itself does no I/O — to push a final status delta for each.
+     *
+     * Carries `run_in_background` too (reagent P1 on PR #2520): the cache's
+     * `push_delta` fully overwrites a node's snapshot per push, so if this
+     * omitted it, a background Bash node resolved via this exact scrub path
+     * would silently blank an earlier `run_in_background: true` push back
+     * to `undefined` — erasing the diagnostic signal for precisely the
+     * orphaned/stuck-launch class `muxspect dock`'s `bg` column exists to
+     * flag.
      */
-    resolvedToolNodes: Array<{ id: string; status: ToolNode["status"]; toolName: string }>;
+    resolvedToolNodes: Array<{ id: string; status: ToolNode["status"]; toolName: string; run_in_background?: boolean }>;
 } | null {
     let next: DocumentNode[] | null = null;
     let markdownCanceled = 0;
     let toolsCanceled = 0;
-    const resolvedToolNodes: Array<{ id: string; status: ToolNode["status"]; toolName: string }> = [];
+    const resolvedToolNodes: Array<{ id: string; status: ToolNode["status"]; toolName: string; run_in_background?: boolean }> = [];
 
     // Spec's "simple heuristic" (SPEC_ORPHAN_THINKING_NODES §Design):
     // a thinking markdown is orphaned only when it's the document's
@@ -175,7 +183,12 @@ function scrubOrphanedInProgress(
             const closedLog = n.log != null ? { ...n.log, open: false } : n.log;
             next[i] = { ...n, status: "canceled", log: closedLog };
             toolsCanceled++;
-            resolvedToolNodes.push({ id: n.id, status: "canceled", toolName: n.toolName ?? n.tool });
+            resolvedToolNodes.push({
+                id: n.id,
+                status: "canceled",
+                toolName: n.toolName ?? n.tool,
+                run_in_background: (n.params as BashParams | undefined)?.run_in_background,
+            });
             continue;
         }
         // AskUserQuestion that has content AFTER it was answered (the
