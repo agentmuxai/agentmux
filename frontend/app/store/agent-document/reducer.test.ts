@@ -944,6 +944,19 @@ describe("agent document reducer", () => {
             ]);
         });
 
+        it("reagent P1 on PR #2520: an orphaned background launch's resolvedToolNodes entry carries run_in_background, so muxspect dock's cache doesn't get its earlier true silently blanked back to undefined", () => {
+            const bg = tool("bg1", { status: "running", params: { command: "task dev", run_in_background: true } });
+            const r = update(seed([bg]), { type: "ScrubOrphanedInProgress", at: 1000 });
+            expect(r.events).toEqual([
+                {
+                    type: "orphans-scrubbed",
+                    markdownCanceled: 0,
+                    toolsCanceled: 1,
+                    resolvedToolNodes: [{ id: "bg1", status: "canceled", toolName: "Bash", run_in_background: true }],
+                },
+            ]);
+        });
+
         // AskUserQuestion answered before reload (conversation continued past
         // the question) — must resolve to `success` and clear `question` so the
         // question panel does NOT re-surface. SPEC_ASK_USER_QUESTION §13/Phase 3.
