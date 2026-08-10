@@ -53,7 +53,7 @@ export type InitState = {
 /**
  * Document node types that make up the agent's markdown document
  */
-export type DocumentNode = MarkdownNode | SectionNode | ToolNode | AgentMessageNode | UserMessageNode | ShellNode | AgentErrorNode | ContextCompactedNode | CompactionStartedNode | JektMessageNode | SessionOutcomeNode;
+export type DocumentNode = MarkdownNode | SectionNode | ToolNode | AgentMessageNode | UserMessageNode | ShellNode | AgentErrorNode | ContextCompactedNode | CompactionStartedNode | JektMessageNode | SessionOutcomeNode | DayDividerNode;
 
 /**
  * Raw markdown text block
@@ -452,6 +452,22 @@ export interface SessionOutcomeNode {
     outcome: "resumed" | "fresh";
     attemptedSid: string;
     actualSid: string | null;
+    timestamp: number;
+}
+
+/**
+ * Calendar-day separator in the Agent History view. A render-time synthetic
+ * (injected by `injectDayDividers`, never persisted, never part of the live
+ * document store) — id `day-<YYYY-MM-DD>` is content-derived so pagination
+ * prepends recompute to the identical node instead of duplicating.
+ * Spec: SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md §4.4.
+ */
+export interface DayDividerNode {
+    type: "day_divider";
+    id: string;
+    /** Human label, e.g. "Sun, Aug 10 2026". */
+    dayLabel: string;
+    /** Local midnight of the day, unix ms. */
     timestamp: number;
 }
 

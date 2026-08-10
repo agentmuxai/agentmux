@@ -245,6 +245,16 @@ describe("parseHistoryLines", () => {
             // The surrounding conversation still replays.
             expect(nodes.filter((n) => n.type === "markdown").length).toBeGreaterThan(0);
         });
+
+        it("materializes resumed outcomes when includeResumedOutcomes is set (Agent History view, §4.1)", () => {
+            const lines = [outcomeLine("resumed")];
+            const { nodes } = parseHistoryLines(lines, "claude-stream-json", undefined, undefined, {
+                includeResumedOutcomes: true,
+            });
+            const outcomes = nodes.filter((n) => n.type === "session_outcome");
+            expect(outcomes).toHaveLength(1);
+            expect((outcomes[0] as { outcome: string }).outcome).toBe("resumed");
+        });
     });
 
     describe("compact_boundary replay (Codex P2, PR #2378 round 2)", () => {

@@ -153,6 +153,8 @@ export const STREAMING_CAPABLE: Record<NodeKind, boolean> = {
     jekt_message: false,
     // One-shot marker, same as context_compacted — not chunked.
     session_outcome: false,
+    // Render-time synthetic calendar separator (Agent History view) — static.
+    day_divider: false,
 };
 
 /**
@@ -173,6 +175,7 @@ export function estimateNode(node: DocumentNode, state: DocumentState): number {
         case "context_compacted": return 48;
         case "compaction_started": return 32;
         case "session_outcome":   return 48;
+        case "day_divider":       return 32;
     }
 }
 
@@ -214,6 +217,7 @@ export function estimateNodeForState(
             case "context_compacted": return 48;
             case "compaction_started": return 32;
             case "session_outcome":   return 48;
+            case "day_divider":       return 32;
         }
     }
     // expanded
@@ -229,5 +233,6 @@ export function estimateNodeForState(
         case "context_compacted": return 48;
         case "compaction_started": return 32;
         case "session_outcome":   return 48;
+        case "day_divider":       return 32;
     }
 }
