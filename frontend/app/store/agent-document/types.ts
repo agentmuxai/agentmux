@@ -138,9 +138,20 @@ export type AgentDocumentCommand =
      * Idempotent — running it twice is a no-op against the
      * already-scrubbed state.
      *
+     * `scope: "tools-only"` narrows the sweep to `tool` nodes with
+     * `status === "running"` — dispatched shortly after every TurnEnd
+     * (agent-view.tsx): a foreground tool call cannot outlive its turn
+     * (it blocks it) and a backgrounded harness call resolves its
+     * ToolNode immediately, so a running tool node observed after the
+     * turn ended is provably an orphan (rejected call / dropped
+     * tool_result). Thinking markdown, shells (turn-independent — a
+     * live MCP shell legitimately spans turns), and awaiting_answer
+     * questions are deliberately untouched in this scope; their
+     * lifecycles are session-bounded, not turn-bounded.
+     *
      * Spec: docs/specs/SPEC_ORPHAN_THINKING_NODES_2026_05_27.md.
      */
-    | { type: "ScrubOrphanedInProgress"; at: number }
+    | { type: "ScrubOrphanedInProgress"; at: number; scope?: "tools-only" }
     /**
      * Force one specific `ToolNode` to `status: "canceled"`, regardless of
      * how long it's been running or whether a session boundary has
