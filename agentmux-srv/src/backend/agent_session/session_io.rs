@@ -18,6 +18,14 @@ use super::zone_naming::{agent_current_zone, is_valid_definition_id, validate_an
 pub const SNAPSHOT_FILE: &str = "output.state.json";
 /// Raw NDJSON stream for crash-recovery replay.
 pub const OUTPUT_FILE: &str = "output";
+/// Receive-time sidecar for `output`: one NDJSON `{"off":<byte offset of the
+/// appended batch>,"ms":<unix ms>}` record per append batch. A pure addition —
+/// `output`'s own format and every existing parser are untouched; a missing or
+/// corrupt sidecar degrades reads to "no stamps" (today's behavior). Gives
+/// replayed transcript nodes real timestamps (hover peek after restore, day
+/// separators). Spec:
+/// SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md §4.4.
+pub const TSIDX_FILE: &str = "output.tsidx";
 
 /// Write `content` to `output.state.json` in `agent:<defId>:current`.
 /// Idempotent — creates the file if missing, overwrites otherwise.

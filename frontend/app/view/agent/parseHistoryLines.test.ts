@@ -112,6 +112,64 @@ describe("parseHistoryLines", () => {
         expect(lastSessionStats).toEqual({ input_tokens: 500, output_tokens: 50 });
     });
 
+    // §4.4 of SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW
+    // _2026_08_09.md: replayed nodes get receive-time stamps from the
+    // output.tsidx sidecar (`stamps` parallel to `lines`); wire timestamps
+    // win; 0/absent = unknown and must never stamp a node.
+    describe("tsidx receive-time stamping (§4.4)", () => {
+        it("stamps a timestamp-less replayed node from its line's batch time", () => {
+            const lines = [
+                line({ type: "text", content: "hello" }),
+                line({ type: "tool_call", tool: "Bash", id: "tool-1", params: { command: "ls" } }),
+            ];
+            const { nodes } = parseHistoryLines(lines, "claude-stream-json", undefined, [1_700_000_000_000, 1_700_000_001_000]);
+            expect((nodes[0] as { timestamp?: number }).timestamp).toBe(1_700_000_000_000);
+            expect((nodes[1] as ToolNode).timestamp).toBe(1_700_000_001_000);
+        });
+
+        it("a tool_result replacement preserves the tool_call's stamp", () => {
+            const lines = [
+                line({ type: "tool_call", tool: "Bash", id: "tool-1", params: { command: "ls" } }),
+                line({ type: "tool_result", tool: "Bash", id: "tool-1", status: "success", duration: 0.1 }),
+            ];
+            const { nodes } = parseHistoryLines(lines, "claude-stream-json", undefined, [111_000, 222_000]);
+            const tool = nodes[0] as ToolNode;
+            expect(tool.status).toBe("success");
+            expect(tool.timestamp).toBe(111_000);
+        });
+
+        it("a 0 stamp entry means unknown and does not stamp the node", () => {
+            const lines = [line({ type: "text", content: "hello" })];
+            const { nodes } = parseHistoryLines(lines, "claude-stream-json", undefined, [0]);
+            const ts = (nodes[0] as { timestamp?: number }).timestamp;
+            expect(ts === undefined || ts === 0).toBe(true);
+            expect(ts).not.toBe(1970); // sanity: nothing invents a time
+        });
+
+        it("absent stamps array leaves behavior unchanged", () => {
+            const lines = [line({ type: "text", content: "hello" })];
+            const { nodes } = parseHistoryLines(lines, "claude-stream-json");
+            expect(nodes).toHaveLength(1);
+        });
+
+        it("a wire timestamp wins over the batch stamp", () => {
+            const wire = "2026-08-09T12:00:00Z";
+            const lines = [
+                JSON.stringify({
+                    type: "system",
+                    subtype: "agentmux_session_outcome",
+                    outcome: "fresh",
+                    attempted_sid: "sid-1",
+                    actual_sid: null,
+                    timestamp: wire,
+                }),
+            ];
+            const { nodes } = parseHistoryLines(lines, "claude-stream-json", undefined, [999_000]);
+            const outcome = nodes.find((n) => n.type === "session_outcome") as { timestamp: number };
+            expect(outcome.timestamp).toBe(Date.parse(wire));
+        });
+    });
+
     // §3.5 of SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW
     // _2026_08_09.md: `fresh` outcomes materialize as divider nodes; `resumed`
     // outcomes are demoted — persisted line kept, no working-view node.

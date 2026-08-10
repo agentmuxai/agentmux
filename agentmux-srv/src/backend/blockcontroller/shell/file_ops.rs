@@ -10,6 +10,46 @@ use base64::Engine as _;
 use crate::backend::storage::filestore::FileStore;
 use crate::backend::wps;
 
+/// Current unix time in ms, or 0 if the clock is before the epoch (never in
+/// practice; 0 reads as "unknown" on the consumer side, same as no stamp).
+fn unix_ms_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// Append one receive-time record to a zone's `output.tsidx` sidecar:
+/// NDJSON `{"off":<byte offset the batch starts at in output>,"ms":<unix ms>}`.
+/// Batch granularity is deliberate — one flush of one turn's output; sub-batch
+/// precision has no UI meaning
+/// (SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md §4.4).
+/// Fire-and-forget like every other write on this path: any failure logs at
+/// debug and the transcript append is unaffected. Only called for agent
+/// transcript streams (never PTY `term` data).
+fn append_tsidx_entry(fs: &Arc<FileStore>, zone: &str, batch_start: u64, now_ms: i64) {
+    use crate::backend::agent_session::TSIDX_FILE;
+    use crate::backend::storage::error::StoreError;
+
+    if let Ok(None) = fs.stat(zone, TSIDX_FILE) {
+        if let Err(e) = fs.make_file(
+            zone,
+            TSIDX_FILE,
+            std::collections::HashMap::new(),
+            crate::backend::storage::filestore::FileOpts::default(),
+        ) {
+            if !matches!(e, StoreError::AlreadyExists) {
+                tracing::debug!(zone = %zone, error = %e, "tsidx: make_file failed; skipping stamp");
+                return;
+            }
+        }
+    }
+    let line = format!("{{\"off\":{batch_start},\"ms\":{now_ms}}}\n");
+    if let Err(e) = fs.append_data(zone, TSIDX_FILE, line.as_bytes()) {
+        tracing::debug!(zone = %zone, error = %e, "tsidx: append failed");
+    }
+}
+
 /// Persist `data` to the block's output file and the global transcript zone
 /// **without** publishing a WPS event. Used by the persistent controller to
 /// record user-message lines for future history loads (so that
@@ -25,9 +65,9 @@ pub fn persist_to_blockfile_silent(
     global_output_zone: Option<&str>,
 ) {
     if let Some(fs) = filestore {
-        let needs_create = match fs.stat(block_id, filename) {
-            Ok(None) => true,
-            Ok(Some(_)) => false,
+        let (needs_create, batch_start): (bool, u64) = match fs.stat(block_id, filename) {
+            Ok(None) => (true, 0),
+            Ok(Some(info)) => (false, info.size as u64),
             Err(e) => {
                 tracing::warn!(
                     block_id = %block_id, filename = %filename, error = %e,
@@ -53,11 +93,20 @@ pub fn persist_to_blockfile_silent(
                 }
             }
         }
-        if let Err(e) = fs.append_data(block_id, filename, data) {
-            tracing::warn!(
-                block_id = %block_id, filename = %filename, error = %e,
-                "persist_silent: append_data failed"
-            );
+        match fs.append_data(block_id, filename, data) {
+            Ok(()) => {
+                // Only agent transcript streams carry a global zone; those are
+                // the streams the tsidx sidecar exists for (§4.4).
+                if global_output_zone.is_some() {
+                    append_tsidx_entry(fs, block_id, batch_start, unix_ms_now());
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    block_id = %block_id, filename = %filename, error = %e,
+                    "persist_silent: append_data failed"
+                );
+            }
         }
     }
     if let Some(zone) = global_output_zone {
@@ -182,13 +231,27 @@ pub fn handle_append_block_file(
             }
         }
 
-        if let Err(e) = fs.append_data(block_id, filename, data) {
-            tracing::warn!(
-                block_id = %block_id,
-                filename = %filename,
-                error = %e,
-                "filestore append_data failed"
-            );
+        match fs.append_data(block_id, filename, data) {
+            Ok(()) => {
+                // Receive-time stamp for this batch (§4.4). Gated on
+                // `global_output_zone` — only agent transcript appends carry
+                // one; PTY `term` data and non-agent blocks never get a
+                // sidecar. `start_offset` is Some here (Error stat already
+                // returned above).
+                if global_output_zone.is_some() {
+                    if let Some(start) = start_offset {
+                        append_tsidx_entry(fs, block_id, start, unix_ms_now());
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    block_id = %block_id,
+                    filename = %filename,
+                    error = %e,
+                    "filestore append_data failed"
+                );
+            }
         }
         // Note: output.idx is NOT updated incrementally here. It is a lazily-built,
         // self-validating cache rebuilt by the read path whenever output grows (see
@@ -219,7 +282,7 @@ pub(super) fn mirror_append_to_global(gfs: &Arc<FileStore>, zone: &str, data: &[
     use crate::backend::agent_session::OUTPUT_FILE;
     use crate::backend::storage::error::StoreError;
 
-    match gfs.stat(zone, OUTPUT_FILE) {
+    let batch_start: u64 = match gfs.stat(zone, OUTPUT_FILE) {
         Ok(None) => {
             if let Err(e) = gfs.make_file(
                 zone,
@@ -232,15 +295,25 @@ pub(super) fn mirror_append_to_global(gfs: &Arc<FileStore>, zone: &str, data: &[
                     return;
                 }
             }
+            0
         }
-        Ok(Some(_)) => {}
+        Ok(Some(info)) => info.size as u64,
         Err(e) => {
             tracing::warn!(zone = %zone, error = %e, "global transcripts: stat failed; skipping mirror");
             return;
         }
-    }
-    if let Err(e) = gfs.append_data(zone, OUTPUT_FILE, data) {
-        tracing::warn!(zone = %zone, error = %e, "global transcripts: append_data failed");
+    };
+    match gfs.append_data(zone, OUTPUT_FILE, data) {
+        Ok(()) => {
+            // Global zones are agent transcripts by construction — always
+            // stamp (§4.4). Cross-channel mirrors from concurrent srv
+            // instances serialize on the store, so offsets stay monotonic;
+            // the read-side join sorts defensively regardless.
+            append_tsidx_entry(gfs, zone, batch_start, unix_ms_now());
+        }
+        Err(e) => {
+            tracing::warn!(zone = %zone, error = %e, "global transcripts: append_data failed");
+        }
     }
 }
 
