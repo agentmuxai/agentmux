@@ -29,16 +29,31 @@
  * docs/specs/SPEC_NEXT_PROMPT_SUGGESTION_RESTORE_ON_CLEAR_2026_08_10.md —
  * see AgentFooter.tsx's placeholder precedence comment.
  *
- * Every write to `term:next_prompt_suggestion` (a fresh suggestion here, or
- * a clear) is paired with a bump to `term:next_prompt_suggestion_gen` (a
- * monotonic counter, `suggestionGen()` below) — AgentFooter.tsx masks a
+ * Every write to `term:next_prompt_suggestion` FROM THIS FILE (a fresh
+ * suggestion, or guard 1's clear) is paired with a bump to
+ * `term:next_prompt_suggestion_gen` (`suggestionGenCounter` below, a
+ * monotonic counter) via `writeSuggestionMeta` — AgentFooter.tsx masks a
  * *specific write*, not a specific text value, when it snapshots this pair
- * at send time (§9 of that spec). Text-value comparison alone has a real
- * collision: if a later turn's genuinely fresh suggestion happens to be the
- * exact same string as the one masked at the previous send (a plausible
- * repeat, e.g. "Run the tests"), value-equality would suppress a legitimate
- * current suggestion until the next send. The generation counter can't
- * collide that way — reagentx P1 on #2515.
+ * at send time (§9/§10 of that spec). Text-value comparison alone has a
+ * real collision: if a later turn's genuinely fresh suggestion happens to
+ * be the exact same string as the one masked at the previous send (a
+ * plausible repeat, e.g. "Run the tests"), value-equality would suppress a
+ * legitimate current suggestion until the next send. The generation
+ * counter can't collide that way — reagentx P1 on #2515.
+ *
+ * One exception: guard 4's clear (below) is NOT a write from this file —
+ * `useBlockActivity.ts`'s `clearActivity` writes
+ * `term:next_prompt_suggestion: null` directly, alongside its own
+ * `term:osc_title`/`term:ambient_summary` clears, bypassing
+ * `writeSuggestionMeta` and never touching the gen key. Harmless today only
+ * because the resulting `null` is falsy and short-circuits
+ * `AgentFooter.tsx`'s `suggestion && ...` check before the gen comparison
+ * is ever reached — not because the invariant above actually holds for
+ * that path. Flagged, not fixed: routing guard 4 through this file's
+ * counter would need exporting it across a module boundary that was
+ * deliberately kept separate (module doc below, guard 4: "NOT by this
+ * hook... one ControllerStatus subscription per pane") for a benefit that
+ * doesn't exist today — reagentx P2 on #2515 (second re-review).
  *
  * Unlike the read-only activity summary (which persists across turns), a
  * stale suggestion here is a correctness bug, not a cosmetic one — it can
