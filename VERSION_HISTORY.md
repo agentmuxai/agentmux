@@ -1,5 +1,16 @@
 # AgentMux Version History
 
+## 0.55.1 — 2026-08-09
+
+- feat(agent): assign every agent a display color, backfill existing agents
+- fix(dev): Vite watcher ignores never matched (34x handle reduction); cool down handle-anomaly warns
+- fix(agent-pane): new-tab '+' keeps the existing conversation as a visible tab instead of replacing the pane
+- feat(agent-pane): wire the attached-task status axis — 'Running in background' instead of stuck 'Working…'
+- fix(agent-pane): expanded dock row shows the full command word-wrapped at the top
+- fix(agent-pane): scrub ghost 'running' tool nodes at turn end (stuck dock rows)
+- fix(agent-pane): Working shows instantly on send; drop redundant Running-in-background footer state
+
+
 ## 0.55.0 — 2026-08-09
 
 - fix(statusbar): shorten the Disk pill's hover tooltip to match the other stat pills
