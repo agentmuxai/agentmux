@@ -1,7 +1,7 @@
 # SPEC: Explicit close button on the Runtime (Mode/Model/Effort) dropup
 
 **Date:** 2026-08-07
-**Status:** Draft — ready for review
+**Status:** implemented — PR #2460; verified in code 2026-08-10.
 **Author:** AgentX (agent)
 **Trigger:** User request — *"when changing the model panel, we dont want it
 to auto close after selection, because sometimes the user wants to change

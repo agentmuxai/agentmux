@@ -1,7 +1,7 @@
 # SPEC: eager per-dispatch naming + two-bucket swarm row model
 
 **Date:** 2026-07-19
-**Status:** Proposed — design only, no implementation yet.
+**Status:** implemented — Phase A PR #2231 (eager naming), Phase B PR #2232 (two-bucket row model); verified in code 2026-08-10.
 **Ask (verbatim):** "we want 1 haiku call be agent tool call, and 1 per
 workflow tool call, which should be 54 .. actually, lets split Agents and
 Workflows, they should be top-level ... AgentA -> Agent Tool -> All

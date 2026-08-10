@@ -23,6 +23,8 @@ Project documentation organized by type.
 | `specs/` | Specs, design explorations, and implementation plans, from draft through implemented |
 | `status/` | Point-in-time subsystem status snapshots |
 
+Spec `**Status:**` lines use a closed vocabulary (`draft | proposed | active | implemented | living | historical | superseded`) — the rule, and the reader guardrail that goes with it, live in [`docs/specs/README.md`](specs/README.md#status-field).
+
 In practice nearly all specs — draft and implemented alike — live under `docs/specs/`, not the
 top-level `specs/` directory; treat the latter as legacy/lower-traffic rather than "the approved
 tier." There is no `docs-internal/` directory in this repo.

@@ -1,7 +1,7 @@
 # SPEC: Tool preview common-indentation stripping (dedent)
 
 **Date:** 2026-08-08
-**Status:** Proposed (analysis complete — not yet implemented)
+**Status:** proposed — verified unimplemented as of 2026-08-10 (sibling refinement #2467 shipped; this one did not).
 **Scope:** `frontend/app/view/agent/components/ToolOverlayLog.tsx`,
 `frontend/app/view/agent/components/DiffViewer.tsx`, one new shared util
 (+ tests)

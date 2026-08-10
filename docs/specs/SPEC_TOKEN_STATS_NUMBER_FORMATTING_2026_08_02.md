@@ -1,6 +1,6 @@
 # Plan: consolidate duplicated display-formatting utilities into `frontend/util/`
 
-**Status:** Plan — not yet implemented.
+**Status:** implemented — PR #2385 (formatter consolidation incl. §7 sweep); verified in code 2026-08-10.
 **Trigger:** user request while discussing the composer strip's `↑in ↓out` token display — the abbreviated form never rolls over past "k" (a heavy session could show `12345.6k` instead of `12.3m`), and there's no comma-grouped exact form for tooltips/full-precision contexts. Broadened per follow-up request into a sweep for other duplicated utility-shaped logic (§7) worth building out the same way.
 
 `frontend/util/` already exists as this codebase's convention for exactly this (`menu-position.ts`, `settle-detector.ts`) — everything below lands as new siblings there, not a novel location.

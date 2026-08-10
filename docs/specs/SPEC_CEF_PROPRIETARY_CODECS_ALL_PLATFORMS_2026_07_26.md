@@ -1,9 +1,6 @@
 # Spec: CEF proprietary codec support (H.264/AAC) across Windows/macOS/Linux
 
-**Status:** Draft — design only, no implementation. Written after two
-research passes confirming the exact CI/build architecture; contains a
-correction to the original request's premise (see "Key finding" below)
-that should be confirmed before implementation starts.
+**Status:** implemented — Windows #2308, macOS rebuild (tag cef-macos-arm64-148.23.23-codecs) closed via #2347/#2399, Linux release cut, CI resolver #2353; H.264/AAC verified on all three platforms. Verified 2026-08-10.
 **Author:** Agent2
 **Date:** 2026-07-26
 **Related:** `docs/reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md`

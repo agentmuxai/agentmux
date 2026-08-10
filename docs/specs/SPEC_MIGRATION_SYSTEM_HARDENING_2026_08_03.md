@@ -1,6 +1,6 @@
 # Migration System Audit & Hardening Plan
 **Date:** 2026-08-03
-**Status:** Phase 0 implemented (this PR, commits `28a925c4`/`f9505afb`) — Phases 1-6 still proposed, not started.
+**Status:** active — Phase 0 shipped in PR #2394; Phases 1-6 not started (migration failure is still non-fatal at bootstrap.rs). Verified 2026-08-10.
 **Scope:** agentmux-srv, agentmux-launcher, agentmux-cef
 **Related:** [`docs/specs/SPEC_DOCS_LIFECYCLE_HARDENING_2026_08_03.md`](./SPEC_DOCS_LIFECYCLE_HARDENING_2026_08_03.md) — written the same day, deliberately the same shape. Both audits found the identical underlying pattern: a marker that claims a state (a migration flag / a doc's `Status:` field) is trusted without ever being checked against ground truth, and nothing re-verifies it once written.
 **Trigger:** Live incident — a launched agent ("Agent1", channel `local-main-b28b7a-9172ff88`, srv v0.54.9 / commit `1899c5ed`) failed to start, and a `FOREIGN KEY constraint failed` warning on `linkagentidentity` appeared in the logs around the same time.

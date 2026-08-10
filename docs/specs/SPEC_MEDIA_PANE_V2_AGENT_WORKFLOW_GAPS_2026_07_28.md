@@ -1,6 +1,6 @@
 # Spec: Media pane v2 — gaps found running a real agent video-editing workflow through it
 
-**Status:** Proposed
+**Status:** proposed — verified unimplemented as of 2026-08-10 (docs-only commit #2344; no transcode/thumbnail/gallery code).
 **Author:** AgentY
 **Date:** 2026-07-28
 **Related:** `docs/specs/SPEC_MEDIA_PANE_2026_07_26.md` (v1 — implemented, PR #2299;

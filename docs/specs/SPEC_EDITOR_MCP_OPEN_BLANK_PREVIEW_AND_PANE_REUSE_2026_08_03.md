@@ -1,6 +1,6 @@
 # Plan: MCP-opened markdown blank-preview investigation + Editor-pane reuse
 
-**Status:** Proposed
+**Status:** active — Part 2 pane reuse shipped (PR #2404) and Part 1 dead-meta cleanup shipped (PR #2403); Part 1's blank-preview root-cause fix remains open pending a live repro. Verified 2026-08-10.
 **Author:** AgentY
 **Date:** 2026-08-03
 **Related:** `docs/analysis/ANALYSIS_EDITOR_MD_BUGS_2026_06_20.md` (the original
