@@ -84,6 +84,19 @@ impl ProviderConfig {
             ControllerType::Acp => "acp",
         }
     }
+
+    /// Return the provider-specific continuation argv strategy stored in pane
+    /// metadata. Codex uses an `exec resume` subcommand; existing providers
+    /// append their configured flag.
+    pub fn resume_strategy_str(&self) -> &'static str {
+        if self.id == "codex" {
+            "codex-exec"
+        } else if self.resume_flag.is_some() {
+            "flag"
+        } else {
+            "none"
+        }
+    }
 }
 
 // ─── Provider definitions ────────────────────────────────────────────────────
@@ -474,10 +487,11 @@ mod tests {
     }
 
     #[test]
-    fn codex_resume_flag_is_none() {
+    fn codex_uses_exec_resume_strategy() {
         let p = get_provider("codex").unwrap();
         assert!(p.resume_flag.is_none());
         assert_eq!(p.controller_type, ControllerType::Subprocess);
+        assert_eq!(p.resume_strategy_str(), "codex-exec");
     }
 
     #[test]

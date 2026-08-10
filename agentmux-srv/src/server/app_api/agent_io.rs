@@ -252,6 +252,17 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     let resume_flag = obj::meta_get_string(
                         &block.meta, "agent:resume_flag", "--resume",
                     );
+                    let resume_strategy = obj::meta_get_string(
+                        &block.meta,
+                        "agent:resume_strategy",
+                        if session_id_field == "thread_id" {
+                            "codex-exec"
+                        } else if resume_flag.is_empty() {
+                            "none"
+                        } else {
+                            "flag"
+                        },
+                    );
                     // Picker reattach (parallel of the websocket-path
                     // logic): hydrate the persisted session id from
                     // block meta so spawn_turn appends --resume <sid>
@@ -319,6 +330,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             env_vars,
                             message: cmd.message,
                             resume_flag,
+                            resume_strategy,
                             session_id_field,
                             message_id: None,
                             session_id: if persisted_session_id.is_empty() {
@@ -338,6 +350,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             env_vars,
                             message: cmd.message,
                             resume_flag,
+                            resume_strategy,
                             session_id_field,
                             message_id: None,
                             session_id: if persisted_session_id.is_empty() {

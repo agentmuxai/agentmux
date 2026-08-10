@@ -75,6 +75,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                     env_vars: cmd.env_vars,
                     message: cmd.message,
                     resume_flag: "--resume".to_string(),
+                    resume_strategy: "flag".to_string(),
                     session_id_field: "session_id".to_string(),
                     message_id: None,
                     // Direct-spawn legacy command — caller doesn't
@@ -335,6 +336,17 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                     let resume_flag = crate::backend::obj::meta_get_string(
                         &block.meta, "agent:resume_flag", "--resume",
                     );
+                    let resume_strategy = crate::backend::obj::meta_get_string(
+                        &block.meta,
+                        "agent:resume_strategy",
+                        if session_id_field == "thread_id" {
+                            "codex-exec"
+                        } else if resume_flag.is_empty() {
+                            "none"
+                        } else {
+                            "flag"
+                        },
+                    );
                     // Picker reattach: the frontend writes the prior
                     // block's session id here when launching with
                     // `continueOfInstanceId`. spawn_turn hydrates its
@@ -436,6 +448,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                             env_vars,
                             message: cmd.message,
                             resume_flag,
+                            resume_strategy,
                             session_id_field,
                             message_id: cmd.message_id,
                             session_id: if persisted_session_id.is_empty() {
@@ -455,6 +468,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                             env_vars,
                             message: cmd.message,
                             resume_flag,
+                            resume_strategy,
                             session_id_field,
                             message_id: cmd.message_id,
                             session_id: if persisted_session_id.is_empty() {

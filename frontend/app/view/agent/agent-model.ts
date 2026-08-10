@@ -267,6 +267,7 @@ export class AgentViewModel implements ViewModel {
                     "cmd:args": cliArgs,
                     "cmd:env": envVars,
                     "agent:resume_flag": provider.resumeFlag ?? "",
+                    "agent:resume_strategy": provider.resumeStrategy ?? (provider.resumeFlag ? "flag" : "none"),
                     "agent:session_id_field": provider.sessionIdField,
                 },
             });
@@ -614,6 +615,7 @@ export class AgentViewModel implements ViewModel {
                 "cmd:cwd": finalWorkDir,
                 "cmd:env": envVars,
                 "agent:resume_flag": provider.resumeFlag ?? "",
+                "agent:resume_strategy": provider.resumeStrategy ?? (provider.resumeFlag ? "flag" : "none"),
                 "agent:session_id_field": provider.sessionIdField,
                 "agent:sessionid": continueSid,
                 ...zoomMeta,

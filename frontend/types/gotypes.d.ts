@@ -1396,6 +1396,7 @@ declare global {
         agentOutputFormat?: string;
         agentBinDir?: string;
         "agent:resume_flag"?: string;
+        "agent:resume_strategy"?: "none" | "flag" | "codex-exec";
         "agent:session_id_field"?: string;
         "agent:sessionid"?: string;
         /** Last classified agent failure; set on error exit, cleared on clean exit. */
