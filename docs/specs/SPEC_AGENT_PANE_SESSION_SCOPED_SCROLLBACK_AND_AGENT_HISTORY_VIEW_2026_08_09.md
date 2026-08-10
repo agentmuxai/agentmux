@@ -57,6 +57,30 @@ So the pane is now *honest* about the boundary — but the pre-boundary
 conversation still fills the scrollback above the divider. The human still
 reads dead context by default; the divider is a caption, not a scope.
 
+**The `resumed` divider is mis-timed and over-shown (observed live
+2026-08-09).** Two compounding problems with *"Session continued"*:
+
+- **It fires on internal process recycles the user never saw.** A resume
+  attempt happens on *every* controller spawn that has a persisted
+  `session_id` — not just user-visible events like an app restart, but
+  routine internals: the CLI process exiting between turns and being
+  respawned on the next message, and the stall-fallback respawn
+  (`respawn_once_for_leftover_queue`). From the user's chair nothing
+  happened, yet a full divider row appears announcing that nothing happened.
+- **It lands *after* the content it refers to.** `Resumed` is only emitted
+  once the outcome is *unambiguously* known, and per
+  `persistent_resume.rs:283-322` a same-sid echo alone is not proof — the
+  emission waits for `is_confirmed_success`, i.e. the first successfully
+  *completed turn* of the respawned process. So the persisted line (and the
+  divider) appears in the stream *below* the first post-resume exchange:
+  the user sends a message, reads the reply, and then "Session continued"
+  materializes under it. Correct machinery, absurd-reading placement.
+
+`Fresh` outcomes don't share the placement problem in the case that matters:
+the `FireRetry` path emits before the retried messages are redelivered, and
+a fresh boundary genuinely changes what the scrollback means. The refinement
+(§3.5): `fresh` stays prominent; `resumed` stops being a transcript divider.
+
 ### 1.2 Restore replays everything in `:current`, boundary-blind
 
 - Store shape: `agent:<definitionId>:current/` holds `output` (raw NDJSON) +
@@ -88,14 +112,29 @@ reads dead context by default; the divider is a caption, not a scope.
   (`PaneRow`: failure row, session digest, ActivityDock) stack *around* the
   always-mounted `AgentDocumentView`; nothing replaces it.
 
-### 1.4 Timestamps are sparse in replayed history
+### 1.4 Timestamps are sparse in replayed history — and this already breaks
+### a shipped feature
 
 Most provider events carry no wire timestamp, and replay deliberately doesn't
 invent them (`parseHistoryLines.ts:57` — thinking/tool_call events get
 `timestamp: 0` or none). The reliably-timestamped records are the synthetic
 frames AgentMux itself writes (`agentmux_session_outcome`, `compact_boundary`)
-and result-type frames that happen to include one. Day separators need a
-timestamp source that actually exists (§4.4).
+and result-type frames that happen to include one.
+
+The cost is already user-visible: the **hover-to-peek metadata system**
+(PR #2392 lineage — `UserMessageBlock.tsx:107-115`, `ToolBlock.tsx:303-311`,
+`MarkdownBlock.tsx`, rendered via the Portal-based `PeekOverlay.tsx`) is
+built to show `formatExactTime(ts) · formatTimeAgo(ts)` on hover, but is
+gated on `props.node.timestamp != null`. Live-received nodes are stamped on
+arrival, so hover works *during* a session — but after any pane
+restore/reopen, replayed nodes come back timestamp-less and the hover shows
+no time at all. The hover system isn't broken; **its data source is**. Day
+separators (§4.4) and hover timestamps are the same missing input.
+
+A second sharp edge: some replay paths use `timestamp: 0` as their
+"unknown" sentinel while the hover gate checks `!= null` — a zero that
+leaks through renders as 1970. "Unknown" must be represented as absent,
+uniformly (§4.4).
 
 ---
 
@@ -200,9 +239,39 @@ A single row pinned at the top of the truncated scrollback:
 - Clicking it opens the Agent History view (§4) scrolled to the boundary the
   working pane was clamped at, so "what came right before this?" is one
   click + zero hunting.
-- When the working session itself contains `resumed` dividers or compaction
-  dividers, those render inline as today — the link row only marks the
-  *fresh* scope edge.
+- When the working session itself contains compaction dividers, those render
+  inline as today — the link row only marks the *fresh* scope edge.
+
+### 3.5 Demote the `resumed` divider (the "Session continued" fix)
+
+Per §1.1, *"Session continued"* fires on user-invisible process recycles and
+lands below the content it refers to. A `resumed` outcome is a **non-event
+for knowledge scope** — the model has everything the pane shows, which is the
+pane's default implication anyway. A divider row asserting the default is
+noise, and mis-placed noise at that.
+
+Refinement (display-only — the persisted `agentmux_session_outcome` line is
+untouched; it remains the §3.1 anchor semantics, a diagnostics record, and a
+useful landmark in Agent History):
+
+- **Working view: stop rendering `resumed` outcomes as divider rows.**
+  `DocumentRow.tsx`'s `session_outcome` branch renders only
+  `outcome === "fresh"`; `renderers.ts` sizes `resumed` nodes to height 0
+  (same mechanism collapsed nodes already use), or the parse layer skips
+  materializing a visible node for them in the working store.
+- **Where "resumed" information still surfaces:** it already does, in the
+  right place — the resume-failure banner path (`AgentControlBar.tsx`) covers
+  the doubt case, and §1.1's emission analysis shows a *confirmed* resume
+  needs no announcement. If we later want positive confirmation after a
+  visible restart, that belongs in transient pane chrome (a `PaneRow`
+  accessory that auto-dismisses), not the permanent transcript. Not in
+  scope.
+- **Agent History view: keep them, subtle.** In the full-history reading
+  posture, process-restart landmarks are genuinely useful context. Render
+  `resumed` there as a thin inline marker (timestamp + "session resumed"),
+  visually lighter than `fresh` and day separators.
+- The already-persisted backlog of `resumed` lines in existing streams needs
+  no migration — they simply stop rendering in the working view.
 
 ---
 
@@ -269,26 +338,51 @@ read-only configuration. Same `agent:session:read` RPC, same
 `parseHistoryLines`, same renderer registry — no new backend endpoints for
 phase 2.
 
-### 4.4 Day separators with sparse timestamps
+### 4.4 Node timestamps become a first-class requirement
 
-Rule: emit a `day_divider` synthetic row whenever the **best-known timestamp**
-crosses a local-calendar-day boundary between consecutive nodes, where
-best-known = the node's own timestamp if present, else the last preceding
-known timestamp (carried forward). Untimestamped runs therefore group under
-the last known day rather than inventing times — honest and stable.
+**Decision (2026-08-09): going forward, every conversation node carries a
+timestamp that survives restore.** This is no longer an optional history-view
+refinement — it is the shared data source for three surfaces: day separators
+here, the already-shipped hover-to-peek time display (§1.4, currently
+inoperative after restore), and future jump-to-date navigation.
 
-- Reliable in-stream sources today: `agentmux_session_outcome` (RFC3339,
-  backend-stamped), `compact_boundary`, and result frames that carry
-  `timestamp`. In practice every session start is stamped, so day resolution
-  is at worst "the day the session containing this message started" — already
-  sufficient for perusal.
-- **Optional backend refinement (phase 3):** stamp receive-time on mirror.
-  The global-zone append path (`shell.rs::handle_append_block_file` /
-  `resolve_global_output_zone`) appends batches whose arrival time it knows;
-  writing a sidecar `output.tsidx` (NDJSON of `{line, unix_ms}` per batch) —
-  additive, separate file, no change to `output`'s format or existing
-  parsers — gives the history view dense timestamps for exact day edges and
-  future "jump to date." Explicitly not required for phase 2.
+**Capture — stamp at append time (backend, additive):** the append path that
+writes every transcript line
+(`shell.rs::handle_append_block_file` + `resolve_global_output_zone`) knows
+each batch's arrival time. It additionally appends to a sidecar
+`output.tsidx` in the same zone — NDJSON of `{line: <first line of batch>,
+unix_ms}` per batch. Deliberately a sidecar, not an envelope around `output`
+lines: `output`'s format is consumed by every existing parser and the
+snapshot/high-water-mark machinery; an in-band change is a migration, a
+sidecar is a pure addition. Missing/truncated `tsidx` degrades gracefully to
+today's behavior. Batch-granularity (one stamp per append, not per line) is
+sufficient — a batch is one flush of one turn's output; sub-second precision
+within a batch has no UI meaning.
+
+**Replay — stamp nodes from the sidecar:** `agent:session:read` (and the
+paging reads) return the relevant `tsidx` slice alongside the NDJSON window;
+`parseHistoryLines` resolves each line's batch stamp and sets
+`node.timestamp` wherever the wire frame didn't carry a better one. With
+that, restored nodes are timestamped and **the hover peek works after
+restore with zero changes to the hover components themselves**.
+
+**Sentinel hygiene:** "unknown" is *absent* (`undefined`), never `0`. The
+replay paths that currently write `timestamp: 0` fallbacks change to omit
+the field; the hover gate (`!= null`) then does the right thing everywhere,
+and no path can render 1970.
+
+**Day separators** then follow a simple rule: emit a `day_divider` synthetic
+row whenever the best-known timestamp crosses a local-calendar-day boundary
+between consecutive nodes — best-known = the node's own timestamp if
+present, else the last preceding known timestamp (carried forward).
+
+- For **new content** (post-`tsidx`), day edges are exact.
+- For **legacy content** (lines appended before `tsidx` existed — no receive
+  time was ever recorded; backfill is impossible), the carry-forward rule
+  anchors on what legacy streams do have: `agentmux_session_outcome`,
+  `compact_boundary`, and result frames. Worst case, a legacy message groups
+  under the day its session started — honest, and it only ever applies to
+  pre-upgrade history.
 - `day_divider` rows are render-time synthetics (like the link row, not
   persisted, not part of the node stream), id'd `day-<YYYY-MM-DD>` so
   pagination prepends merge instead of duplicating — same stable-id rationale
@@ -321,12 +415,19 @@ Once the Agent History view exists, wire them in:
   new `view/agent/history/AgentHistoryView.tsx` (+ day-divider injection,
   ~small — composition of existing pieces),
   `virtualization/{DocumentRow.tsx,renderers.ts,expansion-source.ts}`
-  (+`day_divider` row, `context_compacted`-shaped),
+  (+`day_divider` row, `context_compacted`-shaped; `session_outcome` row
+  gated to `fresh` in working view per §3.5),
+  `parseHistoryLines.ts` (tsidx stamping + drop `timestamp: 0` sentinels),
   `components/AgentControlBar.tsx` (menu entry).
-- **Backend:** none for phases 1–2. Phase 3: `output.tsidx` sidecar append +
-  archive-section reads (existing RPCs).
+- **Backend:** phase 1: none. Phase 2: the `output.tsidx` sidecar append
+  (§4.4 — one write site in `shell.rs::handle_append_block_file`, mirrored
+  to the global zone like `output` itself) + returning the tsidx slice from
+  `agent:session:read`/paging reads. Phase 3: archive-section reads
+  (existing RPCs).
 - **Storage/format:** no changes to `output`, `output.state.json`, zone
-  naming, or any RPC contract in phases 1–2.
+  naming, or existing RPC response fields. `output.tsidx` is a new sibling
+  file; the session-read RPCs gain an optional response field (additive —
+  old frontends ignore it, new frontends tolerate its absence).
 - **Risk concentration:** the §3.2 clamp sits in the restore path that has
   had recent race/regression history — it must be a pure post-parse filter
   with no changes to read offsets/high-water-mark bookkeeping, so a clamp bug
@@ -337,9 +438,9 @@ Once the Agent History view exists, wire them in:
 
 | Phase | Scope | Outcome |
 |-------|-------|---------|
-| **P1** | §3: restore + live clamp at last `fresh` boundary; history **link row** (links to nothing yet → opens a "coming in P2" no-op is not acceptable — P1 ships only if P2 ships in the same release train; otherwise P1's link row is feature-flagged off and P1 is just the clamp + a static "prior history preserved" note on the divider) | Working pane = agent's actual knowledge |
-| **P2** | §4.1–4.4: Agent History view, `bodyMode` swap, day separators (sparse-timestamp rule), entry points | Full history perusable, per agent, in-pane |
-| **P3** | §4.5 archives section; `output.tsidx` dense timestamps; jump-to-date/boundary navigation | Complete retention story + groundwork for rotation |
+| **P1** | §3: restore + live clamp at last `fresh` boundary; §3.5 `resumed`-divider demotion (independent, immediately shippable); history **link row** (links to nothing yet → opens a "coming in P2" no-op is not acceptable — P1 ships only if P2 ships in the same release train; otherwise P1's link row is feature-flagged off and P1 is just the clamp + §3.5 + a static "prior history preserved" note on the divider) | Working pane = agent's actual knowledge; "Session continued" noise gone |
+| **P2** | §4.1–4.4: Agent History view, `bodyMode` swap, `output.tsidx` stamping + replay wiring (fixes hover timestamps as a side effect), day separators, entry points | Full history perusable, per agent, in-pane; hover times survive restore |
+| **P3** | §4.5 archives section; jump-to-date/boundary navigation; link-row session count | Complete retention story + groundwork for rotation |
 
 ## 7. Testing
 
@@ -347,9 +448,15 @@ Once the Agent History view exists, wire them in:
   boundary found mid-`loadOlder` page; multiple fresh boundaries → newest
   wins; `resumed`-only stream → no clamp; no-boundary legacy stream → no
   clamp), `SessionScopeTrim` (trim keeps boundary node, is idempotent,
-  no-ops when boundary is already first), day-divider injection (carry-
-  forward rule, id stability across pagination prepends, no divider between
-  same-day nodes).
+  no-ops when boundary is already first), §3.5 gating (`resumed` node not
+  visible in working view, visible-subtle in history view), day-divider
+  injection (carry-forward rule, id stability across pagination prepends,
+  no divider between same-day nodes), tsidx stamping (line→batch stamp
+  resolution; wire timestamp wins over batch stamp; absent tsidx → absent
+  timestamps, never `0`; no node renders a 1970 hover).
+- **Backend units:** tsidx append (one entry per batch, mirrored to global
+  zone, survives interleaved appends; truncated/corrupt tsidx is skipped
+  without failing the session read).
 - **Fixture replay:** extend the existing `parseHistoryLines.test.ts` /
   session-outcome fixtures with a two-session NDJSON fixture (session A →
   `fresh` outcome → session B) asserting: working restore shows only B +
