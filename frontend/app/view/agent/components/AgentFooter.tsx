@@ -543,6 +543,12 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     // it never trips the history-cursor reset in handleInput.
     const setComposerValue = (text: string): void => {
         if (!textareaRef) return;
+        // Consumes the Esc-cleared snapshot — the undo-restore call below
+        // reads `escClearedDraft` as its `text` argument BEFORE this runs, so
+        // nulling it here doesn't affect that write. Every other caller
+        // (ghost-text accept, history recall) is a fresh edit that should
+        // supersede a stale snapshot the same way typing does.
+        escClearedDraft = null;
         writeComposerValue(text);
         textareaRef.setSelectionRange(text.length, text.length);
         setIsBangCmd(text.startsWith("!"));
@@ -559,6 +565,12 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         // again from the newest sent message. (Programmatic recall writes the
         // value without dispatching `input`, so it doesn't reach here.)
         histPos = sentHistory.length;
+        // Any real keystroke (typed or voice-dispatched) supersedes the
+        // Esc-cleared snapshot — an empty box reached by typing-then-deleting
+        // is no longer "the direct result of Esc", so Ctrl/Cmd+Z must fall
+        // through to native undo instead of resurrecting stale text. (reagent
+        // P1 / codex P2 on PR #2497.)
+        escClearedDraft = null;
         // Perf marks per SPEC_INPUT_RESPONSIVENESS §7.1. Target: handler
         // body P95 < 5 ms. The mark span ends BEFORE the RAF enqueue so
         // we measure only the synchronous handler cost.
@@ -676,13 +688,19 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     // destructive programmatic edit (it bypasses the browser's native undo
     // stack via direct .value assignment); ordinary typing keeps native
     // undo, which the shortcut falls through to below.
+    //
+    // Invalidated (set back to null) by handleInput, setComposerValue, and
+    // handleSend — any edit or send after the Esc-clear means a later empty
+    // box is no longer "the direct result of" that Esc-clear, so it must not
+    // resurrect stale text. (reagent P1 / codex P2 on PR #2497.)
     let escClearedDraft: string | null = null;
     const undoComposer = (): void => {
         if (!textareaRef) return;
         textareaRef.focus();
         if (escClearedDraft != null && textareaRef.value.length === 0) {
+            // setComposerValue nulls escClearedDraft itself (it reads this
+            // argument before doing so) — no separate reset needed here.
             setComposerValue(escClearedDraft);
-            escClearedDraft = null;
             return;
         }
         // No snapshot to restore — fall through to the browser's own undo
@@ -719,6 +737,10 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
             histPos = sentHistory.length;
             histDraft = "";
             writeComposerValue("");
+            // A sent message supersedes any pending Esc-cleared snapshot —
+            // the now-empty box must not resurrect old text via Ctrl/Cmd+Z.
+            // (reagent P1 on PR #2497.)
+            escClearedDraft = null;
             setAutocompletePrefix(null);
             setIsBangCmd(false);
             // Scroll the new user message into view. SolidJS flushes the
