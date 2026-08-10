@@ -201,15 +201,29 @@ impl LanDiscovery {
             ("instance_id", instance_id.as_str()),
             ("auth_key", auth_key.as_str()),
         ];
+        // `""` alone does NOT mean "auto-detect" despite how that reads —
+        // `AsIpAddrs for &str`'s own doc comment: "If the string is empty,
+        // will return an empty set." Auto-detection is a SEPARATE opt-in:
+        // `.enable_addr_auto()` tells the daemon to fill in (and keep
+        // updated) this service's addresses from the host's own interfaces.
+        // Without it, a service registered via `ServiceInfo::new(..., "",
+        // ...)` has zero addresses and `addr_auto: false` (the struct's
+        // hardcoded default) — `register()` still returns `Ok(())` (it just
+        // enqueues a `Command::Register`, no synchronous validation), so
+        // this silently produced a service that was never actually
+        // discoverable by ANY peer, not even another mDNS client on the same
+        // host. Caught by `a_registered_instance_is_discoverable_by_an_
+        // independent_mdns_client` below.
         let service_info = ServiceInfo::new(
             SERVICE_TYPE,
             &service_name,
             &host_name_mdns,
-            "",  // empty = auto-detect IP
+            "",
             port,
             &properties[..],
         )
-        .map_err(|e| format!("ServiceInfo creation failed: {e}"))?;
+        .map_err(|e| format!("ServiceInfo creation failed: {e}"))?
+        .enable_addr_auto();
 
         let service_fullname = service_info.get_fullname().to_string();
 
@@ -726,11 +740,13 @@ impl LanDiscoveryController {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_lan_source, is_valid_probe, mdns_hostname, probe_response_json, UDP_PROBE_TYPE,
-        UDP_PROTOCOL_VERSION, UDP_RESPONSE_TYPE,
+        is_lan_source, is_valid_probe, mdns_hostname, probe_response_json, LanDiscovery,
+        SERVICE_TYPE, UDP_PROBE_TYPE, UDP_PROTOCOL_VERSION, UDP_RESPONSE_TYPE,
     };
+    use mdns_sd::ServiceEvent;
     use serde_json::json;
     use std::net::SocketAddr;
+    use std::sync::Arc;
     use tokio::net::UdpSocket;
 
     #[test]
@@ -877,6 +893,73 @@ mod tests {
         assert_eq!(response["version"], "1.2.3");
         assert_eq!(response["port"], 9999);
         assert_eq!(response["auth_key"], "secret-key");
+    }
+
+    // -- Real mDNS registration round-trip (reagent-style investigation:
+    //    LAN peer discovery was silently broken end-to-end — see below) --
+
+    /// Registers a real LanDiscovery instance (exactly as `start()` does in
+    /// production) and browses for it with a SEPARATE, independent
+    /// `mdns_sd::ServiceDaemon` — mirroring what a real peer's browse-side
+    /// would see. This is the one test in this module that touches the real
+    /// network stack (multicast on 5353); it's slow (~3s) and, like any mDNS
+    /// test, has a small flakiness ceiling on a hostile CI network — but it's
+    /// the only way to catch a registration bug that a browse-only or
+    /// probe-only unit test can't reach.
+    ///
+    /// This test is the reason the `""` (empty string) IP passed to
+    /// `ServiceInfo::new` in `start()` was found to be broken: mdns-sd's own
+    /// doc comment on `AsIpAddrs for &str` says plainly "If the string is
+    /// empty, will return an empty set" — NOT "auto-detect". Combined with
+    /// `ServiceInfo::new` hardcoding `addr_auto: false` and `start()` never
+    /// calling the builder's `.enable_addr_auto()`, every registered service
+    /// had zero addresses and no instruction to ever fill them in — it was
+    /// never actually discoverable, not by a real peer, not even by another
+    /// mDNS client on the SAME machine. `register()` itself has no
+    /// synchronous validation for this (it just enqueues a `Command::
+    /// Register` and returns `Ok`), so `start()` logged "LAN discovery
+    /// started" successfully every time despite never actually working.
+    #[tokio::test]
+    async fn a_registered_instance_is_discoverable_by_an_independent_mdns_client() {
+        let event_bus = Arc::new(crate::backend::eventbus::EventBus::new());
+        let instance_id = format!("test-{}", std::process::id());
+        let discovery = LanDiscovery::start(
+            instance_id.clone(),
+            "test-host".to_string(),
+            "0.0.0-test".to_string(),
+            54321,
+            "test-auth-key".to_string(),
+            event_bus,
+        )
+        .expect("LanDiscovery::start should succeed");
+
+        // Independent daemon — a stand-in for a real peer's browse side.
+        // Deliberately NOT the same ServiceDaemon `discovery` uses; a
+        // same-process shortcut (e.g. reading `discovery`'s own in-memory
+        // `instances` map) wouldn't exercise the actual wire announcement.
+        let browser_daemon = mdns_sd::ServiceDaemon::new().expect("browser daemon");
+        let receiver = browser_daemon.browse(SERVICE_TYPE).expect("browse");
+
+        let mut found = false;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            if let Ok(event) = receiver.recv_timeout(std::time::Duration::from_millis(200)) {
+                if let ServiceEvent::ServiceResolved(info) = event {
+                    if info.get_property_val_str("instance_id") == Some(instance_id.as_str()) {
+                        found = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        let _ = browser_daemon.shutdown();
+        discovery.shutdown();
+
+        assert!(
+            found,
+            "an independent mDNS client must be able to discover a freshly-registered LanDiscovery instance within 5s"
+        );
     }
 
     /// End-to-end probe/response round trip over real loopback sockets
