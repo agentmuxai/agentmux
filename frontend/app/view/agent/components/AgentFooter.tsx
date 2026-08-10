@@ -543,6 +543,12 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     // it never trips the history-cursor reset in handleInput.
     const setComposerValue = (text: string): void => {
         if (!textareaRef) return;
+        // Consumes the Esc-cleared snapshot — the undo-restore call below
+        // reads `escClearedDraft` as its `text` argument BEFORE this runs, so
+        // nulling it here doesn't affect that write. Every other caller
+        // (ghost-text accept, history recall) is a fresh edit that should
+        // supersede a stale snapshot the same way typing does.
+        escClearedDraft = null;
         writeComposerValue(text);
         textareaRef.setSelectionRange(text.length, text.length);
         setIsBangCmd(text.startsWith("!"));
@@ -559,6 +565,12 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         // again from the newest sent message. (Programmatic recall writes the
         // value without dispatching `input`, so it doesn't reach here.)
         histPos = sentHistory.length;
+        // Any real keystroke (typed or voice-dispatched) supersedes the
+        // Esc-cleared snapshot — an empty box reached by typing-then-deleting
+        // is no longer "the direct result of Esc", so Ctrl/Cmd+Z must fall
+        // through to native undo instead of resurrecting stale text. (reagent
+        // P1 / codex P2 on PR #2497.)
+        escClearedDraft = null;
         // Perf marks per SPEC_INPUT_RESPONSIVENESS §7.1. Target: handler
         // body P95 < 5 ms. The mark span ends BEFORE the RAF enqueue so
         // we measure only the synchronous handler cost.
@@ -670,6 +682,43 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         });
     });
 
+    // Draft cleared by Esc, held for Undo. Plain (non-reactive) — read
+    // fresh at Ctrl/Cmd+Z time and at context-menu-build time, never
+    // rendered. One level deep is deliberate: Esc-clear is the only
+    // destructive programmatic edit (it bypasses the browser's native undo
+    // stack via direct .value assignment); ordinary typing keeps native
+    // undo, which the shortcut falls through to below.
+    //
+    // Invalidated (set back to null) by handleInput, setComposerValue, and
+    // handleSend — any edit or send after the Esc-clear means a later empty
+    // box is no longer "the direct result of" that Esc-clear, so it must not
+    // resurrect stale text. (reagent P1 / codex P2 on PR #2497.)
+    let escClearedDraft: string | null = null;
+    const undoComposer = (): void => {
+        if (!textareaRef) return;
+        textareaRef.focus();
+        if (escClearedDraft != null && textareaRef.value.length === 0) {
+            // setComposerValue nulls escClearedDraft itself (it reads this
+            // argument before doing so) — no separate reset needed here.
+            setComposerValue(escClearedDraft);
+            return;
+        }
+        // No snapshot to restore — fall through to the browser's own undo
+        // (covers plain typed edits; a no-op if its stack is empty).
+        document.execCommand("undo");
+    };
+    /** "Undo" entry for the composer's right-click menu — leading item
+     *  above the standard Cut/Copy/Paste block (contextmenu.ts). Enabled
+     *  when there's an Esc-cleared draft to restore or any text native
+     *  undo could plausibly act on. */
+    const composerUndoItems = (): ContextMenuItem[] => [
+        {
+            label: "Undo",
+            enabled: escClearedDraft != null || (textareaRef?.value.length ?? 0) > 0,
+            click: undoComposer,
+        },
+    ];
+
     const handleSend = () => {
         if (!textareaRef) return;
         const message = textareaRef.value;
@@ -688,6 +737,10 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
             histPos = sentHistory.length;
             histDraft = "";
             writeComposerValue("");
+            // A sent message supersedes any pending Esc-cleared snapshot —
+            // the now-empty box must not resurrect old text via Ctrl/Cmd+Z.
+            // (reagent P1 on PR #2497.)
+            escClearedDraft = null;
             setAutocompletePrefix(null);
             setIsBangCmd(false);
             // Scroll the new user message into view. SolidJS flushes the
@@ -821,6 +874,18 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
             handleSend();
             return;
         }
+        // Undo an Esc-clear — platform-standard shortcut (Ctrl+Z on
+        // Windows/Linux, Cmd+Z on macOS). Only intercepted when the
+        // composer is empty and a cleared draft exists: in every other
+        // state the event falls through to the browser's native undo for
+        // ordinary typed edits.
+        if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "z") {
+            if (textareaRef && textareaRef.value.length === 0 && escClearedDraft != null) {
+                e.preventDefault();
+                undoComposer();
+            }
+            return;
+        }
         if (e.key === "Escape") {
             // Esc semantics (SPEC_AGENT_PANE_FOLLOWUPS item #9):
             //  - textarea has text → clear it, stay focused
@@ -828,6 +893,11 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
             if (!textareaRef) return;
             if (textareaRef.value.trim().length > 0) {
                 e.preventDefault();
+                // Snapshot for Undo (Ctrl/Cmd+Z or the right-click menu) —
+                // the programmatic clear below bypasses the browser's own
+                // undo stack (direct .value assignment), so without this
+                // an accidental Esc destroyed the draft irrecoverably.
+                escClearedDraft = textareaRef.value;
                 writeComposerValue("");
                 setIsBangCmd(false);
                 // Clearing exits history navigation — park the cursor at the
@@ -880,7 +950,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
                     // here silently shows a useless disabled-Copy menu instead
                     // of letting the user paste. See
                     // docs/specs/REPORT_CONTEXT_MENU_GAP_AUDIT_2026_08_07.md.
-                    onContextMenu={showTextInputContextMenu}
+                    onContextMenu={(e) => void showTextInputContextMenu(e, composerUndoItems())}
                     rows={1}
                 />
                 {/* Pinned to the composer's right edge instead of the pane's
