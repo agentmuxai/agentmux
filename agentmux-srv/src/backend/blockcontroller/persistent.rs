@@ -265,6 +265,14 @@ struct PersistentInner {
     /// dedup a spawn-claim race, a job `spawning_in_progress` now fully
     /// owns. This counter exists for a different, narrower purpose: giving
     /// `stop_requested_generation` something stable to compare against.
+    ///
+    /// ALSO bumped (without a spawn) by
+    /// `clear_session_id_for_fresh_spawn` to atomically retire every
+    /// existing generation's reader tasks alongside a session-id clear —
+    /// see its doc comment (codex P1 on PR #2500, second round). The
+    /// resulting numbering gap is deliberate and inert: generations are
+    /// only ever compared for equality; the invariant is "never reused,"
+    /// not "no gaps."
     spawn_generation: u64,
     /// AskUserQuestion `can_use_tool` control_requests awaiting a user answer:
     /// `tool_use_id -> (request_id, questions JSON)`. Filled by the stdout
@@ -1113,6 +1121,37 @@ impl PersistentSubprocessController {
     /// function never pops anything itself — it isn't tied to a specific
     /// message the way the original spawn attempt was), so a genuinely
     /// later, unrelated send will still eventually pick it up.
+    /// Atomically clears the ambient session id AND reserves a fresh
+    /// spawn generation, so every reader task belonging to any EXISTING
+    /// generation is stale from this point on. Used by both fresh-start
+    /// respawn paths (`respawn_once_for_leftover_queue`,
+    /// `retry_after_resume_failure`'s `BecomeSpawner` arm) in place of a
+    /// bare `session_id = None`.
+    ///
+    /// codex P1 on PR #2500 (second round): clearing alone left a window
+    /// — until `spawn_process`'s own generation bump, which happens AFTER
+    /// the `--resume` decision reads `session_id` and after the process
+    /// is spawned — where the dying generation still equaled
+    /// `spawn_generation`, so its stdout reader's stale-sid echo passed
+    /// `try_capture_session_id`'s currency gate (issue #2366) and was
+    /// re-adopted: the supposedly fresh spawn could reattach
+    /// `--resume <stale-sid>` with no retry payload armed to catch the
+    /// repeat failure. Reserving the next generation in the same lock
+    /// acquisition as the clear closes the whole window.
+    ///
+    /// The reserved generation is never itself spawned (`spawn_process`
+    /// bumps again) — see `spawn_generation`'s doc comment for why the
+    /// gap is inert. A `stop_process` racing into the reserve window
+    /// records a `StopRequested` for the never-spawned generation, which
+    /// the resume state machine ignores; both callers only reach this
+    /// point after the prior generation's tracking has already resolved,
+    /// so no stop-intent is lost that wasn't equally lost before.
+    fn clear_session_id_for_fresh_spawn(&self) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.spawn_generation += 1;
+        inner.session_id = None;
+    }
+
     fn respawn_once_for_leftover_queue(&self, mut config: PersistentSpawnConfig) {
         config.session_id = String::new();
         // reagentx P0 on PR #2360 (sixth review pass, round 11): clearing
@@ -1156,10 +1195,13 @@ impl PersistentSubprocessController {
         // affects THIS respawn's own `--resume` decision (already forced
         // empty via `config.session_id` above) and carries no such
         // permanent, over-broad risk. The narrower race the poisoning was
-        // meant to close is real but far rarer than the cases above;
-        // tracked as a documented follow-up instead of reintroducing this
-        // regression.
-        self.inner.lock().unwrap().session_id = None;
+        // meant to close — a still-racing reader task from the doomed
+        // process re-capturing the same sid right after a plain clear —
+        // is now closed WITHOUT poisoning: the clear also reserves a
+        // fresh spawn generation, making every existing generation's
+        // capture stale to `try_capture_session_id`'s currency gate (see
+        // `clear_session_id_for_fresh_spawn`'s own doc comment).
+        self.clear_session_id_for_fresh_spawn();
         let retry_config = config.clone();
         let spawn_result = self.spawn_process(config, None);
         match &spawn_result {
@@ -1555,7 +1597,10 @@ impl PersistentSubprocessController {
                 // `DeliverDirect` or `Queued` above — breaking in-memory
                 // session tracking and turn-end subagent reconciliation
                 // for that process's remaining lifetime.
-                self.inner.lock().unwrap().session_id = None;
+                // Clear + reserve a fresh generation in one lock
+                // acquisition (same race as the leftover-queue fallback —
+                // see `clear_session_id_for_fresh_spawn`).
+                self.clear_session_id_for_fresh_spawn();
                 let retry_config = config.clone();
                 let spawn_result = self.spawn_process(config, None);
                 match &spawn_result {
@@ -3592,6 +3637,38 @@ mod send_input_tests {
     /// (issue #2365 — retry batches carry identity, not just text).
     fn qentry(seq: u64, json: &str) -> persistent_resume::QueuedRetryEntry {
         persistent_resume::QueuedRetryEntry { seq, json: json.to_string() }
+    }
+
+    /// codex P1 on PR #2500 (second round): the fresh-start clear must
+    /// retire every existing generation IN THE SAME lock acquisition —
+    /// a bare `session_id = None` left the dying generation still equal
+    /// to `spawn_generation` until `spawn_process`'s own (later) bump,
+    /// so its stdout reader's stale echo passed the #2366 currency gate
+    /// during exactly the window where `spawn_process` reads
+    /// `session_id` for the `--resume` decision.
+    #[test]
+    fn fresh_spawn_clear_makes_the_dying_generations_capture_stale_immediately() {
+        let c = controller();
+        {
+            let mut inner = c.inner.lock().unwrap();
+            inner.spawn_generation = 1;
+            inner.session_id = Some("stale-sid".to_string());
+        }
+
+        // The fallback/retry path clears — BEFORE any new spawn exists.
+        c.clear_session_id_for_fresh_spawn();
+
+        // The gen-1 reader's buffered echo lands in the pre-spawn window.
+        let mut inner = c.inner.lock().unwrap();
+        let (adopted, _) = inner.try_capture_session_id("stale-sid", 1, false);
+
+        assert!(
+            !adopted,
+            "the dying generation must be stale from the instant of the clear, \
+             not only after spawn_process's own later bump"
+        );
+        assert_eq!(inner.session_id, None, "the fresh spawn must not see a --resume sid");
+        assert_eq!(inner.spawn_generation, 2, "the clear reserves the next generation");
     }
 
     // codex P1 on PR #2360 (round 16, commit ce1642d90): `stop_process`
