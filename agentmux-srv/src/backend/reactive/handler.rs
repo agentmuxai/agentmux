@@ -105,6 +105,20 @@ impl Handler {
         block_id: &str,
         tab_id: Option<&str>,
     ) -> Result<(), String> {
+        self.register_agent_generated(agent_id, block_id, tab_id, 0)
+    }
+
+    /// [`register_agent`], recording the registering persistent-controller
+    /// spawn's generation so its own exit-handler can later
+    /// compare-and-remove ([`unregister_block_if_generation`]) instead of
+    /// blindly wiping a fallback respawn's fresh registration (issue #2363).
+    pub fn register_agent_generated(
+        &mut self,
+        agent_id: &str,
+        block_id: &str,
+        tab_id: Option<&str>,
+        spawn_generation: u64,
+    ) -> Result<(), String> {
         if !validate_agent_id(agent_id) {
             return Err(format!("invalid agent ID: {}", agent_id));
         }
@@ -135,6 +149,7 @@ impl Handler {
                 tab_id: tab_id.map(|s| s.to_string()),
                 registered_at: now,
                 last_seen: now,
+                spawn_generation,
             },
         );
 
@@ -156,6 +171,40 @@ impl Handler {
             self.agent_to_block.remove(&agent_id);
             self.agent_info.remove(&agent_id);
         }
+    }
+
+    /// Unregister by block ID **only if** the current registration was
+    /// written by the spawn with `expected_generation` — a
+    /// compare-and-remove for persistent-controller exit-handlers (issue
+    /// #2363: the handler's `is_current_generation` gate is read once,
+    /// while a fallback respawn re-registers on a parallel task; an
+    /// unconditional [`unregister_block`] here could wipe the NEW spawn's
+    /// registration, leaving the live agent invisible to Tier-1 delivery
+    /// with nothing left to re-register it). Runs atomically under the
+    /// handler's own lock (via the outer wrapper). A registration with no
+    /// recorded generation (0 — HTTP/PTY paths) is never removed by this
+    /// variant: leaving a stale entry to the TTL sweep is strictly safer
+    /// than deleting a live one.
+    ///
+    /// Returns true if the registration was ours and was removed.
+    pub fn unregister_block_if_generation(&mut self, block_id: &str, expected_generation: u64) -> bool {
+        let Some(agent_id) = self.block_to_agent.get(block_id) else {
+            return false;
+        };
+        let matches = self
+            .agent_info
+            .get(agent_id)
+            .is_some_and(|info| expected_generation != 0 && info.spawn_generation == expected_generation);
+        if !matches {
+            tracing::info!(
+                block_id = %block_id,
+                expected_generation = expected_generation,
+                "reactive: registration generation changed since this spawn registered — skipping unregister"
+            );
+            return false;
+        }
+        self.unregister_block(block_id);
+        true
     }
 
     /// Update the last_seen timestamp for an agent.
@@ -542,12 +591,35 @@ impl ReactiveHandler {
             .register_agent(agent_id, block_id, tab_id)
     }
 
+    /// See the inner [`Handler::register_agent_generated`].
+    pub fn register_agent_generated(
+        &self,
+        agent_id: &str,
+        block_id: &str,
+        tab_id: Option<&str>,
+        spawn_generation: u64,
+    ) -> Result<(), String> {
+        self.inner
+            .lock()
+            .unwrap()
+            .register_agent_generated(agent_id, block_id, tab_id, spawn_generation)
+    }
+
     pub fn unregister_agent(&self, agent_id: &str) {
         self.inner.lock().unwrap().unregister_agent(agent_id);
     }
 
     pub fn unregister_block(&self, block_id: &str) {
         self.inner.lock().unwrap().unregister_block(block_id);
+    }
+
+    /// See the inner [`Handler::unregister_block_if_generation`] — atomic
+    /// compare-and-remove under the handler lock (issue #2363).
+    pub fn unregister_block_if_generation(&self, block_id: &str, expected_generation: u64) -> bool {
+        self.inner
+            .lock()
+            .unwrap()
+            .unregister_block_if_generation(block_id, expected_generation)
     }
 
     /// Return the logical agent_id currently mapped to this block, if any.
