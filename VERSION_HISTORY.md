@@ -1,5 +1,16 @@
 # AgentMux Version History
 
+## 0.55.3 — 2026-08-10
+
+- feat(agent-pane): session-scoped scrollback — clamp at fresh session boundary, demote 'Session continued' divider
+- feat(agent): introduce model vendor as a concept distinct from harness
+- feat(agent-pane): output.tsidx receive-time sidecar — replayed transcript nodes get real timestamps (hover peek works after restore)
+- feat(agent-pane): Agent History view — read-only full-history reader with day separators; 'Earlier conversations' link row
+- fix(agent-pane): address codex review on #2507/#2508 — stats reset at fresh boundary, tsidx archive lifecycle, exact stamp offsets
+- test(persistent): add missing #2368 regression — held error line dropped on successful stale-resume retry
+- fix(lan-discovery): registered instances were never actually announced on the wire
+
+
 ## 0.55.2 — 2026-08-10
 
 - feat(agent): add Codex JSONL and resume support
