@@ -51,7 +51,7 @@ import { PaneRow } from "./components/PaneRow";
 import { PaneTabStrip } from "@/app/element/PaneTabStrip";
 import { PaneTabRenameInput } from "@/app/element/PaneTabRenameInput";
 import { useForkSet } from "./fork/useForkSet";
-import { getLayoutModelForStaticTab, pushBlockOntoStack, setActiveBlockInStack } from "@/layout/index";
+import { closeBlockInStack, getLayoutModelForStaticTab, pushBlockOntoStack, setActiveBlockInStack } from "@/layout/index";
 import { useAgentDropAttach } from "./hooks/useAgentDropAttach";
 import { useSnapshotPersistence } from "./hooks/useSnapshotPersistence";
 import { useAgentDecisions } from "./hooks/useAgentDecisions";
@@ -142,119 +142,107 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
     const block = model.blockAtom;
     const agentId = () => block()?.meta?.["agentId"];
 
-    return (
-        <ModalLayer scope="pane">
-            <Show
-                when={agentId()}
-                fallback={<AgentPicker model={model} />}
-            >
-                <AgentPresentationView model={model} agentId={agentId()} />
-            </Show>
-        </ModalLayer>
-    );
-};
-
-AgentViewWrapper.displayName = "AgentViewWrapper";
-
-// Launch flow lives in `flows/launch-flow.ts` — Step 2 of
-// specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md.
-
-const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agentId: string }): JSX.Element => {
-    const block = model.blockAtom;
-    const providerKey = (): string => block()?.meta?.["agentProvider"] ?? agentId;
-    const provider = () => getProvider(providerKey());
-    const outputFormat = (): string => block()?.meta?.["agentOutputFormat"] ?? "claude-stream-json";
-    // Human-readable display name for the composer placeholder. Matches
-    // the same fallback chain used by the onMount log() on line 380 —
-    // single source of truth for "what to call this agent in the UI."
-    // Reactive: the textarea placeholder updates if the user renames
-    // the agent without remounting the pane.
-    const agentName = (): string => block()?.meta?.["agentName"] ?? agentId;
-
-    // Reactive agent-definition list — used to resolve the current AgentDefinition object
-    // for identity/memory modal requests.
+    // In-pane tabs — rendered here (not inside AgentPresentationView) so the
+    // strip stays visible whether the active member is a launched
+    // conversation OR a blank/picker tab (AgentPicker, no agentId yet).
+    // Previously the strip lived only in AgentPresentationView and was
+    // driven solely by fork lineage, so clicking "+" (which pushes a blank,
+    // agentId-less block onto this pane's stack) swapped the ENTIRE pane to
+    // AgentPicker with no strip at all — the just-open tab (e.g. "Camper")
+    // had no visible pill to switch back to. Report: 2026-08-09.
+    //
+    // Two independent sources are merged into one tab list:
+    //  - "stack" tabs: every block in this pane's own blockStack (Phase 2 of
+    //    SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md §4.3) — always
+    //    present, agentId or not. This is the primary source and mirrors
+    //    term.tsx's termTabs.
+    //  - "fork" tabs: conversations sharing this one's `parent_id` lineage
+    //    that are open in ANOTHER top-level pane (Phase 3/4) — kept as
+    //    additional pills, deduped against the stack by blockId, so
+    //    cross-pane fork-switching keeps working.
+    const layoutModel = getLayoutModelForStaticTab();
     const agentDefinitions = useAgentDefinitions();
-    const currentAgent = createMemo(() => agentDefinitions().find((a) => a.id === agentId));
-
-    // Fork tab strip — Phases 3+4 of SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md.
-    // Phase 3 ("read-only switch") let the user jump between forks that
-    // already exist and are already open somewhere. Phase 4 originally made
-    // "+" auto-fork the current conversation via the launch modal; it now
-    // opens a blank AgentPicker tab instead (`handleNewAgentTab` below) so
-    // "+" behaves like a normal new-tab action, not an implicit fork.
-    // Replaces the unwired ForkBar/PaneRegions/PaneRow fork-bar path from
-    // SPEC_AGENT_PANE_FORKS_AND_AUX_PINS_2026_06_15 (which never shipped);
-    // `computeForkSet`'s derivation logic is reused as-is, only its
-    // PaneRow-based rendering is retired.
     const [openDefinitions] = useOpenDefinitionMap();
     const forks = useForkSet({
         definitions: agentDefinitions,
         openBlockByDef: openDefinitions,
-        activeDefinitionId: () => agentId,
+        activeDefinitionId: () => agentId() ?? "",
     });
-    // Review finding: a fork with no open blockId anywhere rendered as a
-    // normal-looking clickable tab that silently no-op'd on click (no
-    // feedback, looked broken). "Read-only switch" only makes sense for
-    // forks that ARE currently open somewhere — opening a not-yet-open fork
-    // is a launch action, correctly out of scope until Phase 4. Filter to
-    // switchable forks (open elsewhere, or the pane's own active one) so an
-    // unopenable fork simply isn't offered as a tab at all, rather than
-    // being offered and then silently doing nothing.
+    // Same "switchable" filter AgentPresentationView used to apply: a fork
+    // with no open blockId anywhere can't be jumped to, so it isn't offered.
     const switchableForks = createMemo(() => forks().filter((f) => f.isActive || !!f.blockId));
+
+    interface PaneTab {
+        blockId: string;
+        label: string;
+        /** AgentDefinition id, when this tab has launched an agent — stays
+         *  undefined for a still-blank picker tab (nothing to rename). */
+        definitionId?: string;
+    }
+    // Rename overrides, keyed by blockId — set synchronously by
+    // handleTabRenameConfirm below so a just-renamed tab (including a
+    // dormant, non-active member whose block meta isn't reactively tracked
+    // here) reflects its new label immediately, without waiting on the
+    // SetMetaCommand round-trip (term.tsx's titleOverrides precedent).
+    const [titleOverrides, setTitleOverrides] = createSignal<Record<string, string>>({});
+    const labelForBlock = (id: string): PaneTab => {
+        // The currently-mounted member reads its own reactive block meta;
+        // every other (dormant) stack member isn't mounted here — read its
+        // last-persisted meta directly, same as term.tsx's termTabs does.
+        const meta = id === model.blockId ? block()?.meta : WOS.getObjectValue<Block>(WOS.makeORef("block", id))?.meta;
+        const definitionId = meta?.["agentId"] as string | undefined;
+        const label = titleOverrides()[id] ?? (meta?.["agentName"] as string) ?? definitionId ?? "New Agent";
+        return { blockId: id, label, definitionId };
+    };
+    const stackTabs = createMemo<PaneTab[]>(() => {
+        // Reactive dependency: re-derive whenever ANY layout mutation
+        // happens (matches term.tsx's termTabs).
+        layoutModel.localTreeStateAtom();
+        const node = layoutModel.getNodeByBlockId(model.blockId);
+        const stack = node?.data?.blockStack?.length ? node.data.blockStack : [model.blockId];
+        return stack.map(labelForBlock);
+    });
+    const combinedTabs = createMemo<PaneTab[]>(() => {
+        const stack = stackTabs();
+        const stackIds = new Set(stack.map((t) => t.blockId));
+        const extras = switchableForks()
+            .filter((f) => f.blockId && !stackIds.has(f.blockId))
+            .map((f): PaneTab => ({ blockId: f.blockId!, label: f.title, definitionId: f.definitionId }));
+        return [...stack, ...extras];
+    });
     // Only render tab pills once there's something to switch BETWEEN — a
     // lone conversation shows just the "+" (no pill for itself). The
-    // moment a 2nd fork exists, both (including the first) appear as tabs.
-    const visibleForkTabs = createMemo(() => (switchableForks().length > 1 ? switchableForks() : []));
-    // Activating a fork tab has two cases, both "switch," neither "create":
-    // (1) the fork's block already lives in THIS pane's own block-stack
-    //     (only possible once Phase 4 ships pushBlockOntoStack) — swap the
-    //     active member in place via the Phase 2 mechanism; (2) today's only
-    //     reachable case — the fork is open as its own separate top-level
-    //     pane — jump focus to it via the pre-existing refocusNode, same as
-    //     the picker's "Switch to existing" flow already does.
-    const handleForkSwitch = (definitionId: string) => {
-        const entry = switchableForks().find((f) => f.definitionId === definitionId);
-        if (!entry || entry.isActive || !entry.blockId) return;
-        const layoutModel = getLayoutModelForStaticTab();
-        const myNode = layoutModel.getNodeByBlockId(model.blockId);
-        if (myNode?.data?.blockStack?.includes(entry.blockId)) {
-            setActiveBlockInStack(layoutModel, myNode.id, entry.blockId);
+    // moment a 2nd tab exists, both (including the first) appear.
+    const visibleTabs = createMemo(() => (combinedTabs().length > 1 ? combinedTabs() : []));
+    const activeBlockId = createMemo(() => {
+        layoutModel.localTreeStateAtom();
+        return layoutModel.getNodeByBlockId(model.blockId)?.data?.activeBlockId ?? model.blockId;
+    });
+    // Activating a tab has two cases, both "switch," neither "create": (1)
+    // the target block already lives in THIS pane's own block-stack — swap
+    // the active member in place; (2) a fork open as its own separate
+    // top-level pane — jump focus to it via refocusNode, same as the
+    // picker's "Switch to existing" flow already does.
+    const handleTabSwitch = (targetBlockId: string) => {
+        if (targetBlockId === activeBlockId()) return;
+        const node = layoutModel.getNodeByBlockId(model.blockId);
+        if (!node) return;
+        const stack = node.data?.blockStack?.length ? node.data.blockStack : [model.blockId];
+        if (stack.includes(targetBlockId)) {
+            setActiveBlockInStack(layoutModel, node.id, targetBlockId);
         } else {
-            refocusNode(entry.blockId);
+            refocusNode(targetBlockId);
         }
     };
-    // Double-click a fork tab to rename it —
-    // SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md §3.3/§4.
-    // No local override needed (unlike the terminal tab strip): the RPC
-    // broadcasts `agents:changed`, which `useAgentDefinitions()` already
-    // subscribes to, so `forks()`/`switchableForks()` pick up the new title
-    // through the normal reactive chain once the round-trip completes.
-    const [renamingForkId, setRenamingForkId] = createSignal<string | null>(null);
-    const handleForkRenameConfirm = async (definitionId: string, title: string): Promise<void> => {
-        setRenamingForkId(null);
-        try {
-            await RpcApi.RenameAgentDefinitionTitleCommand(TabRpcClient, { id: definitionId, title });
-        } catch (e: unknown) {
-            pushNotification({
-                icon: "fa-triangle-exclamation",
-                title: "Rename failed",
-                message: e instanceof Error ? e.message : String(e),
-                timestamp: new Date().toISOString(),
-                type: "error",
-                expiration: Date.now() + 8000,
-            });
-        }
-    };
-    // "+" on the fork tab strip. Opens a blank agent tab — the same
-    // starting-view picker (`AgentPicker`, "select an existing agent or
-    // create a new one") a brand-new agent pane shows — instead of jumping
-    // straight into the launch/fork modal. Mirrors term.tsx's
-    // handleTermTabAdd: allocate an unplaced block via pane.open (no
-    // agentId meta, so AgentViewWrapper's `agentId()` gate falls through to
-    // AgentPicker) and push it onto this pane's own stack. No modal, no
-    // implicit fork of the current conversation.
+    // "+" on the tab strip. Opens a blank agent tab — the same starting-view
+    // picker (`AgentPicker`, "select an existing agent or create a new
+    // one") a brand-new agent pane shows — instead of jumping straight into
+    // the launch/fork modal. Mirrors term.tsx's handleTermTabAdd: allocate
+    // an unplaced block via pane.open (no agentId meta, so this wrapper's
+    // `agentId()` gate falls through to AgentPicker) and push it onto this
+    // pane's own stack. No modal, no implicit fork of the current
+    // conversation.
     const handleNewAgentTab = async (): Promise<void> => {
-        const layoutModel = getLayoutModelForStaticTab();
         if (!layoutModel.getNodeByBlockId(model.blockId)) return;
         let paneOpenResult: { block_id: string };
         try {
@@ -274,18 +262,171 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             });
             return;
         }
-        // Review finding (term.tsx precedent): this pane could have closed
-        // while the RPC above was in flight — re-resolve the node fresh
-        // rather than trusting a pre-await reference. If it's gone, the
-        // skip_placement block we just created has nowhere to attach to;
-        // delete it instead of leaving an orphaned, unreachable block behind.
-        const myNode = layoutModel.getNodeByBlockId(model.blockId);
-        if (!myNode) {
+        // This pane could have closed while the RPC above was in flight —
+        // re-resolve the node fresh rather than trusting a pre-await
+        // reference. If it's gone, the skip_placement block we just
+        // created has nowhere to attach to; delete it instead of leaving
+        // an orphaned, unreachable block behind.
+        const node = layoutModel.getNodeByBlockId(model.blockId);
+        if (!node) {
             await ObjectService.DeleteBlock(paneOpenResult.block_id).catch(() => {});
             return;
         }
-        pushBlockOntoStack(layoutModel, myNode.id, paneOpenResult.block_id);
+        pushBlockOntoStack(layoutModel, node.id, paneOpenResult.block_id);
     };
+    // × on a tab (also middle-click, via PaneTabStrip's onMouseDown).
+    // Mirrors term.tsx's handleTermTabClose: resolve the block's OWNING
+    // node — for a stack member that's this pane (pop it out, delete just
+    // that block; last member closes the pane), for a cross-pane fork tab
+    // it's that other pane (same semantics apply there). closeBlockInStack
+    // guards against a blockId that isn't a member, so a stale tab entry
+    // can't close the wrong thing.
+    const handleTabClose = (targetBlockId: string) => {
+        const node = layoutModel.getNodeByBlockId(targetBlockId);
+        if (!node) return;
+        void closeBlockInStack(layoutModel, node.id, targetBlockId);
+    };
+    // Double-click a tab to rename it (only meaningful once it has launched
+    // an agent — a still-blank picker tab has nothing to rename). TWO writes
+    // are required (reagent P1 on PR #2488): stack-tab labels read
+    // `block.meta.agentName` (labelForBlock above), which
+    // RenameAgentDefinitionTitleCommand does NOT touch — it renames only the
+    // AgentDefinition row (name/branch_label), which is what fork tabs and
+    // the picker's agent list read. Writing only the definition left a
+    // stack tab's pill (and its pane title) showing the stale name forever;
+    // writing only block meta would leave fork tabs/the picker stale. The
+    // titleOverrides entry gives the pill its new label synchronously.
+    const [renamingBlockId, setRenamingBlockId] = createSignal<string | null>(null);
+    const handleTabRenameConfirm = async (tab: PaneTab, title: string): Promise<void> => {
+        setRenamingBlockId(null);
+        if (!tab.definitionId) return;
+        const prevOverride = titleOverrides()[tab.blockId];
+        setTitleOverrides((prev) => ({ ...prev, [tab.blockId]: title }));
+        // Definition rename FIRST — it's the authoritative store (fork tabs,
+        // AgentPicker). If it fails, nothing has been written anywhere:
+        // roll back the optimistic override and stop, so the two stores
+        // can't diverge (reagent P2 on PR #2488 round 6 — the old order
+        // could land the meta write and then fail the rename, leaving the
+        // stack pill and fork tabs permanently showing different names).
+        try {
+            await RpcApi.RenameAgentDefinitionTitleCommand(TabRpcClient, { id: tab.definitionId, title });
+        } catch (e: unknown) {
+            setTitleOverrides((prev) => {
+                const next = { ...prev };
+                if (prevOverride === undefined) delete next[tab.blockId];
+                else next[tab.blockId] = prevOverride;
+                return next;
+            });
+            pushNotification({
+                icon: "fa-triangle-exclamation",
+                title: "Rename failed",
+                message: e instanceof Error ? e.message : String(e),
+                timestamp: new Date().toISOString(),
+                type: "error",
+                expiration: Date.now() + 8000,
+            });
+            return;
+        }
+        // Denormalized copy the stack pill + pane title read. If THIS write
+        // fails after a successful rename, the kept titleOverrides entry
+        // still shows the new name for the rest of the session; the meta
+        // catches up on the agent's next launch (launchAgentDefinition
+        // rewrites agentName from the definition).
+        await RpcApi.SetMetaCommand(TabRpcClient, {
+            oref: WOS.makeORef("block", tab.blockId),
+            meta: { agentName: title } as any,
+        }).catch(() => {});
+    };
+
+    return (
+        <ModalLayer scope="pane">
+            {/* Flex-column stack: strip on top, content filling the rest.
+                Required because ModalLayer's mount is a plain 100%-height
+                box, NOT a flex column — without this wrapper the strip's
+                own height ADDS to `.agent-view`'s height:100%, overflowing
+                the pane and clipping the composer off the bottom (found
+                live 2026-08-09: "agent pane has no text input"). */}
+            <div class="agent-pane-stack">
+                {/* Top region, above everything else, matching the editor's own
+                    tab-strip placement and every general tabbed-UI convention.
+                    The "+" always renders — that's how you'd get to a second
+                    tab — but the tab pill itself stays hidden until there's
+                    something to switch BETWEEN (see visibleTabs above).
+                    SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md. */}
+                <PaneTabStrip
+                    tabs={visibleTabs()}
+                    activeId={activeBlockId()}
+                    getId={(t) => t.blockId}
+                    getLabel={(t) => t.label}
+                    onActivate={handleTabSwitch}
+                    onClose={handleTabClose}
+                    onTabDoubleClick={(t) => t.definitionId && setRenamingBlockId(t.blockId)}
+                    renderLabel={(t) =>
+                        renamingBlockId() === t.blockId && t.definitionId ? (
+                            <PaneTabRenameInput
+                                initialValue={t.label}
+                                onConfirm={(title) => void handleTabRenameConfirm(t, title)}
+                                onCancel={() => setRenamingBlockId(null)}
+                            />
+                        ) : (
+                            <span class="pane-tab-label">{t.label}</span>
+                        )
+                    }
+                    onAdd={() => void handleNewAgentTab()}
+                    addTitle="New tab"
+                />
+                <div class="agent-pane-stack-content">
+                    <Show
+                        when={agentId()}
+                        fallback={<AgentPicker model={model} />}
+                    >
+                        <AgentPresentationView model={model} agentId={agentId()} agentDefinitions={agentDefinitions} />
+                    </Show>
+                </div>
+            </div>
+        </ModalLayer>
+    );
+};
+
+AgentViewWrapper.displayName = "AgentViewWrapper";
+
+// Launch flow lives in `flows/launch-flow.ts` — Step 2 of
+// specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md.
+
+const AgentPresentationView = ({
+    model,
+    agentId,
+    agentDefinitions,
+}: {
+    model: AgentViewModel;
+    agentId: string;
+    /** The wrapper's own reactive definition list, passed down instead of a
+     *  second `useAgentDefinitions()` call here — each call issues its own
+     *  ListAgentDefinitionsCommand RPC + `agents:changed` subscription, and
+     *  this component is always co-mounted with the wrapper (reagent P2 on
+     *  PR #2488). */
+    agentDefinitions: () => AgentDefinition[];
+}): JSX.Element => {
+    const block = model.blockAtom;
+    const providerKey = (): string => block()?.meta?.["agentProvider"] ?? agentId;
+    const provider = () => getProvider(providerKey());
+    const outputFormat = (): string => block()?.meta?.["agentOutputFormat"] ?? "claude-stream-json";
+    // Human-readable display name for the composer placeholder. Matches
+    // the same fallback chain used by the onMount log() on line 380 —
+    // single source of truth for "what to call this agent in the UI."
+    // Reactive: the textarea placeholder updates if the user renames
+    // the agent without remounting the pane.
+    const agentName = (): string => block()?.meta?.["agentName"] ?? agentId;
+
+    // Reactive agent-definition list (from the wrapper) — used to resolve
+    // the current AgentDefinition object for identity/memory modal requests.
+    const currentAgent = createMemo(() => agentDefinitions().find((a) => a.id === agentId));
+
+    // Fork tab strip + in-pane "+" tab logic moved up to AgentViewWrapper
+    // (SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md §4.3 follow-up,
+    // 2026-08-09) so the strip stays visible even when the pane's active
+    // member is a blank/picker tab with no agentId yet — see that
+    // component's comment for the full rationale.
 
     // Wire the pane-scoped modal callback into the model so the single
     // title-bar "Stash" (backpack) icon can open the unified tabbed
@@ -1514,35 +1655,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 driven by AgentViewModel.viewName / viewIcon / endIconButtons.
                 See SPEC_AGENT_PANE_FOLLOWUPS item #8. */}
 
-            {/* Fork tab strip — top region, above everything else, matching
-                the editor's own tab-strip placement and every general
-                tabbed-UI convention. The "+" always renders once an agent
-                is running — that's how you'd get to a second conversation —
-                but the tab pill itself stays hidden until there's something
-                to switch BETWEEN — a lone conversation shows only the "+";
-                the moment a fork exists, both appear.
-                SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md. */}
-            <PaneTabStrip
-                tabs={visibleForkTabs()}
-                activeId={agentId}
-                getId={(f) => f.definitionId}
-                getLabel={(f) => f.title}
-                onActivate={handleForkSwitch}
-                onTabDoubleClick={(f) => setRenamingForkId(f.definitionId)}
-                renderLabel={(f) =>
-                    renamingForkId() === f.definitionId ? (
-                        <PaneTabRenameInput
-                            initialValue={f.title}
-                            onConfirm={(title) => void handleForkRenameConfirm(f.definitionId, title)}
-                            onCancel={() => setRenamingForkId(null)}
-                        />
-                    ) : (
-                        <span class="pane-tab-label">{f.title}</span>
-                    )
-                }
-                onAdd={() => void handleNewAgentTab()}
-                addTitle="New tab"
-            />
+            {/* Tab strip now lives in AgentViewWrapper — see its comment. */}
 
             <AgentSearchBar
                 visible={search.visible}
