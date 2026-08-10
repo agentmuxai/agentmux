@@ -36,6 +36,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
 import { parseHistoryLines } from "../parseHistoryLines";
+import { lastFreshBoundaryIndex } from "../session-outcome";
 
 import type { DocumentState, FilterState, LogFn } from "../types";
 
@@ -176,8 +177,20 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 batch(() => opts.model.dispatchDoc({ type: "HistoryLoaded", nodes: newNodes }));
             }
 
-            setHistoryOffset(newOffset);
-            opts.log("history", `loaded ${newNodes.length} older messages (offset ${newOffset})`);
+            // Session-scope edge: a fresh session-outcome boundary in this
+            // page means everything at offsets below it is content the
+            // model does not have — the reducer keeps only the
+            // at-or-after-boundary part of this page, and further
+            // load-older would only fetch pages the reducer drops
+            // wholesale. Stop paging here (spec §3.2). The full stream
+            // stays on disk for the Agent History view (P2).
+            if (lastFreshBoundaryIndex(newNodes) >= 0) {
+                setHistoryOffset(0);
+                opts.log("history", `session boundary reached — older history is out of the working session's scope`);
+            } else {
+                setHistoryOffset(newOffset);
+            }
+            opts.log("history", `loaded ${newNodes.length} older messages (offset ${historyOffset()})`);
         } catch (err: any) {
             opts.log("history", `failed to load older messages: ${err?.message ?? String(err)}`, "warn");
         } finally {
@@ -362,12 +375,21 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                         // NDJSON replay path below.
                         const available = typeof rangeResp.total === "number" ? rangeResp.total : hwm;
                         const clampedStart = Math.min(windowStart, available);
-                        setHistoryOffset(clampedStart);
+                        // Session-scope edge (spec §3.2): a fresh boundary
+                        // inside the restored window means the reducer
+                        // clamped the visible document at it — lines older
+                        // than the window are out of scope too, so
+                        // load-older must not page into them. Offset 0
+                        // makes loadOlder a no-op.
+                        const scopeClamped = lastFreshBoundaryIndex(nodes) >= 0;
+                        setHistoryOffset(scopeClamped ? 0 : clampedStart);
                         setHistoryTotal(available);
                         opts.log(
                             "history",
                             `v2 restore: ${nodes.length} nodes from lines [${clampedStart}, ${available})` +
-                            (clampedStart > 0 ? ` (${clampedStart} older lines available via load-older)` : "") +
+                            (scopeClamped
+                                ? " (clamped to session scope — older history via Agent History)"
+                                : clampedStart > 0 ? ` (${clampedStart} older lines available via load-older)` : "") +
                             (ds?.collapsedNodeIds?.length ? `, ${ds.collapsedNodeIds.length} collapsed` : ""),
                         );
                         opts.model.dispatchPane({ type: "InitReady", at: Date.now() });
@@ -480,7 +502,8 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 // the frontend never asks for offsets the backend can't
                 // serve.
                 const available = rangeResp.total ?? total;
-                setHistoryOffset(offset);
+                // Same session-scope edge as the v2-restore path above.
+                setHistoryOffset(lastFreshBoundaryIndex(nodes) >= 0 ? 0 : offset);
                 setHistoryTotal(available);
 
                 opts.log("history", `loaded ${nodes.length} of ${available} previous messages`);

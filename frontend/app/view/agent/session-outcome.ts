@@ -72,3 +72,24 @@ export function sessionOutcomeLiveTimestamp(frameTimestamp: string | null | unde
     const parsed = typeof frameTimestamp === "string" ? Date.parse(frameTimestamp) : NaN;
     return Number.isNaN(parsed) ? Date.now() : parsed;
 }
+
+/**
+ * Index of the LAST `session_outcome` node with `outcome: "fresh"` in an
+ * ordered node list, or -1 if none. A `fresh` outcome is the working
+ * scrollback's scope anchor: the model has none of the content before it,
+ * so the working view must not show that content
+ * (SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md
+ * §3.1). `resumed` outcomes are NOT anchors — the model genuinely has the
+ * prior turns. Structurally typed (not `DocumentNode[]`) so both the
+ * document reducer and the pagination hook can call it without an import
+ * cycle through the full node union.
+ */
+export function lastFreshBoundaryIndex(
+    nodes: ReadonlyArray<{ type: string; outcome?: string }>,
+): number {
+    for (let i = nodes.length - 1; i >= 0; i--) {
+        const n = nodes[i];
+        if (n.type === "session_outcome" && n.outcome === "fresh") return i;
+    }
+    return -1;
+}

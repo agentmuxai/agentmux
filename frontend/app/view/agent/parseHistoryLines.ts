@@ -150,7 +150,18 @@ export function parseHistoryLines(
         if (rawEvent.type === "system" && rawEvent.subtype === "agentmux_session_outcome") {
             parser.flushPending();
             const data = parseSessionOutcomeFrame(rawEvent);
-            if (data) {
+            // `resumed` outcomes are demoted out of the working transcript
+            // (SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW
+            // _2026_08_09.md §3.5): a confirmed resume fires on
+            // user-invisible process recycles and its persisted line lands
+            // AFTER the first post-resume exchange — as a divider row it
+            // announces a non-event in the wrong place. The line stays in
+            // the stream (diagnostics + the P2 history view will render it
+            // subtly); only the node materialization is skipped. The
+            // flushPending() above still runs — the accumulator split at
+            // this line predates this change and keeps replay/live node
+            // ids aligned.
+            if (data && data.outcome !== "resumed") {
                 const parsedTs = typeof rawEvent.timestamp === "string" ? Date.parse(rawEvent.timestamp) : NaN;
                 const node: SessionOutcomeNode = {
                     type: "session_outcome",

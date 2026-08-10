@@ -303,6 +303,11 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
             <Show when={props.node() && props.node().type === "session_outcome"}>
                 {(() => {
                     const n = props.node() as Extract<DocumentNode, { type: "session_outcome" }>;
+                    // `resumed` nodes are no longer materialized in the
+                    // working document (§3.5 of the session-scoped-scrollback
+                    // spec — both parse paths skip them), so this branch only
+                    // sees `fresh` today. The resumed rendering is kept for
+                    // the P2 Agent History view, which materializes both.
                     const resumed = n.outcome === "resumed";
                     return (
                         <div class={resumed ? "agent-session-outcome" : "agent-session-outcome agent-session-outcome-fresh"}>
@@ -311,7 +316,7 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                             </div>
                             <Show when={!resumed}>
                                 <div class="agent-session-outcome-detail">
-                                    Prior conversation is not available to this agent
+                                    Prior conversation isn't available to this agent — it's preserved in the agent's history
                                 </div>
                             </Show>
                         </div>
