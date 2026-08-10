@@ -944,7 +944,7 @@ describe("agent document reducer", () => {
             ]);
         });
 
-        it("reagent P1 on PR #2520: an orphaned background launch's resolvedToolNodes entry carries run_in_background, so muxspect dock's cache doesn't get its earlier true silently blanked back to undefined", () => {
+        it("codex P2 / reagent P1 on PR #2520: a node orphaned BEFORE any acceptance response ever arrived reports run_in_background as undefined, never a false 'bg' — isAcceptedBackgroundLaunch requires status success, which this branch's own guard (status running) makes impossible", () => {
             const bg = tool("bg1", { status: "running", params: { command: "task dev", run_in_background: true } });
             const r = update(seed([bg]), { type: "ScrubOrphanedInProgress", at: 1000 });
             expect(r.events).toEqual([
@@ -952,7 +952,7 @@ describe("agent document reducer", () => {
                     type: "orphans-scrubbed",
                     markdownCanceled: 0,
                     toolsCanceled: 1,
-                    resolvedToolNodes: [{ id: "bg1", status: "canceled", toolName: "Bash", run_in_background: true }],
+                    resolvedToolNodes: [{ id: "bg1", status: "canceled", toolName: "Bash" }],
                 },
             ]);
         });

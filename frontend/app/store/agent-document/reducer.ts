@@ -13,7 +13,8 @@
  * on every mount. Issue #728 gap 4.
  */
 
-import type { BashParams, DocumentNode, ShellNode, ToolLogChunk, ToolNode, ToolStreamingLog } from "../../view/agent/types";
+import type { DocumentNode, ShellNode, ToolLogChunk, ToolNode, ToolStreamingLog } from "../../view/agent/types";
+import { isAcceptedBackgroundLaunch } from "../../view/agent/activity/tool-adapter";
 import { lastFreshBoundaryIndex } from "../../view/agent/session-outcome";
 import {
     AgentDocumentCommand,
@@ -183,11 +184,20 @@ function scrubOrphanedInProgress(
             const closedLog = n.log != null ? { ...n.log, open: false } : n.log;
             next[i] = { ...n, status: "canceled", log: closedLog };
             toolsCanceled++;
+            // isAcceptedBackgroundLaunch (not the raw params flag — codex P2 /
+            // reagent P1 on PR #2520) requires status === "success", which
+            // this branch's own guard (n.status === "running") makes
+            // impossible here by construction: a node that WAS confirmed
+            // accepted is already "success" and never reaches this branch
+            // again. That's correct, not dead code — a node orphaned before
+            // any response ever arrived genuinely can't be confirmed as an
+            // accepted background launch, so reporting undefined here (never
+            // a false "bg") is the accurate answer, not a gap.
             resolvedToolNodes.push({
                 id: n.id,
                 status: "canceled",
                 toolName: n.toolName ?? n.tool,
-                run_in_background: (n.params as BashParams | undefined)?.run_in_background,
+                run_in_background: isAcceptedBackgroundLaunch(n) || undefined,
             });
             continue;
         }

@@ -126,6 +126,10 @@ describe("StreamFlushQueue.flushNow", () => {
             tool: "Bash",
             status: "success",
             params: { command: "task dev", run_in_background: true },
+            // Must be the acceptance message, not just the params flag
+            // (codex P2 / reagent P1 on PR #2520) — isAcceptedBackgroundLaunch
+            // checks this, not the raw flag alone.
+            result: { stdout: "Command running in background with ID: b12345. Output is being written to: …", stderr: "", exitCode: 0 },
             collapsed: false,
             summary: "",
             timestamp: 1000,
@@ -143,5 +147,29 @@ describe("StreamFlushQueue.flushNow", () => {
         q.pushNewNode(fgBash);
         const fgCall = calls.find(([, data]) => data.node_id === "toolu_fg");
         expect(fgCall?.[1].run_in_background).toBeUndefined();
+    });
+
+    it("codex P2 / reagent P1 on PR #2520: a run_in_background: true call that finished synchronously (never actually detached) sends undefined, not true — the raw params flag alone is NOT the signal", () => {
+        const { model } = makeModel();
+        const q = createStreamFlushQueue(model);
+
+        const fastFinish: ToolNode = {
+            type: "tool",
+            id: "toolu_fast",
+            tool: "Bash",
+            status: "success",
+            params: { command: "du -sh .cargo", run_in_background: true },
+            // The harness's own real output, not the acceptance message —
+            // issue #2518's own majority case (11 of 17 in that session).
+            result: { stdout: "<exited 0 in 13.38s>\n707M    .cargo", stderr: "", exitCode: 0 },
+            collapsed: false,
+            summary: "",
+            timestamp: 1000,
+        };
+        q.pushNewNode(fastFinish);
+
+        const calls = vi.mocked(RpcApi.DockNodeStatusCommand).mock.calls;
+        const call = calls.find(([, data]) => data.node_id === "toolu_fast");
+        expect(call?.[1].run_in_background).toBeUndefined();
     });
 });
