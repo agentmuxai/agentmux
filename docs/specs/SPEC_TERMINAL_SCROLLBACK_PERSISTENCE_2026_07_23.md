@@ -1,7 +1,7 @@
 # SPEC: Terminal scrollback doesn't survive reconnect (all `view:"term"` panes)
 
 **Date:** 2026-07-23
-**Status:** Proposed — analysis + design, no code changes yet
+**Status:** implemented — PR #2279; verified in code 2026-08-10.
 **Severity:** Medium (no data loss beyond the session — output is gone, not corrupted — but a real, visible regression in usability for both the agent-shell drawer and standalone Terminal panes)
 **Trigger:** Reported while testing PR #2278 (shell-drawer log-panel removal) — the report ("close and reopen the shell, prior content is gone, resets every time") turned out to be a pre-existing gap unrelated to that PR's scope, discovered during live verification.
 

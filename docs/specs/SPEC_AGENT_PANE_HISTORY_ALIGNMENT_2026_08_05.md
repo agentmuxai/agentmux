@@ -1,8 +1,7 @@
 # SPEC: Align pane scrollback with actual model context, and make cross-instance opens honest
 
 **Date:** 2026-08-05
-**Status:** Proposed — design for Part A below; implemented in this PR. Parts B/C
-scoped but deferred (see §6).
+**Status:** active — Part A (session-outcome transcript event) shipped in PR #2426; Parts B (rehydrate-before-resume) and C (session_id backfill) not started. Verified 2026-08-10. See also SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md, which builds on Part A.
 **Severity:** Medium — no data loss, but a real correctness gap: the pane can
 imply the agent remembers a conversation it does not, with no visible signal
 that anything went wrong.

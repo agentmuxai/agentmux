@@ -1,6 +1,6 @@
 # Spec: an orthogonal "attached task" status axis, sibling to `TurnPhase`
 
-**Status:** Design — reducer-level slice implemented this pass (types + reducer + tests); dispatch wiring (ActivityDock → reducer) and `AgentFooter`/Swarm rendering deliberately deferred, see §6.
+**Status:** active — reducer slice + dispatch wiring + hasRunningPromotedTool shipped (PR #2489); the AgentFooter render from #2489 was deliberately reverted 2026-08-10 (dock running-row is the indicator); §6 item 4 (Swarm pane / muxspect surfacing) not started. Verified 2026-08-10.
 **Author:** Agent A (agenta-07017)
 **Builds on:**
 - `docs/specs/REPORT_LONGRUNNING_TOOLCALL_DOCK_VISIBILITY_2026_07_16.md` (Agent2) — original analysis, §6/§7 design direction.

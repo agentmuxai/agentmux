@@ -1,7 +1,7 @@
 # Codex CLI JSONL Adapter Contract
 
 **Date:** 2026-08-08
-**Status:** Draft
+**Status:** implemented — PR #2476 (codex-translator.ts + tests); verified in code 2026-08-10.
 **Scope:** Codex CLI subprocess output, turn lifecycle, session continuity, translation, and fixtures
 **Target:** AgentMux Codex provider (`styledOutputFormat: "codex-json"`)
 **Current AgentMux pin:** `@openai/codex@0.116.0`

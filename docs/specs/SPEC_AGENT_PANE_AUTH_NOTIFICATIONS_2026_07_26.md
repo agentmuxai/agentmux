@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-26
 **Author:** AgentA
-**Status:** Decided — ready for implementation. Open questions in §8 resolved 2026-07-26; implementation tracked against §9's acceptance criteria.
+**Status:** implemented — PR #2304 (LaunchAuthState never-silent mount notifications); verified in code 2026-08-10.
 **Depends on / relates to:**
 - [`SPEC_LAUNCH_AUTH_STATE_MACHINE_2026_05_14.md`](SPEC_LAUNCH_AUTH_STATE_MACHINE_2026_05_14.md) — the **pre-launch modal's** `AuthState` reducer (bundle/identity selection before a pane exists). Sibling machine, not the same one — see §7.
 - [`PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md`](PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md) — the three-tier `runProviderLogin` fallback this spec builds notifications on top of.

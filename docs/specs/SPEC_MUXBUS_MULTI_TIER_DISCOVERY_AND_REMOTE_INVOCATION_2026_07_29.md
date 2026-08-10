@@ -1,6 +1,6 @@
 # Spec: multi-tier discovery + remote API invocation over muxbus
 
-**Status:** Proposed (audit + design)
+**Status:** active — §1 Tier-2b same-host cross-channel discovery shipped (PR #2350); §2 LAN pinned identity, §3 cloud directory, §4 typed RPC invocation layer not started. Verified 2026-08-10.
 **Author:** AgentY
 **Date:** 2026-07-29
 **Related:** `docs/specs/SPEC_MUXBUS_DELIVERY_HIERARCHY_2026_06_15.md`,

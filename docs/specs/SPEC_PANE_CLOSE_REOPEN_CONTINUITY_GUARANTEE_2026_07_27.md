@@ -1,6 +1,6 @@
 # Spec: pane close/reopen must guarantee conversation continuity, or say so
 
-**Status:** Draft — not implemented.
+**Status:** implemented — PR #2323, extended by #2426 (resume outcome as transcript event); verified in code 2026-08-10.
 **Author:** Agent1
 **Date:** 2026-07-27
 **Triggered by:** a user question about whether an agent's Armory-sourced workspace rules (Bundles/Skills/MCP) are "always available," which surfaced that reopening a pane goes through a resume (`--resume <sid>`) whose success is unverified end-to-end. Investigating that led to two real, evidenced gaps below.

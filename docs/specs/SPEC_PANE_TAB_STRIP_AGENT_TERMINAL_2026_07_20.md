@@ -1,7 +1,7 @@
 # SPEC: Pane tab strip — editor-style in-pane tabs for agent and terminal panes
 
 **Date:** 2026-07-20
-**Status:** Draft — architecture + UI direction, no code landed
+**Status:** implemented — shared PaneTabStrip across editor/agent/terminal via PRs #2250/#2254/#2261/#2282; verified in code 2026-08-10.
 **Scope:** Agent pane (`frontend/app/view/agent/**`), terminal pane (`frontend/app/view/term/**`),
 layout store, agent runtime, shell controller
 **Author:** Agent3

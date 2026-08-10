@@ -1,6 +1,6 @@
 # Spec: Execute the macOS leg of issue #2311 (codec-enabled patched CEF)
 
-**Status:** Draft — execution runbook, no build run yet.
+**Status:** implemented — build completed and tagged (see STATUS_CEF_PROPRIETARY_CODECS_MACOS_2026_07_27.md); verified 2026-08-10.
 **Author:** AgentO
 **Date:** 2026-07-27
 **Issue:** [agentmuxai/agentmux#2311](https://github.com/agentmuxai/agentmux/issues/2311)

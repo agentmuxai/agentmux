@@ -1,9 +1,7 @@
 # SPEC — Armory "Bind to Agent" context menu on account rows
 
 **Date:** 2026-08-09
-**Status:** Proposed (user-requested direction; supersedes the failure-row
-surface of `SPEC_ACCOUNT_ADOPTION_PIGGYBACK_LOGIN_2026_08_09.md` as the
-primary UX — see §6 for how the two relate)
+**Status:** implemented — PR #2485; verified in code 2026-08-10.
 **Trigger:** A user with **three** anthropic/claude accounts in the Armory
 has no way to assign them to agents from the place where the accounts are
 visible. Assignment today only happens agent-side (launch modal picker,

@@ -1,7 +1,7 @@
 # SPEC: Auto-timeout for AskUserQuestion — 30s countdown, auto-select the recommended option
 
 **Date:** 2026-08-06
-**Status:** Proposed — all open questions resolved (§5); ready for implementation.
+**Status:** implemented — PR #2441; verified in code 2026-08-10.
 **Severity:** Low-Medium — no data-loss risk, but an unanswered question
 blocks the agent's turn indefinitely today, which defeats unattended/overnight
 runs and any workflow where the human isn't watching the pane.

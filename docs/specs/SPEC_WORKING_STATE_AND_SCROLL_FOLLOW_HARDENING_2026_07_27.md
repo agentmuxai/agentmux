@@ -1,7 +1,7 @@
 # SPEC: Harden the "Working…" indicator and message-list auto-follow against four related recurring bugs
 
 **Date:** 2026-07-27
-**Status:** Implemented (this pass covers the low-risk, high-confidence mechanisms; two items are explicitly deferred, see §5)
+**Status:** implemented — this pass's mechanisms shipped; of §5's two deferred items, the tool-liveness gap was closed by the attached-task axis (PR #2489 + #2472) and the scroll input-gating race remains open, conditional on live reports. Verified 2026-08-10.
 **Author:** Agent1
 **Scope:** `agentmux-srv/src/backend/blockcontroller/{mod,persistent}.rs`, `frontend/app/view/agent/agent-view.tsx`, `frontend/app/view/agent/useAgentStream.ts`, `frontend/app/view/agent/hooks/usePendingMessageAcceptance.ts`, `frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx`
 

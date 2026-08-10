@@ -1,7 +1,7 @@
 # Codex Provider Integration: Claude-Parity Lifecycle
 
 **Date:** 2026-08-08
-**Status:** Draft
+**Status:** active — Slices A (JSONL adapter) + B (provider argv/resume) shipped in PR #2476; Slices C (Docker identity projection), D (Armory/Stash Codex account UX), E (provider-native materializer), F (Docker smoke) not started. Verified 2026-08-10.
 **Scope:** Codex provider registration, Armory accounts, Agent Stash bindings,
 authentication isolation, Docker projection, provider-native configuration, and
 delivery slices

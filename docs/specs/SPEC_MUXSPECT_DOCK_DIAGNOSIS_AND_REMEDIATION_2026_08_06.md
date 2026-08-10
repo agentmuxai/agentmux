@@ -9,7 +9,7 @@ could not see or explain it. Notable: `SPEC_MUXSPECT_LIVE_INTROSPECTION_TOOL_202
 own stated trigger (§ header) was **the same bug** — "the user asked to locate
 '2 stuck sleep dock items.'" This is a recurring, still-unsolved pain point,
 not a one-off.
-**Status:** Proposed (implemented — see note below)
+**Status:** implemented — PR #2432 (muxspect dock / dock clear); verified in code 2026-08-10.
 
 > **2026-08-07 audit note:** Implemented within a day — `muxspect dock`/
 > `dock clear` commands are live in `muxspect.mjs`. Status field was never
