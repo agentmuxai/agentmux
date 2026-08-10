@@ -233,8 +233,9 @@ function renderDock(data) {
         status: n.status,
         age: msToAge(n.age_ms),
         stuck: n.stuck ? "STUCK?" : "",
+        bg: n.run_in_background ? "bg" : "",
     }));
-    const cols = ["node_id", "tool", "status", "age", "stuck"];
+    const cols = ["node_id", "tool", "status", "age", "stuck", "bg"];
     const widths = Object.fromEntries(
         cols.map((c) => [c, Math.max(c.length, ...rows.map((r) => String(r[c]).length))])
     );
@@ -244,6 +245,16 @@ function renderDock(data) {
     if (rows.some((r) => r.stuck)) {
         console.log(`\nSTUCK? nodes: 'running' past the promotion threshold with nothing srv-side backing this block.`);
         console.log(`Clear one with: muxspect dock clear ${data.block_id} <node_id>`);
+    }
+    // issue #2518: a 'bg' row's status is the RAW ToolNode status, terminal
+    // ("success") within ~a second — it can NEVER show STUCK? here even if
+    // the real dock row has been showing 'running' for hours, because the
+    // srv has no visibility into whether this node's <task-notification>
+    // ever arrived (that reclassification happens entirely client-side).
+    // A long-`age` 'bg' row with status=success is worth checking by hand
+    // in the actual UI even though this table reads clean.
+    if (rows.some((r) => r.bg)) {
+        console.log(`\nbg rows: backgrounded launches — STUCK? never applies to these (server can't see the dock's own <task-notification> tracking). Check the live UI by hand if one looks old.`);
     }
 }
 

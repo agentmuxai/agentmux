@@ -31,6 +31,20 @@ pub struct DockNodeSnapshot {
     /// so a slow/backed-up push doesn't understate how stale the
     /// snapshot itself is.
     pub observed_at: i64,
+    /// Whether `params.run_in_background` was `true` on this call (Bash
+    /// only; `None` for every other tool). `status` above is the RAW
+    /// `ToolNode` status, which for an accepted background launch is
+    /// terminal ("success") within ~a second — it does NOT reflect
+    /// whether the dock is still showing this row as `running` while it
+    /// awaits a `<task-notification>` (that reclassification happens
+    /// entirely client-side in `tool-adapter.ts`'s `toolActivities`,
+    /// which the server has no visibility into). This flag exists so a
+    /// human reading `muxspect dock` output isn't misled by `status:
+    /// success` into assuming the dock row is finished too — see issue
+    /// #2518, where exactly that gap let 11 of 17 backgrounded calls in
+    /// one session get stuck `running` in the actual UI while this raw
+    /// snapshot showed them as long-since `success`.
+    pub run_in_background: Option<bool>,
 }
 
 /// One block's tracked nodes, keyed by node id so a later delta for the
@@ -125,6 +139,7 @@ mod tests {
             status: status.to_string(),
             timestamp: Some(1000),
             observed_at: 2000,
+            run_in_background: None,
         }
     }
 
@@ -142,6 +157,15 @@ mod tests {
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].node_id, "n1");
         assert_eq!(got[0].status, "running");
+    }
+
+    #[test]
+    fn run_in_background_round_trips() {
+        let cache = DockSnapshotCache::new();
+        let mut n = node("n1", "success");
+        n.run_in_background = Some(true);
+        cache.push_delta("block-1", n);
+        assert_eq!(cache.get("block-1", 2000)[0].run_in_background, Some(true));
     }
 
     #[test]

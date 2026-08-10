@@ -202,6 +202,7 @@ declare global {
         tool_name: string;
         status: string;
         timestamp?: number;
+        run_in_background?: boolean;
     };
 
     // CommandAgentAnswerData — AskUserQuestion answer, delivered to the running

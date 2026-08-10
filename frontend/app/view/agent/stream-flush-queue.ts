@@ -30,7 +30,7 @@ import { batch } from "solid-js";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import type { DocumentNode, ShellNode, ToolLogChunk } from "./types";
+import type { BashParams, DocumentNode, ShellNode, ToolLogChunk } from "./types";
 
 /**
  * Fire-and-forget push of a `ToolNode`'s current status to srv, for
@@ -41,6 +41,13 @@ import type { DocumentNode, ShellNode, ToolLogChunk } from "./types";
  * non-tool nodes and RPC failures (best-effort telemetry, never blocks or
  * surfaces an error for the actual document write).
  * See docs/specs/SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06.md §3.1.
+ *
+ * Also sends `run_in_background` (issue #2518): `status` alone can't tell a
+ * human reading `muxspect dock` apart an accepted background launch (whose
+ * raw ToolNode status goes terminal within ~a second) from an ordinary
+ * finished call — the actual dock row's `running` classification for that
+ * case happens entirely client-side, in `tool-adapter.ts`, which the server
+ * never sees. This flag is the one bit that survives the trip.
  */
 function pushDockNodeStatus(model: AgentPaneModel, node: DocumentNode) {
     if (node.type !== "tool") return;
@@ -50,6 +57,7 @@ function pushDockNodeStatus(model: AgentPaneModel, node: DocumentNode) {
         tool_name: node.toolName ?? node.tool,
         status: node.status,
         timestamp: node.timestamp,
+        run_in_background: (node.params as BashParams | undefined)?.run_in_background,
     }).catch(() => {});
 }
 
