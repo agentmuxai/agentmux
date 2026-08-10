@@ -32,7 +32,7 @@ import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show }
 import { CopyButton } from "../element/copybutton";
 import { detectAgentColor, detectAgentFromEnv, detectAgentTextColor, getEffectiveTitle, isUsableFocusRingColor } from "./autotitle";
 import { buildPaneContextMenu } from "./pane-actions";
-import { hueToHeaderBg, hueToActiveBorder, PANE_HUE_OPTIONS, setHue } from "./pane-color-menu";
+import { hueToHeaderBg, hueToActiveBorder, hueToBorder, PANE_HUE_OPTIONS, setHue } from "./pane-color-menu";
 import { BlockFrameProps } from "./blocktypes";
 import { PaneSizeBadge } from "./pane-size-badge";
 import { TitleBar } from "./titlebar";
@@ -743,6 +743,10 @@ function BlockMask({ nodeModel }: { nodeModel: NodeModel }): JSX.Element {
             }
             if (bd?.meta?.["frame:bordercolor"]) {
                 style["border-color"] = bd.meta["frame:bordercolor"];
+            }
+            const hue = bd?.meta?.["frame:hue"];
+            if (typeof hue === "number") {
+                style["border-color"] = hueToBorder(hue);
             }
         }
         return style;

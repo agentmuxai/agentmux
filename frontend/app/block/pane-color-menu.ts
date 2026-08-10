@@ -36,6 +36,14 @@ export function hueToActiveBorder(hue: number): string {
     return `hsl(${hue}, 65%, 52%)`;
 }
 
+/** Derive the dimmed unfocused-border color from a hue (0–360). Lightness
+ * scaled by the same 0.55 dim factor as agent-color.ts::dimAgentColor, so
+ * an explicit hue pick dims the same way the auto-assigned agent color
+ * does. */
+export function hueToBorder(hue: number): string {
+    return `hsl(${hue}, 65%, 29%)`;
+}
+
 export function setHue(blockId: string, hue: number | null): void {
     void RpcApi.SetMetaCommand(TabRpcClient, {
         oref: WOS.makeORef("block", blockId),
