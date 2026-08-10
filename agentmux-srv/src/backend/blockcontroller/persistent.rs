@@ -5075,6 +5075,63 @@ mod send_input_tests {
         );
     }
 
+    /// Closes issue #2368 (the visible-error-flash residue of #2360/#2373's
+    /// stale-`--resume` retry): unlike the two tests above (retry itself
+    /// fails to launch → flush; `DeliverDirect` fallback needed → don't
+    /// flush yet), this covers the actual `BecomeSpawner` HAPPY path — the
+    /// fresh, no-`--resume` respawn launches successfully. `held_error_line`
+    /// must be silently dropped here, never reaching the blockfile: the
+    /// doomed first attempt's error was never the user's problem to see
+    /// once the transparent retry it triggered actually worked. This is
+    /// the regression test
+    /// `docs/specs/SPEC_PERSISTENT_SPAWN_GENERATION_AND_MESSAGE_IDENTITY_2026_08_09.md`
+    /// §5's verification list asked for before #2368 could be closed with
+    /// evidence.
+    #[tokio::test]
+    async fn retry_after_resume_failure_drops_the_held_error_line_when_the_respawn_succeeds() {
+        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let filestore = Arc::new(FileStore::open_in_memory().unwrap());
+        let block_id = "block-drop-on-successful-retry".to_string();
+        let c = PersistentSubprocessController::new(
+            "tab".to_string(),
+            block_id.clone(),
+            Some(broker),
+            None,
+            None,
+            Some(filestore.clone()),
+        );
+
+        // "echo" (used elsewhere in this codebase's tests, e.g.
+        // subprocess/tests.rs) — a real, trivially-successful spawn target,
+        // so `spawn_process` returns `Ok(())` exactly as it would for a
+        // genuine fresh CLI respawn.
+        let config = PersistentSpawnConfig {
+            cli_command: "echo".to_string(),
+            cli_args: vec![],
+            working_dir: String::new(),
+            env_vars: HashMap::new(),
+            session_id_field: "session_id".to_string(),
+            resume_flag: "--resume".to_string(),
+            session_id: String::new(),
+            message_id: None,
+        };
+        c.retry_after_resume_failure(1, config, vec![qentry(1, "{}")], Some("boom\n".to_string()));
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+        let flushed = filestore
+            .read_file(&block_id, PERSISTENT_OUTPUT_SUBJECT)
+            .unwrap()
+            .map(|bytes| String::from_utf8_lossy(&bytes).contains("boom"))
+            .unwrap_or(false);
+        assert!(
+            !flushed,
+            "a held error line from the doomed first attempt must be silently dropped — never \
+             flushed to the blockfile — when the stale-`--resume` retry's fresh respawn actually \
+             succeeds (issue #2368): the user should see only the real response, not a stale \
+             error bubble followed by it"
+        );
+    }
+
     /// codex P1 on PR #2360 (sixth review pass, round 5): the drain must
     /// track every message it successfully delivers beyond the first
     /// (which `spawn_process` already stashed synchronously — see
