@@ -226,6 +226,31 @@ fn archive_moves_content_and_clears_current() {
 }
 
 #[test]
+fn archive_carries_and_clears_tsidx_sidecar() {
+    // codex P2 on PR #2508: the tsidx sidecar must travel with output on
+    // archive and be cleared from :current — a stale sidecar under a fresh
+    // (offset-0) output mis-times the next session's lines.
+    use super::session_io::TSIDX_FILE;
+    let fs = fresh_filestore();
+    let payload = br#"{"nodes":[]}"#;
+    write_session_state(&fs, "def-ts", payload).unwrap();
+    append_session_output(&fs, "def-ts", "raw1").unwrap();
+    let current_zone = agent_current_zone("def-ts");
+    write_zone_file(&fs, &current_zone, TSIDX_FILE, b"{\"off\":0,\"ms\":123}
+").unwrap();
+
+    let (zone, _) = archive_session(&fs, "def-ts").unwrap().expect("archived");
+
+    let archived_ts = fs.read_file(&zone, TSIDX_FILE).unwrap().unwrap();
+    assert_eq!(archived_ts, b"{\"off\":0,\"ms\":123}
+");
+    assert!(
+        fs.stat(&current_zone, TSIDX_FILE).unwrap().is_none(),
+        ":current tsidx must be cleared with output"
+    );
+}
+
+#[test]
 fn archive_on_empty_current_is_noop() {
     let fs = fresh_filestore();
     // Nothing was ever written.
