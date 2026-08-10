@@ -29,10 +29,16 @@
  */
 
 import { extractToolDetail } from "../stream-parser";
-import type { BashParams, DocumentNode, ToolNode } from "../types";
+import type { BashParams, BashResult, DocumentNode, ToolNode } from "../types";
 import type { ActivityStatus, PinnedActivity } from "./types";
 
 export const TOOL_PROMOTION_MS = 30_000;
+
+/** The harness's literal acceptance-message prefix for a genuinely detached
+ *  launch (see BashParams.run_in_background's doc comment). Exported so
+ *  muxspect/introspection tooling can recognize the same signal — see
+ *  docs/retro/retro-stuck-background-dock-timer-2026-08-10.md. */
+export const BACKGROUND_LAUNCH_ACCEPTED_PREFIX = "Command running in background with ID:";
 
 function isBashToolNode(n: DocumentNode): n is ToolNode {
     return n.type === "tool" && n.tool === "Bash" && n.timestamp != null;
@@ -40,16 +46,30 @@ function isBashToolNode(n: DocumentNode): n is ToolNode {
 
 /**
  * True for a Bash call the harness ran detached (issue #2490): its
- * `tool_use.input` carried `run_in_background: true` and the tool_result
- * came back accepted ("Command running in background with ID: …"). The
- * ToolNode is terminal within ~a second, but the real process tree keeps
- * running until a `<task-notification>` lands — so, unlike an ordinary
- * call, terminal-with-success here means STARTED, not finished. A failed
- * launch (`status: "failed"` — the harness refused the command) is not a
- * live background task and falls through to the ordinary duration rules.
+ * `tool_use.input` carried `run_in_background: true` AND the tool_result's
+ * own text actually is the acceptance message ("Command running in
+ * background with ID: …"), not the command's real output. The ToolNode is
+ * terminal within ~a second, but the real process tree keeps running until
+ * a `<task-notification>` lands — so, unlike an ordinary call,
+ * terminal-with-success here means STARTED, not finished.
+ *
+ * The `params.run_in_background === true` flag alone is NOT sufficient —
+ * issue #2518: the harness decides per-call whether a command actually
+ * gets detached; a command that finishes fast enough is returned
+ * synchronously (result text `<exited N in Ts>\n<real output>`, the SAME
+ * shape an ordinary call gets) even though the caller asked for
+ * `run_in_background: true`. Treating that case as "launch accepted, wait
+ * for a `<task-notification>` that will never come" left the dock row
+ * `running` forever with a growing timer — confirmed live: a single
+ * session with 17 backgrounded calls left 11 stuck this way, each one
+ * exactly the fast-finishing case. A failed launch (`status: "failed"` —
+ * the harness refused the command) is also not a live background task and
+ * falls through to the ordinary duration rules, same as before.
  */
 function isAcceptedBackgroundLaunch(n: ToolNode): boolean {
-    return (n.params as BashParams | undefined)?.run_in_background === true && n.status === "success";
+    if ((n.params as BashParams | undefined)?.run_in_background !== true || n.status !== "success") return false;
+    const stdout = (n.result as BashResult | undefined)?.stdout;
+    return typeof stdout === "string" && stdout.startsWith(BACKGROUND_LAUNCH_ACCEPTED_PREFIX);
 }
 
 /**
