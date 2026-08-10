@@ -111,6 +111,60 @@ pub fn clear_active_pid(wstore: &Arc<Store>, block_id: &str) {
     }
 }
 
+/// Clear `session:active_pid` **only if it still equals `expected_pid`** —
+/// a transactional compare-and-clear for exit-handlers that know which
+/// process instance they are cleaning up after.
+///
+/// Issue #2363: `PersistentSubprocessController`'s fallback respawn
+/// (`respawn_once_for_leftover_queue`) runs on a separate tokio task from
+/// the dying process's own exit-handler. The exit-handler's cleanup is
+/// gated on a spawn-generation check, but that gate is read once under the
+/// controller's lock while the fallback registers its own fresh PID in
+/// parallel — the unconditional [`clear_active_pid`] could then wipe the
+/// NEW process's registration, leaving it untracked for crash recovery
+/// until the next natural re-registration. The whole read-compare-clear
+/// here runs inside one `Store::with_tx` (a single connection lock across
+/// read+merge+write — see `object_helpers::update_object_meta`'s doc
+/// comment for the transactional contract), so a concurrent
+/// [`mark_active_pid`] strictly serializes against it: whichever commits
+/// second sees the other's completed write, and a mismatch means "a newer
+/// process already registered — leave it alone."
+///
+/// Best-effort like the unconditional variant: logs on failure, never
+/// panics. Returns nothing — callers do not branch on the outcome.
+pub fn clear_active_pid_if_pid(wstore: &Arc<Store>, block_id: &str, expected_pid: u32) {
+    let block_id_owned = block_id.to_string();
+    let result = wstore.with_tx(|tx| {
+        let mut block = tx.must_get::<Block>(&block_id_owned)?;
+        let current = block
+            .meta
+            .get(META_SESSION_ACTIVE_PID)
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        if current != expected_pid as u64 {
+            // A newer process re-registered (or the pid was already
+            // cleared) — not ours to clear.
+            return Ok(false);
+        }
+        block.meta.remove(META_SESSION_ACTIVE_PID);
+        tx.update(&mut block)?;
+        Ok(true)
+    });
+    match result {
+        Ok(true) => {}
+        Ok(false) => {
+            tracing::info!(
+                block_id = %block_id,
+                expected_pid = expected_pid,
+                "session_recovery: active pid changed since this process registered — skipping clear"
+            );
+        }
+        Err(e) => {
+            tracing::warn!(block_id = %block_id, error = %e, "session_recovery: compare-and-clear active pid failed");
+        }
+    }
+}
+
 /// Scan all blocks at server startup. For any agent block that still has
 /// `session:active_pid` set, transfer the flag to `session:was_interrupted`.
 ///

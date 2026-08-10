@@ -35,6 +35,21 @@
 
 use super::persistent::PersistentSpawnConfig;
 
+/// One redeliverable stdin message in a [`RetryPayload`] batch: the
+/// formatted JSON plus its queue identity.
+///
+/// `seq` is the message's `QueuedMessage::seq` (issue #2365): assigned
+/// once from the controller's monotonic counter at first enqueue and
+/// preserved across redelivery, so every "is this message already
+/// queued / is this the seeded message" check is exact identity, never
+/// content equality — two genuinely different messages with identical
+/// text (two "yes" replies) can no longer be conflated.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct QueuedRetryEntry {
+    pub seq: u64,
+    pub json: String,
+}
+
 /// The spawn config + the growing batch of stdin messages to redeliver if
 /// this generation's `--resume` turns out to be stale. Named separately
 /// from the state enum so `MessageAppendedToRetryBatch` can grow it in
@@ -42,7 +57,7 @@ use super::persistent::PersistentSpawnConfig;
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct RetryPayload {
     pub config: PersistentSpawnConfig,
-    pub messages: Vec<String>,
+    pub messages: Vec<QueuedRetryEntry>,
 }
 
 /// One spawn attempt's resume/error-line lifecycle.
@@ -110,20 +125,24 @@ impl Default for ResumeState {
 }
 
 impl ResumeState {
-    /// Read-only accessor for the drain: is `delivered` the exact message
-    /// `spawn_process` originally seeded the retry batch with (its first
-    /// entry), for the given `generation`? Used to identify the
-    /// already-recorded seed by content (not position) before appending
-    /// any LATER message the drain delivers — see
+    /// Read-only accessor for the drain: is `delivered_seq` the exact
+    /// message `spawn_process` originally seeded the retry batch with
+    /// (its first entry), for the given `generation`? Used to identify
+    /// the already-recorded seed before appending any LATER message the
+    /// drain delivers. Matched by queue identity (`QueuedRetryEntry::seq`),
+    /// neither by position (see
     /// `PersistentSubprocessController::drain_queue_after_successful_spawn`'s
-    /// own doc comment for why content, not position, is what's checked.
-    pub(super) fn is_seeded_message(&self, generation: u64, delivered: &str) -> bool {
+    /// own doc comment for why the front of the queue isn't necessarily
+    /// the seed) nor by content (issue #2365 — a later, genuinely
+    /// different delivery sharing identical text must not be mistaken
+    /// for the seed).
+    pub(super) fn is_seeded_message(&self, generation: u64, delivered_seq: u64) -> bool {
         match self {
             ResumeState::AwaitingOutcome { generation: g, retry, .. }
             | ResumeState::ConfirmedRetry { generation: g, retry, .. }
                 if *g == generation =>
             {
-                retry.messages.first().map(String::as_str) == Some(delivered)
+                retry.messages.first().map(|e| e.seq) == Some(delivered_seq)
             }
             _ => false,
         }
@@ -166,7 +185,7 @@ pub(super) enum ResumeEvent {
     /// The drain appended another message to this generation's retry
     /// batch before it was known to be doomed (or after it was
     /// confirmed doomed but before the process actually exited).
-    MessageAppendedToRetryBatch { generation: u64, json: String },
+    MessageAppendedToRetryBatch { generation: u64, entry: QueuedRetryEntry },
     /// stderr reader saw "No conversation found" for this exact sid.
     ResumeUnreachable { generation: u64, sid: String },
     /// stdout reader saw a terminal `result`/`is_error:true` line.
@@ -368,9 +387,9 @@ pub(super) fn update(state: ResumeState, event: ResumeEvent) -> (ResumeState, Ve
         // redelivered).
         (
             ResumeState::AwaitingOutcome { generation, attempted_sid, mut retry, held_error_line, stop_requested },
-            ResumeEvent::MessageAppendedToRetryBatch { generation: g, json },
+            ResumeEvent::MessageAppendedToRetryBatch { generation: g, entry },
         ) if generation == g => {
-            retry.messages.push(json);
+            retry.messages.push(entry);
             (
                 ResumeState::AwaitingOutcome { generation, attempted_sid, retry, held_error_line, stop_requested },
                 vec![],
@@ -378,9 +397,9 @@ pub(super) fn update(state: ResumeState, event: ResumeEvent) -> (ResumeState, Ve
         }
         (
             ResumeState::ConfirmedRetry { generation, attempted_sid, mut retry, held_error_line, stop_requested },
-            ResumeEvent::MessageAppendedToRetryBatch { generation: g, json },
+            ResumeEvent::MessageAppendedToRetryBatch { generation: g, entry },
         ) if generation == g => {
-            retry.messages.push(json);
+            retry.messages.push(entry);
             (ResumeState::ConfirmedRetry { generation, attempted_sid, retry, held_error_line, stop_requested }, vec![])
         }
 
@@ -578,8 +597,14 @@ mod tests {
         }
     }
 
+    /// Shorthand for a retry-batch entry with an explicit queue seq
+    /// (issue #2365 — retry batches carry identity, not just text).
+    fn qentry(seq: u64, json: &str) -> QueuedRetryEntry {
+        QueuedRetryEntry { seq, json: json.to_string() }
+    }
+
     fn dummy_retry() -> RetryPayload {
-        RetryPayload { config: dummy_config(), messages: vec!["{}".to_string()] }
+        RetryPayload { config: dummy_config(), messages: vec![qentry(1, "{}")] }
     }
 
     fn spawned_with_resume(generation: u64) -> ResumeState {
@@ -820,11 +845,11 @@ mod tests {
     fn message_appended_while_awaiting_outcome_grows_the_batch() {
         let state = spawned_with_resume(1);
         let (state, effects) =
-            update(state, ResumeEvent::MessageAppendedToRetryBatch { generation: 1, json: "{\"m\":2}".to_string() });
+            update(state, ResumeEvent::MessageAppendedToRetryBatch { generation: 1, entry: qentry(2, "{\"m\":2}") });
         assert!(effects.is_empty());
         match state {
             ResumeState::AwaitingOutcome { retry, .. } => {
-                assert_eq!(retry.messages, vec!["{}".to_string(), "{\"m\":2}".to_string()])
+                assert_eq!(retry.messages, vec![qentry(1, "{}"), qentry(2, "{\"m\":2}")])
             }
             other => panic!("expected AwaitingOutcome, got {other:?}"),
         }
@@ -841,11 +866,11 @@ mod tests {
         let (state, _) =
             update(state, ResumeEvent::ResumeUnreachable { generation: 1, sid: "dead-sid".to_string() });
         let (state, effects) =
-            update(state, ResumeEvent::MessageAppendedToRetryBatch { generation: 1, json: "{\"m\":2}".to_string() });
+            update(state, ResumeEvent::MessageAppendedToRetryBatch { generation: 1, entry: qentry(2, "{\"m\":2}") });
         assert!(effects.is_empty());
         match state {
             ResumeState::ConfirmedRetry { retry, .. } => {
-                assert_eq!(retry.messages, vec!["{}".to_string(), "{\"m\":2}".to_string()])
+                assert_eq!(retry.messages, vec![qentry(1, "{}"), qentry(2, "{\"m\":2}")])
             }
             other => panic!("expected ConfirmedRetry, got {other:?}"),
         }
@@ -995,7 +1020,7 @@ mod tests {
         assert!(effects.is_empty(), "an ambiguous echo must not flush or fire anything");
         match &state {
             ResumeState::ConfirmedRetry { retry, .. } => {
-                assert_eq!(retry.messages, vec!["{}".to_string()], "the confirmed retry must survive intact")
+                assert_eq!(retry.messages, vec![qentry(1, "{}")], "the confirmed retry must survive intact")
             }
             other => panic!("expected the confirmed retry to survive an ambiguous echo, got {other:?}"),
         }
