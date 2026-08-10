@@ -302,14 +302,23 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
     const handleTabRenameConfirm = async (tab: PaneTab, title: string): Promise<void> => {
         setRenamingBlockId(null);
         if (!tab.definitionId) return;
+        const prevOverride = titleOverrides()[tab.blockId];
         setTitleOverrides((prev) => ({ ...prev, [tab.blockId]: title }));
+        // Definition rename FIRST — it's the authoritative store (fork tabs,
+        // AgentPicker). If it fails, nothing has been written anywhere:
+        // roll back the optimistic override and stop, so the two stores
+        // can't diverge (reagent P2 on PR #2488 round 6 — the old order
+        // could land the meta write and then fail the rename, leaving the
+        // stack pill and fork tabs permanently showing different names).
         try {
-            await RpcApi.SetMetaCommand(TabRpcClient, {
-                oref: WOS.makeORef("block", tab.blockId),
-                meta: { agentName: title } as any,
-            });
             await RpcApi.RenameAgentDefinitionTitleCommand(TabRpcClient, { id: tab.definitionId, title });
         } catch (e: unknown) {
+            setTitleOverrides((prev) => {
+                const next = { ...prev };
+                if (prevOverride === undefined) delete next[tab.blockId];
+                else next[tab.blockId] = prevOverride;
+                return next;
+            });
             pushNotification({
                 icon: "fa-triangle-exclamation",
                 title: "Rename failed",
@@ -318,7 +327,17 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
                 type: "error",
                 expiration: Date.now() + 8000,
             });
+            return;
         }
+        // Denormalized copy the stack pill + pane title read. If THIS write
+        // fails after a successful rename, the kept titleOverrides entry
+        // still shows the new name for the rest of the session; the meta
+        // catches up on the agent's next launch (launchAgentDefinition
+        // rewrites agentName from the definition).
+        await RpcApi.SetMetaCommand(TabRpcClient, {
+            oref: WOS.makeORef("block", tab.blockId),
+            meta: { agentName: title } as any,
+        }).catch(() => {});
     };
 
     return (
