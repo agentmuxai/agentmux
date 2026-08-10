@@ -142,6 +142,17 @@ const HANDLE_WARN_AGENTMUX: u32 = 20_000;
 const HANDLE_WARN_EXTERNAL: u32 = 50_000;
 #[cfg(target_os = "windows")]
 const HANDLE_TOP_N: usize = 3;
+/// Minimum gap between repeat WARNs for the SAME still-anomalous PID. The
+/// first live run of this detector (2026-08-09) re-warned every 30s
+/// attribution cycle — and more under the urgent-on-pressure path — for
+/// two persisting Vite-process anomalies, drowning the log. One warn per
+/// PID per this window keeps the signal (a persisting anomaly still
+/// re-surfaces regularly, and the info line's `handles_top` carries the
+/// count every cycle regardless) without the spam. A PID that drops below
+/// threshold and re-crosses later warns immediately again (its entry is
+/// pruned while healthy).
+#[cfg(target_os = "windows")]
+const HANDLE_WARN_COOLDOWN: Duration = Duration::from_secs(600);
 
 /// One process's handle-count sample for anomaly classification.
 #[cfg(target_os = "windows")]
@@ -184,6 +195,44 @@ fn classify_handle_anomalies(samples: &[HandleSample]) -> Vec<HandleAnomaly> {
     anomalies.sort_by(|a, b| b.handles.cmp(&a.handles));
     anomalies
 }
+
+/// Pure cooldown gate for anomaly WARNs, factored out for unit testing.
+/// Returns the indices (into `anomalies`) that should warn THIS cycle, and
+/// updates `last_warned` accordingly. Entries for PIDs that are no longer
+/// anomalous are pruned first — both so the map can't grow unbounded across
+/// process churn, and so a process that recovers and later re-crosses the
+/// threshold warns immediately rather than being silently inside a stale
+/// cooldown window.
+#[cfg(target_os = "windows")]
+fn filter_anomalies_for_warn(
+    anomalies: &[HandleAnomaly],
+    last_warned: &mut HashMap<u32, Instant>,
+    now: Instant,
+    cooldown: Duration,
+) -> Vec<usize> {
+    let current: HashSet<u32> = anomalies.iter().map(|a| a.pid).collect();
+    last_warned.retain(|pid, _| current.contains(pid));
+
+    let mut warn = Vec::new();
+    for (i, anomaly) in anomalies.iter().enumerate() {
+        let due = match last_warned.get(&anomaly.pid) {
+            Some(&at) => now.duration_since(at) >= cooldown,
+            None => true,
+        };
+        if due {
+            last_warned.insert(anomaly.pid, now);
+            warn.push(i);
+        }
+    }
+    warn
+}
+
+/// Process-lifetime state for the cooldown above. A plain static rather
+/// than threading it through the loop: `log_memory_attribution` is only
+/// ever called from the single sysinfo loop task, so contention is nil.
+#[cfg(target_os = "windows")]
+static LAST_HANDLE_WARN: std::sync::OnceLock<std::sync::Mutex<HashMap<u32, Instant>>> =
+    std::sync::OnceLock::new();
 
 /// Open-query-close a process's total handle count. Returns `None` for
 /// PIDs we can't open (protected/system processes) — expected, skipped
@@ -305,7 +354,16 @@ fn log_memory_attribution(sys: &mut sysinfo::System, commit_used_gb: f64, commit
         .collect::<Vec<_>>()
         .join(", ");
 
-    for anomaly in classify_handle_anomalies(&handle_samples) {
+    let anomalies = classify_handle_anomalies(&handle_samples);
+    let warn_indices = {
+        let mut last = LAST_HANDLE_WARN
+            .get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+            .lock()
+            .unwrap();
+        filter_anomalies_for_warn(&anomalies, &mut last, Instant::now(), HANDLE_WARN_COOLDOWN)
+    };
+    for i in warn_indices {
+        let anomaly = &anomalies[i];
         if anomaly.is_agentmux {
             tracing::warn!(
                 target: "mem_attribution",
@@ -530,6 +588,58 @@ mod handle_anomaly_tests {
         // itself — a running process always has at least a few handles.
         let count = process_handle_count(std::process::id());
         assert!(count.is_some_and(|c| c > 0), "got {count:?}");
+    }
+
+    fn anomaly(pid: u32) -> HandleAnomaly {
+        HandleAnomaly { pid, name: format!("proc{pid}.exe"), handles: 99_999, is_agentmux: false }
+    }
+
+    #[test]
+    fn cooldown_warns_immediately_on_first_sight_then_suppresses() {
+        let mut last = HashMap::new();
+        let t0 = Instant::now();
+        let cooldown = Duration::from_secs(600);
+        let anomalies = vec![anomaly(1)];
+
+        assert_eq!(filter_anomalies_for_warn(&anomalies, &mut last, t0, cooldown), vec![0]);
+        // Same anomaly, next 30s cycle — suppressed.
+        let t1 = t0 + Duration::from_secs(30);
+        assert!(filter_anomalies_for_warn(&anomalies, &mut last, t1, cooldown).is_empty());
+        // Past the cooldown — warns again.
+        let t2 = t0 + cooldown;
+        assert_eq!(filter_anomalies_for_warn(&anomalies, &mut last, t2, cooldown), vec![0]);
+    }
+
+    #[test]
+    fn cooldown_is_per_pid_not_global() {
+        let mut last = HashMap::new();
+        let t0 = Instant::now();
+        let cooldown = Duration::from_secs(600);
+
+        assert_eq!(filter_anomalies_for_warn(&[anomaly(1)], &mut last, t0, cooldown), vec![0]);
+        // A DIFFERENT pid appearing 30s later warns immediately, even though
+        // pid 1 is mid-cooldown.
+        let t1 = t0 + Duration::from_secs(30);
+        let both = vec![anomaly(1), anomaly(2)];
+        assert_eq!(filter_anomalies_for_warn(&both, &mut last, t1, cooldown), vec![1]);
+    }
+
+    #[test]
+    fn recovered_pid_recrossing_the_threshold_warns_immediately() {
+        let mut last = HashMap::new();
+        let t0 = Instant::now();
+        let cooldown = Duration::from_secs(600);
+
+        assert_eq!(filter_anomalies_for_warn(&[anomaly(1)], &mut last, t0, cooldown), vec![0]);
+        // pid 1 drops below threshold (absent from anomalies) — its entry is
+        // pruned...
+        let t1 = t0 + Duration::from_secs(30);
+        assert!(filter_anomalies_for_warn(&[], &mut last, t1, cooldown).is_empty());
+        assert!(last.is_empty(), "healthy pid's entry must be pruned");
+        // ...so re-crossing 30s later (well inside what would have been the
+        // old cooldown window) warns immediately.
+        let t2 = t0 + Duration::from_secs(60);
+        assert_eq!(filter_anomalies_for_warn(&[anomaly(1)], &mut last, t2, cooldown), vec![0]);
     }
 }
 

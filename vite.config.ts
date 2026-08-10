@@ -175,7 +175,28 @@ export default defineConfig({
             // and the original docs/retro/RETRO_CEF_BUILD_RACE_2026_04_24.md.
             // No functional loss: nothing under target/ is ever meant to
             // trigger a frontend HMR reload.
-            ignored: ["dist/**", "target/**", "**/*.md", "**/*.json"],
+            //
+            // ANCHORED TO THE REPO ROOT, ABSOLUTE, FORWARD-SLASHED — not the
+            // relative "dist/**" form this originally used. Chokidar matches
+            // ignore globs against ABSOLUTE paths, so a relative pattern
+            // matches nothing, silently. Worse, even "**/dist/**" fails when
+            // the repo lives under a dot-directory (every agent checkout is
+            // under ~/.agentmux/...): picomatch's `**` refuses to traverse
+            // dot-segments like ".agentmux" without dot:true, which chokidar
+            // doesn't set. Empirically verified: with the relative patterns,
+            // a `task dev` Vite process on such a checkout accumulated 75K+
+            // Windows handles in ~1h (caught by mem_attribution's new
+            // handle-count anomaly WARN, 2026-08-09) because it was watching
+            // dist/cef-dev's entire extracted CEF runtime — meaning the
+            // #2424 race fix above was also silently ineffective there. An
+            // absolute pattern spells the dot-directories out literally, so
+            // `**` never has to traverse them.
+            ignored: [
+                `${path.resolve(__dirname).replace(/\\/g, "/")}/dist/**`,
+                `${path.resolve(__dirname).replace(/\\/g, "/")}/target/**`,
+                `${path.resolve(__dirname).replace(/\\/g, "/")}/**/*.md`,
+                `${path.resolve(__dirname).replace(/\\/g, "/")}/**/*.json`,
+            ],
         },
     },
     css: {
