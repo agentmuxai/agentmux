@@ -51,13 +51,25 @@ before it ever ran) can stay stuck at `status: "running"` in the dock
 indefinitely, invisible to every other `muxspect` command.
 
 `dock <block_id>` reads a lightweight snapshot the renderer itself pushes
-on every `ToolNode` status change (id, tool name, status, age — no
-transcript content) and flags entries that look stuck (`running`, past
-the 30s promotion threshold, with nothing srv-side backing the block).
+on every `ToolNode` status change (id, tool name, status, age, whether it
+was a `run_in_background` launch — no transcript content) and flags
+entries that look stuck (`running`, past the 30s promotion threshold,
+with nothing srv-side backing the block).
 `dock clear <block_id> <node_id>` force-cancels one specific entry live,
 in whatever renderer currently has that block open — no pane reload
 needed. This is `muxspect`'s only mutating command; every other command
 is read-only diagnostics.
+
+The `STUCK?` heuristic has a blind spot for backgrounded launches (issue
+#2518): an accepted `run_in_background` launch's raw `ToolNode.status`
+goes terminal (`success`) within ~a second, so `STUCK?` — which only ever
+fires on `status: "running"` — structurally can never flag one, no matter
+how long the *actual* dock row has been showing `running` while it awaits
+a `<task-notification>` (that reclassification is entirely client-side,
+in `tool-adapter.ts`; the srv never sees it). The `bg` column is the one
+signal that survives the trip: a `bg` row with an old `age` and
+`status: success` is worth checking by hand in the live UI even though
+`STUCK?` reads clean for it.
 
 Full design: `docs/specs/SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06.md`.
 This targets one specific, narrow bug class — it is not a fix for the

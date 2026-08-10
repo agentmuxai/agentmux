@@ -83,8 +83,15 @@ function resultText(result: ToolNode["result"]): string | undefined {
  * exactly the fast-finishing case. A failed launch (`status: "failed"` —
  * the harness refused the command) is also not a live background task and
  * falls through to the ordinary duration rules, same as before.
+ *
+ * Exported so `pushDockNodeStatus`/the orphan-scrub push (issue #2520)
+ * reuse this exact classification instead of the raw `params` flag —
+ * codex P2 / reagent P1 on PR #2520: forwarding the raw flag tagged the
+ * MAJORITY of backgrounded calls `bg` in `muxspect dock` (11 of the 17 in
+ * #2518's own motivating session were fast-finishing, i.e. NOT accepted),
+ * making the column noisy on the common case instead of a signal.
  */
-function isAcceptedBackgroundLaunch(n: ToolNode): boolean {
+export function isAcceptedBackgroundLaunch(n: ToolNode): boolean {
     if ((n.params as BashParams | undefined)?.run_in_background !== true || n.status !== "success") return false;
     const text = resultText(n.result);
     return typeof text === "string" && text.startsWith(BACKGROUND_LAUNCH_ACCEPTED_PREFIX);

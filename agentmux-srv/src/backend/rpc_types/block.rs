@@ -150,6 +150,11 @@ pub struct CommandDockNodeStatusData {
     /// `ToolNode.timestamp` (ms), if the pushing client had one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timestamp: Option<i64>,
+    /// `params.run_in_background === true` on the pushing client's own
+    /// `ToolNode`, if it's a Bash call. See
+    /// `DockNodeSnapshot::run_in_background`'s doc comment (issue #2518).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_in_background: Option<bool>,
 }
 
 /// Data for AgentAnswerCommand — an AskUserQuestion answer delivered back to

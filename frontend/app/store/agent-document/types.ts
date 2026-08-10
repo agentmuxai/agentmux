@@ -231,7 +231,7 @@ export type AgentDocumentEvent =
            * cache learns about the resolution instead of reporting an
            * already-resolved node as stuck forever (reagentx P1, PR #2432).
            */
-          resolvedToolNodes: Array<{ id: string; status: string; toolName: string }>;
+          resolvedToolNodes: Array<{ id: string; status: string; toolName: string; run_in_background?: boolean }>;
       }
     | { type: "tool-force-canceled"; nodeId: string }
     | {
