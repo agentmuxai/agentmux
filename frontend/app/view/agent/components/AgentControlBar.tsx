@@ -265,15 +265,25 @@ export const AgentControlBar = ({ blockId, blockAtom, providerId, onOpenHistory 
                         >
                             {exportBusy() ? "Exporting…" : "Export"}
                         </button>
-                        <Show when={onOpenHistory}>
-                            <button
-                                class="agent-session-btn"
-                                title="Browse this agent's full recorded history, across sessions"
-                                onClick={() => onOpenHistory?.()}
-                            >
-                                View full history
-                            </button>
-                        </Show>
+                    </div>
+                </div>
+            </Show>
+
+            {/* ── Agent History entry — deliberately UNCONDITIONAL (not
+                nested in the session-actions row): archived and 500K+-line
+                sessions hide that row but are exactly the states where the
+                full-history reader matters most (reagent P1 on PR #2509). */}
+            <Show when={onOpenHistory}>
+                <div class="agent-session-row">
+                    <span class="agent-session-row-label">History</span>
+                    <div class="agent-session-actions">
+                        <button
+                            class="agent-session-btn"
+                            title="Browse this agent's full recorded history, across sessions"
+                            onClick={() => onOpenHistory?.()}
+                        >
+                            View full history
+                        </button>
                     </div>
                 </div>
             </Show>

@@ -61,13 +61,22 @@ export interface AgentHistoryViewProps {
 }
 
 export function AgentHistoryView(props: AgentHistoryViewProps) {
-    // Raw parsed nodes (no dividers) + the id set that dedupes page
-    // overlaps, mirroring the reducer's HistoryLoaded contract without
-    // involving the store.
+    // The accumulated RAW LINES (+ parallel stamps), reparsed wholesale
+    // into nodes on every page load. Wholesale — not per-page with an id
+    // dedup — because ClaudeCodeStreamParser generates counter-based ids
+    // (node_0, user_0, …) that restart for every parser instance: two
+    // independently-parsed pages collide on ids for UNRELATED messages,
+    // and any per-page dedup silently drops real history (codex P1 on
+    // PR #2509). One parse over the full accumulated range keeps ids
+    // unique and accumulator state (text/thinking runs spanning a page
+    // boundary) correct. Cost: O(loaded lines) per page-up, bounded by
+    // the reader's own pagination — fine for a reading posture.
     const [rawNodes, setRawNodes] = createSignal<DocumentNode[]>([]);
-    const seenIds = new Set<string>();
+    let accLines: string[] = [];
+    let accStamps: (number | undefined)[] = [];
     const [historyOffset, setHistoryOffset] = createSignal(0);
     const [totalLines, setTotalLines] = createSignal(0);
+    const [loading, setLoading] = createSignal(true);
     const [loadingOlder, setLoadingOlder] = createSignal(false);
     const [loadError, setLoadError] = createSignal<string | null>(null);
 
@@ -97,10 +106,19 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
     registerLayoutPane(layoutKey, { layout: setLayoutView, zoom: () => {} });
     onCleanup(() => unregisterLayoutPane(layoutKey));
 
-    const parsePage = (lines: string[], stamps?: number[]): DocumentNode[] =>
-        parseHistoryLines(lines, props.outputFormat(), props.agentName?.(), stamps, {
-            includeResumedOutcomes: true,
-        }).nodes;
+    /** Reparse the full accumulated line range into nodes (see the
+     *  wholesale-reparse rationale on `rawNodes`). */
+    const reparseAccumulated = (): DocumentNode[] =>
+        parseHistoryLines(
+            accLines,
+            props.outputFormat(),
+            props.agentName?.(),
+            accStamps as number[],
+            { includeResumedOutcomes: true },
+        ).nodes;
+
+    const stampsOf = (resp: { lines?: string[]; stamps?: number[] }): (number | undefined)[] =>
+        resp.stamps ?? new Array((resp.lines ?? []).length).fill(undefined);
 
     onMount(() => {
         let mounted = true;
@@ -116,7 +134,10 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
                 if (!mounted) return;
                 const total = countResp?.count ?? 0;
                 setTotalLines(total);
-                if (total === 0) return;
+                if (total === 0) {
+                    setLoading(false);
+                    return;
+                }
 
                 const offset = Math.max(0, total - HISTORY_PAGE);
                 const resp = await RpcApi.BlockfileReadRangeCommand(TabRpcClient, {
@@ -126,16 +147,19 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
                     limit: total - offset,
                 }, { timeout: 30_000 });
                 if (!mounted) return;
-                const nodes = parsePage(resp.lines ?? [], resp.stamps);
+                accLines = resp.lines ?? [];
+                accStamps = stampsOf(resp);
+                const nodes = reparseAccumulated();
                 batch(() => {
-                    for (const n of nodes) seenIds.add(n.id);
                     setRawNodes(nodes);
                     setHistoryOffset(Math.min(offset, typeof resp.total === "number" ? resp.total : offset));
                     if (typeof resp.total === "number") setTotalLines(resp.total);
+                    setLoading(false);
                 });
             } catch (err) {
                 if (!mounted) return;
                 setLoadError((err as Error | undefined)?.message ?? String(err));
+                setLoading(false);
             }
         })();
     });
@@ -152,10 +176,11 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
                 offset: newOffset,
                 limit: currentOffset - newOffset,
             }, { timeout: 15_000 });
-            const pageNodes = parsePage(resp.lines ?? [], resp.stamps).filter((n) => !seenIds.has(n.id));
+            accLines = [...(resp.lines ?? []), ...accLines];
+            accStamps = [...stampsOf(resp), ...accStamps];
+            const nodes = reparseAccumulated();
             batch(() => {
-                for (const n of pageNodes) seenIds.add(n.id);
-                if (pageNodes.length > 0) setRawNodes((prev) => [...pageNodes, ...prev]);
+                setRawNodes(nodes);
                 setHistoryOffset(newOffset);
             });
         } catch {
@@ -178,13 +203,19 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
                 </button>
                 <div class="agent-history-title">Agent History</div>
                 <div class="agent-history-meta">
-                    {historyOffset() === 0 && totalLines() > 0
-                        ? "full history loaded"
-                        : totalLines() > 0
-                            ? `${totalLines()} lines · scroll up for earlier`
-                            : loadError()
-                                ? `couldn't load history: ${loadError()}`
-                                : "no recorded history"}
+                    {/* Explicit loading state first — without it the initial
+                        async window renders "no recorded history", which is
+                        indistinguishable from a genuinely empty agent
+                        (reagent P2 on PR #2509). */}
+                    {loading()
+                        ? "loading history…"
+                        : loadError()
+                            ? `couldn't load history: ${loadError()}`
+                            : historyOffset() === 0 && totalLines() > 0
+                                ? "full history loaded"
+                                : totalLines() > 0
+                                    ? `${totalLines()} lines · scroll up for earlier`
+                                    : "no recorded history"}
                 </div>
             </div>
             <div class="agent-history-body">

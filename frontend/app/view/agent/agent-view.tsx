@@ -747,6 +747,16 @@ const AgentPresentationView = ({
         log,
     });
 
+    // True when content older than the working session exists out of view:
+    // set by the restore/pagination clamp paths (scopeClamped) OR derived
+    // from a live clamp — after the reducer's StreamFlush trim, the fresh
+    // session_outcome divider is always the first document node.
+    const earlierHistoryAvailable = createMemo(() => {
+        if (history.scopeClamped()) return true;
+        const first = agentAtoms().documentAtom[0]()[0];
+        return first?.type === "session_outcome" && first.outcome === "fresh";
+    });
+
     // Auth + launch flow state and the onCleanup that kills the CLI
     // if the pane closes mid-login.
     // `getDocument` is read-only; for writes we MUST dispatch through
@@ -1619,6 +1629,12 @@ const AgentPresentationView = ({
     useAgentKeyboard({
         blockId: model.blockId,
         onToggleSearch: () => {
+            // Search targets the LIVE document (its highlight + jumpTo are
+            // bound to the live AgentDocumentView, which unmounts in
+            // history mode) — opening it there would search a hidden
+            // document and dispatch scroll commands to an unmounted list
+            // (reagent P1 on PR #2509). History-mode search is P3 scope.
+            if (bodyMode() !== "live") return;
             // Second Ctrl+F press closes and clears state.
             if (search.visible()) {
                 search.close();
@@ -1729,17 +1745,6 @@ const AgentPresentationView = ({
 
             {/* Tab strip now lives in AgentViewWrapper — see its comment. */}
 
-            <AgentSearchBar
-                visible={search.visible}
-                onSearch={search.performSearch}
-                onNext={search.next}
-                onPrev={search.prev}
-                onClose={search.close}
-                matchIndex={search.currentIndex}
-                matchCount={search.matchCount}
-            />
-
-
             <Show
                 when={bodyMode() === "live"}
                 fallback={
@@ -1751,11 +1756,28 @@ const AgentPresentationView = ({
                     />
                 }
             >
-            {/* §3.4 link row — shown once the working scrollback was clamped
-                at a fresh session boundary. The one UI consumer of
-                history.scopeClamped: prior history is preserved and one
-                click away, so the clamp never reads as data loss. */}
-            <Show when={history.scopeClamped()}>
+            {/* Search bar lives INSIDE the live branch: its highlight +
+                jumpTo target the live document and would act on a hidden,
+                unmounted list in history mode (reagent P1 on PR #2509). */}
+            <AgentSearchBar
+                visible={search.visible}
+                onSearch={search.performSearch}
+                onNext={search.next}
+                onPrev={search.prev}
+                onClose={search.close}
+                matchIndex={search.currentIndex}
+                matchCount={search.matchCount}
+            />
+
+            {/* §3.4 link row — shown when the working scrollback is clamped
+                at a fresh session boundary: either detected during
+                restore/pagination (history.scopeClamped) or arrived LIVE —
+                the reducer's StreamFlush clamp leaves the fresh boundary as
+                the document's first node, so deriving from the document
+                covers the live path the RPC-side signal can't see
+                (codex P2 on PR #2509). Prior history stays one click away,
+                so the clamp never reads as data loss. */}
+            <Show when={earlierHistoryAvailable()}>
                 <PaneRow
                     sigil="⌛"
                     title="Earlier conversations"
