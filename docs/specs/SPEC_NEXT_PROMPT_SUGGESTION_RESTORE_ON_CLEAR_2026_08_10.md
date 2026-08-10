@@ -250,8 +250,12 @@ suggestion back.
 - No change to `isComposerEmpty()` / guard 3's late-RPC-write protection —
   confirmed independent and untouched (§2).
 - No change to guard 1 (clear on `Submitting`) or guard 4 (clear on session
-  end) in `useNextPromptSuggestion.ts` — both are correct and stay exactly
-  as they are.
+  end) in `useNextPromptSuggestion.ts` — **their firing conditions are
+  unchanged; their write bodies gained a paired generation-counter bump as
+  of §10.** Originally written as "no useNextPromptSuggestion.ts changes at
+  all," which stopped being true once §10's fix landed — noted here
+  explicitly rather than left to drift, per the same lesson §9 already
+  documents about stale claims in this file.
 - No new UI affordance (e.g. an explicit "dismiss suggestion" button) — the
   suggestion simply follows the box's emptiness now, same interaction
   model as today, just without the premature one-way clear.
@@ -266,11 +270,16 @@ suggestion back.
   the explicit meta-null after Tab/Right-Arrow accept (§3.3). Update the
   doc comments at lines 512-523 (currently explaining `boxWasEmpty`'s
   purpose) and 578-586 (currently citing the old §4.3 requirement this spec
-  amends) to reflect the new, simpler rule. §9 (post-review): new
-  `suggestionMaskedAtSend` signal + its read in `placeholder` + its write
-  in `handleSend`.
-- No `useNextPromptSuggestion.ts` changes — its four guards are all correct
-  as-is (§6).
+  amends) to reflect the new, simpler rule. §9/§10 (post-review): new
+  `suggestionGenMaskedAtSend` signal + its read in `placeholder` (compared
+  against a generation number, not suggestion text — §10) + its write in
+  `handleSend`.
+- `frontend/app/view/agent/hooks/useNextPromptSuggestion.ts` — §10
+  (post-review): new module-level `suggestionGenCounter` + `writeSuggestionMeta`
+  helper, used by both `clearSuggestion` (guard 1) and the RPC
+  success-write, pairing every write to `term:next_prompt_suggestion` with
+  a bump to a new `term:next_prompt_suggestion_gen` meta key. Guards'
+  firing conditions unchanged.
 - No `agentmux-srv` (Rust) changes. No wire-format changes — this is a
   pure frontend edit-state fix.
 
@@ -360,3 +369,51 @@ case) confirming the default placeholder shows instead of the stale
 suggestion, and one with a `createSignal`-backed mock confirming a
 genuinely new suggestion arriving later still displays normally (the mask
 doesn't shadow it forever).
+
+---
+
+## 10. Second post-review fix: text-value masking collides on a repeated suggestion (P1, caught by reagentx)
+
+§9's fix compared the *text* of the masked suggestion against the live
+text. That has a real collision the re-review caught: if a later turn's
+genuinely fresh suggestion happens to be the exact same string as the one
+masked at the previous send — a plausible repeat, e.g. Haiku predicting
+"Run the tests" after two unrelated turns — `suggestion !==
+suggestionMaskedAtSend()` evaluates `false` for a suggestion that is not
+actually stale, and band 1 stays wrongly suppressed until the *next* send
+resets the mask. The regression test added in §9 only exercised a
+differently-worded follow-up suggestion ("Check the logs"), so it didn't
+exercise this path at all.
+
+**Root problem:** text-value equality was always the wrong proxy for "has
+this been re-written since I captured it." What's actually needed is
+identity of the *write event*, not identity of its *payload*.
+
+**Fix:** `useNextPromptSuggestion.ts` now pairs every write to
+`term:next_prompt_suggestion` — both the RPC success-write and guard 1's
+clear — with a bump to a new `term:next_prompt_suggestion_gen` meta key, via
+a shared `writeSuggestionMeta` helper and a module-level monotonic counter
+(shared across every pane's hook instance; still strictly increasing and
+still unique per write when shared, and sharing it avoids per-instance
+bookkeeping AgentFooter.tsx never needed — each block only ever compares
+its own gen against its own earlier snapshot). `AgentFooter.tsx`'s mask
+(`suggestionGenMaskedAtSend`, renamed from `suggestionMaskedAtSend`) now
+snapshots and compares the generation number instead of the text. Any real
+write — same text or not — bumps the counter, so the collision above is
+structurally impossible now, not just less likely.
+
+**One accepted edge case, not fixed:** a suggestion already sitting in meta
+with no `_gen` key at all (e.g. left over from a session running the
+pre-§10 build) reads as `suggestionGen === undefined`, which matches the
+mask's own initial `undefined` default — so on the very first send after
+an in-place upgrade, band 1 could be wrongly suppressed once, the same
+failure mode as before this fix, not the P1 bug reappearing. Judged
+acceptable: narrow (one suggestion, one upgrade transition), and it fails
+toward under- rather than over-showing, consistent with this feature's
+existing risk posture (guard 3 already prefers dropping a suggestion over
+risking a stale/wrong one).
+
+**Test plan addition:** a new case sets an identical suggestion string with
+an incremented generation number after a simulated send, and asserts the
+placeholder shows it — pinning the exact collision the text-based version
+missed.

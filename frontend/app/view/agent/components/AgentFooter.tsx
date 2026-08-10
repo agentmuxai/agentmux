@@ -475,27 +475,38 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     // session ending (useNextPromptSuggestion.ts's own guards). See
     // docs/specs/SPEC_NEXT_PROMPT_SUGGESTION_RESTORE_ON_CLEAR_2026_08_10.md.
     const voice = getVoiceSession();
-    // Masks a specific stale suggestion value from band 1 — set by
+    // Masks a specific stale WRITE (not a text value) from band 1 — set by
     // handleSend right as it synchronously empties the composer. Without
     // this, every send has a real window where the box is empty (so the
     // native placeholder wants to render) but the PREVIOUS turn's
     // suggestion is still sitting in meta, since useNextPromptSuggestion.ts
     // guard 1 clears it via an async fire-and-forget RPC, not synchronously
     // with the send — the old suggestion would briefly flash as placeholder
-    // text before that RPC round-trips. A signal, not a plain variable: the
-    // placeholder memo below must actually re-run the instant this is set,
-    // and mutating a bare closure variable doesn't trigger Solid's
-    // reactivity at all (the first version of this fix did exactly that and
-    // silently never worked — caught by the regression test, not by
-    // inspection). Pure value comparison otherwise, no reset needed: once
-    // the backend actually clears/replaces the meta key, the live value no
-    // longer equals this snapshot and band 1 resumes normally (for a
-    // genuinely new suggestion) on its own. Reagentx P1 on #2515.
-    const [suggestionMaskedAtSend, setSuggestionMaskedAtSend] = createSignal<string | undefined>(undefined);
+    // text before that RPC round-trips.
+    //
+    // Compares term:next_prompt_suggestion_gen, a monotonic counter
+    // useNextPromptSuggestion.ts bumps on every write to
+    // term:next_prompt_suggestion (fresh or cleared) — NOT the suggestion
+    // text itself. An earlier version of this compared text values
+    // directly: if a later turn's genuinely fresh suggestion happened to be
+    // the exact same string masked at the previous send (a plausible
+    // repeat, e.g. Haiku predicting "Run the tests" twice), value-equality
+    // would suppress a legitimate current suggestion until the next send —
+    // reagentx P1 on #2515, caught on re-review. The generation counter
+    // can't collide that way: any real write (same text or not) bumps it.
+    //
+    // A signal, not a plain variable: the placeholder memo below must
+    // actually re-run the instant this is set, and mutating a bare closure
+    // variable doesn't trigger Solid's reactivity at all (a still-earlier
+    // version of this fix did exactly that and silently never worked —
+    // caught by its own regression test, not by inspection).
+    const [suggestionGenMaskedAtSend, setSuggestionGenMaskedAtSend] = createSignal<number | undefined>(undefined);
     const placeholder = createMemo(() => {
         const vm = props.viewModel;
-        const suggestion = vm?.blockAtom()?.meta?.["term:next_prompt_suggestion"] as string | undefined;
-        if (suggestion && suggestion !== suggestionMaskedAtSend()) return suggestion;
+        const meta = vm?.blockAtom()?.meta;
+        const suggestion = meta?.["term:next_prompt_suggestion"] as string | undefined;
+        const suggestionGen = meta?.["term:next_prompt_suggestion_gen"] as number | undefined;
+        if (suggestion && suggestionGen !== suggestionGenMaskedAtSend()) return suggestion;
         const listeningHere =
             !!vm && voice.isListening() && voice.currentTargetId() === vm.blockId;
         return listeningHere
@@ -737,15 +748,15 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
             }
             histPos = sentHistory.length;
             histDraft = "";
-            // Mask whatever suggestion is still in meta right now — see the
-            // doc comment on suggestionMaskedAtSend above `placeholder`.
+            // Mask whatever write is current in meta right now — see the
+            // doc comment on suggestionGenMaskedAtSend above `placeholder`.
             // Order doesn't matter relative to writeComposerValue below
             // (that call doesn't touch any signal `placeholder` reads
             // either), but setting the signal is what actually makes
             // `placeholder` recompute — a plain variable write here would
             // silently do nothing.
-            setSuggestionMaskedAtSend(
-                props.viewModel?.blockAtom()?.meta?.["term:next_prompt_suggestion"] as string | undefined
+            setSuggestionGenMaskedAtSend(
+                props.viewModel?.blockAtom()?.meta?.["term:next_prompt_suggestion_gen"] as number | undefined
             );
             writeComposerValue("");
             // A sent message supersedes any pending Esc-cleared snapshot —

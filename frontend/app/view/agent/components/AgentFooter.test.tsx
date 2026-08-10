@@ -98,13 +98,42 @@ describe("AgentFooter Esc-clear Undo", () => {
 // whenever a viewModel is present). suggestion is fixed for the lifetime of
 // the mock, which is deliberate: these tests exist to prove editing the
 // composer never triggers a write that would clear it, not to simulate the
-// real reactive meta atom.
-function makeViewModel(suggestion: string | undefined): AgentViewModel {
+// real reactive meta atom. `gen` mirrors term:next_prompt_suggestion_gen —
+// must be a real number whenever `suggestion` is set, or the placeholder
+// memo's initial "undefined !== undefined" comparison would wrongly
+// suppress it from the very first render (see suggestionGenMaskedAtSend's
+// doc comment in AgentFooter.tsx).
+function makeViewModel(suggestion: string | undefined, gen = 1): AgentViewModel {
     return {
         blockId: "test-block",
-        blockAtom: () => ({ meta: { "term:next_prompt_suggestion": suggestion } }) as any,
+        blockAtom: () =>
+            ({
+                meta: {
+                    "term:next_prompt_suggestion": suggestion,
+                    "term:next_prompt_suggestion_gen": suggestion ? gen : undefined,
+                },
+            }) as any,
         voiceTargetRef: { current: null },
     } as unknown as AgentViewModel;
+}
+
+// Reactive variant for tests that need meta to actually change after
+// mount (simulating useNextPromptSuggestion.ts's guard-1 clear or a later
+// turn's fresh write landing).
+function makeReactiveViewModel(initial: { suggestion: string | undefined; gen: number | undefined }) {
+    const [state, setState] = createSignal(initial);
+    const vm = {
+        blockId: "test-block",
+        blockAtom: () =>
+            ({
+                meta: {
+                    "term:next_prompt_suggestion": state().suggestion,
+                    "term:next_prompt_suggestion_gen": state().gen,
+                },
+            }) as any,
+        voiceTargetRef: { current: null },
+    } as unknown as AgentViewModel;
+    return { vm, setState };
 }
 
 describe("AgentFooter ghost-text next-prompt suggestion (SPEC_NEXT_PROMPT_SUGGESTION_RESTORE_ON_CLEAR_2026_08_10.md)", () => {
@@ -179,12 +208,7 @@ describe("AgentFooter ghost-text next-prompt suggestion (SPEC_NEXT_PROMPT_SUGGES
     });
 
     it("shows a genuinely new suggestion normally once meta actually updates after send", async () => {
-        const [suggestion, setSuggestion] = createSignal<string | undefined>("Run the tests");
-        const vm = {
-            blockId: "test-block",
-            blockAtom: () => ({ meta: { "term:next_prompt_suggestion": suggestion() } }) as any,
-            voiceTargetRef: { current: null },
-        } as unknown as AgentViewModel;
+        const { vm, setState } = makeReactiveViewModel({ suggestion: "Run the tests", gen: 1 });
         const onSendMessage = vi.fn();
         render(() => <AgentFooter agentName="Test" viewModel={vm} onSendMessage={onSendMessage} />);
         const user = userEvent.setup();
@@ -195,10 +219,34 @@ describe("AgentFooter ghost-text next-prompt suggestion (SPEC_NEXT_PROMPT_SUGGES
         expect(ta.placeholder).toBe("Send message to Test...");
 
         // Simulates useNextPromptSuggestion.ts guard 1's clear RPC landing,
-        // then a later turn's fresh suggestion arriving — the mask must not
-        // shadow it.
-        setSuggestion(undefined);
-        setSuggestion("Check the logs");
+        // then a later turn's fresh (differently-worded) suggestion
+        // arriving — the mask must not shadow it.
+        setState({ suggestion: undefined, gen: 2 });
+        setState({ suggestion: "Check the logs", gen: 3 });
         expect(ta.placeholder).toBe("Check the logs");
+    });
+
+    // Reagentx P1 on #2515, second round: an earlier version of this fix
+    // compared the suggestion TEXT masked at send against the live text —
+    // if a later turn's genuinely fresh suggestion happened to be the exact
+    // same string (a plausible repeat, e.g. Haiku predicting "Run the
+    // tests" twice), that comparison would wrongly suppress a legitimate
+    // current suggestion. Only the generation counter, not the text, is
+    // compared now — this pins the collision directly.
+    it("shows a fresh suggestion after send even when its text is identical to the one masked", async () => {
+        const { vm, setState } = makeReactiveViewModel({ suggestion: "Run the tests", gen: 1 });
+        const onSendMessage = vi.fn();
+        render(() => <AgentFooter agentName="Test" viewModel={vm} onSendMessage={onSendMessage} />);
+        const user = userEvent.setup();
+        const ta = screen.getByRole("textbox") as HTMLTextAreaElement;
+
+        await user.type(ta, "ok will do");
+        keyOn(ta, "Enter");
+        expect(ta.placeholder).toBe("Send message to Test...");
+
+        // Same text, but a genuinely new write (fresh generation) — must
+        // show, not stay suppressed just because the string happens to match.
+        setState({ suggestion: "Run the tests", gen: 2 });
+        expect(ta.placeholder).toBe("Run the tests");
     });
 });

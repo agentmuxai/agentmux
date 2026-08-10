@@ -29,6 +29,17 @@
  * docs/specs/SPEC_NEXT_PROMPT_SUGGESTION_RESTORE_ON_CLEAR_2026_08_10.md —
  * see AgentFooter.tsx's placeholder precedence comment.
  *
+ * Every write to `term:next_prompt_suggestion` (a fresh suggestion here, or
+ * a clear) is paired with a bump to `term:next_prompt_suggestion_gen` (a
+ * monotonic counter, `suggestionGen()` below) — AgentFooter.tsx masks a
+ * *specific write*, not a specific text value, when it snapshots this pair
+ * at send time (§9 of that spec). Text-value comparison alone has a real
+ * collision: if a later turn's genuinely fresh suggestion happens to be the
+ * exact same string as the one masked at the previous send (a plausible
+ * repeat, e.g. "Run the tests"), value-equality would suppress a legitimate
+ * current suggestion until the next send. The generation counter can't
+ * collide that way — reagentx P1 on #2515.
+ *
  * Unlike the read-only activity summary (which persists across turns), a
  * stale suggestion here is a correctness bug, not a cosmetic one — it can
  * put words in the user's mouth. Four independent guards:
@@ -79,12 +90,25 @@ export interface UseNextPromptSuggestionOptions {
     isComposerEmpty: () => boolean;
 }
 
-function clearSuggestion(blockId: string): void {
+// Shared across every pane's hook instance — module-level, not per-mount.
+// Doesn't need to be scoped per block: a strictly-increasing counter is
+// still strictly increasing (and still unique per write) when shared, and
+// sharing it avoids per-instance bookkeeping for no benefit — AgentFooter.tsx
+// only ever compares one block's own gen against its own earlier snapshot,
+// never across blocks.
+let suggestionGenCounter = 0;
+
+function writeSuggestionMeta(blockId: string, suggestion: string | null): void {
     fireAndForget(() =>
         ObjectService.UpdateObjectMeta(makeORef("block", blockId), {
-            "term:next_prompt_suggestion": null,
+            "term:next_prompt_suggestion": suggestion,
+            "term:next_prompt_suggestion_gen": ++suggestionGenCounter,
         } as any)
     );
+}
+
+function clearSuggestion(blockId: string): void {
+    writeSuggestionMeta(blockId, null);
 }
 
 export function useNextPromptSuggestion(opts: UseNextPromptSuggestionOptions): void {
@@ -116,11 +140,7 @@ export function useNextPromptSuggestion(opts: UseNextPromptSuggestionOptions): v
                 recordTurn("ambient:next_prompt_suggestion", result.tokens);
             }
             if (result.suggestion && isComposerEmpty()) {
-                fireAndForget(() =>
-                    ObjectService.UpdateObjectMeta(makeORef("block", blockId), {
-                        "term:next_prompt_suggestion": result.suggestion,
-                    } as any)
-                );
+                writeSuggestionMeta(blockId, result.suggestion);
             }
         }).catch(() => {
             // Silently ignore — no ghost text shows.
