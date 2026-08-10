@@ -45,6 +45,17 @@ pub const PERSISTENT_OUTPUT_SUBJECT: &str = "output";
 
 pub const BLOCK_CONTROLLER_PERSISTENT: &str = "persistent";
 
+/// Draws the next process-wide registration nonce (≥ 1) for a persistent
+/// spawn's muxbus/registry registrations — see the doc comment at the
+/// `my_registration_nonce` binding in `spawn_process` for why this is a
+/// srv-wide counter rather than the controller-local spawn generation
+/// (codex P1 on PR #2500: generations restart per controller instance
+/// and can collide across a `resync_controller` replacement).
+fn next_registration_nonce() -> u64 {
+    static NEXT_REGISTRATION_NONCE: AtomicU64 = AtomicU64::new(0);
+    NEXT_REGISTRATION_NONCE.fetch_add(1, Ordering::Relaxed) + 1
+}
+
 /// Builds the NDJSON line for a `persistent_resume::ResumeEffect::
 /// EmitSessionOutcome` — a free function (not a method) so it's callable
 /// directly from the stdout-reader, process-waiter, and stop-path match
@@ -2035,6 +2046,19 @@ impl PersistentSubprocessController {
             };
             (generation, effects)
         };
+        // Identity for this spawn's muxbus/registry registrations
+        // (`registration_nonce` on `AgentRegistration`/`AgentEntry`).
+        // Deliberately NOT `my_generation`: the generation is
+        // controller-LOCAL (starts at 0 per controller instance), so a
+        // replacement controller for this same block
+        // (`resync_controller` stops the old one asynchronously and
+        // constructs a new one immediately) restarts at generation 1 —
+        // the old and new processes could then share a generation, and
+        // the old exit-handler's compare-and-remove would accept the
+        // replacement's fresh registration as its own and delete it
+        // (codex P1 on PR #2500). A process-wide counter can never
+        // collide across controller instances.
+        let my_registration_nonce = next_registration_nonce();
         // reagentx P1 (round 7 on this PR): this fresh spawn can supersede
         // a PRIOR generation that was still AwaitingOutcome/ConfirmedRetry
         // with a held error line (see `resolve_superseded_generation`'s
@@ -2177,12 +2201,14 @@ impl PersistentSubprocessController {
         // See SPEC_MUXBUS_AGENT_DISCOVERY_AND_PERSISTENT_DELIVERY_2026_06_16.
         let agent_id_for_muxbus = muxbus_agent_id_from_env(&config.env_vars);
         if let Some(ref agent_id) = agent_id_for_muxbus {
-            // `_generated` variants record `my_generation` so this exact
-            // spawn's exit-handler can compare-and-remove its own
-            // registrations instead of blindly wiping a fallback
-            // respawn's fresh ones (issue #2363).
+            // `_with_nonce` variants record this spawn's process-wide
+            // registration nonce so this exact spawn's exit-handler can
+            // compare-and-remove its own registrations instead of
+            // blindly wiping a fallback respawn's (or replacement
+            // controller's) fresh ones (issue #2363; codex P1 on PR
+            // #2500 for why not the controller-local generation).
             match crate::backend::reactive::get_global_handler()
-                .register_agent_generated(agent_id, &self.block_id, Some(&self.tab_id), my_generation)
+                .register_agent_with_nonce(agent_id, &self.block_id, Some(&self.tab_id), my_registration_nonce)
             {
                 Ok(()) => {
                     tracing::info!(
@@ -2197,18 +2223,18 @@ impl PersistentSubprocessController {
                     // exactly like that handler does.
                     if let Ok(local_url) = std::env::var("AGENTMUX_LOCAL_URL") {
                         let data_dir = crate::backend::base::get_wave_data_dir();
-                        crate::backend::reactive::registry::write_generated(
+                        crate::backend::reactive::registry::write_with_nonce(
                             &data_dir,
                             agent_id,
                             &local_url,
                             &self.block_id,
-                            my_generation,
+                            my_registration_nonce,
                         );
-                        crate::backend::reactive::registry::write_shared_from_env_generated(
+                        crate::backend::reactive::registry::write_shared_from_env_with_nonce(
                             agent_id,
                             &local_url,
                             &self.block_id,
-                            my_generation,
+                            my_registration_nonce,
                         );
                     }
                 }
@@ -2722,6 +2748,10 @@ impl PersistentSubprocessController {
         // unconditional clear could wipe a fallback respawn's fresh
         // registration (issue #2363, see clear_active_pid_if_pid).
         let pid_wait = pid;
+        // This exact spawn's registration identity, for the guarded
+        // muxbus/registry removals below (issue #2363 / codex P1 on PR
+        // #2500 — see `my_registration_nonce`'s own doc comment).
+        let nonce_wait = my_registration_nonce;
 
         tokio::spawn(async move {
             tokio::select! {
@@ -2907,25 +2937,28 @@ impl PersistentSubprocessController {
                         // respawn has ALREADY re-registered, the guards below
                         // leave its fresh registration in place.
                         // All removals are compare-and-remove keyed on this
-                        // spawn's generation (issue #2363): the
-                        // `is_current_generation` gate above was read once,
-                        // and a fallback/retry respawn's fresh registration
-                        // can land on a parallel task between that read and
-                        // these calls — an unconditional removal here would
-                        // wipe the NEW spawn's entry with nothing left to
-                        // re-register it.
+                        // spawn's process-wide registration nonce (issue
+                        // #2363): the `is_current_generation` gate above
+                        // was read once, and a fallback/retry respawn's
+                        // fresh registration can land on a parallel task
+                        // between that read and these calls — an
+                        // unconditional removal here would wipe the NEW
+                        // spawn's entry with nothing left to re-register
+                        // it. Nonce, not generation: a replacement
+                        // controller's spawn restarts at generation 1 and
+                        // could collide with ours (codex P1 on PR #2500).
                         let registration_was_ours = crate::backend::reactive::get_global_handler()
-                            .unregister_block_if_generation(&block_id_wait, my_generation_wait);
+                            .unregister_block_if_nonce(&block_id_wait, nonce_wait);
                         if let Some(ref agent_id) = agent_id_wait {
                             let data_dir = crate::backend::base::get_wave_data_dir();
-                            crate::backend::reactive::registry::remove_if_generation(
+                            crate::backend::reactive::registry::remove_if_nonce(
                                 &data_dir,
                                 agent_id,
-                                my_generation_wait,
+                                nonce_wait,
                             );
-                            crate::backend::reactive::registry::remove_shared_from_env_if_generation(
+                            crate::backend::reactive::registry::remove_shared_from_env_if_nonce(
                                 agent_id,
-                                my_generation_wait,
+                                nonce_wait,
                             );
                             // The cloud subscriber's agent set records no
                             // per-agent identity to compare against, so the
@@ -3282,25 +3315,28 @@ impl PersistentSubprocessController {
 
                         // Deregister from muxbus (see the clean-exit arm above).
                         // All removals are compare-and-remove keyed on this
-                        // spawn's generation (issue #2363): the
-                        // `is_current_generation` gate above was read once,
-                        // and a fallback/retry respawn's fresh registration
-                        // can land on a parallel task between that read and
-                        // these calls — an unconditional removal here would
-                        // wipe the NEW spawn's entry with nothing left to
-                        // re-register it.
+                        // spawn's process-wide registration nonce (issue
+                        // #2363): the `is_current_generation` gate above
+                        // was read once, and a fallback/retry respawn's
+                        // fresh registration can land on a parallel task
+                        // between that read and these calls — an
+                        // unconditional removal here would wipe the NEW
+                        // spawn's entry with nothing left to re-register
+                        // it. Nonce, not generation: a replacement
+                        // controller's spawn restarts at generation 1 and
+                        // could collide with ours (codex P1 on PR #2500).
                         let registration_was_ours = crate::backend::reactive::get_global_handler()
-                            .unregister_block_if_generation(&block_id_wait, my_generation_wait);
+                            .unregister_block_if_nonce(&block_id_wait, nonce_wait);
                         if let Some(ref agent_id) = agent_id_wait {
                             let data_dir = crate::backend::base::get_wave_data_dir();
-                            crate::backend::reactive::registry::remove_if_generation(
+                            crate::backend::reactive::registry::remove_if_nonce(
                                 &data_dir,
                                 agent_id,
-                                my_generation_wait,
+                                nonce_wait,
                             );
-                            crate::backend::reactive::registry::remove_shared_from_env_if_generation(
+                            crate::backend::reactive::registry::remove_shared_from_env_if_nonce(
                                 agent_id,
-                                my_generation_wait,
+                                nonce_wait,
                             );
                             // The cloud subscriber's agent set records no
                             // per-agent identity to compare against, so the

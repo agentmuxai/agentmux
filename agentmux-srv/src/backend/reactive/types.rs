@@ -89,14 +89,18 @@ pub struct AgentRegistration {
     pub tab_id: Option<String>,
     pub registered_at: u64,
     pub last_seen: u64,
-    /// Spawn generation of the persistent-controller process this
+    /// Process-wide unique nonce of the persistent-controller spawn this
     /// registration belongs to; 0 = not recorded (HTTP register handler,
-    /// PTY shell auto-register). Real generations are always ≥ 1
-    /// (`PersistentInner::spawn_generation` is pre-incremented). Lets the
-    /// exit-handler's cleanup compare-and-remove instead of blindly wiping
-    /// a fallback respawn's fresh registration (issue #2363).
+    /// PTY shell auto-register). Real nonces are always ≥ 1, drawn from a
+    /// single srv-wide counter (`persistent::next_registration_nonce`) —
+    /// NOT the controller-local spawn generation, which restarts at 1
+    /// for a replacement controller (`resync_controller`) and could
+    /// collide across controller instances for the same block (codex P1
+    /// on PR #2500). Lets the exit-handler's cleanup compare-and-remove
+    /// instead of blindly wiping a fallback respawn's (or replacement
+    /// controller's) fresh registration (issue #2363).
     #[serde(default)]
-    pub spawn_generation: u64,
+    pub registration_nonce: u64,
 }
 
 /// List of registered agents.

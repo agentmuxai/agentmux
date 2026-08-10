@@ -48,18 +48,21 @@ pub struct AgentEntry {
     /// `docs/specs/SPEC_MUXBUS_CROSS_CHANNEL_DELIVERY_2026_07_02.md`.
     #[serde(default)]
     pub channel: String,
-    /// Spawn generation of the persistent-controller process this entry
-    /// was written for; 0 = not recorded (HTTP register handler, PTY
-    /// shell auto-register, pre-existing entries). Real generations are
-    /// always ≥ 1. Lets an exit-handler's cleanup compare-and-remove
-    /// ([`remove_if_generation`]) instead of deleting a fallback
-    /// respawn's fresh entry (issue #2363).
+    /// Process-wide unique nonce of the persistent-controller spawn this
+    /// entry was written for; 0 = not recorded (HTTP register handler,
+    /// PTY shell auto-register, pre-existing entries). Real nonces are
+    /// always ≥ 1, drawn from a single srv-wide counter — NOT the
+    /// controller-local spawn generation, which restarts for a
+    /// replacement controller and could collide across controller
+    /// instances (codex P1 on PR #2500). Lets an exit-handler's cleanup
+    /// compare-and-remove ([`remove_if_nonce`]) instead of deleting a
+    /// fallback respawn's fresh entry (issue #2363).
     #[serde(default)]
-    pub spawn_generation: u64,
+    pub registration_nonce: u64,
 }
 
 /// Serializes this process's own read-compare-remove sequences
-/// ([`remove_if_generation`] / [`remove_shared_if_generation`]) against
+/// ([`remove_if_nonce`] / [`remove_shared_if_nonce`]) against
 /// its own writes. Both the racing writer (a fallback respawn's
 /// re-registration) and the racing remover (the dying spawn's
 /// exit-handler) live in this same agentmux-srv process — each per-agent
@@ -119,17 +122,17 @@ fn agent_path(data_dir: &Path, agent_id: &str) -> PathBuf {
 /// existing `authkey.dev` file). On Windows, default ACLs inherit
 /// user-only on user-owned directories.
 pub fn write(data_dir: &Path, agent_id: &str, local_url: &str, block_id: &str) {
-    write_generated(data_dir, agent_id, local_url, block_id, 0);
+    write_with_nonce(data_dir, agent_id, local_url, block_id, 0);
 }
 
 /// [`write`], recording the registering persistent-controller spawn's
-/// generation — see `AgentEntry::spawn_generation` / issue #2363.
-pub fn write_generated(
+/// registration nonce — see `AgentEntry::registration_nonce` / issue #2363.
+pub fn write_with_nonce(
     data_dir: &Path,
     agent_id: &str,
     local_url: &str,
     block_id: &str,
-    spawn_generation: u64,
+    registration_nonce: u64,
 ) {
     let _guard = REGISTRY_OP_LOCK.lock().unwrap();
     let dir = agents_dir(data_dir);
@@ -144,7 +147,7 @@ pub fn write_generated(
         // Empty for entries in the per-channel registry — see the field's
         // doc comment on `AgentEntry`.
         channel: String::new(),
-        spawn_generation,
+        registration_nonce,
     };
     let path = agent_path(data_dir, agent_id);
     let Ok(json) = serde_json::to_string(&entry) else { return };
@@ -169,21 +172,23 @@ pub fn remove(data_dir: &Path, agent_id: &str) {
 }
 
 /// Remove an agent entry **only if** it was written by the spawn with
-/// `expected_generation` — compare-and-remove for persistent-controller
-/// exit-handlers (issue #2363). An entry with no recorded generation
+/// `expected_nonce` — compare-and-remove for persistent-controller
+/// exit-handlers (issue #2363; nonce is process-wide unique, so the
+/// guard holds across controller replacement too — codex P1 on PR
+/// #2500). An entry with no recorded nonce
 /// (0) is never removed by this variant: leaving a stale file to the
 /// TTL sweep ([`cleanup_stale`]) is strictly safer than deleting a live
 /// registration. Atomic w.r.t. this process's own writes via
 /// [`REGISTRY_OP_LOCK`].
-pub fn remove_if_generation(data_dir: &Path, agent_id: &str, expected_generation: u64) {
+pub fn remove_if_nonce(data_dir: &Path, agent_id: &str, expected_nonce: u64) {
     let _guard = REGISTRY_OP_LOCK.lock().unwrap();
     let matches = lookup(data_dir, agent_id)
-        .is_some_and(|e| expected_generation != 0 && e.spawn_generation == expected_generation);
+        .is_some_and(|e| expected_nonce != 0 && e.registration_nonce == expected_nonce);
     if !matches {
         tracing::info!(
             agent_id = %agent_id,
-            expected_generation = expected_generation,
-            "registry: entry generation changed since this spawn registered — skipping remove"
+            expected_nonce = expected_nonce,
+            "registry: entry changed hands since this spawn registered — skipping remove"
         );
         return;
     }
@@ -303,18 +308,18 @@ fn pid_alive(pid: u32) -> bool {
 /// concurrent writers for different channels of the same agent name
 /// cannot race or clobber each other.
 pub fn write_shared(shared_dir: &Path, agent_id: &str, local_url: &str, block_id: &str, channel: &str) {
-    write_shared_generated(shared_dir, agent_id, local_url, block_id, channel, 0);
+    write_shared_with_nonce(shared_dir, agent_id, local_url, block_id, channel, 0);
 }
 
 /// [`write_shared`], recording the registering persistent-controller
-/// spawn's generation — see `AgentEntry::spawn_generation` / issue #2363.
-pub fn write_shared_generated(
+/// spawn's registration nonce — see `AgentEntry::registration_nonce` / issue #2363.
+pub fn write_shared_with_nonce(
     shared_dir: &Path,
     agent_id: &str,
     local_url: &str,
     block_id: &str,
     channel: &str,
-    spawn_generation: u64,
+    registration_nonce: u64,
 ) {
     let _guard = REGISTRY_OP_LOCK.lock().unwrap();
     let dir = shared_agent_dir(shared_dir, agent_id);
@@ -328,7 +333,7 @@ pub fn write_shared_generated(
         updated_at: now_unix_millis(),
         auth_key: local_auth_key().to_string(),
         channel: channel.to_string(),
-        spawn_generation,
+        registration_nonce,
     };
     write_entry_file(&path, &entry);
 }
@@ -345,28 +350,28 @@ pub fn remove_shared(shared_dir: &Path, agent_id: &str, channel: &str) {
 }
 
 /// [`remove_shared`] **only if** this channel's entry was written by the
-/// spawn with `expected_generation` — see [`remove_if_generation`]
+/// spawn with `expected_nonce` — see [`remove_if_nonce`]
 /// (issue #2363). Cross-channel note: only this channel's own file is
 /// read and removed, matching [`write_shared`]'s single-writer contract,
 /// so the process-local [`REGISTRY_OP_LOCK`] still suffices.
-pub fn remove_shared_if_generation(
+pub fn remove_shared_if_nonce(
     shared_dir: &Path,
     agent_id: &str,
     channel: &str,
-    expected_generation: u64,
+    expected_nonce: u64,
 ) {
     let _guard = REGISTRY_OP_LOCK.lock().unwrap();
     let path = shared_channel_path(shared_dir, agent_id, channel);
     let matches = std::fs::read_to_string(&path)
         .ok()
         .and_then(|content| serde_json::from_str::<AgentEntry>(&content).ok())
-        .is_some_and(|e| expected_generation != 0 && e.spawn_generation == expected_generation);
+        .is_some_and(|e| expected_nonce != 0 && e.registration_nonce == expected_nonce);
     if !matches {
         tracing::info!(
             agent_id = %agent_id,
             channel = %channel,
-            expected_generation = expected_generation,
-            "registry: shared entry generation changed since this spawn registered — skipping remove"
+            expected_nonce = expected_nonce,
+            "registry: shared entry changed hands since this spawn registered — skipping remove"
         );
         return;
     }
@@ -396,26 +401,26 @@ pub fn remove_shared_from_env(agent_id: &str) {
     }
 }
 
-/// Convenience wrapper over [`write_shared_generated`] — see
+/// Convenience wrapper over [`write_shared_with_nonce`] — see
 /// [`write_shared_from_env`].
-pub fn write_shared_from_env_generated(
+pub fn write_shared_from_env_with_nonce(
     agent_id: &str,
     local_url: &str,
     block_id: &str,
-    spawn_generation: u64,
+    registration_nonce: u64,
 ) {
     if let Some(shared_dir) = crate::registry::resolve_shared_reactive_dir() {
         let channel = std::env::var("AGENTMUX_CHANNEL").unwrap_or_else(|_| "stable".to_string());
-        write_shared_generated(&shared_dir, agent_id, local_url, block_id, &channel, spawn_generation);
+        write_shared_with_nonce(&shared_dir, agent_id, local_url, block_id, &channel, registration_nonce);
     }
 }
 
-/// Convenience wrapper over [`remove_shared_if_generation`] — see
+/// Convenience wrapper over [`remove_shared_if_nonce`] — see
 /// [`write_shared_from_env`].
-pub fn remove_shared_from_env_if_generation(agent_id: &str, expected_generation: u64) {
+pub fn remove_shared_from_env_if_nonce(agent_id: &str, expected_nonce: u64) {
     if let Some(shared_dir) = crate::registry::resolve_shared_reactive_dir() {
         let channel = std::env::var("AGENTMUX_CHANNEL").unwrap_or_else(|_| "stable".to_string());
-        remove_shared_if_generation(&shared_dir, agent_id, &channel, expected_generation);
+        remove_shared_if_nonce(&shared_dir, agent_id, &channel, expected_nonce);
     }
 }
 
