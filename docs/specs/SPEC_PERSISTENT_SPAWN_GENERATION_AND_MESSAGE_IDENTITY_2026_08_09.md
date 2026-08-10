@@ -87,24 +87,31 @@ transition that fired it). Decision table:
   impossible by construction (the retry's process exited) — debug-assert.
 - `stdin_tx.is_some()` and `spawn_generation > retry_generation`: an
   unrelated spawn raced ahead during the exit-handler's cleanup window.
-  **Open design question** — the issue's suggested "prepend behind it"
-  needs a drain trigger to avoid starvation (nothing drains
-  `pending_send_messages` while a healthy process is running; the queue
-  only drains post-spawn). Options, to be settled during implementation
-  with a test for each candidate:
+  Two candidate resolutions, to be settled during implementation with a
+  test for each (a bare "prepend behind it" is NOT one of them — nothing
+  drains `pending_send_messages` while a healthy process runs, so an
+  unflushed prepend starves; and a naive prepend-then-flush races
+  concurrent `DeliverDirect` sends mid-batch, as reagentx flagged on
+  this spec's round 3):
   1. **DeliverDirect + disclosure** (accept the reorder, persist a
      visible "delivered after later input" marker) — smallest change,
-     honest, no starvation risk.
-  2. **Prepend + explicit flush**: prepend the batch, then immediately
-     drain the queue through the live `stdin_tx` in batch order — this
-     preserves intra-batch order and delivers exactly once, and the
-     "reorder" relative to the newer process's first message already
-     happened (it was accepted first by a live process) — nothing can
-     un-send it. Likely the right call: it degrades gracefully to
-     option 1's semantics while keeping the queue as the single
-     ordering authority.
-  3. Reserve-claim state (the issue's option b) — most invasive; only
-     if 1/2 prove insufficient under test.
+     honest, no starvation risk, no new state.
+  2. **Drain-claim + flush** (the issue's own option b, now concrete):
+     a new `drain_claim: bool` on `PersistentInner`, orthogonal to
+     `spawning_in_progress`. `decide_retry_batch_action` sets it under
+     the same lock acquisition in which it decides; while it is held,
+     `decide_send_action`'s `DeliverDirect` branch routes to `Queued`
+     instead (exactly how it already treats `spawning_in_progress`).
+     The retry path then flushes the batch plus anything queued behind
+     it through `stdin_tx` in order and clears the claim. An
+     already-in-flight `DeliverDirect` that was *decided* before the
+     claim was set can still land mid-batch — that residue is bounded
+     to sends that were already racing the process exit itself, i.e.
+     option 1's semantics as the floor, with strictly better ordering
+     in every other interleaving.
+  Preference: option 2 — it makes the queue the single ordering
+  authority; option 1 remains the fallback if 2's tests surface
+  something worse.
 - Spawner/queued branches unchanged.
 
 ## 5. Verify-and-close work (#2366, #2368)
@@ -134,6 +141,11 @@ transition that fired it). Decision table:
 
 - No rework of `persistent_resume.rs`'s state machine semantics — it is
   the fix for half this cluster; this spec only builds on it.
-- No change to `spawning_in_progress` semantics (round-14's starvation
-  analysis stands).
+- No change to `spawning_in_progress` **semantics** — round-14's
+  starvation analysis stands: it is never pre-asserted or repurposed for
+  the retry claim. §4 option 2's `drain_claim` is a NEW, orthogonal
+  state deliberately added instead of overloading that bool; the only
+  touch to existing behavior is `decide_send_action` treating a held
+  drain claim the same way it already treats an in-progress spawn
+  (queue behind it).
 - Not addressing #2405 (Job-Object registration) — separate mechanism.
