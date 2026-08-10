@@ -21,8 +21,39 @@
  * output to claude-haiku-4-5-20251001 and asks for a short, natural next
  * user message. The result is written to `term:next_prompt_suggestion`
  * block meta, which the composer reads as ghost text (dimmed, shown only
- * while the input is empty; Tab accepts it into the real input; any other
- * keystroke dismisses it — see AgentFooter.tsx).
+ * while the input is empty; Tab accepts it into the real input). Typing
+ * over it, or accepting it and then deleting the text, does NOT dismiss it
+ * from block meta — the composer just stops rendering it while non-empty
+ * (native `<textarea placeholder>` behavior) and shows it again once the
+ * box is empty, per
+ * docs/specs/SPEC_NEXT_PROMPT_SUGGESTION_RESTORE_ON_CLEAR_2026_08_10.md —
+ * see AgentFooter.tsx's placeholder precedence comment.
+ *
+ * Every write to `term:next_prompt_suggestion` FROM THIS FILE (a fresh
+ * suggestion, or guard 1's clear) is paired with a bump to
+ * `term:next_prompt_suggestion_gen` (`suggestionGenCounter` below, a
+ * monotonic counter) via `writeSuggestionMeta` — AgentFooter.tsx masks a
+ * *specific write*, not a specific text value, when it snapshots this pair
+ * at send time (§9/§10 of that spec). Text-value comparison alone has a
+ * real collision: if a later turn's genuinely fresh suggestion happens to
+ * be the exact same string as the one masked at the previous send (a
+ * plausible repeat, e.g. "Run the tests"), value-equality would suppress a
+ * legitimate current suggestion until the next send. The generation
+ * counter can't collide that way — reagentx P1 on #2515.
+ *
+ * One exception: guard 4's clear (below) is NOT a write from this file —
+ * `useBlockActivity.ts`'s `clearActivity` writes
+ * `term:next_prompt_suggestion: null` directly, alongside its own
+ * `term:osc_title`/`term:ambient_summary` clears, bypassing
+ * `writeSuggestionMeta` and never touching the gen key. Harmless today only
+ * because the resulting `null` is falsy and short-circuits
+ * `AgentFooter.tsx`'s `suggestion && ...` check before the gen comparison
+ * is ever reached — not because the invariant above actually holds for
+ * that path. Flagged, not fixed: routing guard 4 through this file's
+ * counter would need exporting it across a module boundary that was
+ * deliberately kept separate (module doc below, guard 4: "NOT by this
+ * hook... one ControllerStatus subscription per pane") for a benefit that
+ * doesn't exist today — reagentx P2 on #2515 (second re-review).
  *
  * Unlike the read-only activity summary (which persists across turns), a
  * stale suggestion here is a correctness bug, not a cosmetic one — it can
@@ -40,8 +71,12 @@
  *      response arrives (not just "was the composer empty when we sent the
  *      request") specifically to close the race where the RPC resolves
  *      *after* the user already typed something: without this check, a late
- *      response could silently overwrite whatever cleared the suggestion
- *      when typing started (see AgentFooter.tsx's handleInput).
+ *      response could silently overwrite what the user is actively typing.
+ *      This is the only guard against that race — AgentFooter.tsx's
+ *      `handleInput` does NOT also clear the suggestion on typing (it used
+ *      to; that was removed as redundant with this guard and was itself the
+ *      cause of a bug — see
+ *      docs/specs/SPEC_NEXT_PROMPT_SUGGESTION_RESTORE_ON_CLEAR_2026_08_10.md).
  *   4. Cleared on session end (process exit) — but NOT by this hook.
  *      useBlockActivity.ts's `clearActivity` owns that transition (it
  *      already clears `term:osc_title`/`term:ambient_summary` there) and
@@ -70,12 +105,25 @@ export interface UseNextPromptSuggestionOptions {
     isComposerEmpty: () => boolean;
 }
 
-function clearSuggestion(blockId: string): void {
+// Shared across every pane's hook instance — module-level, not per-mount.
+// Doesn't need to be scoped per block: a strictly-increasing counter is
+// still strictly increasing (and still unique per write) when shared, and
+// sharing it avoids per-instance bookkeeping for no benefit — AgentFooter.tsx
+// only ever compares one block's own gen against its own earlier snapshot,
+// never across blocks.
+let suggestionGenCounter = 0;
+
+function writeSuggestionMeta(blockId: string, suggestion: string | null): void {
     fireAndForget(() =>
         ObjectService.UpdateObjectMeta(makeORef("block", blockId), {
-            "term:next_prompt_suggestion": null,
+            "term:next_prompt_suggestion": suggestion,
+            "term:next_prompt_suggestion_gen": ++suggestionGenCounter,
         } as any)
     );
+}
+
+function clearSuggestion(blockId: string): void {
+    writeSuggestionMeta(blockId, null);
 }
 
 export function useNextPromptSuggestion(opts: UseNextPromptSuggestionOptions): void {
@@ -107,11 +155,7 @@ export function useNextPromptSuggestion(opts: UseNextPromptSuggestionOptions): v
                 recordTurn("ambient:next_prompt_suggestion", result.tokens);
             }
             if (result.suggestion && isComposerEmpty()) {
-                fireAndForget(() =>
-                    ObjectService.UpdateObjectMeta(makeORef("block", blockId), {
-                        "term:next_prompt_suggestion": result.suggestion,
-                    } as any)
-                );
+                writeSuggestionMeta(blockId, result.suggestion);
             }
         }).catch(() => {
             // Silently ignore — no ghost text shows.
