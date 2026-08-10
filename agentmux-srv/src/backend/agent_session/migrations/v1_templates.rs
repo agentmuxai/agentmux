@@ -284,6 +284,7 @@ pub fn migrate_promote_template_sessions_v1(
                 container_volumes: template.container_volumes.clone(),
                 container_name: String::new(),
                 use_ambient_login: 0,
+                model_vendor_base_url: template.model_vendor_base_url.clone(),
             };
             if let Err(e) = wstore.agent_def_insert(&mut new_def) {
                 tracing::warn!(

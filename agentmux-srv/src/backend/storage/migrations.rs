@@ -89,7 +89,14 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 6;
 ///        duplication as db_agent_credentials, for the same id_store
 ///        fallback reason. See
 ///        docs/specs/SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07.md.
-pub const OBJECT_SCHEMA_VERSION: i64 = 14;
+///   v15 — model_vendor_base_url on both db_agent_definitions and db_agents:
+///        redirects a harness (CLI) at a non-default model vendor backend
+///        (e.g. ANTHROPIC_BASE_URL for a claude-provider agent) — the data-
+///        model side of formalizing harness vs. model-vendor as distinct
+///        concepts. Defaults to '' (use the harness's default vendor).
+///        Only settable via `agent.define`, validated against the resolved
+///        provider's `ProviderConfig::base_url_env_var`.
+pub const OBJECT_SCHEMA_VERSION: i64 = 15;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -225,7 +232,8 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             container_image      TEXT NOT NULL DEFAULT '',
             container_volumes    TEXT NOT NULL DEFAULT '[]',
             container_name       TEXT NOT NULL DEFAULT '',
-            use_ambient_login    INTEGER NOT NULL DEFAULT 0
+            use_ambient_login    INTEGER NOT NULL DEFAULT 0,
+            model_vendor_base_url TEXT NOT NULL DEFAULT ''
         );
         CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_definitions_slug
             ON db_agent_definitions(slug);
@@ -405,7 +413,11 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             -- Explicit per-agent opt-in to the CLI's global (ambient) login
             -- when no oauth-class account resolves at spawn (schema v12,
             -- SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md §2.3).
-            use_ambient_login    INTEGER NOT NULL DEFAULT 0
+            use_ambient_login    INTEGER NOT NULL DEFAULT 0,
+
+            -- Redirects this agent's harness at a non-default model vendor
+            -- backend (schema v15) — see db_agent_definitions' column doc.
+            model_vendor_base_url TEXT NOT NULL DEFAULT ''
         );
         CREATE INDEX IF NOT EXISTS idx_agents_is_template
             ON db_agents(is_template);
@@ -589,6 +601,11 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         // gating — SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md §2.3).
         "ALTER TABLE db_agent_definitions ADD COLUMN use_ambient_login INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE db_agents ADD COLUMN use_ambient_login INTEGER NOT NULL DEFAULT 0",
+        // v15: model vendor override — redirects a harness at a non-default
+        // backend (e.g. ANTHROPIC_BASE_URL). Formalizes harness vs. model
+        // vendor as distinct concepts; see ProviderConfig::base_url_env_var.
+        "ALTER TABLE db_agent_definitions ADD COLUMN model_vendor_base_url TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE db_agents ADD COLUMN model_vendor_base_url TEXT NOT NULL DEFAULT ''",
     ] {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();
@@ -1048,6 +1065,16 @@ mod tests {
         count == 1
     }
 
+    fn column_exists(conn: &Connection, table: &str, column: &str) -> bool {
+        let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})")).unwrap();
+        let names: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .filter_map(Result::ok)
+            .collect();
+        names.iter().any(|n| n == column)
+    }
+
     #[test]
     fn test_object_schema_creates_all_tables_and_singletons() {
         let conn = Connection::open_in_memory().unwrap();
@@ -1102,6 +1129,20 @@ mod tests {
             )
             .unwrap();
         assert_eq!(mem_count, 1);
+    }
+
+    #[test]
+    fn test_object_schema_has_model_vendor_base_url_on_both_tables() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        run_object_schema(&conn).unwrap();
+        // Second pass: the ALTER TABLE array's duplicate-column guard must
+        // not error when the column already exists (fresh installs get it
+        // via CREATE TABLE; the ALTER is for upgrading pre-v15 databases).
+        run_object_schema(&conn).unwrap();
+
+        assert!(column_exists(&conn, "db_agent_definitions", "model_vendor_base_url"));
+        assert!(column_exists(&conn, "db_agents", "model_vendor_base_url"));
     }
 
     #[test]

@@ -675,6 +675,7 @@ mod tests {
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            model_vendor_base_url: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -748,6 +749,7 @@ mod tests {
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            model_vendor_base_url: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -822,6 +824,7 @@ mod tests {
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            model_vendor_base_url: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -885,6 +888,7 @@ mod tests {
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login,
+            model_vendor_base_url: String::new(),
         }
     }
 
@@ -1127,6 +1131,7 @@ mod tests {
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            model_vendor_base_url: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1210,6 +1215,7 @@ mod tests {
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            model_vendor_base_url: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1275,6 +1281,7 @@ mod tests {
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            model_vendor_base_url: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1338,6 +1345,7 @@ mod tests {
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            model_vendor_base_url: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1411,6 +1419,7 @@ mod tests {
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            model_vendor_base_url: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1488,6 +1497,7 @@ mod tests {
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            model_vendor_base_url: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1577,6 +1587,7 @@ mod tests {
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            model_vendor_base_url: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1660,6 +1671,7 @@ mod tests {
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            model_vendor_base_url: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1735,6 +1747,7 @@ mod tests {
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            model_vendor_base_url: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
 

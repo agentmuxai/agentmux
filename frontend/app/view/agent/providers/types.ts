@@ -119,4 +119,16 @@ export interface ProviderDefinition {
      * docs/providers/PROVIDER_MODELS_EFFORT_SETTINGS_2026-06.md.
      */
     models?: ProviderModel[];
+    /**
+     * Env var this harness reads to redirect its model vendor backend (e.g.
+     * Claude Code's `ANTHROPIC_BASE_URL`, pointing it at a proxy/Bedrock/
+     * OpenRouter instead of Anthropic's default endpoint). Omit when a
+     * harness isn't confirmed to support redirection — the harness (CLI
+     * driving the session) and the model vendor (LLM backend actually
+     * serving responses) are independent dimensions; this is the declared
+     * capability side of that split. Mirrors Rust's
+     * `ProviderConfig::base_url_env_var` — set only where independently
+     * verified, not guessed.
+     */
+    baseUrlEnvVar?: string;
 }

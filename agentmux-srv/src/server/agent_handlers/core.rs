@@ -127,6 +127,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // ambient opt-in is an explicit per-agent toggle (spec
                     // §2.2 edge case — no implicit ambient for fresh agents).
                     use_ambient_login: 0,
+                    // Not settable via this RPC yet — only `agent.define`
+                    // (the App-API/MCP path) can set a model vendor override.
+                    model_vendor_base_url: String::new(),
                 };
                 wstore.agent_def_insert(&mut agent).map_err(|e| format!("createagent: {e}"))?;
                 // Assign the agent its display color at creation
@@ -222,6 +225,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // accounts). The Agent setup modal's Accounts tab sends
                     // Some(0|1) to flip it. Spec §2.3.
                     use_ambient_login: cmd.use_ambient_login.unwrap_or(old.use_ambient_login),
+                    // Not carried by CommandUpdateAgentDefinitionData yet —
+                    // always preserve, same as container_name/parent_id
+                    // above, so a UI-driven save never silently wipes a
+                    // vendor override set via `agent.define`.
+                    model_vendor_base_url: old.model_vendor_base_url.clone(),
                 };
                 let found = wstore.agent_def_update(&mut agent).map_err(|e| format!("updateagent: {e}"))?;
                 if !found {
@@ -418,6 +426,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     container_volumes: "[]".to_string(),
                     container_name: String::new(),
                     use_ambient_login: 0,
+                    model_vendor_base_url: String::new(),
                 };
                 wstore.agent_def_insert(&mut agent).map_err(|e| format!("importagentfromclaw: {e}"))?;
 
@@ -554,6 +563,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         container_volumes: "[]".to_string(),
                         container_name: String::new(),
                         use_ambient_login: 0,
+                        model_vendor_base_url: String::new(),
                     };
 
                     if let Err(e) = wstore.agent_def_insert(&mut agent) {
