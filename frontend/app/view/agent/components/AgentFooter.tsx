@@ -79,15 +79,6 @@ interface AgentWorkingRowProps {
      *  launchPhase to "waiting-for-login-completion" too, so without this the
      *  row rendered a second, redundant Cancel button alongside AuthUrlBox's. */
     hasAuthUrl?: boolean;
-    /** Unix ms the current attached-task episode began (reducer
-     *  `attachedTask.since`), or null when nothing long-running is attached.
-     *  When set and the turn is otherwise idle, the row shows a calm
-     *  "Running in background · Ns" state instead of "✓ Worked" / nothing —
-     *  the honest third status for a live dev server / background shell,
-     *  distinct from both "Working…" (turn in flight) and idle. See
-     *  SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md §6.2 and
-     *  retro-persistent-agent-working-status-stuck-2026-07-16.md. */
-    attachedSince?: number | null;
 }
 
 // reagent P2 on PR #2304: "waiting-for-login-link" (tier 1's own up-to-15s
@@ -152,6 +143,19 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
     const [typing, setTyping] = createSignal(false);
     const REVEAL_CHAR_MS = 28;
 
+    // The very first text after ENTERING the loading state renders in full
+    // instantly — the type-out reveal is a transition effect for text
+    // changes while already visibly working (tool → tool → phrase). Playing
+    // it on entry meant "Working…" trailed the Enter keypress by
+    // ~REVEAL_CHAR_MS × 8 ≈ 250ms of a nearly-empty row, reading as "the
+    // indicator comes up late" even though the state flip is synchronous
+    // with the send (user report 2026-08-10). Plain (non-reactive) flag:
+    // only the loading edge below writes it, only the reveal effect reads it.
+    let revealInstantly = true;
+    createEffect(() => {
+        if (!props.loading) revealInstantly = true;
+    });
+
     // The shimmer class is ALWAYS on (baked into the class attribute below);
     // this effect only toggles `.is-typing`, which overlays opaque white
     // text during the reveal. Toggling the shimmer class itself on every
@@ -162,7 +166,8 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
     // (found in the sandbox, sandbox/working-shimmer.html on this machine).
     createEffect(() => {
         const text = leftText();
-        if (reducedMotion() || !text) {
+        if (reducedMotion() || !text || revealInstantly) {
+            revealInstantly = false;
             setRevealed(text.length);
             setTyping(false);
             return;
@@ -250,38 +255,23 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
             CANCELLABLE_LAUNCH_PHASES.has(props.launchPhase.kind),
     );
 
-    // Attached-task state wins over the "✓ Worked" summary: a live dev
-    // server / background shell is the pane's current truth; the completed
-    // turn's stats return once the task ends (attachedSince → null).
-    const attachedElapsed = createMemo((): string | null => {
-        const s = props.attachedSince;
-        if (s == null) return null;
-        return formatElapsedCompact((tick(), Date.now()) - s);
-    });
-
+    // No dedicated "Running in background" state here — the ActivityDock's
+    // own running row (pinned above the composer, same data source) IS the
+    // indicator for a live attached task; a footer copy of it was redundant
+    // (user feedback 2026-08-10, reverting the render half of #2489 — the
+    // reducer axis itself stays, for the watchdog/Swarm consumers).
     return (
         <Show
             when={props.loading}
             fallback={
-                <Show
-                    when={attachedElapsed()}
-                    fallback={
-                        <Show when={workedSummary()}>
-                            <span class="agent-working-row agent-working-row--worked">
-                                <span class="agent-working-row-left">{workedSummary()}</span>
-                                <span class="agent-working-row-right">
-                                    <Show when={workedSecondary()}>
-                                        <span class="agent-working-row-secondary">{workedSecondary()}</span>
-                                    </Show>
-                                </span>
-                            </span>
-                        </Show>
-                    }
-                >
-                    <span class="agent-working-row agent-working-row--attached">
-                        <span class="agent-spinner-dot" />
-                        <span class="agent-working-row-left">Running in background</span>
-                        <span class="agent-working-row-right">{attachedElapsed()}</span>
+                <Show when={workedSummary()}>
+                    <span class="agent-working-row agent-working-row--worked">
+                        <span class="agent-working-row-left">{workedSummary()}</span>
+                        <span class="agent-working-row-right">
+                            <Show when={workedSecondary()}>
+                                <span class="agent-working-row-secondary">{workedSecondary()}</span>
+                            </Show>
+                        </span>
                     </span>
                 </Show>
             }
