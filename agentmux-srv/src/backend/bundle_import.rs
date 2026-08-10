@@ -228,6 +228,18 @@ pub struct ParsedMcpServer {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AccountRequirement {
     pub id: String,
+    /// ABF v0.2 (SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_
+    /// 2026_08_10.md §2.1): the wire key is `credentialProvider`, renamed
+    /// from the ambiguous v0.1 `provider` (which collided with the
+    /// unrelated harness/model-vendor "provider" concept components.
+    /// instructions now uses — §2.2). `alias` keeps a v0.1-produced bundle
+    /// (still carrying the old key) importing unchanged; new exports only
+    /// ever write `credentialProvider`. The Rust field itself keeps its
+    /// name — every internal caller (account-requirement resolution,
+    /// `db_accounts.provider` matching) already reads it as "which
+    /// credential service", which was always accurate; only the wire
+    /// format needed disambiguating from the newer, unrelated sense.
+    #[serde(rename = "credentialProvider", alias = "provider")]
     pub provider: String,
     #[serde(default)]
     pub kind: String,
@@ -1315,6 +1327,27 @@ mod tests {
 
     #[test]
     fn parses_account_requirements_read_only() {
+        let files = vec![
+            file("armory.json", &minimal_manifest(serde_json::json!({
+                "accounts": "accounts/requirements.json",
+            }))),
+            file("accounts/requirements.json", r#"{"requirements":[{"id":"gh-main","credentialProvider":"github","kind":"api-key","env":"GITHUB_TOKEN","optional":false}]}"#),
+        ];
+        let result = parse_bundle_import(&files).unwrap();
+        assert_eq!(result.requirements, vec![AccountRequirement {
+            id: "gh-main".to_string(),
+            provider: "github".to_string(),
+            kind: "api-key".to_string(),
+            env: "GITHUB_TOKEN".to_string(),
+            optional: false,
+        }]);
+    }
+
+    #[test]
+    fn a_v01_bundle_still_carrying_the_old_provider_key_still_imports() {
+        // ABF v0.2, §2.1: "provider" was renamed to "credentialProvider" on
+        // export, but a bundle exported by a v0.1 build (or hand-authored
+        // against the old spec) still uses the old key — must not break.
         let files = vec![
             file("armory.json", &minimal_manifest(serde_json::json!({
                 "accounts": "accounts/requirements.json",

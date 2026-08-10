@@ -497,7 +497,13 @@ pub fn export_bundle(bundle: &Memory, skills: &[Skill]) -> BundleExport {
             }
             requirements.push(json!({
                 "id": format!("{slug}-{name}"),
-                "provider": slug,
+                // ABF v0.2 (SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_
+                // NATIVE_MEMORY_2026_08_10.md §2.1): renamed from "provider"
+                // to disambiguate from the harness/model-vendor "provider"
+                // concept components.instructions now uses (§2.2) — this one
+                // means "which credential/account service", matching
+                // db_accounts.provider, not a coding harness.
+                "credentialProvider": slug,
                 "kind": "api-key",
                 // "Where it lands" per the requirements.json schema
                 // (research report §5.3) -- an env var name, header name,
@@ -722,6 +728,28 @@ mod tests {
             .expect("expected accounts/requirements.json to be inferred");
         assert!(req_file.content.contains("GITHUB_TOKEN"));
         assert!(!req_file.content.to_lowercase().contains("ghp_"), "must never contain a real secret value");
+    }
+
+    #[test]
+    fn requirement_entries_use_credential_provider_not_provider() {
+        // ABF v0.2, §2.1: "provider" was ambiguous with the newer harness/
+        // model-vendor sense components.instructions now uses. Exported
+        // requirements must use the disambiguated key.
+        let mcp_servers = r#"[{"name":"github","type":"stdio","command":"gh-mcp","env":{"GITHUB_TOKEN":""}}]"#;
+        let bundle = make_bundle("", "[]", mcp_servers, "[]");
+        let export = export_bundle(&bundle, &[]);
+
+        let req_file = export
+            .files
+            .iter()
+            .find(|f| f.path == "accounts/requirements.json")
+            .unwrap();
+        assert!(req_file.content.contains("\"credentialProvider\""));
+        assert!(
+            !req_file.content.contains("\"provider\""),
+            "must not emit the old, ambiguous key alongside the new one: {}",
+            req_file.content
+        );
     }
 
     #[test]
