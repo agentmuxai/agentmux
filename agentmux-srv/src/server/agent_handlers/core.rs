@@ -129,6 +129,16 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     use_ambient_login: 0,
                 };
                 wstore.agent_def_insert(&mut agent).map_err(|e| format!("createagent: {e}"))?;
+                // Assign the agent its display color at creation
+                // (SPEC_AGENT_COLOR_2026_08_08.md). Best-effort: a failure
+                // here shouldn't fail the create — agent.open assigns a
+                // color on first open as the fallback.
+                let _ = wstore.agent_content_set(&crate::backend::storage::store::AgentContent {
+                    agent_id: agent.id.clone(),
+                    content_type: "ui:color".to_string(),
+                    content: crate::backend::agent_color::pick_agent_color(&agent.id).to_string(),
+                    updated_at: now,
+                });
                 broker.publish(crate::backend::wps::WaveEvent {
                     event: "agents:changed".to_string(),
                     scopes: vec![],

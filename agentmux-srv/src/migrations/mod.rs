@@ -35,6 +35,7 @@ mod m0016_seed_starter_mcp_servers;
 mod m0017_ambient_login_grandfather;
 mod m0018_ambient_login_registry;
 mod m0019_repair_malformed_secret_ref;
+mod m0020_agent_color_backfill;
 mod runner;
 
 pub use runner::count_pending_migrations;
@@ -130,4 +131,5 @@ static REGISTRY: &[&(dyn Migration + Sync)] = &[
     &m0017_ambient_login_grandfather::M0017AmbientLoginGrandfather,
     &m0018_ambient_login_registry::M0018AmbientLoginRegistry,
     &m0019_repair_malformed_secret_ref::M0019RepairMalformedSecretRef,
+    &m0020_agent_color_backfill::M0020AgentColorBackfill,
 ];
