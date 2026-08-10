@@ -865,6 +865,42 @@ describe("agent document reducer", () => {
             expect(r.events).toEqual([]);
         });
 
+        // Turn-end scope (scope: "tools-only") — dispatched shortly after
+        // every TurnEnd (agent-view.tsx): a foreground tool call cannot
+        // outlive its turn, so a still-running tool node observed after the
+        // turn ended is provably an orphan (the "running · 45m git status"
+        // ghost dock row, user report 2026-08-10). Everything with a
+        // session-bounded lifecycle must survive this mid-session pass.
+        it("tools-only scope scrubs running tools but leaves thinking tail, live shells, and questions alone", () => {
+            const s0 = seed([
+                tool("ghost", { status: "running" }),
+                tool("answered", { status: "awaiting_answer" }),
+                shell("dev-server", { status: "running" }),
+                thinkingMd("tail-think", "mid-thought"),
+            ]);
+            const r = update(s0, { type: "ScrubOrphanedInProgress", at: 9999, scope: "tools-only" });
+            expect((r.state.nodes[0] as ToolNode).status).toBe("canceled");
+            // Session-bounded lifecycles untouched:
+            expect((r.state.nodes[1] as ToolNode).status).toBe("awaiting_answer");
+            expect((r.state.nodes[2] as ShellNode).status).toBe("running");
+            expect((r.state.nodes[3] as any).metadata.thinking).toBe(true);
+            expect(r.events).toEqual([
+                {
+                    type: "orphans-scrubbed",
+                    markdownCanceled: 0,
+                    toolsCanceled: 1,
+                    resolvedToolNodes: [{ id: "ghost", status: "canceled", toolName: "Bash" }],
+                },
+            ]);
+        });
+
+        it("tools-only scope is a no-op when no tool is running", () => {
+            const s0 = seed([shell("dev-server", { status: "running" }), thinkingMd("tail-think")]);
+            const r = update(s0, { type: "ScrubOrphanedInProgress", at: 9999, scope: "tools-only" });
+            expect(r.state).toBe(s0);
+            expect(r.events).toEqual([]);
+        });
+
         it("scrubs tool-running anywhere in doc but leaves prior thinking alone", () => {
             // Realistic snapshot of an app-killed session: prior
             // turn's thinking → text → new turn's tool started but

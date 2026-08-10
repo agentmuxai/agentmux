@@ -845,6 +845,31 @@ const AgentPresentationView = ({
         }
     }
 
+    // Turn-end ghost-tool scrub (user report 2026-08-10: a ~1s `git status`
+    // call stuck as a "running \u00b7 45m" dock row for the rest of the session).
+    // A foreground tool call cannot outlive its turn \u2014 it blocks it \u2014 and a
+    // backgrounded harness call resolves its ToolNode immediately, so a tool
+    // node still `running` shortly AFTER TurnEnd is provably an orphan
+    // (rejected call / dropped tool_result). scrubOrphanedInProgress
+    // otherwise only runs at session boundaries (SessionEnd/HistoryLoaded),
+    // which is why the ghost survived all session. The 2s delay absorbs any
+    // tail flush still in flight; the working guard skips the pass when a
+    // new turn already started (its running tools are legit). tools-only
+    // scope: thinking markdown, shells (turn-independent), and questions
+    // keep their session-bounded lifecycles.
+    createEffect(on(turnJustEndedAtom, (n) => {
+        if (n === 0) return;
+        const timer = setTimeout(() => {
+            if (workingFromPhase(agentAtoms().turnPhaseAtom[0]())) return;
+            dispatchDocIfRegistered(model.blockId, {
+                type: "ScrubOrphanedInProgress",
+                at: Date.now(),
+                scope: "tools-only",
+            });
+        }, 2_000);
+        onCleanup(() => clearTimeout(timer));
+    }));
+
     // Posts a permanent, visible line into the pane's own conversation \u2014
     // distinct from `log()`, which routes to the hidden activity-log/shell-
     // terminal channel (see docs/specs/SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26.md
