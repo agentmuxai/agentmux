@@ -110,6 +110,7 @@ describe("backgrounded Bash calls (issue #2490)", () => {
             params: { command: "task dev", run_in_background: true },
             timestamp: 1000,
             duration: 0.4,
+            result: { stdout: "Command running in background with ID: b12345. Output is being written to: …", stderr: "", exitCode: 0 },
         });
         // Sub-second and terminal — invisible to the duration heuristic,
         // but a declared background task must still light the axis.
@@ -124,6 +125,7 @@ describe("backgrounded Bash calls (issue #2490)", () => {
             params: { command: "task dev", run_in_background: true },
             timestamp: 1000,
             duration: 0.4,
+            result: { stdout: "Command running in background with ID: b12345. Output is being written to: …", stderr: "", exitCode: 0 },
         });
         const notification: DocumentNode = {
             type: "user_message",

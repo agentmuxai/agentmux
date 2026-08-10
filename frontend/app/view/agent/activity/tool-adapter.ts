@@ -29,27 +29,65 @@
  */
 
 import { extractToolDetail } from "../stream-parser";
-import type { BashParams, DocumentNode, ToolNode } from "../types";
+import type { BashParams, BashResult, DocumentNode, ToolNode } from "../types";
 import type { ActivityStatus, PinnedActivity } from "./types";
 
 export const TOOL_PROMOTION_MS = 30_000;
+
+/** The harness's literal acceptance-message prefix for a genuinely detached
+ *  launch (see BashParams.run_in_background's doc comment). Exported so any
+ *  other code that needs to recognize the same signal doesn't redefine it. */
+export const BACKGROUND_LAUNCH_ACCEPTED_PREFIX = "Command running in background with ID:";
 
 function isBashToolNode(n: DocumentNode): n is ToolNode {
     return n.type === "tool" && n.tool === "Bash" && n.timestamp != null;
 }
 
 /**
+ * The result's raw text, whichever field it landed in. claude-translator.ts's
+ * `buildToolResults` normally puts it in `stdout` (the structured
+ * `{ stdout, stderr, interrupted }` sibling), but falls back to a plain
+ * `{ content: string }` shape when Claude omits a terminal-shaped
+ * `tool_use_result` or returns multiple tool_result blocks (the structured
+ * sibling is then unattributable to any one block) — codex P1 on this PR:
+ * checking `stdout` alone missed that fallback shape, so a genuinely
+ * detached launch whose acceptance text arrived via `content` was rejected
+ * outright and vanished from the dock entirely instead of just being
+ * misclassified.
+ */
+function resultText(result: ToolNode["result"]): string | undefined {
+    const r = result as (BashResult & { content?: unknown }) | undefined;
+    if (typeof r?.stdout === "string") return r.stdout;
+    if (typeof r?.content === "string") return r.content;
+    return undefined;
+}
+
+/**
  * True for a Bash call the harness ran detached (issue #2490): its
- * `tool_use.input` carried `run_in_background: true` and the tool_result
- * came back accepted ("Command running in background with ID: …"). The
- * ToolNode is terminal within ~a second, but the real process tree keeps
- * running until a `<task-notification>` lands — so, unlike an ordinary
- * call, terminal-with-success here means STARTED, not finished. A failed
- * launch (`status: "failed"` — the harness refused the command) is not a
- * live background task and falls through to the ordinary duration rules.
+ * `tool_use.input` carried `run_in_background: true` AND the tool_result's
+ * own text actually is the acceptance message ("Command running in
+ * background with ID: …"), not the command's real output. The ToolNode is
+ * terminal within ~a second, but the real process tree keeps running until
+ * a `<task-notification>` lands — so, unlike an ordinary call,
+ * terminal-with-success here means STARTED, not finished.
+ *
+ * The `params.run_in_background === true` flag alone is NOT sufficient —
+ * issue #2518: the harness decides per-call whether a command actually
+ * gets detached; a command that finishes fast enough is returned
+ * synchronously (result text `<exited N in Ts>\n<real output>`, the SAME
+ * shape an ordinary call gets) even though the caller asked for
+ * `run_in_background: true`. Treating that case as "launch accepted, wait
+ * for a `<task-notification>` that will never come" left the dock row
+ * `running` forever with a growing timer — confirmed live: a single
+ * session with 17 backgrounded calls left 11 stuck this way, each one
+ * exactly the fast-finishing case. A failed launch (`status: "failed"` —
+ * the harness refused the command) is also not a live background task and
+ * falls through to the ordinary duration rules, same as before.
  */
 function isAcceptedBackgroundLaunch(n: ToolNode): boolean {
-    return (n.params as BashParams | undefined)?.run_in_background === true && n.status === "success";
+    if ((n.params as BashParams | undefined)?.run_in_background !== true || n.status !== "success") return false;
+    const text = resultText(n.result);
+    return typeof text === "string" && text.startsWith(BACKGROUND_LAUNCH_ACCEPTED_PREFIX);
 }
 
 /**
