@@ -21,8 +21,13 @@
  * output to claude-haiku-4-5-20251001 and asks for a short, natural next
  * user message. The result is written to `term:next_prompt_suggestion`
  * block meta, which the composer reads as ghost text (dimmed, shown only
- * while the input is empty; Tab accepts it into the real input; any other
- * keystroke dismisses it — see AgentFooter.tsx).
+ * while the input is empty; Tab accepts it into the real input). Typing
+ * over it, or accepting it and then deleting the text, does NOT dismiss it
+ * from block meta — the composer just stops rendering it while non-empty
+ * (native `<textarea placeholder>` behavior) and shows it again once the
+ * box is empty, per
+ * docs/specs/SPEC_NEXT_PROMPT_SUGGESTION_RESTORE_ON_CLEAR_2026_08_10.md —
+ * see AgentFooter.tsx's placeholder precedence comment.
  *
  * Unlike the read-only activity summary (which persists across turns), a
  * stale suggestion here is a correctness bug, not a cosmetic one — it can
@@ -40,8 +45,12 @@
  *      response arrives (not just "was the composer empty when we sent the
  *      request") specifically to close the race where the RPC resolves
  *      *after* the user already typed something: without this check, a late
- *      response could silently overwrite whatever cleared the suggestion
- *      when typing started (see AgentFooter.tsx's handleInput).
+ *      response could silently overwrite what the user is actively typing.
+ *      This is the only guard against that race — AgentFooter.tsx's
+ *      `handleInput` does NOT also clear the suggestion on typing (it used
+ *      to; that was removed as redundant with this guard and was itself the
+ *      cause of a bug — see
+ *      docs/specs/SPEC_NEXT_PROMPT_SUGGESTION_RESTORE_ON_CLEAR_2026_08_10.md).
  *   4. Cleared on session end (process exit) — but NOT by this hook.
  *      useBlockActivity.ts's `clearActivity` owns that transition (it
  *      already clears `term:osc_title`/`term:ambient_summary` there) and
