@@ -140,6 +140,20 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
         return undefined;
     });
 
+    // Full command for the expanded header — the collapsed row's title is
+    // ellipsis-truncated by CSS, so a long command (a heartbeat-wrapped
+    // dev launch, a multi-flag one-liner) is unidentifiable without this.
+    // Shell rows: `cmd` is the real command even when the row carries a
+    // custom display title. Tool rows: BashParams.command, falling back to
+    // the title (which toolToActivity derives from the same field).
+    const fullCommand = createMemo((): string | undefined => {
+        const a = props.activity();
+        if (!a) return undefined;
+        if (a.shell) return a.shell.cmd;
+        if (a.tool) return (a.tool.params as { command?: string } | undefined)?.command ?? a.title;
+        return undefined;
+    });
+
     // Expanded shell/tool log — same cap + renderer as PersistentShellBlock.
     // A promoted tool call's log is optional (only populated for tools that
     // stream partials — see ToolNode.log's own doc comment), unlike a
@@ -211,6 +225,14 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
                             class="agent-activity-log agent-tool-overlay-log"
                             onClick={(e) => e.stopPropagation()}
                         >
+                            {/* Full command, word-wrapped — the collapsed
+                                title truncates, so this header is how the
+                                user identifies WHAT is running (user report
+                                2026-08-10: long-running process in the dock
+                                was unidentifiable when expanded). */}
+                            <Show when={fullCommand()}>
+                                <div class="agent-activity-command">{fullCommand()}</div>
+                            </Show>
                             <Show when={capped().hiddenLines > 0}>
                                 <OutputHiddenMarker hidden={capped().hiddenLines} noun="line" from="tail" />
                             </Show>
