@@ -15,10 +15,12 @@
  *
  * Also covers the 30s auto-timeout (recommended-option auto-select +
  * countdown) added by
- * docs/specs/SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md.
+ * docs/specs/SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md, and the
+ * hover-pause behavior on top of it from
+ * docs/specs/SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md.
  */
 
-import { cleanup, render, screen } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -215,8 +217,14 @@ describe("AgentQuestionPanel 30s auto-timeout", () => {
         const [pending] = createSignal<ToolNode[]>([twoQuestionSet()]);
         render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
 
+        // Clicking the radio requires the pointer to be over it first, so
+        // this also fires a real `mouseenter` on the panel — per
+        // SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md, that
+        // hides the countdown for a flat 15s before it resumes at a fresh
+        // 30s, so total time-to-auto-submit here is 15s + 30s, not the
+        // pre-hover-pause 30s alone.
         await user.click(screen.getByRole("radio", { name: /Blue/ }));
-        vi.advanceTimersByTime(30_000);
+        vi.advanceTimersByTime(15_000 + 30_000);
 
         expect(onAnswer).toHaveBeenCalledTimes(1);
         const outcome = onAnswer.mock.calls[0][0];
@@ -299,6 +307,139 @@ describe("AgentQuestionPanel 30s auto-timeout", () => {
         expect(screen.getByText(/Auto-selects recommended in 1s/)).toBeTruthy();
 
         vi.advanceTimersByTime(1_000);
+        expect(onAnswer).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe("AgentQuestionPanel hover-pause (SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md)", () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    const panel = () => screen.getByRole("group", { name: /Agent question/ });
+
+    it("hides the countdown immediately on mouse-enter", () => {
+        const onAnswer = vi.fn();
+        const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+
+        vi.advanceTimersByTime(5_000); // 25s remaining
+        expect(screen.getByText(/Auto-selects recommended in 25s/)).toBeTruthy();
+
+        fireEvent.mouseEnter(panel());
+        expect(screen.queryByText(/Auto-selects recommended in/)).toBeNull();
+    });
+
+    // Regression guard: an earlier version of this feature kept the
+    // countdown hidden for as long as the mouse stayed over the panel,
+    // rather than a flat window. That reopened the exact "work does not
+    // stop" gap SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md §5.1
+    // rejected — answering by mouse click leaves the cursor parked over the
+    // panel (clicking requires the pointer to already be there), and if the
+    // user then steps away without ever moving the mouse again, `mouseleave`
+    // never fires and the safety net never resumes. Caught by this exact
+    // scenario failing in the pre-existing "merges: keeps a
+    // manually-answered question..." test above. Fixed by making the hide
+    // window unconditional on continued hover — bound the fix here so it
+    // can't silently regress back to the indefinite version.
+    it("resumes at a fresh 30s exactly 15s after entry, even if the mouse never leaves the panel", () => {
+        const onAnswer = vi.fn();
+        const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+
+        vi.advanceTimersByTime(18_000); // 12s remaining
+        fireEvent.mouseEnter(panel());
+        // No mouseleave anywhere in this test — the mouse just stays there.
+
+        // Still hidden partway through the 15s window.
+        vi.advanceTimersByTime(10_000);
+        expect(screen.queryByText(/Auto-selects recommended in/)).toBeNull();
+        expect(onAnswer).not.toHaveBeenCalled();
+
+        // Window elapses — countdown reappears at a full 30s, not the 12s it
+        // had before the hover (§5 point 2: "fresh, not resumed"), and
+        // despite the mouse never having left.
+        vi.advanceTimersByTime(5_000);
+        expect(screen.getByText(/Auto-selects recommended in 30s/)).toBeTruthy();
+
+        vi.advanceTimersByTime(30_000);
+        expect(onAnswer).toHaveBeenCalledTimes(1);
+    });
+
+    it("a fresh mouse-enter during the hide window restarts a fresh 15s from that point (the 'recursive' case)", () => {
+        const onAnswer = vi.fn();
+        const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+
+        fireEvent.mouseEnter(panel());
+        vi.advanceTimersByTime(10_000); // 10s into the first 15s window
+        fireEvent.mouseEnter(panel()); // a fresh entry restarts the window
+
+        // Would have resumed at t=15s under the original window — confirm
+        // it didn't, because the second entry reset the clock to t=10+15=25s.
+        vi.advanceTimersByTime(5_000); // t=15s
+        expect(screen.queryByText(/Auto-selects recommended in/)).toBeNull();
+
+        vi.advanceTimersByTime(9_000); // t=24s — still inside the restarted window
+        expect(screen.queryByText(/Auto-selects recommended in/)).toBeNull();
+        expect(onAnswer).not.toHaveBeenCalled();
+
+        vi.advanceTimersByTime(1_000); // t=25s — restarted window elapses
+        expect(screen.getByText(/Auto-selects recommended in 30s/)).toBeTruthy();
+    });
+
+    it("manual submit while hidden/hovered works normally with no leftover auto-submit", async () => {
+        const user = userEvent.setup({ delay: null });
+        const onAnswer = vi.fn();
+        const [pending, setPending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
+        const handleAnswer = vi.fn((outcome: unknown) => {
+            onAnswer(outcome);
+            setPending([]);
+        });
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={handleAnswer} />);
+
+        fireEvent.mouseEnter(panel());
+        await user.click(screen.getByRole("radio", { name: /Red/ }));
+        await user.click(screen.getByRole("button", { name: /Submit answer/ }));
+
+        expect(onAnswer).toHaveBeenCalledTimes(1);
+        vi.advanceTimersByTime(60_000);
+        expect(onAnswer).toHaveBeenCalledTimes(1);
+    });
+
+    it("a new question-set arriving mid-hover starts unhidden and counting, ignoring the old head's hover state", () => {
+        const onAnswer = vi.fn();
+        const [pending, setPending] = createSignal<ToolNode[]>([singleSelectQuestion("q1")]);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+
+        fireEvent.mouseEnter(panel());
+        expect(screen.queryByText(/Auto-selects recommended in/)).toBeNull();
+
+        setPending([singleSelectQuestion("q4")]);
+        expect(screen.getByText(/Auto-selects recommended in 30s/)).toBeTruthy();
+
+        vi.advanceTimersByTime(30_000);
+        expect(onAnswer).toHaveBeenCalledTimes(1);
+    });
+
+    it("minimizing (Answer later) while hidden forces an immediate resume, unaffected by hover history", async () => {
+        const user = userEvent.setup({ delay: null });
+        const onAnswer = vi.fn();
+        const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+
+        fireEvent.mouseEnter(panel());
+        await user.click(screen.getByRole("button", { name: /Answer later/ }));
+
+        // Minimized chip shows the countdown ticking normally — hover-pause
+        // never applies to it (§3.1).
+        expect(screen.getByText(/auto-selects in 30s/)).toBeTruthy();
+
+        vi.advanceTimersByTime(30_000);
         expect(onAnswer).toHaveBeenCalledTimes(1);
     });
 });
