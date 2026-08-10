@@ -115,6 +115,13 @@ export interface UseHistoryPagination {
      * exactly like a same-block reopen, so its writes are safe and expected.
      */
     snapshotIsForeignBlock: Accessor<boolean>;
+    /**
+     * True once the working scrollback has been clamped at a `fresh`
+     * session-outcome boundary (restore, NDJSON fallback, or a loadOlder
+     * page hitting one). Drives the §3.4 "Earlier conversations" link row
+     * into the Agent History view — the only UI consumer of the clamp.
+     */
+    scopeClamped: Accessor<boolean>;
 }
 
 const PAGE_SIZE = 200;
@@ -141,6 +148,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
     const [historyTotal, setHistoryTotal] = createSignal(0);
     const [loadingOlder, setLoadingOlder] = createSignal(false);
     const [snapshotIsForeignBlock, setSnapshotIsForeignBlock] = createSignal(false);
+    const [scopeClamped, setScopeClamped] = createSignal(false);
 
     /**
      * Load the previous page of history and prepend to the document.
@@ -186,6 +194,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
             // stays on disk for the Agent History view (P2).
             if (lastFreshBoundaryIndex(newNodes) >= 0) {
                 setHistoryOffset(0);
+                setScopeClamped(true);
                 opts.log("history", `session boundary reached — older history is out of the working session's scope`);
             } else {
                 setHistoryOffset(newOffset);
@@ -381,13 +390,14 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                         // than the window are out of scope too, so
                         // load-older must not page into them. Offset 0
                         // makes loadOlder a no-op.
-                        const scopeClamped = lastFreshBoundaryIndex(nodes) >= 0;
-                        setHistoryOffset(scopeClamped ? 0 : clampedStart);
+                        const windowClamped = lastFreshBoundaryIndex(nodes) >= 0;
+                        if (windowClamped) setScopeClamped(true);
+                        setHistoryOffset(windowClamped ? 0 : clampedStart);
                         setHistoryTotal(available);
                         opts.log(
                             "history",
                             `v2 restore: ${nodes.length} nodes from lines [${clampedStart}, ${available})` +
-                            (scopeClamped
+                            (windowClamped
                                 ? " (clamped to session scope — older history via Agent History)"
                                 : clampedStart > 0 ? ` (${clampedStart} older lines available via load-older)` : "") +
                             (ds?.collapsedNodeIds?.length ? `, ${ds.collapsedNodeIds.length} collapsed` : ""),
@@ -503,7 +513,12 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 // serve.
                 const available = rangeResp.total ?? total;
                 // Same session-scope edge as the v2-restore path above.
-                setHistoryOffset(lastFreshBoundaryIndex(nodes) >= 0 ? 0 : offset);
+                if (lastFreshBoundaryIndex(nodes) >= 0) {
+                    setScopeClamped(true);
+                    setHistoryOffset(0);
+                } else {
+                    setHistoryOffset(offset);
+                }
                 setHistoryTotal(available);
 
                 opts.log("history", `loaded ${nodes.length} of ${available} previous messages`);
@@ -540,5 +555,6 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
         loadingOlder,
         loadOlder,
         snapshotIsForeignBlock,
+        scopeClamped,
     };
 }

@@ -117,5 +117,9 @@ export function currentExpansion(
         case "session_outcome":
             // Fixed-height divider — never collapsible, same as context_compacted.
             return OPEN_DEFAULT;
+
+        case "day_divider":
+            // Fixed-height calendar separator — never collapsible.
+            return OPEN_DEFAULT;
     }
 }

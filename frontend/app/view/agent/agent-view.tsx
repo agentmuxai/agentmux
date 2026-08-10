@@ -48,6 +48,7 @@ import { useNextPromptSuggestion } from "./hooks/useNextPromptSuggestion";
 import { useAgentCommands } from "./hooks/useAgentCommands";
 import { useAgentFailure } from "./hooks/useAgentFailure";
 import { PaneRow } from "./components/PaneRow";
+import { AgentHistoryView } from "./history/AgentHistoryView";
 import { PaneTabStrip } from "@/app/element/PaneTabStrip";
 import { PaneTabRenameInput } from "@/app/element/PaneTabRenameInput";
 import { useForkSet } from "./fork/useForkSet";
@@ -604,6 +605,13 @@ const AgentPresentationView = ({
     const [layoutView, setLayoutView] = createSignal<LayoutView | null>(null);
     registerLayoutPane(model.blockId, { layout: setLayoutView, zoom: () => {} });
     onCleanup(() => unregisterLayoutPane(model.blockId));
+
+    // Body mode (spec §4.2): "history" swaps the transcript + composer
+    // subtree for the read-only Agent History reader. The live subtree
+    // unmounts (its stream subscription with it — never doubled); on
+    // return, the normal mount/restore path catches the pane up. Always
+    // reopens "live" — a transient reading posture, not persisted state.
+    const [bodyMode, setBodyMode] = createSignal<"live" | "history">("live");
     // DEV-only: CDP validation hook — lets engineers run
     // `__agentLayout()` in the console to snapshot the slice state.
     if (import.meta.env.DEV) {
@@ -737,6 +745,16 @@ const AgentPresentationView = ({
             }
         },
         log,
+    });
+
+    // True when content older than the working session exists out of view:
+    // set by the restore/pagination clamp paths (scopeClamped) OR derived
+    // from a live clamp — after the reducer's StreamFlush trim, the fresh
+    // session_outcome divider is always the first document node.
+    const earlierHistoryAvailable = createMemo(() => {
+        if (history.scopeClamped()) return true;
+        const first = agentAtoms().documentAtom[0]()[0];
+        return first?.type === "session_outcome" && first.outcome === "fresh";
     });
 
     // Auth + launch flow state and the onCleanup that kills the CLI
@@ -1611,6 +1629,12 @@ const AgentPresentationView = ({
     useAgentKeyboard({
         blockId: model.blockId,
         onToggleSearch: () => {
+            // Search targets the LIVE document (its highlight + jumpTo are
+            // bound to the live AgentDocumentView, which unmounts in
+            // history mode) — opening it there would search a hidden
+            // document and dispatch scroll commands to an unmounted list
+            // (reagent P1 on PR #2509). History-mode search is P3 scope.
+            if (bodyMode() !== "live") return;
             // Second Ctrl+F press closes and clears state.
             if (search.visible()) {
                 search.close();
@@ -1721,6 +1745,20 @@ const AgentPresentationView = ({
 
             {/* Tab strip now lives in AgentViewWrapper — see its comment. */}
 
+            <Show
+                when={bodyMode() === "live"}
+                fallback={
+                    <AgentHistoryView
+                        blockId={model.blockId}
+                        outputFormat={outputFormat}
+                        agentName={agentName}
+                        onClose={() => setBodyMode("live")}
+                    />
+                }
+            >
+            {/* Search bar lives INSIDE the live branch: its highlight +
+                jumpTo target the live document and would act on a hidden,
+                unmounted list in history mode (reagent P1 on PR #2509). */}
             <AgentSearchBar
                 visible={search.visible}
                 onSearch={search.performSearch}
@@ -1731,7 +1769,29 @@ const AgentPresentationView = ({
                 matchCount={search.matchCount}
             />
 
-
+            {/* §3.4 link row — shown when the working scrollback is clamped
+                at a fresh session boundary: either detected during
+                restore/pagination (history.scopeClamped) or arrived LIVE —
+                the reducer's StreamFlush clamp leaves the fresh boundary as
+                the document's first node, so deriving from the document
+                covers the live path the RPC-side signal can't see
+                (codex P2 on PR #2509). Prior history stays one click away,
+                so the clamp never reads as data loss. */}
+            <Show when={earlierHistoryAvailable()}>
+                <PaneRow
+                    sigil="⌛"
+                    title="Earlier conversations"
+                    meta="preserved from before this session started"
+                    accent="neutral"
+                    actions={[{
+                        label: "Open Agent History",
+                        title: "Browse this agent's full history",
+                        onClick: () => setBodyMode("history"),
+                        primary: true,
+                    }]}
+                    onActivate={() => setBodyMode("history")}
+                />
+            </Show>
             {/* Scroll region wrapper — .agent-document (inside AgentDocumentView)
                 is absolutely positioned to fill this box, and AgentWorkingRow
                 floats over its bottom edge instead of pushing it up as a
@@ -2043,6 +2103,7 @@ const AgentPresentationView = ({
                             blockId={model.blockId}
                             blockAtom={block}
                             providerId={provider()?.id ?? ""}
+                            onOpenHistory={() => setBodyMode("history")}
                         />
                         {/* Drag-to-height drawer wrapping the terminal — the actual
                             scrollable/resizable content. */}
@@ -2076,6 +2137,7 @@ const AgentPresentationView = ({
                     </div>
                 </Show>
             </div>
+            </Show>
             {/* AgentActionBar (Add / Import / Export) lives in the
                 AgentPicker view only. Once an agent is loaded the user
                 is working in the conversation; the action bar would

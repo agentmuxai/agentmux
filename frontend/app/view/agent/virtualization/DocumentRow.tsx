@@ -300,6 +300,16 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     );
                 })()}
             </Show>
+            <Show when={props.node() && props.node().type === "day_divider"}>
+                {(() => {
+                    const n = props.node() as Extract<DocumentNode, { type: "day_divider" }>;
+                    return (
+                        <div class="agent-day-divider">
+                            <div class="agent-day-divider-label">{n.dayLabel}</div>
+                        </div>
+                    );
+                })()}
+            </Show>
             <Show when={props.node() && props.node().type === "session_outcome"}>
                 {(() => {
                     const n = props.node() as Extract<DocumentNode, { type: "session_outcome" }>;
