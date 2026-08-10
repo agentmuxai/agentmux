@@ -405,7 +405,8 @@ pub(crate) async fn agent_define_core(
     // agent's actual provider (not this possibly-defaulted `provider`,
     // which may not reflect an unspecified `cmd.provider` on an update
     // call) right before its own write — this check doesn't gate that path.
-    agent_define::validate_vendor_base_url(&provider, &cmd.model_vendor_base_url)?;
+    let cmd_model_vendor_base_url = cmd.model_vendor_base_url.clone().unwrap_or_default();
+    agent_define::validate_vendor_base_url(&provider, &cmd_model_vendor_base_url)?;
 
     // Build the new definition struct up-front so agent_def_find_or_insert
     // can use it as both the lookup key and the insert payload.
@@ -444,7 +445,7 @@ pub(crate) async fn agent_define_core(
         container_volumes: cmd.container_volumes.clone(),
         container_name: String::new(), // assigned by ContainerManager on first spawn
         use_ambient_login: 0,
-        model_vendor_base_url: cmd.model_vendor_base_url.clone(),
+        model_vendor_base_url: cmd_model_vendor_base_url.clone(),
     };
 
     // Atomic check-then-insert.
@@ -514,7 +515,13 @@ pub(crate) async fn agent_define_core(
                 if !cmd.description.is_empty() { updated.description = cmd.description.clone(); }
                 if !cmd.working_directory.is_empty() { updated.working_directory = cmd.working_directory.clone(); }
                 if !cmd.shell.is_empty()    { updated.shell = cmd.shell.clone(); }
-                if !cmd.model_vendor_base_url.is_empty() { updated.model_vendor_base_url = cmd.model_vendor_base_url.clone(); }
+                // `None` = don't touch; `Some(_)` (including `Some("")`) sets
+                // it explicitly — the caller MUST be able to pass `Some("")`
+                // to clear a stale override, or a provider change away from
+                // a vendor-capable provider (see validation below) would
+                // permanently block every future agent.define call for this
+                // agent, since there'd be no way to ever un-set the old value.
+                if let Some(url) = &cmd.model_vendor_base_url { updated.model_vendor_base_url = url.clone(); }
                 // Authoritative check for this write: validates the FINAL
                 // effective (provider, override) pair — catches both a
                 // freshly-supplied override against the real provider, and a

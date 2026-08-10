@@ -423,7 +423,20 @@ impl Store {
         let mut by_id: std::collections::HashMap<String, AgentDefinition> =
             local.into_iter().map(|d| (d.id.clone(), d)).collect();
         for rec in &global {
-            let def = super::def_registry_mirror::record_to_agent_definition(rec);
+            let mut def = super::def_registry_mirror::record_to_agent_definition(rec);
+            // model_vendor_base_url is deliberately channel-local only —
+            // DefinitionRecordV1 doesn't carry it, so record_to_agent_definition
+            // always returns "" for it. Without this, the global overlay
+            // silently wiped a same-channel agent's override on every read
+            // (including agent.open's spawn-time resolution), making the
+            // whole feature a no-op in default single-instance operation —
+            // not just the genuinely-cross-channel case this limitation is
+            // documented for. Preserve the local row's value when one
+            // exists; only a truly cross-channel agent (no local row) sees
+            // the empty default. (reagent P0 on PR #2505.)
+            if let Some(existing) = by_id.get(&def.id) {
+                def.model_vendor_base_url = existing.model_vendor_base_url.clone();
+            }
             by_id.insert(def.id.clone(), def);
         }
         let mut result: Vec<AgentDefinition> = by_id.into_values().collect();

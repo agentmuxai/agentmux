@@ -114,11 +114,17 @@ pub struct CommandAgentDefineData {
     pub container_volumes: String,
     /// Redirects this agent's harness at a non-default model vendor backend
     /// (e.g. a custom `ANTHROPIC_BASE_URL` for a `claude`-provider agent).
-    /// Empty (default) = use the harness's default vendor endpoint. Rejected
-    /// at define-time unless the resolved provider declares
-    /// `ProviderConfig::base_url_env_var` — see `agent_define_core`.
+    /// `None` (the default — omitted or absent) = don't touch the stored
+    /// value; on a fresh insert this means "no override". `Some("")` is an
+    /// explicit clear back to "no override" — required so a caller can ever
+    /// undo a previously-set value or recover from a stale override left
+    /// behind by a provider change (see `agent_define_core`'s update
+    /// branch). `Some(url)` sets it, rejected at define-time unless the
+    /// resolved provider declares `ProviderConfig::base_url_env_var`.
+    /// Mirrors the existing `Option<T>` = "don't touch" idiom already used
+    /// by `CommandUpdateAgentDefinitionData::use_ambient_login`.
     #[serde(default)]
-    pub model_vendor_base_url: String,
+    pub model_vendor_base_url: Option<String>,
 }
 
 fn default_host_agent_type() -> String {
