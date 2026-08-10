@@ -225,6 +225,21 @@ struct PersistentInner {
     /// spawn or arrived while someone else's spawn was already in flight.
     /// Drained by `release_spawn_claim_and_drain_queue`.
     pending_send_messages: VecDeque<QueuedMessage>,
+    /// Exclusive claim held by a stale-resume retry batch flush (issue
+    /// #2367; spec §4 option 2 of
+    /// SPEC_PERSISTENT_SPAWN_GENERATION_AND_MESSAGE_IDENTITY_2026_08_09).
+    /// Taken by `decide_retry_batch_action` in the SAME lock acquisition
+    /// in which it decides a live, newer-generation process should
+    /// receive the batch; while held, `decide_send_action`'s
+    /// `DeliverDirect` branch routes to `Queued` instead (exactly how it
+    /// already treats `spawning_in_progress`), making the queue the
+    /// single ordering authority — a concurrent send can no longer
+    /// `try_send` ahead of earlier-accepted retry messages. Released by
+    /// the flush task (`drain_queue_with_claim`) once the queue runs dry
+    /// or the process dies. Deliberately a NEW flag, not a reuse of
+    /// `spawning_in_progress` — round-14's starvation analysis stands:
+    /// that flag is never pre-asserted while no spawn is in progress.
+    drain_claim: bool,
     /// Monotonic counter behind `QueuedMessage::seq` (issue #2365) —
     /// pre-incremented at every fresh enqueue, so real seqs start at 1
     /// and are never reused for this controller's lifetime. Redelivery
@@ -448,9 +463,50 @@ enum SendAction {
     /// own (issue #2365 — content matching could discard a different,
     /// identical-text message instead).
     BecomeSpawner { own_seq: u64 },
-    /// Another caller is already spawning — this message has been
-    /// enqueued for that caller's own post-spawn drain to deliver.
+    /// Another caller is already spawning (or a retry-batch flush holds
+    /// the drain claim — issue #2367) — this message has been enqueued
+    /// for that claim-holder's own drain to deliver.
     Queued,
+}
+
+/// What `decide_retry_batch_action` determined a stale-resume retry
+/// batch's fate should be (issue #2367; spec §4). Split from
+/// [`SendAction`] because the batch's live-process outcome is not a
+/// direct delivery: the batch goes through the queue under the drain
+/// claim, never through a caller's own `try_send`.
+enum RetryBatchAction {
+    /// A live, NEWER-generation process is running with no claim held.
+    /// The batch was prepended to the queue AND `drain_claim` was taken
+    /// in the same lock acquisition that decided this — the caller must
+    /// start the queue flush
+    /// (`drain_queue_with_claim(.., QueueDrainClaim::RetryFlush)`).
+    FlushClaimed,
+    /// Someone else holds a claim (a spawn in flight, or another flush)
+    /// — the batch was prepended for that claim-holder's drain.
+    Queued,
+    /// Nobody holds a claim and no process is running — this retry
+    /// claimed the exclusive spawn right; `own_seq` is the batch's first
+    /// entry's seq (see `SendAction::BecomeSpawner`).
+    BecomeSpawner { own_seq: u64 },
+}
+
+/// Which exclusivity claim a queue-drain task runs under — the spawn
+/// claim (`spawning_in_progress`, the post-spawn drain) or the retry
+/// flush claim (`drain_claim`, issue #2367). The task must release
+/// exactly the claim its initiator took, and nothing else.
+#[derive(Clone, Copy, PartialEq)]
+enum QueueDrainClaim {
+    SpawnClaim,
+    RetryFlush,
+}
+
+impl QueueDrainClaim {
+    fn release(self, inner: &mut PersistentInner) {
+        match self {
+            QueueDrainClaim::SpawnClaim => inner.spawning_in_progress = false,
+            QueueDrainClaim::RetryFlush => inner.drain_claim = false,
+        }
+    }
 }
 
 /// A single entry in `pending_send_messages`: the formatted stdin JSON
@@ -596,6 +652,7 @@ impl PersistentSubprocessController {
                 resume: persistent_resume::ResumeState::default(),
                 spawning_in_progress: false,
                 pending_send_messages: VecDeque::new(),
+                drain_claim: false,
                 next_message_seq: 0,
                 drain_send_in_flight: false,
                 current_pid: None,
@@ -808,9 +865,9 @@ impl PersistentSubprocessController {
     /// silently dropped it).
     fn decide_send_action(&self, json_str: &str, skip_if_seq_queued: Option<u64>) -> SendAction {
         let mut inner = self.inner.lock().unwrap();
-        if inner.stdin_tx.is_some() && !inner.spawning_in_progress {
+        if inner.stdin_tx.is_some() && !inner.spawning_in_progress && !inner.drain_claim {
             SendAction::DeliverDirect
-        } else if inner.spawning_in_progress {
+        } else if inner.spawning_in_progress || inner.drain_claim {
             let already_queued = skip_if_seq_queued
                 .is_some_and(|seq| inner.pending_send_messages.iter().any(|m| m.seq == seq));
             if !already_queued {
@@ -944,6 +1001,29 @@ impl PersistentSubprocessController {
     /// itself, so a SECOND stall just publishes a status update instead of
     /// cascading indefinitely.
     fn drain_queue_after_successful_spawn(&self, retry_config: PersistentSpawnConfig, allow_fallback_respawn: bool) {
+        self.drain_queue_with_claim(retry_config, allow_fallback_respawn, QueueDrainClaim::SpawnClaim);
+    }
+
+    /// The queue-drain loop itself, parameterized by which exclusivity
+    /// claim it runs under ([`QueueDrainClaim`]) — the post-spawn drain
+    /// (`SpawnClaim`) and issue #2367's retry-batch flush (`RetryFlush`)
+    /// share every delivery invariant (Sender::send backpressure,
+    /// seed-aware retry-batch appends, delivery-order persistence,
+    /// stall handling); the ONLY difference is which flag they release.
+    /// `RetryFlush` callers always pass `allow_fallback_respawn: false`:
+    /// the flush targets an already-running process, so a stall means
+    /// that process died — leftovers stay queued for the next spawn and
+    /// the stalled branch publishes a status update.
+    fn drain_queue_with_claim(
+        &self,
+        retry_config: PersistentSpawnConfig,
+        allow_fallback_respawn: bool,
+        claim: QueueDrainClaim,
+    ) {
+        debug_assert!(
+            !(claim == QueueDrainClaim::RetryFlush && allow_fallback_respawn),
+            "a retry flush never respawns — see this function's doc comment"
+        );
         let inner_arc = Arc::clone(&self.inner);
         let block_id = self.block_id.clone();
         let self_ref = self.self_ref.lock().unwrap().clone().unwrap_or_default();
@@ -1000,9 +1080,23 @@ impl PersistentSubprocessController {
                     // duplicate-process race `spawning_in_progress` was
                     // added in this same PR to close.
                     let mut inner = inner_arc.lock().unwrap();
+                    // Re-check the queue under THIS lock before releasing:
+                    // the pop above observing "empty" and this release are
+                    // two separate acquisitions, and a concurrent caller
+                    // routed to `Queued` (claim still held) can enqueue in
+                    // that gap. With a live tx, releasing now would strand
+                    // that message — no claim holder ever drains it, and
+                    // every future send takes `DeliverDirect` straight
+                    // past it. Loop back and drain it instead (issue
+                    // #2367's queue-authority guarantee; the same gap
+                    // existed for the spawn-claim drain).
+                    if inner.stdin_tx.is_some() && !inner.pending_send_messages.is_empty() {
+                        drop(inner);
+                        continue;
+                    }
                     let stalled = inner.stdin_tx.is_none() && !inner.pending_send_messages.is_empty();
                     if !(stalled && allow_fallback_respawn) {
-                        inner.spawning_in_progress = false;
+                        claim.release(&mut inner);
                     }
                     break stalled;
                 };
@@ -1038,7 +1132,7 @@ impl PersistentSubprocessController {
                     inner.pending_send_messages.push_front(QueuedMessage { seq, json_str: e.0, already_persisted });
                     let stalled = !inner.pending_send_messages.is_empty();
                     if !(stalled && allow_fallback_respawn) {
-                        inner.spawning_in_progress = false;
+                        claim.release(&mut inner);
                     }
                     break stalled;
                 }
@@ -1102,7 +1196,7 @@ impl PersistentSubprocessController {
                         // claim was deliberately kept held above pending
                         // this hand-off, so it must still be released here
                         // or no future caller could ever spawn again.
-                        inner_arc.lock().unwrap().spawning_in_progress = false;
+                        claim.release(&mut inner_arc.lock().unwrap());
                     }
                 }
             }
@@ -1433,8 +1527,14 @@ impl PersistentSubprocessController {
         }
     }
 
+    /// `retry_generation` is the spawn generation whose `ProcessExited`
+    /// fired this retry (the process-waiter's own `my_generation_wait`) —
+    /// `decide_retry_batch_action` needs it to tell a live NEWER spawn
+    /// apart from the impossible "our own process is somehow still
+    /// running" case (issue #2367).
     fn retry_after_resume_failure(
         &self,
+        retry_generation: u64,
         mut config: PersistentSpawnConfig,
         mut entries: Vec<persistent_resume::QueuedRetryEntry>,
         held_error_line: Option<String>,
@@ -1452,113 +1552,44 @@ impl PersistentSubprocessController {
         };
         let rest = entries;
 
-        match self.decide_retry_batch_action(&first, &rest) {
-            SendAction::DeliverDirect => {
-                // Another caller's own spawn already installed a running
-                // process by the time this retry got scheduled — no need
-                // for a dedicated respawn; deliver straight to it.
+        match self.decide_retry_batch_action(retry_generation, &first, &rest) {
+            RetryBatchAction::FlushClaimed => {
+                // A live, NEWER-generation process was already running by
+                // the time this retry got scheduled (issue #2367 — the
+                // retry's own process exited; a live `stdin_tx` is by
+                // definition an unrelated spawn that raced ahead). The
+                // batch was prepended to the queue and `drain_claim` was
+                // taken in the SAME lock acquisition that decided this
+                // arm, so every concurrent `decide_send_action` caller
+                // already routes to `Queued` behind it — the queue is the
+                // single ordering authority. Flush through the same drain
+                // loop a successful spawn uses (`Sender::send`
+                // backpressure, seed-aware retry-batch appends,
+                // delivery-order persistence); it releases `drain_claim`
+                // once the queue runs dry. This subsumes the previous
+                // `try_send`-then-fall-back-to-queue design: everything
+                // goes through the queue up front, so the batch can never
+                // reorder relative to itself or to racing sends, and the
+                // spawn flag is no longer borrowed for a non-spawn (the
+                // round-7/round-8 fallback machinery this replaces).
                 self.mark_turn_active_and_publish();
-                let mut any_failed = false;
-                {
-                    let mut inner = self.inner.lock().unwrap();
-                    let tx = inner.stdin_tx.clone();
-                    for entry in std::iter::once(first).chain(rest) {
-                        // codex P2 on PR #2360 (round 15, commit
-                        // fdb8db6fd): once ANY earlier message in this
-                        // batch has failed direct delivery, stop
-                        // attempting `try_send` for the rest — the
-                        // bounded stdin channel's receiver runs
-                        // concurrently and can free capacity between
-                        // iterations, letting a LATER message in this same
-                        // batch succeed via `try_send` while an EARLIER
-                        // one sits queued (from the `Full` failure below),
-                        // reordering this batch relative to itself once
-                        // the drain eventually delivers the queued one.
-                        // `!any_failed` short-circuits every remaining
-                        // message straight to the queued branch, in
-                        // order, once the first failure is hit.
-                        let delivered = !any_failed
-                            && tx.as_ref().is_some_and(|tx| tx.try_send(entry.json.clone()).is_ok());
-                        if !delivered {
-                            any_failed = true;
-                            // codex P2 on PR #2360 (sixth review pass,
-                            // round 6): this is the retry's own
-                            // LAST-CHANCE delivery attempt for this
-                            // message — nothing else will ever resend it,
-                            // so discarding it here (an earlier cut of
-                            // this fix did, on both a `Full` channel and a
-                            // process that died again in this exact gap)
-                            // would lose it permanently despite already
-                            // having been reported as accepted.
-                            inner
-                                .pending_send_messages
-                                .push_back(QueuedMessage::already_persisted(entry.seq, entry.json));
-                        }
-                    }
-                    if any_failed {
-                        // codex P2 on PR #2360 (sixth review pass, round
-                        // 7): pushing onto the queue alone is not enough —
-                        // `DeliverDirect` only fires when
-                        // `spawning_in_progress` is `false`, so nothing
-                        // would EVER drain this entry: future callers ALSO
-                        // take `DeliverDirect` (bypassing the queue
-                        // entirely) for as long as this same process stays
-                        // alive, which could be indefinite, silently
-                        // reordering it behind much later input.
-                        //
-                        // Claimed in this SAME lock acquisition as the
-                        // push above — reagentx P1 on PR #2360 (sixth
-                        // review pass, round 8): an earlier cut of this
-                        // fix claimed it in a SEPARATE, later lock
-                        // acquisition, leaving a window where a
-                        // concurrent `send_message` could observe
-                        // `stdin_tx.is_some() && !spawning_in_progress`
-                        // and take `DeliverDirect` itself — jumping ahead
-                        // of the just-queued retry messages — or, if the
-                        // process also died in that same window, take
-                        // `BecomeSpawner` and spawn a second, independent
-                        // child process for the same block, reintroducing
-                        // the exact concurrent-spawn TOCTOU
-                        // `spawning_in_progress` exists to prevent.
-                        inner.spawning_in_progress = true;
-                    }
-                }
-                if any_failed {
-                    tracing::warn!(
-                        block_id = %self.block_id,
-                        "failed to redeliver one or more messages after stale-resume retry (already-running path) — draining via the queue instead"
-                    );
-                    // Claim the spawn flag (above) and hand off to the
-                    // SAME drain used after a fresh spawn (with
-                    // backpressure via `Sender::send`, not `try_send`)
-                    // instead of leaving it orphaned.
-                    // `allow_fallback_respawn: false` — the process is
-                    // still alive, there's nothing to fall back to spawn.
-                    self.drain_queue_after_successful_spawn(config.clone(), false);
-                    // reagentx P1 (round 2 on PR #2371): flushing eagerly
-                    // HERE (an earlier cut of this fix did, reasoning
-                    // that `drain_queue_after_successful_spawn` is a
-                    // fire-and-forget background task with no way to
-                    // report failure back to this call) contradicts the
-                    // same established pattern as the `Queued` arm below
-                    // — eventual delivery is the overwhelmingly common
-                    // outcome, so flushing eagerly would show a stale,
-                    // wrong error bubble immediately followed by the real
-                    // (successful) response. Dropped instead: on the rare
-                    // total-failure path, the drain's own
-                    // `stalled_with_leftovers` branch (with
-                    // `allow_fallback_respawn: false`) already calls
-                    // `publish_status()` — never silent forever, even
-                    // without the specific original error text.
-                    drop(held_error_line);
-                }
-                // If every message in the batch was delivered directly to
-                // a live, already-running process (the `!any_failed`
-                // case), `held_error_line` is dropped here implicitly —
-                // genuine progress, same as a successful `BecomeSpawner`
-                // spawn.
+                // `allow_fallback_respawn: false` — the flush targets an
+                // already-running process; a stall means that process
+                // died, and its own exit handling (or the next send's
+                // spawn) picks the leftovers up.
+                self.drain_queue_with_claim(config.clone(), false, QueueDrainClaim::RetryFlush);
+                // reagentx P1 (round 2 on PR #2371): eventual delivery is
+                // the overwhelmingly common outcome — flushing the held
+                // line eagerly here would show a stale, wrong error
+                // bubble immediately followed by the real (successful)
+                // response. On the rare total-failure path the drain's
+                // own `stalled_with_leftovers` branch (with
+                // `allow_fallback_respawn: false`) already calls
+                // `publish_status()` — never silent forever, even without
+                // the specific original error text.
+                drop(held_error_line);
             }
-            SendAction::Queued => {
+            RetryBatchAction::Queued => {
                 // Someone else is already spawning — their own
                 // `release_spawn_claim_and_drain_queue` will deliver this
                 // (or, if their process turns out to already be dead, its
@@ -1587,7 +1618,7 @@ impl PersistentSubprocessController {
                 // specific original error text.
                 drop(held_error_line);
             }
-            SendAction::BecomeSpawner { own_seq } => {
+            RetryBatchAction::BecomeSpawner { own_seq } => {
                 // Only clear inner.session_id now that THIS retry is
                 // actually about to spawn — codex P2 on PR #2360 (sixth
                 // review pass, round 3): clearing it unconditionally up
@@ -1642,66 +1673,56 @@ impl PersistentSubprocessController {
         }
     }
 
-    /// Same three-way decision as `decide_send_action`, but atomically
-    /// enqueues an ENTIRE batch of messages (not just one) when the
-    /// outcome is `Queued` or `BecomeSpawner` — used only by
-    /// `retry_after_resume_failure`. codex P2 on PR #2360 (sixth review
-    /// pass, round 6): deciding and enqueueing a multi-message retry batch
-    /// one call at a time (each through its own `decide_send_action` call)
-    /// left a window between them where a genuinely new, unrelated message
-    /// could interleave into the MIDDLE of the same original batch,
-    /// reordering it relative to how the doomed process actually received
-    /// it. `first` is checked for an already-queued duplicate the same way
-    /// `decide_send_action` does (see its own doc comment on
-    /// `skip_if_already_queued`) — it may still be sitting in
-    /// `pending_send_messages` if the drain hasn't reached it yet. `rest`
-    /// is always pushed as-is: content-based dedup must never apply WITHIN
-    /// the same batch, since two entries can legitimately be identical
-    /// (the user genuinely sent the same text twice) and both need
-    /// redelivering (codex P2 on PR #2360, sixth review pass, round 6).
+    /// Same shape of decision as `decide_send_action`, but atomically
+    /// enqueues the ENTIRE batch (not just one message) in every arm —
+    /// used only by `retry_after_resume_failure`. codex P2 on PR #2360
+    /// (sixth review pass, round 6): deciding and enqueueing a
+    /// multi-message retry batch one call at a time (each through its own
+    /// `decide_send_action` call) left a window between them where a
+    /// genuinely new, unrelated message could interleave into the MIDDLE
+    /// of the same original batch, reordering it relative to how the
+    /// doomed process actually received it. Batch prepend/dedup rules
+    /// live in [`Self::prepend_retry_batch`].
+    ///
+    /// Issue #2367 (spec §4, option 2): the live-process outcome is no
+    /// longer a caller-side `try_send` (`DeliverDirect`) — that let a
+    /// concurrent send race ahead of, or into the middle of, the batch.
+    /// It is now [`RetryBatchAction::FlushClaimed`]: batch prepended and
+    /// `drain_claim` taken under this one lock, then flushed through the
+    /// shared queue drain.
     fn decide_retry_batch_action(
         &self,
+        retry_generation: u64,
         first: &persistent_resume::QueuedRetryEntry,
         rest: &[persistent_resume::QueuedRetryEntry],
-    ) -> SendAction {
+    ) -> RetryBatchAction {
         let mut inner = self.inner.lock().unwrap();
-        if inner.stdin_tx.is_some() && !inner.spawning_in_progress {
-            SendAction::DeliverDirect
-        } else if inner.spawning_in_progress {
-            // codex P2 on PR #2360 (sixth review pass, round 11): prepend
-            // rather than append. This retry batch represents messages
-            // that were accepted by the doomed process BEFORE whatever's
-            // currently sitting in the queue — anything already queued
-            // here arrived AFTER the original spawn had already claimed
-            // `spawning_in_progress`, so it's chronologically LATER than
-            // this batch. Appending would let the fresh process receive
-            // later-arriving input before this earlier-accepted batch.
-            //
-            // `first` may itself STILL be sitting in the queue (see
-            // `decide_send_action`'s doc comment on `skip_if_already_
-            // queued`) — always at index 0 if so, since it's the ONLY
-            // thing ever present when a claim starts and nothing but
-            // `push_back` ever touches this queue elsewhere. In that
-            // case `rest` belongs immediately after it (same batch,
-            // preserving order), not ahead of it.
-            let first_already_queued =
-                inner.pending_send_messages.iter().any(|m| m.seq == first.seq);
-            if first_already_queued {
-                for (i, entry) in rest.iter().enumerate() {
-                    inner
-                        .pending_send_messages
-                        .insert(i + 1, QueuedMessage::already_persisted(entry.seq, entry.json.clone()));
-                }
-            } else {
-                let mut front: VecDeque<QueuedMessage> = VecDeque::new();
-                front.push_back(QueuedMessage::already_persisted(first.seq, first.json.clone()));
-                for entry in rest {
-                    front.push_back(QueuedMessage::already_persisted(entry.seq, entry.json.clone()));
-                }
-                front.append(&mut inner.pending_send_messages);
-                inner.pending_send_messages = front;
-            }
-            SendAction::Queued
+        if inner.stdin_tx.is_some() && !inner.spawning_in_progress && !inner.drain_claim {
+            // The retry's own process exited — that exit is what fired
+            // this retry, and the exit-handler clears `stdin_tx` under
+            // the same `is_current_generation` gate — so a live
+            // `stdin_tx` here is by definition a NEWER, unrelated spawn
+            // that raced ahead during the exit-handler's cleanup window
+            // (issue #2367).
+            debug_assert!(
+                inner.spawn_generation != retry_generation,
+                "a retry's own generation cannot still be current while stdin_tx is live"
+            );
+            // Prepend the batch and take the drain claim in THIS SAME
+            // lock acquisition (spec §4 option 2): from this instant
+            // every `decide_send_action` caller routes to `Queued`
+            // behind the batch, so the queue — not a caller's own
+            // `try_send` — is the single ordering authority. The only
+            // residue is a `DeliverDirect` *decided* before this lock
+            // was taken that lands mid-batch: that send was already
+            // racing the process exit itself, and no claim scheme can
+            // sequence it.
+            inner.drain_claim = true;
+            Self::prepend_retry_batch(&mut inner, first, rest);
+            RetryBatchAction::FlushClaimed
+        } else if inner.spawning_in_progress || inner.drain_claim {
+            Self::prepend_retry_batch(&mut inner, first, rest);
+            RetryBatchAction::Queued
         } else {
             inner.spawning_in_progress = true;
             inner
@@ -1712,7 +1733,47 @@ impl PersistentSubprocessController {
                     .pending_send_messages
                     .push_back(QueuedMessage::already_persisted(entry.seq, entry.json.clone()));
             }
-            SendAction::BecomeSpawner { own_seq: first.seq }
+            RetryBatchAction::BecomeSpawner { own_seq: first.seq }
+        }
+    }
+
+    /// Prepends a retry batch to `pending_send_messages`, deduping only
+    /// `first` by seq. codex P2 on PR #2360 (sixth review pass, round
+    /// 11): prepend rather than append — this batch represents messages
+    /// accepted by the doomed process BEFORE whatever's currently
+    /// queued (anything queued arrived after the original spawn claimed
+    /// `spawning_in_progress`, so it's chronologically later); appending
+    /// would let the fresh process receive later-arriving input first.
+    ///
+    /// `first` may itself STILL be sitting in the queue (see
+    /// `decide_send_action`'s doc comment on `skip_if_seq_queued`) —
+    /// always at index 0 if so, since it's the ONLY thing ever present
+    /// when a claim starts and nothing but `push_back` ever touches
+    /// this queue elsewhere. In that case `rest` belongs immediately
+    /// after it (same batch, preserving order), not ahead of it. `rest`
+    /// is always pushed as-is: dedup must never apply WITHIN the same
+    /// batch (two entries can legitimately carry identical text and
+    /// both need redelivering).
+    fn prepend_retry_batch(
+        inner: &mut PersistentInner,
+        first: &persistent_resume::QueuedRetryEntry,
+        rest: &[persistent_resume::QueuedRetryEntry],
+    ) {
+        let first_already_queued = inner.pending_send_messages.iter().any(|m| m.seq == first.seq);
+        if first_already_queued {
+            for (i, entry) in rest.iter().enumerate() {
+                inner
+                    .pending_send_messages
+                    .insert(i + 1, QueuedMessage::already_persisted(entry.seq, entry.json.clone()));
+            }
+        } else {
+            let mut front: VecDeque<QueuedMessage> = VecDeque::new();
+            front.push_back(QueuedMessage::already_persisted(first.seq, first.json.clone()));
+            for entry in rest {
+                front.push_back(QueuedMessage::already_persisted(entry.seq, entry.json.clone()));
+            }
+            front.append(&mut inner.pending_send_messages);
+            inner.pending_send_messages = front;
         }
     }
 
@@ -3117,7 +3178,12 @@ impl PersistentSubprocessController {
                                         block_id = %block_id_wait,
                                         "stale --resume session id caused this exit — retrying fresh, without --resume"
                                     );
-                                    ctrl.retry_after_resume_failure(retry.config, retry.messages, held_error_line);
+                                    ctrl.retry_after_resume_failure(
+                                        my_generation_wait,
+                                        retry.config,
+                                        retry.messages,
+                                        held_error_line,
+                                    );
                                 } else if let Some(line) = held_error_line {
                                     // The controller itself is already gone
                                     // (weak ref invalidated) — nothing can
@@ -3924,7 +3990,7 @@ mod send_input_tests {
             session_id: "dead-sid".to_string(),
             message_id: None,
         };
-        c.retry_after_resume_failure(config, vec![qentry(1, "{}")], None);
+        c.retry_after_resume_failure(1, config, vec![qentry(1, "{}")], None);
 
         assert_eq!(
             c.inner.lock().unwrap().session_id,
@@ -4311,7 +4377,7 @@ mod send_input_tests {
     #[test]
     fn decide_retry_batch_action_marks_every_entry_as_already_persisted() {
         let c = controller();
-        c.decide_retry_batch_action(&qentry(1, "hello"), &[qentry(2, "world")]);
+        c.decide_retry_batch_action(1, &qentry(1, "hello"), &[qentry(2, "world")]);
         let inner = c.inner.lock().unwrap();
         assert!(inner.pending_send_messages[0].already_persisted);
         assert!(inner.pending_send_messages[1].already_persisted);
@@ -4684,7 +4750,7 @@ mod send_input_tests {
             session_id: "dead-sid".to_string(),
             message_id: None,
         };
-        c.retry_after_resume_failure(config, vec![qentry(1, "{}")], None);
+        c.retry_after_resume_failure(1, config, vec![qentry(1, "{}")], None);
 
         assert_eq!(
             c.inner.lock().unwrap().session_id.as_deref(),
@@ -4717,6 +4783,7 @@ mod send_input_tests {
             message_id: None,
         };
         c.retry_after_resume_failure(
+            1,
             config,
             vec![qentry(1, "msg-1"), qentry(2, "msg-2"), qentry(3, "msg-3")],
             None,
@@ -4750,7 +4817,7 @@ mod send_input_tests {
             session_id: String::new(),
             message_id: None,
         };
-        c.retry_after_resume_failure(config, vec![qentry(1, "stuck")], None);
+        c.retry_after_resume_failure(1, config, vec![qentry(1, "stuck")], None);
 
         let inner = c.inner.lock().unwrap();
         assert_eq!(
@@ -4789,6 +4856,7 @@ mod send_input_tests {
             message_id: None,
         };
         c.retry_after_resume_failure(
+            1,
             config,
             vec![qentry(1, "msg-1"), qentry(2, "msg-2"), qentry(3, "msg-3")],
             None,
@@ -4805,18 +4873,17 @@ mod send_input_tests {
         assert_eq!(inner.pending_send_messages[2], "msg-3");
     }
 
-    /// codex P2 on PR #2360 (sixth review pass, round 7): pushing a failed
-    /// direct-retry delivery onto the queue alone is not enough —
-    /// `DeliverDirect` only fires when `spawning_in_progress` is `false`,
-    /// so nothing would EVER drain this entry for as long as the same
-    /// process stays alive (every future caller would ALSO take
-    /// `DeliverDirect`, bypassing the queue entirely). The claim must be
-    /// taken and a drain triggered instead — which, even against the same
-    /// dead sender used here, must still correctly release the claim
+    /// Issue #2367 (supersedes the round-7 spawn-flag borrow): a retry
+    /// batch targeting a live process must take the DRAIN claim in the
+    /// same lock acquisition that decides the flush — so no concurrent
+    /// caller bypasses the queue via `DeliverDirect` — while leaving
+    /// `spawning_in_progress` untouched (round 14's starvation analysis:
+    /// it is never pre-asserted while no spawn is in progress). Even
+    /// against a dead sender the flush must still release the claim
     /// afterward (not leave it stuck forever) while preserving the
     /// message for a future spawn.
     #[tokio::test]
-    async fn retry_after_resume_failure_claims_the_spawn_flag_when_direct_delivery_fails() {
+    async fn retry_after_resume_failure_takes_the_drain_claim_not_the_spawn_flag() {
         let c = controller();
         let (tx, rx) = mpsc::channel::<String>(1);
         drop(rx);
@@ -4832,19 +4899,78 @@ mod send_input_tests {
             session_id: String::new(),
             message_id: None,
         };
-        c.retry_after_resume_failure(config, vec![qentry(1, "stuck")], None);
+        c.retry_after_resume_failure(1, config, vec![qentry(1, "stuck")], None);
 
-        assert!(
-            c.inner.lock().unwrap().spawning_in_progress,
-            "must claim the spawn flag immediately so no concurrent caller bypasses the queue via DeliverDirect"
-        );
+        {
+            let inner = c.inner.lock().unwrap();
+            assert!(
+                inner.drain_claim,
+                "must take the drain claim immediately so no concurrent caller bypasses the queue via DeliverDirect"
+            );
+            assert!(
+                !inner.spawning_in_progress,
+                "the spawn flag must never be borrowed for a non-spawn (round 14 starvation analysis)"
+            );
+        }
 
         // Let the background drain (which will also fail against this
         // same dead sender) run to completion.
         tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
         let inner = c.inner.lock().unwrap();
-        assert!(!inner.spawning_in_progress, "claim must eventually be released, not stuck forever");
+        assert!(!inner.drain_claim, "the drain claim must eventually be released, not stuck forever");
         assert_eq!(inner.pending_send_messages.len(), 1, "message must remain queued, not lost");
+    }
+
+    /// Issue #2367, the actual reordering bug: while the retry batch is
+    /// being flushed into a live newer process, a concurrent
+    /// `send_message` must route through the queue BEHIND the batch —
+    /// under the old `try_send` design it took `DeliverDirect` and could
+    /// jump ahead of (or into the middle of) earlier-accepted retry
+    /// messages. The queue is now the single ordering authority: batch
+    /// first, later send after, and the claim releases once dry.
+    #[tokio::test]
+    async fn retry_flush_orders_a_concurrent_send_behind_the_whole_batch() {
+        let c = controller();
+        let (tx, mut rx) = mpsc::channel::<String>(8);
+        c.inner.lock().unwrap().stdin_tx = Some(tx);
+
+        let config = PersistentSpawnConfig {
+            cli_command: "unused".to_string(),
+            cli_args: vec![],
+            working_dir: String::new(),
+            env_vars: HashMap::new(),
+            session_id_field: "session_id".to_string(),
+            resume_flag: "--resume".to_string(),
+            session_id: String::new(),
+            message_id: None,
+        };
+        c.retry_after_resume_failure(
+            1,
+            config,
+            vec![qentry(1, "batch-1"), qentry(2, "batch-2")],
+            None,
+        );
+
+        // Races in while the flush task holds the drain claim: must be
+        // queued behind the batch, never delivered directly.
+        let action = c.decide_send_action("later-send", None);
+        assert!(
+            matches!(action, SendAction::Queued),
+            "a send during a retry flush must queue behind the batch, not DeliverDirect ahead of it"
+        );
+
+        assert_eq!(rx.recv().await.unwrap(), "batch-1");
+        assert_eq!(rx.recv().await.unwrap(), "batch-2");
+        assert_eq!(
+            rx.recv().await.unwrap(),
+            "later-send",
+            "the concurrent send must arrive strictly after the whole batch"
+        );
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+        let inner = c.inner.lock().unwrap();
+        assert!(!inner.drain_claim, "claim must be released once the queue runs dry");
+        assert!(inner.pending_send_messages.is_empty());
     }
 
     /// codex P2 on PR #2371: a confirmed retry that turns out NOT to
@@ -4878,7 +5004,7 @@ mod send_input_tests {
             session_id: String::new(),
             message_id: None,
         };
-        c.retry_after_resume_failure(config, vec![qentry(1, "{}")], Some("boom\n".to_string()));
+        c.retry_after_resume_failure(1, config, vec![qentry(1, "{}")], Some("boom\n".to_string()));
 
         let flushed = filestore
             .read_file(&block_id, PERSISTENT_OUTPUT_SUBJECT)
@@ -4933,7 +5059,7 @@ mod send_input_tests {
             session_id: String::new(),
             message_id: None,
         };
-        c.retry_after_resume_failure(config, vec![qentry(1, "stuck")], Some("boom\n".to_string()));
+        c.retry_after_resume_failure(1, config, vec![qentry(1, "stuck")], Some("boom\n".to_string()));
         tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
 
         let flushed = filestore
@@ -5150,8 +5276,8 @@ mod send_input_tests {
     #[test]
     fn decide_retry_batch_action_enqueues_the_whole_batch_atomically() {
         let c = controller();
-        let action = c.decide_retry_batch_action(&qentry(1, "first"), &[qentry(2, "second"), qentry(3, "third")]);
-        assert!(matches!(action, SendAction::BecomeSpawner { .. }));
+        let action = c.decide_retry_batch_action(1, &qentry(1, "first"), &[qentry(2, "second"), qentry(3, "third")]);
+        assert!(matches!(action, RetryBatchAction::BecomeSpawner { .. }));
         let inner = c.inner.lock().unwrap();
         assert_eq!(
             inner.pending_send_messages.iter().cloned().collect::<Vec<_>>(),
@@ -5170,9 +5296,9 @@ mod send_input_tests {
         c.inner.lock().unwrap().spawning_in_progress = true;
 
         let action =
-            c.decide_retry_batch_action(&qentry(1, "hello"), &[qentry(2, "hello"), qentry(3, "hello")]);
+            c.decide_retry_batch_action(1, &qentry(1, "hello"), &[qentry(2, "hello"), qentry(3, "hello")]);
 
-        assert!(matches!(action, SendAction::Queued));
+        assert!(matches!(action, RetryBatchAction::Queued));
         let inner = c.inner.lock().unwrap();
         assert_eq!(
             inner.pending_send_messages.len(),
@@ -5193,9 +5319,9 @@ mod send_input_tests {
             inner.pending_send_messages.push_back(QueuedMessage::fresh(1, "first".to_string()));
         }
 
-        let action = c.decide_retry_batch_action(&qentry(1, "first"), &[qentry(2, "second")]);
+        let action = c.decide_retry_batch_action(1, &qentry(1, "first"), &[qentry(2, "second")]);
 
-        assert!(matches!(action, SendAction::Queued));
+        assert!(matches!(action, RetryBatchAction::Queued));
         let inner = c.inner.lock().unwrap();
         assert_eq!(
             inner
@@ -5227,9 +5353,9 @@ mod send_input_tests {
             inner.pending_send_messages.push_back(QueuedMessage::fresh(1, "later-message".to_string()));
         }
 
-        let action = c.decide_retry_batch_action(&qentry(2, "A"), &[]);
+        let action = c.decide_retry_batch_action(1, &qentry(2, "A"), &[]);
 
-        assert!(matches!(action, SendAction::Queued));
+        assert!(matches!(action, RetryBatchAction::Queued));
         let inner = c.inner.lock().unwrap();
         assert_eq!(
             inner.pending_send_messages.iter().cloned().collect::<Vec<_>>(),
@@ -5264,6 +5390,7 @@ mod resume_poison_tests {
             resume: persistent_resume::ResumeState::default(),
             spawning_in_progress: false,
             pending_send_messages: VecDeque::new(),
+            drain_claim: false,
             next_message_seq: 0,
             drain_send_in_flight: false,
             current_pid: None,
