@@ -157,6 +157,7 @@ function mkBgBash(overrides: Partial<ToolNode> = {}): ToolNode {
         params: { command: "task dev", run_in_background: true },
         timestamp: 1000,
         duration: 0.4,
+        result: { stdout: "Command running in background with ID: b12345. Output is being written to: …", stderr: "", exitCode: 0 },
         ...overrides,
     });
 }
@@ -221,6 +222,26 @@ describe("toolActivities — backgrounded calls", () => {
         // the threshold gate drops it entirely.
         const nodes: DocumentNode[] = [mkBgBash({ status: "failed" })];
         expect(toolActivities(nodes, 2000)).toEqual([]);
+    });
+
+    it("issue #2518: a call that asked for run_in_background but finished too fast to actually detach is NOT treated as a live background task", () => {
+        // The harness itself decides per-call whether a command actually gets
+        // detached — a command that finishes fast enough is returned
+        // synchronously with the command's real output (the same
+        // `<exited N in Ts>` shape an ordinary call gets), not the "Command
+        // running in background with ID: …" acceptance message, even though
+        // run_in_background: true was passed. Without the result-content
+        // check, this was misclassified as "launch accepted, wait for a
+        // <task-notification> that will never come" — a dock row stuck
+        // `running` forever. Confirmed live: 11 of 17 backgrounded calls in
+        // a single session got stuck exactly this way.
+        const fastFinish = mkBgBash({
+            duration: 13.38,
+            result: { stdout: "<exited 0 in 13.38s>\n707M    /c/Users/area54/.cargo", stderr: "", exitCode: 0 },
+        });
+        // Long after it finished — must resolve via the ordinary
+        // duration/threshold rules, not the "wait for notification" path.
+        expect(toolActivities([fastFinish], 1000 + 13_380 + 60_000)).toEqual([]);
     });
 
     it("a foreground call is untouched by an unrelated notification in the document", () => {
