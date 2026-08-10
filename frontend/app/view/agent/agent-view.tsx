@@ -64,6 +64,8 @@ import { DragOverlay } from "@/app/element/dragoverlay";
 import { AgentControlBar } from "./components/AgentControlBar";
 import { ActivityDock } from "./components/ActivityDock";
 import { hasRunningPromotedTool, nextToolPromotionAt } from "./activity/tool-adapter";
+import { earliestLiveAttachedStartMs } from "./activity/attached-task";
+import { allSubagentsAtom } from "./activity/subagent-source";
 import { AgentDecisionPanel } from "./components/AgentDecisionPanel";
 import { AgentQuestionPanel } from "./components/AgentQuestionPanel";
 import { AgentDisconnectedBanner } from "./components/AgentDisconnectedBanner";
@@ -527,6 +529,7 @@ const AgentPresentationView = ({
                 currentToolArg: a.currentToolArgAtom[1],
                 failure: a.failureAtom[1],
                 compacting: a.compactingAtom[1],
+                attachedTask: a.attachedTaskAtom[1],
             },
         });
         registerAgentActivity(model.blockId, a.turnPhaseAtom[0]);
@@ -1198,7 +1201,12 @@ const AgentPresentationView = ({
         () => showingLaunchActivity() || workingFromPhase(agentAtoms().turnPhaseAtom[0]()),
     );
     const workingRowVisible = createMemo(
-        () => workingRowLoading() || agentAtoms().sessionStatsAtom[0]() != null,
+        () =>
+            workingRowLoading() ||
+            agentAtoms().sessionStatsAtom[0]() != null ||
+            // Attached-task state ("Running in background · Ns") renders in
+            // the same row — see AgentWorkingRow's attachedSince prop.
+            agentAtoms().attachedTaskAtom[0]() != null,
     );
 
     onMount(() => {
@@ -1235,6 +1243,42 @@ const AgentPresentationView = ({
         const at = nextToolPromotionAt(nodes, now);
         if (at == null) return;
         const timer = setTimeout(() => setToolPromotionCheckNonce((n) => n + 1), Math.max(0, at - now) + 50);
+        onCleanup(() => clearTimeout(timer));
+    });
+
+    // Attached-task axis dispatch — the deferred §6.1 call site of
+    // SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md. Derives "≥1 live
+    // agent-declared long-running activity" from the same shell + subagent +
+    // tool aggregate the ActivityDock renders, and dispatches the reducer's
+    // AttachedTaskObserved / AttachedTaskCleared on the 0→1 / 1→0 edges.
+    // Both commands are idempotent in the reducer, so re-running this effect
+    // while the level is unchanged is harmless. Wall-clock re-check timer:
+    // a running Bash call crosses TOOL_PROMOTION_MS on a timer, not on a
+    // document event (same discipline as the promotion effect above).
+    const [attachedCheckNonce, setAttachedCheckNonce] = createSignal(0);
+    createEffect(() => {
+        attachedCheckNonce();
+        const nodes = agentAtoms().documentAtom[0]();
+        const subs = allSubagentsAtom();
+        const now = Date.now();
+        // `at` carries the earliest running activity's REAL start time, not
+        // the observation time — a promoted Bash call has already been
+        // running ≥30s when this first fires, and a pane reopened over an
+        // already-running shell must not restart the elapsed counter at 0
+        // (reagent P1 on PR #2489; matches AttachedTaskState.since's
+        // "when this episode began" contract).
+        const startMs = earliestLiveAttachedStartMs(nodes, subs, model.blockId, now);
+        const current = agentAtoms().attachedTaskAtom[0]() != null;
+        if ((startMs != null) !== current) {
+            dispatchPaneIfRegistered(
+                model.blockId,
+                startMs != null ? { type: "AttachedTaskObserved", at: startMs } : { type: "AttachedTaskCleared" },
+                "system",
+            );
+        }
+        const at = nextToolPromotionAt(nodes, now);
+        if (at == null) return;
+        const timer = setTimeout(() => setAttachedCheckNonce((n) => n + 1), Math.max(0, at - now) + 50);
         onCleanup(() => clearTimeout(timer));
     });
 
@@ -1737,6 +1781,7 @@ const AgentPresentationView = ({
                             currentTool={agentAtoms().currentToolAtom[0]()}
                             currentToolArg={agentAtoms().currentToolArgAtom[0]()}
                             toolPromoted={hasPromotedTool()}
+                            attachedSince={agentAtoms().attachedTaskAtom[0]()?.since ?? null}
                             sessionStats={agentAtoms().sessionStatsAtom[0]()}
                             turnTokens={agentAtoms().turnTokensAtom[0]()}
                             launchPhase={status.launchPhase()}

@@ -389,6 +389,36 @@
                 opacity: 0.7;
             }
         }
+
+        // Attached-task state — the turn is idle but ≥1 agent-declared
+        // long-running activity (dev server, background shell, subagent)
+        // is still alive. Calmer than --loading (secondary text, slow
+        // pulse) so it reads as "healthy, running" rather than "busy" —
+        // SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md §6.2.
+        &--attached {
+            color: var(--secondary-text-color);
+            background: var(--elevated-bg-color);
+
+            .agent-working-row-left {
+                flex: 1;
+                min-width: 0;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                opacity: 0.75;
+            }
+
+            .agent-working-row-right {
+                flex-shrink: 0;
+                margin-left: var(--space-2);
+                opacity: 0.55;
+            }
+
+            .agent-spinner-dot {
+                // Same pulse, half tempo — alive, not working.
+                animation-duration: 2.4s;
+            }
+        }
     }
 
 
