@@ -165,7 +165,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 limit: loadLimit,
             }, { timeout: 15000 });
 
-            const { nodes: newNodes } = parseHistoryLines(resp.lines ?? [], opts.outputFormat(), opts.agentName?.());
+            const { nodes: newNodes } = parseHistoryLines(resp.lines ?? [], opts.outputFormat(), opts.agentName?.(), resp.stamps);
             if (newNodes.length > 0) {
                 // batch() ensures HistoryLoaded's documentAtom write is not a
                 // standalone runUpdates frame that could interleave with a
@@ -340,7 +340,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                             limit: hwm - windowStart,
                         }, { timeout: 30_000 });
                         if (!mounted) return;
-                        const { nodes, lastSessionStats } = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat(), opts.agentName?.());
+                        const { nodes, lastSessionStats } = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat(), opts.agentName?.(), rangeResp.stamps);
                         batch(() => opts.model.dispatchDoc({ type: "HistoryRestored", fromSnapshot: true, nodes }));
                         // Hydrate the composer strip's context-fill bar from the
                         // resumed conversation's last known usage instead of
@@ -484,7 +484,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 }, { timeout: 15000 });
                 if (!mounted) return;
 
-                const { nodes, lastSessionStats } = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat(), opts.agentName?.());
+                const { nodes, lastSessionStats } = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat(), opts.agentName?.(), rangeResp.stamps);
                 if (nodes.length > 0) {
                     batch(() => opts.model.dispatchDoc({ type: "HistoryLoaded", nodes }));
                 }
