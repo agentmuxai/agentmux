@@ -12,10 +12,15 @@
  * agent's turn forever: any question the user hasn't touched by zero is
  * filled in with its recommended option and the (possibly-merged) answer is
  * submitted automatically. See §2.3 for why this merges rather than
- * disarming on first interaction.
+ * disarming on first interaction. Hovering the panel hides the countdown and
+ * pauses the underlying deadline for a flat 15s from that hover, then
+ * unconditionally resumes at a fresh 30s regardless of whether the mouse is
+ * still there — a bounded, self-resuming pause, not the permanent disarm
+ * §2.3/§5.1 rejected. See the hover-pause spec above.
  *
  * Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md,
- * docs/specs/SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md.
+ * docs/specs/SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md,
+ * docs/specs/SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md.
  */
 
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, type Accessor, type JSX } from "solid-js";
@@ -29,6 +34,14 @@ import "./AgentQuestionPanel.scss";
  *  SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md §5.2 — not user-
  *  configurable in v1. */
 const AUTO_TIMEOUT_MS = 30_000;
+
+/** How long the countdown stays hidden after a hover into the panel, before
+ *  an unanswered question-set's timer resumes (fresh AUTO_TIMEOUT_MS, not
+ *  resumed from wherever it was paused) — a flat window timed from the
+ *  triggering `mouseenter`, unconditional regardless of whether the mouse is
+ *  still over the panel when it elapses. See
+ *  SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md §3. */
+const HOVER_HIDE_GRACE_MS = 15_000;
 
 /** Matches a Claude Code AskUserQuestion "(Recommended)" label suffix,
  *  case-insensitively, with optional trailing whitespace. */
@@ -104,17 +117,73 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
     /** Milliseconds left before the auto-timeout fires. See the timer effect
      *  below (defined after `submit`, once all its dependencies exist). */
     const [remainingMs, setRemainingMs] = createSignal(AUTO_TIMEOUT_MS);
+    /** True while the countdown is suppressed by a recent hover. Drives both
+     *  the UI (rendered nothing while true, §3.4 of the hover-pause spec)
+     *  and whether the timer effect below is armed. Bounded, NOT tied to
+     *  "is the mouse currently over the panel" — see the doc comment on
+     *  `onPanelPointerEnter` below for why. */
+    const [hidden, setHidden] = createSignal(false);
+    let hideTimeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    const clearHideTimer = () => {
+        if (hideTimeoutId !== undefined) {
+            clearTimeout(hideTimeoutId);
+            hideTimeoutId = undefined;
+        }
+    };
+    // The hide timer is a raw setTimeout, not owned by a reactive effect (it
+    // must survive across hidden()/tool_use_id changes within its own
+    // window) — so it needs its own top-level cleanup on unmount, same as
+    // every interval elsewhere in this file gets via its owning effect.
+    onCleanup(clearHideTimer);
 
     // Reset working state whenever the head question changes (new tool_use_id,
     // queue advance). Keyed on tool_use_id so we never inherit a prior
-    // question's selections.
+    // question's selections. Also resets hover/hidden state so a fresh
+    // question-set never inherits a stale hover history from the previous
+    // one (SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md §3.3).
     createEffect(() => {
         const r = request();
         void r?.tool_use_id; // touch so the effect re-runs on change
         setMinimized(false);
         setState((r?.questions ?? []).map(() => ({ selected: [], other: "" })));
         setRemainingMs(AUTO_TIMEOUT_MS);
+        clearHideTimer();
+        setHidden(false);
     });
+
+    // Mouse enters the expanded panel. See
+    // SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md §3.1 for why
+    // this is scoped to the whole panel (not just the "Other" input) and
+    // excludes the minimized chip entirely — wired only on the expanded
+    // panel's root div below.
+    //
+    // Hides for a flat HOVER_HIDE_GRACE_MS from THIS entry, then
+    // unconditionally resumes — deliberately NOT "stays hidden for as long
+    // as the mouse remains over the panel." An earlier version of this
+    // feature did that and a test caught the resulting regression:
+    // `userEvent.click()` on any option inside the panel fires a real
+    // `mouseenter` on the way to the click (the pointer has to be over the
+    // target to click it — true in a real browser too, not just this test
+    // harness), so answering by mouse and then stepping away with the
+    // cursor left parked over the panel would have paused the timer
+    // indefinitely, since nothing ever fires `mouseleave`. That's the exact
+    // "work does not stop" failure §5.1 of the original timeout spec
+    // rejected, reintroduced through hover instead of a permanent disarm on
+    // click. Bounding every hide to a flat window, timed from entry and
+    // independent of whether the mouse is still there, closes that gap: the
+    // worst case is "paused for at most HOVER_HIDE_GRACE_MS," never
+    // indefinite. A fresh `mouseenter` (the mouse actually leaving and
+    // coming back) re-arms a new window — that's the "recursively" behavior
+    // the feature asks for.
+    const onPanelPointerEnter = () => {
+        clearHideTimer();
+        setHidden(true);
+        hideTimeoutId = setTimeout(() => {
+            hideTimeoutId = undefined;
+            setHidden(false); // timer effect below re-arms at a fresh AUTO_TIMEOUT_MS
+        }, HOVER_HIDE_GRACE_MS);
+    };
 
     const setQ = (i: number, next: Partial<QState>) => {
         setState((prev) => prev.map((q, idx) => (idx === i ? { ...q, ...next } : q)));
@@ -226,15 +295,28 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
         return count;
     };
 
-    // 30s auto-timeout: fires unconditionally at zero, regardless of any
-    // interaction so far. Deliberately NOT disarmed on the first click/
-    // keystroke — an earlier design did that, and it was rejected because it
-    // directly undercuts the feature's own goal ("work does not stop"): a
-    // user who answers one question in a multi-question set and then steps
-    // away would otherwise cancel the safety net entirely, leaving the rest
-    // blocked forever. Instead, `applyRecommendedDefaults` merges — anything
-    // the user already answered survives untouched. See
+    // 30s auto-timeout: fires unconditionally at zero once armed, regardless
+    // of any *past* interaction. Deliberately NOT disarmed permanently on the
+    // first click/keystroke — an earlier design did that, and it was
+    // rejected because it directly undercuts the feature's own goal ("work
+    // does not stop"): a user who answers one question in a multi-question
+    // set and then steps away would otherwise cancel the safety net
+    // entirely, leaving the rest blocked forever. Instead,
+    // `applyRecommendedDefaults` merges — anything the user already answered
+    // survives untouched. See
     // docs/specs/SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md §5.1.
+    //
+    // Gated on `hidden()` (SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md
+    // §3.3): this is a *live, strictly bounded* pause, not a permanent
+    // disarm — a hover starts a flat HOVER_HIDE_GRACE_MS window, and once it
+    // elapses this effect re-runs and re-arms at a fresh AUTO_TIMEOUT_MS
+    // UNCONDITIONALLY, regardless of whether the mouse is still over the
+    // panel (see onPanelPointerEnter's doc comment and spec §9 for why —
+    // an earlier, rejected version of this stayed hidden for as long as the
+    // mouse remained over the panel, which reopened §5.1's exact failure
+    // mode via a click's own mouseenter). That distinction is why this
+    // doesn't reopen §5.1's rejected design: the countdown can never be
+    // suppressed for longer than one HOVER_HIDE_GRACE_MS window per hover.
     //
     // A separate effect (rather than folding into the reset effect above)
     // because it depends on `submit`/`applyRecommendedDefaults`, which in
@@ -243,8 +325,9 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
     createEffect(() => {
         const r = request();
         void r?.tool_use_id; // touch so the effect re-runs on change, same as the reset effect
-        if (!r) return;
+        if (!r || hidden()) return; // paused while hidden; re-arms when hidden() flips false
 
+        setRemainingMs(AUTO_TIMEOUT_MS); // fresh retrigger, not resumed from wherever it was paused
         const intervalId = setInterval(() => {
             setRemainingMs((prev) => {
                 if (prev <= 1000) {
@@ -259,6 +342,13 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
     });
 
     const defer = () => {
+        // Hover-pause is a full-panel-only affordance (the minimized chip
+        // has no typing surface) — force an immediate resume so minimizing
+        // always returns the timer to its original, hover-independent
+        // behavior, preserving "keeps running while minimized" unchanged.
+        // SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md §3.1, §3.3.
+        clearHideTimer();
+        setHidden(false);
         setMinimized(true);
         props.onDefer?.();
     };
@@ -361,6 +451,7 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
                         role="group"
                         aria-label="Agent question"
                         tabindex={-1}
+                        onMouseEnter={onPanelPointerEnter}
                     >
                         <div class="agent-question-panel-header">
                             <span class="agent-question-panel-icon" aria-hidden="true">❓</span>
@@ -368,15 +459,19 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
                             <Show when={queueDepth() > 1}>
                                 <span class="agent-question-panel-queue">+{queueDepth() - 1} more</span>
                             </Show>
-                            <span
-                                class="agent-question-panel-countdown"
-                                classList={{
-                                    "agent-question-panel-countdown--warning": countdownSeverity() === "warning",
-                                    "agent-question-panel-countdown--critical": countdownSeverity() === "critical",
-                                }}
-                            >
-                                Auto-selects recommended in {countdownSeconds()}s
-                            </span>
+                            {/* Rendered nothing (not just visually hidden) while hidden() —
+                                SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md §3.4. */}
+                            <Show when={!hidden()}>
+                                <span
+                                    class="agent-question-panel-countdown"
+                                    classList={{
+                                        "agent-question-panel-countdown--warning": countdownSeverity() === "warning",
+                                        "agent-question-panel-countdown--critical": countdownSeverity() === "critical",
+                                    }}
+                                >
+                                    Auto-selects recommended in {countdownSeconds()}s
+                                </span>
+                            </Show>
                         </div>
 
                         <For each={r.questions}>
