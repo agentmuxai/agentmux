@@ -21,6 +21,7 @@ import {
     AgentPaneCommand,
     AgentPaneEvent,
     AgentPaneState,
+    type AttachedTaskState,
     type CompactionState,
     type InitPhase,
     initialState,
@@ -96,6 +97,16 @@ export interface AgentPaneProjections {
      * docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md.
      */
     compacting?: (next: CompactionState | null) => void;
+    /**
+     * Live "≥1 agent-declared long-running activity attached" state, or
+     * null. Reducer-owned (see `AgentPaneState.attachedTask` /
+     * `AttachedTaskObserved` / `AttachedTaskCleared`). Drives the
+     * "Running…" footer status once `turnPhase` is otherwise idle — the
+     * fix for the Agent1 "stuck Working for 12h" retro
+     * (retro-persistent-agent-working-status-stuck-2026-07-16.md). See
+     * docs/specs/SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md.
+     */
+    attachedTask?: (next: AttachedTaskState | null) => void;
 }
 
 interface Slot {
@@ -270,6 +281,7 @@ export function dispatch(
     proj("currentToolArg", prev.currentToolArg, slot.state.currentToolArg, slot.proj.currentToolArg);
     proj("failure", prev.failure, slot.state.failure, slot.proj.failure);
     proj("compacting", prev.compacting, slot.state.compacting, slot.proj.compacting);
+    proj("attachedTask", prev.attachedTask, slot.state.attachedTask, slot.proj.attachedTask);
 
     if (cascadeSetter != null) {
         console.warn(
