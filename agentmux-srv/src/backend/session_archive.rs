@@ -41,6 +41,12 @@ pub const META_SESSION_ARCHIVE_PATH: &str = "session:archive_path";
 
 /// FileStore filename for session output.
 const OUTPUT_FILENAME: &str = "output";
+/// Receive-time sidecar (see `agent_session::TSIDX_FILE`) — archived,
+/// deleted, and restored in lockstep with `output` (codex P2 on PR #2508):
+/// leaving it behind would mis-time a fresh session's lines (new output
+/// restarts at offset 0 under stale entries), and dropping it from the
+/// archive loses the timestamps the sidecar exists to preserve.
+const TSIDX_FILENAME: &str = crate::backend::agent_session::session_io::TSIDX_FILE;
 
 // ---------------------------------------------------------------------------
 // Shared helpers — used by both the RPC handlers and the sweep
@@ -146,6 +152,25 @@ pub fn archive_session_output(
             "session_archive: failed to delete filestore entry after archiving (meta already updated)"
         );
     }
+    // Sidecar follows output: archive its bytes next to the .jsonl.gz
+    // (best-effort — auxiliary timing data), then delete so a restarted
+    // session can't inherit stale offset stamps.
+    if let Ok(Some(ts_bytes)) = filestore.read_file(block_id, TSIDX_FILENAME) {
+        if !ts_bytes.is_empty() {
+            let ts_path = archive_dir.join(format!("{}.tsidx.gz", block_id));
+            if let Err(e) = write_gz(&ts_bytes, &ts_path) {
+                tracing::warn!(block_id = %block_id, error = %e, "session_archive: tsidx archive write failed (output archive unaffected)");
+            }
+        }
+    }
+    match filestore.stat(block_id, TSIDX_FILENAME) {
+        Ok(Some(_)) => {
+            if let Err(e) = filestore.delete_file(block_id, TSIDX_FILENAME) {
+                tracing::warn!(block_id = %block_id, error = %e, "session_archive: failed to delete tsidx sidecar after archiving");
+            }
+        }
+        _ => {}
+    }
 
     tracing::info!(
         block_id = %block_id,
@@ -195,6 +220,32 @@ pub fn restore_session_output(
     filestore
         .append_data(block_id, OUTPUT_FILENAME, &raw_bytes)
         .map_err(|e| format!("append_data: {e}"))?;
+
+    // Restore the tsidx sidecar when its archive exists (best-effort —
+    // pre-sidecar archives simply have none, and restored history without
+    // stamps degrades to the carry-forward day rule, not an error).
+    let ts_path = archive_path
+        .parent()
+        .map(|d| d.join(format!("{}.tsidx.gz", block_id)))
+        .filter(|p| p.exists());
+    let _ = filestore.delete_file(block_id, TSIDX_FILENAME); // ignore "not found"
+    if let Some(ts_path) = ts_path {
+        match read_gz(&ts_path) {
+            Ok(ts_bytes) if !ts_bytes.is_empty() => {
+                let created = filestore
+                    .make_file(block_id, TSIDX_FILENAME, FileMeta::default(), FileOpts::default());
+                if created.is_ok() {
+                    if let Err(e) = filestore.append_data(block_id, TSIDX_FILENAME, &ts_bytes) {
+                        tracing::warn!(block_id = %block_id, error = %e, "session_archive: tsidx restore append failed");
+                    }
+                }
+            }
+            Ok(_) => {}
+            Err(e) => {
+                tracing::warn!(block_id = %block_id, error = %e, "session_archive: tsidx restore read failed");
+            }
+        }
+    }
 
     // Clear archive meta keys (keep the .gz as backup — don't delete it)
     let mut meta = MetaMapType::new();

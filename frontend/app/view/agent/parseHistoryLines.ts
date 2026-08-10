@@ -202,11 +202,16 @@ export function parseHistoryLines(
             // user-invisible process recycles and its persisted line lands
             // AFTER the first post-resume exchange — as a divider row it
             // announces a non-event in the wrong place. The line stays in
-            // the stream; only the node materialization is skipped, unless
-            // the caller is the Agent History view (`includeResumedOutcomes`),
-            // where restart landmarks are useful. The flushPending() above
-            // still runs — the accumulator split at this line predates this
-            // change and keeps replay/live node ids aligned.
+            if (data && data.outcome === "fresh") {
+                // codex P2 on PR #2507: a usage-bearing `session_end` seen
+                // BEFORE this boundary belongs to the old session — the
+                // fresh model has none of those tokens in context. Without
+                // this reset, a restore window shaped [old result → fresh
+                // boundary → no new result yet] hydrates the context-fill
+                // bar (`ReconcileContextFromHistory`) with the dead
+                // session's count. Only post-boundary usage may seed it.
+                lastSessionStats = null;
+            }
             if (data && (data.outcome !== "resumed" || opts?.includeResumedOutcomes)) {
                 const parsedTs = typeof rawEvent.timestamp === "string" ? Date.parse(rawEvent.timestamp) : NaN;
                 const node: SessionOutcomeNode = {
