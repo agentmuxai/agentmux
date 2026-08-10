@@ -32,7 +32,7 @@ import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show }
 import { CopyButton } from "../element/copybutton";
 import { detectAgentColor, detectAgentFromEnv, detectAgentTextColor, getEffectiveTitle, isUsableFocusRingColor } from "./autotitle";
 import { buildPaneContextMenu } from "./pane-actions";
-import { hueToHeaderBg, hueToActiveBorder, PANE_HUE_OPTIONS, setHue } from "./pane-color-menu";
+import { hueToHeaderBg, hueToActiveBorder, hueToBorder, PANE_HUE_OPTIONS, setHue } from "./pane-color-menu";
 import { BlockFrameProps } from "./blocktypes";
 import { PaneSizeBadge } from "./pane-size-badge";
 import { TitleBar } from "./titlebar";
@@ -717,12 +717,23 @@ function BlockMask({ nodeModel }: { nodeModel: NodeModel }): JSX.Element {
             if (tabActiveBorderColor) {
                 style["border-color"] = tabActiveBorderColor;
             }
+            // frame:activebordercolor is a passive default (per-agent
+            // identity color, seeded once at launch — see
+            // SPEC_AGENT_COLOR_2026_08_08.md); frame:hue is an explicit
+            // user choice from the pane-header "Pane Color" picker
+            // (pane-color-menu.ts's setHue). The explicit choice must win
+            // whenever it's present, or picking a hue on an agent pane
+            // would have no visible effect (reagent P1, PR #2477) — hue
+            // is therefore checked LAST. Clearing the hue picker sets
+            // frame:hue to `null` (not delete), which correctly falls
+            // through here (typeof null !== "number") back to the
+            // agent's default color rather than to no color at all.
+            if (bd?.meta?.["frame:activebordercolor"]) {
+                style["border-color"] = bd.meta["frame:activebordercolor"];
+            }
             const hue = bd?.meta?.["frame:hue"];
             if (typeof hue === "number") {
                 style["border-color"] = hueToActiveBorder(hue);
-            }
-            if (bd?.meta?.["frame:activebordercolor"]) {
-                style["border-color"] = bd.meta["frame:activebordercolor"];
             }
         } else {
             const tabData = atoms.tabAtom();
@@ -732,6 +743,10 @@ function BlockMask({ nodeModel }: { nodeModel: NodeModel }): JSX.Element {
             }
             if (bd?.meta?.["frame:bordercolor"]) {
                 style["border-color"] = bd.meta["frame:bordercolor"];
+            }
+            const hue = bd?.meta?.["frame:hue"];
+            if (typeof hue === "number") {
+                style["border-color"] = hueToBorder(hue);
             }
         }
         return style;
