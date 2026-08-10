@@ -1,7 +1,7 @@
 # SPEC: Session-scoped pane scrollback + a full "Agent History" view
 
 **Date:** 2026-08-09
-**Status:** active — P1 (session-scope clamp §3.1-3.3 + `resumed`-divider demotion §3.5 + static preserved-note on the fresh divider) shipped in PR #2507; §4.4's `output.tsidx` capture + replay stamping implemented 2026-08-10 (this restores hover-peek times after reopen). Remaining: the Agent History view itself (§4.1-4.3, day separators, §3.4 link row) and P3.
+**Status:** active — P1 shipped in PR #2507 (session-scope clamp + `resumed`-divider demotion); §4.4's `output.tsidx` capture + replay stamping shipped in PR #2508; P2's Agent History view (§4.1-4.3 `bodyMode` swap, day separators, §3.4 link row, control-bar entry) implemented 2026-08-10. Remaining: P3 (§4.5 archives section, jump-to-date, link-row session count).
 **Severity:** Medium — UX/correctness follow-up, no data loss involved
 **Extends:** `SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md` (Part A shipped the
 honest *"New session started"* divider this spec builds on)

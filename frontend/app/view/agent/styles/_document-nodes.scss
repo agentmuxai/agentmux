@@ -1754,6 +1754,40 @@
 // warning-color treatment as .agent-compaction-started so a discontinuity
 // the user should actually notice reads as visually distinct from routine
 // continuity, not just another neutral marker in the transcript.
+// Calendar-day separator (Agent History view). Same centered-rule shape as
+// .agent-session-outcome but visually lighter — a date chip, no detail line.
+.agent-day-divider {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px var(--space-2);
+    user-select: none;
+    position: relative;
+
+    &::before,
+    &::after {
+        content: "";
+        position: absolute;
+        top: 50%;
+        width: 32%;
+        height: 1px;
+        background: var(--border-color, rgba(255, 255, 255, 0.08));
+    }
+
+    &::before { left: 0; }
+    &::after  { right: 0; }
+
+    .agent-day-divider-label {
+        font-size: 10.5px;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+        color: var(--tertiary-text-color, rgba(255, 255, 255, 0.35));
+        padding: 1px 9px;
+        border-radius: 9px;
+        background: var(--panel-bg-color, rgba(255, 255, 255, 0.04));
+    }
+}
+
 .agent-session-outcome {
     display: flex;
     flex-direction: column;

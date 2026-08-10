@@ -61,6 +61,14 @@ export function parseHistoryLines(
     outputFormat: string,
     agentName?: string,
     stamps?: number[],
+    opts?: {
+        /**
+         * Materialize `resumed` session outcomes as nodes. False (default)
+         * for the working view (§3.5 demotion); true for the Agent History
+         * view, where process-restart landmarks are useful context (§4.1).
+         */
+        includeResumedOutcomes?: boolean;
+    },
 ): ParsedHistory {
     const translator = createTranslator(outputFormat);
     // isReplay: true — thinking/tool_call events carry no wire timestamp of
@@ -194,12 +202,12 @@ export function parseHistoryLines(
             // user-invisible process recycles and its persisted line lands
             // AFTER the first post-resume exchange — as a divider row it
             // announces a non-event in the wrong place. The line stays in
-            // the stream (diagnostics + the P2 history view will render it
-            // subtly); only the node materialization is skipped. The
-            // flushPending() above still runs — the accumulator split at
-            // this line predates this change and keeps replay/live node
-            // ids aligned.
-            if (data && data.outcome !== "resumed") {
+            // the stream; only the node materialization is skipped, unless
+            // the caller is the Agent History view (`includeResumedOutcomes`),
+            // where restart landmarks are useful. The flushPending() above
+            // still runs — the accumulator split at this line predates this
+            // change and keeps replay/live node ids aligned.
+            if (data && (data.outcome !== "resumed" || opts?.includeResumedOutcomes)) {
                 const parsedTs = typeof rawEvent.timestamp === "string" ? Date.parse(rawEvent.timestamp) : NaN;
                 const node: SessionOutcomeNode = {
                     type: "session_outcome",

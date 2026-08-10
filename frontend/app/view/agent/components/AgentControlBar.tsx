@@ -23,9 +23,12 @@ interface AgentControlBarProps {
     blockId: string;
     blockAtom: () => Block | undefined;
     providerId: string;
+    /** Open the pane's Agent History view (spec §4.2 entry point) —
+     *  reachable even when the pane has no session boundary. */
+    onOpenHistory?: () => void;
 }
 
-export const AgentControlBar = ({ blockId, blockAtom, providerId }: AgentControlBarProps): JSX.Element => {
+export const AgentControlBar = ({ blockId, blockAtom, providerId, onOpenHistory }: AgentControlBarProps): JSX.Element => {
     const [archiveBusy, setArchiveBusy] = createSignal(false);
     const [exportBusy, setExportBusy] = createSignal(false);
     const [restoreBusy, setRestoreBusy] = createSignal(false);
@@ -94,8 +97,24 @@ export const AgentControlBar = ({ blockId, blockAtom, providerId }: AgentControl
         }
     };
 
-    // Only show for Claude provider (Phase 1)
-    if (providerId !== "claude") return null;
+    // Only show session-management controls for Claude (Phase 1) — but the
+    // Agent History entry is provider-agnostic (the transcript zone exists
+    // for every provider), so it renders before the gate.
+    if (providerId !== "claude") {
+        return (
+            <Show when={onOpenHistory}>
+                <div class="agent-session-row">
+                    <button
+                        class="agent-session-btn"
+                        title="Browse this agent's full recorded history, across sessions"
+                        onClick={() => onOpenHistory?.()}
+                    >
+                        View full history
+                    </button>
+                </div>
+            </Show>
+        ) as unknown as JSX.Element;
+    }
 
     // 4.1 Graceful degradation: warn when session grows unwieldy (500K lines).
     // Browser still handles this via content-visibility, but we surface the state
@@ -246,6 +265,15 @@ export const AgentControlBar = ({ blockId, blockAtom, providerId }: AgentControl
                         >
                             {exportBusy() ? "Exporting…" : "Export"}
                         </button>
+                        <Show when={onOpenHistory}>
+                            <button
+                                class="agent-session-btn"
+                                title="Browse this agent's full recorded history, across sessions"
+                                onClick={() => onOpenHistory?.()}
+                            >
+                                View full history
+                            </button>
+                        </Show>
                     </div>
                 </div>
             </Show>

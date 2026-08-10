@@ -71,3 +71,59 @@
     user-select: none;
     cursor: default;
 }
+
+// ── Agent History view (spec §4 — read-only full-stream reader) ──────────
+// Fills the pane body where the live transcript + composer normally sit.
+// `.agent-history-body` is the positioning parent for the reused
+// `.agent-document` (absolutely positioned to fill, same contract as
+// `.agent-document-scroll-region`).
+.agent-history-view {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.agent-history-header {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 6px 10px;
+    flex: 0 0 auto;
+    border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+
+    .agent-history-back {
+        background: none;
+        border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+        border-radius: 6px;
+        color: var(--secondary-text-color, rgba(255, 255, 255, 0.6));
+        font-size: 11.5px;
+        padding: 3px 9px;
+        cursor: pointer;
+
+        &:hover {
+            color: var(--main-text-color, #fff);
+            border-color: var(--accent-color, rgba(88, 148, 255, 0.6));
+        }
+    }
+
+    .agent-history-title {
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--secondary-text-color, rgba(255, 255, 255, 0.55));
+    }
+
+    .agent-history-meta {
+        font-size: 11px;
+        color: var(--tertiary-text-color, rgba(255, 255, 255, 0.32));
+        margin-left: auto;
+    }
+}
+
+.agent-history-body {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 0;
+}
