@@ -222,6 +222,48 @@ fn test_handler_unregister_block() {
     assert!(handler.get_agent("agent1").is_none());
 }
 
+/// Issue #2363 / codex P1 on PR #2500: the guarded unregister removes
+/// only its own spawn's registration — a newer spawn's (or replacement
+/// controller's) re-registration under a different nonce must survive a
+/// stale exit-handler's cleanup.
+#[test]
+fn test_handler_unregister_block_if_nonce_spares_a_newer_registration() {
+    let mut handler = Handler::new();
+    handler
+        .register_agent_with_nonce("agent1", "block1", None, 5)
+        .unwrap();
+    // A fallback respawn (or a resync_controller replacement) re-registers
+    // the same agent/block under its own nonce before the dying spawn's
+    // exit-handler reaches cleanup.
+    handler
+        .register_agent_with_nonce("agent1", "block1", None, 6)
+        .unwrap();
+
+    assert!(
+        !handler.unregister_block_if_nonce("block1", 5),
+        "the stale spawn's cleanup must not claim the newer registration"
+    );
+    assert!(
+        handler.get_agent("agent1").is_some(),
+        "the newer registration must survive"
+    );
+
+    assert!(handler.unregister_block_if_nonce("block1", 6), "the owner may remove it");
+    assert!(handler.get_agent("agent1").is_none());
+}
+
+/// A registration with no recorded nonce (HTTP/PTY register paths pass 0)
+/// is never removed by the guarded variant — stale-entry leakage is
+/// strictly safer than deleting a live registration.
+#[test]
+fn test_handler_unregister_block_if_nonce_never_matches_nonceless_registrations() {
+    let mut handler = Handler::new();
+    handler.register_agent("agent1", "block1", None).unwrap();
+
+    assert!(!handler.unregister_block_if_nonce("block1", 0));
+    assert!(handler.get_agent("agent1").is_some());
+}
+
 #[test]
 fn test_handler_list_agents() {
     let mut handler = Handler::new();

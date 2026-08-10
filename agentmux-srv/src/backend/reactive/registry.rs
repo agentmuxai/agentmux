@@ -48,7 +48,29 @@ pub struct AgentEntry {
     /// `docs/specs/SPEC_MUXBUS_CROSS_CHANNEL_DELIVERY_2026_07_02.md`.
     #[serde(default)]
     pub channel: String,
+    /// Process-wide unique nonce of the persistent-controller spawn this
+    /// entry was written for; 0 = not recorded (HTTP register handler,
+    /// PTY shell auto-register, pre-existing entries). Real nonces are
+    /// always ≥ 1, drawn from a single srv-wide counter — NOT the
+    /// controller-local spawn generation, which restarts for a
+    /// replacement controller and could collide across controller
+    /// instances (codex P1 on PR #2500). Lets an exit-handler's cleanup
+    /// compare-and-remove ([`remove_if_nonce`]) instead of deleting a
+    /// fallback respawn's fresh entry (issue #2363).
+    #[serde(default)]
+    pub registration_nonce: u64,
 }
+
+/// Serializes this process's own read-compare-remove sequences
+/// ([`remove_if_nonce`] / [`remove_shared_if_nonce`]) against
+/// its own writes. Both the racing writer (a fallback respawn's
+/// re-registration) and the racing remover (the dying spawn's
+/// exit-handler) live in this same agentmux-srv process — each per-agent
+/// registry file has exactly one writing instance — so a process-local
+/// mutex is sufficient to make the compare-and-remove atomic; no file
+/// locking needed. Plain removes/writes for other controller types don't
+/// need the guard but take it anyway for uniformity (it's uncontended).
+static REGISTRY_OP_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Process-wide auth key for the local AgentMux instance.
 ///
@@ -100,6 +122,19 @@ fn agent_path(data_dir: &Path, agent_id: &str) -> PathBuf {
 /// existing `authkey.dev` file). On Windows, default ACLs inherit
 /// user-only on user-owned directories.
 pub fn write(data_dir: &Path, agent_id: &str, local_url: &str, block_id: &str) {
+    write_with_nonce(data_dir, agent_id, local_url, block_id, 0);
+}
+
+/// [`write`], recording the registering persistent-controller spawn's
+/// registration nonce — see `AgentEntry::registration_nonce` / issue #2363.
+pub fn write_with_nonce(
+    data_dir: &Path,
+    agent_id: &str,
+    local_url: &str,
+    block_id: &str,
+    registration_nonce: u64,
+) {
+    let _guard = REGISTRY_OP_LOCK.lock().unwrap();
     let dir = agents_dir(data_dir);
     let _ = std::fs::create_dir_all(&dir);
     let entry = AgentEntry {
@@ -112,6 +147,7 @@ pub fn write(data_dir: &Path, agent_id: &str, local_url: &str, block_id: &str) {
         // Empty for entries in the per-channel registry — see the field's
         // doc comment on `AgentEntry`.
         channel: String::new(),
+        registration_nonce,
     };
     let path = agent_path(data_dir, agent_id);
     let Ok(json) = serde_json::to_string(&entry) else { return };
@@ -131,6 +167,31 @@ pub fn write(data_dir: &Path, agent_id: &str, local_url: &str, block_id: &str) {
 
 /// Remove an agent entry from the shared registry.
 pub fn remove(data_dir: &Path, agent_id: &str) {
+    let _guard = REGISTRY_OP_LOCK.lock().unwrap();
+    let _ = std::fs::remove_file(agent_path(data_dir, agent_id));
+}
+
+/// Remove an agent entry **only if** it was written by the spawn with
+/// `expected_nonce` — compare-and-remove for persistent-controller
+/// exit-handlers (issue #2363; nonce is process-wide unique, so the
+/// guard holds across controller replacement too — codex P1 on PR
+/// #2500). An entry with no recorded nonce
+/// (0) is never removed by this variant: leaving a stale file to the
+/// TTL sweep ([`cleanup_stale`]) is strictly safer than deleting a live
+/// registration. Atomic w.r.t. this process's own writes via
+/// [`REGISTRY_OP_LOCK`].
+pub fn remove_if_nonce(data_dir: &Path, agent_id: &str, expected_nonce: u64) {
+    let _guard = REGISTRY_OP_LOCK.lock().unwrap();
+    let matches = lookup(data_dir, agent_id)
+        .is_some_and(|e| expected_nonce != 0 && e.registration_nonce == expected_nonce);
+    if !matches {
+        tracing::info!(
+            agent_id = %agent_id,
+            expected_nonce = expected_nonce,
+            "registry: entry changed hands since this spawn registered — skipping remove"
+        );
+        return;
+    }
     let _ = std::fs::remove_file(agent_path(data_dir, agent_id));
 }
 
@@ -247,6 +308,20 @@ fn pid_alive(pid: u32) -> bool {
 /// concurrent writers for different channels of the same agent name
 /// cannot race or clobber each other.
 pub fn write_shared(shared_dir: &Path, agent_id: &str, local_url: &str, block_id: &str, channel: &str) {
+    write_shared_with_nonce(shared_dir, agent_id, local_url, block_id, channel, 0);
+}
+
+/// [`write_shared`], recording the registering persistent-controller
+/// spawn's registration nonce — see `AgentEntry::registration_nonce` / issue #2363.
+pub fn write_shared_with_nonce(
+    shared_dir: &Path,
+    agent_id: &str,
+    local_url: &str,
+    block_id: &str,
+    channel: &str,
+    registration_nonce: u64,
+) {
+    let _guard = REGISTRY_OP_LOCK.lock().unwrap();
     let dir = shared_agent_dir(shared_dir, agent_id);
     let _ = std::fs::create_dir_all(&dir);
     let path = shared_channel_path(shared_dir, agent_id, channel);
@@ -258,6 +333,7 @@ pub fn write_shared(shared_dir: &Path, agent_id: &str, local_url: &str, block_id
         updated_at: now_unix_millis(),
         auth_key: local_auth_key().to_string(),
         channel: channel.to_string(),
+        registration_nonce,
     };
     write_entry_file(&path, &entry);
 }
@@ -267,7 +343,38 @@ pub fn write_shared(shared_dir: &Path, agent_id: &str, local_url: &str, block_id
 /// concurrent writer recreating it a moment later is harmless — the next
 /// write just re-creates the directory via `create_dir_all`).
 pub fn remove_shared(shared_dir: &Path, agent_id: &str, channel: &str) {
+    let _guard = REGISTRY_OP_LOCK.lock().unwrap();
     let path = shared_channel_path(shared_dir, agent_id, channel);
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_dir(shared_agent_dir(shared_dir, agent_id));
+}
+
+/// [`remove_shared`] **only if** this channel's entry was written by the
+/// spawn with `expected_nonce` — see [`remove_if_nonce`]
+/// (issue #2363). Cross-channel note: only this channel's own file is
+/// read and removed, matching [`write_shared`]'s single-writer contract,
+/// so the process-local [`REGISTRY_OP_LOCK`] still suffices.
+pub fn remove_shared_if_nonce(
+    shared_dir: &Path,
+    agent_id: &str,
+    channel: &str,
+    expected_nonce: u64,
+) {
+    let _guard = REGISTRY_OP_LOCK.lock().unwrap();
+    let path = shared_channel_path(shared_dir, agent_id, channel);
+    let matches = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|content| serde_json::from_str::<AgentEntry>(&content).ok())
+        .is_some_and(|e| expected_nonce != 0 && e.registration_nonce == expected_nonce);
+    if !matches {
+        tracing::info!(
+            agent_id = %agent_id,
+            channel = %channel,
+            expected_nonce = expected_nonce,
+            "registry: shared entry changed hands since this spawn registered — skipping remove"
+        );
+        return;
+    }
     let _ = std::fs::remove_file(&path);
     let _ = std::fs::remove_dir(shared_agent_dir(shared_dir, agent_id));
 }
@@ -291,6 +398,29 @@ pub fn remove_shared_from_env(agent_id: &str) {
     if let Some(shared_dir) = crate::registry::resolve_shared_reactive_dir() {
         let channel = std::env::var("AGENTMUX_CHANNEL").unwrap_or_else(|_| "stable".to_string());
         remove_shared(&shared_dir, agent_id, &channel);
+    }
+}
+
+/// Convenience wrapper over [`write_shared_with_nonce`] — see
+/// [`write_shared_from_env`].
+pub fn write_shared_from_env_with_nonce(
+    agent_id: &str,
+    local_url: &str,
+    block_id: &str,
+    registration_nonce: u64,
+) {
+    if let Some(shared_dir) = crate::registry::resolve_shared_reactive_dir() {
+        let channel = std::env::var("AGENTMUX_CHANNEL").unwrap_or_else(|_| "stable".to_string());
+        write_shared_with_nonce(&shared_dir, agent_id, local_url, block_id, &channel, registration_nonce);
+    }
+}
+
+/// Convenience wrapper over [`remove_shared_if_nonce`] — see
+/// [`write_shared_from_env`].
+pub fn remove_shared_from_env_if_nonce(agent_id: &str, expected_nonce: u64) {
+    if let Some(shared_dir) = crate::registry::resolve_shared_reactive_dir() {
+        let channel = std::env::var("AGENTMUX_CHANNEL").unwrap_or_else(|_| "stable".to_string());
+        remove_shared_if_nonce(&shared_dir, agent_id, &channel, expected_nonce);
     }
 }
 
