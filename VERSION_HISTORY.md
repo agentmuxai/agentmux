@@ -1,5 +1,14 @@
 # AgentMux Version History
 
+## 0.55.2 — 2026-08-10
+
+- feat(agent): add Codex JSONL and resume support
+- feat(agent-pane): Undo for Esc-cleared composer drafts — right-click menu + Ctrl/Cmd+Z
+- fix(persistent): compare-and-clear cleanup, seq-keyed queue identity, generation-gated sid adoption (#2363/#2365/#2366)
+- fix(persistent): retry batch flushes under a drain claim — queue is the ordering authority (#2367)
+- feat(agent-pane): backgrounded Bash tasks get a live dock row until their task-notification lands
+
+
 ## 0.55.1 — 2026-08-09
 
 - feat(agent): assign every agent a display color, backfill existing agents
