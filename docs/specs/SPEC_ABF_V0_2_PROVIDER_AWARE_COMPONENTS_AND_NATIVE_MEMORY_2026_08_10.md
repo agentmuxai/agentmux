@@ -1,7 +1,11 @@
 # Spec: ABF v0.2 — Provider-Aware Components + Native Memory
 
 **Date:** 2026-08-10
-**Status:** proposal — no implementation yet.
+**Status:** proposal — no implementation yet. Revised after Codex review on
+PR #2517 found four real implementability gaps in the first draft (all
+credited inline below, matching this repo's own `Codex P1, PR #NNNN`
+citation convention) — not disputed, all four were correct and are folded
+into the design as shipped in this revision.
 **Relationship to prior work:** builds on
 `docs/specs/REPORT_ARMORY_BUNDLE_STANDARD_RESEARCH_2026_07_16.md` (the
 original ABF proposal, §5) and
@@ -179,25 +183,71 @@ either needs to diverge per harness, and widening scope to components that
 don't need it repeats the mistake this spec is fixing (inventing structure
 ahead of a real need). Revisit if that changes.
 
-**Import-time merge:** `default` entries load for every agent regardless of
-provider; a matching provider-keyed entry appends after `default` (same
-precedence idiom already used for structured-field-wins-then-free-form-
-extends, e.g. `agent_open.rs`'s auth-env-then-free-form-`env`-blob
-ordering). A bundle with no provider-specific entries behaves exactly as
-v0.1 bundles do today.
+**Revision note (Codex P1, PR #2517, ×2 findings):** the original draft of
+this section put the default+provider merge at *import* time, keyed off
+`db_bundles.provider`. Both premises were wrong, for the same underlying
+reason: **a bundle is reusable across agents on different providers, and
+has no provider of its own** — confirmed by reading
+`frontend/app/view/memory/memory-model.ts:100-112`'s `draftToWire()`,
+which *deliberately* writes `provider: ""`/`model: ""` on every save,
+citing its own doc comment: "provider/model are deprecated on presets
+(provider-agnostic, §4.1a). Write empty so the ON CONFLICT update clears
+any stale legacy value." This isn't an unused column waiting to be
+repurposed (what the original draft assumed) — it's actively, deliberately
+scrubbed empty by the shipped UI on every single save, matching this
+repo's own documented architecture principle
+(`CLAUDE.md`: "a bundle... is the agent's provider-agnostic config
+collection... NOT provider/model; those belong to the agent"). Building
+§2.2 on top of a column the codebase is actively erasing was a real design
+error, not a minor gap. Corrected design follows.
 
-**Export-time behavior:** unchanged by default — `export_bundle()` keeps
-writing everything under `default` unless the source `db_bundles.provider`
-column (exists today, unused — §1.2) is non-empty, in which case exported
-instruction content lands under that provider's key instead of (not
-in addition to) `default`. No new UI decision needed for v0.2: this makes
-the already-existing-but-ignored column meaningful for the first time,
-rather than adding a new one.
+**Storage:** add a new `db_bundles` column, `instructions_by_provider`
+(JSON `{provider_id: content}`, same encoding pattern already used for
+`context_files`/`mcp_servers` on this exact table). This is deliberately
+**not** the deprecated `provider`/`model` columns — those stay exactly as
+deprecated as they are today, untouched by this spec. The existing flat
+`instructions` column keeps meaning "default," unchanged.
 
-**Backward compatibility:** an importer encountering the v0.1 flat-array
-shape (`"instructions": ["instructions/AGENTS.md"]`) treats the whole
-array as an implicit `default` entry. No v0.1-produced bundle breaks on
-a v0.2 importer.
+**Authoring:** the Armory bundle editor (`memory-model.ts` /
+`MemoryDraft`) needs a real, new UI affordance to add a labeled
+per-provider instruction variant — a list of `{provider, content}` pairs
+alongside the existing single instructions textarea, serialized into
+`instructions_by_provider` on save. No implementation detail beyond "this
+needs to exist" is specified here; it's an Armory UI change with its own
+design pass, out of this spec's scope to lay out in full, but calling out
+explicitly since the original draft incorrectly claimed no UI change was
+needed at all.
+
+**Export:** `export_bundle()` writes the flat `instructions` to
+`instructions/AGENTS.md` (default, unchanged from v0.1) and one
+`instructions/<provider>/AGENTS.md` file per populated key in
+`instructions_by_provider`, listed under that provider's key in the
+manifest.
+
+**Import:** `parse_bundle_import` stores each variant verbatim into
+`instructions_by_provider` — **no merge decision at import time at all.**
+This directly resolves the reused-bundle problem: the bundle keeps every
+variant it shipped with, undecided, because import time is exactly the
+moment it's least knowable which agent(s) will eventually launch against
+it.
+
+**Merge, moved to launch time:** `agent_config.rs::build_config_files()`
+gains a new `provider: &str` parameter (the launching agent's own already-
+resolved provider — trivially available at every call site, since the
+agent's provider is what determines the launch args in the first place).
+When assembling `CLAUDE.md` content, it appends
+`bundle.instructions_by_provider.get(provider)` (if present) after the
+existing `default`/flat `instructions` content, using the same
+precedence idiom already used elsewhere for structured-then-free-form
+composition (e.g. `agent_open.rs`'s auth-env-then-free-form-`env`-blob
+ordering). This is genuinely correct where the import-time version wasn't:
+the same bundle, attached to a Claude agent and a Codex agent, now
+correctly gets each agent's own matching variant at the moment each is
+actually launched — not a single frozen decision baked in at import.
+
+**Backward compatibility:** a v0.1 bundle (or a v0.2 bundle with no
+`instructions_by_provider` entries) behaves exactly as today — `provider`
+parameter present but nothing to look up, no behavior change.
 
 ### 2.3 Native memory as a new component
 
@@ -231,13 +281,39 @@ wrong content on a bundle's next export once it's reattached elsewhere,
 with no signal to the user that happened. (a) makes the scoping decision
 visible in the RPC call itself.
 
-**Import behavior:** memory files import into `db_agent_native_memory`
-directly, keyed by the *importing* agent's own freshly-created (or
-target) `agent_id` — never the exporting agent's ID, which has no meaning
-in the importing instance. Mirrors `persist_define_content`'s existing
-pattern: commit the agent definition row first, then write content,
-logging-but-not-failing on a content-write error so a partial memory
-import never blocks agent creation.
+**Revision note (Codex P1 ×2, PR #2517):** the original draft assumed an
+"importing agent" exists during `bundle.import`/`bundle.import.commit` and
+that inserting into `db_agent_native_memory` alone was sufficient. Both
+were wrong. `bundle_import_commit_impl` creates only a `db_bundles` row —
+its request carries no `agent_id`, so there is no valid FK target for a
+memory row in the generic import flow at all. Separately,
+`SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07.md` §2.2 (cited earlier in
+this same spec, missed on the first pass) is explicit that the durable
+table is a **fallback mirror consulted only by the Stash UI's own RPCs**
+— the harness process itself reads the live filesystem directly and never
+consults this table. Writing only to `db_agent_native_memory` on import
+would make imported memory visible in Stash while remaining completely
+invisible to the agent that's supposed to have it, until something else
+happened to rewrite the live files. Corrected design follows.
+
+**Import requires its own agent-scoped entry point.** Mirroring §2.3's
+export-side `bundle.export_for_agent`, add `bundle.import_for_agent
+(files_or_zip, agent_id)` — the *only* path that processes a
+`components.memory` key. The generic, agent-less `bundle.import` continues
+to create only the reusable `db_bundles`/skills/MCP rows as it does today;
+if its manifest contains a `memory` component, it's skipped with an
+explicit warning in the response ("memory requires an agent-scoped
+import"), never silently dropped.
+
+**Import must write through to the live filesystem, not just the mirror.**
+`bundle.import_for_agent` writes each memory file through the *same* path
+`native_memory_handlers.rs`'s existing `write_file` RPC handler already
+uses: resolve `memory_dir_for_cwd(...)` for the target agent, write the
+file to that live path, **then** upsert into `db_agent_native_memory` —
+reusing that handler's existing dual-write logic directly (line ~647-689)
+rather than reimplementing it, so imported memory gets durability and
+location-consistency for free, and — critically — is actually on disk
+where the harness will read it, not only in the mirror table.
 
 ### 2.4 Manifest version
 
@@ -253,10 +329,15 @@ credential-provider) and v0.2 (keyed instructions object,
 
 ## 3. Non-goals
 
-- **Fixing `agent_config.rs`'s CLAUDE.md-always runtime behavior** (§1.2).
-  Real, independently-fixable gap; unrelated to the export/import format
-  itself and belongs in its own PR with its own test plan, not bundled into
-  a schema change.
+- **Switching `agent_config.rs`'s output filename per provider** (the
+  CLAUDE.md-always part of §1.2's finding — writing `AGENTS.md`/`GEMINI.md`
+  instead of `CLAUDE.md` for a non-Claude agent). Real, independently-
+  fixable gap, but unrelated to bundle content selection and belongs in
+  its own PR with its own test plan. Note this is narrower than the
+  original draft's non-goal: `build_config_files()` gaining a `provider`
+  parameter at all is now **in scope** (§2.2 depends on it to select the
+  right `instructions_by_provider` entry) — only the output filename stays
+  hardcoded to `CLAUDE.md` for now, unchanged from today.
 - **Any change to credential/account handling.** `SecretRef`-style
   declare-don't-bundle stays exactly as designed; §2.1's rename is
   cosmetic (field name only), not a design change.
@@ -272,28 +353,40 @@ credential-provider) and v0.2 (keyed instructions object,
 
 ## 4. Rollout
 
-- No backfill needed for `components.instructions`'s shape change — every
-  currently-stored `db_bundles` row exports fresh at request time; there's
-  no persisted `armory.json` state to migrate, only the exporter/importer
-  code.
-- `db_bundles.provider`/`.model` columns already exist and are already
-  populated for every bundle (confirmed unused-but-present, §1.2) — §2.2's
-  export-time behavior activates immediately for any bundle that already
-  has a non-empty `provider`, no new data entry required from users.
+- **Migration required** (revised from the original "no backfill needed"
+  claim, which only held under the incorrect import-time-merge design):
+  add the `instructions_by_provider` JSON column to `db_bundles`
+  (`NOT NULL DEFAULT '{}'`, matching the empty-object-sentinel convention
+  `context_files`/`mcp_servers` already use on this table). Every existing
+  row gets the default empty object — behaviorally identical to today
+  until an author actually adds a variant through the new UI affordance
+  (§2.2).
+- `db_bundles.provider`/`.model` stay exactly as deprecated as they are
+  today (`memory-model.ts::draftToWire` continues zeroing them on every
+  save) — this spec does not touch, read, or resurrect either column.
 - `db_agent_native_memory` already exists and is already populated
   organically per `SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07.md`'s
-  write-through-on-read design — §2.3 has data to export from day one for
-  any agent whose Stash Memory tab has been opened at least once.
+  write-through-on-read design, so `bundle.export_for_agent` (§2.3) has
+  data to export from day one for any agent whose Stash Memory tab has
+  been opened at least once — this part of the original rollout claim
+  still holds; only the instructions-column claim needed correcting.
 
 ## 5. Test plan
 
 - Unit: `parse_bundle_import` accepts both the v0.1 flat-array
   `instructions` shape and the v0.2 keyed-object shape; a v0.1 array
-  imports identically to an equivalent v0.2 `{"default": [...]}` object.
-- Unit: export with `db_bundles.provider` set routes instructions under
-  that provider's key, not `default`; export with an empty `provider`
-  behaves exactly as today (regression check against existing v0.1 export
-  tests).
+  imports identically to an equivalent v0.2 `{"default": [...]}` object,
+  with `instructions_by_provider` left at its default empty object in
+  both cases (no merge decision made at import time — §2.2).
+- Unit: `export_bundle()` emits one `instructions/<provider>/AGENTS.md`
+  file per populated `instructions_by_provider` key, alongside the
+  existing default `instructions/AGENTS.md`; a bundle with no variants
+  exports identically to a v0.1 bundle (regression check against existing
+  v0.1 export tests).
+- Unit: `build_config_files(..., provider)` — with a populated
+  `instructions_by_provider`, the matching provider's content is appended
+  after the default content; an unmatched or absent provider produces
+  output identical to the pre-§2.2 function signature (regression check).
 - Unit: `credentialProvider` round-trips through export → import
   unchanged; a v0.1 bundle still carrying the old `provider` key in
   `accounts/requirements.json` is still accepted on import (read as
@@ -303,8 +396,18 @@ credential-provider) and v0.2 (keyed instructions object,
   omitted entirely (not an empty array) for an agent with none, matching
   the existing omit-empty-components convention already used for
   `skills`/`mcpServers`/`accounts`.
+- Unit: `bundle.import` (the generic, agent-less path) returns an explicit
+  warning and skips a `memory` component if one is present in the
+  manifest, rather than silently dropping or erroring.
+- Unit: `bundle.import_for_agent` — an imported memory file exists at the
+  target agent's live `memory_dir_for_cwd(...)` path AND in
+  `db_agent_native_memory` after import (both halves of the dual-write,
+  not just the mirror).
 - Integration: full export → import round trip for a bundle with
-  provider-scoped instructions AND memory components, landing in a fresh
-  target instance, confirming both the merged instructions content at
-  launch time and the imported agent's Stash Memory tab show the expected
-  content.
+  provider-scoped instructions AND memory components: export via
+  `bundle.export_for_agent` from a source agent, import via
+  `bundle.import_for_agent` into a fresh target agent, launch the target
+  agent on a provider matching one of the exported variants, and confirm
+  (a) the launched agent's materialized `CLAUDE.md` contains the matching
+  provider variant's content and (b) the target agent's Stash Memory tab
+  shows the imported memory files.
