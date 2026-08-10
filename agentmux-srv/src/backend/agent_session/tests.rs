@@ -466,6 +466,7 @@ fn insert_template(
         container_volumes: "[]".to_string(),
         container_name: String::new(),
         use_ambient_login: 0,
+        model_vendor_base_url: String::new(),
     };
     wstore.agent_def_insert(&mut def).unwrap();
     def
@@ -699,6 +700,7 @@ fn template_promote_does_not_reuse_clone_with_active_zone() {
         container_volumes: "[]".to_string(),
         container_name: String::new(),
         use_ambient_login: 0,
+        model_vendor_base_url: String::new(),
     };
     wstore.agent_def_insert(&mut user_clone).unwrap();
     // The user's clone has its OWN active conversation.
@@ -806,6 +808,7 @@ fn template_promote_preserves_user_continuation_on_clone() {
         container_volumes: "[]".to_string(),
         container_name: String::new(),
         use_ambient_login: 0,
+        model_vendor_base_url: String::new(),
     };
     wstore.agent_def_insert(&mut prior_target).unwrap();
     // Seeded `:current` has the OLDER stale snapshot the prior
@@ -905,6 +908,7 @@ fn template_promote_recovers_partial_copy_at_zone() {
         container_volumes: "[]".to_string(),
         container_name: String::new(),
         use_ambient_login: 0,
+        model_vendor_base_url: String::new(),
     };
     wstore.agent_def_insert(&mut prior_target).unwrap();
 
@@ -1006,6 +1010,7 @@ fn template_promote_promotes_newer_source_over_stale_destination() {
         container_volumes: "[]".to_string(),
         container_name: String::new(),
         use_ambient_login: 0,
+        model_vendor_base_url: String::new(),
     };
     wstore.agent_def_insert(&mut prior_target).unwrap();
 
@@ -1126,6 +1131,7 @@ fn template_promote_idempotent_under_partial_failure_at_archive_move() {
         container_volumes: "[]".to_string(),
         container_name: String::new(),
         use_ambient_login: 0,
+        model_vendor_base_url: String::new(),
     };
     wstore.agent_def_insert(&mut prior_target).unwrap();
     // Realistic partial-failure shape: run 1 copied :current
@@ -1263,6 +1269,7 @@ fn template_promote_skips_already_user_owned_definitions() {
         container_volumes: "[]".to_string(),
         container_name: String::new(),
         use_ambient_login: 0,
+        model_vendor_base_url: String::new(),
     };
     wstore.agent_def_insert(&mut user_def).unwrap();
     write_session_state(&filestore, &user_def.id, br#"{"nodes":[]}"#).unwrap();

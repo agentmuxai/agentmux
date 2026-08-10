@@ -144,6 +144,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     container_volumes: template.container_volumes.clone(),
                     container_name: String::new(),
                     use_ambient_login: 0,
+                    model_vendor_base_url: template.model_vendor_base_url.clone(),
                 };
                 wstore
                     .agent_def_insert(&mut new_def)
@@ -352,6 +353,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     container_volumes: source.container_volumes.clone(),
                     container_name: String::new(),
                     use_ambient_login: 0,
+                    model_vendor_base_url: source.model_vendor_base_url.clone(),
                 };
                 wstore
                     .agent_def_insert(&mut fork)
