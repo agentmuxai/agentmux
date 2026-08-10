@@ -89,6 +89,14 @@ pub struct AgentRegistration {
     pub tab_id: Option<String>,
     pub registered_at: u64,
     pub last_seen: u64,
+    /// Spawn generation of the persistent-controller process this
+    /// registration belongs to; 0 = not recorded (HTTP register handler,
+    /// PTY shell auto-register). Real generations are always ≥ 1
+    /// (`PersistentInner::spawn_generation` is pre-incremented). Lets the
+    /// exit-handler's cleanup compare-and-remove instead of blindly wiping
+    /// a fallback respawn's fresh registration (issue #2363).
+    #[serde(default)]
+    pub spawn_generation: u64,
 }
 
 /// List of registered agents.

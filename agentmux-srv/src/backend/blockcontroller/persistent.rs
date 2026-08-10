@@ -214,6 +214,14 @@ struct PersistentInner {
     /// spawn or arrived while someone else's spawn was already in flight.
     /// Drained by `release_spawn_claim_and_drain_queue`.
     pending_send_messages: VecDeque<QueuedMessage>,
+    /// Monotonic counter behind `QueuedMessage::seq` (issue #2365) —
+    /// pre-incremented at every fresh enqueue, so real seqs start at 1
+    /// and are never reused for this controller's lifetime. Redelivery
+    /// paths (a stale-resume retry batch) preserve a message's original
+    /// seq instead of drawing a new one — that preservation is what
+    /// makes "already queued?" an identity check rather than a content
+    /// comparison.
+    next_message_seq: u64,
     /// True while the drain (`drain_queue_after_successful_spawn`) is
     /// between successfully sending a message on the live stdin channel
     /// and finishing its OWN follow-up append of that message into
@@ -256,6 +264,15 @@ struct PersistentInner {
 }
 
 impl PersistentInner {
+    /// Draws the next message seq (issue #2365) — pre-incremented, so
+    /// real seqs start at 1 and 0 can serve as "never a valid seq" in
+    /// tests. Must be called under the same lock acquisition as the
+    /// enqueue it identifies.
+    fn take_next_message_seq(&mut self) -> u64 {
+        self.next_message_seq += 1;
+        self.next_message_seq
+    }
+
     /// Applies one `persistent_resume::ResumeEvent` to `self.resume`,
     /// storing the resulting state back and returning the effects for
     /// the caller to execute. The one and only place `self.resume` is
@@ -373,7 +390,24 @@ impl PersistentInner {
             is_confirmed_success,
         });
         let just_resolved_tracking = was_tracking && matches!(self.resume, persistent_resume::ResumeState::NotTracking { .. });
-        let adopted = sid_is_new && (session_id_was_none || just_resolved_tracking);
+        // Ambient adoption is gated on generation currency (issue #2366):
+        // the state machine already drops a stale generation's
+        // `SessionCaptured` for TRACKING purposes, but the
+        // `session_id_was_none` arm below used to adopt regardless — so a
+        // doomed generation's still-draining stdout reader, echoing its
+        // stale attempted sid moments after `respawn_once_for_leftover_
+        // queue`'s plain clear of `session_id` (see that function's
+        // round-13 comment, which deferred exactly this race), could
+        // re-install the stale sid into ambient state. `resume_poisoned`
+        // doesn't cover that: the fallback path deliberately does NOT
+        // poison (the death may have nothing to do with a stale resume),
+        // and the fallback respawn passes `resume_retry_payload: None`,
+        // so a later spawn re-attaching `--resume <stale-sid>` would
+        // fail with nothing re-armed to catch it. A newer spawn owns the
+        // session identity by definition — a superseded generation's
+        // capture must never adopt.
+        let is_current_generation = generation == self.spawn_generation;
+        let adopted = is_current_generation && sid_is_new && (session_id_was_none || just_resolved_tracking);
         if adopted {
             self.session_id = Some(sid.to_string());
         }
@@ -389,8 +423,12 @@ enum SendAction {
     DeliverDirect,
     /// Nobody else is currently spawning — this caller claimed the
     /// exclusive right to do so and its message has already been enqueued
-    /// for the post-spawn drain.
-    BecomeSpawner,
+    /// for the post-spawn drain. `own_seq` is that enqueued message's
+    /// `QueuedMessage::seq`, handed back so the caller can later tell
+    /// `release_spawn_claim_and_drain_queue` exactly which entry was its
+    /// own (issue #2365 — content matching could discard a different,
+    /// identical-text message instead).
+    BecomeSpawner { own_seq: u64 },
     /// Another caller is already spawning — this message has been
     /// enqueued for that caller's own post-spawn drain to deliver.
     Queued,
@@ -406,17 +444,24 @@ enum SendAction {
 /// blockfile transcript.
 #[derive(Clone, Debug)]
 struct QueuedMessage {
+    /// Queue identity (issue #2365): assigned once from
+    /// `PersistentInner::next_message_seq` at first enqueue and preserved
+    /// verbatim across redelivery (`QueuedRetryEntry::seq` carries it
+    /// through a stale-resume retry batch), so dedup / own-message /
+    /// seed checks are exact identity — two genuinely different messages
+    /// with identical text can never be conflated.
+    seq: u64,
     json_str: String,
     already_persisted: bool,
 }
 
 impl QueuedMessage {
-    fn fresh(json_str: String) -> Self {
-        Self { json_str, already_persisted: false }
+    fn fresh(seq: u64, json_str: String) -> Self {
+        Self { seq, json_str, already_persisted: false }
     }
 
-    fn already_persisted(json_str: String) -> Self {
-        Self { json_str, already_persisted: true }
+    fn already_persisted(seq: u64, json_str: String) -> Self {
+        Self { seq, json_str, already_persisted: true }
     }
 }
 
@@ -532,6 +577,7 @@ impl PersistentSubprocessController {
                 resume: persistent_resume::ResumeState::default(),
                 spawning_in_progress: false,
                 pending_send_messages: VecDeque::new(),
+                next_message_seq: 0,
                 drain_send_in_flight: false,
                 current_pid: None,
                 stdin_tx: None,
@@ -733,21 +779,35 @@ impl PersistentSubprocessController {
     /// if that spawn's own drain hasn't reached it yet; blindly queueing
     /// another copy there let a fallback spawn eventually deliver the
     /// same prompt twice.
-    fn decide_send_action(&self, json_str: &str, skip_if_already_queued: bool) -> SendAction {
+    /// `skip_if_seq_queued`: `Some(seq)` marks this call a KNOWN
+    /// re-delivery of the message originally enqueued under `seq` — skip
+    /// enqueueing if that exact entry is still queued, and preserve the
+    /// original seq (not a fresh one) if it must be re-queued, so the
+    /// message keeps one identity for its whole lifetime (issue #2365:
+    /// the old content-equality check here treated a genuinely
+    /// different, identical-text message as "already queued" and
+    /// silently dropped it).
+    fn decide_send_action(&self, json_str: &str, skip_if_seq_queued: Option<u64>) -> SendAction {
         let mut inner = self.inner.lock().unwrap();
         if inner.stdin_tx.is_some() && !inner.spawning_in_progress {
             SendAction::DeliverDirect
         } else if inner.spawning_in_progress {
-            let already_queued =
-                skip_if_already_queued && inner.pending_send_messages.iter().any(|m| m == json_str);
+            let already_queued = skip_if_seq_queued
+                .is_some_and(|seq| inner.pending_send_messages.iter().any(|m| m.seq == seq));
             if !already_queued {
-                inner.pending_send_messages.push_back(QueuedMessage::fresh(json_str.to_string()));
+                let seq = skip_if_seq_queued.unwrap_or_else(|| inner.take_next_message_seq());
+                inner
+                    .pending_send_messages
+                    .push_back(QueuedMessage::fresh(seq, json_str.to_string()));
             }
             SendAction::Queued
         } else {
             inner.spawning_in_progress = true;
-            inner.pending_send_messages.push_back(QueuedMessage::fresh(json_str.to_string()));
-            SendAction::BecomeSpawner
+            let own_seq = skip_if_seq_queued.unwrap_or_else(|| inner.take_next_message_seq());
+            inner
+                .pending_send_messages
+                .push_back(QueuedMessage::fresh(own_seq, json_str.to_string()));
+            SendAction::BecomeSpawner { own_seq }
         }
     }
 
@@ -755,9 +815,10 @@ impl PersistentSubprocessController {
     /// returning `BecomeSpawner`. `spawn_succeeded` distinguishes two very
     /// different situations:
     ///
-    /// - **Failed spawn**: discards only `own_message` — the specific
-    ///   message THIS spawner pushed when it claimed `BecomeSpawner`, found
-    ///   by content match rather than assumed to be at the front. codex P2
+    /// - **Failed spawn**: discards only the entry with `own_seq` — the
+    ///   specific message THIS spawner pushed when it claimed
+    ///   `BecomeSpawner` (`SendAction::BecomeSpawner::own_seq`), found by
+    ///   queue identity rather than assumed to be at the front. codex P2
     ///   on PR #2360 (round 14, commit 8c2bc99ab): the queue is NOT always
     ///   empty at the moment a new spawner claims it — the "second stall"
     ///   path (`drain_queue_after_successful_spawn` with
@@ -769,13 +830,10 @@ impl PersistentSubprocessController {
     ///   message" in that case discarded an OLDER, unrelated, already-
     ///   accepted prompt instead of the actually-failed one — silent data
     ///   loss, plus handing the wrong (already-failed) message to the
-    ///   fallback respawn. Matching by content instead of position fixes
-    ///   this whenever the two differ, which is the overwhelming common
-    ///   case; the narrow residual case of two GENUINELY DIFFERENT messages
-    ///   sharing identical content (e.g. two "yes" replies) is the same
-    ///   content-identity-ambiguity gap already tracked in #2365 — this fix
-    ///   doesn't need to (and doesn't try to) close that, since either
-    ///   duplicate is content-equivalent to discard here. codex P1 on PR
+    ///   fallback respawn. Originally fixed by matching content instead
+    ///   of position, which still left two GENUINELY DIFFERENT messages
+    ///   sharing identical text (e.g. two "yes" replies) ambiguous; seq
+    ///   matching (issue #2365) closes that residue too. codex P1 on PR
     ///   #2360 (sixth review pass): leaving this message queued let an
     ///   unrelated LATER successful spawn silently execute a prompt the
     ///   caller was already told had failed (`send_message`/
@@ -808,7 +866,7 @@ impl PersistentSubprocessController {
     /// frontend the turn ended — the ORIGINAL exit deliberately suppressed
     /// its own terminal-status publish expecting the retry to eventually
     /// publish one.
-    fn release_spawn_claim_and_drain_queue(&self, spawn_succeeded: bool, retry_config: PersistentSpawnConfig, own_message: &str) {
+    fn release_spawn_claim_and_drain_queue(&self, spawn_succeeded: bool, retry_config: PersistentSpawnConfig, own_seq: u64) {
         if !spawn_succeeded {
             // Discard only `own_message` — see this function's own doc
             // comment above for why position (front) is not a safe
@@ -834,7 +892,7 @@ impl PersistentSubprocessController {
             // leave the claim held and hand off to the fallback respawn.
             let leftovers = {
                 let mut inner = self.inner.lock().unwrap();
-                if let Some(idx) = inner.pending_send_messages.iter().position(|m| m == own_message) {
+                if let Some(idx) = inner.pending_send_messages.iter().position(|m| m.seq == own_seq) {
                     inner.pending_send_messages.remove(idx);
                 } else {
                     // Shouldn't normally happen — defensively log rather
@@ -890,13 +948,14 @@ impl PersistentSubprocessController {
             // (b) records the ACTUAL seeded/triggering message a SECOND
             // time (once via `spawn_process`'s synchronous seed, once via
             // this drain's own append) — a confirmed stale-resume retry
-            // would then redeliver that one message TWICE. Matching by
-            // content instead correctly identifies the seeded entry
-            // regardless of where it sits, exactly once (via
-            // `seed_already_matched`, so a later, genuinely-different
-            // delivery that happens to share identical content isn't ALSO
-            // wrongly skipped — same known, accepted content-identity
-            // limits as #2365).
+            // would then redeliver that one message TWICE. Originally
+            // fixed by matching content (with `seed_already_matched` as a
+            // one-shot so an identical-text later delivery wasn't ALSO
+            // skipped); now matched by queue identity
+            // (`QueuedMessage::seq`, issue #2365), which identifies the
+            // seeded entry exactly regardless of position or duplicate
+            // text. The one-shot flag is kept as cheap defense-in-depth —
+            // seqs are never reused, so it can no longer fire twice.
             let mut seed_already_matched = false;
             let stalled_with_leftovers = loop {
                 let next = {
@@ -928,11 +987,11 @@ impl PersistentSubprocessController {
                     }
                     break stalled;
                 };
-                let QueuedMessage { json_str, already_persisted } = queued;
+                let QueuedMessage { seq, json_str, already_persisted } = queued;
                 let delivered_copy = json_str.clone();
                 let is_the_seed = !seed_already_matched && {
                     let inner = inner_arc.lock().unwrap();
-                    inner.resume.is_seeded_message(inner.spawn_generation, &delivered_copy)
+                    inner.resume.is_seeded_message(inner.spawn_generation, seq)
                 };
                 if is_the_seed {
                     seed_already_matched = true;
@@ -957,7 +1016,7 @@ impl PersistentSubprocessController {
                     // up. Same claim-retention rule as above.
                     let mut inner = inner_arc.lock().unwrap();
                     inner.drain_send_in_flight = false;
-                    inner.pending_send_messages.push_front(QueuedMessage { json_str: e.0, already_persisted });
+                    inner.pending_send_messages.push_front(QueuedMessage { seq, json_str: e.0, already_persisted });
                     let stalled = !inner.pending_send_messages.is_empty();
                     if !(stalled && allow_fallback_respawn) {
                         inner.spawning_in_progress = false;
@@ -992,7 +1051,7 @@ impl PersistentSubprocessController {
                     let generation = inner.spawn_generation;
                     inner.apply_resume_event(persistent_resume::ResumeEvent::MessageAppendedToRetryBatch {
                         generation,
-                        json: delivered_copy.clone(),
+                        entry: persistent_resume::QueuedRetryEntry { seq, json: delivered_copy.clone() },
                     });
                 }
                 inner_arc.lock().unwrap().drain_send_in_flight = false;
@@ -1163,7 +1222,7 @@ impl PersistentSubprocessController {
         });
         let json_str = json_msg.to_string();
 
-        match self.decide_send_action(&json_str, false) {
+        match self.decide_send_action(&json_str, None) {
             SendAction::Queued => {
                 // Persistence happens later, inside the drain, at the
                 // exact moment this message is actually delivered — see
@@ -1206,7 +1265,7 @@ impl PersistentSubprocessController {
                 self.emit_message_accepted(config.message_id.as_deref());
                 Ok(())
             }
-            SendAction::BecomeSpawner => {
+            SendAction::BecomeSpawner { own_seq } => {
                 // `resume_retry_payload` is stashed SYNCHRONOUSLY inside
                 // spawn_process, before any background task exists —
                 // reagentx P1 on PR #2360: stashing it after spawn_process
@@ -1222,8 +1281,10 @@ impl PersistentSubprocessController {
                 // `--resume`, which is what the retry payload is for.
                 let message_id = config.message_id.clone();
                 let retry_config = config.clone();
-                let own_message = json_str.clone();
-                let spawn_result = self.spawn_process(config, Some(json_str));
+                let spawn_result = self.spawn_process(
+                    config,
+                    Some(persistent_resume::QueuedRetryEntry { seq: own_seq, json: json_str }),
+                );
                 // Only emit "accepted" on success — codex P2 on PR #2360
                 // (sixth review pass, round 4): an earlier cut of this fix
                 // persisted unconditionally here, letting a rejected spawn
@@ -1239,7 +1300,7 @@ impl PersistentSubprocessController {
                     self.mark_turn_active_and_publish();
                     self.emit_message_accepted(message_id.as_deref());
                 }
-                self.release_spawn_claim_and_drain_queue(spawn_result.is_ok(), retry_config, &own_message);
+                self.release_spawn_claim_and_drain_queue(spawn_result.is_ok(), retry_config, own_seq);
                 spawn_result
             }
         }
@@ -1322,11 +1383,11 @@ impl PersistentSubprocessController {
     fn retry_after_resume_failure(
         &self,
         mut config: PersistentSpawnConfig,
-        mut json_strs: Vec<String>,
+        mut entries: Vec<persistent_resume::QueuedRetryEntry>,
         held_error_line: Option<String>,
     ) {
         config.session_id = String::new();
-        let Some(first) = (!json_strs.is_empty()).then(|| json_strs.remove(0)) else {
+        let Some(first) = (!entries.is_empty()).then(|| entries.remove(0)) else {
             // Nothing to retry at all (shouldn't happen in practice —
             // the batch always has at least the triggering message) —
             // but if it ever does, this is a no-op, not a launch, so any
@@ -1336,7 +1397,7 @@ impl PersistentSubprocessController {
             }
             return;
         };
-        let rest = json_strs;
+        let rest = entries;
 
         match self.decide_retry_batch_action(&first, &rest) {
             SendAction::DeliverDirect => {
@@ -1348,7 +1409,7 @@ impl PersistentSubprocessController {
                 {
                     let mut inner = self.inner.lock().unwrap();
                     let tx = inner.stdin_tx.clone();
-                    for msg in std::iter::once(first).chain(rest) {
+                    for entry in std::iter::once(first).chain(rest) {
                         // codex P2 on PR #2360 (round 15, commit
                         // fdb8db6fd): once ANY earlier message in this
                         // batch has failed direct delivery, stop
@@ -1363,7 +1424,8 @@ impl PersistentSubprocessController {
                         // `!any_failed` short-circuits every remaining
                         // message straight to the queued branch, in
                         // order, once the first failure is hit.
-                        let delivered = !any_failed && tx.as_ref().is_some_and(|tx| tx.try_send(msg.clone()).is_ok());
+                        let delivered = !any_failed
+                            && tx.as_ref().is_some_and(|tx| tx.try_send(entry.json.clone()).is_ok());
                         if !delivered {
                             any_failed = true;
                             // codex P2 on PR #2360 (sixth review pass,
@@ -1375,7 +1437,9 @@ impl PersistentSubprocessController {
                             // process that died again in this exact gap)
                             // would lose it permanently despite already
                             // having been reported as accepted.
-                            inner.pending_send_messages.push_back(QueuedMessage::already_persisted(msg));
+                            inner
+                                .pending_send_messages
+                                .push_back(QueuedMessage::already_persisted(entry.seq, entry.json));
                         }
                     }
                     if any_failed {
@@ -1470,7 +1534,7 @@ impl PersistentSubprocessController {
                 // specific original error text.
                 drop(held_error_line);
             }
-            SendAction::BecomeSpawner => {
+            SendAction::BecomeSpawner { own_seq } => {
                 // Only clear inner.session_id now that THIS retry is
                 // actually about to spawn — codex P2 on PR #2360 (sixth
                 // review pass, round 3): clearing it unconditionally up
@@ -1491,7 +1555,7 @@ impl PersistentSubprocessController {
                         "failed to respawn after a stale --resume session id"
                     ),
                 }
-                self.release_spawn_claim_and_drain_queue(spawn_result.is_ok(), retry_config, &first);
+                self.release_spawn_claim_and_drain_queue(spawn_result.is_ok(), retry_config, own_seq);
                 if spawn_result.is_err() {
                     // Surface this, or the pane hangs forever with NO
                     // signal at all — codex P2 on PR #2360 (fifth review
@@ -1539,7 +1603,11 @@ impl PersistentSubprocessController {
     /// the same batch, since two entries can legitimately be identical
     /// (the user genuinely sent the same text twice) and both need
     /// redelivering (codex P2 on PR #2360, sixth review pass, round 6).
-    fn decide_retry_batch_action(&self, first: &str, rest: &[String]) -> SendAction {
+    fn decide_retry_batch_action(
+        &self,
+        first: &persistent_resume::QueuedRetryEntry,
+        rest: &[persistent_resume::QueuedRetryEntry],
+    ) -> SendAction {
         let mut inner = self.inner.lock().unwrap();
         if inner.stdin_tx.is_some() && !inner.spawning_in_progress {
             SendAction::DeliverDirect
@@ -1560,18 +1628,19 @@ impl PersistentSubprocessController {
             // `push_back` ever touches this queue elsewhere. In that
             // case `rest` belongs immediately after it (same batch,
             // preserving order), not ahead of it.
-            let first_already_queued = inner.pending_send_messages.iter().any(|m| m == first);
+            let first_already_queued =
+                inner.pending_send_messages.iter().any(|m| m.seq == first.seq);
             if first_already_queued {
-                for (i, msg) in rest.iter().enumerate() {
+                for (i, entry) in rest.iter().enumerate() {
                     inner
                         .pending_send_messages
-                        .insert(i + 1, QueuedMessage::already_persisted(msg.clone()));
+                        .insert(i + 1, QueuedMessage::already_persisted(entry.seq, entry.json.clone()));
                 }
             } else {
                 let mut front: VecDeque<QueuedMessage> = VecDeque::new();
-                front.push_back(QueuedMessage::already_persisted(first.to_string()));
-                for msg in rest {
-                    front.push_back(QueuedMessage::already_persisted(msg.clone()));
+                front.push_back(QueuedMessage::already_persisted(first.seq, first.json.clone()));
+                for entry in rest {
+                    front.push_back(QueuedMessage::already_persisted(entry.seq, entry.json.clone()));
                 }
                 front.append(&mut inner.pending_send_messages);
                 inner.pending_send_messages = front;
@@ -1579,11 +1648,15 @@ impl PersistentSubprocessController {
             SendAction::Queued
         } else {
             inner.spawning_in_progress = true;
-            inner.pending_send_messages.push_back(QueuedMessage::already_persisted(first.to_string()));
-            for msg in rest {
-                inner.pending_send_messages.push_back(QueuedMessage::already_persisted(msg.clone()));
+            inner
+                .pending_send_messages
+                .push_back(QueuedMessage::already_persisted(first.seq, first.json.clone()));
+            for entry in rest {
+                inner
+                    .pending_send_messages
+                    .push_back(QueuedMessage::already_persisted(entry.seq, entry.json.clone()));
             }
-            SendAction::BecomeSpawner
+            SendAction::BecomeSpawner { own_seq: first.seq }
         }
     }
 
@@ -1860,7 +1933,11 @@ impl PersistentSubprocessController {
     /// Spawn the persistent CLI process. Called only while the caller
     /// holds the exclusive spawn claim (`spawning_in_progress`, see
     /// `decide_send_action`) — never directly.
-    fn spawn_process(&self, config: PersistentSpawnConfig, resume_retry_payload: Option<String>) -> Result<(), String> {
+    fn spawn_process(
+        &self,
+        config: PersistentSpawnConfig,
+        resume_retry_payload: Option<persistent_resume::QueuedRetryEntry>,
+    ) -> Result<(), String> {
         // Build command — use make_cli_cmd to resolve .cmd wrappers to node on Windows
         let mut cmd = crate::server::cli_handlers::make_cli_cmd(&config.cli_command);
 
@@ -2100,8 +2177,12 @@ impl PersistentSubprocessController {
         // See SPEC_MUXBUS_AGENT_DISCOVERY_AND_PERSISTENT_DELIVERY_2026_06_16.
         let agent_id_for_muxbus = muxbus_agent_id_from_env(&config.env_vars);
         if let Some(ref agent_id) = agent_id_for_muxbus {
+            // `_generated` variants record `my_generation` so this exact
+            // spawn's exit-handler can compare-and-remove its own
+            // registrations instead of blindly wiping a fallback
+            // respawn's fresh ones (issue #2363).
             match crate::backend::reactive::get_global_handler()
-                .register_agent(agent_id, &self.block_id, Some(&self.tab_id))
+                .register_agent_generated(agent_id, &self.block_id, Some(&self.tab_id), my_generation)
             {
                 Ok(()) => {
                     tracing::info!(
@@ -2116,16 +2197,18 @@ impl PersistentSubprocessController {
                     // exactly like that handler does.
                     if let Ok(local_url) = std::env::var("AGENTMUX_LOCAL_URL") {
                         let data_dir = crate::backend::base::get_wave_data_dir();
-                        crate::backend::reactive::registry::write(
+                        crate::backend::reactive::registry::write_generated(
                             &data_dir,
                             agent_id,
                             &local_url,
                             &self.block_id,
+                            my_generation,
                         );
-                        crate::backend::reactive::registry::write_shared_from_env(
+                        crate::backend::reactive::registry::write_shared_from_env_generated(
                             agent_id,
                             &local_url,
                             &self.block_id,
+                            my_generation,
                         );
                     }
                 }
@@ -2635,6 +2718,10 @@ impl PersistentSubprocessController {
         // This exact spawn's identity — see `stop_requested_generation`'s
         // doc comment for why the retry decision below needs it.
         let my_generation_wait = my_generation;
+        // This exact spawn's OS pid, for the compare-and-clear below — the
+        // unconditional clear could wipe a fallback respawn's fresh
+        // registration (issue #2363, see clear_active_pid_if_pid).
+        let pid_wait = pid;
 
         tokio::spawn(async move {
             tokio::select! {
@@ -2815,25 +2902,51 @@ impl PersistentSubprocessController {
 
                         // Deregister from muxbus so later sends fall through to the
                         // lower tiers instead of resolving to a dead block. Mirrors
-                        // the shell controller's exit path. Done regardless of
-                        // whether a retry follows — this exact process's
-                        // resources are gone either way, and spawn_process's own
-                        // fresh registration (if a retry follows) doesn't clean
-                        // up state belonging to THIS dying process.
-                        crate::backend::reactive::get_global_handler()
-                            .unregister_block(&block_id_wait);
+                        // the shell controller's exit path. This exact process's
+                        // resources are gone either way; if a retry/fallback
+                        // respawn has ALREADY re-registered, the guards below
+                        // leave its fresh registration in place.
+                        // All removals are compare-and-remove keyed on this
+                        // spawn's generation (issue #2363): the
+                        // `is_current_generation` gate above was read once,
+                        // and a fallback/retry respawn's fresh registration
+                        // can land on a parallel task between that read and
+                        // these calls — an unconditional removal here would
+                        // wipe the NEW spawn's entry with nothing left to
+                        // re-register it.
+                        let registration_was_ours = crate::backend::reactive::get_global_handler()
+                            .unregister_block_if_generation(&block_id_wait, my_generation_wait);
                         if let Some(ref agent_id) = agent_id_wait {
                             let data_dir = crate::backend::base::get_wave_data_dir();
-                            crate::backend::reactive::registry::remove(&data_dir, agent_id);
-                            crate::backend::reactive::registry::remove_shared_from_env(agent_id);
-                            if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
-                                sub.remove_agent(agent_id);
+                            crate::backend::reactive::registry::remove_if_generation(
+                                &data_dir,
+                                agent_id,
+                                my_generation_wait,
+                            );
+                            crate::backend::reactive::registry::remove_shared_from_env_if_generation(
+                                agent_id,
+                                my_generation_wait,
+                            );
+                            // The cloud subscriber's agent set records no
+                            // per-agent identity to compare against, so the
+                            // in-memory registration's outcome above stands
+                            // in: if a newer spawn already re-registered,
+                            // its cloud subscription must survive too.
+                            if registration_was_ours {
+                                if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
+                                    sub.remove_agent(agent_id);
+                                }
                             }
                         }
 
                         // Clear active pid — clean exit, no recovery needed.
+                        // Compare-and-clear (issue #2363): only if the
+                        // recorded pid is still THIS process's — a fallback
+                        // respawn may have re-registered a fresh pid on a
+                        // parallel task between the generation gate above
+                        // and this call.
                         if let Some(ref wstore) = wstore_wait {
-                            super::session_recovery::clear_active_pid(wstore, &block_id_wait);
+                            super::session_recovery::clear_active_pid_if_pid(wstore, &block_id_wait, pid_wait);
                         }
                     }
 
@@ -3168,20 +3281,47 @@ impl PersistentSubprocessController {
                         health_wait.set_exited(-1);
 
                         // Deregister from muxbus (see the clean-exit arm above).
-                        crate::backend::reactive::get_global_handler()
-                            .unregister_block(&block_id_wait);
+                        // All removals are compare-and-remove keyed on this
+                        // spawn's generation (issue #2363): the
+                        // `is_current_generation` gate above was read once,
+                        // and a fallback/retry respawn's fresh registration
+                        // can land on a parallel task between that read and
+                        // these calls — an unconditional removal here would
+                        // wipe the NEW spawn's entry with nothing left to
+                        // re-register it.
+                        let registration_was_ours = crate::backend::reactive::get_global_handler()
+                            .unregister_block_if_generation(&block_id_wait, my_generation_wait);
                         if let Some(ref agent_id) = agent_id_wait {
                             let data_dir = crate::backend::base::get_wave_data_dir();
-                            crate::backend::reactive::registry::remove(&data_dir, agent_id);
-                            crate::backend::reactive::registry::remove_shared_from_env(agent_id);
-                            if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
-                                sub.remove_agent(agent_id);
+                            crate::backend::reactive::registry::remove_if_generation(
+                                &data_dir,
+                                agent_id,
+                                my_generation_wait,
+                            );
+                            crate::backend::reactive::registry::remove_shared_from_env_if_generation(
+                                agent_id,
+                                my_generation_wait,
+                            );
+                            // The cloud subscriber's agent set records no
+                            // per-agent identity to compare against, so the
+                            // in-memory registration's outcome above stands
+                            // in: if a newer spawn already re-registered,
+                            // its cloud subscription must survive too.
+                            if registration_was_ours {
+                                if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
+                                    sub.remove_agent(agent_id);
+                                }
                             }
                         }
 
                         // Clear active pid — user-initiated stop, no recovery needed.
+                        // Compare-and-clear (issue #2363), same as the
+                        // clean-exit arm: the `is_current_generation` gate
+                        // above was read once under the lock, and a fallback
+                        // respawn's re-registration can land between that
+                        // read and this call.
                         if let Some(ref wstore) = wstore_wait {
-                            super::session_recovery::clear_active_pid(wstore, &block_id_wait);
+                            super::session_recovery::clear_active_pid_if_pid(wstore, &block_id_wait, pid_wait);
                         }
                     }
                 }
@@ -3412,6 +3552,12 @@ mod send_input_tests {
         )
     }
 
+    /// Shorthand for a retry-batch entry with an explicit queue seq
+    /// (issue #2365 — retry batches carry identity, not just text).
+    fn qentry(seq: u64, json: &str) -> persistent_resume::QueuedRetryEntry {
+        persistent_resume::QueuedRetryEntry { seq, json: json.to_string() }
+    }
+
     // codex P1 on PR #2360 (round 16, commit ce1642d90): `stop_process`
     // must record which generation a stop was requested for even when
     // there's no live `kill_tx` to send through — see
@@ -3443,7 +3589,7 @@ mod send_input_tests {
                         session_id: "dead-sid".to_string(),
                         message_id: None,
                     },
-                    messages: vec!["{}".to_string()],
+                    messages: vec![qentry(1, "{}")],
                 },
             });
         }
@@ -3665,7 +3811,7 @@ mod send_input_tests {
             session_id: "dead-sid".to_string(),
             message_id: None,
         };
-        c.retry_after_resume_failure(config, vec!["{}".to_string()], None);
+        c.retry_after_resume_failure(config, vec![qentry(1, "{}")], None);
 
         assert_eq!(
             c.inner.lock().unwrap().session_id,
@@ -3851,8 +3997,8 @@ mod send_input_tests {
     #[test]
     fn decide_send_action_becomes_spawner_when_nothing_is_in_flight() {
         let c = controller();
-        let action = c.decide_send_action("msg-a", false);
-        assert!(matches!(action, SendAction::BecomeSpawner));
+        let action = c.decide_send_action("msg-a", None);
+        assert!(matches!(action, SendAction::BecomeSpawner { .. }));
         let inner = c.inner.lock().unwrap();
         assert!(inner.spawning_in_progress, "must claim the exclusive spawn right");
         assert_eq!(
@@ -3867,7 +4013,7 @@ mod send_input_tests {
         let c = controller();
         c.inner.lock().unwrap().spawning_in_progress = true;
 
-        let action = c.decide_send_action("msg-b", false);
+        let action = c.decide_send_action("msg-b", None);
         assert!(
             matches!(action, SendAction::Queued),
             "a second caller must queue instead of independently deciding to spawn"
@@ -3887,8 +4033,8 @@ mod send_input_tests {
         let c = controller();
         c.inner.lock().unwrap().spawning_in_progress = true;
 
-        c.decide_send_action("hello", false);
-        let action = c.decide_send_action("hello", false);
+        c.decide_send_action("hello", None);
+        let action = c.decide_send_action("hello", None);
 
         assert!(matches!(action, SendAction::Queued));
         let inner = c.inner.lock().unwrap();
@@ -3901,32 +4047,66 @@ mod send_input_tests {
 
     /// codex P1 on PR #2360 (sixth review pass, round 4): unlike a genuine
     /// new message, `retry_after_resume_failure`'s payload is a KNOWN
-    /// re-delivery of content that may ALREADY be sitting in the queue —
+    /// re-delivery of a message that may ALREADY be sitting in the queue —
     /// pushed by the very spawn attempt whose failure triggered this
     /// retry, if that spawn's own drain hasn't reached it yet. Blindly
-    /// queueing another copy (as the `false`/`send_message` path
+    /// queueing another copy (as the `None`/`send_message` path
     /// correctly does for a genuine new message) would let a fallback
-    /// spawn eventually deliver the same prompt twice. `skip_if_already_
-    /// queued=true` (what `retry_after_resume_failure` always passes)
-    /// must therefore skip re-enqueueing an identical, already-present
-    /// entry.
+    /// spawn eventually deliver the same prompt twice. Passing the
+    /// original entry's seq must therefore skip re-enqueueing while that
+    /// exact entry is still present (issue #2365: matched by identity,
+    /// not text).
     #[test]
     fn decide_send_action_dedups_a_known_retry_of_an_already_queued_message() {
         let c = controller();
         {
             let mut inner = c.inner.lock().unwrap();
             inner.spawning_in_progress = true;
-            inner.pending_send_messages.push_back(QueuedMessage::fresh("original-payload".to_string()));
+            inner
+                .pending_send_messages
+                .push_back(QueuedMessage::fresh(7, "original-payload".to_string()));
         }
 
-        let action = c.decide_send_action("original-payload", true);
+        let action = c.decide_send_action("original-payload", Some(7));
 
         assert!(matches!(action, SendAction::Queued));
         let inner = c.inner.lock().unwrap();
         assert_eq!(
             inner.pending_send_messages.len(),
             1,
-            "a retry of content already queued must not add a duplicate copy"
+            "a retry of a message still queued under its own seq must not add a duplicate copy"
+        );
+    }
+
+    /// Issue #2365 regression: the dedup must key on the entry's seq, not
+    /// its text — a DIFFERENT message that happens to share identical
+    /// content with the retried one must not satisfy the check (the old
+    /// content-equality version silently dropped the retry here).
+    #[test]
+    fn decide_send_action_does_not_dedup_a_retry_against_an_identical_text_different_message() {
+        let c = controller();
+        {
+            let mut inner = c.inner.lock().unwrap();
+            inner.spawning_in_progress = true;
+            // A genuinely different message (seq 9) with the same text as
+            // the retried entry (seq 7).
+            inner
+                .pending_send_messages
+                .push_back(QueuedMessage::fresh(9, "original-payload".to_string()));
+        }
+
+        let action = c.decide_send_action("original-payload", Some(7));
+
+        assert!(matches!(action, SendAction::Queued));
+        let inner = c.inner.lock().unwrap();
+        assert_eq!(
+            inner.pending_send_messages.len(),
+            2,
+            "identical text under a different seq is a different message — the retry must still be queued"
+        );
+        assert_eq!(
+            inner.pending_send_messages[1].seq, 7,
+            "the re-queued retry must keep its original seq, not draw a fresh one"
         );
     }
 
@@ -3939,12 +4119,16 @@ mod send_input_tests {
         let c = controller();
         c.inner.lock().unwrap().spawning_in_progress = true;
 
-        let action = c.decide_send_action("not-yet-queued", true);
+        let action = c.decide_send_action("not-yet-queued", Some(42));
 
         assert!(matches!(action, SendAction::Queued));
         let inner = c.inner.lock().unwrap();
         assert_eq!(inner.pending_send_messages.len(), 1);
         assert_eq!(inner.pending_send_messages[0], "not-yet-queued");
+        assert_eq!(
+            inner.pending_send_messages[0].seq, 42,
+            "a re-queued known redelivery must preserve its original seq"
+        );
     }
 
     #[test]
@@ -3953,7 +4137,7 @@ mod send_input_tests {
         let (tx, _rx) = mpsc::channel::<String>(4);
         c.inner.lock().unwrap().stdin_tx = Some(tx);
 
-        let action = c.decide_send_action("msg-c", false);
+        let action = c.decide_send_action("msg-c", None);
         assert!(matches!(action, SendAction::DeliverDirect));
         let inner = c.inner.lock().unwrap();
         assert!(
@@ -3983,7 +4167,7 @@ mod send_input_tests {
             inner.spawning_in_progress = true;
         }
 
-        let action = c.decide_send_action("msg-late-arrival", false);
+        let action = c.decide_send_action("msg-late-arrival", None);
         assert!(
             matches!(action, SendAction::Queued),
             "must queue, not deliver direct, while a drain for an earlier message is still active"
@@ -3999,7 +4183,7 @@ mod send_input_tests {
     #[test]
     fn decide_send_action_marks_a_fresh_message_as_not_yet_persisted() {
         let c = controller();
-        c.decide_send_action("hello", false);
+        c.decide_send_action("hello", None);
         let inner = c.inner.lock().unwrap();
         assert!(
             !inner.pending_send_messages[0].already_persisted,
@@ -4014,7 +4198,7 @@ mod send_input_tests {
     #[test]
     fn decide_retry_batch_action_marks_every_entry_as_already_persisted() {
         let c = controller();
-        c.decide_retry_batch_action("hello", &["world".to_string()]);
+        c.decide_retry_batch_action(&qentry(1, "hello"), &[qentry(2, "world")]);
         let inner = c.inner.lock().unwrap();
         assert!(inner.pending_send_messages[0].already_persisted);
         assert!(inner.pending_send_messages[1].already_persisted);
@@ -4067,8 +4251,8 @@ mod send_input_tests {
                 let c = StdArc::clone(&c);
                 let spawner_count = StdArc::clone(&spawner_count);
                 let queued_count = StdArc::clone(&queued_count);
-                std::thread::spawn(move || match c.decide_send_action(&format!("msg-{i}"), false) {
-                    SendAction::BecomeSpawner => {
+                std::thread::spawn(move || match c.decide_send_action(&format!("msg-{i}"), None) {
+                    SendAction::BecomeSpawner { .. } => {
                         spawner_count.fetch_add(1, AtomicOrdering::SeqCst);
                     }
                     SendAction::Queued => {
@@ -4109,14 +4293,14 @@ mod send_input_tests {
             let mut inner = c.inner.lock().unwrap();
             inner.stdin_tx = Some(tx);
             inner.spawning_in_progress = true;
-            inner.pending_send_messages.push_back(QueuedMessage::fresh("first".to_string()));
-            inner.pending_send_messages.push_back(QueuedMessage::fresh("second".to_string()));
+            inner.pending_send_messages.push_back(QueuedMessage::fresh(1, "first".to_string()));
+            inner.pending_send_messages.push_back(QueuedMessage::fresh(2, "second".to_string()));
         }
 
         // Never used for a fallback spawn in this test — the drain fully
         // succeeds without ever stalling. `own_message` is only consulted
         // on the failed-spawn path, so its value doesn't matter here.
-        c.release_spawn_claim_and_drain_queue(true, unreachable_fallback_config(), "first");
+        c.release_spawn_claim_and_drain_queue(true, unreachable_fallback_config(), 0);
 
         assert_eq!(rx.recv().await.unwrap(), "first");
         assert_eq!(rx.recv().await.unwrap(), "second");
@@ -4177,13 +4361,13 @@ mod send_input_tests {
         {
             let mut inner = c.inner.lock().unwrap();
             inner.spawning_in_progress = true;
-            inner.pending_send_messages.push_back(QueuedMessage::fresh("stuck-one".to_string()));
-            inner.pending_send_messages.push_back(QueuedMessage::fresh("stuck-two".to_string()));
+            inner.pending_send_messages.push_back(QueuedMessage::fresh(1, "stuck-one".to_string()));
+            inner.pending_send_messages.push_back(QueuedMessage::fresh(2, "stuck-two".to_string()));
             // stdin_tx stays None — simulates the process this claim was
             // spawning for having already died before the drain ran.
         }
 
-        c.release_spawn_claim_and_drain_queue(true, unreachable_fallback_config(), "stuck-one");
+        c.release_spawn_claim_and_drain_queue(true, unreachable_fallback_config(), 0);
         // Let the spawned background task, and the fallback respawn
         // attempt it triggers, run to completion.
         tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
@@ -4222,11 +4406,11 @@ mod send_input_tests {
         {
             let mut inner = c.inner.lock().unwrap();
             inner.spawning_in_progress = true;
-            inner.pending_send_messages.push_back(QueuedMessage::fresh("the-one-that-failed".to_string()));
-            inner.pending_send_messages.push_back(QueuedMessage::fresh("queued-by-someone-else".to_string()));
+            inner.pending_send_messages.push_back(QueuedMessage::fresh(1, "the-one-that-failed".to_string()));
+            inner.pending_send_messages.push_back(QueuedMessage::fresh(2, "queued-by-someone-else".to_string()));
         }
 
-        c.release_spawn_claim_and_drain_queue(false, unreachable_fallback_config(), "the-one-that-failed");
+        c.release_spawn_claim_and_drain_queue(false, unreachable_fallback_config(), 1);
 
         let inner = c.inner.lock().unwrap();
         assert!(
@@ -4266,14 +4450,14 @@ mod send_input_tests {
             // Simulates leftovers surviving a prior "second stall" release
             // (queue non-empty, claim already given up by that path) plus a
             // later BecomeSpawner appending its own message behind them.
-            inner.pending_send_messages.push_back(QueuedMessage::fresh("older-leftover-from-a-different-caller".to_string()));
-            inner.pending_send_messages.push_back(QueuedMessage::fresh("this-spawners-own-message-that-just-failed".to_string()));
+            inner.pending_send_messages.push_back(QueuedMessage::fresh(1, "older-leftover-from-a-different-caller".to_string()));
+            inner.pending_send_messages.push_back(QueuedMessage::fresh(2, "this-spawners-own-message-that-just-failed".to_string()));
         }
 
         c.release_spawn_claim_and_drain_queue(
             false,
             unreachable_fallback_config(),
-            "this-spawners-own-message-that-just-failed",
+            2,
         );
 
         let inner = c.inner.lock().unwrap();
@@ -4326,19 +4510,19 @@ mod send_input_tests {
             {
                 let mut inner = c.inner.lock().unwrap();
                 inner.spawning_in_progress = true;
-                inner.pending_send_messages.push_back(QueuedMessage::fresh("the-one-that-failed".to_string()));
+                inner.pending_send_messages.push_back(QueuedMessage::fresh(1, "the-one-that-failed".to_string()));
             }
 
             let handles: Vec<_> = (0..8)
                 .map(|i| {
                     let c = StdArc::clone(&c);
                     std::thread::spawn(move || {
-                        let _ = c.decide_send_action(&format!("racer-{iteration}-{i}"), false);
+                        let _ = c.decide_send_action(&format!("racer-{iteration}-{i}"), None);
                     })
                 })
                 .collect();
 
-            c.release_spawn_claim_and_drain_queue(false, unreachable_fallback_config(), "the-one-that-failed");
+            c.release_spawn_claim_and_drain_queue(false, unreachable_fallback_config(), 1);
 
             for h in handles {
                 h.join().unwrap();
@@ -4387,7 +4571,7 @@ mod send_input_tests {
             session_id: "dead-sid".to_string(),
             message_id: None,
         };
-        c.retry_after_resume_failure(config, vec!["{}".to_string()], None);
+        c.retry_after_resume_failure(config, vec![qentry(1, "{}")], None);
 
         assert_eq!(
             c.inner.lock().unwrap().session_id.as_deref(),
@@ -4421,7 +4605,7 @@ mod send_input_tests {
         };
         c.retry_after_resume_failure(
             config,
-            vec!["msg-1".to_string(), "msg-2".to_string(), "msg-3".to_string()],
+            vec![qentry(1, "msg-1"), qentry(2, "msg-2"), qentry(3, "msg-3")],
             None,
         );
 
@@ -4453,7 +4637,7 @@ mod send_input_tests {
             session_id: String::new(),
             message_id: None,
         };
-        c.retry_after_resume_failure(config, vec!["stuck".to_string()], None);
+        c.retry_after_resume_failure(config, vec![qentry(1, "stuck")], None);
 
         let inner = c.inner.lock().unwrap();
         assert_eq!(
@@ -4493,7 +4677,7 @@ mod send_input_tests {
         };
         c.retry_after_resume_failure(
             config,
-            vec!["msg-1".to_string(), "msg-2".to_string(), "msg-3".to_string()],
+            vec![qentry(1, "msg-1"), qentry(2, "msg-2"), qentry(3, "msg-3")],
             None,
         );
 
@@ -4535,7 +4719,7 @@ mod send_input_tests {
             session_id: String::new(),
             message_id: None,
         };
-        c.retry_after_resume_failure(config, vec!["stuck".to_string()], None);
+        c.retry_after_resume_failure(config, vec![qentry(1, "stuck")], None);
 
         assert!(
             c.inner.lock().unwrap().spawning_in_progress,
@@ -4581,7 +4765,7 @@ mod send_input_tests {
             session_id: String::new(),
             message_id: None,
         };
-        c.retry_after_resume_failure(config, vec!["{}".to_string()], Some("boom\n".to_string()));
+        c.retry_after_resume_failure(config, vec![qentry(1, "{}")], Some("boom\n".to_string()));
 
         let flushed = filestore
             .read_file(&block_id, PERSISTENT_OUTPUT_SUBJECT)
@@ -4636,7 +4820,7 @@ mod send_input_tests {
             session_id: String::new(),
             message_id: None,
         };
-        c.retry_after_resume_failure(config, vec!["stuck".to_string()], Some("boom\n".to_string()));
+        c.retry_after_resume_failure(config, vec![qentry(1, "stuck")], Some("boom\n".to_string()));
         tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
 
         let flushed = filestore
@@ -4677,15 +4861,15 @@ mod send_input_tests {
             let mut inner = c.inner.lock().unwrap();
             inner.stdin_tx = Some(tx);
             inner.spawning_in_progress = true;
-            inner.pending_send_messages.push_back(QueuedMessage::fresh("first".to_string()));
-            inner.pending_send_messages.push_back(QueuedMessage::fresh("second".to_string()));
+            inner.pending_send_messages.push_back(QueuedMessage::fresh(1, "first".to_string()));
+            inner.pending_send_messages.push_back(QueuedMessage::fresh(2, "second".to_string()));
             // Simulates spawn_process's own synchronous stash for "first"
             // — the message that triggered this spawn.
             let generation = inner.spawn_generation;
             inner.apply_resume_event(persistent_resume::ResumeEvent::SpawnedWithResume {
                 generation,
                 attempted_sid: "sid".to_string(),
-                retry: persistent_resume::RetryPayload { config: retry_config.clone(), messages: vec!["first".to_string()] },
+                retry: persistent_resume::RetryPayload { config: retry_config.clone(), messages: vec![qentry(1, "first")] },
             });
         }
 
@@ -4703,7 +4887,7 @@ mod send_input_tests {
         match &inner.resume {
             persistent_resume::ResumeState::AwaitingOutcome { retry, .. } => assert_eq!(
                 retry.messages,
-                vec!["first".to_string(), "second".to_string()],
+                vec![qentry(1, "first"), qentry(2, "second")],
                 "must contain the ORIGINAL message exactly once plus every later delivery, in order"
             ),
             other => panic!("expected AwaitingOutcome, got {other:?}"),
@@ -4742,8 +4926,8 @@ mod send_input_tests {
             inner.spawning_in_progress = true;
             // Simulates a "second stall" leaving an older leftover queued
             // ahead of this spawn's own triggering message.
-            inner.pending_send_messages.push_back(QueuedMessage::fresh("older-leftover".to_string()));
-            inner.pending_send_messages.push_back(QueuedMessage::fresh("new-trigger".to_string()));
+            inner.pending_send_messages.push_back(QueuedMessage::fresh(1, "older-leftover".to_string()));
+            inner.pending_send_messages.push_back(QueuedMessage::fresh(2, "new-trigger".to_string()));
             // spawn_process's own synchronous stash — seeded with the
             // ACTUAL trigger message, not whatever happens to sit at the
             // front of the queue.
@@ -4753,7 +4937,7 @@ mod send_input_tests {
                 attempted_sid: "sid".to_string(),
                 retry: persistent_resume::RetryPayload {
                     config: retry_config.clone(),
-                    messages: vec!["new-trigger".to_string()],
+                    messages: vec![qentry(2, "new-trigger")],
                 },
             });
         }
@@ -4775,11 +4959,11 @@ mod send_input_tests {
             "must contain exactly the older leftover plus the trigger, no omission, no duplication: {delivered:?}"
         );
         assert!(
-            delivered.contains(&"older-leftover".to_string()),
+            delivered.iter().any(|e| e.json == "older-leftover"),
             "the older leftover must not be silently dropped from the retry batch"
         );
         assert_eq!(
-            delivered.iter().filter(|m| *m == "new-trigger").count(),
+            delivered.iter().filter(|e| e.json == "new-trigger").count(),
             1,
             "the actual trigger message must not be recorded twice"
         );
@@ -4809,15 +4993,15 @@ mod send_input_tests {
             let mut inner = c.inner.lock().unwrap();
             inner.stdin_tx = Some(tx);
             inner.spawning_in_progress = true;
-            inner.pending_send_messages.push_back(QueuedMessage::fresh("first".to_string()));
-            inner.pending_send_messages.push_back(QueuedMessage::fresh("second".to_string()));
+            inner.pending_send_messages.push_back(QueuedMessage::fresh(1, "first".to_string()));
+            inner.pending_send_messages.push_back(QueuedMessage::fresh(2, "second".to_string()));
             // Simulates poison_resume having ALREADY promoted the tentative
             // retry to confirmed before the drain got to "second".
             let generation = inner.spawn_generation;
             inner.apply_resume_event(persistent_resume::ResumeEvent::SpawnedWithResume {
                 generation,
                 attempted_sid: "sid".to_string(),
-                retry: persistent_resume::RetryPayload { config: retry_config.clone(), messages: vec!["first".to_string()] },
+                retry: persistent_resume::RetryPayload { config: retry_config.clone(), messages: vec![qentry(1, "first")] },
             });
             inner.apply_resume_event(persistent_resume::ResumeEvent::ResumeUnreachable {
                 generation,
@@ -4840,7 +5024,7 @@ mod send_input_tests {
         };
         assert_eq!(
             delivered,
-            &vec!["first".to_string(), "second".to_string()],
+            &vec![qentry(1, "first"), qentry(2, "second")],
             "must still be tracking this spawn's delivered messages, even though it was already confirmed"
         );
     }
@@ -4853,8 +5037,8 @@ mod send_input_tests {
     #[test]
     fn decide_retry_batch_action_enqueues_the_whole_batch_atomically() {
         let c = controller();
-        let action = c.decide_retry_batch_action("first", &["second".to_string(), "third".to_string()]);
-        assert!(matches!(action, SendAction::BecomeSpawner));
+        let action = c.decide_retry_batch_action(&qentry(1, "first"), &[qentry(2, "second"), qentry(3, "third")]);
+        assert!(matches!(action, SendAction::BecomeSpawner { .. }));
         let inner = c.inner.lock().unwrap();
         assert_eq!(
             inner.pending_send_messages.iter().cloned().collect::<Vec<_>>(),
@@ -4873,7 +5057,7 @@ mod send_input_tests {
         c.inner.lock().unwrap().spawning_in_progress = true;
 
         let action =
-            c.decide_retry_batch_action("hello", &["hello".to_string(), "hello".to_string()]);
+            c.decide_retry_batch_action(&qentry(1, "hello"), &[qentry(2, "hello"), qentry(3, "hello")]);
 
         assert!(matches!(action, SendAction::Queued));
         let inner = c.inner.lock().unwrap();
@@ -4893,16 +5077,20 @@ mod send_input_tests {
         {
             let mut inner = c.inner.lock().unwrap();
             inner.spawning_in_progress = true;
-            inner.pending_send_messages.push_back(QueuedMessage::fresh("first".to_string()));
+            inner.pending_send_messages.push_back(QueuedMessage::fresh(1, "first".to_string()));
         }
 
-        let action = c.decide_retry_batch_action("first", &["second".to_string()]);
+        let action = c.decide_retry_batch_action(&qentry(1, "first"), &[qentry(2, "second")]);
 
         assert!(matches!(action, SendAction::Queued));
         let inner = c.inner.lock().unwrap();
         assert_eq!(
-            inner.pending_send_messages.iter().cloned().collect::<Vec<_>>(),
-            vec!["first".to_string(), "second".to_string()],
+            inner
+                .pending_send_messages
+                .iter()
+                .map(|m| (m.seq, m.json_str.clone()))
+                .collect::<Vec<_>>(),
+            vec![(1, "first".to_string()), (2, "second".to_string())],
             "the already-queued first entry must not be duplicated, but the rest of the batch must still be appended"
         );
     }
@@ -4923,10 +5111,10 @@ mod send_input_tests {
             // started, while the retry's own trigger ("A") had already
             // been popped and delivered (and is no longer in the queue —
             // it's now tracked only in the confirmed retry batch).
-            inner.pending_send_messages.push_back(QueuedMessage::fresh("later-message".to_string()));
+            inner.pending_send_messages.push_back(QueuedMessage::fresh(1, "later-message".to_string()));
         }
 
-        let action = c.decide_retry_batch_action("A", &[]);
+        let action = c.decide_retry_batch_action(&qentry(2, "A"), &[]);
 
         assert!(matches!(action, SendAction::Queued));
         let inner = c.inner.lock().unwrap();
@@ -4963,6 +5151,7 @@ mod resume_poison_tests {
             resume: persistent_resume::ResumeState::default(),
             spawning_in_progress: false,
             pending_send_messages: VecDeque::new(),
+            next_message_seq: 0,
             drain_send_in_flight: false,
             current_pid: None,
             stdin_tx: None,
@@ -4986,11 +5175,62 @@ mod resume_poison_tests {
     }
 
     fn spawned_with_resume(inner: &mut PersistentInner, generation: u64, attempted_sid: &str) {
+        // Mirror production's invariant (`spawn_process` bumps
+        // `spawn_generation` in the same lock acquisition that applies
+        // the spawn event): ambient adoption in `try_capture_session_id`
+        // is gated on generation currency (issue #2366), so a helper
+        // that left `spawn_generation` at 0 would make every capture
+        // look stale.
+        inner.spawn_generation = generation;
         inner.apply_resume_event(persistent_resume::ResumeEvent::SpawnedWithResume {
             generation,
             attempted_sid: attempted_sid.to_string(),
-            retry: persistent_resume::RetryPayload { config: dummy_spawn_config(), messages: vec!["{}".to_string()] },
+            retry: persistent_resume::RetryPayload { config: dummy_spawn_config(), messages: vec![persistent_resume::QueuedRetryEntry { seq: 1, json: "{}".to_string() }] },
         });
+    }
+
+    /// Issue #2366 regression: a superseded generation's still-draining
+    /// stdout reader must not re-install its stale sid into ambient
+    /// `session_id` after a fallback respawn's plain clear.
+    /// `respawn_once_for_leftover_queue` deliberately does NOT poison
+    /// (the death may be unrelated to a stale resume — see its round-13
+    /// comment), so `resume_poisoned` cannot catch this echo; only the
+    /// generation gate can.
+    #[test]
+    fn a_stale_generations_capture_does_not_adopt_into_ambient_session_id() {
+        let mut inner = inner_with_session_id(Some("stale-sid"));
+        spawned_with_resume(&mut inner, 1, "stale-sid");
+
+        // The gen-1 process died; the fallback respawn cleared the
+        // ambient sid and spawned gen 2 fresh (no --resume, so no new
+        // resume tracking).
+        inner.session_id = None;
+        inner.spawn_generation = 2;
+        inner.apply_resume_event(persistent_resume::ResumeEvent::SpawnedFresh { generation: 2 });
+
+        // Gen 1's stdout reader finally drains its buffered echo of the
+        // stale attempted sid.
+        let (adopted, _effects) = inner.try_capture_session_id("stale-sid", 1, false);
+
+        assert!(!adopted, "a superseded generation's echo must not be adopted");
+        assert_eq!(
+            inner.session_id, None,
+            "ambient session_id must stay clear for the live generation's own capture"
+        );
+    }
+
+    /// Control case for the gate above: the CURRENT generation's capture
+    /// into a cleared ambient sid must still adopt normally.
+    #[test]
+    fn the_current_generations_capture_still_adopts_after_a_clear() {
+        let mut inner = inner_with_session_id(None);
+        inner.spawn_generation = 2;
+        inner.apply_resume_event(persistent_resume::ResumeEvent::SpawnedFresh { generation: 2 });
+
+        let (adopted, _effects) = inner.try_capture_session_id("fresh-sid", 2, false);
+
+        assert!(adopted, "the live generation's first capture must adopt");
+        assert_eq!(inner.session_id.as_deref(), Some("fresh-sid"));
     }
 
     // stderr wins the race: poisons the id and clears it from session_id,
@@ -5011,6 +5251,9 @@ mod resume_poison_tests {
     #[test]
     fn stdout_first_then_stderr_poison_still_clears() {
         let mut inner = inner_with_session_id(None);
+        // A capture for generation 1 can only originate from a gen-1
+        // spawn's own reader task (issue #2366's currency gate).
+        inner.spawn_generation = 1;
         let (captured, _effects) = inner.try_capture_session_id("dead-sid", 1, true);
         assert!(captured, "first capture with no prior state succeeds");
         assert_eq!(inner.session_id.as_deref(), Some("dead-sid"));
@@ -5024,6 +5267,9 @@ mod resume_poison_tests {
     #[test]
     fn different_fresh_session_id_is_captured_normally() {
         let mut inner = inner_with_session_id(None);
+        // A capture for generation 1 can only originate from a gen-1
+        // spawn's own reader task (issue #2366's currency gate).
+        inner.spawn_generation = 1;
         inner.poison_resume("dead-sid", 1);
 
         let (captured, _effects) = inner.try_capture_session_id("fresh-sid", 1, true);
