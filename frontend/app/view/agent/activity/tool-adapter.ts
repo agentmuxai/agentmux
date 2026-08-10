@@ -29,13 +29,52 @@
  */
 
 import { extractToolDetail } from "../stream-parser";
-import type { DocumentNode, ToolNode } from "../types";
+import type { BashParams, DocumentNode, ToolNode } from "../types";
 import type { ActivityStatus, PinnedActivity } from "./types";
 
 export const TOOL_PROMOTION_MS = 30_000;
 
 function isBashToolNode(n: DocumentNode): n is ToolNode {
     return n.type === "tool" && n.tool === "Bash" && n.timestamp != null;
+}
+
+/**
+ * True for a Bash call the harness ran detached (issue #2490): its
+ * `tool_use.input` carried `run_in_background: true` and the tool_result
+ * came back accepted ("Command running in background with ID: …"). The
+ * ToolNode is terminal within ~a second, but the real process tree keeps
+ * running until a `<task-notification>` lands — so, unlike an ordinary
+ * call, terminal-with-success here means STARTED, not finished. A failed
+ * launch (`status: "failed"` — the harness refused the command) is not a
+ * live background task and falls through to the ordinary duration rules.
+ */
+function isAcceptedBackgroundLaunch(n: ToolNode): boolean {
+    return (n.params as BashParams | undefined)?.run_in_background === true && n.status === "success";
+}
+
+/**
+ * Terminal outcomes of backgrounded calls, keyed by originating
+ * `tool_use_id`. The harness reports a background task's ACTUAL
+ * completion as a plain user message whose whole payload is a
+ * `<task-notification>` block naming the `<tool-use-id>` it belongs to
+ * and a `<status>` — that message (not the instant tool_result) is the
+ * background task's real end-of-life signal. Parsed leniently: a
+ * notification without a recognizable status still ends the task
+ * (as "stopped") rather than leaving a finished process shown as
+ * running forever.
+ */
+function backgroundCompletions(nodes: ReadonlyArray<DocumentNode>): Map<string, { status: ActivityStatus; endedAt?: number }> {
+    const out = new Map<string, { status: ActivityStatus; endedAt?: number }>();
+    for (const n of nodes) {
+        if (n.type !== "user_message" || !n.message.includes("<task-notification>")) continue;
+        const toolUseId = /<tool-use-id>([^<]+)<\/tool-use-id>/.exec(n.message)?.[1];
+        if (!toolUseId) continue;
+        const rawStatus = /<status>([^<]+)<\/status>/.exec(n.message)?.[1];
+        const status: ActivityStatus =
+            rawStatus === "completed" ? "done" : rawStatus === "failed" ? "error" : "stopped";
+        out.set(toolUseId, { status, endedAt: n.timestamp });
+    }
+    return out;
 }
 
 /** True while `n` is running and has already crossed the promotion
@@ -90,11 +129,40 @@ export function toolToActivity(n: ToolNode): PinnedActivity {
 /** Every Bash tool call that has ever crossed `TOOL_PROMOTION_MS` — running
  *  ones past the threshold, plus finished ones whose total duration cleared
  *  it (still returned after they finish so the dock's own RETENTION_MS
- *  window, not this function, decides when the row actually disappears). */
+ *  window, not this function, decides when the row actually disappears).
+ *
+ *  PLUS every accepted backgrounded call (issue #2490): those are
+ *  agent-declared long-running work, so they get a dock row immediately
+ *  (no 30s threshold — the duration heuristic exists to auto-detect
+ *  undeclared long work, and a declared background task needs no
+ *  detection) that stays `running` until the harness's
+ *  `<task-notification>` for this exact `tool_use_id` lands. The
+ *  attached-task axis (attached-task.ts) picks these up with no changes,
+ *  by construction — spec §4 of
+ *  SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md. */
 export function toolActivities(nodes: ReadonlyArray<DocumentNode>, now: number): PinnedActivity[] {
     const out: PinnedActivity[] = [];
+    let completions: Map<string, { status: ActivityStatus; endedAt?: number }> | null = null;
     for (const n of nodes) {
         if (!isBashToolNode(n)) continue;
+        if (isAcceptedBackgroundLaunch(n)) {
+            // Built lazily: the vast majority of documents contain no
+            // backgrounded calls, and scanning every user message for
+            // notifications on every recompute would be pure waste there.
+            completions ??= backgroundCompletions(nodes);
+            const completion = completions.get(n.id);
+            const activity = toolToActivity(n);
+            if (completion) {
+                out.push({ ...activity, status: completion.status, endedAt: completion.endedAt });
+            } else {
+                // Still running for real, whatever the instant
+                // tool_result said — override the terminal status the
+                // plain mapping derived, and drop the endedAt derived
+                // from the launch acknowledgment's duration.
+                out.push({ ...activity, status: "running", endedAt: undefined });
+            }
+            continue;
+        }
         if (!everCrossedThreshold(n, now)) continue;
         out.push(toolToActivity(n));
     }

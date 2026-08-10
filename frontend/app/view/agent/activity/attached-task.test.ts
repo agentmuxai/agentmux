@@ -99,3 +99,38 @@ describe("earliestLiveAttachedStartMs", () => {
         expect(earliestLiveAttachedStartMs(nodes, subs, "block-1", 10_000)).toBe(500);
     });
 });
+
+// ── Backgrounded calls reach the axis by construction (issue #2490) ──
+
+describe("backgrounded Bash calls (issue #2490)", () => {
+    it("an accepted background launch counts as live attached work from its call time", () => {
+        const bg = mkBash({
+            id: "toolu_bg",
+            status: "success",
+            params: { command: "task dev", run_in_background: true },
+            timestamp: 1000,
+            duration: 0.4,
+        });
+        // Sub-second and terminal — invisible to the duration heuristic,
+        // but a declared background task must still light the axis.
+        expect(hasLiveAttachedActivity([bg], [], "block-1", 2000)).toBe(true);
+        expect(earliestLiveAttachedStartMs([bg], [], "block-1", 2000)).toBe(1000);
+    });
+
+    it("its task-notification ends the episode", () => {
+        const bg = mkBash({
+            id: "toolu_bg",
+            status: "success",
+            params: { command: "task dev", run_in_background: true },
+            timestamp: 1000,
+            duration: 0.4,
+        });
+        const notification: DocumentNode = {
+            type: "user_message",
+            id: "user-1",
+            message: "<task-notification>\n<tool-use-id>toolu_bg</tool-use-id>\n<status>completed</status>\n</task-notification>",
+            timestamp: 900_000,
+        };
+        expect(hasLiveAttachedActivity([bg, notification], [], "block-1", 950_000)).toBe(false);
+    });
+});

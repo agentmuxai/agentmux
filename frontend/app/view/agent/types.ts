@@ -122,6 +122,20 @@ interface WriteParams {
 export interface BashParams {
     command: string;
     timeout?: number;
+    /**
+     * True when the harness runs this command detached: the tool_result
+     * returns almost immediately ("Command running in background with
+     * ID: …") while the real process tree keeps running, and a
+     * `<task-notification>` user message carrying this call's
+     * `tool_use_id` arrives when it actually finishes. The flag was
+     * always present in the wire `tool_use.input` and flows through
+     * `ToolNode.params` untouched — this field just names it so
+     * tool-adapter.ts can give backgrounded calls a dock row that
+     * tracks the REAL lifetime instead of the instant tool_result
+     * (issue #2490; docs/status/STATUS_ATTACHED_TASK_AXIS_AND_DEV_LOOP_2026_08_09.md
+     * rung 2).
+     */
+    run_in_background?: boolean;
 }
 
 interface GrepParams {
