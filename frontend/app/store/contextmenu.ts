@@ -118,17 +118,29 @@ async function getClipboardURL(): Promise<URL | null> {
     }
 }
 
-async function showTextInputContextMenu(e: MouseEvent): Promise<void> {
+/**
+ * @param leadingItems caller-supplied items rendered ABOVE the standard
+ * Cut/Copy/Paste block (separated from it) — e.g. the agent composer's
+ * "Undo" (AgentFooter.tsx). When provided, the menu shows even if none of
+ * the standard items are enabled (an empty composer still offers Undo).
+ */
+async function showTextInputContextMenu(e: MouseEvent, leadingItems?: ContextMenuItem[]): Promise<void> {
     e.preventDefault();
     e.stopPropagation();
     const canPaste = canEnablePaste();
     const canCopy = canEnableCopy();
     const canCut = canEnableCut();
     const clipboardURL = await getClipboardURL();
-    if (!canPaste && !canCopy && !canCut && !clipboardURL) {
+    if (!canPaste && !canCopy && !canCut && !clipboardURL && !leadingItems?.length) {
         return;
     }
     let menu: ContextMenuItem[] = [];
+    if (leadingItems?.length) {
+        menu.push(...leadingItems);
+        if (canCut || canCopy || canPaste || clipboardURL) {
+            menu.push({ type: "separator" });
+        }
+    }
     if (canCut) {
         menu.push({ label: "Cut", role: "cut" });
     }
