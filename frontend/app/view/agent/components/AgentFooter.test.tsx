@@ -6,6 +6,10 @@
  * on PR #2497): `escClearedDraft` must be invalidated by any edit or send
  * after the Esc-clear, so Ctrl/Cmd+Z can't resurrect stale text once a new
  * message has been typed, deleted back to empty, or sent.
+ *
+ * Also covers the ghost-text next-prompt suggestion's restore-on-clear
+ * behavior added by
+ * docs/specs/SPEC_NEXT_PROMPT_SUGGESTION_RESTORE_ON_CLEAR_2026_08_10.md.
  */
 
 import { cleanup, render, screen } from "@solidjs/testing-library";
@@ -13,6 +17,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AgentFooter } from "./AgentFooter";
+import { ObjectService } from "@/app/store/services";
+import type { AgentViewModel } from "../agent-model";
 
 afterEach(() => {
     cleanup();
@@ -82,5 +88,70 @@ describe("AgentFooter Esc-clear Undo", () => {
         // Ctrl+Z after sending would resurrect the pre-Esc "hello" draft.
         keyOn(ta, "z", { ctrlKey: true });
         expect(ta.value).toBe("");
+    });
+});
+
+// Minimal AgentViewModel double — only the fields AgentFooter actually reads:
+// blockId (voice-target wiring), blockAtom (ghost-text suggestion meta), and
+// voiceTargetRef (onMount registers a PaneVoiceHandle onto it unconditionally
+// whenever a viewModel is present). suggestion is fixed for the lifetime of
+// the mock, which is deliberate: these tests exist to prove editing the
+// composer never triggers a write that would clear it, not to simulate the
+// real reactive meta atom.
+function makeViewModel(suggestion: string | undefined): AgentViewModel {
+    return {
+        blockId: "test-block",
+        blockAtom: () => ({ meta: { "term:next_prompt_suggestion": suggestion } }) as any,
+        voiceTargetRef: { current: null },
+    } as unknown as AgentViewModel;
+}
+
+describe("AgentFooter ghost-text next-prompt suggestion (SPEC_NEXT_PROMPT_SUGGESTION_RESTORE_ON_CLEAR_2026_08_10.md)", () => {
+    it("shows the suggestion as placeholder text when set", () => {
+        render(() => <AgentFooter agentName="Test" viewModel={makeViewModel("Run the tests")} />);
+        expect(screen.getByPlaceholderText("Run the tests")).toBeTruthy();
+    });
+
+    // The actual bug this spec fixes: typing over the suggestion then
+    // deleting back to empty used to permanently clear it from block meta,
+    // so the composer fell back to "Send message to <agent>..." instead of
+    // showing the suggestion again.
+    it("keeps showing the same suggestion after typing over it and deleting back to empty", async () => {
+        const updateSpy = vi.spyOn(ObjectService, "UpdateObjectMeta").mockResolvedValue(undefined);
+        render(() => <AgentFooter agentName="Test" viewModel={makeViewModel("Run the tests")} />);
+        const user = userEvent.setup();
+        const ta = screen.getByRole("textbox") as HTMLTextAreaElement;
+
+        await user.type(ta, "actually let me refactor first");
+        await user.clear(ta);
+
+        expect(ta.value).toBe("");
+        expect(ta.placeholder).toBe("Run the tests");
+        // The regression: handleInput used to null term:next_prompt_suggestion
+        // on the first keystroke into an empty box. Editing must never write
+        // to it at all — only a new turn starting or session end may.
+        expect(updateSpy).not.toHaveBeenCalled();
+    });
+
+    it("Tab accepts the suggestion into the composer without clearing it from meta", async () => {
+        const updateSpy = vi.spyOn(ObjectService, "UpdateObjectMeta").mockResolvedValue(undefined);
+        render(() => <AgentFooter agentName="Test" viewModel={makeViewModel("Run the tests")} />);
+        const ta = screen.getByRole("textbox") as HTMLTextAreaElement;
+
+        keyOn(ta, "Tab");
+        expect(ta.value).toBe("Run the tests");
+        expect(updateSpy).not.toHaveBeenCalled();
+
+        // Deleting the accepted text back to empty shows the same
+        // suggestion again — accepting via Tab and typing it by hand are
+        // treated identically (spec §5 point 1).
+        const user = userEvent.setup();
+        await user.clear(ta);
+        expect(ta.placeholder).toBe("Run the tests");
+    });
+
+    it("falls back to the default placeholder when no suggestion is set", () => {
+        render(() => <AgentFooter agentName="Test" viewModel={makeViewModel(undefined)} />);
+        expect(screen.getByPlaceholderText("Send message to Test...")).toBeTruthy();
     });
 });

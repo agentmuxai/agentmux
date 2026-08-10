@@ -9,11 +9,8 @@ import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type 
 import { useTick } from "@/app/hook/useTick";
 import { getVoiceSession, type PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { markEnd, markStart } from "@/perf";
-import { makeORef } from "@/app/store/wos";
 import { atoms } from "@/app/store/global";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
-import { ObjectService } from "@/app/store/services";
-import { fireAndForget } from "@/util/util";
 import { formatCompactNumber } from "@/util/format-count";
 import { formatElapsedCompact } from "@/util/format-time";
 import { abbreviateText } from "@/util/format-text";
@@ -470,7 +467,13 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     //      the session, so it's obvious transcription is live and routed here.
     //   3. The default "Send message to <agent>…" prompt.
     // Reactive: reads the block meta atom + the voice singleton's SignalAtoms
-    // so it flips the instant either changes.
+    // so it flips the instant either changes. term:next_prompt_suggestion is
+    // NOT cleared by editing the composer (handleInput/handleKeyDown below
+    // deliberately leave it alone) — typing over it and deleting back to
+    // empty shows the same suggestion again, rather than falling through to
+    // band 3. It's cleared only by an actual new turn starting or the
+    // session ending (useNextPromptSuggestion.ts's own guards). See
+    // docs/specs/SPEC_NEXT_PROMPT_SUGGESTION_RESTORE_ON_CLEAR_2026_08_10.md.
     const voice = getVoiceSession();
     const placeholder = createMemo(() => {
         const vm = props.viewModel;
@@ -509,22 +512,9 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         }
     };
 
-    // Tracks the box's emptiness immediately BEFORE the current edit — used
-    // by the ghost-text clear check in handleInput below (SPEC_AMBIENT_GHOST_
-    // TEXT_NEXT_PROMPT_2026_07_03.md §4.3). Every programmatic write to
-    // textareaRef.value MUST go through writeComposerValue (never assign
-    // `.value` directly) so this stays in sync — none of these writers
-    // dispatch a real `input` event, so handleInput never sees them, and a
-    // stale flag either misses clearing a real stale suggestion or
-    // re-triggers the clear check on an edit that isn't actually the first
-    // one from empty. Seeded `true` (safe default: even if wrong for a mount
-    // with restored draft text, ghost text is only ever shown for an empty
-    // composer, so there's nothing to dismiss in that case anyway).
-    let boxWasEmpty = true;
     const writeComposerValue = (text: string): void => {
         if (!textareaRef) return;
         textareaRef.value = text;
-        boxWasEmpty = text.length === 0;
     };
 
     const acceptCompletion = (cmd: SlashCommand): void => {
@@ -575,27 +565,21 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         // body P95 < 5 ms. The mark span ends BEFORE the RAF enqueue so
         // we measure only the synchronous handler cost.
         markStart("agent-keystroke");
-        // The first edit into a previously-empty box dismisses any pending
-        // ghost-text suggestion — it must not silently reappear if the user
-        // later deletes back to empty. Checks the box's PRE-edit emptiness
-        // (boxWasEmpty) rather than the post-edit length: a `value.length
-        // === 1` check only catches a single typed keystroke and misses
-        // paste or voice-transcript inserts, which dispatch the same
-        // `input` event but can write multiple characters into an empty
-        // box at once (reagentx review on #1961). See
-        // docs/specs/SPEC_AMBIENT_GHOST_TEXT_NEXT_PROMPT_2026_07_03.md §4.3.
-        const newValue = textareaRef?.value ?? "";
-        if (boxWasEmpty && newValue.length > 0) {
-            const vm = props.viewModel;
-            if (vm?.blockAtom()?.meta?.["term:next_prompt_suggestion"]) {
-                fireAndForget(() =>
-                    ObjectService.UpdateObjectMeta(makeORef("block", vm.blockId), {
-                        "term:next_prompt_suggestion": null,
-                    } as any)
-                );
-            }
-        }
-        boxWasEmpty = newValue.length === 0;
+        // Deliberately does NOT clear term:next_prompt_suggestion here.
+        // Typing over the ghost text (or deleting back to empty) no longer
+        // dismisses it for good — the suggestion in block meta is untouched
+        // by editing, and is cleared only by the two lifecycle events that
+        // own that responsibility: a new turn starting (guard 1,
+        // useNextPromptSuggestion.ts) and session end (guard 4, same file).
+        // The native <textarea placeholder> already only renders on an
+        // empty value, so hiding it while the user types needs no code here
+        // at all — and leaving the meta alone means deleting back to empty
+        // shows the same suggestion again instead of falling through to
+        // "Send message to <agent>...". See
+        // docs/specs/SPEC_NEXT_PROMPT_SUGGESTION_RESTORE_ON_CLEAR_2026_08_10.md
+        // §2 for why the RPC-write race this used to guard against is
+        // already independently closed by isComposerEmptyRef below, not by
+        // clearing meta on every first keystroke.
         updateAutocomplete();
         setIsBangCmd(textareaRef?.value.startsWith("!") ?? false);
         const cb = props.onTyping;
@@ -779,11 +763,13 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
             if (suggestion) {
                 e.preventDefault();
                 setComposerValue(suggestion);
-                fireAndForget(() =>
-                    ObjectService.UpdateObjectMeta(makeORef("block", vm!.blockId), {
-                        "term:next_prompt_suggestion": null,
-                    } as any)
-                );
+                // Deliberately does NOT clear term:next_prompt_suggestion —
+                // same reasoning as handleInput above (§3.3 of
+                // SPEC_NEXT_PROMPT_SUGGESTION_RESTORE_ON_CLEAR_2026_08_10.md):
+                // accepting via Tab and then deleting the accepted text
+                // should behave the same as typing it by hand and deleting
+                // it, both ending in the same empty-box state. Cleared only
+                // by the two lifecycle guards in useNextPromptSuggestion.ts.
                 return;
             }
         }
