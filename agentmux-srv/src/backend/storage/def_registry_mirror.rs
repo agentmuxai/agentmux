@@ -316,6 +316,38 @@ mod tests {
         assert_eq!(skills[0].name, "greet");
     }
 
+    // reagent P0 on PR #2505: agent_def_list's global overlay unconditionally
+    // inserted the registry-derived def over the local one for every user
+    // agent id — including a same-channel agent that's ALSO mirrored into
+    // the global store (the normal case: every agent.define write
+    // auto-mirrors via registry_def_upsert). Since DefinitionRecordV1 never
+    // carries model_vendor_base_url (deliberately channel-local only), the
+    // overlay's always-"" value silently erased the local override on every
+    // read — including agent.open's spawn-time resolution — making the
+    // whole feature a no-op in default single-instance operation, not just
+    // the documented genuinely-cross-channel case.
+    #[test]
+    fn agent_def_list_preserves_local_model_vendor_base_url_over_the_global_overlay() {
+        let store = Store::open_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let def_store = Arc::new(DefinitionStore::open(tmp.path().join("definitions")).unwrap());
+
+        let mut def = local_def("agent-1", "Vendor Agent");
+        def.model_vendor_base_url = "https://my-proxy.example.com".to_string();
+        store.agent_def_insert(&mut def).unwrap();
+        // Same id also present in the global store — the normal case, not
+        // the cross-channel-only case the earlier (buggy) comment assumed.
+        def_store.upsert(&global_user_agent("agent-1", "Vendor Agent")).unwrap();
+        store.set_def_registry(def_store);
+
+        let list = store.agent_def_list().unwrap();
+        let found = list.iter().find(|d| d.id == "agent-1").expect("agent must be listed");
+        assert_eq!(
+            found.model_vendor_base_url, "https://my-proxy.example.com",
+            "the global overlay must not wipe a same-channel agent's vendor override"
+        );
+    }
+
     fn local_def(id: &str, name: &str) -> AgentDefinition {
         AgentDefinition {
             id: id.to_string(),

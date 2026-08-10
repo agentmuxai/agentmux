@@ -171,3 +171,97 @@ mod tests {
         assert!(validate_vendor_base_url("not-a-real-provider", "https://x").is_err());
     }
 }
+
+// reagent P1 on PR #2505: agent.define's update path had no way to distinguish
+// "don't touch model_vendor_base_url" from "clear it" (a plain empty String
+// always meant "don't touch"). Combined with the authoritative validation
+// re-running on every update against whatever is currently stored, a provider
+// change away from a vendor-capable provider while an old override sat there
+// permanently blocked every future agent.define call for that agent — there
+// was no way to ever un-set the stale value. Fixed via Option<String>: `None`
+// = don't touch, `Some("")` = explicit clear.
+#[cfg(test)]
+mod agent_define_core_vendor_tests {
+    use super::*;
+    use crate::server::tests::test_state;
+
+    fn cmd(value: serde_json::Value) -> CommandAgentDefineData {
+        serde_json::from_value(value).unwrap()
+    }
+
+    #[tokio::test]
+    async fn omitting_the_field_on_update_does_not_clear_a_previously_set_override() {
+        let state = test_state();
+
+        let created = agent_define_core(state.wstore.clone(), state.broker.clone(), cmd(json!({
+            "name": "vendor-test-agent",
+            "provider": "claude",
+            "model_vendor_base_url": "https://my-proxy.example.com",
+        }))).await.unwrap();
+        let def = state.wstore.agent_def_get(&created.definition_id).unwrap().unwrap();
+        assert_eq!(def.model_vendor_base_url, "https://my-proxy.example.com");
+
+        // Update that touches an unrelated field and omits model_vendor_base_url.
+        agent_define_core(state.wstore.clone(), state.broker.clone(), cmd(json!({
+            "name": "vendor-test-agent",
+            "if_exists": "update",
+            "description": "just touching something else",
+        }))).await.unwrap();
+        let def = state.wstore.agent_def_get(&created.definition_id).unwrap().unwrap();
+        assert_eq!(
+            def.model_vendor_base_url, "https://my-proxy.example.com",
+            "an omitted field must not clear the stored override"
+        );
+    }
+
+    #[tokio::test]
+    async fn explicit_empty_string_clears_a_previously_set_override() {
+        let state = test_state();
+
+        let created = agent_define_core(state.wstore.clone(), state.broker.clone(), cmd(json!({
+            "name": "vendor-clear-test",
+            "provider": "claude",
+            "model_vendor_base_url": "https://my-proxy.example.com",
+        }))).await.unwrap();
+
+        agent_define_core(state.wstore.clone(), state.broker.clone(), cmd(json!({
+            "name": "vendor-clear-test",
+            "if_exists": "update",
+            "model_vendor_base_url": "",
+        }))).await.unwrap();
+        let def = state.wstore.agent_def_get(&created.definition_id).unwrap().unwrap();
+        assert_eq!(def.model_vendor_base_url, "", "explicit empty string must clear the override");
+    }
+
+    #[tokio::test]
+    async fn a_stale_override_left_by_a_provider_change_is_recoverable_not_a_permanent_block() {
+        let state = test_state();
+
+        let created = agent_define_core(state.wstore.clone(), state.broker.clone(), cmd(json!({
+            "name": "vendor-poison-test",
+            "provider": "claude",
+            "model_vendor_base_url": "https://my-proxy.example.com",
+        }))).await.unwrap();
+
+        // Changing provider to one that doesn't support the override, without
+        // clearing it, must fail validation rather than silently succeeding.
+        let err = agent_define_core(state.wstore.clone(), state.broker.clone(), cmd(json!({
+            "name": "vendor-poison-test",
+            "if_exists": "update",
+            "provider": "codex",
+        }))).await.unwrap_err();
+        assert!(err.contains("does not support"));
+
+        // The agent must not be permanently stuck: clearing the override in
+        // the SAME call that changes provider must succeed.
+        agent_define_core(state.wstore.clone(), state.broker.clone(), cmd(json!({
+            "name": "vendor-poison-test",
+            "if_exists": "update",
+            "provider": "codex",
+            "model_vendor_base_url": "",
+        }))).await.unwrap();
+        let def = state.wstore.agent_def_get(&created.definition_id).unwrap().unwrap();
+        assert_eq!(def.provider, "codex");
+        assert_eq!(def.model_vendor_base_url, "");
+    }
+}
