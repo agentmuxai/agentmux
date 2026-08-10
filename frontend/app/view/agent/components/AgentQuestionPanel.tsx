@@ -307,13 +307,16 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
     // docs/specs/SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md §5.1.
     //
     // Gated on `hidden()` (SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md
-    // §3.3): this is a *live, bounded* pause tied to the mouse continuously
-    // being over the panel (plus a short post-hover grace), not a permanent
-    // disarm — the moment hover ends and the grace elapses, this effect
-    // re-runs and re-arms at a fresh AUTO_TIMEOUT_MS. That distinction is why
-    // this doesn't reopen §5.1's rejected design: there is no state here
-    // where the countdown can be suppressed indefinitely without the mouse
-    // actively, continuously returning to the panel.
+    // §3.3): this is a *live, strictly bounded* pause, not a permanent
+    // disarm — a hover starts a flat HOVER_HIDE_GRACE_MS window, and once it
+    // elapses this effect re-runs and re-arms at a fresh AUTO_TIMEOUT_MS
+    // UNCONDITIONALLY, regardless of whether the mouse is still over the
+    // panel (see onPanelPointerEnter's doc comment and spec §9 for why —
+    // an earlier, rejected version of this stayed hidden for as long as the
+    // mouse remained over the panel, which reopened §5.1's exact failure
+    // mode via a click's own mouseenter). That distinction is why this
+    // doesn't reopen §5.1's rejected design: the countdown can never be
+    // suppressed for longer than one HOVER_HIDE_GRACE_MS window per hover.
     //
     // A separate effect (rather than folding into the reset effect above)
     // because it depends on `submit`/`applyRecommendedDefaults`, which in
