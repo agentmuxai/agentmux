@@ -5101,13 +5101,17 @@ mod send_input_tests {
             Some(filestore.clone()),
         );
 
-        // "echo" (used elsewhere in this codebase's tests, e.g.
-        // subprocess/tests.rs) — a real, trivially-successful spawn target,
-        // so `spawn_process` returns `Ok(())` exactly as it would for a
-        // genuine fresh CLI respawn.
+        // codex P1 on this PR: "echo" is a cmd.exe BUILT-IN on Windows, not
+        // a standalone executable — `Command::new("echo")` fails to spawn
+        // on the required Windows CI leg, flipping this test's assertion
+        // (spawn `Err` routes through the FAILURE branch, which flushes
+        // "boom", the opposite of what's being proven here). "git" is a
+        // real, standalone executable guaranteed present on every
+        // supported CI platform (Windows/macOS/Linux all need it to check
+        // the repo out in the first place) and exits 0 near-instantly.
         let config = PersistentSpawnConfig {
-            cli_command: "echo".to_string(),
-            cli_args: vec![],
+            cli_command: "git".to_string(),
+            cli_args: vec!["--version".to_string()],
             working_dir: String::new(),
             env_vars: HashMap::new(),
             session_id_field: "session_id".to_string(),
