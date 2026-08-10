@@ -234,23 +234,51 @@ variant it shipped with, undecided, because import time is exactly the
 moment it's least knowable which agent(s) will eventually launch against
 it.
 
-**Merge, moved to launch time:** `agent_config.rs::build_config_files()`
-gains a new `provider: &str` parameter (the launching agent's own already-
-resolved provider — trivially available at every call site, since the
-agent's provider is what determines the launch args in the first place).
-When assembling `CLAUDE.md` content, it appends
-`bundle.instructions_by_provider.get(provider)` (if present) after the
-existing `default`/flat `instructions` content, using the same
-precedence idiom already used elsewhere for structured-then-free-form
-composition (e.g. `agent_open.rs`'s auth-env-then-free-form-`env`-blob
-ordering). This is genuinely correct where the import-time version wasn't:
-the same bundle, attached to a Claude agent and a Codex agent, now
-correctly gets each agent's own matching variant at the moment each is
-actually launched — not a single frozen decision baked in at import.
+**Revision note (Codex P1 ×2, PR #2517, second round):** the "launch-time
+merge in `build_config_files()`" design above was itself wrong, for a
+reason bigger than a missing parameter. Two things I hadn't checked:
+
+1. `build_config_files()`'s actual caller
+   (`agent_open.rs:653-707`) assembles its `content_map` from already-
+   resolved `AgentContent` rows (`content_type` → content, e.g. `"soul"`,
+   `"agentmd"`), not live from `db_bundles`. Whatever flattening happens
+   from a bundle into an agent's own content already happened earlier, at
+   bundle-attach time — there is no bundle value in scope at launch to
+   call `.get(provider)` on in the first place.
+2. More fundamentally: `build_config_files()` is **Claude-only**, by
+   explicit prior design decision, not an oversight this spec can patch.
+   `SPEC_CODEX_PROVIDER_INTEGRATION_2026_08_08.md:438-443` states this
+   directly: *"The current `build_config_files()` always creates
+   Claude-native files including `CLAUDE.md`... Writing those for a Codex
+   definition produces a successful filesystem operation but does not
+   configure Codex."* That spec's own §10.2 gives Codex a **completely
+   separate** delivery mechanism — compiled `developer_instructions` in an
+   AgentMux-owned TOML profile (`$CODEX_HOME/agentmux-<agent-id>.
+   config.toml`, loaded via `--profile`), not a file write into the
+   working directory at all. Every other provider will need its own
+   analogous materializer as it's onboarded. There is no single function
+   this spec can extend to deliver a provider-scoped variant to *every*
+   provider — that's a per-provider materializer architecture already in
+   progress separately, and re-designing it here would mean silently
+   redeciding a 400-line spec I hadn't read before proposing this section.
+
+**Corrected scope: ABF stores and exports/imports provider-scoped
+instruction data; delivering a selected variant into a running agent is
+each provider's own materializer's job, not this spec's.** §2.2 commits to
+the storage shape (`instructions_by_provider`), the authoring UI, and
+export/import — full stop. Wiring `instructions_by_provider.get(provider)`
+into any specific materializer (Claude's `build_config_files()`, Codex's
+TOML-profile compiler, or any future provider's own mechanism) is
+explicitly **out of scope**, moved to §3's non-goals. Until that wiring
+exists, a v0.2 bundle's provider-specific variants are exportable and
+importable but not yet consumed by any running agent — an honest, partial
+step (the storage/interchange half of the feature) rather than a claim
+this spec doesn't back up.
 
 **Backward compatibility:** a v0.1 bundle (or a v0.2 bundle with no
-`instructions_by_provider` entries) behaves exactly as today — `provider`
-parameter present but nothing to look up, no behavior change.
+`instructions_by_provider` entries) behaves exactly as today in every
+respect — nothing about existing export/import/launch behavior changes
+until a materializer is separately built to consume the new data.
 
 ### 2.3 Native memory as a new component
 
@@ -283,6 +311,19 @@ whichever agent was attached *at that moment*, producing stale or simply
 wrong content on a bundle's next export once it's reattached elsewhere,
 with no signal to the user that happened. (a) makes the scoping decision
 visible in the RPC call itself.
+
+**Revision note (Codex P1, PR #2517, second round): the mirror can be
+stale at export time.** `db_agent_native_memory` only gets refreshed by
+the Stash Memory tab's own `list`/`read_file`/`write_file` RPCs
+(`SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07.md` §2.2's write-through-on-
+read design) — a file Claude wrote autonomously since the tab was last
+opened (or never opened at all) sits live on disk but isn't in the mirror
+yet. `bundle.export_for_agent` has exactly what those RPCs have — the
+agent's own `config_dir`/`working_directory` — so before reading
+`db_agent_native_memory` for the snapshot, it must run the same
+live-FS-read-then-upsert pass `agent:memory:list` already performs
+(`native_memory_handlers.rs` list handler), not read the mirror cold.
+Reuses existing logic; doesn't invent new sync behavior.
 
 **Revision note (Codex P1 ×2, PR #2517):** the original draft assumed an
 "importing agent" exists during `bundle.import`/`bundle.import.commit` and
@@ -318,6 +359,23 @@ rather than reimplementing it, so imported memory gets durability and
 location-consistency for free, and — critically — is actually on disk
 where the harness will read it, not only in the mirror table.
 
+**Revision note (Codex P1, PR #2517, second round): a same-named file at
+an existing target silently destroys the agent's own memory.** Nothing in
+the original draft stopped `bundle.import_for_agent` from targeting an
+agent that already has its own `MEMORY.md` — the reused write-handler
+logic overwrites on rename, and the mirror upsert overwrites on conflict,
+with no preview or choice. **Scope narrowed for v0.2: `bundle.
+import_for_agent` only accepts a target agent with zero existing
+`db_agent_native_memory` rows** (checked before any write; a non-empty
+target is rejected outright with a clear error, not partially imported).
+This is the simplest rule that can't destroy existing memory, at the cost
+of not supporting "merge memory into an agent that already has some" —
+real skip/rename/replace semantics are a legitimate follow-up if that
+turns out to matter, flagged explicitly rather than designed here
+(matches this repo's own "explicit follow-up, not guessed at" convention
+— see `SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07.md` §4's own non-goals
+list for the precedent).
+
 ### 2.4 Manifest version
 
 `$schema` becomes `.../v0.2/bundle.schema.json`; `compatibility.agentmux`
@@ -332,15 +390,19 @@ credential-provider) and v0.2 (keyed instructions object,
 
 ## 3. Non-goals
 
-- **Switching `agent_config.rs`'s output filename per provider** (the
-  CLAUDE.md-always part of §1.2's finding — writing `AGENTS.md`/`GEMINI.md`
-  instead of `CLAUDE.md` for a non-Claude agent). Real, independently-
-  fixable gap, but unrelated to bundle content selection and belongs in
-  its own PR with its own test plan. Note this is narrower than the
-  original draft's non-goal: `build_config_files()` gaining a `provider`
-  parameter at all is now **in scope** (§2.2 depends on it to select the
-  right `instructions_by_provider` entry) — only the output filename stays
-  hardcoded to `CLAUDE.md` for now, unchanged from today.
+- **Wiring `instructions_by_provider` into any provider's launch-time
+  materializer** — including Claude's own `build_config_files()`. §2.2's
+  second revision narrowed this deliberately: `build_config_files()` is
+  Claude-only by prior design, doesn't currently receive bundle content at
+  all (its `content_map` comes from pre-resolved `AgentContent` rows, not
+  live `db_bundles` reads — `agent_open.rs:653-707`), and
+  `SPEC_CODEX_PROVIDER_INTEGRATION_2026_08_08.md` §10.2 gives Codex a
+  structurally different delivery mechanism entirely (a compiled
+  `developer_instructions` TOML profile, not a file write). This spec
+  ships the storage/authoring/export/import half of provider-scoped
+  instructions; actually delivering a selected variant into a running
+  agent is separate, per-provider materializer work, tracked as follow-up
+  rather than designed here.
 - **Any change to credential/account handling.** `SecretRef`-style
   declare-don't-bundle stays exactly as designed; §2.1's rename is
   cosmetic (field name only), not a design change.
@@ -386,10 +448,6 @@ credential-provider) and v0.2 (keyed instructions object,
   existing default `instructions/AGENTS.md`; a bundle with no variants
   exports identically to a v0.1 bundle (regression check against existing
   v0.1 export tests).
-- Unit: `build_config_files(..., provider)` — with a populated
-  `instructions_by_provider`, the matching provider's content is appended
-  after the default content; an unmatched or absent provider produces
-  output identical to the pre-§2.2 function signature (regression check).
 - Unit: `credentialProvider` round-trips through export → import
   unchanged; a v0.1 bundle still carrying the old `provider` key in
   `accounts/requirements.json` is still accepted on import (read as
@@ -406,11 +464,19 @@ credential-provider) and v0.2 (keyed instructions object,
   target agent's live `memory_dir_for_cwd(...)` path AND in
   `db_agent_native_memory` after import (both halves of the dual-write,
   not just the mirror).
+- Unit: `bundle.import_for_agent` rejects a target agent that already has
+  at least one `db_agent_native_memory` row, with no partial write of any
+  imported file (all-or-nothing on the pre-check, not per-file).
+- Unit: `bundle.export_for_agent` refreshes the mirror from the live
+  filesystem before snapshotting — a file present on disk but not yet in
+  `db_agent_native_memory` (simulating "written since the Memory tab was
+  last opened") is included in the export.
 - Integration: full export → import round trip for a bundle with
-  provider-scoped instructions AND memory components: export via
-  `bundle.export_for_agent` from a source agent, import via
-  `bundle.import_for_agent` into a fresh target agent, launch the target
-  agent on a provider matching one of the exported variants, and confirm
-  (a) the launched agent's materialized `CLAUDE.md` contains the matching
-  provider variant's content and (b) the target agent's Stash Memory tab
-  shows the imported memory files.
+  provider-scoped instructions AND memory components, landing in a fresh
+  target instance: export via `bundle.export_for_agent` from a source
+  agent, import via `bundle.import_for_agent` into a fresh (empty-memory)
+  target agent, and confirm (a) `armory.json`'s `components.instructions`
+  carries both the default and provider-keyed entries and (b) the target
+  agent's Stash Memory tab shows the imported memory files. Does **not**
+  cover launch-time materialization of the provider-scoped variant — that
+  consumption path doesn't exist yet per §3's non-goals.
