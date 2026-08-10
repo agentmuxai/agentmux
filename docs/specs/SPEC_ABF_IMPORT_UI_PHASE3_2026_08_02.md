@@ -1,7 +1,7 @@
 # Spec: ABF Import UI (Phase 3) — Selective Import + Collision Handling
 
 **Date:** 2026-08-02
-**Status:** Spec — not yet implemented.
+**Status:** implemented — PR #2382 (selective import + collision handling, 3-step modal); verified in code 2026-08-10.
 **Relationship to prior work:** builds on
 `docs/specs/SPEC_ABF_V0_1_SINGLE_FILE_AND_IMPORTER_2026_08_01.md`, whose §4.1
 explicitly scoped Phase 2 to "backend + RPC only... no UI (Phase 3, still

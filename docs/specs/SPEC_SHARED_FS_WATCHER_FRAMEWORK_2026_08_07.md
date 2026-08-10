@@ -1,7 +1,7 @@
 # SPEC: Shared filesystem-watcher framework — audit + design
 
 **Date:** 2026-08-07
-**Status:** Proposed
+**Status:** implemented — framework PR #2455 (backend/fs_watch/ FsWatchPool), consumers migrated in #2456 (config watcher) and #2462 (editor + media); verified in code 2026-08-10.
 **Trigger:** Follow-up to `docs/specs/SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07.md`,
 which deferred live capture of Claude's autonomous memory writes as a
 non-goal specifically because it would need a filesystem watcher. User

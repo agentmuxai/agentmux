@@ -1,6 +1,6 @@
 # Spec: true per-node token accounting
 
-**Status:** Design — open questions resolved (§6), sequenced as the second implementation pass. Not yet implemented.
+**Status:** proposed — verified unimplemented as of 2026-08-10 (no roundIndex/RoundRecord in frontend); base hover-peek shipped separately (PR #2392).
 **Relationship:** Phase 2 follow-up to `docs/specs/SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md`, which deliberately deferred real per-node token/cost data (§1.4/§4.2/§6 there) in favor of a client-side chars÷4 estimate. This spec answers "can we do better than a guess?" — and the answer is **partially yes, with a real derivation**, not a heuristic, for the Claude provider specifically.
 
 ## 1. The core insight

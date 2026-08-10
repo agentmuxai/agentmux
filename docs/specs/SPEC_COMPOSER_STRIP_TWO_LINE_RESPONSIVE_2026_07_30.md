@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-30
 **Type:** UI responsiveness spec
-**Status:** Proposed — audited and designed, not yet implemented
+**Status:** implemented — PR #2372 (container-query two-row grid); verified in code 2026-08-10.
 **Scope:** `frontend/app/view/agent/components/AgentComposerStrip.tsx` +
 `frontend/app/view/agent/styles/_composer-strip.scss`
 **Trigger:** User request — *"refine the responsiveness of the stats bar above the agent pane's

@@ -6,7 +6,7 @@
 dock items," and neither `muxlog` nor any existing RPC could answer "what is
 this running instance doing right now, and which instance is even hosting
 this conversation." That gap is the direct motivation for this spec.
-**Status:** Proposed when written; **since implemented and shipping** (PR #2380 landed `list`/`describe`; PR #2390, "surface last persisted spawn/execution error in list/describe", extends it further — both merged as of 2026-08-03). Confirmed via direct live use in this session: `node ~/.agentmux/shell/muxspect.mjs describe <block_id>` returns real `list`/`describe`/`last_error` output today, not the "no code yet" state this line originally described. Treat the phased design below as implementation history, not a pending proposal.
+**Status:** implemented — PRs #2380 (list/describe), #2390 (spawn/exec error surfacing), #2432 (dock); verified 2026-08-10.
 **Related:** `docs/specs/REPORT_PROCESS_ARCHITECTURE_STATE_AND_RETHINK_2026_07_22.md`
 (names the same six-plus overlapping liveness mechanisms this tool would read
 from, not add an seventh to), `agentmux-srv/src/broker/process.rs` (Process

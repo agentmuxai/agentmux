@@ -1,7 +1,7 @@
 # Spec: ABF v0.1 — Single-File Format + Importer (Phase 2)
 
 **Date:** 2026-08-01
-**Status:** Spec — implementation follows in this same effort (Phase 2, §4 below).
+**Status:** implemented — backend/bundle_import.rs + bundle.import RPC; extended by the Phase-3 UI (PR #2382). Verified 2026-08-10.
 **Relationship to prior work:** refines and partially supersedes
 `docs/specs/REPORT_ARMORY_BUNDLE_STANDARD_RESEARCH_2026_07_16.md` §5 (the
 original ABF proposal). That report's research (§1–§4, §7) stands unchanged —

@@ -1,6 +1,6 @@
 # Spec: Media pane v4 — agent-facing `OpenMedia` MCP tool
 
-**Status:** Proposed (implemented — see note below)
+**Status:** implemented — PR #2398 (OpenMedia MCP tool); verified in code 2026-08-10.
 **Author:** AgentY
 
 > **2026-08-07 audit note:** Implemented — `OpenMedia` MCP tool is live in

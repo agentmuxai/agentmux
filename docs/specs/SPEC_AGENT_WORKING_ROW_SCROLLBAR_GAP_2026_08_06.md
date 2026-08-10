@@ -1,7 +1,7 @@
 # Spec: Continuous AgentWorkingRow background through the scrollbar gutter
 
 **Date:** 2026-08-06
-**Status:** Proposed (analysis only — not yet implemented)
+**Status:** implemented — PR #2439 (backdrop-layer fix); verified in code 2026-08-10.
 **Scope:** `frontend/app/view/agent/agent-view.tsx`, `frontend/app/view/agent/styles/_control-bar.scss`, `frontend/app/view/agent/styles/_document.scss`
 **Related:** `SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md` §3.2 (introduced the floating-overlay architecture this spec builds on), the `.agent-working-row-anchor` z-index-obscures-scrollbar comment in `_control-bar.scss` (the earlier bug this spec must not reintroduce)
 

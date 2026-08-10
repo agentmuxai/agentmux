@@ -1,7 +1,7 @@
 # SPEC — Persistent controller race cluster: gap audit + remaining fixes
 
 **Date:** 2026-08-09 (rewritten same day after a current-code audit — see §1)
-**Status:** Proposed
+**Status:** implemented — PRs #2500 (§2 CAS cleanup + §3 seq-keyed queue) and #2501 (§4 drain-claim retry gate); verified in code 2026-08-10. Only §5's live verify-and-close of issues #2366/#2368 remains (non-code).
 **Scope:** `agentmux-srv/src/backend/blockcontroller/persistent.rs`,
 `session_recovery.rs` (one guarded variant), verification-and-close work
 for two issues.

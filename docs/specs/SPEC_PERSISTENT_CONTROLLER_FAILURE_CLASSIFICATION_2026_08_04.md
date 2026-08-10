@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-04
 **Type:** Bug fix (regression, not a new feature)
-**Status:** Proposed
+**Status:** implemented — PR #2421; verified in code 2026-08-10.
 **Owner:** Agent3
 **Scope:** `agentmux-srv/src/backend/blockcontroller/persistent.rs`
 **Related:** `SPEC_AGENT_FAILURE_DIAGNOSTICS_2026_06_11.md` (the classifier),

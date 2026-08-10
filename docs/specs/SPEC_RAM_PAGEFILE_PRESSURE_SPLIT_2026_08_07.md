@@ -1,7 +1,7 @@
 # Split the low-memory banner into independent RAM and Page File warnings
 
 **Date:** 2026-08-07
-**Status:** Draft — design proposal, not yet implemented
+**Status:** implemented — PR #2451 (P0 + P1); verified in code 2026-08-10.
 **Affected:** `agentmux-cef` (memory heartbeat, pressure classifier, banner emit) and
 `frontend` (banner component), Windows only.
 

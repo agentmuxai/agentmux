@@ -1,7 +1,7 @@
 # SPEC: Shift+drag group resize — move all sibling panes together on one splitter drag
 
 **Date:** 2026-08-03
-**Status:** Approved — design sign-off received (Shift confirmed over Ctrl; algorithm in §5 and minimize-lock handling in §5.3 both approved as proposed); implementing
+**Status:** implemented — PR #2401; verified in code 2026-08-10.
 **Author:** Loap (agent)
 **Tracking discussion:** user request, this session — "resize a bunch of panes simultaneously… if ctrl is pressed when a pane is resized, then all the panes along that dimension resize, not just the pane border the user is dragging." User reviewed §3/§6's prior-art survey and confirmed Shift over the originally-requested Ctrl ("yes, shift sounds right … otherwise your recommendations look good").
 

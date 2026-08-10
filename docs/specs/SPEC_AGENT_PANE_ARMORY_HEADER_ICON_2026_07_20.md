@@ -1,9 +1,7 @@
 # SPEC: Vault Icon on the Agent-Setup Button + Responsive Tabs in the Per-Agent "Armory"
 
 **Date:** 2026-07-20 (corrected 2026-07-21, extended 2026-07-21 §7)
-**Status:** §1-6 implemented and merged (PR #2253). §7 (eliminating horizontal
-scroll) is a live follow-up — live-tested by Asaf via `task dev`, found real
-horizontal scrolling on every tab, planned in §7, not yet implemented.
+**Status:** implemented — PR #2253 including §7 (horizontal-scroll elimination); modal since renamed Stash (#2314). Verified 2026-08-10.
 **Scope:** `frontend/app/view/agent/agent-model.ts`,
 `frontend/app/view/agent/components/AgentSetupModal.tsx` / `.scss`,
 `frontend/app/view/agent/components/AgentNativeMemoryModal.tsx` / `.scss`,

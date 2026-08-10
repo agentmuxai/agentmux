@@ -1,11 +1,7 @@
 # macOS Tab Redock Parity — Implementation Scoping
 
 **Date:** 2026-07-24 (revised same day — see §0.1 "Scope correction")
-**Status:** Scoping only — no code written. This is Phase 7 of
-  `docs/specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md` §6,
-  broken out into its own implementation-ready plan because that
-  phase was previously "design-only" (a cross-platform API table,
-  no concrete architecture for this codebase).
+**Status:** implemented — PR #2310 (CGEventTap tracking); §5 landing-bounce animation remains a known follow-up. Verified 2026-08-10.
 **Trigger:** User: *"lets work on the tab redock .. i believe it
   was implemented for windows by not macos"* → confirmed via
   investigation → *"which has better performance? engineering cost

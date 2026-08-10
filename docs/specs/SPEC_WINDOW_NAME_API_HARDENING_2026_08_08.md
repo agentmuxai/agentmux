@@ -1,7 +1,7 @@
 # SPEC: Window-name App API hardening (phantom-id success + status codes)
 
 **Date:** 2026-08-08
-**Status:** Proposed (fix implemented same day for §3.1-§3.2; §4 deferred)
+**Status:** active — §3 guards shipped same day; §4 (clear-to-default, grapheme-safe clamp, dev-discovery helper) not started. Verified 2026-08-10.
 **Scope:** `agentmux-srv/src/reducer/window.rs`, `agentmux-srv/src/server/mod.rs`
 **Related:** `SPEC_WINDOW_TITLE_FORMAT_2026-05-13.md` (title composition),
 `SPEC_TEST_API_ACCESS.md` (dev `authkey.dev` cross-instance access),

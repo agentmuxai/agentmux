@@ -3,7 +3,7 @@
 **Date:** 2026-07-31
 **Type:** Design/scoping spec (no code changes yet)
 **Scope:** `agentmux-srv/src/backend/blockcontroller/shell/lifecycle.rs`, `agentmux-srv/src/backend/blockcontroller/acp.rs`, `agentmux-srv/src/backend/process_tracker/registry.rs`
-**Status:** Scoped — needs a go/no-go before implementation (see §5)
+**Status:** implemented — PR #2376 (track_spawned in shell + acp); verified in code 2026-08-10.
 **Tracking:** GitHub Discussion #2375, item "Process Broker Phase B"
 
 ---

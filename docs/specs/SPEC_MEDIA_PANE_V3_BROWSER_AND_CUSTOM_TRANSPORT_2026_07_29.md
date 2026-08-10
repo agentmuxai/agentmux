@@ -1,6 +1,6 @@
 # Spec: Media pane v3 — persistent browser + custom playback/scrub UI
 
-**Status:** Proposed
+**Status:** proposed — verified unimplemented as of 2026-08-10 (docs-only commit #2346; no PlaybackTransport anywhere).
 **Author:** AgentY
 **Date:** 2026-07-29
 **Related:** `docs/specs/SPEC_MEDIA_PANE_2026_07_26.md` (v1 — implemented,
