@@ -147,3 +147,90 @@ describe("hasRunningPromotedTool", () => {
         expect(hasRunningPromotedTool([], 1_000_000)).toBe(false);
     });
 });
+
+// ── Backgrounded calls (issue #2490) ──────────────────────────────────
+
+function mkBgBash(overrides: Partial<ToolNode> = {}): ToolNode {
+    return mkBash({
+        id: "toolu_bg1",
+        status: "success",
+        params: { command: "task dev", run_in_background: true },
+        timestamp: 1000,
+        duration: 0.4,
+        ...overrides,
+    });
+}
+
+function mkNotification(toolUseId: string, status: string, timestamp = 500_000): DocumentNode {
+    return {
+        type: "user_message",
+        id: `user-${toolUseId}`,
+        message:
+            `<task-notification>\n<task-id>b12345</task-id>\n<tool-use-id>${toolUseId}</tool-use-id>\n` +
+            `<output-file>C:\tmp\b12345.output</output-file>\n<status>${status}</status>\n` +
+            `<summary>Background command finished</summary>\n</task-notification>`,
+        timestamp,
+    };
+}
+
+describe("toolActivities — backgrounded calls", () => {
+    it("shows an accepted background launch as running immediately, no 30s threshold", () => {
+        const nodes: DocumentNode[] = [mkBgBash()];
+        // Well under the promotion threshold — an ordinary sub-second call
+        // would be invisible; a declared background task must not be.
+        const acts = toolActivities(nodes, 2000);
+        expect(acts).toHaveLength(1);
+        expect(acts[0].status).toBe("running");
+        expect(acts[0].startedAt).toBe(1000);
+        expect(acts[0].endedAt).toBeUndefined();
+        expect(acts[0].title).toBe("task dev");
+    });
+
+    it("stays running until ITS OWN task-notification lands — another call's doesn't end it", () => {
+        const nodes: DocumentNode[] = [mkBgBash({ id: "toolu_a" }), mkNotification("toolu_other", "completed")];
+        const acts = toolActivities(nodes, 2000);
+        expect(acts).toHaveLength(1);
+        expect(acts[0].status).toBe("running");
+    });
+
+    it("ends as done/error per the notification's status, endedAt = notification time", () => {
+        const completed = toolActivities(
+            [mkBgBash({ id: "toolu_ok" }), mkNotification("toolu_ok", "completed", 600_000)],
+            700_000,
+        );
+        expect(completed[0].status).toBe("done");
+        expect(completed[0].endedAt).toBe(600_000);
+
+        const failed = toolActivities(
+            [mkBgBash({ id: "toolu_bad" }), mkNotification("toolu_bad", "failed", 600_000)],
+            700_000,
+        );
+        expect(failed[0].status).toBe("error");
+    });
+
+    it("ends as stopped on a notification with an unrecognized status — never running forever", () => {
+        const acts = toolActivities(
+            [mkBgBash({ id: "toolu_x" }), mkNotification("toolu_x", "killed")],
+            700_000,
+        );
+        expect(acts[0].status).toBe("stopped");
+    });
+
+    it("a REFUSED background launch is not a live task — ordinary duration rules apply", () => {
+        // status failed = the harness rejected the command; sub-second, so
+        // the threshold gate drops it entirely.
+        const nodes: DocumentNode[] = [mkBgBash({ status: "failed" })];
+        expect(toolActivities(nodes, 2000)).toEqual([]);
+    });
+
+    it("a foreground call is untouched by an unrelated notification in the document", () => {
+        const nodes: DocumentNode[] = [
+            mkBash({ id: "fg", timestamp: 1000 }),
+            mkNotification("toolu_other", "completed"),
+        ];
+        const acts = toolActivities(nodes, 1000 + TOOL_PROMOTION_MS);
+        expect(acts).toHaveLength(1);
+        expect(acts[0].id).toBe("fg");
+        expect(acts[0].status).toBe("running");
+    });
+});
