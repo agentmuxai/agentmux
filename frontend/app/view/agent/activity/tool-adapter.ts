@@ -35,13 +35,31 @@ import type { ActivityStatus, PinnedActivity } from "./types";
 export const TOOL_PROMOTION_MS = 30_000;
 
 /** The harness's literal acceptance-message prefix for a genuinely detached
- *  launch (see BashParams.run_in_background's doc comment). Exported so
- *  muxspect/introspection tooling can recognize the same signal — see
- *  docs/retro/retro-stuck-background-dock-timer-2026-08-10.md. */
+ *  launch (see BashParams.run_in_background's doc comment). Exported so any
+ *  other code that needs to recognize the same signal doesn't redefine it. */
 export const BACKGROUND_LAUNCH_ACCEPTED_PREFIX = "Command running in background with ID:";
 
 function isBashToolNode(n: DocumentNode): n is ToolNode {
     return n.type === "tool" && n.tool === "Bash" && n.timestamp != null;
+}
+
+/**
+ * The result's raw text, whichever field it landed in. claude-translator.ts's
+ * `buildToolResults` normally puts it in `stdout` (the structured
+ * `{ stdout, stderr, interrupted }` sibling), but falls back to a plain
+ * `{ content: string }` shape when Claude omits a terminal-shaped
+ * `tool_use_result` or returns multiple tool_result blocks (the structured
+ * sibling is then unattributable to any one block) — codex P1 on this PR:
+ * checking `stdout` alone missed that fallback shape, so a genuinely
+ * detached launch whose acceptance text arrived via `content` was rejected
+ * outright and vanished from the dock entirely instead of just being
+ * misclassified.
+ */
+function resultText(result: ToolNode["result"]): string | undefined {
+    const r = result as (BashResult & { content?: unknown }) | undefined;
+    if (typeof r?.stdout === "string") return r.stdout;
+    if (typeof r?.content === "string") return r.content;
+    return undefined;
 }
 
 /**
@@ -68,8 +86,8 @@ function isBashToolNode(n: DocumentNode): n is ToolNode {
  */
 function isAcceptedBackgroundLaunch(n: ToolNode): boolean {
     if ((n.params as BashParams | undefined)?.run_in_background !== true || n.status !== "success") return false;
-    const stdout = (n.result as BashResult | undefined)?.stdout;
-    return typeof stdout === "string" && stdout.startsWith(BACKGROUND_LAUNCH_ACCEPTED_PREFIX);
+    const text = resultText(n.result);
+    return typeof text === "string" && text.startsWith(BACKGROUND_LAUNCH_ACCEPTED_PREFIX);
 }
 
 /**

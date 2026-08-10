@@ -244,6 +244,25 @@ describe("toolActivities — backgrounded calls", () => {
         expect(toolActivities([fastFinish], 1000 + 13_380 + 60_000)).toEqual([]);
     });
 
+    it("codex P1 on PR #2519: a genuine background acceptance arriving via the result.content fallback shape (not stdout) is still recognized", () => {
+        // claude-translator.ts's buildToolResults falls back to a plain
+        // `{ content: string }` shape (instead of the structured
+        // `{ stdout, stderr, interrupted }` sibling) when Claude omits a
+        // terminal-shaped tool_use_result or returns multiple tool_result
+        // blocks. A stdout-only check would reject this as "not accepted"
+        // and drop a still-running background launch from the dock
+        // entirely — worse than the original bug, since a stuck-forever
+        // entry is at least visible.
+        const nodes: DocumentNode[] = [
+            mkBgBash({
+                result: { content: "Command running in background with ID: b12345. Output is being written to: …" } as any,
+            }),
+        ];
+        const acts = toolActivities(nodes, 2000);
+        expect(acts).toHaveLength(1);
+        expect(acts[0].status).toBe("running");
+    });
+
     it("a foreground call is untouched by an unrelated notification in the document", () => {
         const nodes: DocumentNode[] = [
             mkBash({ id: "fg", timestamp: 1000 }),
