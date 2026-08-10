@@ -1226,12 +1226,7 @@ const AgentPresentationView = ({
         () => showingLaunchActivity() || workingFromPhase(agentAtoms().turnPhaseAtom[0]()),
     );
     const workingRowVisible = createMemo(
-        () =>
-            workingRowLoading() ||
-            agentAtoms().sessionStatsAtom[0]() != null ||
-            // Attached-task state ("Running in background · Ns") renders in
-            // the same row — see AgentWorkingRow's attachedSince prop.
-            agentAtoms().attachedTaskAtom[0]() != null,
+        () => workingRowLoading() || agentAtoms().sessionStatsAtom[0]() != null,
     );
 
     onMount(() => {
@@ -1806,7 +1801,6 @@ const AgentPresentationView = ({
                             currentTool={agentAtoms().currentToolAtom[0]()}
                             currentToolArg={agentAtoms().currentToolArgAtom[0]()}
                             toolPromoted={hasPromotedTool()}
-                            attachedSince={agentAtoms().attachedTaskAtom[0]()?.since ?? null}
                             sessionStats={agentAtoms().sessionStatsAtom[0]()}
                             turnTokens={agentAtoms().turnTokensAtom[0]()}
                             launchPhase={status.launchPhase()}
