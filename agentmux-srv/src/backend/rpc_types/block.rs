@@ -456,6 +456,13 @@ pub struct CommandBlockfileReadRangeData {
 pub struct BlockfileReadRangeResult {
     pub lines: Vec<String>,
     pub total: u64,
+    /// Receive-time stamps (unix ms) parallel to `lines`, joined from the
+    /// `output.tsidx` sidecar; `0` = unknown for that line. Absent entirely
+    /// when no sidecar exists or the request didn't take the `output.idx`
+    /// fast path — old frontends ignore it, new frontends tolerate absence.
+    /// Spec: SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md §4.4.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stamps: Option<Vec<i64>>,
 }
 
 /// Request for blockfile:read_state — read a sidecar JSON file

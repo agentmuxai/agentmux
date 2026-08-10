@@ -171,7 +171,7 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
                         // Empty result cases — answered from the index, no output read.
                         if limit == 0 || total_lines == 0 || (offset as u64) >= total_lines {
-                            return Some(BlockfileReadRangeResult { lines: vec![], total: total_lines });
+                            return Some(BlockfileReadRangeResult { lines: vec![], total: total_lines, stamps: None });
                         }
 
                         // entry(k) = byte offset of non-blank line k (past the 8-byte header).
@@ -203,7 +203,64 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             .filter(|l| !l.trim().is_empty())
                             .map(|l| l.to_string())
                             .collect();
-                        Some(BlockfileReadRangeResult { lines, total: total_lines })
+
+                        // Receive-time stamps for the returned lines, joined
+                        // from the output.tsidx sidecar (batch byte offset →
+                        // unix ms; see agent_session::TSIDX_FILE). Per line:
+                        // the newest batch stamp at-or-before the line's own
+                        // byte offset. Best-effort — any failure yields no
+                        // stamps, never a failed read.
+                        let stamps: Option<Vec<i64>> = (|| {
+                            use crate::backend::agent_session::TSIDX_FILE;
+                            let ts_stat = filestore.stat(&read_block, TSIDX_FILE).ok().flatten()?;
+                            if ts_stat.size == 0 {
+                                return None;
+                            }
+                            let raw_ts = filestore.read_file(&read_block, TSIDX_FILE).ok().flatten()?;
+                            let mut entries: Vec<(u64, i64)> = String::from_utf8_lossy(&raw_ts)
+                                .lines()
+                                .filter_map(|l| {
+                                    let v: serde_json::Value = serde_json::from_str(l.trim()).ok()?;
+                                    Some((v.get("off")?.as_u64()?, v.get("ms")?.as_i64()?))
+                                })
+                                .collect();
+                            if entries.is_empty() {
+                                return None;
+                            }
+                            // Appends serialize on the store so offsets are
+                            // already monotonic in practice; sort defensively
+                            // (cross-channel mirrors racing into the global
+                            // zone).
+                            entries.sort_by_key(|(off, _)| *off);
+
+                            // Byte offset of every returned line, read from
+                            // output.idx in one slice.
+                            let returned = lines.len() as u64;
+                            let (_, idx_raw) = filestore
+                                .read_at(
+                                    &read_block,
+                                    "output.idx",
+                                    OUTPUT_IDX_HEADER_LEN + (offset as u64 * 8) as i64,
+                                    (returned * 8) as i64,
+                                )
+                                .ok()?;
+                            if idx_raw.len() != (returned * 8) as usize {
+                                return None;
+                            }
+                            let stamps = idx_raw
+                                .chunks_exact(8)
+                                .map(|b| {
+                                    let line_off = u64::from_le_bytes(b.try_into().unwrap());
+                                    match entries.partition_point(|(off, _)| *off <= line_off) {
+                                        0 => 0,
+                                        p => entries[p - 1].1,
+                                    }
+                                })
+                                .collect();
+                            Some(stamps)
+                        })();
+
+                        Some(BlockfileReadRangeResult { lines, total: total_lines, stamps })
                     })();
                     if let Some(result) = idx_result {
                         tracing::debug!(
@@ -301,6 +358,7 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 Ok(Some(serde_json::to_value(&BlockfileReadRangeResult {
                     lines,
                     total,
+                    stamps: None,
                 }).unwrap()))
             })
         }),

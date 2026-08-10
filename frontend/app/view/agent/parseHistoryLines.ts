@@ -45,6 +45,14 @@ export interface ParsedHistory {
  *                     detection works during replay — an echoed outgoing jekt
  *                     (FROM == this agent) must rebuild as an outgoing bubble.
  *                     Optional; missing name falls back to "incoming".
+ * @param stamps       Receive-time stamps (unix ms) parallel to `lines`, from
+ *                     the backend's `output.tsidx` sidecar (`stamps` on
+ *                     blockfile:read_range). Used to timestamp replayed nodes
+ *                     whose wire frames carry no time of their own — a wire
+ *                     timestamp always wins over the batch stamp. 0 entries
+ *                     and an absent array both mean "unknown" and leave the
+ *                     node unstamped (never 0 → never a 1970 hover). Spec:
+ *                     SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md §4.4.
  * @returns            Ordered DocumentNodes (deduped by node id) plus the
  *                      last `session_end` stats payload found, if any.
  */
@@ -52,6 +60,7 @@ export function parseHistoryLines(
     lines: string[],
     outputFormat: string,
     agentName?: string,
+    stamps?: number[],
 ): ParsedHistory {
     const translator = createTranslator(outputFormat);
     // isReplay: true — thinking/tool_call events carry no wire timestamp of
@@ -73,7 +82,34 @@ export function parseHistoryLines(
     // which is the same end state the live stream produces.
     const indexById = new Map<string, number>();
 
-    for (const line of lines) {
+    // Batch receive-time for line i, or undefined when unknown. 0 is the
+    // backend's "unknown" sentinel and must never leak onto a node (§4.4
+    // sentinel hygiene — hover gates on `!= null` and would render 1970).
+    const stampFor = (i: number): number | undefined => {
+        const s = stamps?.[i];
+        return typeof s === "number" && s > 0 ? s : undefined;
+    };
+    // Stamp a freshly-created node from its line's batch time when the wire
+    // frame carried no usable timestamp of its own.
+    const stampIfMissing = (node: DocumentNode, stampMs: number | undefined): DocumentNode => {
+        if (stampMs == null) return node;
+        const ts = (node as { timestamp?: number }).timestamp;
+        if (ts != null && ts !== 0) return node;
+        return { ...node, timestamp: stampMs } as DocumentNode;
+    };
+    // An in-place same-id replacement (tool_call → tool_result, accumulated
+    // text deltas) must not wipe the stamp the node got when it was first
+    // created — the replacement event is typically timestamp-less too.
+    const carryTimestamp = (prior: DocumentNode, replacement: DocumentNode): DocumentNode => {
+        const rts = (replacement as { timestamp?: number }).timestamp;
+        if (rts != null && rts !== 0) return replacement;
+        const pts = (prior as { timestamp?: number }).timestamp;
+        if (pts == null || pts === 0) return replacement;
+        return { ...replacement, timestamp: pts } as DocumentNode;
+    };
+
+    for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+        const line = lines[lineIdx];
         const trimmed = line.trim();
         if (!trimmed || !trimmed.startsWith("{")) continue;
 
@@ -127,7 +163,9 @@ export function parseHistoryLines(
                     id: contextCompactedNodeId(data),
                     tokensBefore: data.preTokens,
                     tokensAfter: data.postTokens,
-                    timestamp: Number.isNaN(parsedTs) ? 0 : parsedTs,
+                    // Wire timestamp wins; batch stamp fills the timestamp-less
+                    // case; 0 only when neither exists (type requires number).
+                    timestamp: Number.isNaN(parsedTs) ? (stampFor(lineIdx) ?? 0) : parsedTs,
                     source: "real",
                     trigger: data.trigger,
                     durationMs: data.durationMs,
@@ -171,7 +209,8 @@ export function parseHistoryLines(
                     outcome: data.outcome,
                     attemptedSid: data.attemptedSid,
                     actualSid: data.actualSid,
-                    timestamp: Number.isNaN(parsedTs) ? 0 : parsedTs,
+                    // Same wire-wins-then-stamp rule as context_compacted above.
+                    timestamp: Number.isNaN(parsedTs) ? (stampFor(lineIdx) ?? 0) : parsedTs,
                 };
                 const existing = indexById.get(node.id);
                 if (existing != null) {
@@ -206,10 +245,10 @@ export function parseHistoryLines(
                 // Replace at the original position so insertion order
                 // tracks where the id first appeared (which is where
                 // the live render would have placed it).
-                nodes[existing] = node;
+                nodes[existing] = carryTimestamp(nodes[existing], node);
             } else {
                 indexById.set(node.id, nodes.length);
-                nodes.push(node);
+                nodes.push(stampIfMissing(node, stampFor(lineIdx)));
             }
         }
     }

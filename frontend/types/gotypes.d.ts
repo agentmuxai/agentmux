@@ -2290,6 +2290,10 @@ declare global {
     type BlockfileReadRangeResult = {
         lines: string[];
         total: number;
+        // Receive-time stamps (unix ms) parallel to `lines`; 0 = unknown.
+        // Absent when no output.tsidx sidecar exists (pre-upgrade history)
+        // or the read skipped the output.idx fast path.
+        stamps?: number[];
     };
 
     // wshrpc.CommandBlockfileReadStateData

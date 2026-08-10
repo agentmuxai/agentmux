@@ -605,6 +605,116 @@ use std::sync::Arc;
         assert_eq!(stat_after.size, (line1.len() + line2.len() + b"line three\n".len()) as i64);
     }
 
+    /// Helper: parse a zone's `output.tsidx` sidecar into (off, ms) pairs.
+    #[cfg(test)]
+    fn read_tsidx(fs: &FileStore, zone: &str) -> Vec<(u64, i64)> {
+        let raw = fs
+            .read_file(zone, crate::backend::agent_session::TSIDX_FILE)
+            .unwrap()
+            .unwrap();
+        String::from_utf8_lossy(&raw)
+            .lines()
+            .map(|l| {
+                let v: serde_json::Value = serde_json::from_str(l).unwrap();
+                (v["off"].as_u64().unwrap(), v["ms"].as_i64().unwrap())
+            })
+            .collect()
+    }
+
+    /// §4.4 of SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW
+    /// _2026_08_09.md: agent transcript appends (global_output_zone = Some)
+    /// stamp one `{off, ms}` tsidx record per batch, keyed at the batch's
+    /// start byte offset.
+    #[test]
+    fn tsidx_stamped_per_batch_for_agent_transcript_appends() {
+        use crate::backend::storage::filestore::FileStore;
+        use std::sync::Arc;
+
+        let broker = wps::Broker::new();
+        let fs = Arc::new(FileStore::open_in_memory().unwrap());
+        let block_id = "tsidx-agent-block";
+        let line1 = b"{\"a\":1}\n";
+        let line2 = b"{\"b\":2}\n";
+
+        // Zone name is irrelevant to the per-channel stamp — only its
+        // presence gates it. No global store is installed in this test, so
+        // the mirror side is a no-op.
+        handle_append_block_file(&broker, block_id, "output", line1, Some(&fs), Some("agent:tsidx-test:current"));
+        handle_append_block_file(&broker, block_id, "output", line2, Some(&fs), Some("agent:tsidx-test:current"));
+
+        let entries = read_tsidx(&fs, block_id);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].0, 0);
+        assert_eq!(entries[1].0, line1.len() as u64);
+        assert!(entries[0].1 > 0, "stamp must be a real unix-ms time");
+        assert!(entries[1].1 >= entries[0].1, "stamps monotonic");
+    }
+
+    /// PTY `term` data and non-agent blocks (global_output_zone = None) must
+    /// never grow a tsidx sidecar.
+    #[test]
+    fn tsidx_not_written_without_agent_zone() {
+        use crate::backend::storage::filestore::FileStore;
+        use std::sync::Arc;
+
+        let broker = wps::Broker::new();
+        let fs = Arc::new(FileStore::open_in_memory().unwrap());
+        let block_id = "tsidx-term-block";
+
+        handle_append_block_file(&broker, block_id, "term", b"prompt$ ", Some(&fs), None);
+        handle_append_block_file(&broker, block_id, "output", b"line\n", Some(&fs), None);
+
+        assert!(fs
+            .stat(block_id, crate::backend::agent_session::TSIDX_FILE)
+            .unwrap()
+            .is_none());
+    }
+
+    /// The global-zone mirror stamps its own tsidx, offset-keyed against the
+    /// GLOBAL zone's output (which can differ from the per-channel offsets).
+    #[test]
+    fn tsidx_stamped_by_global_mirror() {
+        use crate::backend::storage::filestore::FileStore;
+        use std::sync::Arc;
+
+        let gfs = Arc::new(FileStore::open_in_memory().unwrap());
+        let zone = "agent:tsidx-mirror:current";
+        let line1 = b"{\"a\":1}\n";
+        let line2 = b"{\"b\":2}\n";
+
+        mirror_append_to_global(&gfs, zone, line1);
+        mirror_append_to_global(&gfs, zone, line2);
+
+        let entries = read_tsidx(&gfs, zone);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].0, 0);
+        assert_eq!(entries[1].0, line1.len() as u64);
+    }
+
+    /// `persist_to_blockfile_silent` (user-message lines) stamps the
+    /// per-channel sidecar too — those lines are transcript content.
+    #[test]
+    fn tsidx_stamped_by_persist_silent() {
+        use crate::backend::storage::filestore::FileStore;
+        use std::sync::Arc;
+
+        let fs = Arc::new(FileStore::open_in_memory().unwrap());
+        let block_id = "tsidx-silent-block";
+        let line = b"{\"type\":\"user_message\"}\n";
+
+        super::file_ops::persist_to_blockfile_silent(
+            block_id,
+            "output",
+            line,
+            Some(&fs),
+            Some("agent:tsidx-silent:current"),
+        );
+
+        let entries = read_tsidx(&fs, block_id);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0, 0);
+    }
+
     /// Minimal WpsClient that records every event delivered to it, so tests
     /// can assert on the broadcast payload (not just the FileStore side effect).
     struct RecordingClient {

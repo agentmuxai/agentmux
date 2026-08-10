@@ -37,7 +37,7 @@ pub use global_store::{
 pub use migrations::{migrate_block_zones_v1, migrate_promote_template_sessions_v1};
 pub use session_io::{
     append_session_output, heal_global_snapshot_source_block_ids, read_session_state,
-    write_session_state, OUTPUT_FILE, SNAPSHOT_FILE,
+    write_session_state, OUTPUT_FILE, SNAPSHOT_FILE, TSIDX_FILE,
 };
 pub use zone_naming::{agent_current_zone, is_valid_definition_id};
 
