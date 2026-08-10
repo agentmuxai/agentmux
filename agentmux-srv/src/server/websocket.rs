@@ -1035,6 +1035,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                         status: cmd.status,
                         timestamp: cmd.timestamp,
                         observed_at,
+                        run_in_background: cmd.run_in_background,
                     },
                 );
                 Ok(None)
