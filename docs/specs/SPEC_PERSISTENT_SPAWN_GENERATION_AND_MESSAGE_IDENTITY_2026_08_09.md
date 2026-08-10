@@ -58,7 +58,24 @@ Per the issue's own suggested fix, unchanged by #2373:
 - `RetryPayload.messages` (persistent_resume.rs) becomes
   `Vec<QueuedRetryEntry { seq, json }>`; `retry_after_resume_failure` /
   `decide_retry_batch_action` take the seq through.
-- Line 1563's content match becomes a seq match.
+
+**All three content-equality sites convert** (reagentx P1 on this spec's
+review caught that the first draft listed only the third; a fresh grep
+found one more beyond that):
+1. persistent.rs:742 — `decide_send_action`'s `skip_if_already_queued`
+   dedup (`.any(|m| m == json_str)`). Collision consequence is the worst
+   of the three: a genuinely different, identical-text message is
+   treated as "already queued" and **silently dropped**. Callers that
+   re-deliver (muxbus steering) pass the original seq so exact-identity
+   dedup still works.
+2. persistent.rs:837 — `release_spawn_claim_and_drain_queue` removing
+   the failed spawn's own trigger (`.position(|m| m == own_message)`).
+   Collision consequence: the WRONG entry (someone else's
+   identical-text message) is discarded and the spawn's own trigger
+   stays queued — a drop plus a potential duplicate delivery.
+3. persistent.rs:1563 — `decide_retry_batch_action`'s
+   `first_already_queued` check (the site #2365 originally reported;
+   reordering consequence).
 
 ## 4. Fix #2367 — generation-aware retry decision (the real design work)
 
