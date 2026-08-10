@@ -330,6 +330,22 @@
     background: var(--block-bg-color, rgba(0, 0, 0, 0.18));
 }
 
+// Full-command header at the top of an expanded shell/tool row — the
+// collapsed title is ellipsis-truncated, so this is where a long command
+// becomes identifiable. Wraps instead of scrolling: the whole point is
+// reading it in full.
+.agent-activity-command {
+    font-family: var(--fixed-font, monospace);
+    font-size: 11px;
+    color: var(--secondary-text-color);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    padding: var(--space-1) 0 var(--space-1-5);
+    margin-bottom: var(--space-1);
+    border-bottom: 1px solid var(--border-color);
+    user-select: text;
+}
+
 .agent-activity-overflow {
     appearance: none;
     border: none;
