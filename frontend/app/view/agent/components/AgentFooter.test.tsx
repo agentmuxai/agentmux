@@ -14,6 +14,7 @@
 
 import { cleanup, render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
+import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AgentFooter } from "./AgentFooter";
@@ -153,5 +154,51 @@ describe("AgentFooter ghost-text next-prompt suggestion (SPEC_NEXT_PROMPT_SUGGES
     it("falls back to the default placeholder when no suggestion is set", () => {
         render(() => <AgentFooter agentName="Test" viewModel={makeViewModel(undefined)} />);
         expect(screen.getByPlaceholderText("Send message to Test...")).toBeTruthy();
+    });
+
+    // Reagentx P1 on #2515: handleSend synchronously empties the composer,
+    // but the previous turn's stale suggestion is only cleared from meta by
+    // an async fire-and-forget RPC (useNextPromptSuggestion.ts guard 1) —
+    // this pins the worst case, where that RPC hasn't landed by the time
+    // the placeholder next renders, using a viewModel whose blockAtom never
+    // updates at all (simulating an arbitrarily slow/never-resolving clear).
+    it("does not flash the previous turn's stale suggestion in the now-empty box right after sending", async () => {
+        const onSendMessage = vi.fn();
+        render(() => (
+            <AgentFooter agentName="Test" viewModel={makeViewModel("Run the tests")} onSendMessage={onSendMessage} />
+        ));
+        const user = userEvent.setup();
+        const ta = screen.getByRole("textbox") as HTMLTextAreaElement;
+
+        await user.type(ta, "let's refactor instead");
+        keyOn(ta, "Enter");
+
+        expect(onSendMessage).toHaveBeenCalledWith("let's refactor instead");
+        expect(ta.value).toBe("");
+        expect(ta.placeholder).toBe("Send message to Test...");
+    });
+
+    it("shows a genuinely new suggestion normally once meta actually updates after send", async () => {
+        const [suggestion, setSuggestion] = createSignal<string | undefined>("Run the tests");
+        const vm = {
+            blockId: "test-block",
+            blockAtom: () => ({ meta: { "term:next_prompt_suggestion": suggestion() } }) as any,
+            voiceTargetRef: { current: null },
+        } as unknown as AgentViewModel;
+        const onSendMessage = vi.fn();
+        render(() => <AgentFooter agentName="Test" viewModel={vm} onSendMessage={onSendMessage} />);
+        const user = userEvent.setup();
+        const ta = screen.getByRole("textbox") as HTMLTextAreaElement;
+
+        await user.type(ta, "let's refactor instead");
+        keyOn(ta, "Enter");
+        expect(ta.placeholder).toBe("Send message to Test...");
+
+        // Simulates useNextPromptSuggestion.ts guard 1's clear RPC landing,
+        // then a later turn's fresh suggestion arriving — the mask must not
+        // shadow it.
+        setSuggestion(undefined);
+        setSuggestion("Check the logs");
+        expect(ta.placeholder).toBe("Check the logs");
     });
 });

@@ -212,6 +212,7 @@ suggestion back.
 | Suggestion RPC resolves while the user is actively typing (non-empty box) | Still dropped — `isComposerEmpty()` guard 3 in the hook is untouched by this spec (§2) |
 | User deletes back to empty, walks away, a *new* turn's suggestion RPC resolves later | Guard 1 already cleared the old suggestion when that new turn's `Submitting` fired, so the new RPC's result (if the box is still empty when it resolves) simply overwrites with the fresh suggestion — no stale leftover |
 | Session ends with a suggestion sitting in meta, box empty | Guard 4 (`clearActivity`) still clears it — unaffected by this change |
+| User sends a message while a suggestion is showing | Composer clears synchronously, but guard 1's clear is an async RPC — without §9's fix, the box briefly re-shows the just-sent turn's stale suggestion until that RPC lands |
 
 ---
 
@@ -265,7 +266,9 @@ suggestion back.
   the explicit meta-null after Tab/Right-Arrow accept (§3.3). Update the
   doc comments at lines 512-523 (currently explaining `boxWasEmpty`'s
   purpose) and 578-586 (currently citing the old §4.3 requirement this spec
-  amends) to reflect the new, simpler rule.
+  amends) to reflect the new, simpler rule. §9 (post-review): new
+  `suggestionMaskedAtSend` signal + its read in `placeholder` + its write
+  in `handleSend`.
 - No `useNextPromptSuggestion.ts` changes — its four guards are all correct
   as-is (§6).
 - No `agentmux-srv` (Rust) changes. No wire-format changes — this is a
@@ -308,3 +311,52 @@ behavior — confirm exact file/coverage at implementation time):
   starts with no stale suggestion showing before its own RPC resolves.
 - Type a message and submit it without ever deleting back to empty first —
   confirm normal behavior, unaffected by this change.
+
+---
+
+## 9. Post-review fix: stale suggestion flashing after send (P1, caught by reagentx)
+
+Removing `handleInput`'s clear-on-first-keystroke closed the reported bug,
+but reopened a narrower, real one: **`handleSend` clears the composer
+synchronously; `useNextPromptSuggestion.ts` guard 1 clears the meta key
+asynchronously** (a fire-and-forget `ObjectService.UpdateObjectMeta` RPC,
+triggered off the `Submitting` phase transition). Before this spec, that
+gap was invisible — `handleInput` had already nulled the meta the moment
+the user's first keystroke landed, long before they got around to hitting
+Send. With that early clear gone, every send now has a real window where
+the box is empty (native placeholder wants to render) and the *previous*
+turn's suggestion is still sitting in meta, briefly flashing as placeholder
+text until the RPC round-trips.
+
+**Fix:** `AgentFooter.tsx` gained a `suggestionMaskedAtSend` signal.
+`handleSend` snapshots whatever suggestion is currently in meta into it,
+right alongside its existing synchronous composer-clear; the `placeholder`
+memo skips band 1 whenever the live suggestion still equals that snapshot.
+Pure value comparison, no explicit reset needed — the moment the backend's
+async clear (or a later turn's fresh suggestion) actually lands, the live
+value no longer matches the snapshot and band 1 resumes on its own.
+
+**A first attempt at this fix silently didn't work**, caught only by its
+own regression test, not by inspection: it used a plain `let
+suggestionMaskedAtSend` mutated directly inside `handleSend`. That mutation
+never touches Solid's reactive graph, so the `placeholder` `createMemo` —
+which only re-runs when one of *its own* tracked signal reads changes —
+never re-evaluated when the plain variable changed. The fix looked correct
+reading the diff; it took an actual test asserting the placeholder's live
+value after a simulated send (not just that the right values were
+assigned) to reveal it did nothing. Fixed by making it a real
+`createSignal`, read inside `placeholder` (so it's a tracked dependency)
+and written via its setter in `handleSend`. Lesson for this class of bug:
+a "capture at write time, compare at read time" pattern only closes a race
+if the write side actually participates in whatever reactivity the read
+side depends on — a plain closure variable is invisible to a `createMemo`
+no matter how correctly timed the write is.
+
+**Test plan addition**, folded into the file already covered above: two
+cases render an `AgentFooter` with a `viewModel` mock, type and send a
+message, and assert `ta.placeholder` immediately after — one with a
+never-updating mock `blockAtom` (models the RPC never landing, the worst
+case) confirming the default placeholder shows instead of the stale
+suggestion, and one with a `createSignal`-backed mock confirming a
+genuinely new suggestion arriving later still displays normally (the mask
+doesn't shadow it forever).

@@ -475,10 +475,27 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     // session ending (useNextPromptSuggestion.ts's own guards). See
     // docs/specs/SPEC_NEXT_PROMPT_SUGGESTION_RESTORE_ON_CLEAR_2026_08_10.md.
     const voice = getVoiceSession();
+    // Masks a specific stale suggestion value from band 1 — set by
+    // handleSend right as it synchronously empties the composer. Without
+    // this, every send has a real window where the box is empty (so the
+    // native placeholder wants to render) but the PREVIOUS turn's
+    // suggestion is still sitting in meta, since useNextPromptSuggestion.ts
+    // guard 1 clears it via an async fire-and-forget RPC, not synchronously
+    // with the send — the old suggestion would briefly flash as placeholder
+    // text before that RPC round-trips. A signal, not a plain variable: the
+    // placeholder memo below must actually re-run the instant this is set,
+    // and mutating a bare closure variable doesn't trigger Solid's
+    // reactivity at all (the first version of this fix did exactly that and
+    // silently never worked — caught by the regression test, not by
+    // inspection). Pure value comparison otherwise, no reset needed: once
+    // the backend actually clears/replaces the meta key, the live value no
+    // longer equals this snapshot and band 1 resumes normally (for a
+    // genuinely new suggestion) on its own. Reagentx P1 on #2515.
+    const [suggestionMaskedAtSend, setSuggestionMaskedAtSend] = createSignal<string | undefined>(undefined);
     const placeholder = createMemo(() => {
         const vm = props.viewModel;
         const suggestion = vm?.blockAtom()?.meta?.["term:next_prompt_suggestion"] as string | undefined;
-        if (suggestion) return suggestion;
+        if (suggestion && suggestion !== suggestionMaskedAtSend()) return suggestion;
         const listeningHere =
             !!vm && voice.isListening() && voice.currentTargetId() === vm.blockId;
         return listeningHere
@@ -720,6 +737,16 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
             }
             histPos = sentHistory.length;
             histDraft = "";
+            // Mask whatever suggestion is still in meta right now — see the
+            // doc comment on suggestionMaskedAtSend above `placeholder`.
+            // Order doesn't matter relative to writeComposerValue below
+            // (that call doesn't touch any signal `placeholder` reads
+            // either), but setting the signal is what actually makes
+            // `placeholder` recompute — a plain variable write here would
+            // silently do nothing.
+            setSuggestionMaskedAtSend(
+                props.viewModel?.blockAtom()?.meta?.["term:next_prompt_suggestion"] as string | undefined
+            );
             writeComposerValue("");
             // A sent message supersedes any pending Esc-cleared snapshot —
             // the now-empty box must not resurrect old text via Ctrl/Cmd+Z.
