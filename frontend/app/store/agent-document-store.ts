@@ -49,6 +49,13 @@ function pushResolvedDockNodes(blockId: string, events: AgentDocumentEvent[]) {
                 node_id: n.id,
                 tool_name: n.toolName,
                 status: n.status,
+                // reagent P1 on PR #2520: DockSnapshotCache::push_delta fully
+                // overwrites a node's snapshot per push — omitting this would
+                // silently blank an earlier `run_in_background: true` push
+                // back to undefined right when a node resolves via scrub,
+                // erasing the signal for exactly the orphaned/stuck-launch
+                // class this field exists to flag.
+                run_in_background: n.run_in_background,
             }).catch(() => {});
         }
     }

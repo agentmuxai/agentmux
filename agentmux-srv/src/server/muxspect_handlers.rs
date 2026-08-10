@@ -244,7 +244,24 @@ pub struct DockNodeView {
     /// see spec §3.1's own framing of this as "the same signal a human
     /// would manually cross-reference today, automated," not a perfect
     /// per-node liveness oracle.
+    ///
+    /// Does NOT cover a backgrounded call stuck in the actual dock UI
+    /// (issue #2518): `status` here is the RAW `ToolNode` status, which is
+    /// terminal ("success") for an accepted background launch within ~a
+    /// second — this field can never go `true` for that case no matter how
+    /// long the real dock row has been showing `running`, because the
+    /// server has no visibility into whether a `<task-notification>` ever
+    /// arrived (that reclassification is entirely client-side, in
+    /// `tool-adapter.ts`). See `run_in_background` below: a `true` there
+    /// combined with a long `age_ms` is worth checking by hand even when
+    /// `stuck` reads `false`.
     pub stuck: bool,
+    /// `params.run_in_background === true` on the pushing client's own
+    /// `ToolNode`, if it's a Bash call and the renderer reported it.
+    /// `None` for every non-Bash tool and for older clients that predate
+    /// this field. See `stuck`'s doc comment above for why this exists.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_in_background: Option<bool>,
 }
 
 /// `GET /api/v1/muxspect/dock?block_id=X` — the cached `ToolNode` status
@@ -299,6 +316,7 @@ fn dock_node_views(
                 status: n.status,
                 age_ms,
                 stuck,
+                run_in_background: n.run_in_background,
             }
         })
         .collect()
@@ -475,6 +493,7 @@ mod tests {
             status: status.to_string(),
             timestamp: Some(observed_at),
             observed_at,
+            run_in_background: None,
         }
     }
 
@@ -524,6 +543,22 @@ mod tests {
         assert_eq!(views.len(), 2);
         assert_eq!(views[0].node_id, "n1");
         assert_eq!(views[1].node_id, "n2");
+    }
+
+    #[test]
+    fn dock_node_views_surfaces_run_in_background_even_though_status_is_terminal() {
+        // Issue #2518: an accepted background launch is terminal
+        // ("success") within ~a second server-side, so `stuck` can never
+        // catch it — this is the one signal that lets a human tell "this
+        // success might actually still be running in the real dock" apart
+        // from an ordinary finished call, without the server having to
+        // duplicate the client's <task-notification> cross-referencing.
+        let now_ms = 100_000;
+        let mut bg_node = dock_node("n1", "success", 0);
+        bg_node.run_in_background = Some(true);
+        let views = dock_node_views(vec![bg_node], now_ms, false);
+        assert_eq!(views[0].run_in_background, Some(true));
+        assert!(!views[0].stuck, "status is terminal — the raw heuristic correctly stays quiet");
     }
 
     #[tokio::test]
