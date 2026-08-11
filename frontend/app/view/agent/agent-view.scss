@@ -116,19 +116,16 @@
         left: 0;
         z-index: var(--z-pane-overlay, 4);
         // Explicit shrink-to-fit, not just relying on the implicit
-        // absolute-positioning auto-width algorithm (which should already
-        // size this to its content per spec, since only `left` — not
-        // `right` — is set, but wasn't verified live before this override
-        // shipped). Live feedback: a visible, semi-transparent rectangle
-        // was showing immediately to the right of the "+" with a single
-        // conversation open, where nothing should render at all — this
-        // forces the box to its content width unconditionally rather than
-        // trusting the implicit algorithm to have gotten it right in every
-        // engine. `.pane-tab-strip`'s own `background: transparent` +
-        // `border-bottom: 1px solid var(--border-color)` (base rule,
-        // PaneTabStrip.scss) is already the "thin solid border-color line"
-        // this was asked for — nothing else needed there once the box is
-        // correctly sized to not extend past the "+".
+        // absolute-positioning auto-width algorithm — belt-and-suspenders;
+        // the algorithm should already size this to its content per spec
+        // (only `left`, not `right`, is set). Not itself the fix for the
+        // semi-transparent-rectangle-next-to-"+" report live-tested
+        // 2026-08-11: that turned out to be `appearance: auto`'s native
+        // button chrome on `.pane-tab-strip-add` (PaneTabStrip.scss),
+        // unrelated to this container's own width — confirmed by the
+        // rectangle staying a fixed size regardless of pane width and
+        // appearing with a single conversation open (only the "+"
+        // rendered, no tab pill to have been mis-sized).
         width: fit-content;
 
         // PaneTabStrip.scss's shared "+" and tab styling is transparent by

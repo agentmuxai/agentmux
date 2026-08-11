@@ -127,6 +127,15 @@
 }
 
 .pane-tab-close {
+    // reset.scss sets `appearance: auto` on every native <button> (kept
+    // there so unstyled form controls still get native OS chrome by
+    // default); every custom-styled button in the app opts back out
+    // individually (_shell-node.scss, _control-bar.scss, swarm-view.scss,
+    // …) — this one didn't, so Chromium was drawing native button chrome
+    // (a fixed-size, semi-transparent box) UNDER this element's own
+    // transparent background/border reset, regardless of pane width or
+    // tab count. Same fix as .pane-tab-strip-add below.
+    appearance: none;
     flex: 0 0 16px;
     width: 16px;
     height: 16px;
@@ -153,6 +162,13 @@
 // the <For> in PaneTabStrip.tsx), so it stays pinned at the visual end of
 // the row regardless of tab count.
 .pane-tab-strip-add {
+    // See .pane-tab-close above — same native `appearance: auto` button
+    // chrome fix. This is what was showing as a fixed-size, semi-
+    // transparent rectangle next to the "+", reported live 2026-08-11
+    // (present with a single conversation open, unaffected by pane width —
+    // ruling out the strip's own box-sizing, which an earlier commit on
+    // this branch wrongly targeted first).
+    appearance: none;
     flex: 0 0 auto;
     width: 28px;
     height: 28px;
