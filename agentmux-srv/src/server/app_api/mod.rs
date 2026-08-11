@@ -695,10 +695,11 @@ pub(crate) async fn bundle_list_impl(state: &AppState) -> Result<serde_json::Val
         "id": m.id, "name": m.name, "description": m.description,
         "provider": m.provider, "model": m.model, "is_blank": m.is_blank, "updated_at": m.updated_at,
     })).collect();
-    // Emit both keys during the Preset→Bundle alias window: new callers of
-    // `bundle.list` read `bundles`; the retained `preset.list` alias's existing
-    // agent/REST consumers still read `presets`. Drop the `presets` key in
-    // Phase 4 when the alias is removed (SPEC_PRESET_TO_BUNDLE_REFACTOR §2.1/§4.4).
+    // Emit both keys: `bundle.list` callers read `bundles`; the separate
+    // REST route `/api/v1/agent/preset/list` (`PresetList` MCP tool,
+    // server/mod.rs) still reads `presets` and is unrelated to the internal
+    // WS `preset.*` aliases retired in this pass — do not drop `presets`
+    // here without first retiring that REST route too.
     Ok(json!({ "bundles": bundles, "presets": bundles }))
 }
 
@@ -718,6 +719,19 @@ pub(crate) async fn bundle_get_impl(
         return Err("bundle.get: provide id or name".to_string());
     };
     serde_json::to_value(&memory).map_err(|e| e.to_string())
+}
+
+/// Structurally validate a bundle draft — Armory Bundle Format (ABF)
+/// UI-alignment pass. Takes the SAME payload shape `bundle.upsert` accepts
+/// (reuses its `normalize_bundle_upsert_input`), not just an id, so the
+/// Armory editor's "Validate" button can check an unsaved draft (including a
+/// brand-new bundle with no id yet) rather than only whatever was last
+/// persisted. Read-only: never touches the Store.
+pub(crate) fn bundle_validate_impl(data: serde_json::Value) -> Result<serde_json::Value, String> {
+    let memory: Memory = serde_json::from_value(bundle::normalize_bundle_upsert_input(data))
+        .map_err(|e| format!("bundle.validate: {e}"))?;
+    let report = crate::backend::bundle_validate::validate_bundle(&memory);
+    serde_json::to_value(&report).map_err(|e| e.to_string())
 }
 
 pub(crate) async fn bundle_self_get_impl(

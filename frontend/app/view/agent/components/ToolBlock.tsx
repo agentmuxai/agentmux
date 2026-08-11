@@ -189,15 +189,20 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // Auto-expand while the tool is actively running (or awaiting approval), and
     // keep a completed tool expanded while it's held open (props.heldOpen — set
     // on completion, cleared when the row scrolls off the top). Pin still wins as
-    // an explicit override. Fail-terminal statuses (failed/denied/canceled) skip
-    // the heldOpen hold and collapse immediately; success holds normally.
+    // an explicit override. `denied`/`canceled` are user-dismissed terminations
+    // (the user already acted on them) and skip the heldOpen hold, collapsing
+    // immediately. `failed` is an agent-caused error, not a dismissal — it holds
+    // open exactly like `success` per the original design doc's own
+    // recommendation (ANALYSIS_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md,
+    // "failed: same as success"); the earlier implementation had lumped it in
+    // with denied/canceled, diverging from that call.
     //
     // Per SPEC_TOOL_AUTO_EXPAND_PANEL_2026_05_16.md §4.2 and
     // docs/specs/PLAN_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md — the 3 s
     // post-completion timer was replaced by scroll-position-driven collapse.
     const isFailTerminal = (): boolean => {
         const s = props.node.status;
-        return s === "failed" || s === "denied" || s === "canceled";
+        return s === "denied" || s === "canceled";
     };
     const autoExpanded = (): boolean => {
         const s = props.node.status;

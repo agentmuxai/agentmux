@@ -32,4 +32,17 @@ export const BundleImportApi = {
     ): Promise<BundleImportCommitResponse> {
         return client.rpcCall("bundle.import.commit", data, opts);
     },
+
+    // Structural-only check (agentmux-srv/src/backend/bundle_validate.rs) —
+    // read-only, no Store write. Accepts the same payload shape
+    // `UpsertMemoryCommand` does, so it can validate an unsaved draft
+    // (including a brand-new bundle with no id yet), not just what's
+    // already persisted.
+    ValidateBundleCommand(
+        client: RpcClient,
+        data: Partial<Memory>,
+        opts?: RpcOpts,
+    ): Promise<BundleValidationReport> {
+        return client.rpcCall("bundle.validate", data, opts);
+    },
 };

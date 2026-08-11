@@ -219,6 +219,19 @@
 .memory-view-field-label {
     font-size: 12px;
     color: var(--secondary-text-color);
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.memory-view-field-help {
+    font-size: 11px;
+    color: var(--tertiary-text-color, rgba(255, 255, 255, 0.5));
+    cursor: default;
+
+    &:hover {
+        color: var(--secondary-text-color);
+    }
 }
 
 .memory-view-input,
@@ -249,6 +262,69 @@
     gap: 8px;
     justify-content: flex-end;
     margin-top: 8px;
+}
+
+.memory-view-validate-btn {
+    padding: 6px 14px;
+    border: 1px solid var(--border-color);
+    border-radius: 0;
+    background: transparent;
+    color: var(--main-text-color);
+    cursor: default;
+    font-size: 13px;
+    // Pushed to the far left of the actions row (Cancel/Save stay grouped
+    // on the right via justify-content: flex-end) since Validate is a
+    // read-only side action, not part of the commit/discard pair.
+    margin-right: auto;
+
+    &:hover:not(:disabled) {
+        background: var(--hover-bg-color, rgba(255, 255, 255, 0.04));
+    }
+
+    &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+}
+
+.memory-view-validation {
+    border: 1px solid var(--border-color);
+    border-radius: 0;
+    padding: 8px 12px;
+    font-size: 12px;
+
+    &.is-valid {
+        border-color: var(--success-text-color, #7ec97e);
+    }
+}
+
+.memory-view-validation-ok {
+    margin: 0;
+    color: var(--success-text-color, #7ec97e);
+}
+
+.memory-view-validation-list {
+    margin: 0;
+    padding-left: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.memory-view-validation-item {
+    &.is-error {
+        color: var(--error-text-color, #ff8080);
+    }
+
+    &.is-warning {
+        color: var(--warning-text-color, #e8b93f);
+    }
+}
+
+.memory-view-validation-field {
+    font-family: var(--mono-font, "JetBrains Mono", monospace);
+    font-size: 11px;
+    opacity: 0.8;
 }
 
 .memory-view-form-hint {

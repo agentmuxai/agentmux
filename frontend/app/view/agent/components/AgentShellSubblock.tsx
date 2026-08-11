@@ -15,13 +15,18 @@
  * onCleanup, which calls DeleteSubBlockCommand).
  */
 
-import { createEffect, createMemo, createSignal, onCleanup, onMount, type Accessor, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type Accessor, type JSX } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { sendWSCommand } from "@/app/store/ws";
-import { WOS, staticTabId } from "@/app/store/global";
+import { WOS, atoms, staticTabId } from "@/app/store/global";
 import { stringToBase64 } from "@/util/util";
 import { TermWrap } from "@/app/view/term/termwrap";
+import { BrainSpinner } from "@/app/element/BrainSpinner";
+
+// Matches browser-view.tsx's LOADING_SPINNER_FADE_MS / BrainSpinner.scss's
+// is-fading transition duration — keep in sync if either changes.
+const SHELL_LOADING_SPINNER_FADE_MS = 200;
 
 interface AgentShellSubblockProps {
     parentBlockId: string;
@@ -78,6 +83,27 @@ interface AgentShellSubblockProps {
 
 const BASE_FONT_SIZE = 13;
 
+/**
+ * Waits for an already-in-flight WOS fetch for `oref` to settle (succeed or
+ * fail), WITHOUT triggering a new one — see the onMount IIFE below for why a
+ * second fetch must be avoided (reagentx P1 on #2522: `subBlockAtom`'s
+ * `createMemo` already eagerly fetches this exact oref at component
+ * construction). `getWaveObjectLoadingAtom` returns `null` while loading and
+ * `false` once settled (regardless of whether the value ended up populated
+ * or null) — see its doc comment in wos.ts. Bounded by `timeoutMs` since a
+ * genuine network failure can leave the loading atom stuck at "loading"
+ * forever (wos.ts's own comment on GetObject rejections other than a
+ * definitive "not found").
+ */
+async function waitForWaveObjectSettled(oref: string, timeoutMs = 2000): Promise<void> {
+    const loadingAtom = WOS.getWaveObjectLoadingAtom(oref);
+    const start = Date.now();
+    while (loadingAtom() === null) {
+        if (Date.now() - start >= timeoutMs) return;
+        await new Promise<void>((resolve) => setTimeout(resolve, 16));
+    }
+}
+
 export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element => {
     let containerRef: HTMLDivElement | undefined;
     let termWrap: TermWrap | undefined;
@@ -86,6 +112,18 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
 
     const [subBlockId, setSubBlockId] = createSignal<string | undefined>(props.existingSubBlockId);
     const [error, setError] = createSignal<string | null>(null);
+    // True once we've resolved (or determined we don't need) the persisted
+    // term:zoom for this sub-block, and are safe to construct TermWrap with
+    // the FINAL font size — see SPEC_AGENT_SHELL_ZOOM_SEED_RACE_2026-08-10.md.
+    // Gates both terminal construction and the loading overlay below.
+    const [zoomSeeded, setZoomSeeded] = createSignal(false);
+    // True once TermWrap.init() has resolved. A reactive replacement for
+    // reading termWrap.loaded (a plain class field) directly inside
+    // createEffect below — the plain field doesn't subscribe the effect to
+    // its later transition, so a font-size correction landing in the narrow
+    // window between TermWrap construction and init() resolving could
+    // previously be silently dropped forever (same spec, §2.2.6).
+    const [wrapLoaded, setWrapLoaded] = createSignal(false);
 
     // Reactive accessor for the sub-block's OWN meta — the same wave-object
     // atom mechanism TermViewModel uses (termViewModel.ts:86,237-246), just
@@ -107,13 +145,66 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
     });
 
     // Apply zoom-driven font-size changes to the live terminal in place —
-    // mirrors term.tsx:234-241.
+    // mirrors term.tsx:234-241. Only for LIVE updates (Ctrl+Wheel while the
+    // shell is already open, or a meta push from elsewhere); the initial
+    // mount's font size is seeded correctly before TermWrap is even
+    // constructed (see the onMount IIFE below), so this effect's first
+    // real-work firing is normally a no-op re-application of the same value.
     createEffect(() => {
         const fs = termFontSize();
-        if (termWrap?.terminal && termWrap.loaded) {
+        // Read unconditionally (not inside the `if`) so SolidJS subscribes
+        // to this signal on the effect's very first run, when termWrap is
+        // still undefined and `termWrap?.terminal && ...` would otherwise
+        // short-circuit before wrapLoaded() is ever read — which silently
+        // drops the subscription and reintroduces the exact bug this signal
+        // was added to fix (reagentx P2 on #2522: setWrapLoaded(true) later
+        // wouldn't re-trigger this effect at all, since it was never
+        // actually subscribed to wrapLoaded in the first place).
+        const loaded = wrapLoaded();
+        if (termWrap?.terminal && loaded) {
             termWrap.terminal.options.fontSize = fs;
             termWrap.handleResize();
         }
+    });
+
+    // Loading-brain overlay, mirroring browser-view.tsx's pattern
+    // (SPEC_AGENT_SHELL_ZOOM_SEED_RACE_2026-08-10.md) — masks the drawer
+    // from mount until the zoom seed fetch resolves and the terminal is
+    // constructed with its FINAL font size, so nothing ever paints at the
+    // wrong size in the first place. `zoomSeeded()` is the source of truth;
+    // these two signals exist only to hold BrainSpinner mounted for the CSS
+    // fade-out duration after seeding finishes (its own contract: caller
+    // owns unmounting after the transition ends).
+    const [spinnerMounted, setSpinnerMounted] = createSignal(true);
+    const [spinnerFading, setSpinnerFading] = createSignal(false);
+    let spinnerFadeTimeout: ReturnType<typeof setTimeout> | null = null;
+    createEffect(() => {
+        if (!zoomSeeded()) {
+            if (spinnerFadeTimeout) {
+                clearTimeout(spinnerFadeTimeout);
+                spinnerFadeTimeout = null;
+            }
+            setSpinnerFading(false);
+            setSpinnerMounted(true);
+            return;
+        }
+        if (!spinnerMounted()) return;
+        // prefersReducedMotion: BrainSpinner shows/hides instantly (no CSS
+        // transition) in that mode, so holding the node mounted for the
+        // normal fade duration would just be a pointless delay — unmount now.
+        if (atoms.prefersReducedMotionAtom()) {
+            setSpinnerMounted(false);
+            return;
+        }
+        setSpinnerFading(true);
+        spinnerFadeTimeout = setTimeout(() => {
+            spinnerFadeTimeout = null;
+            setSpinnerFading(false);
+            setSpinnerMounted(false);
+        }, SHELL_LOADING_SPINNER_FADE_MS);
+    });
+    onCleanup(() => {
+        if (spinnerFadeTimeout) clearTimeout(spinnerFadeTimeout);
     });
 
     onMount(() => {
@@ -145,6 +236,7 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
         void (async () => {
             try {
                 let id = subBlockId();
+                let isExistingBlock = false;
                 if (id) {
                     // Reusing a sub-block id persisted on the parent's meta from a
                     // prior mount — but a sub-block, unlike its parent agent block,
@@ -163,6 +255,7 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
                             blockid: id,
                             forcerestart: false,
                         });
+                        isExistingBlock = true;
                     } catch (e) {
                         console.warn(
                             "AgentShellSubblock: existing sub-block is stale, creating a fresh one:",
@@ -188,6 +281,38 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
                     setSubBlockId(id);
                     props.onSubBlockCreated(id);
                 }
+
+                // Seed the persisted zoom BEFORE constructing TermWrap, so the
+                // very first paint already uses the correct font size instead
+                // of the BASE_FONT_SIZE default followed by a visible
+                // correction jerk — see
+                // docs/specs/SPEC_AGENT_SHELL_ZOOM_SEED_RACE_2026-08-10.md. A
+                // freshly created sub-block has no persisted term:zoom yet
+                // (the already-correct default of 1.0 applies), so only the
+                // reused-existing-block path needs to wait for anything.
+                //
+                // Deliberately does NOT call WOS.reloadWaveObject here: the
+                // `subBlockAtom` memo above already triggered a fetch for
+                // this exact oref as a side effect of being constructed
+                // (WOS.getWaveObjectAtom → getWaveObjectValue eagerly fetches
+                // on first read, and that memo runs synchronously at
+                // component construction, before this async IIFE even
+                // starts). Calling reloadWaveObject here would force a
+                // SECOND, redundant GetObject round-trip for the same object
+                // on every reused-sub-block drawer open (reagentx P1 on
+                // #2522). Instead, just wait for that already-in-flight
+                // fetch to settle, bounded by a timeout so a genuine network
+                // failure (which can leave the loading atom stuck, per
+                // wos.ts's own comment on GetObject rejections) can't hang
+                // shell startup indefinitely — falls back to whatever
+                // termFontSize() currently computes (default zoom) if it
+                // times out; the live-update effect below corrects it later
+                // if a subsequent fetch/push succeeds.
+                if (isExistingBlock) {
+                    await waitForWaveObjectSettled(WOS.makeORef("block", id));
+                }
+                setZoomSeeded(true);
+
                 if (disposed || !containerRef) return;
                 const wrap = new TermWrap(
                     id,
@@ -216,6 +341,7 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
                 );
                 termWrap = wrap;
                 await wrap.init();
+                if (!disposed) setWrapLoaded(true);
                 if (!disposed) {
                     props.onTermReady?.((text: string) => {
                         // Leading \r\n forces this line to start fresh regardless of
@@ -244,7 +370,14 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
                 // was an unhandled promise rejection and the drawer silently
                 // never rendered a terminal — no user-facing error at all.
                 console.error("AgentShellSubblock: failed to start shell:", e);
-                if (!disposed) setError(e instanceof Error ? e.message : String(e));
+                if (!disposed) {
+                    setError(e instanceof Error ? e.message : String(e));
+                    // Clear the loading overlay even on failure — otherwise a
+                    // rejection before setZoomSeeded(true) (e.g. resync/create
+                    // both failing) leaves the BrainSpinner overlay covering
+                    // the error message forever.
+                    setZoomSeeded(true);
+                }
             }
         })();
     });
@@ -259,6 +392,11 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
     return (
         <div class="agent-shell-subblock" ref={containerRef}>
             {error() && <div class="agent-shell-subblock-error">Shell failed to start: {error()}</div>}
+            <Show when={spinnerMounted()}>
+                <div class="agent-shell-loading-overlay" classList={{ "is-fading": spinnerFading() }}>
+                    <BrainSpinner />
+                </div>
+            </Show>
         </div>
     );
 };

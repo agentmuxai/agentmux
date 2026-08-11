@@ -13,6 +13,7 @@ import {
     computeMenuPosition,
     type MenuPositionResult,
 } from "@/app/util/menu-position";
+import { createSubmenuHover, type SubmenuHoverController } from "@/app/util/submenu-hover";
 import { benchMark } from "@/util/startup-bench";
 
 // Cache for "synchronous" values that are fetched once at startup.
@@ -175,6 +176,15 @@ export function showJsContextMenu(
     menuEl.style.visibility = "hidden";
 
     function renderItems(container: HTMLElement, itemList: NativeContextMenuItem[]) {
+        // Peers (same-level submenu-bearing rows) close each other instantly
+        // on entry — matches the old zero-delay mouseleave's implicit
+        // sibling-closing side effect, which createSubmenuHover's open-delay/
+        // safe-triangle close otherwise silently drops (reagent P1 on
+        // PR #2525; termSettingsMenu.ts's Themes/Font Size/Terminal Zoom/
+        // Transparency submenus are the concrete affected case). One list
+        // per renderItems call — each call is exactly one menu level, so
+        // nested submenus never reach across levels to close an ancestor.
+        const peers: SubmenuHoverController[] = [];
         for (const item of itemList) {
             if (item.type === "separator") {
                 const sep = document.createElement("div");
@@ -249,29 +259,60 @@ export function showJsContextMenu(
                 // doesn't affect placement. Held visibility:hidden until
                 // placed for the same reason as the parent menu: the
                 // pane-overlay clip must register the final rect only.
-                row.addEventListener("mouseenter", () => {
-                    sub.style.visibility = "hidden";
-                    sub.style.display = "";
-                    void computeMenuPosition(
-                        {
-                            anchor: row.getBoundingClientRect(),
-                            placement: "right-start",
-                            avoidNativePanes: false,
-                        },
-                        sub,
-                    ).then((pos) => {
-                        // Hover may have left (or the whole menu closed)
-                        // before the async placement resolved.
-                        if (!sub.isConnected || sub.style.display === "none") return;
-                        applyMenuPosition(sub, pos);
-                        sub.style.visibility = "";
-                        assertMenuInPaintableArea(sub, "context-submenu");
-                    }).catch(() => {
-                        if (sub.isConnected) sub.style.visibility = "";
-                    });
+                //
+                // Open/close timing goes through the shared hover-intent core
+                // (SPEC_SUBMENU_POSITIONING_AND_HOVER_TIMING_2026_08_10) instead
+                // of firing instantly on mouseenter/mouseleave: a short open
+                // delay avoids flashing a submenu while the cursor is just
+                // sweeping across sibling rows, and a safe-triangle close lets
+                // the user travel diagonally into the submenu without it
+                // vanishing out from under the cursor.
+                const hover = createSubmenuHover({
+                    onOpen: () => {
+                        sub.style.visibility = "hidden";
+                        sub.style.display = "";
+                        void computeMenuPosition(
+                            {
+                                anchor: row.getBoundingClientRect(),
+                                placement: "right-start",
+                                avoidNativePanes: false,
+                            },
+                            sub,
+                        ).then((pos) => {
+                            // Hover may have left (or the whole menu closed)
+                            // before the async placement resolved.
+                            if (!sub.isConnected || sub.style.display === "none") return;
+                            applyMenuPosition(sub, pos);
+                            sub.style.visibility = "";
+                            assertMenuInPaintableArea(sub, "context-submenu");
+                        }).catch(() => {
+                            if (sub.isConnected) sub.style.visibility = "";
+                        });
+                    },
+                    onClose: () => {
+                        sub.style.display = "none";
+                    },
                 });
-                row.addEventListener("mouseleave", () => { sub.style.display = "none"; });
+                // `sub` reports a zero rect via getBoundingClientRect() while
+                // display:none, which the controller treats as "no geometry
+                // yet" — safe to register once, up front.
+                hover.setSubmenuEl(sub);
+                peers.push(hover);
+                row.addEventListener("mouseenter", () => {
+                    for (const peer of peers) {
+                        if (peer !== hover) peer.close();
+                    }
+                    hover.onTriggerEnter();
+                });
+                row.addEventListener("mouseleave", (e) => hover.onTriggerLeave(e as MouseEvent));
+                sub.addEventListener("mouseenter", () => hover.onSubmenuEnter());
+                sub.addEventListener("mouseleave", (e) => hover.onSubmenuLeave(e as MouseEvent));
             } else if (item.enabled !== false) {
+                // A plain (no-submenu) row is still an explicit new selection —
+                // entering it closes any open peer submenu immediately too.
+                row.addEventListener("mouseenter", () => {
+                    for (const peer of peers) peer.close();
+                });
                 row.addEventListener("click", () => {
                     overlay.remove();
                     if (item.id && onClick) onClick(item.id);

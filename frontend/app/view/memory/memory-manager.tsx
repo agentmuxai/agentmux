@@ -1,9 +1,9 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// MemoryManager — the context-free Memory-bundle management UI.
+// MemoryManager — the context-free Armory Bundle Format (ABF) management UI.
 //
-// This is the full list / create / edit / delete lifecycle for Memory
+// This is the full list / create / edit / delete lifecycle for ABF
 // bundles, extracted out of the `view: "memory"` block pane so the exact
 // same UI can render in two places without depending on the Agent-pane
 // block, `nodeModel`, or any ViewModel-from-BlockRegistry context:
@@ -20,6 +20,7 @@
 import { For, onCleanup, Show, type JSX } from "solid-js";
 
 import { PrimitiveListDetail } from "@/app/element/primitive-list-detail";
+import { Tooltip } from "@/app/element/tooltip";
 import { useModalLayer } from "@/app/element/modal-layer";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { type MemoryDraft, MemoryViewModel } from "./memory-model";
@@ -29,6 +30,15 @@ import "./memory-view.scss";
 interface MemoryManagerBodyProps {
     model: MemoryViewModel;
 }
+
+/** Small (i) icon with a hover tooltip — contextual in-line documentation
+ *  next to a field label, explaining what it does in ABF terms without
+ *  requiring a trip to the docs. */
+const FieldHelp = (props: { text: string }): JSX.Element => (
+    <Tooltip content={props.text} placement="right">
+        <i class="fa-sharp fa-solid fa-circle-info memory-view-field-help" aria-hidden="true" />
+    </Tooltip>
+);
 
 /**
  * MemoryManagerBody — the rail + detail UI, driven by a MemoryViewModel.
@@ -95,11 +105,15 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
 
     const handleCancel = () => model.cancelDraft();
 
+    const handleValidate = () => {
+        void model.validateDraft();
+    };
+
     const handleDelete = (id: string) => {
-        // Confirm via the most boring possible dialog. Presets can be
+        // Confirm via the most boring possible dialog. Bundles can be
         // referenced by running instances; deletion is an explicit user
         // intent we don't want to fast-path.
-        const ok = window.confirm("Delete this preset? Running instances continue with their snapshot, but new launches won't see it.");
+        const ok = window.confirm("Delete this bundle? Running instances continue with their snapshot, but new launches won't see it.");
         if (!ok) return;
         void model.deleteMemory(id);
     };
@@ -111,6 +125,10 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
         const current = model.draftAtom();
         if (!current) return;
         model.setDraft({ ...current, [key]: value });
+        // A validation report reflects the draft AS OF the click; any edit
+        // after that invalidates it — clear rather than leave a stale
+        // "looks good" (or stale error) hanging off text the user changed.
+        model.setValidation(null);
     };
 
     // Single-pane: the detail view (read-only or edit form) shows instead of
@@ -118,7 +136,7 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
     // docs/specs/SPEC_ARMORY_RESPONSIVE_SINGLE_PANE_LAYOUT_2026_07_15.md.
     // "In detail" whenever something is selected OR a draft (new or
     // editing-existing) is open; otherwise the list shows. The old
-    // no-selection empty-state message ("Select a preset...") is gone — with
+    // no-selection empty-state message ("Select a bundle...") is gone — with
     // nothing selected you're just looking at the list, there's no third
     // empty detail state to explain.
     const inDetail = () => model.selectedIdAtom() !== null || model.draftAtom() !== null;
@@ -136,7 +154,7 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
             </Show>
             <div class="memory-view-rail-header">
                 <button class="memory-view-new-btn" onClick={handleNew}>
-                    + New Preset
+                    + New Bundle
                 </button>
                 <button class="memory-view-new-btn" onClick={handleImportBundle}>
                     Import Bundle
@@ -162,7 +180,7 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
                                     <span class="memory-view-global-badge" title="Injected into all agents at launch">Global</span>
                                 </Show>
                             </div>
-                            {/* Subtitle shows the description now that presets
+                            {/* Subtitle shows the description now that bundles
                                 are provider-agnostic (§4.1a). Class name kept
                                 to avoid CSS churn. */}
                             <Show when={!memory.is_blank && memory.description}>
@@ -236,11 +254,14 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
                             }}
                         >
                             <h2 class="memory-view-form-title">
-                                {draft().id ? "Edit Preset" : "New Preset"}
+                                {draft().id ? "Edit Bundle" : "New Bundle"}
                             </h2>
 
                             <label class="memory-view-field">
-                                <span class="memory-view-field-label">Name *</span>
+                                <span class="memory-view-field-label">
+                                    Name *
+                                    <FieldHelp text="The bundle's display name — shown in the Armory list and in the agent launch picker. Required." />
+                                </span>
                                 <input
                                     class="memory-view-input"
                                     type="text"
@@ -253,7 +274,10 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
                             </label>
 
                             <label class="memory-view-field">
-                                <span class="memory-view-field-label">Description</span>
+                                <span class="memory-view-field-label">
+                                    Description
+                                    <FieldHelp text="Optional short label shown under the bundle's name in the launch picker. Purely cosmetic — has no effect on what gets injected into the agent." />
+                                </span>
                                 <input
                                     class="memory-view-input"
                                     type="text"
@@ -266,12 +290,15 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
                                 />
                             </label>
 
-                            {/* Provider + model intentionally omitted: presets are
+                            {/* Provider + model intentionally omitted: bundles are
                                 provider-agnostic; the CLI + model belong to the
                                 agent. See SPEC_MEMORY_IDENTITY_ARCH §4.1a. */}
 
                             <label class="memory-view-field">
-                                <span class="memory-view-field-label">Instructions</span>
+                                <span class="memory-view-field-label">
+                                    Instructions
+                                    <FieldHelp text="The default system prompt injected into the agent's context at launch — provider-agnostic, applies regardless of which CLI/harness the agent uses. ABF v0.2 supports additional per-provider variants (instructions_by_provider) that override this for a specific harness; there's no authoring UI for those yet, but an imported bundle's variants round-trip through this form unchanged." />
+                                </span>
                                 <textarea
                                     class="memory-view-textarea"
                                     rows={8}
@@ -285,6 +312,19 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
                             </label>
 
                             <div class="memory-view-form-actions">
+                                <Tooltip
+                                    content="Structurally checks this draft: unknown provider keys, unsafe or colliding context-file paths, and malformed JSON in the fields not yet editable here. Advisory only — never blocks Save."
+                                    placement="top"
+                                >
+                                    <button
+                                        type="button"
+                                        class="memory-view-validate-btn"
+                                        onClick={handleValidate}
+                                        disabled={model.validatingAtom() || model.savingAtom() || !draft().name.trim()}
+                                    >
+                                        {model.validatingAtom() ? "Validating…" : "Validate"}
+                                    </button>
+                                </Tooltip>
                                 <button
                                     type="button"
                                     class="memory-view-cancel-btn"
@@ -302,9 +342,50 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
                                 </button>
                             </div>
 
+                            {/* Structural ABF validation results (bundle.validate) —
+                                advisory only, never blocks Save. Cleared on any
+                                further edit (updateDraft) or draft replacement so a
+                                stale report never lingers onto different content. */}
+                            <Show when={model.validationAtom()}>
+                                {(report) => (
+                                    <div
+                                        class="memory-view-validation"
+                                        classList={{ "is-valid": report().is_valid }}
+                                    >
+                                        <Show
+                                            when={report().issues.length > 0}
+                                            fallback={<p class="memory-view-validation-ok">No structural issues found.</p>}
+                                        >
+                                            <ul class="memory-view-validation-list">
+                                                <For each={report().issues}>
+                                                    {(issue) => (
+                                                        <li
+                                                            class="memory-view-validation-item"
+                                                            classList={{
+                                                                "is-error": issue.severity === "error",
+                                                                "is-warning": issue.severity === "warning",
+                                                            }}
+                                                        >
+                                                            <span class="memory-view-validation-field">{issue.field}</span>
+                                                            {": "}
+                                                            {issue.message}
+                                                        </li>
+                                                    )}
+                                                </For>
+                                            </ul>
+                                        </Show>
+                                    </div>
+                                )}
+                            </Show>
+
                             <p class="memory-view-form-hint">
-                                Context files, MCP servers, and skills will be editable in a follow-up — the
-                                fields are persisted as JSON today and round-trip cleanly through the form.
+                                This bundle's other Armory Bundle Format (ABF) components — context files,
+                                MCP servers, and skills — will be editable here in a follow-up. For now they're
+                                persisted as JSON and round-trip cleanly through the form; use{" "}
+                                <strong>Validate</strong> above to catch unsafe paths or malformed JSON in
+                                them. To bring in an existing <code>.abf</code> archive's components directly,
+                                use <strong>Import Bundle</strong> from the bundle list (Cancel to get back
+                                there).
                             </p>
                         </form>
                     )}
@@ -315,7 +396,7 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
     return (
         <PrimitiveListDetail
             showDetail={inDetail()}
-            backLabel="Bundles"
+            backLabel="ABF"
             onBack={handleBack}
             list={listView}
             detail={detailView}
