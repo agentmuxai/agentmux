@@ -413,6 +413,16 @@ pub fn content_digest_files(files: &[BundleImportFile]) -> String {
 /// [`MAX_ACCOUNT_REQUIREMENTS`]).
 const MAX_INSTRUCTION_PROVIDER_VARIANTS: usize = 32;
 
+/// The exact warning `parse_bundle_import_with_budget` pushes when
+/// `components.memory` is present — ABF v0.2 §2.3. A shared constant
+/// (rather than a literal duplicated at both the push site and
+/// `bundle_import_for_agent_impl`'s filter site, reagent P1 PR #2527)
+/// so the two can never drift apart: if this message ever changes, the
+/// filter in `bundle.rs` keeps working because it references the same
+/// constant, not a copy of the string.
+pub(crate) const MEMORY_COMPONENT_IGNORED_WARNING: &str =
+    "components.memory: present but ignored — memory requires an agent-scoped import (bundle.import_for_agent), not bundle.import";
+
 /// Parse one `components.instructions`-shaped path array (either the v0.1
 /// flat array itself, or one key's array within the v0.2 keyed-object
 /// shape) into its joined instructions text. `label` is used only for
@@ -869,18 +879,20 @@ pub fn parse_bundle_import_with_budget(
 
     // ABF v0.2 §2.3: `parse_bundle_import`/`parse_bundle_import_with_budget`
     // are called by every agent-LESS import path (bundle.import,
-    // bundle.import.preview, bundle.import.commit) — none of them has an
-    // agent to write memory into. A components.memory key is explicitly
-    // skipped here, with a warning rather than silently dropped, so a
-    // caller inspecting the response can tell the memory component was
-    // present but requires bundle.import_for_agent, not that it was
-    // missing from the source bundle. Fixing this once here, rather than
-    // in each of the three RPC handlers, means it applies uniformly by
-    // construction — no handler can forget the check.
+    // bundle.import.preview, bundle.import.commit) AND by
+    // `bundle_import_for_agent_impl` (which reuses this same parser for
+    // everything except memory, which it handles separately downstream).
+    // A components.memory key gets a warning here so the three agent-less
+    // callers can tell the memory component was present but requires
+    // bundle.import_for_agent, not that it was missing from the source
+    // bundle. reagent P1, PR #2527: `bundle_import_for_agent_impl` DOES
+    // handle memory, so this warning is actively misleading there —
+    // it must filter this exact string out of `parsed.warnings` before
+    // merging into its own response (see MEMORY_COMPONENT_IGNORED_WARNING's
+    // doc comment for why it's a shared constant, not a duplicated
+    // literal, so the push site and the filter site can't drift apart).
     if components.and_then(|c| c.get("memory")).is_some() {
-        warnings.push(
-            "components.memory: present but ignored — memory requires an agent-scoped import (bundle.import_for_agent), not bundle.import".to_string(),
-        );
+        warnings.push(MEMORY_COMPONENT_IGNORED_WARNING.to_string());
     }
 
     Ok(ParsedBundleImport {
