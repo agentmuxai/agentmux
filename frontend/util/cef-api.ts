@@ -13,7 +13,7 @@ import {
     computeMenuPosition,
     type MenuPositionResult,
 } from "@/app/util/menu-position";
-import { createSubmenuHover } from "@/app/util/submenu-hover";
+import { createSubmenuHover, type SubmenuHoverController } from "@/app/util/submenu-hover";
 import { benchMark } from "@/util/startup-bench";
 
 // Cache for "synchronous" values that are fetched once at startup.
@@ -176,6 +176,15 @@ export function showJsContextMenu(
     menuEl.style.visibility = "hidden";
 
     function renderItems(container: HTMLElement, itemList: NativeContextMenuItem[]) {
+        // Peers (same-level submenu-bearing rows) close each other instantly
+        // on entry — matches the old zero-delay mouseleave's implicit
+        // sibling-closing side effect, which createSubmenuHover's open-delay/
+        // safe-triangle close otherwise silently drops (reagent P1 on
+        // PR #2525; termSettingsMenu.ts's Themes/Font Size/Terminal Zoom/
+        // Transparency submenus are the concrete affected case). One list
+        // per renderItems call — each call is exactly one menu level, so
+        // nested submenus never reach across levels to close an ancestor.
+        const peers: SubmenuHoverController[] = [];
         for (const item of itemList) {
             if (item.type === "separator") {
                 const sep = document.createElement("div");
@@ -288,11 +297,22 @@ export function showJsContextMenu(
                 // display:none, which the controller treats as "no geometry
                 // yet" — safe to register once, up front.
                 hover.setSubmenuEl(sub);
-                row.addEventListener("mouseenter", () => hover.onTriggerEnter());
+                peers.push(hover);
+                row.addEventListener("mouseenter", () => {
+                    for (const peer of peers) {
+                        if (peer !== hover) peer.close();
+                    }
+                    hover.onTriggerEnter();
+                });
                 row.addEventListener("mouseleave", (e) => hover.onTriggerLeave(e as MouseEvent));
                 sub.addEventListener("mouseenter", () => hover.onSubmenuEnter());
                 sub.addEventListener("mouseleave", (e) => hover.onSubmenuLeave(e as MouseEvent));
             } else if (item.enabled !== false) {
+                // A plain (no-submenu) row is still an explicit new selection —
+                // entering it closes any open peer submenu immediately too.
+                row.addEventListener("mouseenter", () => {
+                    for (const peer of peers) peer.close();
+                });
                 row.addEventListener("click", () => {
                     overlay.remove();
                     if (item.id && onClick) onClick(item.id);

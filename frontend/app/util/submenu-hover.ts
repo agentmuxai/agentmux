@@ -202,10 +202,15 @@ export function createSubmenuHover(opts: SubmenuHoverOptions): SubmenuHoverContr
             doClose();
         },
 
+        // Same as close() — if this was open, onClose() MUST fire so the
+        // caller's own state (e.g. a visibleSubMenus map entry) stays in
+        // sync with reality. Skipping it left a stale visible:true entry
+        // for an unmounted-while-open submenu, which then rendered
+        // instantly (skipping the open delay) the next time its ancestor
+        // reopened (reagent P2 on PR #2525).
         dispose() {
             clearOpenTimer();
-            cancelPendingClose();
-            isOpen = false;
+            doClose();
         },
     };
 }
