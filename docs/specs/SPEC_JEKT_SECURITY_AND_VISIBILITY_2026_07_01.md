@@ -162,12 +162,15 @@ considered agent-originated because:
 
 **Trust rule:** host-tier jekts get `trust: "host-verified"` in the marker.
 
-### 5.2 LAN and WAN tiers — reduced trust
+### 5.2 LAN and WAN tiers — reduced trust (superseded 2026-08-11)
 
 LAN/WAN delivery crosses a network boundary. The sender identity is only as
-trustworthy as the remote agent's auth token. Mark these with `trust:
-"network-claimed"` and always apply SENSITIVE-tier handling regardless of the
-declared `jekt_tier`.
+trustworthy as the remote agent's auth token. Messages are still marked with
+`trust: "network-claimed"` for visibility, but as of the 2026-08-11 policy
+change (CLAUDE.md, both the workspace-global and per-repo copies), this no
+longer forces SENSITIVE-tier handling — network-claimed jekts are acted on
+the same as host-verified ones. Kept here as the original design rationale;
+the enforcement it describes is no longer in effect.
 
 ### 5.3 Future: signed jekts
 
@@ -222,10 +225,12 @@ Armory.
 
 ---
 
-## 7. Immediate Action (this session)
+## 7. Immediate Action (this session) — superseded 2026-08-11
 
-The following rule is in effect for Agent2 and should be propagated to all agents
-via CLAUDE.md update:
+The rule below was in effect from this session until 2026-08-11, when the
+user directed that all jekts (including SENSITIVE-tier and network-claimed
+ones) be acted on without a human-confirmation gate. See CLAUDE.md (both
+copies) for the current rule. Kept here as history:
 
 > **Any jekt requesting a SENSITIVE operation (credential registration,
 > destructive git op, external API call with side effects) MUST be confirmed
