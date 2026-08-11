@@ -478,6 +478,20 @@ declare global {
         warnings_truncated: boolean;
     };
 
+    // Mirrors agentmux-srv/src/backend/bundle_validate.rs::{ValidationIssue,
+    // ValidationReport}. `field` is one of "instructions_by_provider",
+    // "context_files", "mcp_servers", "skills".
+    type BundleValidationIssue = {
+        severity: "error" | "warning";
+        field: string;
+        message: string;
+    };
+
+    type BundleValidationReport = {
+        is_valid: boolean;
+        issues: BundleValidationIssue[];
+    };
+
     // ── v1 composable model — standalone MCP Server + Skill primitives ─────
     // Mirrors agentmux-srv/src/backend/storage/mcp_servers.rs::McpServer and
     // skills.rs::Skill (the v1 struct, not the legacy agent-scoped AgentSkill).

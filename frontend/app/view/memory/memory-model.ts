@@ -182,6 +182,18 @@ export class MemoryViewModel implements ViewModel {
     errorAtom: Accessor<string | null> = this._error[0];
     setError = this._error[1];
 
+    private _validating = createSignal<boolean>(false);
+    validatingAtom: Accessor<boolean> = this._validating[0];
+    setValidating = this._validating[1];
+
+    /** Result of the last "Validate" click, or null if never run / cleared
+     *  by a subsequent edit. Cleared whenever the draft is replaced
+     *  (startNew/startEdit/cancelDraft) or saved — a stale report from a
+     *  DIFFERENT bundle must never linger onto the next one. */
+    private _validation = createSignal<BundleValidationReport | null>(null);
+    validationAtom: Accessor<BundleValidationReport | null> = this._validation[0];
+    setValidation = this._validation[1];
+
     /** Memo: the currently-selected Memory row, or null. */
     selectedAtom: Accessor<Memory | null>;
 
@@ -227,6 +239,7 @@ export class MemoryViewModel implements ViewModel {
      *  user starts on a clean banner. */
     startNew(): void {
         this.setError(null);
+        this.setValidation(null);
         this.setDraft(emptyDraft());
         this.setSelectedId(null);
     }
@@ -244,6 +257,7 @@ export class MemoryViewModel implements ViewModel {
             return;
         }
         this.setError(null);
+        this.setValidation(null);
         this.setDraft(draftFromMemory(memory));
         this.setSelectedId(memory.id);
     }
@@ -255,6 +269,7 @@ export class MemoryViewModel implements ViewModel {
     cancelDraft(): void {
         this.setDraft(null);
         this.setError(null);
+        this.setValidation(null);
     }
 
     /** Persist the current draft (creates if id is empty, else updates). */
@@ -288,12 +303,43 @@ export class MemoryViewModel implements ViewModel {
                 // selectedAtom resolves to the saved memory immediately,
                 // no empty-state flash. Reagent P2 (PR #749).
                 this.setDraft(null);
+                this.setValidation(null);
                 this.setSelectedId(saved.id);
             }
         } catch (e) {
             this.setError(`Save failed: ${(e as Error).message ?? e}`);
         } finally {
             this.setSaving(false);
+        }
+    }
+
+    /** Run the structural ABF validator against the current draft — works
+     *  on unsaved edits (including a brand-new bundle with no id yet), not
+     *  just what's already persisted, since `ValidateBundleCommand` accepts
+     *  the same payload shape `saveDraft` sends. Does not save; purely
+     *  advisory. */
+    async validateDraft(): Promise<void> {
+        const draft = this.draftAtom();
+        if (!draft) return;
+        this.setValidating(true);
+        this.setError(null);
+        try {
+            const report = await RpcApi.ValidateBundleCommand(TabRpcClient, draftToWire(draft));
+            // Same identity-equality race guard as saveDraft (reagent P1,
+            // PR #749 round 6 originally, now PR #2532): Cancel, "+ New
+            // Bundle", and another row's Edit button are all still
+            // clickable while this request is in flight (validatingAtom
+            // does not disable them). Without this check, a report for
+            // the OLD draft would land on whatever draft the user has
+            // switched to by the time the RPC resolves — the exact
+            // staleness this feature exists to prevent.
+            if (this.draftAtom() === draft) {
+                this.setValidation(report);
+            }
+        } catch (e) {
+            this.setError(`Validate failed: ${(e as Error).message ?? e}`);
+        } finally {
+            this.setValidating(false);
         }
     }
 
