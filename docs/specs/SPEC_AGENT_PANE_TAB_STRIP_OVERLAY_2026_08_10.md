@@ -100,7 +100,7 @@ fade treatment was added to avoid it; it wasn't asked for, and would add
 complexity (asymmetric padding on a scroll region) for a corner case
 already accepted as fine.
 
-### 1.4 Accepted tradeoff: the strip can be briefly hidden by the loading overlay on mount
+### 1.4 Resolved: the strip no longer competes with the loading overlay
 
 Before this spec, `.pane-tab-strip` was a flex row entirely outside
 `.agent-view`'s own box — geometrically incapable of overlapping anything
@@ -109,40 +109,27 @@ sibling of `.agent-view`, whose `.agent-pane-loading-overlay`
 (`agent-view.tsx`, `_loading-overlay.scss`) is `position: absolute; inset:
 0; z-index: var(--zindex-elem-modal)` (100) — shown from mount until
 initial history load resolves, on every pane mount and reconnect. The
-strip's own z-index (`var(--z-pane-overlay, 4)`, per §1.2/§1.4's sibling
-discussion below) is far below 100.
+strip's own z-index (`var(--z-pane-overlay, 4)`) is far below 100, so
+whether this actually manifested depended on whether `.agent-view` isolated
+its descendants into their own stacking context.
 
-Whether this actually manifests depends on a question this investigation
-was unable to settle with full confidence: does `.agent-view`'s
-`container-type: inline-size` (no explicit `z-index`) establish its own
-stacking context, isolating the loading overlay from ever competing with
-the strip regardless of either one's z-index? Two rounds of review flagged
-this in opposite directions, citing MDN and a W3C spec page that
-disagreed with each other. A targeted search for the CSS Working Group's
-actual resolution (not another spec-text read) found that `container-type`
-was deliberately walked back from forcing layout containment after
-Chromium found the strict version broke real layout behavior (baseline
-alignment, trapped abspos elements, broken scrollable overflow) — the
-highest-confidence signal found in this investigation, but not something
-verified against this app's actual running CEF/Chromium build, since this
-sandbox has no display.
+Earlier rounds of this investigation were unable to settle that with full
+confidence — MDN and a W3C spec page gave opposite answers on whether
+`container-type: inline-size` alone creates one. reagent P1 on PR #2526's
+6th round settled it directly: `container-type: inline-size` computes to
+`contain: inline-size style`, and neither `inline-size` nor `style`
+containment is in the set of values (`layout`, `paint`, `strict`,
+`content`) that create a stacking context — so it does not, and the
+loading overlay genuinely was painting over the tab strip on every mount.
 
-**Accepted, not fixed:** if that resolution is what this build's engine
-actually does (no isolation), the tab strip's `+`/tab controls can be
-briefly hidden behind the opaque loading overlay during the ~1 second
-initial-load window on every mount or reconnect — on top of, not instead
-of, §1.3's scroll-behind-strip case. Not treated as a launch-blocker for
-this change: it's bounded to a short, load-only window (the overlay fades
-and unmounts once history resolves — see
-`docs/specs/REPORT_AGENT_PANE_BLANK_LOAD_BRAIN_INDICATOR_2026_07_04.md`),
-and the same overlay already outranks `.block-mask`'s focused-pane border
-today, independent of anything in this spec — a pre-existing exposure this
-change surfaces adjacent to, not one it introduces from nothing. A real
-fix (giving the loading overlay a z-index that respects the same budget
-`.block-mask`/`.connstatus-overlay` already document, or establishing a
-real, deliberate stacking context somewhere in this chain) is a genuine
-z-index audit across multiple files this spec doesn't own, and is flagged
-as follow-up work, not resolved here.
+**Fixed**, not just documented: `.agent-view` now carries an explicit
+`z-index: 0` alongside its existing `position: relative`
+(`agent-view.scss`), which — unlike `container-type` — is unambiguously a
+stacking-context trigger per spec. Every absolutely-positioned descendant
+inside `.agent-view`, including the loading overlay's z-index 100, is now
+compared only against its own siblings inside that box, never against
+`.pane-tab-strip`. Same pattern `.agent-document-scroll-region` already
+uses for its own children (`_document.scss`).
 
 ---
 
