@@ -79,6 +79,10 @@ export interface AgentDocumentVirtualListProps {
     /** Re-run the provider login flow — forwarded to each row so an inline
      *  auth-error node can offer a "Login Again" CTA (SPEC_REAUTH_FROM_AUTH_ERROR §7). */
     onAgentErrorLogin?: () => void;
+    /** Open/focus the Agent History tab — forwarded to each row so a
+     *  `history_link` synthetic node can act on click. See
+     *  SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md §3.2. */
+    onOpenHistory?: () => void;
     /**
      * Live per-pane zoom factor (the same value applied as CSS `zoom` on
      * `.agent-view` in agent-view.tsx). Normalizes the SINGLE zoomed read —
@@ -910,6 +914,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                                         onTogglePin={props.onTogglePin}
                                         onHoldToolOpen={props.onHoldToolOpen}
                                         onAgentErrorLogin={props.onAgentErrorLogin}
+                                        onOpenHistory={props.onOpenHistory}
                                         ref={(el) => { rowEl = el; observeRow(el, row().nodeId); }}
                                         style={{
                                             position: "absolute",
@@ -975,6 +980,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                                     onTogglePin={props.onTogglePin}
                                     onHoldToolOpen={props.onHoldToolOpen}
                                     onAgentErrorLogin={props.onAgentErrorLogin}
+                                    onOpenHistory={props.onOpenHistory}
                                 />
                             )}
                         </Key>

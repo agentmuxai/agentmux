@@ -22,6 +22,7 @@ import { realAccountIdOrEmpty } from "./identity-carry-over";
 import { refreshAccountCache } from "@/app/view/identity/identity-model";
 import { dimAgentColor, isValidAgentColor, pickAgentColor } from "./agent-color";
 import { parseSeedZoom } from "./agent-zoom-seed";
+import { HISTORY_TAB_FOR_META_KEY, openOrFocusHistoryTab } from "./open-history-tab";
 
 export class AgentViewModel implements ViewModel {
     viewType = "agent";
@@ -148,8 +149,16 @@ export class AgentViewModel implements ViewModel {
         // for panes without a loadable AgentDefinition, and the Memory
         // tab needs no definition.
         this.endIconButtons = () => {
-            const agentId = this.blockAtom()?.meta?.["agentId"];
-            if (!agentId) return [];
+            const meta = this.blockAtom()?.meta;
+            const agentId = meta?.["agentId"];
+            // No Stash button on a history-reader tab: _openAgentStashModal
+            // is wired up only by AgentPresentationView (the live view),
+            // which never mounts for a history tab (AgentHistoryTabView
+            // mounts instead per SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md
+            // §3.1) — without this the button would render (agentId is
+            // copied onto the history block's own meta) but silently do
+            // nothing on click. codex P2 on PR #2539.
+            if (!agentId || meta?.[HISTORY_TAB_FOR_META_KEY]) return [];
             return [
                 {
                     elemtype: "iconbutton",
@@ -750,6 +759,33 @@ export class AgentViewModel implements ViewModel {
             return false;
         }
     };
+
+    /**
+     * Right-click body context menu — blockframe.tsx splices this at the
+     * TOP of the menu, before the shared pane actions + separator (see its
+     * body-right-click handler). "Agent History" is a plain top-level item,
+     * not wrapped in a `submenu` — the ask is one clickable action (open
+     * or focus the tab), not a choice among several; `submenu` is a
+     * drop-in extension point here if a future need for several history
+     * destinations (session / full / archives) arises. No-op when there's
+     * no agent loaded yet (still on the picker).
+     *
+     * Spec: SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md §3.3.
+     */
+    getBodyContextMenuItems(): ContextMenuItem[] {
+        const meta = this.blockAtom()?.meta;
+        const agentId = meta?.["agentId"] as string | undefined;
+        // No entry on the history tab itself (nothing to open — it'd just
+        // re-focus this same tab) and none before an agent is loaded.
+        if (!agentId || meta?.[HISTORY_TAB_FOR_META_KEY]) return [];
+        return [
+            {
+                label: "Agent History",
+                click: () => void openOrFocusHistoryTab({ currentBlockId: this.blockId, agentId }),
+            },
+            { type: "separator" },
+        ];
+    }
 
     giveFocus(): boolean {
         return false;

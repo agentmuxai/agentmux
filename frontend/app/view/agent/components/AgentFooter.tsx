@@ -33,6 +33,23 @@ function fmtTokens(t: TurnTokens): string {
     return `\u2191${formatCompactNumber(t.input)} \u2193${formatCompactNumber(t.output)}`;
 }
 
+// \u2500\u2500 Composer draft persistence \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+// Module-level (not per-component-instance), keyed by blockId, so a draft
+// survives this component's own unmount \u2014 which now happens on every
+// ordinary pane-stack tab switch (opening/closing Agent History, switching
+// forks, the "+" new-tab button), not just when the pane truly closes. The
+// textarea below is deliberately UNCONTROLLED (DOM owns the value, for perf
+// \u2014 see AgentFooter's own comment on textareaRef), so its value is destroyed
+// outright on unmount with nothing to restore from unless something outside
+// the component's own lifetime holds a copy. Cleared only on send; NOT
+// cleared in onCleanup, since every tab-switch-away is itself an unmount
+// from this component's own vantage point and clearing there would erase
+// the very draft this exists to preserve. A stale entry for a since-closed
+// block is a bounded, harmless leak (one short string per block ever
+// opened this session).
+// Spec: SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md \u00a73.4.
+const composerDrafts = new Map<string, string>();
+
 // ── AgentWorkingRow ───────────────────────────────────────────────────────────
 // Rendered immediately below AgentDocumentView in the conversation area.
 // Shows spinner + "Working… · Ns" while loading, "✓ Worked · 42s" on completion.
@@ -426,6 +443,12 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     // specs/SPEC_TOOL_OVERLAY_AND_SCROLL_ON_TYPE_2026_04_13.md §3.4.
     let textareaRef: HTMLTextAreaElement | undefined;
 
+    // Stable for this component instance's whole lifetime (component body
+    // runs once) — undefined only for callers that don't pass a viewModel
+    // (older/test callers, per the prop's own doc comment), in which case
+    // draft persistence below is a no-op rather than an error.
+    const draftBlockId = props.viewModel?.blockId;
+
     // ── Sent-message history (shell-style ArrowUp / ArrowDown recall) ──
     // Per-pane, in-memory, capped. The component body runs once (SolidJS), so
     // these closure `let`s persist for the footer's lifetime — same pattern as
@@ -538,6 +561,13 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     const writeComposerValue = (text: string): void => {
         if (!textareaRef) return;
         textareaRef.value = text;
+        // Every programmatic composer write goes through here (Esc-clear,
+        // undo-restore, history recall, ghost-text accept, autocomplete
+        // accept, voice) — persisting here, not just in handleInput below,
+        // means e.g. an Esc-clear-to-empty also clears the persisted draft
+        // instead of resurrecting the pre-clear text on the next tab
+        // switch back. See composerDrafts above.
+        if (draftBlockId) composerDrafts.set(draftBlockId, text);
     };
 
     const acceptCompletion = (cmd: SlashCommand): void => {
@@ -584,6 +614,13 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         // through to native undo instead of resurrecting stale text. (reagent
         // P1 / codex P2 on PR #2497.)
         escClearedDraft = null;
+        // Persist the draft (composerDrafts above) so it survives a
+        // tab-switch-away/back. Synchronous, not RAF-batched like the
+        // typing-scroll below — a Map.set() is O(1) with no layout/DOM
+        // cost, so it needs no debouncing, and must not depend on
+        // `props.onTyping` being provided (that callback is optional; the
+        // draft guarantee isn't).
+        if (draftBlockId && textareaRef) composerDrafts.set(draftBlockId, textareaRef.value);
         // Perf marks per SPEC_INPUT_RESPONSIVENESS §7.1. Target: handler
         // body P95 < 5 ms. The mark span ends BEFORE the RAF enqueue so
         // we measure only the synchronous handler cost.
@@ -632,6 +669,22 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     // suggestion after the user already started typing.
     onMount(() => {
         props.isComposerEmptyRef?.(() => (textareaRef?.value.length ?? 0) === 0);
+    });
+
+    // Restore a draft left behind by a prior mount of this same block (a
+    // tab switch away and back — see composerDrafts above). Direct .value
+    // write, matching every other programmatic composer write in this file
+    // (writeComposerValue) — deliberately does NOT dispatch `input`, so it
+    // doesn't trip handleInput's history-cursor reset before the user has
+    // touched anything.
+    onMount(() => {
+        if (!draftBlockId || !textareaRef) return;
+        const draft = composerDrafts.get(draftBlockId);
+        if (draft) {
+            textareaRef.value = draft;
+            setIsBangCmd(draft.startsWith("!"));
+            updateAutocomplete();
+        }
     });
 
     // ── Voice input handle ───────────────────────────────────────────

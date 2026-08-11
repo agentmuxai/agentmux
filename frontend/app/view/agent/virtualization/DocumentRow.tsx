@@ -44,6 +44,10 @@ export interface DocumentRowProps {
      *  — the same action as the failure banner. See
      *  SPEC_REAUTH_FROM_AUTH_ERROR_2026_06_20 §7. */
     onAgentErrorLogin?: () => void;
+    /** Open (or focus, if already open) the pane's Agent History tab —
+     *  threaded down so a `history_link` synthetic row can act on click.
+     *  See SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md §3.2. */
+    onOpenHistory?: () => void;
     /** Style applied to the wrapper element. Virtualized parent
      *  passes absolute positioning + translateY; streaming parent
      *  passes nothing (normal flow). */
@@ -121,6 +125,7 @@ export function DocumentRow(props: DocumentRowProps): JSX.Element {
                 onTogglePin={props.onTogglePin}
                 onHoldToolOpen={props.onHoldToolOpen}
                 onAgentErrorLogin={props.onAgentErrorLogin}
+                onOpenHistory={props.onOpenHistory}
             />
         </div>
     );
@@ -134,6 +139,8 @@ interface DocumentNodeBodyProps {
     onHoldToolOpen?: (id: string) => void;
     /** Re-run the provider login flow — drives the inline auth-error CTA. */
     onAgentErrorLogin?: () => void;
+    /** Open/focus the Agent History tab — drives the `history_link` row's click. */
+    onOpenHistory?: () => void;
 }
 
 /**
@@ -309,6 +316,24 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                         </div>
                     );
                 })()}
+            </Show>
+            <Show when={props.node() && props.node().type === "history_link"}>
+                <div
+                    class="agent-history-link-row"
+                    role="button"
+                    tabindex="0"
+                    onClick={() => props.onOpenHistory?.()}
+                    onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            props.onOpenHistory?.();
+                        }
+                    }}
+                >
+                    <span class="agent-history-link-sigil">⌛</span>
+                    <span class="agent-history-link-label">Earlier conversations preserved —</span>
+                    <span class="agent-history-link-cta">Open Agent History →</span>
+                </div>
             </Show>
             <Show when={props.node() && props.node().type === "session_outcome"}>
                 {(() => {
