@@ -275,6 +275,11 @@ pub struct ParsedBundleImport {
     pub name: String,
     pub description: String,
     pub instructions: String,
+    /// ABF v0.2 §2.2: `{provider_id: content}` — every non-"default"
+    /// variant found in a v0.2 `components.instructions` object, stored
+    /// verbatim with no merge decision made here. Empty for a v0.1 bundle
+    /// (flat array) or a v0.2 bundle with no provider-scoped variants.
+    pub instructions_by_provider: HashMap<String, String>,
     pub context_files: Vec<ImportedContextFile>,
     pub mcp_servers: Vec<ParsedMcpServer>,
     pub skills: Vec<ParsedSkill>,
@@ -399,6 +404,110 @@ pub fn content_digest_files(files: &[BundleImportFile]) -> String {
     hex::encode(hasher.finalize())
 }
 
+/// Maximum number of distinct keys accepted in a v0.2
+/// `components.instructions` object (`"default"` plus per-provider
+/// variants) — ABF v0.2 §2.2. A real bundle needs at most one entry per
+/// known harness (nine, as of `providers.rs`) plus `"default"`; generous
+/// headroom for future providers without leaving this unbounded, mirroring
+/// this module's other component-count caps (e.g.
+/// [`MAX_ACCOUNT_REQUIREMENTS`]).
+const MAX_INSTRUCTION_PROVIDER_VARIANTS: usize = 32;
+
+/// Parse one `components.instructions`-shaped path array (either the v0.1
+/// flat array itself, or one key's array within the v0.2 keyed-object
+/// shape) into its joined instructions text, diverting any
+/// `instructions/context/*` reference into `context_files` exactly as
+/// before. `label` is used only for warning messages (`"instructions"` for
+/// the flat/default case, `"instructions.<provider>"` for a variant) so
+/// every caller's warnings are traceable to the specific key that produced
+/// them. Extracted from the single-shape loop this replaces (ABF v0.2
+/// §2.2) — behavior for the flat/default case is byte-for-byte unchanged
+/// from v0.1.
+fn parse_instruction_component_paths(
+    arr: &[Value],
+    label: &str,
+    by_path: &HashMap<String, &str>,
+    context_files: &mut Vec<ImportedContextFile>,
+    warnings: &mut WarningSink,
+) -> String {
+    let mut instructions_parts: Vec<String> = Vec::new();
+    // Codex P1, PR #2379 round 2: components.instructions is manifest-
+    // controlled and its length is NOT bounded by the decompression caps
+    // (those cap the underlying file *content*, not how many times a
+    // manifest can reference the same path). Without dedup, an untrusted
+    // manifest repeating one path thousands of times clones that path's
+    // content into instructions_parts once per repetition, letting a
+    // sub-50MB archive expand to many gigabytes before `join`.
+    let mut seen_instruction_paths: HashSet<String> = HashSet::new();
+    let mut duplicate_instruction_refs: u32 = 0;
+    let paths = capped_component_array(Some(arr), label, warnings);
+    for path_val in paths {
+        let Some(raw_path) = path_val.as_str() else {
+            warnings.push(format!("components.{label}: non-string entry skipped"));
+            continue;
+        };
+        // codex P2, PR #2379 round 4: normalize the manifest's OWN
+        // reference the same way `by_path`'s keys are normalized
+        // (round 4's earlier fix) — otherwise a valid non-canonical
+        // spelling here (e.g. `./instructions/AGENTS.md`) no longer
+        // matches the now-canonicalized lookup key and the component
+        // is reported missing even though the file is genuinely
+        // present under an equivalent spelling.
+        let Some(path) = sanitize_context_relative_path(raw_path) else {
+            warnings.push(format!("components.{label}: \"{raw_path}\" is not a safe path; skipped"));
+            continue;
+        };
+        // codex P1, PR #2379 round 6: accounts/requirements.json is
+        // intentionally IN by_path (the dedicated parser below needs
+        // to read it), but it must never be reachable through this
+        // generic lookup — a manifest listing it here would otherwise
+        // copy its raw JSON straight into `instructions`, later
+        // written unredacted to `instructions/AGENTS.md` on export.
+        if is_requirements_json(&path) {
+            warnings.push(format!(
+                "components.{label}: \"{path}\" is the accounts/ requirements file; not readable as instructions"
+            ));
+            continue;
+        }
+        // codex P1, PR #2379 round 6: dedup already avoids cloning
+        // CONTENT per duplicate reference (round 3), but pushing one
+        // warning STRING per duplicate is itself an amplification
+        // vector — a permitted 10 MB manifest repeating one short
+        // path hundreds of thousands of times could allocate hundreds
+        // of megabytes of warning text serialized into the RPC
+        // response. Count instead; a single summary warning is pushed
+        // after the loop.
+        if !seen_instruction_paths.insert(path.clone()) {
+            duplicate_instruction_refs += 1;
+            continue;
+        }
+        let Some(content) = by_path.get(path.as_str()) else {
+            warnings.push(format!("components.{label}: \"{path}\" not found among the bundle's files; skipped"));
+            continue;
+        };
+        if let Some(rel) = path.strip_prefix("instructions/context/") {
+            match sanitize_context_relative_path(rel) {
+                Some(safe_rel) => context_files.push(ImportedContextFile {
+                    id: context_files.len(),
+                    path: safe_rel,
+                    content: content.to_string(),
+                }),
+                None => warnings.push(format!(
+                    "{path}: not a safe relative path under instructions/context/; skipped"
+                )),
+            }
+        } else {
+            instructions_parts.push(content.to_string());
+        }
+    }
+    if duplicate_instruction_refs > 0 {
+        warnings.push(format!(
+            "components.{label}: {duplicate_instruction_refs} duplicate reference(s) skipped"
+        ));
+    }
+    instructions_parts.join("\n\n---\n\n")
+}
+
 /// Parse and validate a bundle's files into [`ParsedBundleImport`].
 /// Structural failures (missing/malformed `armory.json`) reject the whole
 /// import — `Err` — since there is nothing safe to partially write.
@@ -485,89 +594,43 @@ pub fn parse_bundle_import_with_budget(
     // in manifest order for AGENTS.md-shaped entries; instructions/context/*
     // paths become context_files entries instead.
     // ------------------------------------------------------------------
-    let mut instructions_parts: Vec<String> = Vec::new();
     let mut context_files: Vec<ImportedContextFile> = Vec::new();
-    // Codex P1, PR #2379 round 2: components.instructions is manifest-
-    // controlled and its length is NOT bounded by the decompression caps
-    // (those cap the underlying file *content*, not how many times a
-    // manifest can reference the same path). Without dedup, an untrusted
-    // manifest repeating one path thousands of times clones that path's
-    // content into instructions_parts once per repetition, letting a
-    // sub-50MB archive expand to many gigabytes before `join`.
-    let mut seen_instruction_paths: HashSet<String> = HashSet::new();
-    let mut duplicate_instruction_refs: u32 = 0;
-    {
-        let paths = capped_component_array(
-            components.and_then(|c| c.get("instructions")).and_then(|v| v.as_array()),
-            "instructions",
-            &mut warnings,
-        );
-        for path_val in paths {
-            let Some(raw_path) = path_val.as_str() else {
-                warnings.push("components.instructions: non-string entry skipped".to_string());
-                continue;
-            };
-            // codex P2, PR #2379 round 4: normalize the manifest's OWN
-            // reference the same way `by_path`'s keys are normalized
-            // (round 4's earlier fix) — otherwise a valid non-canonical
-            // spelling here (e.g. `./instructions/AGENTS.md`) no longer
-            // matches the now-canonicalized lookup key and the component
-            // is reported missing even though the file is genuinely
-            // present under an equivalent spelling.
-            let Some(path) = sanitize_context_relative_path(raw_path) else {
-                warnings.push(format!("components.instructions: \"{raw_path}\" is not a safe path; skipped"));
-                continue;
-            };
-            // codex P1, PR #2379 round 6: accounts/requirements.json is
-            // intentionally IN by_path (the dedicated parser below needs
-            // to read it), but it must never be reachable through this
-            // generic lookup — a manifest listing it here would otherwise
-            // copy its raw JSON straight into `instructions`, later
-            // written unredacted to `instructions/AGENTS.md` on export.
-            if is_requirements_json(&path) {
+    let mut instructions = String::new();
+    let mut instructions_by_provider: HashMap<String, String> = HashMap::new();
+    // ABF v0.2 §2.2: components.instructions is EITHER a flat array (v0.1
+    // shape, treated as an implicit "default") OR an object keyed by
+    // provider id (v0.2 shape, "default" plus zero or more provider-scoped
+    // variants). No merge decision happens here — every variant is stored
+    // verbatim; selecting one at launch time is a separate, not-yet-built
+    // materializer's job (see the spec's non-goals).
+    match components.and_then(|c| c.get("instructions")) {
+        Some(Value::Array(arr)) => {
+            instructions = parse_instruction_component_paths(arr, "instructions", &by_path, &mut context_files, &mut warnings);
+        }
+        Some(Value::Object(obj)) => {
+            if obj.len() > MAX_INSTRUCTION_PROVIDER_VARIANTS {
                 warnings.push(format!(
-                    "components.instructions: \"{path}\" is the accounts/ requirements file; not readable as instructions"
+                    "components.instructions: {} provider variants exceeds the limit ({MAX_INSTRUCTION_PROVIDER_VARIANTS}); only the first {MAX_INSTRUCTION_PROVIDER_VARIANTS} are used",
+                    obj.len()
                 ));
-                continue;
             }
-            // codex P1, PR #2379 round 6: dedup already avoids cloning
-            // CONTENT per duplicate reference (round 3), but pushing one
-            // warning STRING per duplicate is itself an amplification
-            // vector — a permitted 10 MB manifest repeating one short
-            // path hundreds of thousands of times could allocate hundreds
-            // of megabytes of warning text serialized into the RPC
-            // response. Count instead; a single summary warning is pushed
-            // after the loop.
-            if !seen_instruction_paths.insert(path.clone()) {
-                duplicate_instruction_refs += 1;
-                continue;
-            }
-            let Some(content) = by_path.get(path.as_str()) else {
-                warnings.push(format!("components.instructions: \"{path}\" not found among the bundle's files; skipped"));
-                continue;
-            };
-            if let Some(rel) = path.strip_prefix("instructions/context/") {
-                match sanitize_context_relative_path(rel) {
-                    Some(safe_rel) => context_files.push(ImportedContextFile {
-                        id: context_files.len(),
-                        path: safe_rel,
-                        content: content.to_string(),
-                    }),
-                    None => warnings.push(format!(
-                        "{path}: not a safe relative path under instructions/context/; skipped"
-                    )),
+            for (key, val) in obj.iter().take(MAX_INSTRUCTION_PROVIDER_VARIANTS) {
+                let label = format!("instructions.{key}");
+                let Some(arr) = val.as_array() else {
+                    warnings.push(format!("components.{label}: expected an array; skipped"));
+                    continue;
+                };
+                let joined = parse_instruction_component_paths(arr, &label, &by_path, &mut context_files, &mut warnings);
+                if key == "default" {
+                    instructions = joined;
+                } else {
+                    instructions_by_provider.insert(key.clone(), joined);
                 }
-            } else {
-                instructions_parts.push(content.to_string());
             }
         }
+        Some(_) => warnings.push("components.instructions: expected an array or object; skipped".to_string()),
+        None => {}
     }
-    if duplicate_instruction_refs > 0 {
-        warnings.push(format!(
-            "components.instructions: {duplicate_instruction_refs} duplicate reference(s) skipped"
-        ));
-    }
-    let instructions = instructions_parts.join("\n\n---\n\n");
 
     // ------------------------------------------------------------------
     // skills — every directory in components.skills, reading <dir>/SKILL.md
@@ -578,7 +641,7 @@ pub fn parse_bundle_import_with_budget(
     let mut duplicate_skill_refs: u32 = 0;
     {
         let dirs = capped_component_array(
-            components.and_then(|c| c.get("skills")).and_then(|v| v.as_array()),
+            components.and_then(|c| c.get("skills")).and_then(|v| v.as_array()).map(|v| v.as_slice()),
             "skills",
             &mut warnings,
         );
@@ -642,7 +705,7 @@ pub fn parse_bundle_import_with_budget(
     let mut duplicate_mcp_refs: u32 = 0;
     {
         let paths = capped_component_array(
-            components.and_then(|c| c.get("mcpServers")).and_then(|v| v.as_array()),
+            components.and_then(|c| c.get("mcpServers")).and_then(|v| v.as_array()).map(|v| v.as_slice()),
             "mcpServers",
             &mut warnings,
         );
@@ -756,6 +819,7 @@ pub fn parse_bundle_import_with_budget(
         name,
         description,
         instructions,
+        instructions_by_provider,
         context_files,
         mcp_servers,
         skills,
@@ -788,7 +852,7 @@ fn is_requirements_json(path: &str) -> bool {
 /// amplification effect. Reuses [`MAX_ENTRY_COUNT`] — a manifest
 /// component array legitimately needs the same "more entries than any
 /// real bundle uses" ceiling a zip archive's entry count does.
-fn capped_component_array<'a>(arr: Option<&'a Vec<Value>>, key: &str, warnings: &mut WarningSink) -> &'a [Value] {
+fn capped_component_array<'a>(arr: Option<&'a [Value]>, key: &str, warnings: &mut WarningSink) -> &'a [Value] {
     let Some(arr) = arr else { return &[] };
     let len = arr.len();
     if len > MAX_ENTRY_COUNT {
@@ -797,7 +861,7 @@ fn capped_component_array<'a>(arr: Option<&'a Vec<Value>>, key: &str, warnings: 
         ));
         &arr[..MAX_ENTRY_COUNT]
     } else {
-        arr.as_slice()
+        arr
     }
 }
 
@@ -1230,6 +1294,70 @@ mod tests {
         assert_eq!(result.instructions, "Be concise.");
         assert_eq!(result.name, "test-bundle");
         assert_eq!(result.description, "A test bundle");
+        assert!(result.instructions_by_provider.is_empty());
+    }
+
+    #[test]
+    fn imports_v02_keyed_object_shape_with_default_and_provider_variants() {
+        let files = vec![
+            file("armory.json", &minimal_manifest(serde_json::json!({
+                "instructions": {
+                    "default": ["instructions/AGENTS.md"],
+                    "claude": ["instructions/claude/AGENTS.md"],
+                    "codex": ["instructions/codex/AGENTS.md"],
+                },
+            }))),
+            file("instructions/AGENTS.md", "Be concise."),
+            file("instructions/claude/AGENTS.md", "Claude-specific."),
+            file("instructions/codex/AGENTS.md", "Codex-specific."),
+        ];
+        let result = parse_bundle_import(&files).unwrap();
+        assert_eq!(result.instructions, "Be concise.");
+        assert_eq!(result.instructions_by_provider.get("claude"), Some(&"Claude-specific.".to_string()));
+        assert_eq!(result.instructions_by_provider.get("codex"), Some(&"Codex-specific.".to_string()));
+        assert_eq!(result.instructions_by_provider.len(), 2);
+    }
+
+    #[test]
+    fn imports_v02_keyed_object_shape_with_no_default_key() {
+        // A bundle that only ever defines provider-specific content, no
+        // shared default — must not crash or silently invent a "default".
+        let files = vec![
+            file("armory.json", &minimal_manifest(serde_json::json!({
+                "instructions": { "claude": ["instructions/claude/AGENTS.md"] },
+            }))),
+            file("instructions/claude/AGENTS.md", "Claude-only."),
+        ];
+        let result = parse_bundle_import(&files).unwrap();
+        assert_eq!(result.instructions, "");
+        assert_eq!(result.instructions_by_provider.get("claude"), Some(&"Claude-only.".to_string()));
+    }
+
+    #[test]
+    fn a_non_array_provider_variant_warns_and_is_skipped() {
+        let files = vec![
+            file("armory.json", &minimal_manifest(serde_json::json!({
+                "instructions": { "default": ["instructions/AGENTS.md"], "claude": "not-an-array" },
+            }))),
+            file("instructions/AGENTS.md", "Be concise."),
+        ];
+        let result = parse_bundle_import(&files).unwrap();
+        assert_eq!(result.instructions, "Be concise.");
+        assert!(result.instructions_by_provider.is_empty());
+        assert!(result.warnings.iter().any(|w| w.contains("instructions.claude") && w.contains("expected an array")));
+    }
+
+    #[test]
+    fn caps_the_number_of_instruction_provider_variants() {
+        let mut instructions = serde_json::Map::new();
+        for i in 0..MAX_INSTRUCTION_PROVIDER_VARIANTS + 5 {
+            instructions.insert(format!("provider-{i}"), serde_json::json!([]));
+        }
+        let files = vec![
+            file("armory.json", &minimal_manifest(serde_json::json!({ "instructions": instructions }))),
+        ];
+        let result = parse_bundle_import(&files).unwrap();
+        assert!(result.warnings.iter().any(|w| w.contains("provider variants exceeds the limit")));
     }
 
     #[test]
@@ -1801,6 +1929,7 @@ mod tests {
             provider: String::new(),
             model: String::new(),
             instructions: "Be helpful.".to_string(),
+            instructions_by_provider: "{}".to_string(),
             context_files: "[]".to_string(),
             mcp_servers: "[]".to_string(),
             skills: "[]".to_string(),
