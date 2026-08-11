@@ -1,5 +1,23 @@
 use super::*;
 
+/// Per-agent async lock serializing `bundle.import_for_agent`'s "check
+/// zero existing memory rows, then write" sequence — ABF v0.2 §2.3,
+/// reagent P2 on PR #2527. Mirrors `agent_open.rs`'s `AGENT_OPEN_LOCKS`
+/// precedent exactly, including its scope note: this only serializes
+/// calls handled by THIS process, not a genuinely different AgentMux
+/// instance/channel racing the same agent_id.
+static BUNDLE_IMPORT_FOR_AGENT_LOCKS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+fn bundle_import_for_agent_lock(agent_id: &str) -> Arc<tokio::sync::Mutex<()>> {
+    let mut locks = BUNDLE_IMPORT_FOR_AGENT_LOCKS.lock().unwrap_or_else(|e| e.into_inner());
+    locks
+        .entry(agent_id.to_string())
+        .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+        .clone()
+}
+
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_bundle_list(engine, state);
     register_bundle_get(engine, state);
@@ -522,6 +540,18 @@ async fn bundle_import_for_agent_impl(
         .map_err(|e| format!("bundle.import_for_agent: {e}"))?
         .ok_or_else(|| format!("bundle.import_for_agent: no agent with id {}", req.agent_id))?;
 
+    // reagent P2, PR #2527: serialize the whole "check zero rows, then
+    // write" sequence per agent — without this, two concurrent
+    // bundle.import_for_agent calls for the same agent can both pass the
+    // zero-rows check before either writes, both proceeding and defeating
+    // the "can't destroy existing memory" invariant. Held until the
+    // function returns (guard drops at every exit path), mirroring
+    // agent_open.rs's AGENT_OPEN_LOCKS precedent — same same-process-only
+    // scope note applies (can't see a genuinely different AgentMux
+    // instance/channel racing the same agent_id).
+    let import_lock = bundle_import_for_agent_lock(&agent.id);
+    let _import_guard = import_lock.lock().await;
+
     // Reject BEFORE any parsing/decoding work — a target with existing
     // memory is a hard stop, not something worth spending
     // decompression/parse cost on first.
@@ -542,7 +572,14 @@ async fn bundle_import_for_agent_impl(
         .map_err(|e| format!("bundle.import_for_agent: {e}"))?;
 
     let mut warnings = resolved.intake_warnings;
-    warnings.extend(parsed.warnings.clone());
+    // reagent P1, PR #2527: parse_bundle_import unconditionally warns
+    // that components.memory is "present but ignored" (correct for
+    // bundle.import/.preview/.commit, which really do ignore it) — but
+    // THIS function handles memory itself, further down. Filtering the
+    // exact shared-constant string out here (rather than duplicating a
+    // literal that could drift) stops every successful memory-bearing
+    // import from falsely claiming its memory was ignored.
+    warnings.extend(parsed.warnings.iter().filter(|w| w.as_str() != bi::MEMORY_COMPONENT_IGNORED_WARNING).cloned());
 
     // Normal bundle components, exactly as bundle.import creates them —
     // a memory-bearing import still creates a reusable bundle row
@@ -2410,6 +2447,86 @@ mod export_import_for_agent_tests {
         let bundle_id = result["bundle_id"].as_str().unwrap();
         let bundle = state.id_store.bundle_memory_get(bundle_id).unwrap().unwrap();
         assert_eq!(bundle.instructions, "Be helpful.");
+    }
+
+    #[tokio::test]
+    async fn import_for_agent_does_not_falsely_claim_memory_was_ignored() {
+        // reagent P1, PR #2527: parse_bundle_import's "components.memory:
+        // present but ignored" warning is correct for bundle.import/.
+        // preview/.commit, but bundle_import_for_agent_impl DOES handle
+        // memory (as this same test's success asserts) — it must not
+        // also carry that misleading warning into its own response.
+        let state = test_state();
+        let config_dir = tempfile::tempdir().unwrap();
+        make_agent(&state, "agent-1", "/work/proj", config_dir.path());
+
+        let files = abf_files_with_memory("Be helpful.", "MEMORY.md", "Imported fact.");
+        let result = bundle_import_for_agent_impl(&state.id_store, &state.wstore, ImportForAgentReq {
+            agent_id: "agent-1".to_string(),
+            file_path: None,
+            zip_base64: None,
+            files: Some(files),
+        }).await.unwrap();
+
+        assert_eq!(result["memory_files_written"], 1);
+        let warnings: Vec<&str> = result["warnings"].as_array().unwrap().iter().map(|w| w.as_str().unwrap()).collect();
+        assert!(
+            !warnings.iter().any(|w| w.contains("present but ignored")),
+            "memory was actually processed; the 'ignored' warning must not appear: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn bundle_import_for_agent_lock_is_keyed_by_agent_id() {
+        // Direct test of the lock mechanism itself, since the join-based
+        // test below can't rigorously prove the lock (as opposed to
+        // incidental single-threaded-runtime serialization) is what
+        // makes concurrent calls behave — bundle_import_for_agent_impl's
+        // body has no other .await points, so it already serializes on a
+        // CURRENT_THREAD runtime regardless of the lock. Production runs
+        // multi-threaded, where that incidental serialization doesn't
+        // apply and the lock is load-bearing.
+        let lock_a1 = bundle_import_for_agent_lock("agent-1");
+        let lock_a2 = bundle_import_for_agent_lock("agent-1");
+        assert!(Arc::ptr_eq(&lock_a1, &lock_a2), "the same agent_id must return the same lock instance");
+
+        let lock_b = bundle_import_for_agent_lock("agent-2");
+        assert!(!Arc::ptr_eq(&lock_a1, &lock_b), "different agent_ids must not share a lock");
+    }
+
+    #[tokio::test]
+    async fn concurrent_imports_for_the_same_agent_do_not_both_succeed() {
+        // reagent P2, PR #2527: without the per-agent lock, two concurrent
+        // bundle.import_for_agent calls for the same agent could both
+        // pass the "zero existing rows" check before either writes. The
+        // lock serializes them fully — one must complete (and its memory
+        // row must exist) before the other's own zero-rows check runs,
+        // so the second is guaranteed to see the first's write and fail.
+        let state = test_state();
+        let config_dir = tempfile::tempdir().unwrap();
+        make_agent(&state, "agent-1", "/work/proj", config_dir.path());
+
+        let files_a = abf_files_with_memory("A.", "MEMORY.md", "From import A.");
+        let files_b = abf_files_with_memory("B.", "MEMORY.md", "From import B.");
+
+        let (result_a, result_b) = tokio::join!(
+            bundle_import_for_agent_impl(&state.id_store, &state.wstore, ImportForAgentReq {
+                agent_id: "agent-1".to_string(), file_path: None, zip_base64: None, files: Some(files_a),
+            }),
+            bundle_import_for_agent_impl(&state.id_store, &state.wstore, ImportForAgentReq {
+                agent_id: "agent-1".to_string(), file_path: None, zip_base64: None, files: Some(files_b),
+            }),
+        );
+
+        let outcomes = [result_a.is_ok(), result_b.is_ok()];
+        assert_eq!(
+            outcomes.iter().filter(|ok| **ok).count(),
+            1,
+            "exactly one of two concurrent imports for the same agent must succeed, got {outcomes:?}"
+        );
+        if let Err(e) = if result_a.is_err() { &result_a } else { &result_b } {
+            assert!(e.contains("already has"), "the losing import must fail with the existing-memory guard, got: {e}");
+        }
     }
 
     #[tokio::test]
