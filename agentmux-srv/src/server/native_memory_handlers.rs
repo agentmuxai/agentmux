@@ -306,10 +306,17 @@ fn parse_frontmatter_type(content: &str) -> Option<String> {
 const MAX_MEMORY_FILE_BYTES: u64 = 10 * 1024 * 1024;
 
 /// Refresh `db_agent_native_memory` from the live filesystem for `agent_id`
-/// — the same read-then-upsert-if-changed pass `agent:memory:list` performs
-/// inline (compare each live file's size+mtime against the mirror, and
-/// upsert only when it's actually changed), extracted so a second caller
-/// can trigger the identical refresh without duplicating the walk.
+/// — the same read-then-upsert-if-changed logic `agent:memory:list`
+/// performs inline (compare each live file's size+mtime against the
+/// mirror, and upsert only when it's actually changed). This is a NEW,
+/// standalone function with the same shape, not a shared implementation
+/// `list`'s handler was refactored to call — reagent P2, PR #2527
+/// (second round): `list`'s own inline copy (this file, `~agent:memory:
+/// list`'s handler) still exists separately and has already diverged in
+/// one detail (it hard-errors on a `file_type()` failure; this function
+/// silently skips the entry instead). Deduplicating the two into one
+/// shared implementation is a legitimate follow-up, not done here to
+/// keep this PR's diff scoped to what ABF v0.2 §2.3 actually needs.
 ///
 /// ABF v0.2 §2.3 (`bundle.export_for_agent`) needs this: `list`/`read_file`
 /// only sync the mirror on a Stash Memory tab open, so exporting straight
@@ -378,12 +385,19 @@ pub(crate) fn refresh_memory_mirror_from_live_fs(
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0);
 
+        // reagent P2, PR #2527 (second round): checked BEFORE the
+        // unchanged-since-last-mirror short-circuit below — an oversized
+        // file that hasn't changed since it was last mirrored still
+        // exports/imports its truncated content on every subsequent
+        // call, so the warning must fire every time too, not just on the
+        // one call that actually re-reads and re-upserts it.
+        if size_bytes > MAX_MEMORY_FILE_BYTES {
+            truncated_files.push(name.clone());
+        }
+
         let unchanged_since_last_mirror = mirrored_meta.get(&name) == Some(&(size_bytes as i64, modified_at));
         if unchanged_since_last_mirror {
             continue;
-        }
-        if size_bytes > MAX_MEMORY_FILE_BYTES {
-            truncated_files.push(name.clone());
         }
         let full_content_read = {
             use std::io::Read;
