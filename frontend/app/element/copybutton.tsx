@@ -15,16 +15,22 @@ type CopyButtonProps = {
 const CopyButton = ({ title, className, onClick }: CopyButtonProps): JSX.Element => {
     const [isCopied, setIsCopied] = createSignal(false);
     const [isError, setIsError] = createSignal(false);
+    const [isPending, setIsPending] = createSignal(false);
     let timeoutRef: ReturnType<typeof setTimeout> | null = null;
 
     const handleOnClick = async (e: MouseEvent) => {
-        if (isCopied()) {
+        if (isCopied() || isPending()) {
             return;
         }
         if (timeoutRef) {
             clearTimeout(timeoutRef);
             timeoutRef = null;
         }
+        // Locks out re-entrant clicks for the duration of the (async) write —
+        // without this, rapid clicks fire concurrent writes whose completion
+        // order isn't guaranteed, letting an older attempt clobber a newer
+        // one's success/error state.
+        setIsPending(true);
 
         try {
             await onClick?.(e);
@@ -34,6 +40,8 @@ const CopyButton = ({ title, className, onClick }: CopyButtonProps): JSX.Element
             console.error("copy failed:", err);
             setIsCopied(false);
             setIsError(true);
+        } finally {
+            setIsPending(false);
         }
 
         timeoutRef = setTimeout(() => {
@@ -56,6 +64,7 @@ const CopyButton = ({ title, className, onClick }: CopyButtonProps): JSX.Element
                 icon: isCopied() ? "check" : isError() ? "triangle-exclamation" : "copy",
                 title: isError() ? "Copy failed — see console" : title,
                 className: clsx("copy-button", { copied: isCopied(), error: isError() }),
+                disabled: isPending(),
                 click: handleOnClick,
             }}
             className={className}
