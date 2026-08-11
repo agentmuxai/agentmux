@@ -10,6 +10,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_bundle_import(engine, state);
     register_bundle_import_preview(engine, state);
     register_bundle_import_commit(engine, state);
+    register_bundle_export_for_agent(engine, state);
+    register_bundle_import_for_agent(engine, state);
 }
 
 /// Raw `[{path, content}]` entry shape, shared by `bundle.import`'s `files`
@@ -296,6 +298,377 @@ fn register_bundle_export(engine: &Arc<WshRpcEngine>, state: &AppState) {
             })
         }),
     );
+}
+
+/// Splice native-memory files into an already-built bundle export's
+/// `armory.json` manifest and files list, adding `components.memory` (ABF
+/// v0.2 §2.3). Kept OUTSIDE `bundle_export.rs` deliberately — that
+/// module's `export_bundle()` is scoped to a bundle's own components
+/// (instructions/skills/MCP/accounts) with no concept of "agent" or
+/// native memory at all; memory is agent-scoped, not bundle-scoped, so
+/// splicing it in here (the RPC-handler layer, which already resolves
+/// other agent-scoped data like skill rows) keeps that module's
+/// documented scope intact rather than growing it a fifth, unrelated
+/// component category. A no-op when `memory_files` is empty — matches the
+/// existing omit-empty-components convention used elsewhere in the
+/// manifest.
+fn splice_memory_component(
+    export: &mut crate::backend::bundle_export::BundleExport,
+    memory_files: &[(String, String)],
+) -> Result<(), String> {
+    if memory_files.is_empty() {
+        return Ok(());
+    }
+    let manifest_idx = export
+        .files
+        .iter()
+        .position(|f| f.path == "armory.json")
+        .ok_or_else(|| "bundle export is missing armory.json".to_string())?;
+    let mut manifest: serde_json::Value = serde_json::from_str(&export.files[manifest_idx].content)
+        .map_err(|e| format!("armory.json: {e}"))?;
+    let mut manifest_memory: Vec<String> = Vec::new();
+    for (filename, content) in memory_files {
+        // Filenames here always came from db_agent_native_memory, which
+        // only ever accepts app-validated names (validate_filename in
+        // native_memory_handlers.rs: alphanumeric + "-_", ends ".md", no
+        // separators) — unlike instructions_by_provider's keys (§2.2),
+        // there's no untrusted-manifest path that could smuggle an unsafe
+        // segment in here, so no additional sanitization is needed.
+        let out_path = format!("memory/{filename}");
+        export.files.push(crate::backend::bundle_export::BundleExportFile {
+            path: out_path.clone(),
+            content: content.clone(),
+        });
+        manifest_memory.push(out_path);
+    }
+    manifest["components"]["memory"] = json!(manifest_memory);
+    export.files[manifest_idx].content =
+        serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// `bundle.export_for_agent` — ABF v0.2 §2.3. The only export path that
+/// carries native memory: pulls a bundle's normal components (identical to
+/// `bundle.export`) plus a snapshot of ONE agent's
+/// `db_agent_native_memory` rows, refreshed from the live filesystem
+/// first (see [`native_memory_handlers::refresh_memory_mirror_from_live_fs`]'s
+/// doc comment for why that refresh is required, not optional). `bundle.
+/// export` stays agent-less and memory-less — bundles are reusable across
+/// many agents by design, so memory (inherently per-agent) needs its own,
+/// explicitly-scoped entry point rather than an implicit "whichever agent
+/// happens to be attached" guess.
+fn register_bundle_export_for_agent(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let id_store = state.id_store.clone();
+    let wstore = state.wstore.clone();
+    engine.register_handler(
+        COMMAND_BUNDLE_EXPORT_FOR_AGENT,
+        Box::new(move |data, _ctx| {
+            let id_store = id_store.clone();
+            let wstore = wstore.clone();
+            Box::pin(async move {
+                #[derive(serde::Deserialize, Default)]
+                struct Req {
+                    bundle_id: String,
+                    agent_id: String,
+                    #[serde(default)]
+                    format: String,
+                }
+                let req: Req = serde_json::from_value(data)
+                    .map_err(|e| format!("bundle.export_for_agent: {e}"))?;
+
+                let bundle = id_store
+                    .bundle_memory_get(&req.bundle_id)
+                    .map_err(|e| format!("bundle.export_for_agent: {e}"))?
+                    .ok_or_else(|| format!("bundle.export_for_agent: no bundle with id {}", req.bundle_id))?;
+                let agent = wstore
+                    .agent_def_get(&req.agent_id)
+                    .map_err(|e| format!("bundle.export_for_agent: {e}"))?
+                    .ok_or_else(|| format!("bundle.export_for_agent: no agent with id {}", req.agent_id))?;
+
+                let mut handler_warnings: Vec<String> = Vec::new();
+                let skill_ids: Vec<String> = crate::backend::bundle_export::parse_json_field_or_warn(
+                    &bundle.skills,
+                    "skills",
+                    &mut handler_warnings,
+                );
+                let mut skills: Vec<crate::backend::storage::Skill> = Vec::new();
+                let mut missing_skill_ids: Vec<String> = Vec::new();
+                for id in &skill_ids {
+                    match wstore.skill_get(id) {
+                        Ok(Some(skill)) => skills.push(skill),
+                        Ok(None) => missing_skill_ids.push(id.clone()),
+                        Err(e) => {
+                            return Err(format!("bundle.export_for_agent: failed to look up skill {id}: {e}"));
+                        }
+                    }
+                }
+
+                let mut export = crate::backend::bundle_export::export_bundle(&bundle, &skills);
+
+                // Refresh the mirror from the live FS, then read every
+                // mirrored file's content — this agent's memory, freshest
+                // as of right now, not as of whenever its Stash Memory tab
+                // was last opened.
+                let mut memory_files: Vec<(String, String)> = Vec::new();
+                if let Some(memory_dir) =
+                    crate::server::native_memory_handlers::memory_dir_for_agent_by_id(&wstore, &agent)
+                {
+                    if let Err(e) = crate::server::native_memory_handlers::refresh_memory_mirror_from_live_fs(
+                        &agent.id,
+                        &memory_dir,
+                        &id_store,
+                    ) {
+                        handler_warnings.push(format!("native memory refresh failed (exporting mirror as-is): {e}"));
+                    }
+                }
+                match id_store.agent_native_memory_list_meta(&agent.id) {
+                    Ok(rows) => {
+                        for row in rows {
+                            match id_store.agent_native_memory_read(&agent.id, &row.filename) {
+                                Ok(Some(content)) => memory_files.push((row.filename, content)),
+                                Ok(None) => {} // deleted between list_meta and read — skip, not an error
+                                Err(e) => handler_warnings.push(format!(
+                                    "native memory: failed to read {}: {e}",
+                                    row.filename
+                                )),
+                            }
+                        }
+                    }
+                    Err(e) => handler_warnings.push(format!("native memory: failed to list: {e}")),
+                }
+                splice_memory_component(&mut export, &memory_files)
+                    .map_err(|e| format!("bundle.export_for_agent: {e}"))?;
+
+                let mut all_warnings = export.warnings.clone();
+                all_warnings.append(&mut handler_warnings);
+
+                if req.format == "zip" {
+                    let zip_bytes = crate::backend::bundle_export::zip_bundle_export(&export)
+                        .map_err(|e| format!("bundle.export_for_agent: {e}"))?;
+                    use base64::Engine as _;
+                    let encoded = base64::engine::general_purpose::STANDARD.encode(&zip_bytes);
+                    return Ok(Some(json!({
+                        "root_slug": export.root_slug,
+                        "skipped_skills": export.skipped_skills,
+                        "warnings": all_warnings,
+                        "missing_skill_ids": missing_skill_ids,
+                        "zip_base64": encoded,
+                    })));
+                }
+
+                let mut result = serde_json::to_value(&export).map_err(|e| e.to_string())?;
+                if let Some(obj) = result.as_object_mut() {
+                    obj.insert("missing_skill_ids".to_string(), json!(missing_skill_ids));
+                    obj.insert("warnings".to_string(), json!(all_warnings));
+                }
+                Ok(Some(result))
+            })
+        }),
+    );
+}
+
+/// `bundle.import_for_agent` — ABF v0.2 §2.3. The only import path that
+/// processes a `components.memory` key; the generic `bundle.import`
+/// explicitly skips it (see its own handler, further down). Unlike
+/// `bundle.import`/`bundle.import.commit`, this is a single-step import —
+/// no preview phase — since a memory-bearing import has its own
+/// unconditional safety net instead: the target agent must have ZERO
+/// existing `db_agent_native_memory` rows, or the whole import is
+/// rejected before any write happens. Simpler than skip/rename/replace
+/// conflict resolution, and sufficient for v0.2 (see the spec's revision
+/// note for why merge semantics are an explicit follow-up, not designed
+/// here).
+fn register_bundle_import_for_agent(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let id_store = state.id_store.clone();
+    let wstore = state.wstore.clone();
+    let broker = state.broker.clone();
+    engine.register_handler(
+        COMMAND_BUNDLE_IMPORT_FOR_AGENT,
+        Box::new(move |data, _ctx| {
+            let id_store = id_store.clone();
+            let wstore = wstore.clone();
+            let broker = broker.clone();
+            Box::pin(async move {
+                use crate::backend::bundle_import as bi;
+
+                #[derive(serde::Deserialize, Default)]
+                struct Req {
+                    agent_id: String,
+                    #[serde(default)]
+                    file_path: Option<String>,
+                    #[serde(default)]
+                    zip_base64: Option<String>,
+                    #[serde(default)]
+                    files: Option<Vec<FileEntry>>,
+                }
+                let req: Req = serde_json::from_value(data)
+                    .map_err(|e| format!("bundle.import_for_agent: {e}"))?;
+
+                let agent = wstore
+                    .agent_def_get(&req.agent_id)
+                    .map_err(|e| format!("bundle.import_for_agent: {e}"))?
+                    .ok_or_else(|| format!("bundle.import_for_agent: no agent with id {}", req.agent_id))?;
+
+                // Reject BEFORE any parsing/decoding work — a target with
+                // existing memory is a hard stop, not something worth
+                // spending decompression/parse cost on first.
+                let existing = id_store
+                    .agent_native_memory_list_meta(&agent.id)
+                    .map_err(|e| format!("bundle.import_for_agent: {e}"))?;
+                if !existing.is_empty() {
+                    return Err(format!(
+                        "bundle.import_for_agent: agent {} already has {} native memory file(s) — import into an agent with no existing memory, or clear it first",
+                        req.agent_id,
+                        existing.len()
+                    ));
+                }
+
+                let resolved = resolve_import_input(req.file_path, req.zip_base64, req.files, bi::WarningBudget::unbounded())
+                    .map_err(|e| format!("bundle.import_for_agent: {e}"))?;
+                let parsed = bi::parse_bundle_import(&resolved.files)
+                    .map_err(|e| format!("bundle.import_for_agent: {e}"))?;
+
+                let mut warnings = resolved.intake_warnings;
+                warnings.extend(parsed.warnings.clone());
+
+                // Normal bundle components, exactly as bundle.import
+                // creates them — a memory-bearing import still creates a
+                // reusable bundle row alongside the agent-scoped memory
+                // write below.
+                let bundle_id = uuid::Uuid::new_v4().to_string();
+                let mut imported_skill_ids: Vec<String> = Vec::new();
+                for skill in &parsed.skills {
+                    let new_skill = crate::backend::storage::Skill {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        name: skill.slug.clone(),
+                        trigger: skill.slug.clone(),
+                        description: skill.description.clone(),
+                        content: skill.content.clone(),
+                        skill_type: crate::backend::agent_config::SKILL_TYPE_AGENT_SKILL.to_string(),
+                        is_global: false,
+                        created_at: chrono::Utc::now().timestamp_millis(),
+                        updated_at: chrono::Utc::now().timestamp_millis(),
+                    };
+                    match wstore.skill_create(&new_skill) {
+                        Ok(_) => imported_skill_ids.push(new_skill.id),
+                        Err(e) => warnings.push(format!("failed to create skill \"{}\": {e}", skill.slug)),
+                    }
+                }
+                let memory = crate::backend::storage::store::Memory {
+                    id: bundle_id.clone(),
+                    name: parsed.name,
+                    description: parsed.description,
+                    is_blank: false,
+                    is_global: false,
+                    provider: String::new(),
+                    model: String::new(),
+                    instructions: parsed.instructions,
+                    instructions_by_provider: serde_json::to_string(&parsed.instructions_by_provider)
+                        .unwrap_or_else(|_| "{}".to_string()),
+                    context_files: serde_json::to_string(
+                        &parsed.context_files.iter().map(|cf| json!({"path": cf.path, "content": cf.content})).collect::<Vec<_>>(),
+                    ).unwrap_or_else(|_| "[]".to_string()),
+                    mcp_servers: serde_json::to_string(
+                        &parsed.mcp_servers.iter().map(|m| m.config.clone()).collect::<Vec<_>>(),
+                    ).unwrap_or_else(|_| "[]".to_string()),
+                    skills: serde_json::to_string(&imported_skill_ids).unwrap_or_else(|_| "[]".to_string()),
+                    sort_order: 0,
+                    created_at: chrono::Utc::now().timestamp_millis(),
+                    updated_at: chrono::Utc::now().timestamp_millis(),
+                };
+                id_store
+                    .bundle_memory_upsert(&memory)
+                    .map_err(|e| format!("bundle.import_for_agent: {e}"))?;
+                let _ = &broker; // parity with bundle.import's signature; no broadcast needed for a single-agent import
+
+                // Memory files: write through the SAME dual-write path
+                // agent:memory:write_file uses (live FS via
+                // memory_dir_for_cwd, then the mirror) — writing only to
+                // db_agent_native_memory would leave this content visible
+                // in Stash while invisible to the actual running agent
+                // (see the spec's revision note).
+                let mut memory_files_written = 0usize;
+                let memory_dir = crate::server::native_memory_handlers::memory_dir_for_agent_by_id(&wstore, &agent);
+                match &memory_dir {
+                    None => warnings.push(format!(
+                        "agent {} has no working directory configured; memory files not written",
+                        req.agent_id
+                    )),
+                    Some(memory_dir) => {
+                        if let Err(e) = std::fs::create_dir_all(memory_dir) {
+                            warnings.push(format!("native memory: mkdir failed: {e}"));
+                        }
+                    }
+                }
+                if let Some(memory_dir) = memory_dir {
+                    for path in resolved_memory_paths(&resolved.files) {
+                        let Some(filename) = path.strip_prefix("memory/") else { continue };
+                        if crate::server::native_memory_handlers::validate_memory_filename(filename).is_err() {
+                            warnings.push(format!("memory/{filename}: not a valid memory filename; skipped"));
+                            continue;
+                        }
+                        let Some(content) = resolved.files.iter().find(|f| f.path == path).map(|f| f.content.clone()) else {
+                            continue;
+                        };
+                        let dest = memory_dir.join(filename);
+                        let tmp = memory_dir.join(format!(".{filename}.{}.tmp", uuid::Uuid::new_v4()));
+                        let write_result = std::fs::write(&tmp, &content)
+                            .and_then(|_| std::fs::rename(&tmp, &dest));
+                        if let Err(e) = write_result {
+                            let _ = std::fs::remove_file(&tmp);
+                            warnings.push(format!("memory/{filename}: write failed: {e}"));
+                            continue;
+                        }
+                        let dest_meta = std::fs::metadata(&dest).ok();
+                        let size_bytes = dest_meta.as_ref().map(|m| m.len() as i64).unwrap_or(content.len() as i64);
+                        let mtime_ms = dest_meta
+                            .and_then(|m| m.modified().ok())
+                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                            .map(|d| d.as_millis() as i64)
+                            .unwrap_or(0);
+                        let metadata_type = crate::server::native_memory_handlers::parse_memory_frontmatter_type(&content);
+                        if let Err(e) = id_store.agent_native_memory_upsert(
+                            &agent.id,
+                            filename,
+                            &content,
+                            metadata_type.as_deref(),
+                            &dest.to_string_lossy(),
+                            size_bytes,
+                            mtime_ms,
+                        ) {
+                            warnings.push(format!("memory/{filename}: mirror upsert failed: {e}"));
+                        } else {
+                            memory_files_written += 1;
+                        }
+                    }
+                }
+
+                Ok(Some(json!({
+                    "bundle_id": bundle_id,
+                    "memory_files_written": memory_files_written,
+                    "skipped_skills": parsed.skipped_skills,
+                    "warnings": warnings,
+                })))
+            })
+        }),
+    );
+}
+
+/// Every `memory/*` path listed under `components.memory` in a parsed
+/// import's `armory.json` — mirrors how `components.instructions`/
+/// `components.skills` are read elsewhere in this file, kept local to
+/// `bundle.import_for_agent` since no other handler needs it.
+fn resolved_memory_paths(files: &[crate::backend::bundle_import::BundleImportFile]) -> Vec<String> {
+    let Some(manifest_file) = files.iter().find(|f| f.path == "armory.json") else {
+        return Vec::new();
+    };
+    let Ok(manifest) = serde_json::from_str::<serde_json::Value>(&manifest_file.content) else {
+        return Vec::new();
+    };
+    manifest["components"]["memory"]
+        .as_array()
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+        .unwrap_or_default()
 }
 
 /// Read-only account-requirement resolution (spec §4.5) — one identity

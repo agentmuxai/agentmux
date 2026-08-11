@@ -305,6 +305,125 @@ fn parse_frontmatter_type(content: &str) -> Option<String> {
 /// file that's readable stays within the size the mirror can also store.
 const MAX_MEMORY_FILE_BYTES: u64 = 10 * 1024 * 1024;
 
+/// Refresh `db_agent_native_memory` from the live filesystem for `agent_id`
+/// — the same read-then-upsert-if-changed pass `agent:memory:list` performs
+/// inline (compare each live file's size+mtime against the mirror, and
+/// upsert only when it's actually changed), extracted so a second caller
+/// can trigger the identical refresh without duplicating the walk.
+///
+/// ABF v0.2 §2.3 (`bundle.export_for_agent`) needs this: `list`/`read_file`
+/// only sync the mirror on a Stash Memory tab open, so exporting straight
+/// from `db_agent_native_memory` without refreshing first would silently
+/// omit anything Claude wrote autonomously since the tab was last opened
+/// (or if it was never opened at all) — see
+/// `SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10.md`
+/// §2.3's second revision note.
+///
+/// Errors only on a genuine `read_dir` failure (permissions, I/O) — a
+/// missing directory (never written, or wiped) is not an error, matching
+/// `list`'s own treatment. A per-file upsert failure is logged and
+/// swallowed (non-fatal), same as `list`.
+pub(crate) fn refresh_memory_mirror_from_live_fs(
+    agent_id: &str,
+    memory_dir: &std::path::Path,
+    id_store: &crate::backend::storage::store::Store,
+) -> Result<(), String> {
+    let mirrored_meta: std::collections::HashMap<String, (i64, i64)> = id_store
+        .agent_native_memory_list_meta(agent_id)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|row| (row.filename, (row.size_bytes, row.last_seen_mtime_ms)))
+        .collect();
+
+    let entries = match std::fs::read_dir(memory_dir) {
+        Ok(e) => e,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(format!("refresh_memory_mirror_from_live_fs: read_dir: {e}")),
+    };
+
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("refresh_memory_mirror_from_live_fs: read_dir entry: {e}"))?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !name.ends_with(".md") {
+            continue;
+        }
+        let file_type = match entry.file_type() {
+            Ok(t) => t,
+            Err(_) => continue, // TOCTOU-deleted between read_dir and here; skip, not fatal.
+        };
+        if !file_type.is_file() {
+            continue;
+        }
+        let meta = match entry.metadata() {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        let size_bytes = meta.len();
+        let modified_at = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+
+        let unchanged_since_last_mirror = mirrored_meta.get(&name) == Some(&(size_bytes as i64, modified_at));
+        if unchanged_since_last_mirror {
+            continue;
+        }
+        let full_content_read = {
+            use std::io::Read;
+            std::fs::File::open(entry.path()).and_then(|f| {
+                let mut buf = Vec::new();
+                f.take(MAX_MEMORY_FILE_BYTES).read_to_end(&mut buf)?;
+                Ok(buf)
+            })
+        };
+        match full_content_read {
+            Ok(buf) => {
+                let full_content = String::from_utf8_lossy(&buf).into_owned();
+                let full_metadata_type = parse_frontmatter_type(&full_content);
+                if let Err(e) = id_store.agent_native_memory_upsert(
+                    agent_id,
+                    &name,
+                    &full_content,
+                    full_metadata_type.as_deref(),
+                    &entry.path().to_string_lossy(),
+                    size_bytes as i64,
+                    modified_at,
+                ) {
+                    tracing::warn!(agent_id, filename = %name, error = %e, "refresh_memory_mirror_from_live_fs: mirror upsert failed (non-fatal)");
+                }
+            }
+            Err(e) => {
+                tracing::warn!(agent_id, filename = %name, error = %e, "refresh_memory_mirror_from_live_fs: full-content read failed, skipping this round (non-fatal)");
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Resolve the live memory directory for an agent identified by its
+/// `AgentDefinition.id` (UUID) — the same identifier convention
+/// `agent:memory:list`/`read_file`/`write_file` use (as opposed to
+/// [`memory_dir_for_agent`]'s slug-based lookup, used by different, App-API
+/// callers). Shared by those three handlers and `bundle.export_for_agent`/
+/// `bundle.import_for_agent` (ABF v0.2 §2.3) so all five resolve identically.
+pub(crate) fn memory_dir_for_agent_by_id(
+    wstore: &crate::backend::storage::store::Store,
+    agent: &crate::backend::storage::AgentDefinition,
+) -> Option<std::path::PathBuf> {
+    if agent.working_directory.is_empty() {
+        return None;
+    }
+    let config_dir = wstore
+        .agent_content_get(&agent.id, "env")
+        .ok()
+        .flatten()
+        .map(|c| parse_claude_config_dir(&c.content))
+        .unwrap_or_default();
+    Some(memory_dir_for_cwd(&config_dir, &agent.working_directory))
+}
+
 pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore_list = state.wstore.clone();
     let id_store_list = state.id_store.clone();
