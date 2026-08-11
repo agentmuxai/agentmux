@@ -8,4 +8,10 @@
             color: var(--success-color);
         }
     }
+    &.error {
+        opacity: 1;
+        i {
+            color: var(--error-color);
+        }
+    }
 }

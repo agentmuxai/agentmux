@@ -9,29 +9,38 @@ import { IconButton } from "./iconbutton";
 type CopyButtonProps = {
     title: string;
     className?: string;
-    onClick: (e: MouseEvent) => void;
+    onClick: (e: MouseEvent) => void | Promise<void>;
 };
 
 const CopyButton = ({ title, className, onClick }: CopyButtonProps): JSX.Element => {
     const [isCopied, setIsCopied] = createSignal(false);
+    const [isError, setIsError] = createSignal(false);
     let timeoutRef: ReturnType<typeof setTimeout> | null = null;
 
-    const handleOnClick = (e: MouseEvent) => {
+    const handleOnClick = async (e: MouseEvent) => {
         if (isCopied()) {
             return;
         }
-        setIsCopied(true);
         if (timeoutRef) {
             clearTimeout(timeoutRef);
+            timeoutRef = null;
         }
+
+        try {
+            await onClick?.(e);
+            setIsError(false);
+            setIsCopied(true);
+        } catch (err) {
+            console.error("copy failed:", err);
+            setIsCopied(false);
+            setIsError(true);
+        }
+
         timeoutRef = setTimeout(() => {
             setIsCopied(false);
+            setIsError(false);
             timeoutRef = null;
         }, 2000);
-
-        if (onClick) {
-            onClick(e);
-        }
     };
 
     onCleanup(() => {
@@ -44,9 +53,9 @@ const CopyButton = ({ title, className, onClick }: CopyButtonProps): JSX.Element
         <IconButton
             decl={{
                 elemtype: "iconbutton",
-                icon: isCopied() ? "check" : "copy",
-                title,
-                className: clsx("copy-button", { copied: isCopied() }),
+                icon: isCopied() ? "check" : isError() ? "triangle-exclamation" : "copy",
+                title: isError() ? "Copy failed — see console" : title,
+                className: clsx("copy-button", { copied: isCopied(), error: isError() }),
                 click: handleOnClick,
             }}
             className={className}
