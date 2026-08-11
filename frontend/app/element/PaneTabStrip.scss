@@ -36,6 +36,22 @@
     // stray colored block.
     background: transparent;
     overflow-x: hidden;
+    // Explicit, not left to default — per the CSS Overflow spec, when one
+    // axis is `hidden` and the other is left at its initial `visible`, the
+    // `visible` one computes to `auto` instead (not `visible`), silently.
+    // With no overflow-y set here, that made this container's real
+    // computed overflow-y `auto` the whole time: any content even a
+    // fraction of a pixel taller than the declared `height: 28px` (a
+    // native `<button>`'s own intrinsic sizing is a plausible source —
+    // see .pane-tab-strip-add's `appearance: none` fix) triggered a real
+    // vertical scrollbar at this box's own right edge. Reported live
+    // 2026-08-11 as a thin, semi-transparent, hover-highlighting vertical
+    // strip immediately right of the "+" that never showed up in the DOM
+    // inspector — the exact signature of a native scrollbar, not a styled
+    // element. Two earlier fixes on this same bug (explicit `width:
+    // fit-content` on the strip; `appearance: none` on the buttons) missed
+    // this because neither touches the vertical axis.
+    overflow-y: hidden;
 }
 
 // Tooltip wrapper (shared Tooltip component) — carries the flex sizing the
@@ -136,6 +152,12 @@
     // transparent background/border reset, regardless of pane width or
     // tab count. Same fix as .pane-tab-strip-add below.
     appearance: none;
+    // outline: none too — `appearance: none` only removes native widget
+    // chrome (background/border/padding treatment); the browser's default
+    // focus-visible ring is a separate UA style that survives it. An
+    // outline paints outside the box model, so it wouldn't show as its own
+    // node in DevTools' element tree even though it's visually there.
+    outline: none;
     flex: 0 0 16px;
     width: 16px;
     height: 16px;
@@ -169,6 +191,8 @@
     // ruling out the strip's own box-sizing, which an earlier commit on
     // this branch wrongly targeted first).
     appearance: none;
+    // See .pane-tab-close above — same outline gap.
+    outline: none;
     flex: 0 0 auto;
     width: 28px;
     height: 28px;
