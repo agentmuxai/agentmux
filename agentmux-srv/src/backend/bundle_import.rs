@@ -413,6 +413,16 @@ pub fn content_digest_files(files: &[BundleImportFile]) -> String {
 /// [`MAX_ACCOUNT_REQUIREMENTS`]).
 const MAX_INSTRUCTION_PROVIDER_VARIANTS: usize = 32;
 
+/// The exact warning `parse_bundle_import_with_budget` pushes when
+/// `components.memory` is present — ABF v0.2 §2.3. A shared constant
+/// (rather than a literal duplicated at both the push site and
+/// `bundle_import_for_agent_impl`'s filter site, reagent P1 PR #2527)
+/// so the two can never drift apart: if this message ever changes, the
+/// filter in `bundle.rs` keeps working because it references the same
+/// constant, not a copy of the string.
+pub(crate) const MEMORY_COMPONENT_IGNORED_WARNING: &str =
+    "components.memory: present but ignored — memory requires an agent-scoped import (bundle.import_for_agent), not bundle.import";
+
 /// Parse one `components.instructions`-shaped path array (either the v0.1
 /// flat array itself, or one key's array within the v0.2 keyed-object
 /// shape) into its joined instructions text. `label` is used only for
@@ -865,6 +875,24 @@ pub fn parse_bundle_import_with_budget(
         } else {
             warnings.push("components.accounts: non-string value skipped".to_string());
         }
+    }
+
+    // ABF v0.2 §2.3: `parse_bundle_import`/`parse_bundle_import_with_budget`
+    // are called by every agent-LESS import path (bundle.import,
+    // bundle.import.preview, bundle.import.commit) AND by
+    // `bundle_import_for_agent_impl` (which reuses this same parser for
+    // everything except memory, which it handles separately downstream).
+    // A components.memory key gets a warning here so the three agent-less
+    // callers can tell the memory component was present but requires
+    // bundle.import_for_agent, not that it was missing from the source
+    // bundle. reagent P1, PR #2527: `bundle_import_for_agent_impl` DOES
+    // handle memory, so this warning is actively misleading there —
+    // it must filter this exact string out of `parsed.warnings` before
+    // merging into its own response (see MEMORY_COMPONENT_IGNORED_WARNING's
+    // doc comment for why it's a shared constant, not a duplicated
+    // literal, so the push site and the filter site can't drift apart).
+    if components.and_then(|c| c.get("memory")).is_some() {
+        warnings.push(MEMORY_COMPONENT_IGNORED_WARNING.to_string());
     }
 
     Ok(ParsedBundleImport {
@@ -1462,6 +1490,35 @@ mod tests {
         ];
         let result = parse_bundle_import(&files).unwrap();
         assert!(result.warnings.iter().any(|w| w.contains("provider variants exceeds the limit")));
+    }
+
+    #[test]
+    fn a_memory_component_is_warned_about_and_ignored_by_the_agent_less_parser() {
+        // ABF v0.2 §2.3: parse_bundle_import (shared by bundle.import and
+        // bundle.import.preview/.commit, all agent-less) must not silently
+        // drop a components.memory key — it needs bundle.import_for_agent
+        // instead, and the response should say so.
+        let files = vec![
+            file("armory.json", &minimal_manifest(serde_json::json!({
+                "instructions": ["instructions/AGENTS.md"],
+                "memory": ["memory/MEMORY.md"],
+            }))),
+            file("instructions/AGENTS.md", "Be concise."),
+        ];
+        let result = parse_bundle_import(&files).unwrap();
+        assert!(result.warnings.iter().any(|w| w.contains("components.memory") && w.contains("bundle.import_for_agent")));
+    }
+
+    #[test]
+    fn no_memory_warning_when_the_component_is_absent() {
+        let files = vec![
+            file("armory.json", &minimal_manifest(serde_json::json!({
+                "instructions": ["instructions/AGENTS.md"],
+            }))),
+            file("instructions/AGENTS.md", "Be concise."),
+        ];
+        let result = parse_bundle_import(&files).unwrap();
+        assert!(!result.warnings.iter().any(|w| w.contains("components.memory")));
     }
 
     #[test]
