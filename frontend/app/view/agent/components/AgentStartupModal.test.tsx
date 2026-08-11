@@ -98,14 +98,14 @@ describe("AgentStartupModal", () => {
 
         render(() => <AgentStartupModal agentId="agent-1" />);
         await screen.findByRole("combobox");
-        expect(screen.queryByText(/Armory → Bundles/)).not.toBeInTheDocument();
+        expect(screen.queryByText(/Armory → ABF/)).not.toBeInTheDocument();
 
         setAgentContent.mockResolvedValue({});
         const select = screen.getByRole("combobox");
         fireEvent.change(select, { target: { value: "bundle-1" } });
 
         await waitFor(() => {
-            expect(screen.getByText(/Armory → Bundles/)).toBeInTheDocument();
+            expect(screen.getByText(/Armory → ABF/)).toBeInTheDocument();
         });
     });
 
