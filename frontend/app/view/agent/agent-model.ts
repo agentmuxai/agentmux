@@ -149,8 +149,16 @@ export class AgentViewModel implements ViewModel {
         // for panes without a loadable AgentDefinition, and the Memory
         // tab needs no definition.
         this.endIconButtons = () => {
-            const agentId = this.blockAtom()?.meta?.["agentId"];
-            if (!agentId) return [];
+            const meta = this.blockAtom()?.meta;
+            const agentId = meta?.["agentId"];
+            // No Stash button on a history-reader tab: _openAgentStashModal
+            // is wired up only by AgentPresentationView (the live view),
+            // which never mounts for a history tab (AgentHistoryTabView
+            // mounts instead per SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md
+            // §3.1) — without this the button would render (agentId is
+            // copied onto the history block's own meta) but silently do
+            // nothing on click. codex P2 on PR #2539.
+            if (!agentId || meta?.[HISTORY_TAB_FOR_META_KEY]) return [];
             return [
                 {
                     elemtype: "iconbutton",
