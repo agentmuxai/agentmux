@@ -1,125 +1,208 @@
-# SPEC: Copy Button False-Positive Checkmark Fix
+# SPEC: Copy Button Silently Failing (Three Stacked Bugs)
 
 **Date:** 2026-08-10
-**Status:** Implemented
-**Area:** Frontend — shared `CopyButton` element (code blocks, connection-status error copy)
-**Severity:** P2 — misleading UI, masks a real clipboard failure
+**Status:** Implemented, verified end-to-end (real OS clipboard content checked directly, not just UI state)
+**Area:** Frontend `CopyButton` element, CEF host clipboard IPC (Windows), markdown code block text extraction
+**Severity:** P1 — code block copy has been silently writing an empty string to the clipboard, likely since the feature was first wired up
 
 ---
 
 ## Problem
 
-Clicking any copy button in the app (code block copy, connection-status error
-copy) always shows a green checkmark, even when the underlying clipboard write
-fails. A user testing clipboard integration reported: clicking copy on a code
-block shows the checkmark, but pasting into Notepad produces nothing — the
-button gave no indication anything was wrong.
+A user testing clipboard integration reported: clicking copy on a chat code
+block shows the checkmark, but pasting into Notepad produces nothing.
 
-## Root Cause
+This turned out to be **three independent bugs stacked on top of each
+other**, each masking the next. Fixing only the first (the obvious one) was
+not sufficient — the checkmark kept appearing and paste kept failing until
+all three were found and fixed. Diagnosis for the second and third bugs used
+direct OS-level verification (PowerShell `Get-Clipboard` /
+`System.Windows.Forms.Clipboard`) rather than relying on the app's own UI
+state, which is what caught them.
 
-**`frontend/app/element/copybutton.tsx`** (`CopyButton`) is a shared element
-used by:
-- `frontend/app/element/markdown-codeblock.tsx` — code block copy button
-  (`handleCopy`, `async`, calls `clipboardWriteText`)
-- `frontend/app/block/blockframe.tsx` — connection-status error copy
-  (`handleCopy`, also `async`)
+---
 
-Both callers pass an **async** `onClick` handler that performs the actual
-clipboard write via `frontend/util/clipboard.ts` → CEF IPC `write_clipboard` →
-`agentmux-cef/src/commands/clipboard.rs` (OS clipboard).
+## Bug 1 — `CopyButton` showed the checkmark unconditionally
 
-The button's own click handler, however, was fire-and-forget with respect to
-that async work:
+**File:** `frontend/app/element/copybutton.tsx`
+
+The click handler set `isCopied(true)` (driving the checkmark) synchronously
+on click, before the caller's **async** `onClick` (the actual clipboard
+write) was even invoked, let alone before it resolved or rejected:
 
 ```tsx
 // BEFORE
 const handleOnClick = (e: MouseEvent) => {
     if (isCopied()) return;
     setIsCopied(true);           // shown immediately, unconditionally
-    // ...timeout bookkeeping...
     if (onClick) {
         onClick(e);               // async result never awaited or checked
     }
 };
 ```
 
-`setIsCopied(true)` (which drives the checkmark icon) ran synchronously,
-*before* `onClick(e)` was even invoked, let alone before its promise
-resolved. Whether the underlying `writeText()` call succeeded, rejected, or
-was never reached (e.g. an IPC error, a stale host binary missing the
-command, an OS-level clipboard failure) had **zero effect on the button's
-displayed state**. The checkmark was not a signal of success — it fired
-unconditionally on click.
+Both callers (`markdown-codeblock.tsx`'s code block copy, `blockframe.tsx`'s
+connection-status error copy) pass async handlers. Whether the underlying
+write succeeded, rejected, or errored had zero effect on the button's
+displayed state — the checkmark was not a signal of anything.
 
-This is orthogonal to whether the clipboard write itself works in any given
-environment; the bug is that the UI can't tell the user either way.
-
-## Fix
-
-**File:** `frontend/app/element/copybutton.tsx`
-
-Make the click handler `async`, `await` the caller's `onClick`, and only
+**Fix:** made the handler `async`, `await` the caller's `onClick`, and only
 show the checkmark if it resolves without throwing. On rejection, show a
-distinct error state (red triangle-exclamation icon, title changed to "Copy
-failed — see console") and log the error via `console.error` so the actual
-underlying error (e.g. the rejected `invokeCommand` error) is visible for
-diagnosis.
+distinct error state (red triangle-exclamation icon, title "Copy failed —
+see console") and `console.error` the real error.
+
+`CopyButtonProps.onClick` type widened from `(e: MouseEvent) => void` to
+`(e: MouseEvent) => void | Promise<void>`. `copybutton.scss` gained an
+`.error` variant (reuses `--error-color`, mirrors the existing `.copied`
+pattern).
+
+This fix was necessary to make failures *observable* at all, but on its own
+did not fix the underlying paste failure — it only stopped hiding it.
+
+---
+
+## Bug 2 — Windows `SetClipboardData` return value was never checked
+
+**File:** `agentmux-cef/src/commands/clipboard.rs`
+
+```rust
+// BEFORE
+EmptyClipboard();
+SetClipboardData(CF_UNICODETEXT as u32, hmem);   // return value discarded
+CloseClipboard();
+Ok(())                                            // always reports success
+```
+
+`SetClipboardData` returns `NULL` on failure. The Windows write path ignored
+that and returned `Ok(())` unconditionally, so even a genuine OS-level
+clipboard failure would round-trip back through IPC as success — the
+frontend promise resolves, Bug 1's now-fixed button correctly shows a
+checkmark, and still nothing useful reaches the clipboard.
+
+**Fix:** check the return value; on `NULL`, capture
+`std::io::Error::last_os_error()`, free `hmem` (ownership only transfers to
+the system on success — the old code leaked `hmem` on this path too), and
+return a real `Err` with the OS error message.
+
+This fix turned out not to be the actual cause of the reported failure
+(`SetClipboardData` was in fact succeeding), but it was a real, independent
+correctness bug in its own right — silently discarding a checked Win32 API's
+failure return is wrong regardless of whether it happened to bite here. It's
+also what would have surfaced Bug 3's actual failure mode as a *visible*
+error rather than a silent one, had Bug 3's failure mode been a rejected
+write instead of a successful-but-empty one.
+
+---
+
+## Bug 3 (root cause) — code block text extraction always produced `""`
+
+**File:** `frontend/app/element/markdown-codeblock.tsx`
+
+After fixing Bugs 1 and 2, the checkmark still appeared and paste was still
+empty. Direct inspection of the OS clipboard confirmed why:
+
+```powershell
+Add-Type -AssemblyName System.Windows.Forms
+[System.Windows.Forms.Clipboard]::ContainsText()   # True
+[System.Windows.Forms.Clipboard]::GetText().Length # 0
+```
+
+The `UnicodeText` clipboard format was present — the write path (Bugs 1 & 2)
+was working correctly end-to-end — but the string being written was empty.
+
+`CodeBlock`'s `getTextContent()` helper walked `children` assuming a
+React-style tree (`typeof x === "string"`, `Array.isArray(x)`, or
+`x.props.children`):
 
 ```tsx
-// AFTER
-const handleOnClick = async (e: MouseEvent) => {
-    if (isCopied()) return;
-    // ...clear any pending reset timeout...
-    try {
-        await onClick?.(e);
-        setIsError(false);
-        setIsCopied(true);
-    } catch (err) {
-        console.error("copy failed:", err);
-        setIsCopied(false);
-        setIsError(true);
+// BEFORE
+const getTextContent = (children: any): string => {
+    if (typeof children === "string") return children;
+    if (Array.isArray(children)) return children.map(getTextContent).join("");
+    if (children && children.props && children.props.children) {
+        return getTextContent(children.props.children);
     }
-    // ...schedule state reset after 2s...
+    return "";
 };
 ```
 
-`CopyButtonProps.onClick` type widened from `(e: MouseEvent) => void` to
-`(e: MouseEvent) => void | Promise<void>` to reflect that both current
-callers pass async functions.
+But `frontend/app/element/markdown.tsx:17` builds this markdown renderer's
+elements via `solid-js/h/jsx-runtime` (feeding `hast-util-to-jsx-runtime`).
+Solid has no virtual DOM — this runtime creates **real DOM nodes** eagerly.
+`children` passed into `CodeBlock` is an actual `<code>` `HTMLElement` (with
+nested `<span>` highlight tokens from `rehypeHighlight`), not an object with
+a `.props` property. None of `getTextContent`'s three branches ever matched
+a real DOM node, so it always fell through to `return ""` — for every code
+block, unconditionally. This is why the clipboard always ended up with valid
+but empty text: the write path was never broken, the value being handed to
+it always was.
 
-**File:** `frontend/app/element/copybutton.scss`
+**Fix:** stop trying to walk a tree shape that never existed at runtime.
+Wrap the rendered `children` in a ref'd `<div class="codeblock-content">`
+and read `.textContent` directly off the real DOM after render — robust
+regardless of the JSX runtime's internal node representation:
 
-Added an `.error` variant (reuses the existing `--error-color` theme token,
-same pattern as the existing `.copied` variant using `--success-color`).
+```tsx
+// AFTER
+let contentRef: HTMLDivElement | undefined;
+const getTextContent = (): string =>
+    (contentRef?.textContent ?? "").replace(/\n$/, "");
+// ...
+<pre class="codeblock">
+    <div class="codeblock-content" ref={contentRef}>{children}</div>
+    <div class="codeblock-actions">...</div>
+</pre>
+```
+
+The new wrapper `<div>` doesn't require any SCSS changes — `pre.codeblock
+code { ... }` is a descendant selector (still matches at any depth), and
+`.codeblock-actions` remains a direct sibling of the content div under the
+same `position: relative` `<pre>`, so its `position: absolute` placement and
+`:hover` reveal are unaffected. No other code depends on the internal DOM
+structure of `pre.codeblock` (confirmed via repo-wide search).
+
+---
+
+## Why this shipped broken for so long
+
+Bug 1 masked Bugs 2 and 3 completely — the checkmark always fired, so nobody
+testing casually (checkmark-only, no actual paste-and-check) would have
+caught that the clipboard was empty. `write_clipboard`/`read_clipboard` has
+been on `main` since April 2026 (commit `b86c69429`) — this was not a recent
+regression, just never actually exercised end-to-end.
+
+---
+
+## Files Changed
+
+```
+frontend/app/element/copybutton.tsx           (Bug 1: async handler, error state)
+frontend/app/element/copybutton.scss          (Bug 1: .error style variant)
+agentmux-cef/src/commands/clipboard.rs        (Bug 2: check SetClipboardData result)
+frontend/app/element/markdown-codeblock.tsx   (Bug 3: DOM-ref-based text extraction)
+```
 
 ## Non-Goals / Follow-up
 
-- **Diagnosing why a given clipboard write fails in a specific environment**
-  is out of scope here — this fix only makes failures observable. The
-  underlying `write_clipboard` IPC path
-  (`frontend/util/clipboard.ts` → `agentmux-cef/src/ipc.rs:400` →
-  `agentmux-cef/src/commands/clipboard.rs`) was independently reviewed and
-  looks structurally correct (standard Win32 `GlobalAlloc`/`SetClipboardData`
-  idiom, present on `main` since April 2026, not a recent regression). If a
-  failure persists after this fix, the console error message it now surfaces
-  is the next debugging input.
 - **Tool-call preview panels have no copy button at all** (`ToolBlockOverlay.tsx`
   / `ToolOverlayLog.tsx` / `ToolBlock.tsx`) — this was never built (the prior
   action bar there, `ToolOverlayActions.tsx`, only had pane/window actions and
   was removed as dead code in #1991). That's new-feature work, not covered by
   this fix, and is tracked separately.
-
-## Files Changed
-
-```
-frontend/app/element/copybutton.tsx    (async handler, error state)
-frontend/app/element/copybutton.scss   (.error style variant)
-```
+- The macOS/Linux clipboard write paths (`pbcopy`/`wl-copy`/`xclip`/`xsel` in
+  the same `clipboard.rs`) were not independently re-verified on those
+  platforms — Bug 3 was a frontend bug affecting all platforms equally, and
+  Bug 2's fix is Windows-specific code, but no macOS/Linux hardware was
+  available to confirm end-to-end paste there.
 
 ## Testing
 
 - `npx tsc --noEmit` — clean, no type errors introduced.
-- Manual: hover a chat code block, click copy, verify checkmark only appears
-  after a successful write; verify pasted content matches; verify a forced
-  failure (e.g. temporarily throwing in the write path) shows the red error
-  icon and logs to console instead of a false checkmark.
+- Manual, verified end-to-end on Windows (`task dev`):
+  1. Confirmed the failure directly against the OS clipboard (PowerShell
+     `Get-Clipboard` / `System.Windows.Forms.Clipboard`) rather than trusting
+     the app's own success UI — this is what caught Bugs 2 and 3 after Bug 1
+     alone didn't fix the reported symptom.
+  2. After all three fixes: clicked copy on a chat code block, checkmark
+     appeared, pasted into Notepad — full code block content present and
+     correct.
