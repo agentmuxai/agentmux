@@ -1,7 +1,11 @@
 # Agent shell drawer: font-size seed race causes zoom jerk on open
 
 **Date:** 2026-08-10
-**Status:** Proposed (investigation complete, fix not yet implemented)
+**Status:** Implemented — `AgentShellSubblock.tsx`, PR #2522. Two follow-up
+issues caught by review (redundant fetch, and a subscription-tracking bug
+reintroduced by the first pass of this fix) are folded into the final
+implementation — see §5 for what actually shipped, which differs from the
+originally proposed `reloadWaveObject`-based approach.
 **Owner:** Agent3
 **Area:** Agent pane / shell drawer (`AgentShellSubblock`), terminal zoom
 
@@ -227,6 +231,48 @@ parent agent pane's zoom (`command-registry.ts:416-450`):
   rather than reading it as a snapshot inside an effect keyed only on
   `termFontSize()`.
 
+## 5a. What actually shipped (amended post-review, differs from §5 above)
+
+The first implementation pass used option (b) above literally —
+`await WOS.reloadWaveObject<Block>(...)` before constructing `TermWrap` — and
+replaced the `.loaded` guard with a `wrapLoaded` signal set inside the
+`if (termWrap?.terminal && wrapLoaded())` condition. Two rounds of automated
+review on PR #2522 caught real problems with both:
+
+- **Redundant fetch (P1).** `subBlockAtom`'s own `createMemo` already
+  triggers an eager `WOS.getWaveObjectAtom` → `getWaveObjectValue` fetch for
+  the exact same oref as a side effect of being *constructed* — which
+  happens synchronously at component setup, before `onMount`'s async IIFE
+  even starts. Calling `reloadWaveObject` later unconditionally forces a
+  **second**, fully redundant `GetObject` round-trip for every reused-shell
+  drawer open. Fixed by adding `waitForWaveObjectSettled(oref)` — a small
+  helper that polls the already-exported `WOS.getWaveObjectLoadingAtom`
+  (returns `null` while loading, `false` once settled) until it settles,
+  **without** triggering any new fetch, bounded by a 2s timeout so a
+  genuine network failure (which can leave the loading atom stuck per
+  `wos.ts`'s own comment on non-"not found" `GetObject` rejections) can't
+  hang shell startup indefinitely.
+- **Reintroduced the exact bug being fixed (P2).** Writing
+  `if (termWrap?.terminal && wrapLoaded())` short-circuits before
+  `wrapLoaded()` is ever read on the effect's first run (which always
+  happens before `TermWrap` exists), so SolidJS never subscribes that
+  effect to the `wrapLoaded` signal at all from that run — `setWrapLoaded
+  (true)` later doesn't by itself re-trigger it. This is the *same class* of
+  bug as the original `termWrap.loaded` non-reactive-field issue (§2.2.6),
+  just moved to a different signal. Fixed by reading `wrapLoaded()`
+  unconditionally (assigned to a local before the `if`, not inside it) —
+  standard SolidJS practice: a signal an effect needs reliable re-triggering
+  from must be read every run, never short-circuited away.
+
+Both were caught by review, not by the original test suite written for the
+first pass — the regression tests were extended afterward to cover the
+redundant-fetch case explicitly (asserting only one signal gets created per
+oref) and a timeout/fallback case for the bounded wait, though attempts to
+construct a test that specifically discriminates the exact P2 scenario
+turned out to self-heal under closer analysis for the ordering tested (see
+the test file's own comment on that point) — the code fix stands on its own
+merits as correct SolidJS practice regardless.
+
 ## 6. Non-goals / out of scope
 
 - Changing how zoom is scoped (per-shell vs per-pane vs global) — already
@@ -239,12 +285,12 @@ parent agent pane's zoom (`command-registry.ts:416-450`):
 
 ## 7. Open questions
 
-- Which of the two seed options in §5 (await inside the existing RPC chain
-  vs. explicit `GetObject` await) is cheaper — does
-  `ControllerResyncCommand`/`CreateSubBlockCommand` already return enough of
-  the block to read `meta["term:zoom"]` directly from its response, avoiding
-  a second round-trip entirely? Needs a look at the RPC response shape
-  server-side (`agentmux-srv`) before committing to an approach.
+- ~~Which of the two seed options in §5 is cheaper~~ — resolved (§5a): neither
+  literally — confirmed `ControllerResyncCommand`/`CreateSubBlockCommand`
+  return `void`/`ORef` only, no block data, so option (a) was never free.
+  Ended up not needing an explicit fetch at all: `subBlockAtom`'s own memo
+  already triggers one, so the actual fix just waits for that to settle
+  (`WOS.getWaveObjectLoadingAtom`) rather than choosing between (a) and (b).
 - ~~Should the terminal container be hidden (not just deferred) until the
   seed value resolves~~ — resolved: yes, use `BrainSpinner` as the stand-in
   (§5), matching the existing agent-pane/browser-pane pattern rather than

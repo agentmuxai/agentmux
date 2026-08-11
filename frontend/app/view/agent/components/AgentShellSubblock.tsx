@@ -83,6 +83,27 @@ interface AgentShellSubblockProps {
 
 const BASE_FONT_SIZE = 13;
 
+/**
+ * Waits for an already-in-flight WOS fetch for `oref` to settle (succeed or
+ * fail), WITHOUT triggering a new one — see the onMount IIFE below for why a
+ * second fetch must be avoided (reagentx P1 on #2522: `subBlockAtom`'s
+ * `createMemo` already eagerly fetches this exact oref at component
+ * construction). `getWaveObjectLoadingAtom` returns `null` while loading and
+ * `false` once settled (regardless of whether the value ended up populated
+ * or null) — see its doc comment in wos.ts. Bounded by `timeoutMs` since a
+ * genuine network failure can leave the loading atom stuck at "loading"
+ * forever (wos.ts's own comment on GetObject rejections other than a
+ * definitive "not found").
+ */
+async function waitForWaveObjectSettled(oref: string, timeoutMs = 2000): Promise<void> {
+    const loadingAtom = WOS.getWaveObjectLoadingAtom(oref);
+    const start = Date.now();
+    while (loadingAtom() === null) {
+        if (Date.now() - start >= timeoutMs) return;
+        await new Promise<void>((resolve) => setTimeout(resolve, 16));
+    }
+}
+
 export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element => {
     let containerRef: HTMLDivElement | undefined;
     let termWrap: TermWrap | undefined;
@@ -131,7 +152,16 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
     // real-work firing is normally a no-op re-application of the same value.
     createEffect(() => {
         const fs = termFontSize();
-        if (termWrap?.terminal && wrapLoaded()) {
+        // Read unconditionally (not inside the `if`) so SolidJS subscribes
+        // to this signal on the effect's very first run, when termWrap is
+        // still undefined and `termWrap?.terminal && ...` would otherwise
+        // short-circuit before wrapLoaded() is ever read — which silently
+        // drops the subscription and reintroduces the exact bug this signal
+        // was added to fix (reagentx P2 on #2522: setWrapLoaded(true) later
+        // wouldn't re-trigger this effect at all, since it was never
+        // actually subscribed to wrapLoaded in the first place).
+        const loaded = wrapLoaded();
+        if (termWrap?.terminal && loaded) {
             termWrap.terminal.options.fontSize = fs;
             termWrap.handleResize();
         }
@@ -259,27 +289,27 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
                 // docs/specs/SPEC_AGENT_SHELL_ZOOM_SEED_RACE_2026-08-10.md. A
                 // freshly created sub-block has no persisted term:zoom yet
                 // (the already-correct default of 1.0 applies), so only the
-                // reused-existing-block path needs an explicit fetch.
-                // `reloadWaveObject` (not `loadAndPinWaveObject`) is used
-                // deliberately: it awaits/refreshes the sub-block's
-                // WaveObject without bumping refCount, so there's no
-                // permanent cache pin to unwind on dispose — see the warning
-                // at floating-pane-workspace.tsx:924-929 about that exact
-                // pitfall with the pinning variant.
+                // reused-existing-block path needs to wait for anything.
+                //
+                // Deliberately does NOT call WOS.reloadWaveObject here: the
+                // `subBlockAtom` memo above already triggered a fetch for
+                // this exact oref as a side effect of being constructed
+                // (WOS.getWaveObjectAtom → getWaveObjectValue eagerly fetches
+                // on first read, and that memo runs synchronously at
+                // component construction, before this async IIFE even
+                // starts). Calling reloadWaveObject here would force a
+                // SECOND, redundant GetObject round-trip for the same object
+                // on every reused-sub-block drawer open (reagentx P1 on
+                // #2522). Instead, just wait for that already-in-flight
+                // fetch to settle, bounded by a timeout so a genuine network
+                // failure (which can leave the loading atom stuck, per
+                // wos.ts's own comment on GetObject rejections) can't hang
+                // shell startup indefinitely — falls back to whatever
+                // termFontSize() currently computes (default zoom) if it
+                // times out; the live-update effect below corrects it later
+                // if a subsequent fetch/push succeeds.
                 if (isExistingBlock) {
-                    try {
-                        await WOS.reloadWaveObject<Block>(WOS.makeORef("block", id));
-                    } catch (e) {
-                        // Non-fatal: worst case the terminal falls back to
-                        // whatever termFontSize() currently computes (default
-                        // 1.0 zoom), and the live-update effect below will
-                        // correct it if a later fetch (e.g. a WPS push)
-                        // succeeds. Don't block shell startup over this.
-                        console.warn(
-                            "AgentShellSubblock: failed to seed term:zoom, using default:",
-                            e
-                        );
-                    }
+                    await waitForWaveObjectSettled(WOS.makeORef("block", id));
                 }
                 setZoomSeeded(true);
 
