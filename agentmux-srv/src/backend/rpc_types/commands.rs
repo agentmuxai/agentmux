@@ -338,12 +338,12 @@ pub const COMMAND_BUNDLE_IMPORT_COMMIT: &str = "bundle.import.commit";
 // entry points that touch db_agent_native_memory.
 pub const COMMAND_BUNDLE_EXPORT_FOR_AGENT: &str = "bundle.export_for_agent";
 pub const COMMAND_BUNDLE_IMPORT_FOR_AGENT: &str = "bundle.import_for_agent";
-// Deprecated `preset.*` aliases — kept wired for one release (remove in Phase 4).
-pub const COMMAND_PRESET_LIST: &str = "preset.list";
-pub const COMMAND_PRESET_GET: &str = "preset.get";
-pub const COMMAND_PRESET_UPSERT: &str = "preset.upsert";
-pub const COMMAND_PRESET_DELETE: &str = "preset.delete";
-pub const COMMAND_PRESET_SELF_GET: &str = "preset.self.get";
+// Structural ABF validator — Armory Bundle Format (ABF) UI-alignment pass.
+// Read-only: fetches the bundle and runs the pure bundle_validate module
+// against it, no Store writes.
+pub const COMMAND_BUNDLE_VALIDATE: &str = "bundle.validate";
+// The deprecated `preset.*` aliases (Phase 2's one-release compat window)
+// were retired here — `bundle.*` is the only surface now.
 pub const COMMAND_MEMORY_LIST: &str = "memory.list";
 pub const COMMAND_MEMORY_READ: &str = "memory.read";
 pub const COMMAND_MEMORY_WRITE: &str = "memory.write";

@@ -1,4 +1,4 @@
-// Ad-hoc App API smoke test — exercises identity.*, preset.*, memory.* as AgentX.
+// Ad-hoc App API smoke test — exercises identity.*, bundle.*, memory.* as AgentX.
 // Run: node scripts/test-app-api.mjs
 import WebSocket from "ws";
 
@@ -76,11 +76,11 @@ async function run() {
             provider: "anthropic", secret: "sk-ant-adhoc-DUMMY",
         }));
 
-        console.log("\n=== preset.list ===");
-        show("presets", await call("preset.list", {}));
+        console.log("\n=== bundle.list ===");
+        show("bundles", await call("bundle.list", {}));
 
-        console.log("\n=== preset.self.get ===");
-        show("self-preset", await call("preset.self.get", { agent_id: AGENT }));
+        console.log("\n=== bundle.self.get ===");
+        show("self-bundle", await call("bundle.self.get", { agent_id: AGENT }));
 
         console.log("\n=== memory.write ===");
         show("write", await call("memory.write", {
