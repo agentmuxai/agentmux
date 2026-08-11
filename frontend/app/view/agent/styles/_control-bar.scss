@@ -45,92 +45,11 @@
         flex-direction: column;
     }
 
-    // === Marching-ants Progress Bar ===
-    // 3px bar pinned position:absolute top:0. .agent-view already has
-    // position:relative (agent-view.scss). Animated while working, hidden
-    // at rest. Colors via color-mix() so every theme inherits without
-    // hardcoded hex.
-    //
-    // Uses transform: translateX() so the animation stays on the GPU
-    // compositor — background-position animation is not reliably promoted
-    // on all Linux GPU drivers and some Windows HW-accel paths.
-    // The ::before overshoots left/right by 12px so the translated edge
-    // never clips; parent overflow:hidden trims it.
-    //
-    // Zoom invariance: .agent-view applies CSS `zoom` for per-pane zoom, which
-    // would otherwise scale this bar (a 3px bar becomes 6px at 2x). Every px
-    // dimension below is divided by --agent-pane-zoom (set alongside the zoom in
-    // agent-view.tsx). Because `zoom` re-multiplies all lengths in the subtree,
-    // dividing first renders the bar at a FIXED screen size at any pane zoom.
-    // Falls back to 1 (no scaling) if the var is absent.
-    .agent-pane-progress-bar {
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: calc(3px / var(--agent-pane-zoom, 1));
-        z-index: var(--z-pane-overlay, 4);
-        pointer-events: none;
-        opacity: 0;
-        overflow: hidden;
-        transition: opacity 200ms ease;
-        // Opaque base so the 3px strip fully covers the pane content beneath it.
-        // Without this the translucent stripe gaps reveal text reaching the top
-        // edge and the marching pattern is lost. Matches .agent-view's surface
-        // (--main-bg-color) so the bar reads as chrome.
-        background: var(--main-bg-color);
-
-        &::before {
-            content: "";
-            position: absolute;
-            top: 0;
-            bottom: 0;
-            // Overshoot and stripe widths are divided by the pane zoom too, so
-            // the overshoot stays larger than the (also-scaled) march distance
-            // and the stripe period renders at a fixed screen size. See the
-            // zoom-invariance note above.
-            left: calc(-12px / var(--agent-pane-zoom, 1));
-            right: calc(-12px / var(--agent-pane-zoom, 1));
-            // Solid fallback for Chromium < 111 where color-mix() is
-            // unsupported — browser ignores the declaration below and
-            // keeps this one so the bar remains visible.
-            background: var(--accent-color);
-            // Every stop is fully opaque (the faded stripe mixes against the
-            // pane background, NOT transparent) so the pattern stays crisp over
-            // any content in any theme.
-            background: repeating-linear-gradient(
-                -45deg,
-                var(--accent-color)                                              0px,
-                var(--accent-color)                                              calc(4px / var(--agent-pane-zoom, 1)),
-                color-mix(in srgb, var(--accent-color) 25%, var(--main-bg-color)) calc(4px / var(--agent-pane-zoom, 1)),
-                color-mix(in srgb, var(--accent-color) 25%, var(--main-bg-color)) calc(8px / var(--agent-pane-zoom, 1))
-            );
-        }
-
-        &--active {
-            opacity: 1;
-
-            &::before {
-                // Promote the layer only while animating, not at idle rest.
-                will-change: transform;
-                animation: agent-ant-march 0.5s linear infinite;
-            }
-        }
-
-        &--active#{&}--stopping {
-            opacity: 0.55;
-        }
-    }
-
-    @keyframes agent-ant-march {
-        // Shift by one stripe period (8px × √2 ≈ 11.314px) per cycle so the
-        // repeating pattern loops seamlessly. translateX keeps the animation
-        // on the GPU compositor. Divided by --agent-pane-zoom (resolved on
-        // ::before, which inherits it) so the march distance matches the
-        // zoom-scaled stripe period and renders fixed at any pane zoom.
-        from { transform: translateX(0); }
-        to   { transform: translateX(calc(11.314px / var(--agent-pane-zoom, 1))); }
-    }
+    // .agent-pane-progress-bar moved to agent-view.scss (near .agent-pane-stack)
+    // as of SPEC_AGENT_PANE_PROGRESS_BAR_ABOVE_TAB_STRIP_2026_08_10.md — it's
+    // portaled out of .agent-view into a slot AgentViewWrapper owns, so it's
+    // no longer a DOM descendant of .agent-view and doesn't belong nested
+    // under this selector (or subject to .agent-view's per-pane zoom) anymore.
 
 
     // Back-and-forth highlight sweep for .agent-working-shimmer (below).

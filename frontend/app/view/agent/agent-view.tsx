@@ -3,6 +3,7 @@
 
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { createEffect, createMemo, createSignal, on, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { Portal } from "solid-js/web";
 import type { AgentViewModel } from "./agent-model";
 import { getProvider } from "./providers";
 import { createAgentAtoms } from "./state";
@@ -144,6 +145,18 @@ const sanitizeLogTextForTerminal = (text: string): string => {
 export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Element => {
     const block = model.blockAtom;
     const agentId = () => block()?.meta?.["agentId"];
+
+    // Portal target for the marching-ants progress bar (below) — the bar's
+    // own working-state/turn-phase reads live inside AgentPresentationView
+    // (deep in .agent-pane-stack-content, BELOW the tab strip in DOM order),
+    // but it needs to render visually in its own row between the tab strip
+    // and the content, which no CSS trick can reach across that boundary
+    // (.agent-pane-stack-content's containing-block ancestors all clip
+    // overflow before it could escape upward). A signal (not a plain ref
+    // variable) so <Portal>'s mount prop — read reactively by
+    // AgentPresentationView on its own first render — never races the ref
+    // callback that sets it just above in JSX order.
+    const [progressBarSlot, setProgressBarSlot] = createSignal<HTMLDivElement>();
 
     // In-pane tabs — rendered here (not inside AgentPresentationView) so the
     // strip stays visible whether the active member is a launched
@@ -350,40 +363,58 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
                 the pane and clipping the composer off the bottom (found
                 live 2026-08-09: "agent pane has no text input"). */}
             <div class="agent-pane-stack">
-                {/* Top region, above everything else, matching the editor's own
-                    tab-strip placement and every general tabbed-UI convention.
-                    The "+" always renders — that's how you'd get to a second
-                    tab — but the tab pill itself stays hidden until there's
-                    something to switch BETWEEN (see visibleTabs above).
-                    SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md. */}
-                <PaneTabStrip
-                    tabs={visibleTabs()}
-                    activeId={activeBlockId()}
-                    getId={(t) => t.blockId}
-                    getLabel={(t) => t.label}
-                    onActivate={handleTabSwitch}
-                    onClose={handleTabClose}
-                    onTabDoubleClick={(t) => t.definitionId && setRenamingBlockId(t.blockId)}
-                    renderLabel={(t) =>
-                        renamingBlockId() === t.blockId && t.definitionId ? (
-                            <PaneTabRenameInput
-                                initialValue={t.label}
-                                onConfirm={(title) => void handleTabRenameConfirm(t, title)}
-                                onCancel={() => setRenamingBlockId(null)}
-                            />
-                        ) : (
-                            <span class="pane-tab-label">{t.label}</span>
-                        )
-                    }
-                    onAdd={() => void handleNewAgentTab()}
-                    addTitle="New tab"
-                />
+                {/* Progress bar's own row — always reserved, above the tab
+                    strip, below wherever the block-frame's own pane header
+                    ends. Empty div; its only content is whatever
+                    AgentPresentationView portals into it below. Sized in
+                    agent-view.scss (.agent-pane-progress-bar-slot). */}
+                <div class="agent-pane-progress-bar-slot" ref={(el) => setProgressBarSlot(el)} />
                 <div class="agent-pane-stack-content">
+                    {/* Tab strip floats over the content instead of
+                        reserving its own row (SPEC_AGENT_PANE_TAB_STRIP_
+                        OVERLAY_2026_08_10.md) — with a single conversation
+                        open, the strip is exactly the "+" button's own
+                        28×28px box (shrink-to-fit + hidden-until-2nd-tab,
+                        SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md),
+                        so the conversation renders, and can be scrolled,
+                        underneath the rest of this row — unobstructed except
+                        for wherever a real tab or the "+" actually sits. The
+                        "+" always renders — that's how you'd get to a second
+                        tab — but the tab pill itself stays hidden until
+                        there's something to switch BETWEEN (see visibleTabs
+                        above). */}
+                    <PaneTabStrip
+                        tabs={visibleTabs()}
+                        activeId={activeBlockId()}
+                        getId={(t) => t.blockId}
+                        getLabel={(t) => t.label}
+                        onActivate={handleTabSwitch}
+                        onClose={handleTabClose}
+                        onTabDoubleClick={(t) => t.definitionId && setRenamingBlockId(t.blockId)}
+                        renderLabel={(t) =>
+                            renamingBlockId() === t.blockId && t.definitionId ? (
+                                <PaneTabRenameInput
+                                    initialValue={t.label}
+                                    onConfirm={(title) => void handleTabRenameConfirm(t, title)}
+                                    onCancel={() => setRenamingBlockId(null)}
+                                />
+                            ) : (
+                                <span class="pane-tab-label">{t.label}</span>
+                            )
+                        }
+                        onAdd={() => void handleNewAgentTab()}
+                        addTitle="New tab"
+                    />
                     <Show
                         when={agentId()}
                         fallback={<AgentPicker model={model} />}
                     >
-                        <AgentPresentationView model={model} agentId={agentId()} agentDefinitions={agentDefinitions} />
+                        <AgentPresentationView
+                            model={model}
+                            agentId={agentId()}
+                            agentDefinitions={agentDefinitions}
+                            progressBarMount={progressBarSlot}
+                        />
                     </Show>
                 </div>
             </div>
@@ -400,6 +431,7 @@ const AgentPresentationView = ({
     model,
     agentId,
     agentDefinitions,
+    progressBarMount,
 }: {
     model: AgentViewModel;
     agentId: string;
@@ -409,6 +441,11 @@ const AgentPresentationView = ({
      *  this component is always co-mounted with the wrapper (reagent P2 on
      *  PR #2488). */
     agentDefinitions: () => AgentDefinition[];
+    /** DOM node (owned by AgentViewWrapper, between the tab strip and the
+     *  content) the marching-ants progress bar portals into — see the
+     *  signal's own doc comment in AgentViewWrapper. undefined only for the
+     *  ref-not-yet-assigned instant on first mount. */
+    progressBarMount: () => HTMLDivElement | undefined;
 }): JSX.Element => {
     const block = model.blockAtom;
     const providerKey = (): string => block()?.meta?.["agentProvider"] ?? agentId;
@@ -1723,21 +1760,37 @@ const AgentPresentationView = ({
                     <BrainSpinner fading={historyLoaded()} />
                 </div>
             </Show>
-            {/* Gradient progress bar — 2px, pinned position:absolute top:0.
-                Animated shimmer while working, hidden at rest. Colors derived
-                from --accent-color via color-mix() so it adapts to all themes.
-                See SPEC_AGENT_PANE_STATUS_GRADIENT_2026_06_14.md §4. */}
-            <div
-                class="agent-pane-progress-bar"
-                classList={{
-                    "agent-pane-progress-bar--active": showingLaunchActivity() || workingFromPhase(agentAtoms().turnPhaseAtom[0]()),
-                    "agent-pane-progress-bar--stopping": agentAtoms().turnPhaseAtom[0]().kind === "Interrupting",
-                }}
-                role="progressbar"
-                aria-label="Agent working"
-                aria-valuemin={0}
-                aria-valuemax={100}
-            />
+            {/* Gradient progress bar — 3px, marching-ants shimmer while
+                working, hidden at rest. Colors derived from --accent-color
+                via color-mix() so it adapts to all themes. Portaled into a
+                slot AgentViewWrapper owns, between the tab strip and the
+                content (its own row, never overlapping either) — this
+                component's state (turnPhase, launch activity) is what
+                drives it, but .agent-view (this component's own root,
+                nested inside .agent-pane-stack-content, itself BELOW the
+                tab strip in DOM order) can't reach a position above the
+                tab strip through CSS alone; every ancestor between here and
+                there clips overflow before an absolutely-positioned escape
+                could ever become visible. See
+                SPEC_AGENT_PANE_STATUS_GRADIENT_2026_06_14.md §4 and
+                SPEC_AGENT_PANE_PROGRESS_BAR_ABOVE_TAB_STRIP_2026_08_10.md.
+                Renders nothing until the slot ref is assigned (one frame,
+                first mount only). */}
+            <Show when={progressBarMount()}>
+                <Portal mount={progressBarMount()!}>
+                    <div
+                        class="agent-pane-progress-bar"
+                        classList={{
+                            "agent-pane-progress-bar--active": showingLaunchActivity() || workingFromPhase(agentAtoms().turnPhaseAtom[0]()),
+                            "agent-pane-progress-bar--stopping": agentAtoms().turnPhaseAtom[0]().kind === "Interrupting",
+                        }}
+                        role="progressbar"
+                        aria-label="Agent working"
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                    />
+                </Portal>
+            </Show>
             <DragOverlay message={dropAttach.dropMessage()} visible={dropAttach.isDragOver()} />
             {/* Pane title + back button now live in the block frame header,
                 driven by AgentViewModel.viewName / viewIcon / endIconButtons.
