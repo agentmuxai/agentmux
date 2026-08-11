@@ -394,6 +394,10 @@ declare global {
         provider?: string;            // "claude" | "codex" | "gemini" | ""
         model?: string;
         instructions?: string;
+        /** JSON-encoded object of `{ provider_id: content }` — additive,
+         *  harness-scoped instruction variants alongside `instructions`
+         *  above (which keeps meaning "default"). ABF v0.2 §2.2. */
+        instructions_by_provider?: string;
         /** JSON-encoded array of `{ path, content }`. */
         context_files?: string;
         /** JSON-encoded array of MCP server configs. */
