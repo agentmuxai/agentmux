@@ -72,15 +72,14 @@
     // focused (50) — the semantically right token for "pane chrome floating
     // over this pane's own content."
     //
-    // `.agent-pane-loading-overlay`'s z-index 100 (_loading-overlay.scss)
-    // no longer competes with this at all: `.agent-view` now establishes
-    // its own stacking context (`z-index: 0`, agent-view.scss above),
-    // added specifically because reagent P1 on PR #2526's 6th round
-    // confirmed `container-type: inline-size` alone does not (it computes
-    // to `contain: inline-size style`, neither value stacking-context-
-    // creating) — so the loading overlay's 100 is now compared only
-    // against its own siblings inside `.agent-view`, never against this
-    // tab strip.
+    // `.agent-pane-loading-overlay` (_loading-overlay.scss) deliberately
+    // sits at its own low z-index (1, not the shared `--zindex-elem-modal`
+    // tier `.agent-auth-overlay` uses) specifically so it stays below this
+    // 4 — see that file's comment for the full reasoning, including why
+    // giving `.agent-view` itself a stacking context (an earlier commit on
+    // this branch, reverted) was the wrong fix: it also silently trapped
+    // `.agent-auth-overlay`, breaking its escape-and-outrank-`.block-mask`
+    // behavior (reagent P1 on PR #2526's 7th round).
     > .pane-tab-strip {
         position: absolute;
         top: 0;
@@ -267,19 +266,18 @@
     width: 100%;
     overflow: hidden;
     position: relative;
-    // Establishes a real stacking context (position + z-index together, per
-    // spec — same pattern as .agent-document-scroll-region below) so every
-    // absolutely-positioned descendant's z-index — including
-    // .agent-pane-loading-overlay's 100 (_loading-overlay.scss) — is
-    // compared only against siblings inside .agent-view, never able to
-    // escape and compete with .pane-tab-strip (a true sibling of
-    // .agent-view inside .agent-pane-stack-content, z-index
-    // var(--z-pane-overlay, 4) — agent-view.scss above). reagent P1 on
-    // PR #2526's 6th round confirmed `container-type: inline-size` alone
-    // does NOT establish one (it computes to `contain: inline-size style`,
-    // and neither value is in the stacking-context-creating set) — this is
-    // the actual fix, not a value this file was already relying on.
-    z-index: 0;
+    // Deliberately NO explicit z-index here (reverted — reagent P1 on PR
+    // #2526's 7th round). A z-index:0 stacking context here would contain
+    // EVERY absolutely-positioned descendant, including
+    // .agent-auth-overlay (_auth-overlay.scss, z-index: var(--zindex-elem-
+    // modal)=100), which deliberately relies on escaping .agent-view to
+    // outrank .block-mask (block.scss — its own ".block-focused" comment:
+    // "No z-index here intentionally... without a stacking context,
+    // .block-mask ... is in the parent stacking context") whenever the
+    // pane is unfocused during an OAuth wait. See
+    // .agent-pane-loading-overlay (_loading-overlay.scss) for the actual,
+    // narrower fix for the tab-strip conflict this file's earlier commit
+    // was trying to solve.
     user-select: none;
     cursor: default;
 }

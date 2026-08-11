@@ -122,14 +122,30 @@ containment is in the set of values (`layout`, `paint`, `strict`,
 `content`) that create a stacking context — so it does not, and the
 loading overlay genuinely was painting over the tab strip on every mount.
 
-**Fixed**, not just documented: `.agent-view` now carries an explicit
-`z-index: 0` alongside its existing `position: relative`
-(`agent-view.scss`), which — unlike `container-type` — is unambiguously a
-stacking-context trigger per spec. Every absolutely-positioned descendant
-inside `.agent-view`, including the loading overlay's z-index 100, is now
-compared only against its own siblings inside that box, never against
-`.pane-tab-strip`. Same pattern `.agent-document-scroll-region` already
-uses for its own children (`_document.scss`).
+**Fixed, narrowly** — not by containing `.agent-view`. A first attempt gave
+`.agent-view` itself an explicit `z-index: 0` (a real, unambiguous
+stacking-context trigger, unlike `container-type`), reasoning that it would
+contain every absolutely-positioned descendant the same way
+`.agent-document-scroll-region` already contains its own children
+(`_document.scss`). reagent P1 on PR #2526's 7th round caught the flaw:
+that also contained `.agent-auth-overlay` (`_auth-overlay.scss`, same
+`--zindex-elem-modal` tier as the loading overlay), which deliberately
+relies on escaping `.agent-view` to outrank `.block-mask` (`block.scss` —
+its own `.block-focused` comment: "No z-index here intentionally... without
+a stacking context, `.block-mask` ... is in the parent stacking context").
+Containing `.agent-view` capped its resolved priority at 0 from
+`.block-mask`'s perspective, so the focus-ring/click-to-focus mask (z-index
+10 unfocused, 50 focused) started painting over the "blocks all
+interaction" auth overlay whenever the pane was unfocused during an OAuth
+wait — a regression in the opposite direction, not scoped to what this
+spec was trying to fix.
+
+The actual fix targets only the one overlay that needed to change:
+`.agent-pane-loading-overlay` now carries its own explicit `z-index: 1`
+(`_loading-overlay.scss`), not the shared `--zindex-elem-modal` token —
+comfortably below the tab strip's 4, while `.agent-auth-overlay` keeps
+`--zindex-elem-modal` (100) and its existing escape-and-outrank-
+`.block-mask` behavior, completely untouched.
 
 ---
 
