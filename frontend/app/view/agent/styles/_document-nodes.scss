@@ -1839,6 +1839,55 @@
     }
 }
 
+// "Earlier conversations — Open Agent History" link row. Scrolls with the
+// transcript (a normal document row) instead of being pinned above the
+// scroll region — see SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md
+// §3.2. Single-line, clickable, sits right after the "New session started"
+// divider it explains.
+.agent-history-link-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    padding: 8px var(--space-2);
+    margin: 0 var(--space-1-5);
+    border: 1px dashed var(--border-color, rgba(255, 255, 255, 0.12));
+    border-radius: 4px;
+    cursor: var(--cursor-interactive, pointer);
+    user-select: none;
+
+    &:hover,
+    &:focus-visible {
+        background: var(--panel-bg-color, rgba(255, 255, 255, 0.04));
+        border-color: color-mix(in srgb, var(--accent-color) 40%, transparent);
+    }
+
+    &:focus-visible {
+        outline: none;
+    }
+
+    .agent-history-link-sigil {
+        flex-shrink: 0;
+        opacity: 0.7;
+    }
+
+    .agent-history-link-label {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 11px;
+        color: var(--tertiary-text-color, rgba(255, 255, 255, 0.3));
+    }
+
+    .agent-history-link-cta {
+        flex-shrink: 0;
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--accent-color);
+    }
+}
+
 // Node hover-peek overlay (ToolBlock.tsx / MarkdownBlock.tsx via
 // PeekOverlay.tsx). Portal-rendered at document.body, NOT a plain in-DOM
 // absolute child of the row — see PeekOverlay.tsx's doc comment: each

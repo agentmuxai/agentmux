@@ -6,6 +6,8 @@ import { createEffect, createMemo, createSignal, on, onCleanup, onMount, Show, t
 import type { AgentViewModel } from "./agent-model";
 import { getProvider } from "./providers";
 import { createAgentAtoms } from "./state";
+import type { SignalPair } from "./state";
+import type { DocumentNode } from "./types";
 import {
     dispatchIfRegistered as dispatchDocIfRegistered,
 } from "@/app/store/agent-document-store";
@@ -48,7 +50,9 @@ import { useNextPromptSuggestion } from "./hooks/useNextPromptSuggestion";
 import { useAgentCommands } from "./hooks/useAgentCommands";
 import { useAgentFailure } from "./hooks/useAgentFailure";
 import { PaneRow } from "./components/PaneRow";
-import { AgentHistoryView } from "./history/AgentHistoryView";
+import { AgentHistoryTabView } from "./history/AgentHistoryTabView";
+import { HISTORY_TAB_FOR_META_KEY, openOrFocusHistoryTab } from "./open-history-tab";
+import { injectHistoryLink } from "./inject-history-link";
 import { PaneTabStrip } from "@/app/element/PaneTabStrip";
 import { PaneTabRenameInput } from "@/app/element/PaneTabRenameInput";
 import { useForkSet } from "./fork/useForkSet";
@@ -144,6 +148,11 @@ const sanitizeLogTextForTerminal = (text: string): string => {
 export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Element => {
     const block = model.blockAtom;
     const agentId = () => block()?.meta?.["agentId"];
+    // A block opened as a read-only history reader (openOrFocusHistoryTab)
+    // — takes priority over the live/picker gate below, and never toggles
+    // back: closing this reading posture is closing the tab, not swapping
+    // content in place. See SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md §3.1.
+    const isHistoryTab = () => !!block()?.meta?.[HISTORY_TAB_FOR_META_KEY];
 
     // In-pane tabs — rendered here (not inside AgentPresentationView) so the
     // strip stays visible whether the active member is a launched
@@ -181,6 +190,11 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
         /** AgentDefinition id, when this tab has launched an agent — stays
          *  undefined for a still-blank picker tab (nothing to rename). */
         definitionId?: string;
+        /** A read-only history-reader tab (openOrFocusHistoryTab) — never
+         *  double-click-renamable (that flow renames the shared
+         *  AgentDefinition, which a history tab must never touch) and
+         *  always labeled distinctly from its live sibling tab. */
+        isHistoryTab?: boolean;
     }
     // Rename overrides, keyed by blockId — set synchronously by
     // handleTabRenameConfirm below so a just-renamed tab (including a
@@ -194,6 +208,14 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
         // last-persisted meta directly, same as term.tsx's termTabs does.
         const meta = id === model.blockId ? block()?.meta : WOS.getObjectValue<Block>(WOS.makeORef("block", id))?.meta;
         const definitionId = meta?.["agentId"] as string | undefined;
+        const isHistoryTab = !!meta?.[HISTORY_TAB_FOR_META_KEY];
+        if (isHistoryTab) {
+            // Deliberately ignores titleOverrides/agentName — a history
+            // tab is never user-renamed (see PaneTab.isHistoryTab) and
+            // must read distinctly from its live sibling, which carries
+            // the same copied agentName in its own meta.
+            return { blockId: id, label: "History", isHistoryTab: true };
+        }
         const label = titleOverrides()[id] ?? (meta?.["agentName"] as string) ?? definitionId ?? "New Agent";
         return { blockId: id, label, definitionId };
     };
@@ -380,10 +402,17 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
                 />
                 <div class="agent-pane-stack-content">
                     <Show
-                        when={agentId()}
-                        fallback={<AgentPicker model={model} />}
+                        when={isHistoryTab()}
+                        fallback={
+                            <Show
+                                when={agentId()}
+                                fallback={<AgentPicker model={model} />}
+                            >
+                                <AgentPresentationView model={model} agentId={agentId()} agentDefinitions={agentDefinitions} />
+                            </Show>
+                        }
                     >
-                        <AgentPresentationView model={model} agentId={agentId()} agentDefinitions={agentDefinitions} />
+                        <AgentHistoryTabView model={model} />
                     </Show>
                 </div>
             </div>
@@ -606,12 +635,6 @@ const AgentPresentationView = ({
     registerLayoutPane(model.blockId, { layout: setLayoutView, zoom: () => {} });
     onCleanup(() => unregisterLayoutPane(model.blockId));
 
-    // Body mode (spec §4.2): "history" swaps the transcript + composer
-    // subtree for the read-only Agent History reader. The live subtree
-    // unmounts (its stream subscription with it — never doubled); on
-    // return, the normal mount/restore path catches the pane up. Always
-    // reopens "live" — a transient reading posture, not persisted state.
-    const [bodyMode, setBodyMode] = createSignal<"live" | "history">("live");
     // DEV-only: CDP validation hook — lets engineers run
     // `__agentLayout()` in the console to snapshot the slice state.
     if (import.meta.env.DEV) {
@@ -756,6 +779,19 @@ const AgentPresentationView = ({
         const first = agentAtoms().documentAtom[0]()[0];
         return first?.type === "session_outcome" && first.outcome === "fresh";
     });
+
+    // Read-side view of the document with the "Open Agent History" link row
+    // injected as a normal, scrolling document node (§3.2 of
+    // SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md) —
+    // replaces the old pinned-above-the-scroll-region PaneRow. The real
+    // setter is passed through unchanged: AgentDocumentView/
+    // createAgentViewState only ever read `documentAtom[0]`, never call the
+    // setter, so pairing a derived read with the real write side is safe
+    // (nothing writes through this pair, so there's nothing to desync).
+    const displayDocumentAtom: SignalPair<DocumentNode[]> = [
+        () => injectHistoryLink(agentAtoms().documentAtom[0](), earlierHistoryAvailable()),
+        agentAtoms().documentAtom[1],
+    ];
 
     // Auth + launch flow state and the onCleanup that kills the CLI
     // if the pane closes mid-login.
@@ -1246,20 +1282,20 @@ const AgentPresentationView = ({
         () => workingRowLoading() || agentAtoms().sessionStatsAtom[0]() != null,
     );
 
-    // Ref CALLBACK, not a one-shot onMount(): the anchor div lives inside
-    // `<Show when={bodyMode() === "live"}>` (Agent History view, PR #2509)
-    // — leaving and returning to the live pane tears down and recreates
-    // this element. A plain `onMount` above (this component's own, which
-    // only runs once for AgentPresentationView's whole lifetime) captured
-    // whichever DOM node existed at first mount and never re-observed
-    // after a remount, so `workingRowHeight` silently froze at its
-    // last-reported value and .agent-document's reserved bottom padding
-    // went stale — the floating AgentWorkingRow then visibly overlapped
-    // the last message after any Open Agent History → back-to-live round
-    // trip. A ref callback fires on every (re)mount of this specific
-    // element, so disconnecting the previous observer and attaching a
-    // fresh one here keeps it correct across remounts. See
-    // docs/specs/SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md.
+    // Ref CALLBACK, not a one-shot onMount(): originally fixed a bug where
+    // Agent History's now-removed `bodyMode` in-place swap (PR #2509)
+    // remounted this anchor div WITHIN one persistent AgentPresentationView
+    // instance, while a plain onMount (this component's own, firing once
+    // for the instance's whole lifetime) kept observing the stale, now-
+    // detached pre-swap node — `workingRowHeight` silently froze and the
+    // floating AgentWorkingRow visibly overlapped the last message. That
+    // specific in-place remount is gone now that Agent History is its own
+    // tab (SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md
+    // §3.1) — but a ref callback (re-observing on every mount of THIS
+    // element, not just the component's first) is still the more robust
+    // shape in general, so it stays: correct whether this component mounts
+    // once or many times over its host block's life (which, per §1 of that
+    // spec, it now does on every ordinary tab switch too).
     let workingRowRO: ResizeObserver | undefined;
     const attachWorkingRowAnchor = (el: HTMLDivElement) => {
         workingRowRO?.disconnect();
@@ -1646,12 +1682,10 @@ const AgentPresentationView = ({
     useAgentKeyboard({
         blockId: model.blockId,
         onToggleSearch: () => {
-            // Search targets the LIVE document (its highlight + jumpTo are
-            // bound to the live AgentDocumentView, which unmounts in
-            // history mode) — opening it there would search a hidden
-            // document and dispatch scroll commands to an unmounted list
-            // (reagent P1 on PR #2509). History-mode search is P3 scope.
-            if (bodyMode() !== "live") return;
+            // This component only ever represents the live view now — Agent
+            // History is a separate pane tab (AgentHistoryTabView), a
+            // separate block/component instance entirely, so there's no
+            // "history mode" of THIS component to guard against anymore.
             // Second Ctrl+F press closes and clears state.
             if (search.visible()) {
                 search.close();
@@ -1762,20 +1796,10 @@ const AgentPresentationView = ({
 
             {/* Tab strip now lives in AgentViewWrapper — see its comment. */}
 
-            <Show
-                when={bodyMode() === "live"}
-                fallback={
-                    <AgentHistoryView
-                        blockId={model.blockId}
-                        outputFormat={outputFormat}
-                        agentName={agentName}
-                        onClose={() => setBodyMode("live")}
-                    />
-                }
-            >
-            {/* Search bar lives INSIDE the live branch: its highlight +
-                jumpTo target the live document and would act on a hidden,
-                unmounted list in history mode (reagent P1 on PR #2509). */}
+            {/* This component only ever represents the live view now —
+                Agent History is a separate pane tab (AgentHistoryTabView),
+                not a swap-in-place body of this one. See
+                SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md §3.1. */}
             <AgentSearchBar
                 visible={search.visible}
                 onSearch={search.performSearch}
@@ -1786,29 +1810,12 @@ const AgentPresentationView = ({
                 matchCount={search.matchCount}
             />
 
-            {/* §3.4 link row — shown when the working scrollback is clamped
-                at a fresh session boundary: either detected during
-                restore/pagination (history.scopeClamped) or arrived LIVE —
-                the reducer's StreamFlush clamp leaves the fresh boundary as
-                the document's first node, so deriving from the document
-                covers the live path the RPC-side signal can't see
-                (codex P2 on PR #2509). Prior history stays one click away,
-                so the clamp never reads as data loss. */}
-            <Show when={earlierHistoryAvailable()}>
-                <PaneRow
-                    sigil="⌛"
-                    title="Earlier conversations"
-                    meta="preserved from before this session started"
-                    accent="neutral"
-                    actions={[{
-                        label: "Open Agent History",
-                        title: "Browse this agent's full history",
-                        onClick: () => setBodyMode("history"),
-                        primary: true,
-                    }]}
-                    onActivate={() => setBodyMode("history")}
-                />
-            </Show>
+            {/* The "Earlier conversations / Open Agent History" link used to
+                render here as a PaneRow pinned above the scroll region —
+                now it's a `history_link` synthetic DOCUMENT NODE, injected
+                by injectHistoryLink into displayDocumentAtom below, so it
+                scrolls with the transcript instead of staying fixed in
+                place. See SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md §3.2. */}
             {/* Scroll region wrapper — .agent-document (inside AgentDocumentView)
                 is absolutely positioned to fill this box, and AgentWorkingRow
                 floats over its bottom edge instead of pushing it up as a
@@ -1837,8 +1844,9 @@ const AgentPresentationView = ({
                 </Show>
 
                 <AgentDocumentView
-                    documentAtom={agentAtoms().documentAtom}
+                    documentAtom={displayDocumentAtom}
                     documentStateAtom={agentAtoms().documentStateAtom}
+                    onOpenHistory={() => void openOrFocusHistoryTab({ currentBlockId: model.blockId, agentId })}
                     onAgentErrorLogin={() => {
                         // Must match onLoginAgain above: the button is labeled "Login
                         // Again", so it has to force a fresh OAuth regardless of
@@ -2120,7 +2128,7 @@ const AgentPresentationView = ({
                             blockId={model.blockId}
                             blockAtom={block}
                             providerId={provider()?.id ?? ""}
-                            onOpenHistory={() => setBodyMode("history")}
+                            onOpenHistory={() => void openOrFocusHistoryTab({ currentBlockId: model.blockId, agentId })}
                         />
                         {/* Drag-to-height drawer wrapping the terminal — the actual
                             scrollable/resizable content. */}
@@ -2154,7 +2162,6 @@ const AgentPresentationView = ({
                     </div>
                 </Show>
             </div>
-            </Show>
             {/* AgentActionBar (Add / Import / Export) lives in the
                 AgentPicker view only. Once an agent is loaded the user
                 is working in the conversation; the action bar would
