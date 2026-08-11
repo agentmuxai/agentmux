@@ -102,6 +102,45 @@
         top: 0;
         left: 0;
         z-index: calc(var(--zindex-elem-modal, 100) + 1);
+
+        // PaneTabStrip.scss's shared "+" and tab styling is transparent by
+        // default (opaque only on hover/active) — correct for editor/
+        // terminal panes, where the strip sits in a normal reserved row in
+        // front of a stable, non-scrolling backdrop, but wrong here now
+        // that the strip floats directly over scrolling conversation
+        // content (above): a transparent-by-default "+" or inactive tab
+        // shows whatever text happens to be scrolled underneath it right
+        // through, instead of reading as a solid control. Only the truly
+        // blank space around the strip should be see-through — the "+" and
+        // every tab need real, opaque contrast regardless of what's behind
+        // them. Scoped to this agent-pane-only selector, not
+        // PaneTabStrip.scss's base rule, so editor/terminal strips are
+        // untouched.
+        //
+        // `--block-bg-color` matches `.pane-tab--active`'s own existing
+        // (already-opaque) color — same token, so an inactive tab and the
+        // active one read as the same "solid chrome" material, not two
+        // different treatments. Hover states get their own explicit rule
+        // (color-mix lightening the same opaque base) rather than falling
+        // through to PaneTabStrip.scss's own `rgba(255,255,255,…)` hover
+        // rules — those are translucent-over-transparent by design, which
+        // would silently undo the opaque base on the one interaction state
+        // (hover) most likely to happen while a user is actually looking at
+        // the strip. Both rules here are more specific than PaneTabStrip.scss's
+        // own (3 vs 2 classes for the default; 4 vs 2 for hover), so no
+        // `!important` is needed for either to win.
+        .pane-tab-strip-add,
+        .pane-tab {
+            background: var(--block-bg-color);
+        }
+
+        .pane-tab-strip-add:hover {
+            background: color-mix(in srgb, var(--block-bg-color) 92%, white 8%);
+        }
+
+        .pane-tab:hover {
+            background: color-mix(in srgb, var(--block-bg-color) 94%, white 6%);
+        }
     }
 }
 
