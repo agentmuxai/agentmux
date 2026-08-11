@@ -127,8 +127,9 @@
         // would silently undo the opaque base on the one interaction state
         // (hover) most likely to happen while a user is actually looking at
         // the strip. Both rules here are more specific than PaneTabStrip.scss's
-        // own (3 vs 2 classes for the default; 4 vs 2 for hover), so no
-        // `!important` is needed for either to win.
+        // own (3 vs 1 class for the default state — `.pane-tab-strip-add`/
+        // `.pane-tab` alone; 4 vs 2 for `:hover`, which adds the pseudo-class),
+        // so no `!important` is needed for either to win.
         .pane-tab-strip-add,
         .pane-tab {
             background: var(--block-bg-color);
