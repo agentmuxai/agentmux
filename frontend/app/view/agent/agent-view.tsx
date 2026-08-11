@@ -1232,7 +1232,6 @@ const AgentPresentationView = ({
     // component boundaries away) via a CSS custom property set on the
     // shared .agent-document-scroll-region ancestor — custom properties
     // cascade through the DOM tree regardless of component boundaries.
-    let workingRowAnchorRef: HTMLDivElement | undefined;
     const [workingRowHeight, setWorkingRowHeight] = createSignal(0);
 
     // Shared by the anchor's <Show> and the backdrop's <Show>/color below
@@ -1247,15 +1246,33 @@ const AgentPresentationView = ({
         () => workingRowLoading() || agentAtoms().sessionStatsAtom[0]() != null,
     );
 
-    onMount(() => {
-        if (typeof ResizeObserver === "undefined" || !workingRowAnchorRef) return;
+    // Ref CALLBACK, not a one-shot onMount(): the anchor div lives inside
+    // `<Show when={bodyMode() === "live"}>` (Agent History view, PR #2509)
+    // — leaving and returning to the live pane tears down and recreates
+    // this element. A plain `onMount` above (this component's own, which
+    // only runs once for AgentPresentationView's whole lifetime) captured
+    // whichever DOM node existed at first mount and never re-observed
+    // after a remount, so `workingRowHeight` silently froze at its
+    // last-reported value and .agent-document's reserved bottom padding
+    // went stale — the floating AgentWorkingRow then visibly overlapped
+    // the last message after any Open Agent History → back-to-live round
+    // trip. A ref callback fires on every (re)mount of this specific
+    // element, so disconnecting the previous observer and attaching a
+    // fresh one here keeps it correct across remounts. See
+    // docs/specs/SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md.
+    let workingRowRO: ResizeObserver | undefined;
+    const attachWorkingRowAnchor = (el: HTMLDivElement) => {
+        workingRowRO?.disconnect();
+        workingRowRO = undefined;
+        if (typeof ResizeObserver === "undefined") return;
         const ro = new ResizeObserver((entries) => {
             const h = entries[0]?.contentRect.height ?? 0;
             setWorkingRowHeight(h);
         });
-        ro.observe(workingRowAnchorRef);
-        onCleanup(() => ro.disconnect());
-    });
+        ro.observe(el);
+        workingRowRO = ro;
+    };
+    onCleanup(() => workingRowRO?.disconnect());
 
     // True once the pane's in-flight Bash tool call has been promoted to a
     // live ActivityDock row (tool-adapter.ts) — AgentWorkingRow suppresses
@@ -1853,7 +1870,7 @@ const AgentPresentationView = ({
                     Shows spinner + elapsed while loading, "✓ Worked · Ns" on completion.
                     Acts as a visual turn delimiter; stays until next message is sent.
                     See SPEC_AGENT_PANE_STATUS_GRADIENT_2026_06_14.md §2. */}
-                <div class="agent-working-row-anchor" ref={workingRowAnchorRef}>
+                <div class="agent-working-row-anchor" ref={attachWorkingRowAnchor}>
                     <Show when={workingRowVisible()}>
                         <AgentWorkingRow
                             loading={workingRowLoading()}
