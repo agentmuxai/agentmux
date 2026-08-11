@@ -415,31 +415,47 @@ const MAX_INSTRUCTION_PROVIDER_VARIANTS: usize = 32;
 
 /// Parse one `components.instructions`-shaped path array (either the v0.1
 /// flat array itself, or one key's array within the v0.2 keyed-object
-/// shape) into its joined instructions text, diverting any
-/// `instructions/context/*` reference into `context_files` exactly as
-/// before. `label` is used only for warning messages (`"instructions"` for
-/// the flat/default case, `"instructions.<provider>"` for a variant) so
-/// every caller's warnings are traceable to the specific key that produced
-/// them. Extracted from the single-shape loop this replaces (ABF v0.2
-/// §2.2) — behavior for the flat/default case is byte-for-byte unchanged
-/// from v0.1.
+/// shape) into its joined instructions text. `label` is used only for
+/// warning messages (`"instructions"` for the flat/default case,
+/// `"instructions.<provider>"` for a variant) so every caller's warnings
+/// are traceable to the specific key that produced them.
+///
+/// `seen_instruction_paths`/`duplicate_instruction_refs` are threaded
+/// through BY THE CALLER, shared across every invocation within one
+/// `parse_bundle_import_with_budget` call (default + every provider
+/// variant) — reagent P1, PR #2523: a HashSet local to each call only
+/// dedupes within its own component array, so the same `instructions/
+/// context/*` path referenced from both `"default"` and a provider
+/// variant was pushed into `context_files` twice, and — worse — a
+/// manifest repeating one path across many provider keys (up to
+/// [`MAX_INSTRUCTION_PROVIDER_VARIANTS`]) re-opened the exact
+/// content-cloning amplification vector the original per-array dedup
+/// existed to close (Codex P1, PR #2379 round 2, cited below).
+///
+/// `divert_context_files`: only `true` for the flat/default case.
+/// reagent P1, PR #2523: diverting any `instructions/context/*`-prefixed
+/// path applies to the raw file path unconditionally, regardless of which
+/// provider variant is being parsed — so a provider literally named
+/// `"context"` (whose exported path is `instructions/context/AGENTS.md`,
+/// per `bundle_export.rs`'s `instructions/<provider>/AGENTS.md`
+/// convention) would have its own content silently misrouted into
+/// `context_files` on a later re-import, a reserved-word collision with
+/// no validation guarding it. Context files are shared, not
+/// provider-scoped, by design (§1's naming note) — a provider variant's
+/// array never needs the diversion at all, so disabling it there closes
+/// the collision structurally rather than special-casing the "context"
+/// name.
 fn parse_instruction_component_paths(
     arr: &[Value],
     label: &str,
     by_path: &HashMap<String, &str>,
     context_files: &mut Vec<ImportedContextFile>,
+    divert_context_files: bool,
+    seen_instruction_paths: &mut HashSet<String>,
+    duplicate_instruction_refs: &mut u32,
     warnings: &mut WarningSink,
 ) -> String {
     let mut instructions_parts: Vec<String> = Vec::new();
-    // Codex P1, PR #2379 round 2: components.instructions is manifest-
-    // controlled and its length is NOT bounded by the decompression caps
-    // (those cap the underlying file *content*, not how many times a
-    // manifest can reference the same path). Without dedup, an untrusted
-    // manifest repeating one path thousands of times clones that path's
-    // content into instructions_parts once per repetition, letting a
-    // sub-50MB archive expand to many gigabytes before `join`.
-    let mut seen_instruction_paths: HashSet<String> = HashSet::new();
-    let mut duplicate_instruction_refs: u32 = 0;
     let paths = capped_component_array(Some(arr), label, warnings);
     for path_val in paths {
         let Some(raw_path) = path_val.as_str() else {
@@ -476,16 +492,20 @@ fn parse_instruction_component_paths(
         // path hundreds of thousands of times could allocate hundreds
         // of megabytes of warning text serialized into the RPC
         // response. Count instead; a single summary warning is pushed
-        // after the loop.
+        // after the whole components.instructions parse completes
+        // (ABF v0.2, §2.2: now after every array, not just this one —
+        // see this function's own doc comment).
         if !seen_instruction_paths.insert(path.clone()) {
-            duplicate_instruction_refs += 1;
+            *duplicate_instruction_refs += 1;
             continue;
         }
         let Some(content) = by_path.get(path.as_str()) else {
             warnings.push(format!("components.{label}: \"{path}\" not found among the bundle's files; skipped"));
             continue;
         };
-        if let Some(rel) = path.strip_prefix("instructions/context/") {
+        let diverted = divert_context_files && path.strip_prefix("instructions/context/").is_some();
+        if diverted {
+            let rel = path.strip_prefix("instructions/context/").unwrap();
             match sanitize_context_relative_path(rel) {
                 Some(safe_rel) => context_files.push(ImportedContextFile {
                     id: context_files.len(),
@@ -499,11 +519,6 @@ fn parse_instruction_component_paths(
         } else {
             instructions_parts.push(content.to_string());
         }
-    }
-    if duplicate_instruction_refs > 0 {
-        warnings.push(format!(
-            "components.{label}: {duplicate_instruction_refs} duplicate reference(s) skipped"
-        ));
     }
     instructions_parts.join("\n\n---\n\n")
 }
@@ -603,9 +618,18 @@ pub fn parse_bundle_import_with_budget(
     // variants). No merge decision happens here — every variant is stored
     // verbatim; selecting one at launch time is a separate, not-yet-built
     // materializer's job (see the spec's non-goals).
+    // Shared across every components.instructions array parsed below
+    // (default + every provider variant) — see
+    // parse_instruction_component_paths's doc comment for why this must
+    // NOT be reset per-array (reagent P1, PR #2523).
+    let mut seen_instruction_paths: HashSet<String> = HashSet::new();
+    let mut duplicate_instruction_refs: u32 = 0;
     match components.and_then(|c| c.get("instructions")) {
         Some(Value::Array(arr)) => {
-            instructions = parse_instruction_component_paths(arr, "instructions", &by_path, &mut context_files, &mut warnings);
+            instructions = parse_instruction_component_paths(
+                arr, "instructions", &by_path, &mut context_files, true,
+                &mut seen_instruction_paths, &mut duplicate_instruction_refs, &mut warnings,
+            );
         }
         Some(Value::Object(obj)) => {
             if obj.len() > MAX_INSTRUCTION_PROVIDER_VARIANTS {
@@ -614,13 +638,36 @@ pub fn parse_bundle_import_with_budget(
                     obj.len()
                 ));
             }
-            for (key, val) in obj.iter().take(MAX_INSTRUCTION_PROVIDER_VARIANTS) {
+            // "default" must be parsed FIRST, regardless of the manifest's
+            // own key order (serde_json::Map without the preserve_order
+            // feature iterates alphabetically — "claude" < "default" —
+            // not insertion order). The shared dedup set means whichever
+            // array reaches a given instructions/context/* path first
+            // decides whether it's diverted; parsing a provider variant
+            // first would let it silently claim a shared context-file
+            // path as plain instructions text before "default" ever gets
+            // a chance to divert it correctly.
+            let mut ordered: Vec<(&String, &Value)> = Vec::with_capacity(obj.len());
+            if let Some(default_entry) = obj.get_key_value("default") {
+                ordered.push(default_entry);
+            }
+            ordered.extend(obj.iter().filter(|(k, _)| *k != "default"));
+            for (key, val) in ordered.into_iter().take(MAX_INSTRUCTION_PROVIDER_VARIANTS) {
                 let label = format!("instructions.{key}");
                 let Some(arr) = val.as_array() else {
                     warnings.push(format!("components.{label}: expected an array; skipped"));
                     continue;
                 };
-                let joined = parse_instruction_component_paths(arr, &label, &by_path, &mut context_files, &mut warnings);
+                // Only the "default" array diverts instructions/context/*
+                // references into context_files — a provider variant's
+                // array never does (reagent P1, PR #2523; see this
+                // function's own doc comment for the reserved-word
+                // collision this closes).
+                let divert_context_files = key == "default";
+                let joined = parse_instruction_component_paths(
+                    arr, &label, &by_path, &mut context_files, divert_context_files,
+                    &mut seen_instruction_paths, &mut duplicate_instruction_refs, &mut warnings,
+                );
                 if key == "default" {
                     instructions = joined;
                 } else {
@@ -630,6 +677,11 @@ pub fn parse_bundle_import_with_budget(
         }
         Some(_) => warnings.push("components.instructions: expected an array or object; skipped".to_string()),
         None => {}
+    }
+    if duplicate_instruction_refs > 0 {
+        warnings.push(format!(
+            "components.instructions: {duplicate_instruction_refs} duplicate reference(s) skipped"
+        ));
     }
 
     // ------------------------------------------------------------------
@@ -1331,6 +1383,58 @@ mod tests {
         let result = parse_bundle_import(&files).unwrap();
         assert_eq!(result.instructions, "");
         assert_eq!(result.instructions_by_provider.get("claude"), Some(&"Claude-only.".to_string()));
+    }
+
+    #[test]
+    fn a_context_file_referenced_from_default_and_a_provider_variant_is_deduped_across_both() {
+        // reagent P1, PR #2523: dedup used to be local to each
+        // components.instructions array, so the same context-file path
+        // referenced from both "default" and a provider variant was
+        // pushed into context_files TWICE. Must dedupe across the whole
+        // components.instructions parse, not per-array.
+        let files = vec![
+            file("armory.json", &minimal_manifest(serde_json::json!({
+                "instructions": {
+                    "default": ["instructions/AGENTS.md", "instructions/context/shared.md"],
+                    "claude": ["instructions/claude/AGENTS.md", "instructions/context/shared.md"],
+                },
+            }))),
+            file("instructions/AGENTS.md", "Default."),
+            file("instructions/claude/AGENTS.md", "Claude."),
+            file("instructions/context/shared.md", "Shared context."),
+        ];
+        let result = parse_bundle_import(&files).unwrap();
+        assert_eq!(result.context_files.len(), 1, "the shared context file must appear exactly once, not once per referencing variant");
+        assert_eq!(result.context_files[0].content, "Shared context.");
+        assert!(result.warnings.iter().any(|w| w.contains("duplicate reference")));
+    }
+
+    #[test]
+    fn a_provider_named_context_is_not_misrouted_into_context_files() {
+        // reagent P1, PR #2523: the instructions/context/ prefix check
+        // applied to every path uniformly regardless of which provider
+        // array was being parsed, so a provider literally named "context"
+        // — whose exported path is instructions/context/AGENTS.md, per
+        // bundle_export.rs's instructions/<provider>/AGENTS.md convention
+        // — had its content silently misrouted into context_files instead
+        // of instructions_by_provider["context"].
+        let files = vec![
+            file("armory.json", &minimal_manifest(serde_json::json!({
+                "instructions": {
+                    "default": ["instructions/AGENTS.md"],
+                    "context": ["instructions/context/AGENTS.md"],
+                },
+            }))),
+            file("instructions/AGENTS.md", "Default."),
+            file("instructions/context/AGENTS.md", "For the 'context' provider."),
+        ];
+        let result = parse_bundle_import(&files).unwrap();
+        assert_eq!(
+            result.instructions_by_provider.get("context"),
+            Some(&"For the 'context' provider.".to_string()),
+            "a provider literally named 'context' must land in instructions_by_provider, not context_files"
+        );
+        assert!(result.context_files.is_empty());
     }
 
     #[test]
