@@ -66,59 +66,45 @@
     // rule) still applies against this box, the new containing block, so a
     // strip with many tabs open still can't overflow the pane.
     //
-    // z-index: capped at `--zindex-termstickers` (20, theme.scss) —
-    // resolved after two prior rounds of guessing wrong on whether
-    // `.agent-view`'s `container-type: inline-size` (no explicit z-index)
-    // isolates its children into their own stacking context. Settled via a
-    // web search for the actual, tested Chromium behavior rather than
-    // reading spec text again: the CSS Working Group explicitly resolved
-    // that `container-type` does NOT force layout containment (walked back
-    // after Chromium found the strict version broke baseline alignment,
-    // trapped abspos elements, and broke scrollable overflow) — so
-    // `.agent-view` does NOT establish a stacking context, and neither does
-    // `.modal-layer-mount` (`modal.scss` — same `position: relative` +
-    // `container-type: inline-size`, no z-index, wrapping this entire pane).
+    // z-index: `var(--z-pane-overlay, 4)` — back to this PR's very first
+    // choice, after three rounds of chasing a higher value trying to clear
+    // `.agent-pane-loading-overlay`'s z-index (100, theme.scss
+    // `--zindex-elem-modal`). That chase was misguided: `--z-pane-overlay`
+    // is 4, which sits safely below every real ceiling in this chain —
+    // `.connstatus-overlay` and `.block-mask` unfocused (both
+    // `--zindex-block-mask-inner` = 10), `.block-mask` focused (50), and
+    // the earlier `--zindex-termstickers` attempt (20, still above 10 —
+    // reagentx P1 on #2526's 5th round caught that this PR's own prior
+    // commit only fixed the block-mask half of the conflict it was trying
+    // to resolve, not the connstatus-overlay half). None of those chase
+    // attempts were needed in the first place: `--z-pane-overlay` was
+    // always semantically the right token for "pane chrome floating over
+    // this pane's own content" — its name says exactly that — and 4 was
+    // never at risk of exceeding 10 the way 20 was.
     //
-    // That resolves the earlier question but surfaces a sharper one:
-    // without either boundary isolating anything, `.pane-tab-strip` is in
-    // the SAME flat stacking context as `.block-mask` (block.scss:492,552 —
-    // z-index 50 when the pane is focused, `--zindex-block-mask-inner`=10
-    // otherwise) and `.connstatus-overlay` (block.scss:367-372, also
-    // `--zindex-block-mask-inner`=10) — both several layers further up,
-    // outside this pane's own DOM entirely. block.scss's own comment
-    // documents the budget: "z-index must exceed any in-block overlay
-    // (termstickers = 20)" — i.e. `.block-mask` is DESIGNED to always paint
-    // above anything living inside the block, and blockframe.tsx separately
-    // documents "BlockMask is last in DOM so it paints above all block
-    // content" as a real invariant. reagentx P1 on #2526 (4th round):
-    // clearing `.agent-pane-loading-overlay`'s `--zindex-elem-modal` (100)
-    // — the ORIGINAL reason this z-index was raised at all — pushes the tab
-    // strip well past that 50/10 ceiling too, inverting the invariant and
-    // risking hiding the focus ring or a live connection-status banner
-    // behind the tab strip's corner.
-    //
-    // These two requirements (clear the loading overlay's 100; stay under
-    // block-mask's 50) are mutually exclusive at any single z-index value —
-    // and that conflict isn't new to this PR. `.agent-pane-loading-overlay`
-    // has used `--zindex-elem-modal` (100) since before any of this
-    // investigation started, meaning it already outranks `.block-mask`
-    // today, independent of the tab strip. Not fixed here — a real z-index
-    // budget audit across the loading overlay, block-mask, and
-    // connstatus-overlay is bigger than "make the tab strip float," and
-    // risks its own regressions without live verification this sandbox
-    // can't do. What IS fixed here: this PR should not make an existing,
-    // narrow, ~1-second-during-initial-load cosmetic issue (the tab strip
-    // possibly dimmed by the loading overlay) into a worse one by also
-    // risking an explicitly documented invariant (block-mask/connstatus
-    // must stay on top) for something as comparatively minor as a floating
-    // "+" button. Capped below block-mask's ceiling instead — reusing
-    // `--zindex-termstickers`, the exact token block.scss's own comment
-    // names as that ceiling, rather than a fresh number.
+    // What this does NOT fix, by design: `.agent-view` and
+    // `.modal-layer-mount` (`modal.scss`) both use `container-type:
+    // inline-size` + `position: relative` with no explicit z-index, which —
+    // confirmed by searching for the CSS Working Group's actual resolution
+    // rather than re-reading conflicting spec/MDN text a third time —
+    // does NOT establish a stacking context (the WG explicitly walked back
+    // forcing layout containment here after Chromium found it broke real
+    // layout behavior). So neither boundary isolates anything, and
+    // `.agent-pane-loading-overlay`'s z-index of 100 already outranks
+    // `.block-mask` (50 focused) and `.connstatus-overlay` (10) today,
+    // independent of this file — a pre-existing exposure, not something
+    // introduced by the tab strip. Fixing that is a real z-index budget
+    // audit across the loading overlay, block-mask, and connstatus-overlay,
+    // out of scope for "make the tab strip float over the conversation,"
+    // and risky to attempt without live verification this sandbox can't
+    // do. The tab strip itself, at 4, no longer contributes to that
+    // pre-existing problem at all — it's back under every real ceiling in
+    // the chain, not just the ones checked so far.
     > .pane-tab-strip {
         position: absolute;
         top: 0;
         left: 0;
-        z-index: var(--zindex-termstickers, 20);
+        z-index: var(--z-pane-overlay, 4);
 
         // PaneTabStrip.scss's shared "+" and tab styling is transparent by
         // default (opaque only on hover/active) — correct for editor/
