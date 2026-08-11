@@ -161,6 +161,35 @@ same `position: relative` `<pre>`, so its `position: absolute` placement and
 `:hover` reveal are unaffected. No other code depends on the internal DOM
 structure of `pre.codeblock` (confirmed via repo-wide search).
 
+### Edge case caught in review: mermaid blocks
+
+The DOM-`.textContent` fix works for plain code blocks (highlight spans
+don't change the underlying text), but `Code()` renders mermaid blocks as an
+**SVG diagram**, not a `<code>` element — replacing the source text with
+Mermaid's rendered output entirely. Reading `.textContent` off that DOM
+picks up the diagram's own rendered `<text>` label nodes instead of the
+mermaid chart source, so copy on a mermaid block would silently copy
+garbled label text rather than the diagram source.
+
+**Fix:** `Code()` now wraps the mermaid render in a `<div data-raw-code={text}>`
+carrying the original source; `CodeBlock`'s `getTextContent()` checks for
+that attribute first and only falls back to `.textContent` when it's absent:
+
+```tsx
+// Code(), mermaid branch
+return (
+    <div data-raw-code={text}>
+        <ErrorBoundary fallback={<MermaidErrorFallback chart={text} />}>
+            <Mermaid chart={text} />
+        </ErrorBoundary>
+    </div>
+);
+
+// CodeBlock's getTextContent()
+const rawCode = contentRef?.querySelector<HTMLElement>("[data-raw-code]");
+const text = rawCode ? (rawCode.dataset.rawCode ?? "") : (contentRef?.textContent ?? "");
+```
+
 ---
 
 ## Why this shipped broken for so long
@@ -176,10 +205,11 @@ regression, just never actually exercised end-to-end.
 ## Files Changed
 
 ```
-frontend/app/element/copybutton.tsx           (Bug 1: async handler, error state)
+frontend/app/element/copybutton.tsx           (Bug 1: async handler, error state, pending-guard)
 frontend/app/element/copybutton.scss          (Bug 1: .error style variant)
 agentmux-cef/src/commands/clipboard.rs        (Bug 2: check SetClipboardData result)
-frontend/app/element/markdown-codeblock.tsx   (Bug 3: DOM-ref-based text extraction)
+frontend/app/element/markdown-codeblock.tsx   (Bug 3: DOM-ref-based text extraction, mermaid edge case)
+.changesets/*.md                              (patch changeset for this PR)
 ```
 
 ## Non-Goals / Follow-up
