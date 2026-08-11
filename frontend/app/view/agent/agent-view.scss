@@ -117,30 +117,50 @@
         // PaneTabStrip.scss's base rule, so editor/terminal strips are
         // untouched.
         //
-        // `--block-bg-color` matches `.pane-tab--active`'s own existing
-        // (already-opaque) color — same token, so an inactive tab and the
-        // active one read as the same "solid chrome" material, not two
-        // different treatments. Hover states get their own explicit rule
-        // (color-mix lightening the same opaque base) rather than falling
-        // through to PaneTabStrip.scss's own `rgba(255,255,255,…)` hover
-        // rules — those are translucent-over-transparent by design, which
-        // would silently undo the opaque base on the one interaction state
-        // (hover) most likely to happen while a user is actually looking at
-        // the strip. Both rules here are more specific than PaneTabStrip.scss's
-        // own (3 vs 1 class for the default state — `.pane-tab-strip-add`/
+        // `--modal-bg-color`, NOT `--block-bg-color` — a real bug in the
+        // first version of this fix, caught live (task dev, 2026-08-11):
+        // `--block-bg-color` is `rgba(0, 0, 0, 0.5)`-ish in every theme
+        // (theme.scss + every frontend/app/themes/*.scss file — never a
+        // flat, alpha-1 color), so using it here was specificity-correct
+        // but still visibly translucent — the exact bug this rule exists to
+        // fix, just less severe than fully transparent. `--modal-bg-color`
+        // is a plain solid hex in every theme (no alpha component at all —
+        // confirmed by grepping every theme file), and is what
+        // AgentQuestionPanel.scss already uses for the identical need (a
+        // floating panel that must stay legibly opaque over arbitrary
+        // content behind it) — same token, same problem, reused rather than
+        // introducing a third. `.pane-tab--active`'s own background (base
+        // rule, PaneTabStrip.scss) is also `--block-bg-color` and was
+        // therefore ALSO only translucent this whole time — not
+        // specifically reported, but the same class of bug. Not special-
+        // cased here: `.pane-tab--active` and plain `.pane-tab` are two
+        // separate classes on the same element (not a BEM compound
+        // selector), so the plain `.pane-tab` rule below (specificity 3)
+        // already outranks the base rule's `.pane-tab--active` (specificity
+        // 1) and applies uniformly regardless of active state — one rule,
+        // not two.
+        //
+        // Hover states get their own explicit rule (color-mix lightening
+        // the same opaque base) rather than falling through to
+        // PaneTabStrip.scss's own `rgba(255,255,255,…)` hover rules — those
+        // are translucent-over-transparent by design, which would silently
+        // undo the opaque base on the one interaction state (hover) most
+        // likely to happen while a user is actually looking at the strip.
+        // Both rules here are more specific than PaneTabStrip.scss's own
+        // (3 vs 1 class for the default state — `.pane-tab-strip-add`/
         // `.pane-tab` alone; 4 vs 2 for `:hover`, which adds the pseudo-class),
         // so no `!important` is needed for either to win.
         .pane-tab-strip-add,
         .pane-tab {
-            background: var(--block-bg-color);
+            background: var(--modal-bg-color, #232323);
         }
 
         .pane-tab-strip-add:hover {
-            background: color-mix(in srgb, var(--block-bg-color) 92%, white 8%);
+            background: color-mix(in srgb, var(--modal-bg-color, #232323) 92%, white 8%);
         }
 
         .pane-tab:hover {
-            background: color-mix(in srgb, var(--block-bg-color) 94%, white 6%);
+            background: color-mix(in srgb, var(--modal-bg-color, #232323) 94%, white 6%);
         }
     }
 }
