@@ -66,26 +66,37 @@
     // rule) still applies against this box, the new containing block, so a
     // strip with many tabs open still can't overflow the pane.
     //
-    // z-index: MUST clear `.agent-pane-loading-overlay`'s
-    // `--zindex-elem-modal` (100, theme.scss) — reagentx P1 on #2526,
-    // caught on re-review. `.agent-view` (that overlay's direct parent, a
-    // sibling of `.pane-tab-strip` right here) has `position: relative` and
-    // `container-type: inline-size` but NO explicit `z-index` — an earlier
-    // version of this comment assumed `container-type` alone forces
-    // stacking-context creation the way `contain: layout`/`paint`/
-    // `content`/`strict` do; verified against MDN's `contain` page that
-    // `size`/`inline-size` containment (what `container-type: inline-size`
-    // actually implies, alongside `style`) does NOT — only `layout`/
-    // `paint`/`content`/`strict` do. So `.agent-view` does NOT establish
-    // its own stacking context, and the loading overlay (a direct child of
-    // `.agent-view`, not of `.agent-document-scroll-region` — a different
-    // element from the one this comment used to be about) competes
-    // directly with this sibling using raw z-index. `calc(... + 1)`, not a
-    // hardcoded number, so this stays correct if `--zindex-elem-modal`
-    // ever changes. (`.agent-document-scroll-region`'s OWN internal
-    // z-index:100 in _document.scss is a separate, correctly-isolated
-    // case — that selector sets `position: relative; z-index: 0` together,
-    // which does establish a real stacking context, unlike `.agent-view`.)
+    // z-index: defensively clears `.agent-pane-loading-overlay`'s
+    // `--zindex-elem-modal` (100, theme.scss) — that overlay is a direct
+    // child of `.agent-view`, a sibling of `.pane-tab-strip` right here.
+    //
+    // Whether this is strictly *necessary* depends on whether `.agent-view`
+    // (position: relative + container-type: inline-size, no explicit
+    // z-index) already establishes its own stacking context via CSS
+    // containment, which would isolate the overlay from ever competing with
+    // a sibling here regardless of this element's z-index. Two normally-
+    // reliable sources disagree on exactly this point, checked directly
+    // (not from memory) after reagentx flagged it twice, in both
+    // directions, across #2526's last two review rounds: MDN's
+    // `container-type` reference states — quoted verbatim, fetched twice —
+    // that `inline-size` "applies style and inline-size containment,"
+    // omitting layout; the W3C spec's own `container-type: inline-size`
+    // valdef says it "applies layout containment, style containment, and
+    // inline-size containment." `layout` containment is the one that
+    // triggers stacking-context creation — so which of these two sources is
+    // accurate determines whether `.agent-view` already isolates the
+    // overlay or not. Unresolved: no display in this sandbox to check what
+    // the actual rendering engine does, and the two sources conflict. This
+    // z-index is written to be correct under EITHER answer — clearing the
+    // overlay's real z-index (not guessing whether containment already
+    // handles it) costs nothing if containment turns out to make it
+    // redundant, and is required if it doesn't. `calc(... + 1)`, not a
+    // hardcoded number, so it stays correct if `--zindex-elem-modal` ever
+    // changes. (`.agent-document-scroll-region`'s own internal z-index:100
+    // in _document.scss is a different element with its own
+    // `position: relative; z-index: 0` pair, which unambiguously does
+    // establish a stacking context regardless of the containment question
+    // above — that part of the reasoning was never in dispute.)
     > .pane-tab-strip {
         position: absolute;
         top: 0;
