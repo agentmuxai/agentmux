@@ -397,7 +397,19 @@ pub fn export_bundle(bundle: &Memory, skills: &[Skill]) -> BundleExport {
     // which matters for reproducible zip byte content.
     let mut manifest_instructions_by_provider: std::collections::BTreeMap<String, Vec<String>> =
         std::collections::BTreeMap::new();
-    for (provider, content) in &instructions_by_provider {
+    // reagent P2, PR #2523: two distinct raw keys (e.g. "claude" and
+    // "./claude") can sanitize to the SAME output path — without a
+    // collision check, both push a BundleExportFile at the identical path
+    // (last one written silently wins, nondeterministically, since
+    // HashMap iteration order isn't guaranteed) and the manifest lists
+    // that path twice. Iterate raw keys sorted first (deterministic which
+    // one "wins" a collision, not just which one happens to iterate
+    // last), and skip + warn on the second and further collisions rather
+    // than silently duplicating.
+    let mut sorted_providers: Vec<(&String, &String)> = instructions_by_provider.iter().collect();
+    sorted_providers.sort_by(|a, b| a.0.cmp(b.0));
+    let mut seen_safe_providers: HashSet<String> = HashSet::new();
+    for (provider, content) in sorted_providers {
         if content.trim().is_empty() {
             continue;
         }
@@ -413,6 +425,12 @@ pub fn export_bundle(bundle: &Memory, skills: &[Skill]) -> BundleExport {
             ));
             continue;
         };
+        if !seen_safe_providers.insert(safe_provider.clone()) {
+            warnings.push(format!(
+                "instructions_by_provider: \"{provider}\" normalizes to the same path as an earlier key (instructions/{safe_provider}/AGENTS.md); skipped to avoid overwriting it"
+            ));
+            continue;
+        }
         let out_path = format!("instructions/{safe_provider}/AGENTS.md");
         files.push(BundleExportFile {
             path: out_path.clone(),
@@ -1275,6 +1293,35 @@ mod tests {
         let manifest_file = export.files.iter().find(|f| f.path == "armory.json").unwrap();
         let manifest: Value = serde_json::from_str(&manifest_file.content).unwrap();
         assert!(manifest["components"]["instructions"].get("claude").is_none());
+    }
+
+    #[test]
+    fn colliding_provider_keys_after_sanitization_do_not_overwrite_each_other() {
+        // reagent P2, PR #2523: "claude" and "./claude" both sanitize to
+        // the same output path — the second one must be skipped with a
+        // warning, not silently overwrite the first (or worse, produce a
+        // manifest listing the same path twice with ambiguous content).
+        let mut bundle = make_bundle("Default.", "[]", "[]", "[]");
+        bundle.instructions_by_provider =
+            r#"{"claude":"First.","./claude":"Second."}"#.to_string();
+        let export = export_bundle(&bundle, &[]);
+
+        let claude_files: Vec<_> = export.files.iter().filter(|f| f.path == "instructions/claude/AGENTS.md").collect();
+        assert_eq!(claude_files.len(), 1, "must not produce two files at the same path");
+        // "./claude" sorts before "claude" byte-wise ('.' < 'c'), so it's
+        // processed first and wins; "claude" is the one skipped as a
+        // duplicate. The exact winner is an implementation detail — what
+        // matters is that it's deterministic and there's only one.
+        assert_eq!(claude_files[0].content, "Second.");
+
+        let manifest_file = export.files.iter().find(|f| f.path == "armory.json").unwrap();
+        let manifest: Value = serde_json::from_str(&manifest_file.content).unwrap();
+        assert_eq!(
+            manifest["components"]["instructions"]["claude"],
+            json!(["instructions/claude/AGENTS.md"]),
+            "must not list the same path twice"
+        );
+        assert!(export.warnings.iter().any(|w| w.contains("normalizes to the same path")));
     }
 
     #[test]
