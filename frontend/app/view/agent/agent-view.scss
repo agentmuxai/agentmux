@@ -66,42 +66,59 @@
     // rule) still applies against this box, the new containing block, so a
     // strip with many tabs open still can't overflow the pane.
     //
-    // z-index: defensively clears `.agent-pane-loading-overlay`'s
-    // `--zindex-elem-modal` (100, theme.scss) — that overlay is a direct
-    // child of `.agent-view`, a sibling of `.pane-tab-strip` right here.
+    // z-index: capped at `--zindex-termstickers` (20, theme.scss) —
+    // resolved after two prior rounds of guessing wrong on whether
+    // `.agent-view`'s `container-type: inline-size` (no explicit z-index)
+    // isolates its children into their own stacking context. Settled via a
+    // web search for the actual, tested Chromium behavior rather than
+    // reading spec text again: the CSS Working Group explicitly resolved
+    // that `container-type` does NOT force layout containment (walked back
+    // after Chromium found the strict version broke baseline alignment,
+    // trapped abspos elements, and broke scrollable overflow) — so
+    // `.agent-view` does NOT establish a stacking context, and neither does
+    // `.modal-layer-mount` (`modal.scss` — same `position: relative` +
+    // `container-type: inline-size`, no z-index, wrapping this entire pane).
     //
-    // Whether this is strictly *necessary* depends on whether `.agent-view`
-    // (position: relative + container-type: inline-size, no explicit
-    // z-index) already establishes its own stacking context via CSS
-    // containment, which would isolate the overlay from ever competing with
-    // a sibling here regardless of this element's z-index. Two normally-
-    // reliable sources disagree on exactly this point, checked directly
-    // (not from memory) after reagentx flagged it twice, in both
-    // directions, across #2526's last two review rounds: MDN's
-    // `container-type` reference states — quoted verbatim, fetched twice —
-    // that `inline-size` "applies style and inline-size containment,"
-    // omitting layout; the W3C spec's own `container-type: inline-size`
-    // valdef says it "applies layout containment, style containment, and
-    // inline-size containment." `layout` containment is the one that
-    // triggers stacking-context creation — so which of these two sources is
-    // accurate determines whether `.agent-view` already isolates the
-    // overlay or not. Unresolved: no display in this sandbox to check what
-    // the actual rendering engine does, and the two sources conflict. This
-    // z-index is written to be correct under EITHER answer — clearing the
-    // overlay's real z-index (not guessing whether containment already
-    // handles it) costs nothing if containment turns out to make it
-    // redundant, and is required if it doesn't. `calc(... + 1)`, not a
-    // hardcoded number, so it stays correct if `--zindex-elem-modal` ever
-    // changes. (`.agent-document-scroll-region`'s own internal z-index:100
-    // in _document.scss is a different element with its own
-    // `position: relative; z-index: 0` pair, which unambiguously does
-    // establish a stacking context regardless of the containment question
-    // above — that part of the reasoning was never in dispute.)
+    // That resolves the earlier question but surfaces a sharper one:
+    // without either boundary isolating anything, `.pane-tab-strip` is in
+    // the SAME flat stacking context as `.block-mask` (block.scss:492,552 —
+    // z-index 50 when the pane is focused, `--zindex-block-mask-inner`=10
+    // otherwise) and `.connstatus-overlay` (block.scss:367-372, also
+    // `--zindex-block-mask-inner`=10) — both several layers further up,
+    // outside this pane's own DOM entirely. block.scss's own comment
+    // documents the budget: "z-index must exceed any in-block overlay
+    // (termstickers = 20)" — i.e. `.block-mask` is DESIGNED to always paint
+    // above anything living inside the block, and blockframe.tsx separately
+    // documents "BlockMask is last in DOM so it paints above all block
+    // content" as a real invariant. reagentx P1 on #2526 (4th round):
+    // clearing `.agent-pane-loading-overlay`'s `--zindex-elem-modal` (100)
+    // — the ORIGINAL reason this z-index was raised at all — pushes the tab
+    // strip well past that 50/10 ceiling too, inverting the invariant and
+    // risking hiding the focus ring or a live connection-status banner
+    // behind the tab strip's corner.
+    //
+    // These two requirements (clear the loading overlay's 100; stay under
+    // block-mask's 50) are mutually exclusive at any single z-index value —
+    // and that conflict isn't new to this PR. `.agent-pane-loading-overlay`
+    // has used `--zindex-elem-modal` (100) since before any of this
+    // investigation started, meaning it already outranks `.block-mask`
+    // today, independent of the tab strip. Not fixed here — a real z-index
+    // budget audit across the loading overlay, block-mask, and
+    // connstatus-overlay is bigger than "make the tab strip float," and
+    // risks its own regressions without live verification this sandbox
+    // can't do. What IS fixed here: this PR should not make an existing,
+    // narrow, ~1-second-during-initial-load cosmetic issue (the tab strip
+    // possibly dimmed by the loading overlay) into a worse one by also
+    // risking an explicitly documented invariant (block-mask/connstatus
+    // must stay on top) for something as comparatively minor as a floating
+    // "+" button. Capped below block-mask's ceiling instead — reusing
+    // `--zindex-termstickers`, the exact token block.scss's own comment
+    // names as that ceiling, rather than a fresh number.
     > .pane-tab-strip {
         position: absolute;
         top: 0;
         left: 0;
-        z-index: calc(var(--zindex-elem-modal, 100) + 1);
+        z-index: var(--zindex-termstickers, 20);
 
         // PaneTabStrip.scss's shared "+" and tab styling is transparent by
         // default (opaque only on hover/active) — correct for editor/
