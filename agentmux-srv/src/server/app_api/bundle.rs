@@ -536,22 +536,30 @@ fn register_bundle_import_for_agent(engine: &Arc<WshRpcEngine>, state: &AppState
                 // reusable bundle row alongside the agent-scoped memory
                 // write below.
                 let bundle_id = uuid::Uuid::new_v4().to_string();
+                // Mirrors bundle.import's own skill-creation block exactly
+                // (global, not bound to any agent; skill_upsert_unique_global
+                // is the real API — a genuine name conflict is a per-skill
+                // warning, any other error aborts the whole RPC).
+                let now = now_ms();
                 let mut imported_skill_ids: Vec<String> = Vec::new();
                 for skill in &parsed.skills {
-                    let new_skill = crate::backend::storage::Skill {
+                    let row = crate::backend::storage::Skill {
                         id: uuid::Uuid::new_v4().to_string(),
                         name: skill.slug.clone(),
                         trigger: skill.slug.clone(),
+                        skill_type: crate::backend::agent_config::SKILL_TYPE_AGENT_SKILL.to_string(),
                         description: skill.description.clone(),
                         content: skill.content.clone(),
-                        skill_type: crate::backend::agent_config::SKILL_TYPE_AGENT_SKILL.to_string(),
-                        is_global: false,
-                        created_at: chrono::Utc::now().timestamp_millis(),
-                        updated_at: chrono::Utc::now().timestamp_millis(),
+                        is_global: true,
+                        created_at: now,
+                        updated_at: now,
                     };
-                    match wstore.skill_create(&new_skill) {
-                        Ok(_) => imported_skill_ids.push(new_skill.id),
-                        Err(e) => warnings.push(format!("failed to create skill \"{}\": {e}", skill.slug)),
+                    match wstore.skill_upsert_unique_global(&row) {
+                        Ok(()) => imported_skill_ids.push(row.id),
+                        Err(e) if e.to_string().contains("already exists") => {
+                            warnings.push(format!("skill \"{}\" already exists; skipped", skill.slug));
+                        }
+                        Err(e) => return Err(format!("bundle.import_for_agent: failed to create skill \"{}\": {e}", skill.slug)),
                     }
                 }
                 let memory = crate::backend::storage::store::Memory {
