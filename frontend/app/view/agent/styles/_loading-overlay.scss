@@ -30,5 +30,30 @@
         // outside .agent-view's box entirely, since
         // SPEC_AGENT_PANE_PROGRESS_BAR_ABOVE_TAB_STRIP_2026_08_10.md.)
         z-index: 1;
+
+        // codex P1 on #2543: only the child `<BrainSpinner>` had its own
+        // fade (`.brain-spinner.is-fading`, 200ms) — this div's own opaque
+        // `background` had none, so it stayed a fully solid cover for the
+        // entire `loadingOverlayFadeTimeout` window (220ms in
+        // agent-view.tsx) regardless of the spinner icon underneath having
+        // already faded to invisible, then vanished INSTANTLY (a `<Show>`
+        // unmount, no transition) when that timer fired — an extra,
+        // separate pop distinct from the spinner's own fade. Mirrors the
+        // spinner's exact easing/duration so both fade as one visual unit;
+        // agent-view.tsx now applies this class from the same
+        // `historyLoaded()` signal that drives the spinner's `fading` prop,
+        // and keeps the overlay mounted for the fade's own duration before
+        // unmounting (so removal itself is invisible, not a pop).
+        &.is-fading {
+            opacity: 0;
+            transition: opacity 200ms ease-out;
+            pointer-events: none;
+        }
+
+        // Same reduced-motion override as .brain-spinner.is-reduced-motion
+        // (BrainSpinner.scss) — instant show/hide, no animated fade.
+        &.is-reduced-motion.is-fading {
+            transition: none;
+        }
     }
 }
