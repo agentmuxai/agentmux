@@ -313,11 +313,6 @@ const KNOWN_REGISTERED_UNDECLARED = [
     "memory.read",
     "memory.write",
     "pane.open",
-    "preset.delete",
-    "preset.get",
-    "preset.list",
-    "preset.self.get",
-    "preset.upsert",
     "slow",
 ];
 
