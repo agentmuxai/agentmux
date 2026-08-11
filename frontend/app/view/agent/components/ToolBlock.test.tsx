@@ -86,6 +86,35 @@ describe("ToolBlock — panel mode", () => {
         expect(panel!.classList.contains("agent-tool-panel--hidden")).toBe(false);
     });
 
+    it("heldOpen + failed → panel is in-flow, same as a held-open success", () => {
+        // A `failed` tool is an agent-caused error, not a user dismissal — it
+        // should hold open exactly like `success` until scrolled off, per
+        // ANALYSIS_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md's own
+        // recommendation. Previously this rendered `--hidden` immediately.
+        const failed: ToolNode = { ...baseTool, status: "failed" };
+        const { container } = render(() => (
+            <ToolBlock node={failed} pinned={false} heldOpen={true} onTogglePin={() => {}} />
+        ));
+        const panel = container.querySelector(".agent-tool-panel");
+        expect(panel).not.toBeNull();
+        expect(panel!.classList.contains("agent-tool-panel--flow")).toBe(true);
+        expect(panel!.classList.contains("agent-tool-panel--hidden")).toBe(false);
+    });
+
+    it.each(["denied", "canceled"] as const)(
+        "heldOpen + %s → panel stays hidden (user-dismissed, collapses immediately)",
+        (status) => {
+            const node: ToolNode = { ...baseTool, status };
+            const { container } = render(() => (
+                <ToolBlock node={node} pinned={false} heldOpen={true} onTogglePin={() => {}} />
+            ));
+            const panel = container.querySelector(".agent-tool-panel");
+            expect(panel).not.toBeNull();
+            expect(panel!.classList.contains("agent-tool-panel--hidden")).toBe(true);
+            expect(panel!.classList.contains("agent-tool-panel--flow")).toBe(false);
+        },
+    );
+
     it("calls onHoldOpen once when a running tool completes (active→inactive)", () => {
         const onHoldOpen = vi.fn();
         const [node, setNode] = createSignal<ToolNode>({ ...baseTool, status: "running" });

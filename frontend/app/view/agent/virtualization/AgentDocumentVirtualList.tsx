@@ -597,7 +597,17 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         if (!release || !scrollRef) return;
         const ds = props.documentState();
         if (ds.expandedTools.size === 0) return;
-        const containerTop = scrollRef.getBoundingClientRect().top;
+        const containerRect = scrollRef.getBoundingClientRect();
+        // A hidden pane (inactive tab: display:none, same "0×0" signature the
+        // ResizeObserver comment above already relies on) or a minimized window
+        // reports a zero-size rect for every element, not just this container's
+        // children — a real "scrolled off the top" collapse can never be
+        // determined when nothing has size, so skip the scan rather than
+        // mass-releasing every held-open tool the instant hidden-but-still-
+        // streaming content arrives (user-reported: tool blocks were
+        // collapsing on tab-switch/window-minimize with no actual scroll).
+        if (containerRect.width === 0 && containerRect.height === 0) return;
+        const containerTop = containerRect.top;
         for (const id of ds.expandedTools) {
             if (ds.pinnedNodes.has(id)) continue;
             const el = scrollRef.querySelector(
