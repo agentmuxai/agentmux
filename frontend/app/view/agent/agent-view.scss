@@ -27,7 +27,6 @@
 @use "styles/header-controls";
 @use "styles/pending-footer";
 @use "styles/action-bar";
-@use "styles/auth-overlay";
 @use "styles/responsive";
 @use "styles/decision-panel";
 @use "styles/shell-node";
@@ -43,7 +42,7 @@
     height: 100%;
     width: 100%;
 
-    > .pane-tab-strip {
+    > .agent-pane-progress-bar-slot {
         flex: 0 0 auto;
     }
 }
@@ -52,6 +51,209 @@
     flex: 1 1 auto;
     min-height: 0;
     position: relative;
+
+    // Floats over the content instead of reserving its own row —
+    // SPEC_AGENT_PANE_TAB_STRIP_OVERLAY_2026_08_10.md. The goal: with one
+    // conversation open, nothing but the "+" button's own 28×28px box
+    // should ever obstruct the conversation, which now renders (and
+    // scrolls) underneath the rest of this row.
+    //
+    // Overrides PaneTabStrip.scss's own `align-self: flex-start` (a no-op
+    // once out of flow — harmless to leave, not worth overriding just to
+    // remove a now-inert declaration) by taking the strip out of flex flow
+    // entirely via `position: absolute`. `max-width: 100%` (from the base
+    // rule) still applies against this box, the new containing block, so a
+    // strip with many tabs open still can't overflow the pane.
+    //
+    // z-index: `var(--z-pane-overlay, 4)` sits safely below every real
+    // ceiling in this chain — `.connstatus-overlay` and `.block-mask`
+    // unfocused (both `--zindex-block-mask-inner` = 10) and `.block-mask`
+    // focused (50) — the semantically right token for "pane chrome floating
+    // over this pane's own content."
+    //
+    // `.agent-view` (below) now carries its own `z-index: 0`, containing
+    // every absolutely/sticky-positioned descendant inside it — including
+    // `.slash-autocomplete` (_slash.scss, z:50) and `.agent-search-bar`
+    // (_search.scss, z:10), both flagged by reagent P1 on PR #2526's 8th
+    // round as escaping to compete directly with this 4, on top of
+    // `.agent-pane-loading-overlay` from the 6th/7th rounds. An earlier
+    // attempt at exactly this (round 6) was reverted (round 7) because it
+    // also trapped `.agent-auth-overlay`, which needed to escape and
+    // outrank `.block-mask` — but that class turned out to be dead CSS,
+    // never rendered anywhere in the app (confirmed via a repo-wide grep);
+    // deleted alongside re-adding this, so nothing legitimately needs to
+    // escape `.agent-view` anymore. See `.agent-view`'s own comment below
+    // for the full reasoning.
+    > .pane-tab-strip {
+        position: absolute;
+        top: 0;
+        left: 0;
+        z-index: var(--z-pane-overlay, 4);
+        // Explicit shrink-to-fit, not just relying on the implicit
+        // absolute-positioning auto-width algorithm — belt-and-suspenders;
+        // the algorithm should already size this to its content per spec
+        // (only `left`, not `right`, is set). Not itself the fix for the
+        // semi-transparent-rectangle-next-to-"+" report live-tested
+        // 2026-08-11: that turned out to be `appearance: auto`'s native
+        // button chrome on `.pane-tab-strip-add` (PaneTabStrip.scss),
+        // unrelated to this container's own width — confirmed by the
+        // rectangle staying a fixed size regardless of pane width and
+        // appearing with a single conversation open (only the "+"
+        // rendered, no tab pill to have been mis-sized).
+        width: fit-content;
+
+        // PaneTabStrip.scss's shared "+" and tab styling is transparent by
+        // default (opaque only on hover/active) — correct for editor/
+        // terminal panes, where the strip sits in a normal reserved row in
+        // front of a stable, non-scrolling backdrop, but wrong here now
+        // that the strip floats directly over scrolling conversation
+        // content (above): a transparent-by-default "+" or inactive tab
+        // shows whatever text happens to be scrolled underneath it right
+        // through, instead of reading as a solid control. Only the truly
+        // blank space around the strip should be see-through — the "+" and
+        // every tab need real, opaque contrast regardless of what's behind
+        // them. Scoped to this agent-pane-only selector, not
+        // PaneTabStrip.scss's base rule, so editor/terminal strips are
+        // untouched.
+        //
+        // `--modal-bg-color`, NOT `--block-bg-color` — a real bug in the
+        // first version of this fix, caught live (task dev, 2026-08-11):
+        // `--block-bg-color` is `rgba(0, 0, 0, 0.5)`-ish in every theme
+        // (theme.scss + every frontend/app/themes/*.scss file — never a
+        // flat, alpha-1 color), so using it here was specificity-correct
+        // but still visibly translucent — the exact bug this rule exists to
+        // fix, just less severe than fully transparent. `--modal-bg-color`
+        // is a plain solid hex in every theme (no alpha component at all —
+        // confirmed by grepping every theme file), and is what
+        // AgentQuestionPanel.scss already uses for the identical need (a
+        // floating panel that must stay legibly opaque over arbitrary
+        // content behind it) — same token, same problem, reused rather than
+        // introducing a third. `.pane-tab--active`'s own background (base
+        // rule, PaneTabStrip.scss) is also `--block-bg-color` and was
+        // therefore ALSO only translucent this whole time — not
+        // specifically reported, but the same class of bug. Not special-
+        // cased here: `.pane-tab--active` and plain `.pane-tab` are two
+        // separate classes on the same element (not a BEM compound
+        // selector), so the plain `.pane-tab` rule below (specificity 3)
+        // already outranks the base rule's `.pane-tab--active` (specificity
+        // 1) and applies uniformly regardless of active state — one rule,
+        // not two.
+        //
+        // Hover states get their own explicit rule (color-mix lightening
+        // the same opaque base) rather than falling through to
+        // PaneTabStrip.scss's own `rgba(255,255,255,…)` hover rules — those
+        // are translucent-over-transparent by design, which would silently
+        // undo the opaque base on the one interaction state (hover) most
+        // likely to happen while a user is actually looking at the strip.
+        // Both rules here are more specific than PaneTabStrip.scss's own
+        // (3 vs 1 class for the default state — `.pane-tab-strip-add`/
+        // `.pane-tab` alone; 4 vs 2 for `:hover`, which adds the pseudo-class),
+        // so no `!important` is needed for either to win.
+        .pane-tab-strip-add,
+        .pane-tab {
+            background: var(--modal-bg-color, #232323);
+        }
+
+        .pane-tab-strip-add:hover {
+            background: color-mix(in srgb, var(--modal-bg-color, #232323) 92%, white 8%);
+        }
+
+        .pane-tab:hover {
+            background: color-mix(in srgb, var(--modal-bg-color, #232323) 94%, white 6%);
+        }
+    }
+}
+
+// Progress bar's own row, between the tab strip and the content — never
+// overlapping either. Always present at this fixed height (not
+// conditionally rendered), so the bar fading in/out via opacity never
+// shifts the tab strip or content by so much as a pixel; only what's
+// drawn inside the slot changes, never the layout around it.
+//
+// AgentPresentationView (deep inside .agent-pane-stack-content, itself
+// BELOW the tab strip in DOM order) portals .agent-pane-progress-bar into
+// this slot — see AgentViewWrapper's progressBarSlot signal and
+// SPEC_AGENT_PANE_PROGRESS_BAR_ABOVE_TAB_STRIP_2026_08_10.md. No CSS-only
+// fix reaches across that boundary: every ancestor between
+// .agent-pane-stack-content and here clips overflow before an
+// absolutely-positioned escape could ever become visible above the tab
+// strip.
+.agent-pane-progress-bar-slot {
+    position: relative;
+    height: 3px;
+    overflow: hidden;
+}
+
+// === Marching-ants Progress Bar ===
+// Fills its slot above — no zoom-compensation math needed here (unlike
+// its previous home nested inside .agent-view), since this slot lives in
+// AgentViewWrapper's tree, outside .agent-view's per-pane `zoom` CSS
+// property entirely, alongside the tab strip and other unzoomed pane
+// chrome. Colors via color-mix() so every theme inherits without
+// hardcoded hex.
+//
+// Uses transform: translateX() so the animation stays on the GPU
+// compositor — background-position animation is not reliably promoted on
+// all Linux GPU drivers and some Windows HW-accel paths. The ::before
+// overshoots left/right by 12px so the translated edge never clips; the
+// slot's own overflow:hidden trims it.
+.agent-pane-progress-bar {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 200ms ease;
+    // Opaque base so the 3px strip fully covers whatever's behind it in
+    // its own slot. Without this the translucent stripe gaps would reveal
+    // the slot's background and the marching pattern would be lost.
+    // Matches .agent-view's surface (--main-bg-color) so the bar reads as
+    // chrome, consistent with the rest of the pane.
+    background: var(--main-bg-color);
+
+    &::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: -12px;
+        right: -12px;
+        // Solid fallback for Chromium < 111 where color-mix() is
+        // unsupported — browser ignores the declaration below and keeps
+        // this one so the bar remains visible.
+        background: var(--accent-color);
+        // Every stop is fully opaque (the faded stripe mixes against the
+        // pane background, NOT transparent) so the pattern stays crisp
+        // over any theme.
+        background: repeating-linear-gradient(
+            -45deg,
+            var(--accent-color)                                              0px,
+            var(--accent-color)                                              4px,
+            color-mix(in srgb, var(--accent-color) 25%, var(--main-bg-color)) 4px,
+            color-mix(in srgb, var(--accent-color) 25%, var(--main-bg-color)) 8px
+        );
+    }
+
+    &--active {
+        opacity: 1;
+
+        &::before {
+            // Promote the layer only while animating, not at idle rest.
+            will-change: transform;
+            animation: agent-ant-march 0.5s linear infinite;
+        }
+    }
+
+    &--active#{&}--stopping {
+        opacity: 0.55;
+    }
+}
+
+@keyframes agent-ant-march {
+    // Shift by one stripe period (8px × √2 ≈ 11.314px) per cycle so the
+    // repeating pattern loops seamlessly. translateX keeps the animation
+    // on the GPU compositor.
+    from { transform: translateX(0); }
+    to   { transform: translateX(11.314px); }
 }
 
 .agent-view {
@@ -68,6 +270,32 @@
     width: 100%;
     overflow: hidden;
     position: relative;
+    // Establishes a real stacking context (position + z-index together,
+    // per spec — same pattern as .agent-document-scroll-region below).
+    // Contains EVERY absolutely/sticky-positioned descendant's z-index —
+    // .agent-pane-loading-overlay (_loading-overlay.scss), .agent-search-
+    // bar (_search.scss, z:10), .slash-autocomplete (_slash.scss, z:50),
+    // .agent-filter-toggle (_header-controls.scss, z:10), and anything
+    // else added inside .agent-view later — so none of them can ever
+    // escape and compete with .pane-tab-strip (a true sibling of
+    // .agent-view inside .agent-pane-stack-content, z-index
+    // var(--z-pane-overlay, 4) — agent-view.scss above), regardless of
+    // their own z-index value.
+    //
+    // History: a round-6 commit on PR #2526 added this same z-index:0 and
+    // was reverted in round 7 — reagent P1 found it also trapped
+    // .agent-auth-overlay, which needed to escape .agent-view to outrank
+    // .block-mask (block.scss — its own ".block-focused" comment documents
+    // that flat, cross-.agent-view competition as deliberate). Round 8
+    // found `.agent-auth-overlay` was never actually rendered anywhere in
+    // the app — dead CSS left over from an earlier auth-UI design,
+    // confirmed via a repo-wide grep and deleted alongside re-adding this.
+    // With nothing left that legitimately needs to escape, containing
+    // .agent-view is safe and — unlike patching each escaping overlay's
+    // z-index individually (loading-overlay in round 6, then search-bar/
+    // slash-autocomplete flagged in round 8) — closes the whole class of
+    // "new .agent-view descendant with z-index > 4" bug at once.
+    z-index: 0;
     user-select: none;
     cursor: default;
 }

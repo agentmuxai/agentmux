@@ -1,13 +1,16 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Presets pane — first-class management of presets (memory bundles).
-// User-facing name is "Presets"; the type/table stay `Memory` /
-// `db_bundles` (SPEC_MEMORY_IDENTITY_ARCH §4.1).
+// Armory Bundle Format (ABF) bundle manager — first-class management of
+// ABF bundles. User-facing name is "Armory Bundle Format (ABF)" (short
+// form "ABF"); the type/table stay `Memory` / `db_bundles`
+// (SPEC_MEMORY_IDENTITY_ARCH §4.1). See
+// docs/specs/SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10.md
+// for the format itself.
 //
-// A preset is the agent's provider-agnostic capability stack:
-// system instructions, context files, MCP servers, skills. Provider/model
-// are NOT part of a preset — they belong to the agent (§4.1a). Presets are
+// A bundle is the agent's provider-agnostic capability stack: system
+// instructions, context files, MCP servers, skills. Provider/model are NOT
+// part of a bundle — they belong to the agent (§4.1a). Bundles are
 // reusable across many agent instances — pick one in the launch modal
 // alongside an Identity bundle.
 //
@@ -30,9 +33,9 @@ export interface MemoryDraft {
     id?: string;
     name: string;
     description: string;
-    // provider/model intentionally absent: a preset is provider-agnostic.
+    // provider/model intentionally absent: an ABF bundle is provider-agnostic.
     // The CLI provider + model belong to the agent (AgentDefinition.provider
-    // + provider_flags), not the preset. See SPEC_MEMORY_IDENTITY_ARCH §4.1a.
+    // + provider_flags), not the bundle. See SPEC_MEMORY_IDENTITY_ARCH §4.1a.
     instructions: string;
     /** Preserved verbatim through the edit round-trip — ABF v0.2 §2.2
      *  provider-scoped variants, not yet editable through this form (no
@@ -54,7 +57,7 @@ export interface MemoryDraft {
     is_global?: boolean;
 }
 
-/** Empty draft for the "+ New Preset" flow.
+/** Empty draft for the "+ New Bundle" flow.
  *
  *  All JSON-array fields default to `"[]"` (not `""`). The backend's
  *  `db_bundles.skills` column is JSON-encoded; a literal `""` would
@@ -124,7 +127,7 @@ export function draftToWire(d: MemoryDraft): Memory {
         // Preserve the global flag so editing a global bundle does not
         // silently strip it (the upsert ON CONFLICT overwrites is_global).
         is_global: d.is_global ?? false,
-        // provider/model are deprecated on presets (provider-agnostic, §4.1a).
+        // provider/model are deprecated on ABF bundles (provider-agnostic, §4.1a).
         // Write empty so the ON CONFLICT update clears any stale legacy value.
         provider: "",
         model: "",
@@ -145,12 +148,12 @@ export class MemoryViewModel implements ViewModel {
     blockId: string;
     nodeModel: BlockNodeModel | null;
 
-    // "layer-group" (not "brain") — matches the Bundles tab icon in the Armory
+    // "layer-group" (not "brain") — matches the ABF tab icon in the Armory
     // rail (armory-view.tsx) so the standalone bundle pane and the Armory nav
     // stay visually consistent; the brain icon is reserved for native memory.
     viewIcon: Accessor<string> = () => "layer-group";
     viewName: Accessor<string>;
-    viewText: Accessor<string | HeaderElem[]> = () => "Bundles";
+    viewText: Accessor<string | HeaderElem[]> = () => "ABF";
     noPadding: Accessor<boolean> = () => false;
 
     get viewComponent(): ViewComponent {
@@ -179,6 +182,18 @@ export class MemoryViewModel implements ViewModel {
     errorAtom: Accessor<string | null> = this._error[0];
     setError = this._error[1];
 
+    private _validating = createSignal<boolean>(false);
+    validatingAtom: Accessor<boolean> = this._validating[0];
+    setValidating = this._validating[1];
+
+    /** Result of the last "Validate" click, or null if never run / cleared
+     *  by a subsequent edit. Cleared whenever the draft is replaced
+     *  (startNew/startEdit/cancelDraft) or saved — a stale report from a
+     *  DIFFERENT bundle must never linger onto the next one. */
+    private _validation = createSignal<BundleValidationReport | null>(null);
+    validationAtom: Accessor<BundleValidationReport | null> = this._validation[0];
+    setValidation = this._validation[1];
+
     /** Memo: the currently-selected Memory row, or null. */
     selectedAtom: Accessor<Memory | null>;
 
@@ -197,7 +212,7 @@ export class MemoryViewModel implements ViewModel {
             : () => undefined;
         this.viewName = createMemo(() => {
             const block = this.blockAtom();
-            return (block?.meta?.["frame:title"] as string) ?? "Bundles";
+            return (block?.meta?.["frame:title"] as string) ?? "ABF";
         });
         this.selectedAtom = createMemo(() => {
             const id = this.selectedIdAtom();
@@ -216,7 +231,7 @@ export class MemoryViewModel implements ViewModel {
             this.setMemories(list);
             this.setError(null);
         } catch (e) {
-            this.setError(`Failed to load presets: ${(e as Error).message ?? e}`);
+            this.setError(`Failed to load ABF bundles: ${(e as Error).message ?? e}`);
         }
     }
 
@@ -224,6 +239,7 @@ export class MemoryViewModel implements ViewModel {
      *  user starts on a clean banner. */
     startNew(): void {
         this.setError(null);
+        this.setValidation(null);
         this.setDraft(emptyDraft());
         this.setSelectedId(null);
     }
@@ -237,10 +253,11 @@ export class MemoryViewModel implements ViewModel {
      *  banner showing alongside the new edit form). Reagent P2 (#747). */
     startEdit(memory: Memory): void {
         if (memory.is_blank) {
-            this.setError("The blank preset is system-managed and cannot be edited.");
+            this.setError("The blank bundle is system-managed and cannot be edited.");
             return;
         }
         this.setError(null);
+        this.setValidation(null);
         this.setDraft(draftFromMemory(memory));
         this.setSelectedId(memory.id);
     }
@@ -252,6 +269,7 @@ export class MemoryViewModel implements ViewModel {
     cancelDraft(): void {
         this.setDraft(null);
         this.setError(null);
+        this.setValidation(null);
     }
 
     /** Persist the current draft (creates if id is empty, else updates). */
@@ -259,7 +277,7 @@ export class MemoryViewModel implements ViewModel {
         const draft = this.draftAtom();
         if (!draft) return;
         if (!draft.name.trim()) {
-            this.setError("Preset name is required.");
+            this.setError("Bundle name is required.");
             return;
         }
         this.setSaving(true);
@@ -272,7 +290,7 @@ export class MemoryViewModel implements ViewModel {
             // OBJECT IDENTITY (=== draft) rather than `!== null`. The
             // user can replace the draft mid-flight by:
             //   - clicking another list item   → cancelDraft → null
-            //   - clicking "+ New Preset"      → startNew → fresh draft
+            //   - clicking "+ New Bundle"      → startNew → fresh draft
             //   - clicking the Edit button     → startEdit → other draft
             // All three cases must skip the post-save navigation. Only
             // identity-equal-to-our-snapshot means the user is still
@@ -285,6 +303,7 @@ export class MemoryViewModel implements ViewModel {
                 // selectedAtom resolves to the saved memory immediately,
                 // no empty-state flash. Reagent P2 (PR #749).
                 this.setDraft(null);
+                this.setValidation(null);
                 this.setSelectedId(saved.id);
             }
         } catch (e) {
@@ -294,10 +313,40 @@ export class MemoryViewModel implements ViewModel {
         }
     }
 
+    /** Run the structural ABF validator against the current draft — works
+     *  on unsaved edits (including a brand-new bundle with no id yet), not
+     *  just what's already persisted, since `ValidateBundleCommand` accepts
+     *  the same payload shape `saveDraft` sends. Does not save; purely
+     *  advisory. */
+    async validateDraft(): Promise<void> {
+        const draft = this.draftAtom();
+        if (!draft) return;
+        this.setValidating(true);
+        this.setError(null);
+        try {
+            const report = await RpcApi.ValidateBundleCommand(TabRpcClient, draftToWire(draft));
+            // Same identity-equality race guard as saveDraft (reagent P1,
+            // PR #749 round 6 originally, now PR #2532): Cancel, "+ New
+            // Bundle", and another row's Edit button are all still
+            // clickable while this request is in flight (validatingAtom
+            // does not disable them). Without this check, a report for
+            // the OLD draft would land on whatever draft the user has
+            // switched to by the time the RPC resolves — the exact
+            // staleness this feature exists to prevent.
+            if (this.draftAtom() === draft) {
+                this.setValidation(report);
+            }
+        } catch (e) {
+            this.setError(`Validate failed: ${(e as Error).message ?? e}`);
+        } finally {
+            this.setValidating(false);
+        }
+    }
+
     async deleteMemory(id: string): Promise<void> {
         const target = this.memoriesAtom().find((m) => m.id === id);
         if (target?.is_blank) {
-            this.setError("The blank preset is system-managed and cannot be deleted.");
+            this.setError("The blank bundle is system-managed and cannot be deleted.");
             return;
         }
         this.setError(null);

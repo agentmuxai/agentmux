@@ -9,7 +9,7 @@
  * §1/§2/§3) removed the "Identities" tab (folded into the agent-pane's own
  * Identity tab — see agent-identity-links-panel.test.tsx), renamed "Memory"
  * to "Memories", and reordered the rail to
- * Accounts, Memories, Skills, MCP Servers, Bundles. These tests guard the
+ * Accounts, Memories, Skills, MCP Servers, ABF. These tests guard the
  * rail contents directly; `ArmorySection`'s type-level rejection of
  * `"identities"` is checked at compile time below (no runtime assertion
  * needed for that part).
@@ -82,11 +82,11 @@ describe("ArmoryView rail", () => {
         expect(screen.queryByText("Memory")).not.toBeInTheDocument();
     });
 
-    it("orders the rail as Accounts, Memories, Skills, MCP Servers, Bundles", () => {
+    it("orders the rail as Accounts, Memories, Skills, MCP Servers, ABF", () => {
         renderArmory();
         const rail = screen.getByLabelText("Armory section", { selector: "nav.bundle-manager-rail" });
         const labels = Array.from(rail.querySelectorAll("button span")).map((el) => el.textContent);
-        expect(labels).toEqual(["Accounts", "Memories", "Skills", "MCP Servers", "Bundles"]);
+        expect(labels).toEqual(["Accounts", "Memories", "Skills", "MCP Servers", "ABF"]);
     });
 });
 

@@ -294,8 +294,10 @@ const KNOWN_REGISTERED_UNDECLARED = [
     "agent.stop",
     "bundle.delete",
     "bundle.export",
+    "bundle.export_for_agent",
     "bundle.get",
     "bundle.import",
+    "bundle.import_for_agent",
     "bundle.list",
     "bundle.self.get",
     "bundle.upsert",
@@ -311,11 +313,6 @@ const KNOWN_REGISTERED_UNDECLARED = [
     "memory.read",
     "memory.write",
     "pane.open",
-    "preset.delete",
-    "preset.get",
-    "preset.list",
-    "preset.self.get",
-    "preset.upsert",
     "slow",
 ];
 
