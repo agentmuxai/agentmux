@@ -53,7 +53,7 @@
 //! regardless of this open question — the credential-leak fix does not wait
 //! on the schema question.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -375,7 +375,8 @@ pub fn export_bundle(bundle: &Memory, skills: &[Skill]) -> BundleExport {
     let mut manifest_mcp: Vec<String> = Vec::new();
 
     // ------------------------------------------------------------------
-    // instructions/AGENTS.md + instructions/context/*
+    // instructions/AGENTS.md (default) + instructions/<provider>/AGENTS.md
+    // (ABF v0.2 §2.2) + instructions/context/*
     // ------------------------------------------------------------------
     if !bundle.instructions.trim().is_empty() {
         files.push(BundleExportFile {
@@ -383,6 +384,44 @@ pub fn export_bundle(bundle: &Memory, skills: &[Skill]) -> BundleExport {
             content: bundle.instructions.clone(),
         });
         manifest_instructions.push("instructions/AGENTS.md".to_string());
+    }
+
+    let instructions_by_provider: HashMap<String, String> = parse_json_field_or_warn(
+        &bundle.instructions_by_provider,
+        "instructions_by_provider",
+        &mut warnings,
+    );
+    // manifest_instructions_by_provider preserves insertion order isn't
+    // required (armory.json's own object key order is not meaningful), but
+    // BTreeMap gives deterministic output ordering across export calls,
+    // which matters for reproducible zip byte content.
+    let mut manifest_instructions_by_provider: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+    for (provider, content) in &instructions_by_provider {
+        if content.trim().is_empty() {
+            continue;
+        }
+        // Provider keys land directly in a file path — sanitize the same
+        // way every other manifest-adjacent path segment in this module
+        // is, since a key that arrived via import (bundle_import.rs stores
+        // whatever key string a manifest declared, unvalidated against the
+        // known provider list) could otherwise smuggle a traversal segment
+        // into instructions/<provider>/AGENTS.md on a later re-export.
+        let Some(safe_provider) = sanitize_context_relative_path(provider) else {
+            warnings.push(format!(
+                "instructions_by_provider: \"{provider}\" is not a safe path segment; skipped"
+            ));
+            continue;
+        };
+        let out_path = format!("instructions/{safe_provider}/AGENTS.md");
+        files.push(BundleExportFile {
+            path: out_path.clone(),
+            content: content.clone(),
+        });
+        manifest_instructions_by_provider
+            .entry(safe_provider)
+            .or_default()
+            .push(out_path);
     }
 
     let context_files: Vec<ContextFileEntry> = parse_json_field_or_warn(
@@ -518,8 +557,20 @@ pub fn export_bundle(bundle: &Memory, skills: &[Skill]) -> BundleExport {
     }
 
     let mut components = serde_json::Map::new();
-    if !manifest_instructions.is_empty() {
-        components.insert("instructions".to_string(), json!(manifest_instructions));
+    // ABF v0.2 §2.2: components.instructions is always the keyed-object
+    // shape on export ("default" plus zero or more provider variants) —
+    // the importer accepts both this and the v0.1 flat-array shape for
+    // backward compatibility, but new exports only ever emit the v0.2
+    // shape.
+    if !manifest_instructions.is_empty() || !manifest_instructions_by_provider.is_empty() {
+        let mut instructions_obj = serde_json::Map::new();
+        if !manifest_instructions.is_empty() {
+            instructions_obj.insert("default".to_string(), json!(manifest_instructions));
+        }
+        for (provider, paths) in &manifest_instructions_by_provider {
+            instructions_obj.insert(provider.clone(), json!(paths));
+        }
+        components.insert("instructions".to_string(), Value::Object(instructions_obj));
     }
     if !manifest_skills.is_empty() {
         components.insert("skills".to_string(), json!(manifest_skills));
@@ -541,7 +592,12 @@ pub fn export_bundle(bundle: &Memory, skills: &[Skill]) -> BundleExport {
     }
 
     let manifest = json!({
-        "$schema": "https://docs.agentmux.ai/schemas/armory-bundle/v0.1/bundle.schema.json",
+        // ABF v0.2 §2.4: bumped from v0.1 — components.instructions's shape
+        // itself changed (flat array -> keyed object, §2.2). $schema is the
+        // ABF FORMAT version, distinct from the "version" field below
+        // (the bundle's own content version, which has nothing to do with
+        // which ABF shape produced this file).
+        "$schema": "https://docs.agentmux.ai/schemas/armory-bundle/v0.2/bundle.schema.json",
         "name": root_slug,
         // Bundles have no native version concept (no `version` column) --
         // ABF requires one, so this is an export-time default the user is
@@ -631,6 +687,7 @@ mod tests {
             provider: String::new(),
             model: String::new(),
             instructions: instructions.to_string(),
+            instructions_by_provider: "{}".to_string(),
             context_files: context_files.to_string(),
             mcp_servers: mcp_servers.to_string(),
             skills: skills.to_string(),
@@ -1177,10 +1234,47 @@ mod tests {
         let manifest_file = export.files.iter().find(|f| f.path == "armory.json").unwrap();
         let manifest: Value = serde_json::from_str(&manifest_file.content).expect("armory.json must be valid JSON");
         assert_eq!(manifest["name"], "backend-dev-bundle");
-        assert!(manifest["components"]["instructions"].as_array().unwrap().len() == 2);
+        // ABF v0.2 §2.2: components.instructions is the keyed-object shape
+        // ("default" + provider variants), not a flat array.
+        assert!(manifest["components"]["instructions"]["default"].as_array().unwrap().len() == 2);
         assert!(manifest["components"]["skills"].as_array().unwrap().len() == 1);
         assert!(manifest["components"]["mcpServers"].as_array().unwrap().len() == 1);
         assert_eq!(manifest["components"]["accounts"], "accounts/requirements.json");
+    }
+
+    #[test]
+    fn exports_a_provider_scoped_instruction_variant() {
+        let mut bundle = make_bundle("Default instructions.", "[]", "[]", "[]");
+        bundle.instructions_by_provider =
+            r#"{"claude":"Claude-specific override.","codex":"Codex-specific override."}"#.to_string();
+        let export = export_bundle(&bundle, &[]);
+
+        let claude_file = export.files.iter().find(|f| f.path == "instructions/claude/AGENTS.md")
+            .expect("expected instructions/claude/AGENTS.md");
+        assert_eq!(claude_file.content, "Claude-specific override.");
+        let codex_file = export.files.iter().find(|f| f.path == "instructions/codex/AGENTS.md")
+            .expect("expected instructions/codex/AGENTS.md");
+        assert_eq!(codex_file.content, "Codex-specific override.");
+
+        let manifest_file = export.files.iter().find(|f| f.path == "armory.json").unwrap();
+        let manifest: Value = serde_json::from_str(&manifest_file.content).unwrap();
+        assert_eq!(manifest["components"]["instructions"]["default"], json!(["instructions/AGENTS.md"]));
+        assert_eq!(manifest["components"]["instructions"]["claude"], json!(["instructions/claude/AGENTS.md"]));
+        assert_eq!(manifest["components"]["instructions"]["codex"], json!(["instructions/codex/AGENTS.md"]));
+    }
+
+    #[test]
+    fn a_blank_provider_variant_is_omitted_entirely() {
+        // An empty-string variant (e.g. left over from a UI field that was
+        // added then cleared) must not produce an empty instructions file
+        // or an empty manifest entry.
+        let mut bundle = make_bundle("Default.", "[]", "[]", "[]");
+        bundle.instructions_by_provider = r#"{"claude":"   "}"#.to_string();
+        let export = export_bundle(&bundle, &[]);
+        assert!(!export.files.iter().any(|f| f.path.starts_with("instructions/claude/")));
+        let manifest_file = export.files.iter().find(|f| f.path == "armory.json").unwrap();
+        let manifest: Value = serde_json::from_str(&manifest_file.content).unwrap();
+        assert!(manifest["components"]["instructions"].get("claude").is_none());
     }
 
     #[test]

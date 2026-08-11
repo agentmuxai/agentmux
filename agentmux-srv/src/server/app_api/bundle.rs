@@ -556,6 +556,10 @@ fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     provider: String::new(),
                     model: String::new(),
                     instructions: parsed.instructions,
+                    // ABF v0.2 §2.2: every variant is stored verbatim, no
+                    // merge decision made at import time.
+                    instructions_by_provider: serde_json::to_string(&parsed.instructions_by_provider)
+                        .unwrap_or_else(|_| "{}".to_string()),
                     // Phase 3 spec §3.0: ImportedContextFile gained a
                     // stable `id` selection key alongside `path`/`content`
                     // -- project it away before persisting, matching
@@ -986,6 +990,15 @@ async fn bundle_import_commit_impl(
                 let bundle_name = bi::bound_bundle_name(&req.bundle_name.unwrap_or_else(|| parsed.name.clone()));
 
                 let instructions = if req.include_instructions { parsed.instructions.clone() } else { String::new() };
+                // ABF v0.2 §2.2: provider-scoped variants are part of the
+                // same "instructions" component, gated by the same
+                // include_instructions flag — no separate per-variant
+                // selection exists in the Phase 3 preview/commit UI.
+                let instructions_by_provider = if req.include_instructions {
+                    parsed.instructions_by_provider.clone()
+                } else {
+                    std::collections::HashMap::new()
+                };
 
                 // include_context_files selects by the stable `id` (round
                 // 13), never by (truncatable) display_path.
@@ -1145,6 +1158,8 @@ async fn bundle_import_commit_impl(
                     provider: String::new(),
                     model: String::new(),
                     instructions,
+                    instructions_by_provider: serde_json::to_string(&instructions_by_provider)
+                        .unwrap_or_else(|_| "{}".to_string()),
                     context_files: serde_json::to_string(&selected_context_files)
                         .unwrap_or_else(|_| "[]".to_string()),
                     mcp_servers: serde_json::to_string(&selected_mcp_servers)
