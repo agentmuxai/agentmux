@@ -695,10 +695,11 @@ pub(crate) async fn bundle_list_impl(state: &AppState) -> Result<serde_json::Val
         "id": m.id, "name": m.name, "description": m.description,
         "provider": m.provider, "model": m.model, "is_blank": m.is_blank, "updated_at": m.updated_at,
     })).collect();
-    // Emit both keys during the Preset→Bundle alias window: new callers of
-    // `bundle.list` read `bundles`; the retained `preset.list` alias's existing
-    // agent/REST consumers still read `presets`. Drop the `presets` key in
-    // Phase 4 when the alias is removed (SPEC_PRESET_TO_BUNDLE_REFACTOR §2.1/§4.4).
+    // Emit both keys: `bundle.list` callers read `bundles`; the separate
+    // REST route `/api/v1/agent/preset/list` (`PresetList` MCP tool,
+    // server/mod.rs) still reads `presets` and is unrelated to the internal
+    // WS `preset.*` aliases retired in this pass — do not drop `presets`
+    // here without first retiring that REST route too.
     Ok(json!({ "bundles": bundles, "presets": bundles }))
 }
 
