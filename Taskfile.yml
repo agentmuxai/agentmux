@@ -54,8 +54,15 @@ tasks:
 
     dev:
         desc: 'Run AgentMux in development mode (Vite hot reload). Optional: task dev TITLE="agentx: PR #1780" sets the OS window title so you can tell parallel dev sessions apart.'
-        vars:
-            TITLE: ''
+        # Deliberately NOT declaring `vars: TITLE: ''` here — go-task 3.48.0
+        # shadows a CLI-supplied `task dev TITLE=...` override with a task's
+        # own `vars:` default for that same name (confirmed via isolated
+        # repro; a declared default always wins over the CLI value, silently
+        # discarding it), leaving {{.TITLE}} empty regardless of what was
+        # passed. Omitting the declaration lets the CLI value flow through
+        # normally (still renders empty when nothing is passed — Go
+        # templates render an unset var as ""). See
+        # docs/retro/retro-task-dev-title-var-shadowing-2026-08-11.md.
         cmds:
             - task: dev:serve
               vars:
@@ -829,8 +836,10 @@ tasks:
     dev:serve:
         internal: true
         desc: Start Vite dev server and the app concurrently, via the launcher (launcher → srv + host on all platforms; Windows uses the runtime/ layout, macOS/Linux a flat layout).
-        vars:
-            TITLE: ''
+        # No `vars: TITLE: ''` here either — see the `dev` task's comment
+        # above (same go-task CLI/caller-var shadowing gotcha applies to a
+        # parent task's `task: dev:serve / vars: TITLE: ...` call just as
+        # much as to a CLI-supplied var).
         env:
             VITE_DEV_TITLE: '{{.TITLE}}'
         cmds:
