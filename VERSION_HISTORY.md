@@ -1,5 +1,17 @@
 # AgentMux Version History
 
+## 0.55.5 — 2026-08-11
+
+- fix(agent): seed shell drawer's term:zoom before construct, eliminate open jerk
+- fix(menu): submenu positioning flash + safe-triangle hover close timing
+- feat(armory): agent-scoped bundle export/import carrying native memory
+- feat(armory): retire preset.* RPC aliases
+- feat(armory): rebrand Bundles/Preset wording to Armory Bundle Format (ABF)
+- feat(armory): add structural ABF bundle validator + bundle.validate RPC
+- feat(armory): wire the Validate button into the Armory bundle editor
+- feat(armory): add contextual ABF tooltips to the bundle editor fields
+
+
 ## 0.55.4 — 2026-08-10
 
 - feat(agent-pane): AskUserQuestion countdown hides on hover, resumes after 15s
