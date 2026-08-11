@@ -92,6 +92,157 @@ describe("AgentFooter Esc-clear Undo", () => {
     });
 });
 
+/**
+ * Regression tests for
+ * docs/specs/SPEC_COMPOSER_SHIFT_UP_SELECTION_VS_HISTORY_RACE_2026-08-11.md.
+ *
+ * jsdom has no layout engine, so `offsetTop` (what the old mirror-div
+ * `caretVisualEdge` measured) always reads 0 regardless of actual cursor
+ * position — meaning the pre-fix code's "on visual row 0" check would have
+ * been unconditionally true for any position with no `\n` before it in this
+ * test environment, unable to meaningfully exercise the bug at all. The fix
+ * (require the true start/end of content via `selectionStart`/`selectionEnd`,
+ * no layout measurement) is fully testable here precisely because it no
+ * longer depends on layout.
+ */
+describe("AgentFooter composer history vs. selection (SPEC_COMPOSER_SHIFT_UP_SELECTION_VS_HISTORY_RACE_2026-08-11.md)", () => {
+    async function sendMessages(ta: HTMLTextAreaElement, user: ReturnType<typeof userEvent.setup>, ...messages: string[]) {
+        for (const msg of messages) {
+            await user.type(ta, msg);
+            keyOn(ta, "Enter");
+        }
+    }
+
+    it("does not trigger history recall while a Shift+ArrowUp selection has only partially reached the top line", async () => {
+        const onSendMessage = vi.fn();
+        render(() => <AgentFooter agentName="Test" onSendMessage={onSendMessage} />);
+        const user = userEvent.setup();
+        const ta = getComposer();
+        await user.click(ta);
+        await sendMessages(ta, user, "first message", "second message");
+
+        const draft = "hello world\nsecond line";
+        await user.type(ta, draft);
+        expect(ta.value).toBe(draft);
+
+        // Selection extended backward (upward) from position 18 (on line 2)
+        // to position 5 (mid-way through "hello world" on line 1) — the
+        // normal, expected result of a Shift+ArrowUp sequence reaching the
+        // top line without yet covering it fully.
+        ta.setSelectionRange(5, 18, "backward");
+        keyOn(ta, "ArrowUp", { shiftKey: true });
+
+        // Bug: the old "on visual row 0" check would have fired history
+        // recall here, replacing the draft. Fixed: the active selection edge
+        // (selectionStart=5, backward direction) isn't at true position 0
+        // yet, so the draft and selection must be left alone.
+        expect(ta.value).toBe(draft);
+        expect(ta.selectionStart).toBe(5);
+        expect(ta.selectionEnd).toBe(18);
+    });
+
+    it("triggers history recall on Shift+ArrowUp once the selection reaches true position 0", async () => {
+        const onSendMessage = vi.fn();
+        render(() => <AgentFooter agentName="Test" onSendMessage={onSendMessage} />);
+        const user = userEvent.setup();
+        const ta = getComposer();
+        await user.click(ta);
+        await sendMessages(ta, user, "first message", "second message");
+
+        const draft = "hello world\nsecond line";
+        await user.type(ta, draft);
+
+        // Now the selection covers the ENTIRE top line (the state one more
+        // Shift+ArrowUp should have produced from the partial-selection case
+        // above).
+        ta.setSelectionRange(0, 18, "backward");
+        keyOn(ta, "ArrowUp", { shiftKey: true });
+
+        expect(ta.value).toBe("second message"); // most recently sent
+    });
+
+    it("does not trigger history recall on plain ArrowUp mid-line, only once the caret reaches true position 0", async () => {
+        const onSendMessage = vi.fn();
+        render(() => <AgentFooter agentName="Test" onSendMessage={onSendMessage} />);
+        const user = userEvent.setup();
+        const ta = getComposer();
+        await user.click(ta);
+        await sendMessages(ta, user, "only message");
+
+        const draft = "hello world";
+        await user.type(ta, draft);
+
+        ta.setSelectionRange(5, 5); // collapsed cursor mid-line, not at start
+        keyOn(ta, "ArrowUp");
+        expect(ta.value).toBe(draft); // untouched — jsdom doesn't move the caret itself
+
+        ta.setSelectionRange(0, 0); // now truly at the start
+        keyOn(ta, "ArrowUp");
+        expect(ta.value).toBe("only message");
+    });
+
+    it("uses the active (moving) selection edge, not always selectionStart, for a forward-direction selection", async () => {
+        // reagentx P2 on #2522's sibling finding, §2.3 of the spec: a
+        // forward-direction selection's moving end for Shift+ArrowUp is
+        // selectionEnd, not selectionStart. The old code always read
+        // selectionStart regardless of direction — here selectionStart is 0
+        // but the ACTUAL moving end (selectionEnd=5) is not, so history must
+        // NOT fire even though selectionStart alone would suggest it should.
+        const onSendMessage = vi.fn();
+        render(() => <AgentFooter agentName="Test" onSendMessage={onSendMessage} />);
+        const user = userEvent.setup();
+        const ta = getComposer();
+        await user.click(ta);
+        await sendMessages(ta, user, "only message");
+
+        const draft = "hello world";
+        await user.type(ta, draft);
+
+        ta.setSelectionRange(0, 5, "forward");
+        keyOn(ta, "ArrowUp", { shiftKey: true });
+
+        expect(ta.value).toBe(draft); // must not have been replaced
+    });
+
+    it("symmetric ArrowDown/last-line case: requires true end of content, not just the last visual line", async () => {
+        const onSendMessage = vi.fn();
+        render(() => <AgentFooter agentName="Test" onSendMessage={onSendMessage} />);
+        const user = userEvent.setup();
+        const ta = getComposer();
+        await user.click(ta);
+        await sendMessages(ta, user, "first message", "second message");
+
+        // Walk back to the oldest entry (two ArrowUps at true start). Note:
+        // editing the recalled text would reset histPos via handleInput
+        // (AgentFooter.tsx:580, exiting history mode on any edit) — this
+        // test stays purely within keyboard navigation to avoid that, since
+        // it's testing the ArrowDown boundary condition itself, not editing.
+        ta.setSelectionRange(0, 0);
+        keyOn(ta, "ArrowUp");
+        expect(ta.value).toBe("second message");
+        ta.setSelectionRange(0, 0);
+        keyOn(ta, "ArrowUp");
+        expect(ta.value).toBe("first message");
+
+        // Collapsed cursor mid-word, not yet at the true end of "first message".
+        ta.setSelectionRange(2, 2);
+        keyOn(ta, "ArrowDown", { shiftKey: true });
+        expect(ta.value).toBe("first message"); // untouched — not at true end yet
+
+        // Now truly at the end: advances forward to the next entry.
+        ta.setSelectionRange("first message".length, "first message".length);
+        keyOn(ta, "ArrowDown");
+        expect(ta.value).toBe("second message");
+
+        // Past the newest entry: falls back to the stashed live draft (empty,
+        // since the composer was empty before entering history mode here —
+        // stashed once, on the very first ArrowUp above).
+        ta.setSelectionRange(ta.value.length, ta.value.length);
+        keyOn(ta, "ArrowDown");
+        expect(ta.value).toBe("");
+    });
+});
+
 // Minimal AgentViewModel double — only the fields AgentFooter actually reads:
 // blockId (voice-target wiring), blockAtom (ghost-text suggestion meta), and
 // voiceTargetRef (onMount registers a PaneVoiceHandle onto it unconditionally
