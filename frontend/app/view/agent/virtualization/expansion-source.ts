@@ -121,5 +121,9 @@ export function currentExpansion(
         case "day_divider":
             // Fixed-height calendar separator — never collapsible.
             return OPEN_DEFAULT;
+
+        case "history_link":
+            // Fixed-height link row — never collapsible.
+            return OPEN_DEFAULT;
     }
 }

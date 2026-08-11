@@ -250,3 +250,79 @@ describe("AgentFooter ghost-text next-prompt suggestion (SPEC_NEXT_PROMPT_SUGGES
         expect(ta.placeholder).toBe("Run the tests");
     });
 });
+
+// SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md §3.4:
+// composerDrafts is module-level, keyed by blockId — every case below uses
+// a blockId dedicated to that case (never "test-block", which every other
+// describe block in this file shares) so these tests can't leak draft
+// state into, or read stale state left by, unrelated tests sharing this
+// file's module graph.
+function makeDraftViewModel(blockId: string): AgentViewModel {
+    return { blockId, blockAtom: () => ({ meta: {} }) as any, voiceTargetRef: { current: null } } as unknown as AgentViewModel;
+}
+
+describe("AgentFooter composer draft persistence (SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md §3.4)", () => {
+    it("restores a typed draft after this block's footer unmounts and remounts (the tab-switch-away/back shape)", async () => {
+        const vm = makeDraftViewModel("draft-block-remount");
+        const { unmount } = render(() => <AgentFooter agentName="Test" viewModel={vm} />);
+        const user = userEvent.setup();
+        await user.type(getComposer(), "half-written thought");
+        unmount();
+
+        render(() => <AgentFooter agentName="Test" viewModel={vm} />);
+        expect(getComposer().value).toBe("half-written thought");
+    });
+
+    it("does not leak a draft across two different blockIds", async () => {
+        const vmA = makeDraftViewModel("draft-block-a");
+        const { unmount } = render(() => <AgentFooter agentName="Test" viewModel={vmA} />);
+        const user = userEvent.setup();
+        await user.type(getComposer(), "block A's draft");
+        unmount();
+
+        const vmB = makeDraftViewModel("draft-block-b");
+        render(() => <AgentFooter agentName="Test" viewModel={vmB} />);
+        expect(getComposer().value).toBe("");
+    });
+
+    it("clears the persisted draft on send — a later remount starts blank, not with the sent text", async () => {
+        const onSendMessage = vi.fn();
+        const vm = makeDraftViewModel("draft-block-sent");
+        const { unmount } = render(() => (
+            <AgentFooter agentName="Test" viewModel={vm} onSendMessage={onSendMessage} />
+        ));
+        const user = userEvent.setup();
+        const ta = getComposer();
+        await user.type(ta, "ship it");
+        keyOn(ta, "Enter");
+        expect(onSendMessage).toHaveBeenCalledWith("ship it");
+        unmount();
+
+        render(() => <AgentFooter agentName="Test" viewModel={vm} />);
+        expect(getComposer().value).toBe("");
+    });
+
+    it("an Esc-clear also clears the persisted draft — a later remount does not resurrect the pre-clear text", async () => {
+        const vm = makeDraftViewModel("draft-block-escclear");
+        const { unmount } = render(() => <AgentFooter agentName="Test" viewModel={vm} />);
+        const user = userEvent.setup();
+        const ta = getComposer();
+        await user.type(ta, "changed my mind");
+        keyOn(ta, "Escape");
+        expect(ta.value).toBe("");
+        unmount();
+
+        render(() => <AgentFooter agentName="Test" viewModel={vm} />);
+        expect(getComposer().value).toBe("");
+    });
+
+    it("without a viewModel, draft persistence is a no-op — no crash, nothing restored", async () => {
+        const { unmount } = render(() => <AgentFooter agentName="Test" />);
+        const user = userEvent.setup();
+        await user.type(getComposer(), "no blockId to key off");
+        unmount();
+
+        render(() => <AgentFooter agentName="Test" />);
+        expect(getComposer().value).toBe("");
+    });
+});

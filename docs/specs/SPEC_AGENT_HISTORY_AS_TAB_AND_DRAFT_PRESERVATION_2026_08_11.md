@@ -69,8 +69,27 @@ various pieces of state (a `ResizeObserver`, an uncontrolled textarea) were
 written under the "mounts once" assumption. Patching each downstream symptom
 (a ref-callback fix here, a draft-snapshot-and-restore mechanism there) works
 but invites a third instance of the same class next time something else
-implicitly assumed single-mount. Removing the remount entirely removes the
-whole bug class at once, which is what §3 below does.
+implicitly assumed single-mount.
+
+**Correction after checking the blockStack tab mechanism directly
+(`layoutNodeModels.ts::activeKeyFor`, 2026-08-11):** switching a pane's
+active stack member is *itself* a remount — the tile renderer keys a
+stacked leaf's subtree on `${node.id}:${activeBlockId}`, so Solid tears
+down and reconstructs the whole subtree on every tab switch, deliberately,
+"the same way every other blockId transition in this codebase already
+works" (that function's own comment). So §3 below does **not** eliminate
+remounting — it moves it from a bespoke, ad-hoc `bodyMode` toggle inside one
+component that was never designed for more than one mount, onto the exact
+same established, already-battle-tested remount path every other pane-stack
+tab switch (forks, terminal tabs) already goes through. That still closes
+the bug class that actually bit us: the `ResizeObserver` and the composer
+draft broke specifically because *this* component's own code assumed
+"mounts once" while sitting inside a subtree nothing else treated that way.
+Reusing the generic tab-switch remount instead means restore-on-mount (the
+same path every pane reopen already exercises) is what catches the live
+tab back up — not a special case. It does mean draft preservation (goal #3)
+needs a real, always-on mechanism, not a "probably unnecessary" fallback —
+§3.4 is written that way below.
 
 ---
 
@@ -82,15 +101,19 @@ whole bug class at once, which is what §3 below does.
    existing blockStack tab mechanism (`PaneTabStrip`, `pushBlockOntoStack`,
    `setActiveBlockInStack` — see `SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md`),
    not a content swap inside one tab.
-2. The live tab's `AgentPresentationView` instance is **never unmounted** by
-   opening/closing/switching to the history tab. No more "subtree that
-   assumed it mounts once now remounts."
-3. An in-progress composer draft **always survives** switching to the history
-   tab and back — whether because the live tab's DOM never went away (the
-   natural outcome of #2) or, if pane-stack switching turns out to
-   unmount/remount inactive members (see §6 open question), via an explicit
-   per-block draft-persistence fallback. Either way this is a hard
-   requirement, not "usually works."
+2. Any state that breaks from an implicit "mounts once" assumption
+   (§1's `ResizeObserver`/draft bugs) is fixed by moving it onto the
+   established, already-correct blockId-keyed remount every other tab
+   switch in this app already uses — not by inventing a new "stays mounted"
+   guarantee this codebase doesn't otherwise have (confirmed it doesn't:
+   §1's correction). Switching to/from the history tab remounts the live
+   tab's `AgentPresentationView` exactly as switching between two ordinary
+   fork tabs already does today.
+3. An in-progress composer draft **always survives** switching to the
+   history tab and back, via an explicit per-block draft-persistence
+   mechanism (§3.4) — required unconditionally, since §1's correction
+   confirmed the tab switch really does remount the live tab and destroy
+   its uncontrolled textarea's DOM value.
 4. The "Open Agent History" entry point renders as part of the scrolling
    transcript (a synthetic node next to the "New Session" divider it already
    sits beside), not a pinned row above the scroll region.
@@ -245,35 +268,32 @@ built now since there is exactly one destination today.
 
 ### 3.4 Composer draft preservation
 
-With §3.1's redesign, the live block's `AgentPresentationView` — and
-therefore `AgentFooter`'s uncontrolled `<textarea>` — is never unmounted by
-opening, switching to, or closing a history tab. That alone should resolve
-the reported loss, **provided** inactive blockStack tabs stay mounted
-(hidden) rather than being unmounted when not the pane's `activeBlockId` —
-see §6, this needs to be confirmed against the actual stack-rendering
-implementation before this goal can be marked done by inspection alone.
-
-**Fallback, regardless of that answer:** add a small belt-and-suspenders
-draft-persistence mechanism scoped to `AgentFooter`, independent of whether
-the tab host keeps it mounted:
+Per §1's correction, switching away from the live tab (to history, to a
+fork, to a blank picker tab — any stack-member switch) remounts it,
+destroying `AgentFooter`'s uncontrolled `<textarea>` and its DOM-only value.
+This is the actual, primary mechanism needed — not a fallback:
 
 - On a debounced interval while typing (piggybacking the existing RAF-
   debounced `onTyping` callback — no new timer), write the current textarea
   value to a per-block in-memory store (`Map<blockId, string>`, module-level,
   matching the existing `sentHistory`/`histDraft` closure-`let` precedent
-  already in this file for other per-pane ephemeral state).
+  already in this file for other per-pane ephemeral state — module-level
+  rather than closure-scoped specifically *because* it must outlive this
+  component instance across a switch-away/switch-back cycle).
 - On mount, if an entry exists for this `blockId`, seed the textarea from it
   (same precedence slot as the ghost-text placeholder logic already handles
   — an explicit draft always wins over a suggestion).
-- Cleared on send (already happens today) and on the block's own unmount-for-
-  real (pane closed, not just tab-switched) via `onCleanup`.
+- Cleared only on send (already happens today). **Deliberately NOT cleared
+  in `onCleanup`** — every tab-switch-away is itself an unmount from this
+  component's own vantage point (SolidJS gives no "is this a real close or
+  a tab switch" signal inside `onCleanup`), so clearing there would erase
+  the very draft this mechanism exists to preserve the instant the user
+  switches away. A stale entry for a since-closed block is a bounded,
+  harmless leak (one short string per block ever opened this session) —
+  optionally swept from `handleTabClose` (§3.1) if it matters in practice,
+  not required for correctness.
 - This is deliberately NOT persisted to backend/block-meta — it's a same-
-  session, in-memory safety net, not a durability feature (see Non-goals).
-
-This makes the guarantee correct either way the §6 question resolves: if
-stack tabs already keep inactive members mounted, the fallback is inert
-(the DOM value was never lost, so the seed-on-mount branch never fires). If
-they don't, the fallback is what actually saves the draft.
+  session, in-memory mechanism, not a durability feature (see Non-goals).
 
 ---
 
@@ -310,19 +330,18 @@ they don't, the fallback is what actually saves the draft.
 
 ## 6. Open questions
 
-1. **Do inactive blockStack tabs stay mounted (hidden) or unmount on
-   switch?** Not yet confirmed by inspection — the leaf-node rendering that
-   consumes `node.data.activeBlockId` vs `blockStack` wasn't conclusively
-   located in this pass. This matters beyond composer drafts: if switching
-   away from the live tab tears down its `useAgentStream` WS subscription
-   entirely, reconnecting on switch-back needs to be at least as robust as
-   the existing reconnect-on-reopen path. §3.4's fallback covers the draft
-   specifically regardless of the answer, but the WS-subscription question
-   should be settled (by reading the actual tile/leaf rendering component,
-   not this doc's own grep pass) before implementation starts, since it
-   changes whether §3.4's fallback is the *only* thing needed or whether
-   switch-away/back also needs the same reconnect treatment pane-reopen
-   already has.
+1. **RESOLVED (2026-08-11):** inactive blockStack tabs unmount on switch —
+   confirmed via `layoutNodeModels.ts::activeKeyFor`, whose own comment
+   states the stacked leaf's subtree is keyed on `${node.id}:${activeBlockId}`
+   specifically so a tab switch remounts it, matching every other blockId
+   transition in the app. §1 and §3.4 above are written against this
+   confirmed answer, not a guess. Consequence for the WS subscription:
+   switching away from the live tab tears down `useAgentStream` same as
+   closing the pane would, and switching back re-mounts through the normal
+   restore/reconnect path (`useHistoryPagination`) — the same path pane
+   reopen already exercises and already handles correctly. No separate
+   reconnect-robustness work needed; this is not a new code path, just an
+   existing one triggered from a new place.
 2. **Tab label collision:** if a user already renamed a fork tab to
    "History" (unlikely but possible — tab titles are free text per
    `handleTabRenameConfirm`), does the history tab need a disambiguating
@@ -345,8 +364,8 @@ they don't, the fallback is what actually saves the draft.
   closing the *live* tab while a history tab is open behaves like closing
   any other stack member).
 - **AgentFooter unit:** draft survives a simulated unmount/remount with the
-  same `blockId` (proves the fallback works standing alone, independent of
-  §6's answer); draft does NOT leak across two *different* `blockId`s typing
+  same `blockId` (the real tab-switch shape, per §6); draft does NOT leak
+  across two *different* `blockId`s typing
   concurrently (map is keyed correctly); cleared on send; cleared on real
   pane-close `onCleanup`.
 - **Manual/live:** type a draft → open Agent History via the link row →

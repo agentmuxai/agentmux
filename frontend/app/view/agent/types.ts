@@ -53,7 +53,7 @@ export type InitState = {
 /**
  * Document node types that make up the agent's markdown document
  */
-export type DocumentNode = MarkdownNode | SectionNode | ToolNode | AgentMessageNode | UserMessageNode | ShellNode | AgentErrorNode | ContextCompactedNode | CompactionStartedNode | JektMessageNode | SessionOutcomeNode | DayDividerNode;
+export type DocumentNode = MarkdownNode | SectionNode | ToolNode | AgentMessageNode | UserMessageNode | ShellNode | AgentErrorNode | ContextCompactedNode | CompactionStartedNode | JektMessageNode | SessionOutcomeNode | DayDividerNode | HistoryLinkNode;
 
 /**
  * Raw markdown text block
@@ -469,6 +469,20 @@ export interface DayDividerNode {
     dayLabel: string;
     /** Local midnight of the day, unix ms. */
     timestamp: number;
+}
+
+/**
+ * "Open Agent History" link row in the LIVE working document. A render-time
+ * synthetic (injected by `injectHistoryLink`, never persisted, never part of
+ * the reducer store) — scrolls with the transcript instead of being pinned
+ * above it, since opening it just switches/opens a pane tab (§3.2 of
+ * SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md). Never
+ * injected into the Agent History reader itself — that view has no need to
+ * link to itself. Fixed id: there is at most one per live document.
+ */
+export interface HistoryLinkNode {
+    type: "history_link";
+    id: "history-link";
 }
 
 /**

@@ -3,10 +3,13 @@
 
 /**
  * AgentHistoryView — the read-only, full-stream transcript reader for one
- * agent (spec §4.1). Rendered by agent-view.tsx as the pane's alternate
- * body (`bodyMode: "history"`); the live transcript + composer subtree is
- * unmounted while this is open, so the live stream subscription is never
- * doubled.
+ * agent (spec §4.1). As of
+ * SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md §3.1,
+ * mounted as a SEPARATE pane tab's entire content (via the thin
+ * `AgentHistoryTabView` wrapper) rather than swapped in place over the live
+ * transcript — that tab's block is a read-only history reader for its
+ * whole lifetime and never toggles to live, so there is no live stream
+ * subscription to double here regardless.
  *
  * Deliberately NOT a consumer of the agent-document reducer store: the
  * reader has no live stream, no truncate/dedup races, and must render the
@@ -56,8 +59,6 @@ export interface AgentHistoryViewProps {
     blockId: string;
     outputFormat: Accessor<string>;
     agentName?: Accessor<string>;
-    /** Return to the live conversation (`bodyMode: "live"`). */
-    onClose: () => void;
 }
 
 export function AgentHistoryView(props: AgentHistoryViewProps) {
@@ -194,13 +195,6 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
     return (
         <div class="agent-history-view">
             <div class="agent-history-header">
-                <button
-                    class="agent-history-back"
-                    title="Back to conversation"
-                    onClick={() => props.onClose()}
-                >
-                    ← Back to conversation
-                </button>
                 <div class="agent-history-title">Agent History</div>
                 <div class="agent-history-meta">
                     {/* Explicit loading state first — without it the initial
