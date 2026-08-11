@@ -43,10 +43,6 @@
     height: 100%;
     width: 100%;
 
-    > .pane-tab-strip {
-        flex: 0 0 auto;
-    }
-
     > .agent-pane-progress-bar-slot {
         flex: 0 0 auto;
     }
@@ -56,6 +52,35 @@
     flex: 1 1 auto;
     min-height: 0;
     position: relative;
+
+    // Floats over the content instead of reserving its own row —
+    // SPEC_AGENT_PANE_TAB_STRIP_OVERLAY_2026_08_10.md. The goal: with one
+    // conversation open, nothing but the "+" button's own 28×28px box
+    // should ever obstruct the conversation, which now renders (and
+    // scrolls) underneath the rest of this row.
+    //
+    // Overrides PaneTabStrip.scss's own `align-self: flex-start` (a no-op
+    // once out of flow — harmless to leave, not worth overriding just to
+    // remove a now-inert declaration) by taking the strip out of flex flow
+    // entirely via `position: absolute`. `max-width: 100%` (from the base
+    // rule) still applies against this box, the new containing block, so a
+    // strip with many tabs open still can't overflow the pane.
+    //
+    // z-index: reuses --z-pane-overlay (previously the progress bar's own
+    // token, now unused there — §"Marching-ants" below no longer competes
+    // for this stacking level at all, living in its own slot outside this
+    // element). .agent-document-scroll-region (_document.scss) establishes
+    // its OWN stacking context (position + z-index together) for its
+    // higher internal z-index values (up to 100) — those are isolated
+    // inside it per the CSS stacking-context spec and can never climb out
+    // to compete with a sibling here, so this only needs to clear
+    // .agent-view's own default (z-index: auto) stacking, not that 100.
+    > .pane-tab-strip {
+        position: absolute;
+        top: 0;
+        left: 0;
+        z-index: var(--z-pane-overlay, 4);
+    }
 }
 
 // Progress bar's own row, between the tab strip and the content — never

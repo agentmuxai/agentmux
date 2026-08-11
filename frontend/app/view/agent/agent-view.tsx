@@ -363,40 +363,48 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
                 the pane and clipping the composer off the bottom (found
                 live 2026-08-09: "agent pane has no text input"). */}
             <div class="agent-pane-stack">
-                {/* Top region, above everything else, matching the editor's own
-                    tab-strip placement and every general tabbed-UI convention.
-                    The "+" always renders — that's how you'd get to a second
-                    tab — but the tab pill itself stays hidden until there's
-                    something to switch BETWEEN (see visibleTabs above).
-                    SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md. */}
-                <PaneTabStrip
-                    tabs={visibleTabs()}
-                    activeId={activeBlockId()}
-                    getId={(t) => t.blockId}
-                    getLabel={(t) => t.label}
-                    onActivate={handleTabSwitch}
-                    onClose={handleTabClose}
-                    onTabDoubleClick={(t) => t.definitionId && setRenamingBlockId(t.blockId)}
-                    renderLabel={(t) =>
-                        renamingBlockId() === t.blockId && t.definitionId ? (
-                            <PaneTabRenameInput
-                                initialValue={t.label}
-                                onConfirm={(title) => void handleTabRenameConfirm(t, title)}
-                                onCancel={() => setRenamingBlockId(null)}
-                            />
-                        ) : (
-                            <span class="pane-tab-label">{t.label}</span>
-                        )
-                    }
-                    onAdd={() => void handleNewAgentTab()}
-                    addTitle="New tab"
-                />
-                {/* Progress bar's own row — between the tab strip and the
-                    content, never overlapping either. Empty div; its only
-                    content is whatever AgentPresentationView portals into it
-                    below. Sized in agent-view.scss (.agent-pane-progress-bar-slot). */}
+                {/* Progress bar's own row — always reserved, above the tab
+                    strip, below wherever the block-frame's own pane header
+                    ends. Empty div; its only content is whatever
+                    AgentPresentationView portals into it below. Sized in
+                    agent-view.scss (.agent-pane-progress-bar-slot). */}
                 <div class="agent-pane-progress-bar-slot" ref={(el) => setProgressBarSlot(el)} />
                 <div class="agent-pane-stack-content">
+                    {/* Tab strip floats over the content instead of
+                        reserving its own row (SPEC_AGENT_PANE_TAB_STRIP_
+                        OVERLAY_2026_08_10.md) — with a single conversation
+                        open, the strip is exactly the "+" button's own
+                        28×28px box (shrink-to-fit + hidden-until-2nd-tab,
+                        SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md),
+                        so the conversation renders, and can be scrolled,
+                        underneath the rest of this row — unobstructed except
+                        for wherever a real tab or the "+" actually sits. The
+                        "+" always renders — that's how you'd get to a second
+                        tab — but the tab pill itself stays hidden until
+                        there's something to switch BETWEEN (see visibleTabs
+                        above). */}
+                    <PaneTabStrip
+                        tabs={visibleTabs()}
+                        activeId={activeBlockId()}
+                        getId={(t) => t.blockId}
+                        getLabel={(t) => t.label}
+                        onActivate={handleTabSwitch}
+                        onClose={handleTabClose}
+                        onTabDoubleClick={(t) => t.definitionId && setRenamingBlockId(t.blockId)}
+                        renderLabel={(t) =>
+                            renamingBlockId() === t.blockId && t.definitionId ? (
+                                <PaneTabRenameInput
+                                    initialValue={t.label}
+                                    onConfirm={(title) => void handleTabRenameConfirm(t, title)}
+                                    onCancel={() => setRenamingBlockId(null)}
+                                />
+                            ) : (
+                                <span class="pane-tab-label">{t.label}</span>
+                            )
+                        }
+                        onAdd={() => void handleNewAgentTab()}
+                        addTitle="New tab"
+                    />
                     <Show
                         when={agentId()}
                         fallback={<AgentPicker model={model} />}
