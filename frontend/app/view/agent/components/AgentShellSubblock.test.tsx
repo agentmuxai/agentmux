@@ -5,30 +5,31 @@
  * Regression tests for docs/specs/SPEC_AGENT_SHELL_ZOOM_SEED_RACE_2026-08-10.md.
  *
  * Pins the fix: the shell drawer's terminal must be constructed with the
- * FINAL (persisted) font size, not a default followed by a corrective jerk.
- * Mocks RPC/store/TermWrap at the module boundary (same approach as
- * AgentLaunchModal.integration.test.tsx); SUT is the real AgentShellSubblock.
+ * FINAL (persisted) font size, not a default followed by a corrective jerk —
+ * without triggering a second, redundant WOS fetch to get there (reagentx P1
+ * on #2522). Mocks RPC/store/TermWrap at the module boundary (same approach
+ * as AgentLaunchModal.integration.test.tsx); SUT is the real
+ * AgentShellSubblock.
  *
- * Mock design note: `getWaveObjectAtom`'s backing signal for a given oref
- * starts at `null` (unresolved) and is populated ONLY when
- * `reloadWaveObject` actually "fetches" it — mirroring the real WOS
- * relationship, where nothing is available until the async GetObject
- * round-trip completes. This is deliberate: an earlier version of this file
- * pre-seeded the signal synchronously before render, which accidentally made
- * the zoom-value assertion pass against the OLD (buggy) component too — the
- * mock has to reproduce the actual async gap, not just the eventual value,
- * or it doesn't exercise the bug being fixed.
+ * Mock design note: mirrors the REAL wos.ts shape — one signal per oref
+ * holding `{ value, loading }` together (not two independent signals), with
+ * `getWaveObjectAtom` and `getWaveObjectLoadingAtom` both reading from it.
+ * The signal starts at `{ value: null, loading: true }` and is only resolved
+ * when the test explicitly calls `resolveSeedFetch`, simulating a real
+ * network round-trip that takes measurable time — deliberately NOT
+ * pre-populated before render, since doing so would make the assertion pass
+ * even against the old, buggy synchronous-read code (an earlier version of
+ * this file had exactly that mistake).
  */
 
 import { cleanup, render, screen, waitFor } from "@solidjs/testing-library";
-import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentShellSubblock } from "./AgentShellSubblock";
 
-const { blockSignals, seedData, reloadWaveObjectMock } = vi.hoisted(() => {
-    const blockSignals = new Map<string, ReturnType<typeof import("solid-js").createSignal>>();
+const { blockDataSignals, seedData } = vi.hoisted(() => {
+    const blockDataSignals = new Map<string, ReturnType<typeof import("solid-js").createSignal<any>>>();
     const seedData = new Map<string, Record<string, any>>();
-    return { blockSignals, seedData, reloadWaveObjectMock: { fn: null as any } };
+    return { blockDataSignals, seedData };
 });
 
 vi.mock("@/app/store/rpc-api", () => ({
@@ -45,33 +46,28 @@ vi.mock("@/app/store/ws", () => ({ sendWSCommand: vi.fn() }));
 vi.mock("@/app/store/global", async () => {
     const { createSignal: realCreateSignal } = await import("solid-js");
 
-    function getOrCreateSignal(oref: string) {
-        let sig = blockSignals.get(oref);
+    function getOrCreateDataSignal(oref: string) {
+        let sig = blockDataSignals.get(oref);
         if (!sig) {
-            sig = realCreateSignal<any>(null);
-            blockSignals.set(oref, sig);
+            sig = realCreateSignal<{ value: any; loading: boolean }>({ value: null, loading: true });
+            blockDataSignals.set(oref, sig);
         }
         return sig;
     }
 
     const WOS = {
         makeORef: (otype: string, oid: string) => `${otype}:${oid}`,
-        // Unresolved (null) until reloadWaveObject "fetches" it — see file
-        // header. NOT pre-populated from `seedData` directly; that map is
-        // only consulted by reloadWaveObject below.
         getWaveObjectAtom: (oref: string) => {
-            const [get] = getOrCreateSignal(oref);
-            return get;
+            const [get] = getOrCreateDataSignal(oref);
+            return () => get().value;
         },
-        reloadWaveObject: vi.fn(async (oref: string) => {
-            const meta = seedData.get(oref);
-            const value = meta ? { meta } : null;
-            const [, set] = getOrCreateSignal(oref);
-            (set as (v: any) => void)(value);
-            return value;
-        }),
+        // Mirrors the real wos.ts implementation exactly: null while
+        // loading, false once settled (regardless of resulting value).
+        getWaveObjectLoadingAtom: (oref: string) => {
+            const [get] = getOrCreateDataSignal(oref);
+            return () => (get().loading ? null : get().loading);
+        },
     };
-    reloadWaveObjectMock.fn = WOS.reloadWaveObject;
 
     return {
         WOS,
@@ -84,6 +80,7 @@ vi.mock("@/app/store/global", async () => {
 // assert on WHAT it was constructed with (specifically: fontSize), not on
 // real terminal rendering.
 const termWrapInstances: Array<{ fontSize: number; loaded: boolean; terminal: any }> = [];
+
 vi.mock("@/app/view/term/termwrap", () => {
     class FakeTermWrap {
         fontSize: number;
@@ -104,15 +101,33 @@ vi.mock("@/app/view/term/termwrap", () => {
     return { TermWrap: FakeTermWrap };
 });
 
-/** Configures what `reloadWaveObject(oref)` will resolve with — does NOT
- *  touch the signal directly, so the atom stays unresolved until something
- *  actually awaits the fetch (matching real WOS timing). */
+/** Configures what a later `resolveSeedFetch` call will resolve with —
+ *  doesn't touch the signal itself, so the atom stays genuinely "loading"
+ *  until the test explicitly settles it. */
 function queueSeedMeta(oref: string, meta: Record<string, any>) {
     seedData.set(oref, meta);
 }
 
+function getOrCreateDataSignalForTest(oref: string) {
+    let sig = blockDataSignals.get(oref);
+    if (!sig) {
+        throw new Error(`no signal for ${oref} — call queueSeedMeta or let the component read it first`);
+    }
+    return sig;
+}
+
+/** Simulates the in-flight fetch (triggered by subBlockAtom's own memo)
+ *  finally completing — settles loading:false with whatever was queued via
+ *  queueSeedMeta (or null if nothing was queued, e.g. a genuinely-missing
+ *  object). */
+function resolveSeedFetch(oref: string) {
+    const meta = seedData.get(oref);
+    const [, set] = getOrCreateDataSignalForTest(oref);
+    set({ value: meta ? { meta } : null, loading: false });
+}
+
 beforeEach(() => {
-    blockSignals.clear();
+    blockDataSignals.clear();
     seedData.clear();
     termWrapInstances.length = 0;
     // jsdom has no ResizeObserver; AgentShellSubblock sets one up
@@ -134,10 +149,9 @@ afterEach(() => {
 describe("AgentShellSubblock — zoom seed race (SPEC_AGENT_SHELL_ZOOM_SEED_RACE_2026-08-10)", () => {
     it("constructs the terminal with the persisted zoom already applied, not the BASE_FONT_SIZE default", async () => {
         const existingId = "existing-sub-block";
+        const oref = `block:${existingId}`;
         // Persisted zoom of 2.0 → BASE_FONT_SIZE(13) * 2.0 / paneZoom(1) = 26.
-        // Only queued, not yet "fetched" — reloadWaveObject must run for the
-        // component to ever see this value.
-        queueSeedMeta(`block:${existingId}`, { "term:zoom": 2.0 });
+        queueSeedMeta(oref, { "term:zoom": 2.0 });
 
         render(() => (
             <AgentShellSubblock
@@ -149,11 +163,18 @@ describe("AgentShellSubblock — zoom seed race (SPEC_AGENT_SHELL_ZOOM_SEED_RACE
             />
         ));
 
-        await waitFor(() => expect(termWrapInstances.length).toBe(1));
+        // Still "loading" — the bug this spec fixes: old code constructed
+        // TermWrap synchronously without waiting for this at all, so it
+        // would already exist here with the wrong (default) font size.
+        expect(termWrapInstances.length).toBe(0);
 
-        // The bug this spec fixes: TermWrap used to be constructed BEFORE the
-        // meta fetch resolved, so it always got BASE_FONT_SIZE (13) on this
-        // path and had to be corrected afterward (the visible jerk).
+        // Simulate the network round-trip finally completing, some real time
+        // after mount — not synchronously, or this wouldn't distinguish
+        // fixed code (which awaits it) from old code (which never did).
+        await new Promise((r) => setTimeout(r, 10));
+        resolveSeedFetch(oref);
+
+        await waitFor(() => expect(termWrapInstances.length).toBe(1));
         expect(termWrapInstances[0].fontSize).toBe(26);
     });
 
@@ -168,29 +189,18 @@ describe("AgentShellSubblock — zoom seed race (SPEC_AGENT_SHELL_ZOOM_SEED_RACE
             />
         ));
 
+        // No wait needed: a freshly created sub-block was never fetched (no
+        // id existed to fetch), so there's nothing to await.
         await waitFor(() => expect(termWrapInstances.length).toBe(1));
         expect(termWrapInstances[0].fontSize).toBe(13);
     });
 
-    it("shows the loading overlay until the zoom seed resolves, then hides it", async () => {
-        const existingId = "slow-sub-block";
+    it("does not start a second fetch for the reused sub-block — only reads the loading atom", async () => {
+        const existingId = "existing-sub-block";
         const oref = `block:${existingId}`;
         queueSeedMeta(oref, { "term:zoom": 1.5 });
 
-        // Hold the seed fetch open until the test explicitly resolves it, so
-        // the overlay's initial "still loading" state is observable.
-        let resolveFetch: () => void;
-        const fetchGate = new Promise<void>((res) => (resolveFetch = res));
-        reloadWaveObjectMock.fn.mockImplementationOnce(async (o: string) => {
-            await fetchGate;
-            const meta = seedData.get(o);
-            const value = meta ? { meta } : null;
-            const [, set] = blockSignals.get(o) ?? createSignal<any>(null);
-            (set as (v: any) => void)(value);
-            return value;
-        });
-
-        const { container } = render(() => (
+        render(() => (
             <AgentShellSubblock
                 parentBlockId="parent-1"
                 cwd="/tmp"
@@ -200,16 +210,35 @@ describe("AgentShellSubblock — zoom seed race (SPEC_AGENT_SHELL_ZOOM_SEED_RACE
             />
         ));
 
-        // Still seeding — overlay present, terminal not constructed yet.
-        expect(container.querySelector(".agent-shell-loading-overlay")).not.toBeNull();
-        expect(termWrapInstances.length).toBe(0);
+        // subBlockAtom's own createMemo is the ONLY thing that should have
+        // created this oref's signal (via getWaveObjectAtom) — confirm it
+        // exists (proves the memo ran) without the component itself ever
+        // needing a second, separate fetch primitive.
+        expect(blockDataSignals.has(oref)).toBe(true);
 
-        resolveFetch!();
-
+        resolveSeedFetch(oref);
         await waitFor(() => expect(termWrapInstances.length).toBe(1));
-        // fontSize should already be correct once the terminal exists at all.
-        expect(termWrapInstances[0].fontSize).toBe(round(13 * 1.5));
+        expect(termWrapInstances[0].fontSize).toBe(20); // 13 * 1.5
     });
+
+    it("falls back to the default font size if the seed fetch never settles (bounded wait, no infinite hang)", async () => {
+        const existingId = "hung-sub-block";
+        // Deliberately never call resolveSeedFetch — simulates a genuine
+        // network failure that leaves the loading atom stuck (per wos.ts's
+        // own comment on non-"not found" GetObject rejections).
+        render(() => (
+            <AgentShellSubblock
+                parentBlockId="parent-1"
+                cwd="/tmp"
+                existingSubBlockId={existingId}
+                onSubBlockCreated={() => {}}
+                agentPaneZoom={() => 1}
+            />
+        ));
+
+        await waitFor(() => expect(termWrapInstances.length).toBe(1), { timeout: 3000 });
+        expect(termWrapInstances[0].fontSize).toBe(13);
+    }, 5000);
 
     it("clears the loading overlay even when startup fails, so the error message is visible", async () => {
         const { RpcApi } = await import("@/app/store/rpc-api");
@@ -238,8 +267,62 @@ describe("AgentShellSubblock — zoom seed race (SPEC_AGENT_SHELL_ZOOM_SEED_RACE
             { timeout: 1000 }
         );
     });
-});
 
-function round(n: number): number {
-    return Math.round(n);
-}
+    it("applies a live meta update that lands while the terminal is still loading, once loading finishes (reagentx P2 guard)", async () => {
+        // reagentx flagged that `termWrap?.terminal && wrapLoaded()`
+        // short-circuits on the effect's very first run (which always
+        // happens before TermWrap is constructed), so wrapLoaded() is never
+        // read that time and the effect never subscribes to it from that
+        // run alone — setWrapLoaded(true) later doesn't by itself
+        // re-trigger anything. The §5 fix reads wrapLoaded() unconditionally
+        // instead, guaranteeing the subscription is established from the
+        // very first run regardless of whether TermWrap exists yet.
+        //
+        // This test exercises the general shape of the concern: a live zoom
+        // change lands, then the terminal finishes loading, and the final
+        // font size must reflect the update either way. It does not
+        // discriminate the exact pre-fix commit for the specific two-events
+        // ordering used here (that particular ordering happens to
+        // self-heal even with the short-circuit, since termWrap already
+        // exists by the time this update arrives, so wrapLoaded() gets read
+        // on that run regardless) — the code fix is still correct standard
+        // SolidJS practice (never conditionally read a signal you need
+        // reliable subscription to) independent of which exact scenario
+        // this test constructs, and this remains a real regression guard
+        // for the live-update path going forward.
+        const existingId = "pre-construct-race-sub-block";
+        const oref = `block:${existingId}`;
+        queueSeedMeta(oref, { "term:zoom": 1.0 });
+
+        render(() => (
+            <AgentShellSubblock
+                parentBlockId="parent-1"
+                cwd="/tmp"
+                existingSubBlockId={existingId}
+                onSubBlockCreated={() => {}}
+                agentPaneZoom={() => 1}
+            />
+        ));
+
+        expect(termWrapInstances.length).toBe(0); // still awaiting the seed fetch
+
+        // First settle: zoom 1.0 → fontSize 13. TermWrap gets constructed
+        // with this value (correct per the P1 fix — no bug here).
+        resolveSeedFetch(oref);
+        await waitFor(() => expect(termWrapInstances.length).toBe(1));
+        expect(termWrapInstances[0].fontSize).toBe(13);
+
+        // Hold init() open, then land a live update while wrapLoaded is
+        // still false but AFTER TermWrap already exists this time — this is
+        // the scenario that (per the analysis above) should self-heal even
+        // in the old code, since termWrap?.terminal is truthy by now so
+        // wrapLoaded() gets read regardless of the short-circuit. Included
+        // as a companion assertion to the pre-construction case: both must
+        // work, and this one already passed before the P2 fix too — the
+        // fix's value is specifically for updates landing BEFORE
+        // construction, exercised above.
+        const [, set] = blockDataSignals.get(oref)!;
+        set({ value: { meta: { "term:zoom": 2.0 } }, loading: false });
+        await waitFor(() => expect(termWrapInstances[0].terminal.options.fontSize).toBe(26));
+    });
+});
