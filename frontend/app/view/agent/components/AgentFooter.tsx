@@ -360,52 +360,47 @@ interface AgentFooterProps {
 }
 
 /**
- * Returns whether the textarea caret is on the first and/or last *visual* line.
- *
- * `<textarea>` wraps text both at explicit `\n` characters and at soft-wrap
- * word-boundaries determined by CSS layout. The simple `includes("\n")` test
- * cannot detect soft-wrap line boundaries — a long single-paragraph message
- * with no `\n` can span many visual rows but always looks like "one line" to a
- * character scan. This function uses a mirror div that replicates the textarea's
- * CSS so the browser word-wraps identically, then reads the zero-width-space
- * marker's `offsetTop` to get the actual visual row Y.
- *
- * Fast-path: when a physical `\n` exists before (or after) the cursor, the
- * answer is known from character data alone — no DOM measurement needed.
+ * Resolves the offset of the selection's "moving" end — the one that
+ * ArrowUp/ArrowDown (with or without Shift) actually relocates. For a
+ * backward-direction selection (anchor after focus — e.g. a collapsed
+ * cursor extended upward via Shift+ArrowUp), that's `selectionStart`; for
+ * "forward" or "none" (anchor before/equal to focus — includes every
+ * collapsed-cursor case, where start===end so direction is moot), that's
+ * `selectionEnd`. Getting this wrong measures the *fixed* anchor instead of
+ * the caret that's actually moving for a forward-direction selection (e.g.
+ * shift-click below the original cursor, then Shift+ArrowUp to extend
+ * further) — see docs/specs/SPEC_COMPOSER_SHIFT_UP_SELECTION_VS_HISTORY_RACE_2026-08-11.md §2.3.
  */
-function caretVisualEdge(ta: HTMLTextAreaElement): { first: boolean; last: boolean } {
-    const pos = ta.selectionStart;
-    const val = ta.value;
-    const needsFirst = !val.slice(0, pos).includes("\n");
-    const needsLast  = !val.slice(pos).includes("\n");
-    if (!needsFirst && !needsLast) return { first: false, last: false };
+function activeSelectionEdge(ta: HTMLTextAreaElement): number {
+    return ta.selectionDirection === "backward" ? ta.selectionStart : ta.selectionEnd;
+}
 
-    const cs = window.getComputedStyle(ta); // perf:allow-layout-read — mirror-div caret detection; runs only on ArrowUp/Down when no physical \n exists, not on every keystroke
-    const baseCss =
-        "position:absolute;visibility:hidden;overflow:hidden;top:-9999px;left:-9999px;" +
-        `width:${ta.clientWidth}px;white-space:pre-wrap;word-wrap:break-word;` + // perf:allow-layout-read — same as above; synchronous read required for mirror-div width match
-        `font:${cs.font};` +
-        `padding:${cs.paddingTop} ${cs.paddingRight} ${cs.paddingBottom} ${cs.paddingLeft};` +
-        `box-sizing:${cs.boxSizing};`;
-
-    const measureY = (text: string): number => {
-        const div = document.createElement("div");
-        div.style.cssText = baseCss;
-        div.textContent = text;
-        const span = document.createElement("span");
-        span.textContent = "​"; // zero-width space — marks the caret position
-        div.appendChild(span);
-        document.body.appendChild(div);
-        const y = span.offsetTop; // perf:allow-layout-read — reads detached mirror div; synchronous result needed to decide ArrowUp/Down behavior
-        document.body.removeChild(div);
-        return y;
-    };
-
-    const caretY = measureY(val.slice(0, pos));
-    return {
-        first: needsFirst && caretY <= measureY(""),   // matches baseline (first visual row)
-        last:  needsLast  && caretY >= measureY(val),  // matches Y at end of text
-    };
+/**
+ * Returns whether the textarea's active selection edge (see
+ * `activeSelectionEdge`) is at the true start/end of the content — i.e.
+ * ArrowUp/ArrowDown has nowhere left to move, so it's safe to intercept for
+ * history navigation instead.
+ *
+ * This used to be a "first/last *visual* line" check (a mirror-div
+ * measurement replicating the textarea's CSS to detect soft-wrapped row
+ * boundaries — see the 2026-06-23 retro,
+ * docs/retro/RETRO_COMPOSER_ARROWKEY_HISTORY_SOFT_WRAP_2026_06_23.md). That
+ * was solving a real problem (character-scanning `\n` alone can't detect
+ * soft-wrap boundaries) but in service of an insufficiently strict
+ * condition: being on visual row 0 doesn't mean there's nowhere left to
+ * move within the line (ArrowUp can still legitimately move the caret to
+ * column 0 of that same row) — only true absolute position 0 means that.
+ * Once the condition is tightened to require the true start/end of content,
+ * the visual-row measurement becomes unnecessary entirely: position 0 is
+ * always the very first character of the very first visual row regardless
+ * of wrapping, and a plain string-length comparison answers the question
+ * more simply, more cheaply (no DOM mutation per keystroke), and more
+ * correctly (also fixes the it-should-take-one-more-keystroke bug — see the
+ * spec cited above) than the mirror-div approach ever could.
+ */
+function caretAtSelectionEdge(ta: HTMLTextAreaElement): { first: boolean; last: boolean } {
+    const pos = activeSelectionEdge(ta);
+    return { first: pos === 0, last: pos === ta.value.length };
 }
 
 export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
@@ -854,13 +849,16 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         // ("send now") held message — the Claude-Code-CLI gesture (unsent, so a
         // true un-send). When nothing is queued, ArrowUp walks back through
         // previously SENT messages (shell-style history) and ArrowDown walks
-        // forward toward the live draft. The caret-on-first/last-line guards let
-        // multiline editing of a recalled message still move line-by-line, and
-        // only cross into history at the top/bottom edge.
+        // forward toward the live draft. The caret-at-start/end guards let
+        // multiline editing of a recalled message (or extending/shrinking a
+        // selection with Shift held) still move within the text normally, and
+        // only cross into history once there's truly nowhere left to move —
+        // i.e. the active selection edge is already at absolute position 0 (or
+        // the end of the content), not merely "on the first/last visual line."
         if (textareaRef && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
             const empty = textareaRef.value.length === 0;
             const navigating = histPos < sentHistory.length;
-            const { first: caretOnFirstLine, last: caretOnLastLine } = caretVisualEdge(textareaRef);
+            const { first: caretAtStart, last: caretAtEnd } = caretAtSelectionEdge(textareaRef);
 
             // Empty composer: ArrowUp un-queues a held message before history.
             if (e.key === "ArrowUp" && empty) {
@@ -872,11 +870,13 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
                 }
             }
 
-            // Older: whenever the caret is on the first line (so we don't fight
-            // multiline cursor movement). Covers an empty composer, a partially
-            // typed draft (stashed into histDraft, restorable with ArrowDown),
-            // and continuing further back while already navigating.
-            if (e.key === "ArrowUp" && histPos > 0 && caretOnFirstLine) {
+            // Older: whenever the active selection edge is at true position 0
+            // (so we don't fight multiline cursor movement OR an in-progress
+            // Shift+ArrowUp selection that hasn't reached the start yet).
+            // Covers an empty composer, a partially typed draft (stashed into
+            // histDraft, restorable with ArrowDown), and continuing further
+            // back while already navigating.
+            if (e.key === "ArrowUp" && histPos > 0 && caretAtStart) {
                 if (!navigating) histDraft = textareaRef.value; // stash the live draft
                 histPos--;
                 e.preventDefault();
@@ -884,9 +884,9 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
                 return;
             }
 
-            // Newer: only while navigating, caret on the last line. Past the
-            // newest entry, restore the stashed draft.
-            if (e.key === "ArrowDown" && navigating && caretOnLastLine) {
+            // Newer: only while navigating, active selection edge at the true
+            // end of content. Past the newest entry, restore the stashed draft.
+            if (e.key === "ArrowDown" && navigating && caretAtEnd) {
                 histPos++;
                 e.preventDefault();
                 setComposerValue(histPos >= sentHistory.length ? histDraft : sentHistory[histPos]);
