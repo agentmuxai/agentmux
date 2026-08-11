@@ -780,9 +780,19 @@ const AgentPresentationView = ({
     const [showLoadingOverlay, setShowLoadingOverlay] = createSignal(true);
     let cancelSettleWait: (() => void) | undefined;
     let loadingOverlayFadeTimeout: ReturnType<typeof setTimeout> | undefined;
+    // Two extra rAFs between "settle detected" and actually starting the
+    // fade — see the doc comment on scheduleOnSettle's call site below for
+    // why: Long-Task quiet alone can be reached before the browser has
+    // actually PAINTED this pane's content (live-reported flicker,
+    // 2026-08-11). Tracked so a pane close mid-transition doesn't write to
+    // disposed signals.
+    let settlePaintRaf1: number | undefined;
+    let settlePaintRaf2: number | undefined;
     onCleanup(() => {
         cancelSettleWait?.();
         clearTimeout(loadingOverlayFadeTimeout);
+        if (settlePaintRaf1 !== undefined) cancelAnimationFrame(settlePaintRaf1);
+        if (settlePaintRaf2 !== undefined) cancelAnimationFrame(settlePaintRaf2);
     });
     const history = useHistoryPagination({
         blockId: model.blockId,
@@ -795,8 +805,30 @@ const AgentPresentationView = ({
         onHistoryReady: () => {
             historyReadyFn?.();
             cancelSettleWait = scheduleOnSettle(() => {
-                setHistoryLoaded(true);
-                loadingOverlayFadeTimeout = setTimeout(() => setShowLoadingOverlay(false), 220);
+                // `scheduleOnSettle` only watches for Long-Task quiet
+                // (no synchronous block >50ms) — but this pane's actual
+                // reveal work (AgentDocumentVirtualList's measure
+                // ResizeObserver, scroll-pin/anchor-restore effects) is
+                // spread across several async/RAF-scheduled steps that
+                // never register as one long task each. "No long tasks
+                // observed" can therefore be reached before the browser has
+                // actually PAINTED the resulting rows — starting the fade
+                // there let the spinner finish disappearing while the pane
+                // was still genuinely blank underneath, then the real
+                // content popped in abruptly once that async chain finally
+                // caught up (live-reported flicker, 2026-08-11, repro:
+                // switch tabs, screenshot-burst the transition — spinner
+                // fully faded by ~400ms, content not visible until ~500ms).
+                // A double requestAnimationFrame is the standard "wait for
+                // an actual paint to have happened" technique: the second
+                // callback is guaranteed to run only after whatever was
+                // queued as of the first one's frame has been painted.
+                settlePaintRaf1 = requestAnimationFrame(() => {
+                    settlePaintRaf2 = requestAnimationFrame(() => {
+                        setHistoryLoaded(true);
+                        loadingOverlayFadeTimeout = setTimeout(() => setShowLoadingOverlay(false), 220);
+                    });
+                });
             });
         },
         // Schema v2: apply DocumentState + pane overlay after NDJSON replay.
