@@ -90,7 +90,7 @@ import { SlashCommandPicker } from "./components/SlashCommandPicker";
 import { SlashHelpPanel } from "./components/SlashHelpPanel";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { createBlock, getApi, openOrFocusPaneByView, pushNotification, refocusNode, WOS } from "@/app/store/global";
+import { atoms, createBlock, getApi, openOrFocusPaneByView, pushNotification, refocusNode, WOS } from "@/app/store/global";
 import { ObjectService } from "@/app/store/services";
 import { ConfirmModal } from "@/element/modal";
 import { ModalLayer } from "@/element/ModalLayer";
@@ -1843,7 +1843,10 @@ const AgentPresentationView = ({
                 blank while it replays. See
                 docs/specs/REPORT_AGENT_PANE_BLANK_LOAD_BRAIN_INDICATOR_2026_07_04.md. */}
             <Show when={showLoadingOverlay()}>
-                <div class="agent-pane-loading-overlay">
+                <div
+                    class="agent-pane-loading-overlay"
+                    classList={{ "is-fading": historyLoaded(), "is-reduced-motion": atoms.prefersReducedMotionAtom() }}
+                >
                     <BrainSpinner fading={historyLoaded()} />
                 </div>
             </Show>
