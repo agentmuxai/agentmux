@@ -331,6 +331,13 @@ pub const COMMAND_BUNDLE_IMPORT: &str = "bundle.import";
 // takes the same file plus a selection and writes only what was chosen.
 pub const COMMAND_BUNDLE_IMPORT_PREVIEW: &str = "bundle.import.preview";
 pub const COMMAND_BUNDLE_IMPORT_COMMIT: &str = "bundle.import.commit";
+// ABF v0.2 §2.3 (SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_
+// 2026_08_10.md) — agent-scoped export/import carrying native memory
+// alongside the normal bundle components. bundle.export/bundle.import stay
+// agent-less (bundles are reusable across agents); these are the only
+// entry points that touch db_agent_native_memory.
+pub const COMMAND_BUNDLE_EXPORT_FOR_AGENT: &str = "bundle.export_for_agent";
+pub const COMMAND_BUNDLE_IMPORT_FOR_AGENT: &str = "bundle.import_for_agent";
 // Deprecated `preset.*` aliases — kept wired for one release (remove in Phase 4).
 pub const COMMAND_PRESET_LIST: &str = "preset.list";
 pub const COMMAND_PRESET_GET: &str = "preset.get";
