@@ -96,12 +96,15 @@ pub struct BundleExport {
     pub warnings: Vec<String>,
 }
 
+// `pub(crate)` so `bundle_validate.rs` can parse `context_files` the exact
+// same way export does — a single shared shape means the two can never
+// silently disagree on what a context-file entry looks like.
 #[derive(Debug, serde::Deserialize, Default)]
-struct ContextFileEntry {
+pub(crate) struct ContextFileEntry {
     #[serde(default)]
-    path: String,
+    pub(crate) path: String,
     #[serde(default)]
-    content: String,
+    pub(crate) content: String,
 }
 
 /// Flag names (case/dash/underscore-insensitive, `-`/`--` prefix optional)

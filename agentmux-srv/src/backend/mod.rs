@@ -8,6 +8,7 @@ pub mod agent_session;
 pub mod blockcontroller;
 pub mod bundle_export;
 pub mod bundle_import;
+pub mod bundle_validate;
 pub mod dock_snapshot;
 pub mod mcp_probe;
 pub mod mcp_seed;

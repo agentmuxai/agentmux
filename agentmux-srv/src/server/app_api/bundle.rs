@@ -30,6 +30,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_bundle_import_commit(engine, state);
     register_bundle_export_for_agent(engine, state);
     register_bundle_import_for_agent(engine, state);
+    register_bundle_validate(engine, state);
 }
 
 /// Raw `[{path, content}]` entry shape, shared by `bundle.import`'s `files`
@@ -103,6 +104,12 @@ fn register_bundle_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
         })
     };
     engine.register_handler(COMMAND_BUNDLE_GET, make(state.clone()));
+}
+
+fn register_bundle_validate(engine: &Arc<WshRpcEngine>, _state: &AppState) {
+    let handler: crate::backend::rpc::engine::CommandHandler =
+        Box::new(move |data, _ctx| Box::pin(async move { Ok(Some(bundle_validate_impl(data)?)) }));
+    engine.register_handler(COMMAND_BUNDLE_VALIDATE, handler);
 }
 
 fn register_bundle_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
