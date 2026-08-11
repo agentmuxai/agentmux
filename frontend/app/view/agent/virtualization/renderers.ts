@@ -155,6 +155,8 @@ export const STREAMING_CAPABLE: Record<NodeKind, boolean> = {
     session_outcome: false,
     // Render-time synthetic calendar separator (Agent History view) — static.
     day_divider: false,
+    // Render-time synthetic link row (live view) — static.
+    history_link: false,
 };
 
 /**
@@ -176,6 +178,7 @@ export function estimateNode(node: DocumentNode, state: DocumentState): number {
         case "compaction_started": return 32;
         case "session_outcome":   return 48;
         case "day_divider":       return 32;
+        case "history_link":      return 40;
     }
 }
 
@@ -218,6 +221,7 @@ export function estimateNodeForState(
             case "compaction_started": return 32;
             case "session_outcome":   return 48;
             case "day_divider":       return 32;
+        case "history_link":      return 40;
         }
     }
     // expanded
@@ -234,5 +238,6 @@ export function estimateNodeForState(
         case "compaction_started": return 32;
         case "session_outcome":   return 48;
         case "day_divider":       return 32;
+        case "history_link":      return 40;
     }
 }

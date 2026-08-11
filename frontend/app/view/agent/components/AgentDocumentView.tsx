@@ -84,6 +84,10 @@ interface AgentDocumentViewProps {
     /** AgentWorkingRow's current height — forwarded to the list's
      *  stick-to-bottom effect. See AgentDocumentVirtualListProps.workingRowHeight. */
     workingRowHeight?: Accessor<number>;
+    /** Open/focus the Agent History tab — forwarded to the list so a
+     *  `history_link` synthetic row can act on click. See
+     *  SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md §3.2. */
+    onOpenHistory?: () => void;
 }
 
 export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element => {
@@ -184,6 +188,7 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
             blockId={props.blockId}
             layoutView={props.layoutView}
             workingRowHeight={props.workingRowHeight}
+            onOpenHistory={props.onOpenHistory}
             headerSlot={headerSlot()}
         />
     );
