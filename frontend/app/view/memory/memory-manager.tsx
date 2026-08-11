@@ -95,6 +95,10 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
 
     const handleCancel = () => model.cancelDraft();
 
+    const handleValidate = () => {
+        void model.validateDraft();
+    };
+
     const handleDelete = (id: string) => {
         // Confirm via the most boring possible dialog. Bundles can be
         // referenced by running instances; deletion is an explicit user
@@ -111,6 +115,10 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
         const current = model.draftAtom();
         if (!current) return;
         model.setDraft({ ...current, [key]: value });
+        // A validation report reflects the draft AS OF the click; any edit
+        // after that invalidates it — clear rather than leave a stale
+        // "looks good" (or stale error) hanging off text the user changed.
+        model.setValidation(null);
     };
 
     // Single-pane: the detail view (read-only or edit form) shows instead of
@@ -287,6 +295,14 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
                             <div class="memory-view-form-actions">
                                 <button
                                     type="button"
+                                    class="memory-view-validate-btn"
+                                    onClick={handleValidate}
+                                    disabled={model.validatingAtom() || model.savingAtom() || !draft().name.trim()}
+                                >
+                                    {model.validatingAtom() ? "Validating…" : "Validate"}
+                                </button>
+                                <button
+                                    type="button"
                                     class="memory-view-cancel-btn"
                                     onClick={handleCancel}
                                     disabled={model.savingAtom()}
@@ -301,6 +317,42 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
                                     {model.savingAtom() ? "Saving…" : "Save"}
                                 </button>
                             </div>
+
+                            {/* Structural ABF validation results (bundle.validate) —
+                                advisory only, never blocks Save. Cleared on any
+                                further edit (updateDraft) or draft replacement so a
+                                stale report never lingers onto different content. */}
+                            <Show when={model.validationAtom()}>
+                                {(report) => (
+                                    <div
+                                        class="memory-view-validation"
+                                        classList={{ "is-valid": report().is_valid }}
+                                    >
+                                        <Show
+                                            when={report().issues.length > 0}
+                                            fallback={<p class="memory-view-validation-ok">No structural issues found.</p>}
+                                        >
+                                            <ul class="memory-view-validation-list">
+                                                <For each={report().issues}>
+                                                    {(issue) => (
+                                                        <li
+                                                            class="memory-view-validation-item"
+                                                            classList={{
+                                                                "is-error": issue.severity === "error",
+                                                                "is-warning": issue.severity === "warning",
+                                                            }}
+                                                        >
+                                                            <span class="memory-view-validation-field">{issue.field}</span>
+                                                            {": "}
+                                                            {issue.message}
+                                                        </li>
+                                                    )}
+                                                </For>
+                                            </ul>
+                                        </Show>
+                                    </div>
+                                )}
+                            </Show>
 
                             <p class="memory-view-form-hint">
                                 Context files, MCP servers, and skills will be editable in a follow-up — the
