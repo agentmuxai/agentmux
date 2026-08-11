@@ -724,12 +724,22 @@ async fn bundle_import_for_agent_impl(
     }
     if let Some(memory_dir) = memory_dir {
         for path in manifest_memory_paths {
-            let Some(filename) = path.strip_prefix("memory/") else { continue };
+            // reagent P1, PR #2527 (third round): every skip in this loop
+            // must warn — this RPC's whole reason to exist is transferring
+            // memory, and a silent drop here (bundle_id/skills already
+            // created, memory_files_written silently undercounting)
+            // directly contradicts that. Matches the sibling
+            // invalid-filename branch just below, which already warned.
+            let Some(filename) = path.strip_prefix("memory/") else {
+                warnings.push(format!("{path}: components.memory path is not under memory/; skipped"));
+                continue;
+            };
             if crate::server::native_memory_handlers::validate_memory_filename(filename).is_err() {
                 warnings.push(format!("memory/{filename}: not a valid memory filename; skipped"));
                 continue;
             }
             let Some(content) = resolved.files.iter().find(|f| f.path == path).map(|f| f.content.clone()) else {
+                warnings.push(format!("{path}: referenced in components.memory but not found among the bundle's files; skipped"));
                 continue;
             };
             let dest = memory_dir.join(filename);
@@ -2754,6 +2764,48 @@ mod export_import_for_agent_tests {
             files: Some(files),
         }).await.unwrap();
         assert_eq!(result["memory_files_written"], 0);
+        let warnings: Vec<&str> = result["warnings"].as_array().unwrap().iter().map(|w| w.as_str().unwrap()).collect();
+        assert!(
+            warnings.iter().any(|w| w.contains("not a valid memory filename")),
+            "got: {warnings:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn import_for_agent_warns_when_a_declared_memory_path_has_no_matching_content() {
+        // reagent P1, PR #2527 (third round): a components.memory entry
+        // with no matching file among the bundle's contents used to
+        // silently continue with no warning, undercounting
+        // memory_files_written with zero signal to the caller — this RPC
+        // exists specifically to transfer memory, so every skip must warn.
+        let state = test_state();
+        let config_dir = tempfile::tempdir().unwrap();
+        make_agent(&state, "agent-1", "/work/proj", config_dir.path());
+
+        let manifest = serde_json::json!({
+            "$schema": "https://docs.agentmux.ai/schemas/armory-bundle/v0.2/bundle.schema.json",
+            "name": "imported-bundle",
+            "version": "0.1.0",
+            "description": "",
+            "components": { "memory": ["memory/MISSING.md"] },
+            "metadata": {},
+        });
+        // Deliberately no "memory/MISSING.md" entry in files.
+        let files = vec![
+            FileEntry { path: "armory.json".to_string(), content: manifest.to_string() },
+        ];
+        let result = bundle_import_for_agent_impl(&state.id_store, &state.wstore, ImportForAgentReq {
+            agent_id: "agent-1".to_string(),
+            file_path: None,
+            zip_base64: None,
+            files: Some(files),
+        }).await.unwrap();
+        assert_eq!(result["memory_files_written"], 0);
+        let warnings: Vec<&str> = result["warnings"].as_array().unwrap().iter().map(|w| w.as_str().unwrap()).collect();
+        assert!(
+            warnings.iter().any(|w| w.contains("MISSING.md") && w.contains("not found")),
+            "got: {warnings:?}"
+        );
     }
 
     #[tokio::test]
