@@ -721,6 +721,19 @@ pub(crate) async fn bundle_get_impl(
     serde_json::to_value(&memory).map_err(|e| e.to_string())
 }
 
+/// Structurally validate a bundle draft — Armory Bundle Format (ABF)
+/// UI-alignment pass. Takes the SAME payload shape `bundle.upsert` accepts
+/// (reuses its `normalize_bundle_upsert_input`), not just an id, so the
+/// Armory editor's "Validate" button can check an unsaved draft (including a
+/// brand-new bundle with no id yet) rather than only whatever was last
+/// persisted. Read-only: never touches the Store.
+pub(crate) fn bundle_validate_impl(data: serde_json::Value) -> Result<serde_json::Value, String> {
+    let memory: Memory = serde_json::from_value(bundle::normalize_bundle_upsert_input(data))
+        .map_err(|e| format!("bundle.validate: {e}"))?;
+    let report = crate::backend::bundle_validate::validate_bundle(&memory);
+    serde_json::to_value(&report).map_err(|e| e.to_string())
+}
+
 pub(crate) async fn bundle_self_get_impl(
     state: &AppState,
     agent_id: &str,
