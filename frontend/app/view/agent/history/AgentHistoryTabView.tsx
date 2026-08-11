@@ -17,7 +17,7 @@
  * Spec: SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md §3.1.
  */
 
-import type { JSX } from "solid-js";
+import { createMemo, type JSX } from "solid-js";
 import type { AgentViewModel } from "../agent-model";
 import { AgentHistoryView } from "./AgentHistoryView";
 import { HISTORY_SOURCE_BLOCK_ID_META_KEY } from "../open-history-tab";
@@ -32,13 +32,36 @@ export function AgentHistoryTabView({ model }: { model: AgentViewModel }): JSX.E
     // only if somehow absent, matching AgentHistoryView's own default.
     const sourceBlockId = (): string | undefined => block()?.meta?.[HISTORY_SOURCE_BLOCK_ID_META_KEY] as string | undefined;
 
+    // Same clamp/default as AgentPresentationView's own zoomFactor — the
+    // universal zoom framework (Ctrl+/-/0, Ctrl+Wheel) writes `term:zoom`
+    // onto whichever block is focused regardless of view type, so a
+    // history tab needs to read it back the identical way to respond to
+    // zoom at all.
+    const zoomFactor = createMemo(() => {
+        const z = block()?.meta?.["term:zoom"];
+        if (z == null || typeof z !== "number" || isNaN(z)) return 1.0;
+        return Math.max(0.5, Math.min(2.0, z));
+    });
+
     return (
-        <AgentHistoryView
-            blockId={model.blockId}
-            sourceBlockId={sourceBlockId()}
-            outputFormat={outputFormat}
-            agentName={agentName}
-        />
+        // `.agent-view` is not just a marker class — it's the scoping root
+        // essentially every agent-pane stylesheet (font/line-height, the
+        // flex layout .agent-history-view's own `flex: 1 1 auto` depends
+        // on, the whole `.agent-document-scroll-region`/virtualization
+        // tree, zoom) nests under. Without it here, the history tab
+        // rendered with no scrolling, no styling, no formatting, and no
+        // zoom — live-reported by the user right after this shipped, since
+        // this thin wrapper never rendered it at all. AgentPresentationView
+        // is the reference for this exact shape (agent-view.tsx).
+        <div class="agent-view agent-view--presentation" style={{ zoom: zoomFactor(), "--agent-pane-zoom": String(zoomFactor()) }}>
+            <AgentHistoryView
+                blockId={model.blockId}
+                sourceBlockId={sourceBlockId()}
+                outputFormat={outputFormat}
+                agentName={agentName}
+                zoomFactor={zoomFactor}
+            />
+        </div>
     );
 }
 

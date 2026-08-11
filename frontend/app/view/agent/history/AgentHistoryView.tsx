@@ -74,6 +74,19 @@ export interface AgentHistoryViewProps {
     sourceBlockId?: string;
     outputFormat: Accessor<string>;
     agentName?: Accessor<string>;
+    /**
+     * Live per-pane zoom factor (the same CSS `zoom` applied on the
+     * `.agent-view` ancestor). Forwarded to `AgentDocumentView` /
+     * `AgentDocumentVirtualList`, which needs it to normalize the ONE
+     * zoomed read the measure `ResizeObserver` takes
+     * (`getBoundingClientRect().height`) back into unzoomed CSS px — see
+     * that component's own doc comment
+     * (SPEC_AGENT_PANE_VIRTUALIZATION_ZOOM_OVERLAP_2026_06_01). Without
+     * this, any zoom level other than 1 records zoomed heights as if they
+     * were unzoomed, producing overlapping rows (zoom < 1) or oversized
+     * gaps and wrong scroll math (zoom > 1). codex P1 on PR #2542.
+     */
+    zoomFactor?: Accessor<number>;
 }
 
 export function AgentHistoryView(props: AgentHistoryViewProps) {
@@ -240,6 +253,7 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
                     loadingOlder={loadingOlder}
                     blockId={layoutKey}
                     layoutView={layoutView}
+                    zoomFactor={props.zoomFactor}
                 />
             </div>
         </div>
