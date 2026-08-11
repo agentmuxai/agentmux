@@ -59,6 +59,7 @@ export function AgentHistoryTabView({ model }: { model: AgentViewModel }): JSX.E
                 sourceBlockId={sourceBlockId()}
                 outputFormat={outputFormat}
                 agentName={agentName}
+                zoomFactor={zoomFactor}
             />
         </div>
     );
