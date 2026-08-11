@@ -867,6 +867,22 @@ pub fn parse_bundle_import_with_budget(
         }
     }
 
+    // ABF v0.2 §2.3: `parse_bundle_import`/`parse_bundle_import_with_budget`
+    // are called by every agent-LESS import path (bundle.import,
+    // bundle.import.preview, bundle.import.commit) — none of them has an
+    // agent to write memory into. A components.memory key is explicitly
+    // skipped here, with a warning rather than silently dropped, so a
+    // caller inspecting the response can tell the memory component was
+    // present but requires bundle.import_for_agent, not that it was
+    // missing from the source bundle. Fixing this once here, rather than
+    // in each of the three RPC handlers, means it applies uniformly by
+    // construction — no handler can forget the check.
+    if components.and_then(|c| c.get("memory")).is_some() {
+        warnings.push(
+            "components.memory: present but ignored — memory requires an agent-scoped import (bundle.import_for_agent), not bundle.import".to_string(),
+        );
+    }
+
     Ok(ParsedBundleImport {
         name,
         description,
@@ -1462,6 +1478,35 @@ mod tests {
         ];
         let result = parse_bundle_import(&files).unwrap();
         assert!(result.warnings.iter().any(|w| w.contains("provider variants exceeds the limit")));
+    }
+
+    #[test]
+    fn a_memory_component_is_warned_about_and_ignored_by_the_agent_less_parser() {
+        // ABF v0.2 §2.3: parse_bundle_import (shared by bundle.import and
+        // bundle.import.preview/.commit, all agent-less) must not silently
+        // drop a components.memory key — it needs bundle.import_for_agent
+        // instead, and the response should say so.
+        let files = vec![
+            file("armory.json", &minimal_manifest(serde_json::json!({
+                "instructions": ["instructions/AGENTS.md"],
+                "memory": ["memory/MEMORY.md"],
+            }))),
+            file("instructions/AGENTS.md", "Be concise."),
+        ];
+        let result = parse_bundle_import(&files).unwrap();
+        assert!(result.warnings.iter().any(|w| w.contains("components.memory") && w.contains("bundle.import_for_agent")));
+    }
+
+    #[test]
+    fn no_memory_warning_when_the_component_is_absent() {
+        let files = vec![
+            file("armory.json", &minimal_manifest(serde_json::json!({
+                "instructions": ["instructions/AGENTS.md"],
+            }))),
+            file("instructions/AGENTS.md", "Be concise."),
+        ];
+        let result = parse_bundle_import(&files).unwrap();
+        assert!(!result.warnings.iter().any(|w| w.contains("components.memory")));
     }
 
     #[test]
