@@ -2575,6 +2575,45 @@ mod export_import_for_agent_tests {
     }
 
     #[tokio::test]
+    async fn export_for_agent_repeats_the_truncation_warning_on_an_unchanged_oversized_file() {
+        // reagent P2, PR #2527 (second round): the truncation check used
+        // to run only inside the "changed since last mirror" branch, so
+        // a SECOND export of the same still-oversized, unchanged file
+        // silently stopped warning even though the exported content was
+        // still truncated every time.
+        let state = test_state();
+        let config_dir = tempfile::tempdir().unwrap();
+        make_agent(&state, "agent-1", "/work/proj", config_dir.path());
+        make_bundle(&state, "bundle-1", "Be helpful.");
+
+        let memory_dir = config_dir.path().join("projects").join("-work-proj").join("memory");
+        std::fs::create_dir_all(&memory_dir).unwrap();
+        let oversized = "x".repeat(10 * 1024 * 1024 + 1);
+        std::fs::write(memory_dir.join("MEMORY.md"), &oversized).unwrap();
+
+        // First export mirrors it (and warns).
+        let _ = bundle_export_for_agent_impl(&state.id_store, &state.wstore, ExportForAgentReq {
+            bundle_id: "bundle-1".to_string(),
+            agent_id: "agent-1".to_string(),
+            format: String::new(),
+        }).await.unwrap();
+
+        // Second export: file on disk is byte-for-byte unchanged (same
+        // size+mtime), so the mirror-refresh's "unchanged" fast path
+        // applies — the warning must still fire.
+        let result = bundle_export_for_agent_impl(&state.id_store, &state.wstore, ExportForAgentReq {
+            bundle_id: "bundle-1".to_string(),
+            agent_id: "agent-1".to_string(),
+            format: String::new(),
+        }).await.unwrap();
+        let warnings: Vec<&str> = result["warnings"].as_array().unwrap().iter().map(|w| w.as_str().unwrap()).collect();
+        assert!(
+            warnings.iter().any(|w| w.contains("MEMORY.md") && w.contains("truncated")),
+            "truncation warning must repeat on a second export of the same unchanged oversized file, got: {warnings:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn import_for_agent_writes_memory_to_both_live_fs_and_mirror() {
         let state = test_state();
         let config_dir = tempfile::tempdir().unwrap();
