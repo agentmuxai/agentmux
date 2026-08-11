@@ -98,6 +98,34 @@ describe("validateDraft", () => {
         expect(model.validationAtom()).toBeNull();
     });
 
+    test("a stale response is ignored if the draft changed before the RPC resolved", async () => {
+        // reagent P1, PR #2532: Cancel/"+ New Bundle"/another row's Edit
+        // are still clickable while validatingAtom() is true, so a report
+        // for the OLD draft must not land on whatever draft the user has
+        // switched to by the time the RPC resolves. Same race class
+        // saveDraft's own identity-equality guard already covers.
+        const { MemoryViewModel } = await import("./memory-model");
+        let resolveRpc: (report: BundleValidationReport) => void = () => {};
+        validateBundleMock.mockReturnValueOnce(
+            new Promise<BundleValidationReport>((resolve) => {
+                resolveRpc = resolve;
+            }),
+        );
+
+        const model = new MemoryViewModel();
+        model.startNew();
+        const inFlight = model.validateDraft();
+
+        // User cancels (or switches to a different draft) while the RPC is
+        // still pending.
+        model.cancelDraft();
+
+        resolveRpc({ is_valid: true, issues: [] });
+        await inFlight;
+
+        expect(model.validationAtom()).toBeNull();
+    });
+
     test("a failed RPC call sets errorAtom instead of validationAtom", async () => {
         const { MemoryViewModel } = await import("./memory-model");
         validateBundleMock.mockRejectedValueOnce(new Error("boom"));

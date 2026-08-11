@@ -325,7 +325,17 @@ export class MemoryViewModel implements ViewModel {
         this.setError(null);
         try {
             const report = await RpcApi.ValidateBundleCommand(TabRpcClient, draftToWire(draft));
-            this.setValidation(report);
+            // Same identity-equality race guard as saveDraft (reagent P1,
+            // PR #749 round 6 originally, now PR #2532): Cancel, "+ New
+            // Bundle", and another row's Edit button are all still
+            // clickable while this request is in flight (validatingAtom
+            // does not disable them). Without this check, a report for
+            // the OLD draft would land on whatever draft the user has
+            // switched to by the time the RPC resolves — the exact
+            // staleness this feature exists to prevent.
+            if (this.draftAtom() === draft) {
+                this.setValidation(report);
+            }
         } catch (e) {
             this.setError(`Validate failed: ${(e as Error).message ?? e}`);
         } finally {
