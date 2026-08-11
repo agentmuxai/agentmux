@@ -46,6 +46,15 @@ export interface SubmenuHoverController {
      * this after `autoUpdate` repositions the same element mid-hover.
      */
     setSubmenuEl(el: { getBoundingClientRect(): DOMRect } | null): void;
+    /**
+     * Force-close now (cancelling any pending open too), bypassing the open
+     * delay and safe-triangle grace period entirely. For an explicit new
+     * selection elsewhere — e.g. a peer/sibling item being entered — there is
+     * no "approach" to protect, so this closes unconditionally rather than
+     * waiting on timers or polygon tracking. The controller stays alive and
+     * reusable for a future onTriggerEnter (unlike dispose()).
+     */
+    close(): void;
     /** Tear down all timers/listeners. Call on unmount / menu close. */
     dispose(): void;
 }
@@ -186,6 +195,11 @@ export function createSubmenuHover(opts: SubmenuHoverOptions): SubmenuHoverContr
 
         setSubmenuEl(el) {
             submenuEl = el;
+        },
+
+        close() {
+            clearOpenTimer();
+            doClose();
         },
 
         dispose() {
