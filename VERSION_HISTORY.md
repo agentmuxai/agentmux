@@ -1,5 +1,15 @@
 # AgentMux Version History
 
+## 0.55.4 — 2026-08-10
+
+- feat(agent-pane): AskUserQuestion countdown hides on hover, resumes after 15s
+- fix(agent-pane): ghost-text next-prompt suggestion restores when composer is cleared
+- fix(agent-pane): dock row for a fast-finishing backgrounded Bash call no longer sticks running forever
+- feat(muxspect): surface run_in_background on dock entries — closes the blind spot behind issue #2518
+- fix(armory): rename ABF requirements.json provider key to credentialProvider
+- feat(armory): provider-scoped bundle instructions (ABF v0.2 storage + export/import)
+
+
 ## 0.55.3 — 2026-08-10
 
 - feat(agent-pane): session-scoped scrollback — clamp at fresh session boundary, demote 'Session continued' divider
