@@ -10,10 +10,17 @@ import { Mermaid, MermaidErrorFallback } from "./markdown-mermaid";
 const Code = ({ className = "", children }: { className?: string; children: any }) => {
     if (/\blanguage-mermaid\b/.test(className)) {
         const text = Array.isArray(children) ? children.join("") : String(children ?? "");
+        // Mermaid renders an SVG diagram in place of the source text, so
+        // reading .textContent off the rendered DOM (CodeBlock's copy path)
+        // would pick up the diagram's own <text> label nodes instead of the
+        // chart source. Carry the original source alongside it so copy can
+        // recover it directly.
         return (
-            <ErrorBoundary fallback={<MermaidErrorFallback chart={text} />}>
-                <Mermaid chart={text} />
-            </ErrorBoundary>
+            <div data-raw-code={text}>
+                <ErrorBoundary fallback={<MermaidErrorFallback chart={text} />}>
+                    <Mermaid chart={text} />
+                </ErrorBoundary>
+            </div>
         );
     }
     return <code class={className}>{children}</code>;
@@ -34,7 +41,9 @@ const CodeBlock = ({ children, onClickExecute }: CodeBlockProps) => {
     let contentRef: HTMLDivElement | undefined;
 
     const getTextContent = (): string => {
-        return (contentRef?.textContent ?? "").replace(/\n$/, "");
+        const rawCode = contentRef?.querySelector<HTMLElement>("[data-raw-code]");
+        const text = rawCode ? (rawCode.dataset.rawCode ?? "") : (contentRef?.textContent ?? "");
+        return text.replace(/\n$/, "");
     };
 
     const handleCopy = async (e: MouseEvent) => {
