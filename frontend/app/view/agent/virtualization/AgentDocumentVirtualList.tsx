@@ -28,7 +28,7 @@
  * the state into the DOM but never reads it back.
  */
 
-import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, untrack, type Accessor, type JSX } from "solid-js";
+import { batch, createEffect, createMemo, createSignal, onCleanup, onMount, Show, untrack, type Accessor, type JSX } from "solid-js";
 import { trail } from "@/log/render-trail";
 import { Key } from "@solid-primitives/keyed";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
@@ -276,37 +276,62 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             const vnodes = partition().virtualizedNodes;
             const docState = props.documentState();
             const ids = vnodes.map((n) => n.id);
-            dispatchLayoutIfRegistered(blockId, { type: "NodesChanged", orderedIds: ids });
-            const idSet = new Set(ids);
-            for (const k of pushedExpansion.keys()) if (!idSet.has(k)) pushedExpansion.delete(k);
-            for (const k of estimatesPushed) if (!idSet.has(k)) estimatesPushed.delete(k);
-            for (const node of vnodes) {
-                if (!estimatesPushed.has(node.id)) {
-                    estimatesPushed.add(node.id);
-                    dispatchLayoutIfRegistered(blockId, {
-                        type: "EstimateSet",
-                        nodeId: node.id,
-                        state: "collapsed",
-                        cssPx: estimateNodeForState(node, "collapsed", docState),
-                    });
-                    dispatchLayoutIfRegistered(blockId, {
-                        type: "EstimateSet",
-                        nodeId: node.id,
-                        state: "expanded",
-                        cssPx: estimateNodeForState(node, "expanded", docState),
-                    });
+            // `dispatchLayoutIfRegistered` synchronously calls the slot's
+            // `proj.layout(view)` callback — which IS `setLayoutView`, a real
+            // Solid signal setter (registerLayoutPane wires it directly). Each
+            // of the dispatches below (NodesChanged, then up to 2×N
+            // EstimateSet, then up to N ExpansionResolved) can independently
+            // produce a DIFFERENT LayoutView and fire it unbatched — so
+            // `windowedRows()` (and the `<Key>` it drives) could re-render
+            // several times per logical document update, each against a
+            // PARTIALLY-updated slice (e.g. `NodesChanged` landing with a
+            // node's estimate/expansion not yet pushed). On a small
+            // incremental change (the common live-streaming case) the
+            // intermediate views are usually equivalent enough that nothing
+            // visibly breaks — but a LARGE simultaneous batch (every node
+            // changing identity at once, e.g. AgentHistoryView's wholesale
+            // reparse-on-loadOlder, SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md)
+            // hits this glitch window hard enough to crash `reconcileArrays`
+            // ("replaceChild: node not a child" — a stale intermediate
+            // `windowedRows()` row still referencing a DOM node an even-more-
+            // intermediate pass had already removed). `batch()` defers every
+            // signal write started inside it until the callback returns, so
+            // `windowedRows()` observes exactly ONE consistent LayoutView per
+            // logical update instead of N glitching ones — the standard Solid
+            // fix for exactly this class of mid-transaction inconsistency.
+            batch(() => {
+                dispatchLayoutIfRegistered(blockId, { type: "NodesChanged", orderedIds: ids });
+                const idSet = new Set(ids);
+                for (const k of pushedExpansion.keys()) if (!idSet.has(k)) pushedExpansion.delete(k);
+                for (const k of estimatesPushed) if (!idSet.has(k)) estimatesPushed.delete(k);
+                for (const node of vnodes) {
+                    if (!estimatesPushed.has(node.id)) {
+                        estimatesPushed.add(node.id);
+                        dispatchLayoutIfRegistered(blockId, {
+                            type: "EstimateSet",
+                            nodeId: node.id,
+                            state: "collapsed",
+                            cssPx: estimateNodeForState(node, "collapsed", docState),
+                        });
+                        dispatchLayoutIfRegistered(blockId, {
+                            type: "EstimateSet",
+                            nodeId: node.id,
+                            state: "expanded",
+                            cssPx: estimateNodeForState(node, "expanded", docState),
+                        });
+                    }
+                    const next = currentExpansion(node, docState);
+                    const key = JSON.stringify(next);
+                    if (pushedExpansion.get(node.id) !== key) {
+                        pushedExpansion.set(node.id, key);
+                        dispatchLayoutIfRegistered(blockId, {
+                            type: "ExpansionResolved",
+                            nodeId: node.id,
+                            to: next,
+                        });
+                    }
                 }
-                const next = currentExpansion(node, docState);
-                const key = JSON.stringify(next);
-                if (pushedExpansion.get(node.id) !== key) {
-                    pushedExpansion.set(node.id, key);
-                    dispatchLayoutIfRegistered(blockId, {
-                        type: "ExpansionResolved",
-                        nodeId: node.id,
-                        to: next,
-                    });
-                }
-            }
+            });
         });
     }
 
