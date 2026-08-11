@@ -172,6 +172,44 @@ describe("createSubmenuHover", () => {
         });
     });
 
+    describe("close", () => {
+        it("closes immediately, bypassing any safe-triangle grace period", () => {
+            controller.setSubmenuEl({ getBoundingClientRect: () => SUBMENU_RECT });
+            controller.onTriggerEnter();
+            vi.advanceTimersByTime(90);
+            expect(onOpen).toHaveBeenCalledOnce();
+
+            controller.close();
+            expect(onClose).toHaveBeenCalledOnce();
+        });
+
+        it("cancels a pending open without ever calling onOpen or onClose", () => {
+            controller.onTriggerEnter();
+            vi.advanceTimersByTime(50);
+            controller.close();
+            vi.advanceTimersByTime(100);
+            expect(onOpen).not.toHaveBeenCalled();
+            expect(onClose).not.toHaveBeenCalled();
+        });
+
+        it("is a no-op when already closed", () => {
+            controller.close();
+            expect(onClose).not.toHaveBeenCalled();
+        });
+
+        it("leaves the controller reusable for a later onTriggerEnter", () => {
+            controller.setSubmenuEl({ getBoundingClientRect: () => SUBMENU_RECT });
+            controller.onTriggerEnter();
+            vi.advanceTimersByTime(90);
+            controller.close();
+            onOpen.mockClear();
+
+            controller.onTriggerEnter();
+            vi.advanceTimersByTime(90);
+            expect(onOpen).toHaveBeenCalledOnce();
+        });
+    });
+
     describe("dispose", () => {
         it("removes the mousemove listener and stops pending timers without calling onClose", () => {
             controller.setSubmenuEl({ getBoundingClientRect: () => SUBMENU_RECT });

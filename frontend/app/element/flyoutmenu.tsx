@@ -43,6 +43,31 @@ function styleToString(pos: MenuPositionResult): string {
     );
 }
 
+/**
+ * Tracks the hover controllers of peer (same-level) menu items so entering
+ * one can force-close any other peer's still-open submenu immediately —
+ * matching how a native/VS-Code-style menu behaves for an explicit new
+ * selection, on top of (not instead of) the safe-triangle grace period each
+ * controller gives its OWN trigger-to-submenu approach. Scoped one per menu
+ * level (one per MenuBody, one per SubMenu) — peers never reach across
+ * levels, so a still-open descendant closes naturally via Solid unmounting
+ * it when its own ancestor's <Show> flips off, not through this registry.
+ */
+function createPeerRegistry() {
+    const peers = new Map<string, SubmenuHoverController>();
+    return {
+        register(key: string, hover: SubmenuHoverController) {
+            peers.set(key, hover);
+            onCleanup(() => peers.delete(key));
+        },
+        closeOthers(key: string) {
+            for (const [k, h] of peers) {
+                if (k !== key) h.close();
+            }
+        },
+    };
+}
+
 type MenuProps = {
     items: MenuItem[];
     className?: string;
@@ -275,6 +300,8 @@ const MenuBody = (props: MenuBodyProps): JSX.Element => {
         props.registerFloating(el);
     };
 
+    const peers = createPeerRegistry();
+
     return (
         <div
             class={clsx("menu", props.className, { "menu--mirrored": props.mirrored })}
@@ -300,12 +327,17 @@ const MenuBody = (props: MenuBodyProps): JSX.Element => {
                               onClose: () => props.closeSubMenu(key),
                           })
                         : null;
+                    if (hover) peers.register(key, hover);
                     onCleanup(() => hover?.dispose());
 
                     const menuItemProps = {
                         class: clsx("menu-item", { active: isActive() }),
                         onMouseEnter: (event: MouseEvent) => {
                             props.handleMouseEnterItem(event, null, index(), item);
+                            // An explicit new selection at this level closes any
+                            // other open peer submenu right away — no triangle to
+                            // protect toward a row the cursor isn't heading for.
+                            peers.closeOthers(key);
                             hover?.onTriggerEnter();
                         },
                         onMouseLeave: (event: MouseEvent) => hover?.onTriggerLeave(event),
@@ -468,6 +500,8 @@ const SubMenu = (props: SubMenuProps): JSX.Element => {
 
     onCleanup(() => cleanupAutoUpdate?.());
 
+    const peers = createPeerRegistry();
+
     const subMenu = (
         <div
             ref={registerSubMenu}
@@ -488,12 +522,14 @@ const SubMenu = (props: SubMenuProps): JSX.Element => {
                               onClose: () => props.closeSubMenu(newKey),
                           })
                         : null;
+                    if (hover) peers.register(newKey, hover);
                     onCleanup(() => hover?.dispose());
 
                     const menuItemProps = {
                         class: clsx("menu-item", { active: isActive() }),
                         onMouseEnter: (event: MouseEvent) => {
                             props.handleMouseEnterItem(event, props.parentKey, idx(), item);
+                            peers.closeOthers(newKey);
                             hover?.onTriggerEnter();
                         },
                         onMouseLeave: (event: MouseEvent) => hover?.onTriggerLeave(event),
