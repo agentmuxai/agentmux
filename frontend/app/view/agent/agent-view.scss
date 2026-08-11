@@ -66,20 +66,31 @@
     // rule) still applies against this box, the new containing block, so a
     // strip with many tabs open still can't overflow the pane.
     //
-    // z-index: reuses --z-pane-overlay (previously the progress bar's own
-    // token, now unused there — §"Marching-ants" below no longer competes
-    // for this stacking level at all, living in its own slot outside this
-    // element). .agent-document-scroll-region (_document.scss) establishes
-    // its OWN stacking context (position + z-index together) for its
-    // higher internal z-index values (up to 100) — those are isolated
-    // inside it per the CSS stacking-context spec and can never climb out
-    // to compete with a sibling here, so this only needs to clear
-    // .agent-view's own default (z-index: auto) stacking, not that 100.
+    // z-index: MUST clear `.agent-pane-loading-overlay`'s
+    // `--zindex-elem-modal` (100, theme.scss) — reagentx P1 on #2526,
+    // caught on re-review. `.agent-view` (that overlay's direct parent, a
+    // sibling of `.pane-tab-strip` right here) has `position: relative` and
+    // `container-type: inline-size` but NO explicit `z-index` — an earlier
+    // version of this comment assumed `container-type` alone forces
+    // stacking-context creation the way `contain: layout`/`paint`/
+    // `content`/`strict` do; verified against MDN's `contain` page that
+    // `size`/`inline-size` containment (what `container-type: inline-size`
+    // actually implies, alongside `style`) does NOT — only `layout`/
+    // `paint`/`content`/`strict` do. So `.agent-view` does NOT establish
+    // its own stacking context, and the loading overlay (a direct child of
+    // `.agent-view`, not of `.agent-document-scroll-region` — a different
+    // element from the one this comment used to be about) competes
+    // directly with this sibling using raw z-index. `calc(... + 1)`, not a
+    // hardcoded number, so this stays correct if `--zindex-elem-modal`
+    // ever changes. (`.agent-document-scroll-region`'s OWN internal
+    // z-index:100 in _document.scss is a separate, correctly-isolated
+    // case — that selector sets `position: relative; z-index: 0` together,
+    // which does establish a real stacking context, unlike `.agent-view`.)
     > .pane-tab-strip {
         position: absolute;
         top: 0;
         left: 0;
-        z-index: var(--z-pane-overlay, 4);
+        z-index: calc(var(--zindex-elem-modal, 100) + 1);
     }
 }
 
