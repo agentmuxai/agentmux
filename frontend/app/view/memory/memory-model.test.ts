@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, test } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import { draftFromMemory, draftToWire, emptyDraft } from "./memory-model";
 
 // reagent P1, PR #2523: instructions_by_provider (ABF v0.2 §2.2) was
@@ -50,5 +50,79 @@ describe("instructions_by_provider round-trip", () => {
         draft.name = "Renamed"; // simulates editing an unrelated field
         const wire = draftToWire(draft);
         expect(wire.instructions_by_provider).toBe('{"claude":"Keep me."}');
+    });
+});
+
+// validateDraft() (Armory Bundle Format (ABF) UI-alignment pass) — the
+// Armory bundle editor's "Validate" button. Mocks RpcApi entirely since
+// MemoryViewModel's constructor fires an unawaited ListMemoriesCommand
+// refresh(); ValidateBundleCommand is the one under test.
+const listMemoriesMock = vi.fn().mockResolvedValue([]);
+const validateBundleMock = vi.fn();
+vi.mock("@/app/store/rpc-api", () => ({
+    RpcApi: {
+        ListMemoriesCommand: (...args: unknown[]) => listMemoriesMock(...args),
+        ValidateBundleCommand: (...args: unknown[]) => validateBundleMock(...args),
+    },
+}));
+
+describe("validateDraft", () => {
+    beforeEach(() => {
+        listMemoriesMock.mockClear();
+        validateBundleMock.mockClear();
+    });
+
+    test("populates validationAtom from the RPC response", async () => {
+        const { MemoryViewModel } = await import("./memory-model");
+        const report: BundleValidationReport = {
+            is_valid: false,
+            issues: [{ severity: "error", field: "context_files", message: "bad path" }],
+        };
+        validateBundleMock.mockResolvedValueOnce(report);
+
+        const model = new MemoryViewModel();
+        model.startNew();
+        await model.validateDraft();
+
+        expect(model.validationAtom()).toEqual(report);
+        expect(model.validatingAtom()).toBe(false);
+        expect(validateBundleMock).toHaveBeenCalledTimes(1);
+    });
+
+    test("is a no-op with no active draft", async () => {
+        const { MemoryViewModel } = await import("./memory-model");
+        const model = new MemoryViewModel();
+        // No startNew()/startEdit() — draftAtom() is null.
+        await model.validateDraft();
+        expect(validateBundleMock).not.toHaveBeenCalled();
+        expect(model.validationAtom()).toBeNull();
+    });
+
+    test("a failed RPC call sets errorAtom instead of validationAtom", async () => {
+        const { MemoryViewModel } = await import("./memory-model");
+        validateBundleMock.mockRejectedValueOnce(new Error("boom"));
+
+        const model = new MemoryViewModel();
+        model.startNew();
+        await model.validateDraft();
+
+        expect(model.validationAtom()).toBeNull();
+        expect(model.errorAtom()).toContain("boom");
+    });
+
+    test("editing a field after validating clears the stale report", async () => {
+        const { MemoryViewModel } = await import("./memory-model");
+        validateBundleMock.mockResolvedValueOnce({ is_valid: true, issues: [] });
+
+        const model = new MemoryViewModel();
+        model.startNew();
+        await model.validateDraft();
+        expect(model.validationAtom()).not.toBeNull();
+
+        // Simulate memory-manager.tsx's updateDraft() clearing the report
+        // on any further edit — a stale "looks good" must not survive a
+        // change to the content it described.
+        model.setValidation(null);
+        expect(model.validationAtom()).toBeNull();
     });
 });

@@ -301,7 +301,6 @@ const KNOWN_REGISTERED_UNDECLARED = [
     "bundle.list",
     "bundle.self.get",
     "bundle.upsert",
-    "bundle.validate",
     "checkctx",
     "echo",
     "failme",
