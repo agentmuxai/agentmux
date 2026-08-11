@@ -41,6 +41,12 @@ pub struct Memory {
     pub model: String,
     #[serde(default)]
     pub instructions: String,
+    /// JSON-encoded object of `{provider_id: content}` — additive,
+    /// harness-scoped instruction variants alongside the flat
+    /// `instructions` column above (which keeps meaning "default"). ABF v0.2
+    /// §2.2; see SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10.md.
+    #[serde(default = "default_json_object_string")]
+    pub instructions_by_provider: String,
     /// JSON-encoded array; the renderer types it as `[{path, content}]`.
     #[serde(default = "default_json_array_string")]
     pub context_files: String,
@@ -71,6 +77,10 @@ fn default_json_array_string() -> String {
     "[]".to_string()
 }
 
+fn default_json_object_string() -> String {
+    "{}".to_string()
+}
+
 /// Format global brain bundles into the block injected into an agent's
 /// CLAUDE.md. Each non-empty section gets a `# [Workspace] <name>` heading so
 /// Claude can tell injected workspace rules apart from the agent's own config;
@@ -91,7 +101,8 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, name, description, is_blank, is_global, provider, model, instructions,
-                    context_files, mcp_servers, skills, sort_order, created_at, updated_at
+                    context_files, mcp_servers, skills, sort_order, created_at, updated_at,
+                    instructions_by_provider
              FROM db_bundles
              ORDER BY is_blank ASC, is_global DESC, updated_at DESC",
         )?;
@@ -111,7 +122,8 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, name, description, is_blank, is_global, provider, model, instructions,
-                    context_files, mcp_servers, skills, sort_order, created_at, updated_at
+                    context_files, mcp_servers, skills, sort_order, created_at, updated_at,
+                    instructions_by_provider
              FROM db_bundles
              WHERE is_global = 1
              ORDER BY sort_order ASC, name ASC",
@@ -128,7 +140,8 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, name, description, is_blank, is_global, provider, model, instructions,
-                    context_files, mcp_servers, skills, sort_order, created_at, updated_at
+                    context_files, mcp_servers, skills, sort_order, created_at, updated_at,
+                    instructions_by_provider
              FROM db_bundles WHERE id = ?1",
         )?;
         let result = stmt.query_row(params![id], map_memory_row);
@@ -148,8 +161,9 @@ impl Store {
             // the global brain.
             "INSERT INTO db_bundles
                 (id, name, description, is_blank, is_global, provider, model, instructions,
-                 context_files, mcp_servers, skills, sort_order, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+                 context_files, mcp_servers, skills, sort_order, created_at, updated_at,
+                 instructions_by_provider)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
              ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 description = excluded.description,
@@ -160,7 +174,8 @@ impl Store {
                 context_files = excluded.context_files,
                 mcp_servers = excluded.mcp_servers,
                 skills = excluded.skills,
-                updated_at = excluded.updated_at",
+                updated_at = excluded.updated_at,
+                instructions_by_provider = excluded.instructions_by_provider",
             params![
                 memory.id,
                 memory.name,
@@ -176,6 +191,7 @@ impl Store {
                 memory.sort_order,
                 memory.created_at,
                 memory.updated_at,
+                memory.instructions_by_provider,
             ],
         )?;
         Ok(())
@@ -239,5 +255,6 @@ fn map_memory_row(row: &rusqlite::Row) -> rusqlite::Result<Memory> {
         sort_order: row.get(11)?,
         created_at: row.get(12)?,
         updated_at: row.get(13)?,
+        instructions_by_provider: row.get(14)?,
     })
 }
