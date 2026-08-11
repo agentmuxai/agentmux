@@ -20,6 +20,7 @@
 import { For, onCleanup, Show, type JSX } from "solid-js";
 
 import { PrimitiveListDetail } from "@/app/element/primitive-list-detail";
+import { Tooltip } from "@/app/element/tooltip";
 import { useModalLayer } from "@/app/element/modal-layer";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { type MemoryDraft, MemoryViewModel } from "./memory-model";
@@ -29,6 +30,15 @@ import "./memory-view.scss";
 interface MemoryManagerBodyProps {
     model: MemoryViewModel;
 }
+
+/** Small (i) icon with a hover tooltip — contextual in-line documentation
+ *  next to a field label, explaining what it does in ABF terms without
+ *  requiring a trip to the docs. */
+const FieldHelp = (props: { text: string }): JSX.Element => (
+    <Tooltip content={props.text} placement="right">
+        <i class="fa-sharp fa-solid fa-circle-info memory-view-field-help" aria-hidden="true" />
+    </Tooltip>
+);
 
 /**
  * MemoryManagerBody — the rail + detail UI, driven by a MemoryViewModel.
@@ -248,7 +258,10 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
                             </h2>
 
                             <label class="memory-view-field">
-                                <span class="memory-view-field-label">Name *</span>
+                                <span class="memory-view-field-label">
+                                    Name *
+                                    <FieldHelp text="The bundle's display name — shown in the Armory list and in the agent launch picker. Required." />
+                                </span>
                                 <input
                                     class="memory-view-input"
                                     type="text"
@@ -261,7 +274,10 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
                             </label>
 
                             <label class="memory-view-field">
-                                <span class="memory-view-field-label">Description</span>
+                                <span class="memory-view-field-label">
+                                    Description
+                                    <FieldHelp text="Optional short label shown under the bundle's name in the launch picker. Purely cosmetic — has no effect on what gets injected into the agent." />
+                                </span>
                                 <input
                                     class="memory-view-input"
                                     type="text"
@@ -279,7 +295,10 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
                                 agent. See SPEC_MEMORY_IDENTITY_ARCH §4.1a. */}
 
                             <label class="memory-view-field">
-                                <span class="memory-view-field-label">Instructions</span>
+                                <span class="memory-view-field-label">
+                                    Instructions
+                                    <FieldHelp text="The default system prompt injected into the agent's context at launch — provider-agnostic, applies regardless of which CLI/harness the agent uses. ABF v0.2 supports additional per-provider variants (instructions_by_provider) that override this for a specific harness; there's no authoring UI for those yet, but an imported bundle's variants round-trip through this form unchanged." />
+                                </span>
                                 <textarea
                                     class="memory-view-textarea"
                                     rows={8}
@@ -293,14 +312,19 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
                             </label>
 
                             <div class="memory-view-form-actions">
-                                <button
-                                    type="button"
-                                    class="memory-view-validate-btn"
-                                    onClick={handleValidate}
-                                    disabled={model.validatingAtom() || model.savingAtom() || !draft().name.trim()}
+                                <Tooltip
+                                    content="Structurally checks this draft: unknown provider keys, unsafe or colliding context-file paths, and malformed JSON in the fields not yet editable here. Advisory only — never blocks Save."
+                                    placement="top"
                                 >
-                                    {model.validatingAtom() ? "Validating…" : "Validate"}
-                                </button>
+                                    <button
+                                        type="button"
+                                        class="memory-view-validate-btn"
+                                        onClick={handleValidate}
+                                        disabled={model.validatingAtom() || model.savingAtom() || !draft().name.trim()}
+                                    >
+                                        {model.validatingAtom() ? "Validating…" : "Validate"}
+                                    </button>
+                                </Tooltip>
                                 <button
                                     type="button"
                                     class="memory-view-cancel-btn"
@@ -355,8 +379,12 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
                             </Show>
 
                             <p class="memory-view-form-hint">
-                                Context files, MCP servers, and skills will be editable in a follow-up — the
-                                fields are persisted as JSON today and round-trip cleanly through the form.
+                                This bundle's other Armory Bundle Format (ABF) components — context files,
+                                MCP servers, and skills — will be editable here in a follow-up. For now they're
+                                persisted as JSON and round-trip cleanly through the form; use{" "}
+                                <strong>Validate</strong> above to catch unsafe paths or malformed JSON in
+                                them, or the <strong>Import Bundle</strong> flow to bring in an existing
+                                <code>.abf</code> archive's components directly.
                             </p>
                         </form>
                     )}
