@@ -25,34 +25,33 @@ type CodeBlockProps = {
 };
 
 const CodeBlock = ({ children, onClickExecute }: CodeBlockProps) => {
-    const getTextContent = (children: any): string => {
-        if (typeof children === "string") {
-            return children;
-        } else if (Array.isArray(children)) {
-            return children.map(getTextContent).join("");
-        } else if (children && children.props && children.props.children) {
-            return getTextContent(children.props.children);
-        }
-        return "";
+    // `children` here is a real DOM node, not a React-style {props:
+    // {children}} tree — this markdown renderer builds elements via
+    // solid-js/h/jsx-runtime (hast-util-to-jsx-runtime), which creates
+    // actual DOM eagerly rather than a virtual-DOM descriptor. Walking
+    // .props.children never matches, so the only reliable way to get the
+    // rendered text is to read it back off the DOM via a ref.
+    let contentRef: HTMLDivElement | undefined;
+
+    const getTextContent = (): string => {
+        return (contentRef?.textContent ?? "").replace(/\n$/, "");
     };
 
     const handleCopy = async (e: MouseEvent) => {
-        let textToCopy = getTextContent(children);
-        textToCopy = textToCopy.replace(/\n$/, "");
-        await clipboardWriteText(textToCopy);
+        await clipboardWriteText(getTextContent());
     };
 
     const handleExecute = (e: MouseEvent) => {
-        let textToCopy = getTextContent(children);
-        textToCopy = textToCopy.replace(/\n$/, "");
         if (onClickExecute) {
-            onClickExecute(textToCopy);
+            onClickExecute(getTextContent());
         }
     };
 
     return (
         <pre class="codeblock">
-            {children}
+            <div class="codeblock-content" ref={contentRef}>
+                {children}
+            </div>
             <div class="codeblock-actions">
                 <CopyButton onClick={handleCopy} title="Copy" />
                 {onClickExecute && (
