@@ -46,12 +46,108 @@
     > .pane-tab-strip {
         flex: 0 0 auto;
     }
+
+    > .agent-pane-progress-bar-slot {
+        flex: 0 0 auto;
+    }
 }
 
 .agent-pane-stack-content {
     flex: 1 1 auto;
     min-height: 0;
     position: relative;
+}
+
+// Progress bar's own row, between the tab strip and the content — never
+// overlapping either. Always present at this fixed height (not
+// conditionally rendered), so the bar fading in/out via opacity never
+// shifts the tab strip or content by so much as a pixel; only what's
+// drawn inside the slot changes, never the layout around it.
+//
+// AgentPresentationView (deep inside .agent-pane-stack-content, itself
+// BELOW the tab strip in DOM order) portals .agent-pane-progress-bar into
+// this slot — see AgentViewWrapper's progressBarSlot signal and
+// SPEC_AGENT_PANE_PROGRESS_BAR_ABOVE_TAB_STRIP_2026_08_10.md. No CSS-only
+// fix reaches across that boundary: every ancestor between
+// .agent-pane-stack-content and here clips overflow before an
+// absolutely-positioned escape could ever become visible above the tab
+// strip.
+.agent-pane-progress-bar-slot {
+    position: relative;
+    height: 3px;
+    overflow: hidden;
+}
+
+// === Marching-ants Progress Bar ===
+// Fills its slot above — no zoom-compensation math needed here (unlike
+// its previous home nested inside .agent-view), since this slot lives in
+// AgentViewWrapper's tree, outside .agent-view's per-pane `zoom` CSS
+// property entirely, alongside the tab strip and other unzoomed pane
+// chrome. Colors via color-mix() so every theme inherits without
+// hardcoded hex.
+//
+// Uses transform: translateX() so the animation stays on the GPU
+// compositor — background-position animation is not reliably promoted on
+// all Linux GPU drivers and some Windows HW-accel paths. The ::before
+// overshoots left/right by 12px so the translated edge never clips; the
+// slot's own overflow:hidden trims it.
+.agent-pane-progress-bar {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 200ms ease;
+    // Opaque base so the 3px strip fully covers whatever's behind it in
+    // its own slot. Without this the translucent stripe gaps would reveal
+    // the slot's background and the marching pattern would be lost.
+    // Matches .agent-view's surface (--main-bg-color) so the bar reads as
+    // chrome, consistent with the rest of the pane.
+    background: var(--main-bg-color);
+
+    &::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: -12px;
+        right: -12px;
+        // Solid fallback for Chromium < 111 where color-mix() is
+        // unsupported — browser ignores the declaration below and keeps
+        // this one so the bar remains visible.
+        background: var(--accent-color);
+        // Every stop is fully opaque (the faded stripe mixes against the
+        // pane background, NOT transparent) so the pattern stays crisp
+        // over any theme.
+        background: repeating-linear-gradient(
+            -45deg,
+            var(--accent-color)                                              0px,
+            var(--accent-color)                                              4px,
+            color-mix(in srgb, var(--accent-color) 25%, var(--main-bg-color)) 4px,
+            color-mix(in srgb, var(--accent-color) 25%, var(--main-bg-color)) 8px
+        );
+    }
+
+    &--active {
+        opacity: 1;
+
+        &::before {
+            // Promote the layer only while animating, not at idle rest.
+            will-change: transform;
+            animation: agent-ant-march 0.5s linear infinite;
+        }
+    }
+
+    &--active#{&}--stopping {
+        opacity: 0.55;
+    }
+}
+
+@keyframes agent-ant-march {
+    // Shift by one stripe period (8px × √2 ≈ 11.314px) per cycle so the
+    // repeating pattern loops seamlessly. translateX keeps the animation
+    // on the GPU compositor.
+    from { transform: translateX(0); }
+    to   { transform: translateX(11.314px); }
 }
 
 .agent-view {
