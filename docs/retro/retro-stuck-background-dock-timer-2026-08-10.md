@@ -101,11 +101,13 @@ PR #2519's P0 happened because a new branch was created via `git checkout -b` ri
 The fix pattern, worth repeating whenever a new branch is cut mid-session:
 
 ```bash
-git fetch origin main
-git merge-base --is-ancestor origin/main HEAD && echo "OK: based on current main" || echo "STALE"
+git fetch origin main && git merge-base --is-ancestor origin/main HEAD \
+  && echo "OK: based on current main" || echo "STALE (or fetch failed — check above)"
 ```
 
 `git log origin/main..HEAD --oneline` is **not** sufficient on its own here (caught by codex reviewing this very retro, P2): it lists commits reachable from `HEAD` but not from `origin/main`, which is exactly this PR's own new commits *even when the base is stale* — a stale base's older history is still an ancestor of the current `origin/main` in the common case (a fast-forward release), so it's silently excluded from the diff either way. The count looks identical whether the branch is fresh or stale; it doesn't prove anything about the base. `git merge-base --is-ancestor origin/main HEAD` checks ancestry directly — it only succeeds if every commit on current `origin/main` is actually in `HEAD`'s history, which is the actual property "not stale" means.
+
+The `fetch` and the ancestry check must be chained with `&&`, not run as separate statements (another codex catch, same P2): if `git fetch` fails silently — network hiccup, auth expiry, no remote — a two-statement version still runs the ancestry check against whatever `origin/main` was cached from the *last successful* fetch. If that stale ref happens to be an ancestor of `HEAD` (the common case right after a genuine sync), the check prints `OK` despite never having verified against current `main` at all — a false all-clear from the exact safety net meant to catch this.
 
 If it fails, rebuild from a fresh branch and cherry-pick just the new commits rather than trying to rebase through it — cherry-pick + force-push to the same PR branch name preserves the open PR and its review thread.
 
