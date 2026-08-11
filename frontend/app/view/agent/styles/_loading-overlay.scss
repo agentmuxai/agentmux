@@ -5,8 +5,7 @@
 // history load resolves. See
 // docs/specs/REPORT_AGENT_PANE_BLANK_LOAD_BRAIN_INDICATOR_2026_07_04.md.
 // Wrapped in .agent-view so the cascade chain matches the pre-split file
-// (SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24), same convention as
-// _auth-overlay.scss.
+// (SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24).
 .agent-view {
     .agent-pane-loading-overlay {
         position: absolute;
@@ -15,25 +14,20 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        // NOT var(--zindex-elem-modal) (100, the auth overlay's tier,
-        // _auth-overlay.scss) — deliberately its own low, explicit value.
-        // .pane-tab-strip (agent-view.scss, z-index var(--z-pane-overlay,
-        // 4), a sibling of .agent-view inside .agent-pane-stack-content)
-        // needs to stay usable while this overlay covers the pane during
+        // Low, explicit value — not load-bearing on its own anymore.
+        // .agent-view now establishes its own stacking context (z-index:
+        // 0, agent-view.scss), so this is compared only against its own
+        // siblings inside .agent-view and can never compete with
+        // .pane-tab-strip (a true sibling of .agent-view, z-index
+        // var(--z-pane-overlay, 4)) regardless of its value — the "+"/tab
+        // controls stay usable while this overlay covers the pane during
         // initial history load (SPEC_AGENT_PANE_TAB_STRIP_OVERLAY_2026_08_10.md
-        // §1.4) — the "+"/tab controls shouldn't disappear on every mount
-        // or reconnect. Since neither .agent-view nor any ancestor between
-        // it and .pane-tab-strip establishes a stacking context (confirmed:
-        // reagent P1 on PR #2526's 6th/7th rounds — `container-type:
-        // inline-size` alone doesn't, and giving .agent-view one directly
-        // regressed .agent-auth-overlay vs .block-mask instead), this
-        // overlay's z-index competes with the tab strip's directly — must
-        // stay below 4. Does NOT need to be high: nothing meaningful
-        // renders in this pane before history has loaded, so it only needs
-        // to beat ordinary unpositioned/auto-z-index content, not the
-        // auth overlay's tier. (Doesn't cover the progress bar anymore
-        // either way — that's portaled into AgentViewWrapper's own slot,
-        // a sibling outside .agent-view's box entirely, since
+        // §1.4). Kept low anyway: nothing meaningful renders in this pane
+        // before history has loaded, so it only ever needs to beat
+        // ordinary unpositioned/auto-z-index content here, not a "modal"
+        // tier. (Doesn't cover the progress bar anymore either way —
+        // that's portaled into AgentViewWrapper's own slot, a sibling
+        // outside .agent-view's box entirely, since
         // SPEC_AGENT_PANE_PROGRESS_BAR_ABOVE_TAB_STRIP_2026_08_10.md.)
         z-index: 1;
     }

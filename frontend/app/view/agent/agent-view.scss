@@ -27,7 +27,6 @@
 @use "styles/header-controls";
 @use "styles/pending-footer";
 @use "styles/action-bar";
-@use "styles/auth-overlay";
 @use "styles/responsive";
 @use "styles/decision-panel";
 @use "styles/shell-node";
@@ -72,14 +71,19 @@
     // focused (50) — the semantically right token for "pane chrome floating
     // over this pane's own content."
     //
-    // `.agent-pane-loading-overlay` (_loading-overlay.scss) deliberately
-    // sits at its own low z-index (1, not the shared `--zindex-elem-modal`
-    // tier `.agent-auth-overlay` uses) specifically so it stays below this
-    // 4 — see that file's comment for the full reasoning, including why
-    // giving `.agent-view` itself a stacking context (an earlier commit on
-    // this branch, reverted) was the wrong fix: it also silently trapped
-    // `.agent-auth-overlay`, breaking its escape-and-outrank-`.block-mask`
-    // behavior (reagent P1 on PR #2526's 7th round).
+    // `.agent-view` (below) now carries its own `z-index: 0`, containing
+    // every absolutely/sticky-positioned descendant inside it — including
+    // `.slash-autocomplete` (_slash.scss, z:50) and `.agent-search-bar`
+    // (_search.scss, z:10), both flagged by reagent P1 on PR #2526's 8th
+    // round as escaping to compete directly with this 4, on top of
+    // `.agent-pane-loading-overlay` from the 6th/7th rounds. An earlier
+    // attempt at exactly this (round 6) was reverted (round 7) because it
+    // also trapped `.agent-auth-overlay`, which needed to escape and
+    // outrank `.block-mask` — but that class turned out to be dead CSS,
+    // never rendered anywhere in the app (confirmed via a repo-wide grep);
+    // deleted alongside re-adding this, so nothing legitimately needs to
+    // escape `.agent-view` anymore. See `.agent-view`'s own comment below
+    // for the full reasoning.
     > .pane-tab-strip {
         position: absolute;
         top: 0;
@@ -266,18 +270,32 @@
     width: 100%;
     overflow: hidden;
     position: relative;
-    // Deliberately NO explicit z-index here (reverted — reagent P1 on PR
-    // #2526's 7th round). A z-index:0 stacking context here would contain
-    // EVERY absolutely-positioned descendant, including
-    // .agent-auth-overlay (_auth-overlay.scss, z-index: var(--zindex-elem-
-    // modal)=100), which deliberately relies on escaping .agent-view to
-    // outrank .block-mask (block.scss — its own ".block-focused" comment:
-    // "No z-index here intentionally... without a stacking context,
-    // .block-mask ... is in the parent stacking context") whenever the
-    // pane is unfocused during an OAuth wait. See
-    // .agent-pane-loading-overlay (_loading-overlay.scss) for the actual,
-    // narrower fix for the tab-strip conflict this file's earlier commit
-    // was trying to solve.
+    // Establishes a real stacking context (position + z-index together,
+    // per spec — same pattern as .agent-document-scroll-region below).
+    // Contains EVERY absolutely/sticky-positioned descendant's z-index —
+    // .agent-pane-loading-overlay (_loading-overlay.scss), .agent-search-
+    // bar (_search.scss, z:10), .slash-autocomplete (_slash.scss, z:50),
+    // .agent-filter-toggle (_header-controls.scss, z:10), and anything
+    // else added inside .agent-view later — so none of them can ever
+    // escape and compete with .pane-tab-strip (a true sibling of
+    // .agent-view inside .agent-pane-stack-content, z-index
+    // var(--z-pane-overlay, 4) — agent-view.scss above), regardless of
+    // their own z-index value.
+    //
+    // History: a round-6 commit on PR #2526 added this same z-index:0 and
+    // was reverted in round 7 — reagent P1 found it also trapped
+    // .agent-auth-overlay, which needed to escape .agent-view to outrank
+    // .block-mask (block.scss — its own ".block-focused" comment documents
+    // that flat, cross-.agent-view competition as deliberate). Round 8
+    // found `.agent-auth-overlay` was never actually rendered anywhere in
+    // the app — dead CSS left over from an earlier auth-UI design,
+    // confirmed via a repo-wide grep and deleted alongside re-adding this.
+    // With nothing left that legitimately needs to escape, containing
+    // .agent-view is safe and — unlike patching each escaping overlay's
+    // z-index individually (loading-overlay in round 6, then search-bar/
+    // slash-autocomplete flagged in round 8) — closes the whole class of
+    // "new .agent-view descendant with z-index > 4" bug at once.
+    z-index: 0;
     user-select: none;
     cursor: default;
 }

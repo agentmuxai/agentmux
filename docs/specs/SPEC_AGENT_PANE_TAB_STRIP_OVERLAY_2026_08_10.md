@@ -140,12 +140,30 @@ interaction" auth overlay whenever the pane was unfocused during an OAuth
 wait — a regression in the opposite direction, not scoped to what this
 spec was trying to fix.
 
-The actual fix targets only the one overlay that needed to change:
-`.agent-pane-loading-overlay` now carries its own explicit `z-index: 1`
+An interim fix targeted only the one overlay flagged at the time:
+`.agent-pane-loading-overlay` got its own explicit `z-index: 1`
 (`_loading-overlay.scss`), not the shared `--zindex-elem-modal` token —
-comfortably below the tab strip's 4, while `.agent-auth-overlay` keeps
-`--zindex-elem-modal` (100) and its existing escape-and-outrank-
-`.block-mask` behavior, completely untouched.
+comfortably below the tab strip's 4, while `.agent-auth-overlay` kept
+`--zindex-elem-modal` (100) and its escape-and-outrank-`.block-mask`
+behavior untouched. reagent P1 on PR #2526's 8th round found this was
+whack-a-mole: `.slash-autocomplete` (`_slash.scss`, z:50) and
+`.agent-search-bar` (`_search.scss`, z:10) have the exact same "escapes
+`.agent-view`, could paint over the tab strip" property the loading
+overlay had — neither was ever nested inside a stacking-context-
+establishing ancestor, so both compete with the tab strip's z:4 directly
+whenever they're open (slash-command picker; in-session search).
+
+**Actually resolved**, structurally: a repo-wide grep found
+`.agent-auth-overlay` was never rendered anywhere — dead CSS left over
+from an earlier auth-UI design (the live one is `AgentDocumentView.tsx`'s
+`.agent-auth-panel-card`/`.agent-auth-notice`, an inline notice, not a
+full-pane overlay). Deleted `_auth-overlay.scss` and its `agent-view.scss`
+import. With nothing left that legitimately needs to escape `.agent-view`
+to outrank `.block-mask`, `.agent-view` now carries its own `z-index: 0`
+again — this time correctly — containing every current and future
+absolutely/sticky-positioned descendant (loading overlay, search bar,
+slash-autocomplete, filter toggle, …) at once instead of requiring a new
+patch every time reagent finds another one.
 
 ---
 
