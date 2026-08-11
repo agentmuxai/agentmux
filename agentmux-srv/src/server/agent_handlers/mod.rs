@@ -446,6 +446,7 @@ mod recent_sessions_tests {
             provider: String::new(),
             model: String::new(),
             instructions: String::new(),
+            instructions_by_provider: "{}".to_string(),
             context_files: "[]".to_string(),
             mcp_servers: "[]".to_string(),
             skills: "[]".to_string(),

@@ -34,6 +34,16 @@ export interface MemoryDraft {
     // The CLI provider + model belong to the agent (AgentDefinition.provider
     // + provider_flags), not the preset. See SPEC_MEMORY_IDENTITY_ARCH §4.1a.
     instructions: string;
+    /** Preserved verbatim through the edit round-trip — ABF v0.2 §2.2
+     *  provider-scoped variants, not yet editable through this form (no
+     *  authoring UI exists yet). Round-tripping this (rather than
+     *  omitting it, which would default to "{}" on save and silently
+     *  wipe out any variants an import brought in) is required as of
+     *  reagent P1, PR #2523: without it, editing ANY field of an
+     *  already-imported bundle through this form would discard its
+     *  provider variants, since bundle_memory_upsert's ON CONFLICT UPDATE
+     *  unconditionally overwrites the column. */
+    instructions_by_provider: string;
     /** Edited as `[{ path, content }]`; serialized to JSON on save. */
     context_files: Array<{ path: string; content: string }>;
     /** Edited as raw JSON string for now (advanced). */
@@ -50,12 +60,13 @@ export interface MemoryDraft {
  *  `db_bundles.skills` column is JSON-encoded; a literal `""` would
  *  trip downstream `JSON.parse(skills)` readers. Reagent P1 on
  *  PR #747 (2026-05-08). */
-function emptyDraft(): MemoryDraft {
+export function emptyDraft(): MemoryDraft {
     return {
         id: undefined,
         name: "",
         description: "",
         instructions: "",
+        instructions_by_provider: "{}",
         context_files: [],
         mcp_servers: "[]",
         skills: "[]",
@@ -65,7 +76,7 @@ function emptyDraft(): MemoryDraft {
 /** Hydrate a draft from a stored Memory. JSON fields are parsed; on
  *  parse failure we fall back to safe empties so the UI stays usable
  *  even if the row is malformed. */
-function draftFromMemory(m: Memory): MemoryDraft {
+export function draftFromMemory(m: Memory): MemoryDraft {
     let context_files: Array<{ path: string; content: string }> = [];
     try {
         const parsed = JSON.parse(m.context_files ?? "[]");
@@ -78,6 +89,14 @@ function draftFromMemory(m: Memory): MemoryDraft {
         name: m.name,
         description: m.description ?? "",
         instructions: m.instructions ?? "",
+        // Preserved, not parsed — this form has no field that edits
+        // per-provider variants yet, so the draft only needs to carry
+        // the raw JSON through unchanged (see the field's own doc
+        // comment on MemoryDraft for why dropping it would be lossy).
+        instructions_by_provider:
+            m.instructions_by_provider && m.instructions_by_provider.trim().length > 0
+                ? m.instructions_by_provider
+                : "{}",
         context_files,
         // Both JSON-array fields use the same empty-string-aware
         // fallback. A legacy row with mcp_servers = "" would
@@ -97,7 +116,7 @@ function draftFromMemory(m: Memory): MemoryDraft {
  *  0 for both — the upsert handler server-sets `created_at = now`
  *  when it sees 0 and always overwrites `updated_at` with now. Codex
  *  P1 (PR #749). */
-function draftToWire(d: MemoryDraft): Memory {
+export function draftToWire(d: MemoryDraft): Memory {
     return {
         id: d.id ?? "",
         name: d.name.trim(),
@@ -110,6 +129,7 @@ function draftToWire(d: MemoryDraft): Memory {
         provider: "",
         model: "",
         instructions: d.instructions,
+        instructions_by_provider: d.instructions_by_provider || "{}",
         context_files: JSON.stringify(d.context_files),
         mcp_servers: d.mcp_servers || "[]",
         // Same JSON-array invariant as mcp_servers — never write an

@@ -42,7 +42,11 @@ use super::error::StoreError;
 ///   v6 — db_agent_native_memory: durable, location-consistent mirror of
 ///        each agent's native memory files, keyed by (agent_id, filename).
 ///        See docs/specs/SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07.md.
-pub const SHARED_STORE_SCHEMA_VERSION: i64 = 6;
+///   v7 — db_bundles.instructions_by_provider: JSON object of
+///        {provider_id: content} instruction variants, additive to the
+///        existing flat `instructions` column. ABF v0.2 §2.2, see
+///        docs/specs/SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10.md.
+pub const SHARED_STORE_SCHEMA_VERSION: i64 = 7;
 
 /// `user_version` value stamped into `objects.db` after `run_object_schema`.
 /// The flat schema reset the counter to 1 (the pre-flatten chain never set
@@ -96,7 +100,17 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 6;
 ///        concepts. Defaults to '' (use the harness's default vendor).
 ///        Only settable via `agent.define`, validated against the resolved
 ///        provider's `ProviderConfig::base_url_env_var`.
-pub const OBJECT_SCHEMA_VERSION: i64 = 15;
+///   v16 — db_bundles.instructions_by_provider: JSON object of
+///        {provider_id: content} instruction variants, additive to the
+///        existing flat `instructions` column (which keeps meaning
+///        "default"). ABF v0.2 storage half of provider-scoped
+///        instructions — see
+///        docs/specs/SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10.md
+///        §2.2. Defaults to '{}' for existing rows; delivering a selected
+///        variant into a running agent is explicitly out of scope for this
+///        version (per that spec's non-goals) — this column only makes the
+///        data storable/exportable/importable.
+pub const OBJECT_SCHEMA_VERSION: i64 = 16;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -305,6 +319,7 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             provider      TEXT NOT NULL DEFAULT '',
             model         TEXT NOT NULL DEFAULT '',
             instructions  TEXT NOT NULL DEFAULT '',
+            instructions_by_provider TEXT NOT NULL DEFAULT '{}',
             context_files TEXT NOT NULL DEFAULT '[]',
             mcp_servers   TEXT NOT NULL DEFAULT '[]',
             skills        TEXT NOT NULL DEFAULT '[]',
@@ -606,6 +621,10 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         // vendor as distinct concepts; see ProviderConfig::base_url_env_var.
         "ALTER TABLE db_agent_definitions ADD COLUMN model_vendor_base_url TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE db_agents ADD COLUMN model_vendor_base_url TEXT NOT NULL DEFAULT ''",
+        // v16: provider-scoped bundle instructions (ABF v0.2 §2.2) — JSON
+        // object of {provider_id: content} variants, additive to the
+        // existing flat `instructions` column.
+        "ALTER TABLE db_bundles ADD COLUMN instructions_by_provider TEXT NOT NULL DEFAULT '{}'",
     ] {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();
@@ -755,6 +774,7 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
             provider      TEXT NOT NULL DEFAULT '',
             model         TEXT NOT NULL DEFAULT '',
             instructions  TEXT NOT NULL DEFAULT '',
+            instructions_by_provider TEXT NOT NULL DEFAULT '{}',
             context_files TEXT NOT NULL DEFAULT '[]',
             mcp_servers   TEXT NOT NULL DEFAULT '[]',
             skills        TEXT NOT NULL DEFAULT '[]',
@@ -873,6 +893,8 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
     //     this column existed.
     for stmt in &[
         "ALTER TABLE db_cron_jobs ADD COLUMN max_age_secs INTEGER",
+        // v7: provider-scoped bundle instructions (ABF v0.2 §2.2).
+        "ALTER TABLE db_bundles ADD COLUMN instructions_by_provider TEXT NOT NULL DEFAULT '{}'",
     ] {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();
@@ -1143,6 +1165,25 @@ mod tests {
 
         assert!(column_exists(&conn, "db_agent_definitions", "model_vendor_base_url"));
         assert!(column_exists(&conn, "db_agents", "model_vendor_base_url"));
+    }
+
+    #[test]
+    fn test_db_bundles_has_instructions_by_provider_in_both_schemas() {
+        // ABF v0.2 §2.2 (v16): db_bundles lives in both objects.db (via
+        // run_object_schema) and the shared store.db (via
+        // run_shared_store_schema) — mirrors the db_agent_credentials /
+        // db_agent_native_memory both-schemas precedent (v13/v14).
+        let object_conn = Connection::open_in_memory().unwrap();
+        object_conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        run_object_schema(&object_conn).unwrap();
+        run_object_schema(&object_conn).unwrap(); // idempotent second pass
+        assert!(column_exists(&object_conn, "db_bundles", "instructions_by_provider"));
+
+        let shared_conn = Connection::open_in_memory().unwrap();
+        shared_conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        run_shared_store_schema(&shared_conn).unwrap();
+        run_shared_store_schema(&shared_conn).unwrap();
+        assert!(column_exists(&shared_conn, "db_bundles", "instructions_by_provider"));
     }
 
     #[test]
