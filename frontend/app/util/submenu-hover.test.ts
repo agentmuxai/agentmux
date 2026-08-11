@@ -211,7 +211,17 @@ describe("createSubmenuHover", () => {
     });
 
     describe("dispose", () => {
-        it("removes the mousemove listener and stops pending timers without calling onClose", () => {
+        it("closes an open submenu immediately, same as close()", () => {
+            controller.setSubmenuEl({ getBoundingClientRect: () => SUBMENU_RECT });
+            controller.onTriggerEnter();
+            vi.advanceTimersByTime(90);
+            expect(onOpen).toHaveBeenCalledOnce();
+
+            controller.dispose();
+            expect(onClose).toHaveBeenCalledOnce();
+        });
+
+        it("removes the mousemove listener and stops pending timers — no further onClose after teardown", () => {
             controller.setSubmenuEl({ getBoundingClientRect: () => SUBMENU_RECT });
             controller.onTriggerEnter();
             vi.advanceTimersByTime(90);
