@@ -1,9 +1,9 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// MemoryManager — the context-free Memory-bundle management UI.
+// MemoryManager — the context-free Armory Bundle Format (ABF) management UI.
 //
-// This is the full list / create / edit / delete lifecycle for Memory
+// This is the full list / create / edit / delete lifecycle for ABF
 // bundles, extracted out of the `view: "memory"` block pane so the exact
 // same UI can render in two places without depending on the Agent-pane
 // block, `nodeModel`, or any ViewModel-from-BlockRegistry context:
@@ -96,10 +96,10 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
     const handleCancel = () => model.cancelDraft();
 
     const handleDelete = (id: string) => {
-        // Confirm via the most boring possible dialog. Presets can be
+        // Confirm via the most boring possible dialog. Bundles can be
         // referenced by running instances; deletion is an explicit user
         // intent we don't want to fast-path.
-        const ok = window.confirm("Delete this preset? Running instances continue with their snapshot, but new launches won't see it.");
+        const ok = window.confirm("Delete this bundle? Running instances continue with their snapshot, but new launches won't see it.");
         if (!ok) return;
         void model.deleteMemory(id);
     };
@@ -118,7 +118,7 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
     // docs/specs/SPEC_ARMORY_RESPONSIVE_SINGLE_PANE_LAYOUT_2026_07_15.md.
     // "In detail" whenever something is selected OR a draft (new or
     // editing-existing) is open; otherwise the list shows. The old
-    // no-selection empty-state message ("Select a preset...") is gone — with
+    // no-selection empty-state message ("Select a bundle...") is gone — with
     // nothing selected you're just looking at the list, there's no third
     // empty detail state to explain.
     const inDetail = () => model.selectedIdAtom() !== null || model.draftAtom() !== null;
@@ -136,7 +136,7 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
             </Show>
             <div class="memory-view-rail-header">
                 <button class="memory-view-new-btn" onClick={handleNew}>
-                    + New Preset
+                    + New Bundle
                 </button>
                 <button class="memory-view-new-btn" onClick={handleImportBundle}>
                     Import Bundle
@@ -162,7 +162,7 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
                                     <span class="memory-view-global-badge" title="Injected into all agents at launch">Global</span>
                                 </Show>
                             </div>
-                            {/* Subtitle shows the description now that presets
+                            {/* Subtitle shows the description now that bundles
                                 are provider-agnostic (§4.1a). Class name kept
                                 to avoid CSS churn. */}
                             <Show when={!memory.is_blank && memory.description}>
@@ -236,7 +236,7 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
                             }}
                         >
                             <h2 class="memory-view-form-title">
-                                {draft().id ? "Edit Preset" : "New Preset"}
+                                {draft().id ? "Edit Bundle" : "New Bundle"}
                             </h2>
 
                             <label class="memory-view-field">
@@ -266,7 +266,7 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
                                 />
                             </label>
 
-                            {/* Provider + model intentionally omitted: presets are
+                            {/* Provider + model intentionally omitted: bundles are
                                 provider-agnostic; the CLI + model belong to the
                                 agent. See SPEC_MEMORY_IDENTITY_ARCH §4.1a. */}
 
@@ -315,7 +315,7 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
     return (
         <PrimitiveListDetail
             showDetail={inDetail()}
-            backLabel="Bundles"
+            backLabel="ABF"
             onBack={handleBack}
             list={listView}
             detail={detailView}

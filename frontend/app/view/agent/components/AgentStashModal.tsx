@@ -62,8 +62,8 @@ export const AgentStashModal = (props: AgentStashModalProps): JSX.Element => {
         { id: "memory", label: "Memories", icon: "brain" },
         { id: "mcp", label: "MCP Servers", icon: "plug" },
         { id: "skills", label: "Skills", icon: "wand-magic-sparkles" },
-        // layer-group: same icon armory-view.tsx's RAIL uses for "Bundles" —
-        // this tab picks a Bundle as startup instructions, so it's the same
+        // layer-group: same icon armory-view.tsx's RAIL uses for "ABF" —
+        // this tab picks a bundle as startup instructions, so it's the same
         // concept scoped to one agent.
         { id: "startup", label: "Startup", icon: "layer-group" },
     ];

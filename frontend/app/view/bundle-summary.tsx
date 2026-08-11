@@ -36,9 +36,12 @@ interface BundleSummaryPanelProps {
 }
 
 export const BundleSummaryPanel = (props: BundleSummaryPanelProps): JSX.Element => {
-    // Identity items are still called "identity bundles"; the config collections
-    // are now just "Bundles". Compute the display strings per kind.
-    const title = props.kind === "Identity" ? "Identity bundles" : "Bundles";
+    // Identity items are still called "identity bundles"; the config
+    // collections are now branded "Armory Bundle Format (ABF)". `title` is
+    // the heading (room for the full name); `sentenceLabel` reads naturally
+    // in running prose below.
+    const title = props.kind === "Identity" ? "Identity bundles" : "Armory Bundle Format (ABF)";
+    const sentenceLabel = props.kind === "Identity" ? "Identity bundles" : "Bundles";
     const lowerPlural = props.kind === "Identity" ? "identities" : "bundles";
 
     return (
@@ -46,7 +49,7 @@ export const BundleSummaryPanel = (props: BundleSummaryPanelProps): JSX.Element 
             <div class="bundle-summary-inner">
                 <h2 class="bundle-summary-title">{title}</h2>
                 <p class="bundle-summary-body">
-                    {title} are app-wide data, shared across every agent and
+                    {sentenceLabel} are app-wide data, shared across every agent and
                     window. They are now created, edited, and deleted in one
                     place — the <strong>Identity &amp; Memory</strong>{" "}
                     manager, opened from the hamburger menu.

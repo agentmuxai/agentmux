@@ -14,12 +14,12 @@ import { SkillManager } from "@/app/view/skill/skill-manager";
 import type { ArmorySection, ArmoryViewModel } from "./armory-model";
 import "./armory-view.scss";
 
-const RAIL: { id: ArmorySection; label: string; icon: string }[] = [
+const RAIL: { id: ArmorySection; label: string; tooltip?: string; icon: string }[] = [
     { id: "accounts", label: "Accounts",    icon: "key" },
     { id: "memory",   label: "Memories",    icon: "brain" },
     { id: "skills",   label: "Skills",      icon: "wand-magic-sparkles" },
     { id: "mcp",      label: "MCP Servers", icon: "plug" },
-    { id: "bundles",  label: "Bundles",     icon: "layer-group" },
+    { id: "bundles",  label: "ABF",         tooltip: "Armory Bundle Format (ABF)", icon: "layer-group" },
 ];
 
 export function ArmoryView(props: ViewComponentProps<ArmoryViewModel>): JSX.Element {
@@ -61,7 +61,7 @@ export function ArmoryView(props: ViewComponentProps<ArmoryViewModel>): JSX.Elem
                 <nav class="bundle-manager-rail" aria-label="Armory section">
                     <For each={RAIL}>
                         {(item) => (
-                            <Tooltip content={item.label} placement="right">
+                            <Tooltip content={item.tooltip ?? item.label} placement="right">
                                 <button
                                     type="button"
                                     class="bundle-manager-rail-item"

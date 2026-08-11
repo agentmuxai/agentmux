@@ -1569,7 +1569,7 @@ const AgentPresentationView = ({
             ]);
 
             // If this agent has a Bundle selected as its startup source
-            // (AgentStartupModal, Armory → Bundles content), its
+            // (AgentStartupModal, Armory → ABF content), its
             // `instructions` take precedence over the legacy freeform
             // "startup" blob — which has no live authoring UI anywhere, see
             // docs/specs/ARCHITECTURE_ARMORY_2026_07_20.md §5. Falls back to
