@@ -383,8 +383,9 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
                                 MCP servers, and skills — will be editable here in a follow-up. For now they're
                                 persisted as JSON and round-trip cleanly through the form; use{" "}
                                 <strong>Validate</strong> above to catch unsafe paths or malformed JSON in
-                                them, or the <strong>Import Bundle</strong> flow to bring in an existing
-                                <code>.abf</code> archive's components directly.
+                                them. To bring in an existing <code>.abf</code> archive's components directly,
+                                use <strong>Import Bundle</strong> from the bundle list (Cancel to get back
+                                there).
                             </p>
                         </form>
                     )}
