@@ -15,6 +15,7 @@ import {
     computeMenuPosition,
     type MenuPositionResult,
 } from "@/app/util/menu-position";
+import { createSubmenuHover, type SubmenuHoverController } from "@/app/util/submenu-hover";
 
 import "./flyoutmenu.scss";
 
@@ -27,6 +28,12 @@ import "./flyoutmenu.scss";
  * by flip+shift for menus at or under that cap. justify-content is forced to
  * flex-start because the .menu rule's flex-end makes overflow unreachable in
  * a scroll container (a no-op when the menu fits).
+ *
+ * Deliberately omits `visibility` — the caller's placeholder style carries
+ * `visibility:hidden` and this full-string replacement drops it once a real
+ * position is known, which is what reveals the menu already in the right
+ * spot instead of flashing at the placeholder coordinates first
+ * (SPEC_SUBMENU_POSITIONING_AND_HOVER_TIMING_2026_08_10 §1.1).
  */
 function styleToString(pos: MenuPositionResult): string {
     const s = pos.style;
@@ -34,6 +41,31 @@ function styleToString(pos: MenuPositionResult): string {
         `position:${s.position};left:${s.left};top:${s.top};` +
         `max-height:${pos.maxHeight}px;overflow-y:auto;justify-content:flex-start`
     );
+}
+
+/**
+ * Tracks the hover controllers of peer (same-level) menu items so entering
+ * one can force-close any other peer's still-open submenu immediately —
+ * matching how a native/VS-Code-style menu behaves for an explicit new
+ * selection, on top of (not instead of) the safe-triangle grace period each
+ * controller gives its OWN trigger-to-submenu approach. Scoped one per menu
+ * level (one per MenuBody, one per SubMenu) — peers never reach across
+ * levels, so a still-open descendant closes naturally via Solid unmounting
+ * it when its own ancestor's <Show> flips off, not through this registry.
+ */
+function createPeerRegistry() {
+    const peers = new Map<string, SubmenuHoverController>();
+    return {
+        register(key: string, hover: SubmenuHoverController) {
+            peers.set(key, hover);
+            onCleanup(() => peers.delete(key));
+        },
+        closeOthers(key: string) {
+            for (const [k, h] of peers) {
+                if (k !== key) h.close();
+            }
+        },
+    };
 }
 
 type MenuProps = {
@@ -62,7 +94,9 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
     const [subMenuPosition, setSubMenuPosition] = createSignal<SubMenuPositionMap>({});
 
     const [isOpen, setIsOpen] = createSignal(false);
-    const [floatingStyle, setFloatingStyle] = createSignal("position:absolute;left:0px;top:0px");
+    const [floatingStyle, setFloatingStyle] = createSignal(
+        "position:absolute;left:0px;top:0px;visibility:hidden",
+    );
 
     let referenceEl: HTMLElement | null = null;
     let floatingEl: HTMLElement | null = null;
@@ -126,11 +160,32 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
 
     const handleSubMenuPosition = (key: string, itemRect: DOMRect, label: string) => {
         // Store the parent menu item's rect; the SubMenu component routes it
-        // through useMenuPosition (right-start, flips to left-start near the
-        // right edge) — no hand-rolled window-edge math here.
+        // through computeMenuPosition (right-start, flips to left-start near
+        // the right edge) — no hand-rolled window-edge math here.
         setSubMenuPosition((prev) => ({ ...prev, [key]: { anchorRect: itemRect, label } }));
     };
 
+    // Whether a submenu is SHOWN and when it opens/closes now routes entirely
+    // through each row's own createSubmenuHover controller (open-delay +
+    // safe-triangle close — SPEC_SUBMENU_POSITIONING_AND_HOVER_TIMING_2026_08_10
+    // §4). These two are the controllers' onOpen/onClose targets; nothing else
+    // writes to visibleSubMenus. Closing deletes the key (rather than setting
+    // visible:false) so every write is a fresh object — no shared, in-place
+    // mutation of a previous render's state object.
+    const openSubMenu = (key: string, label: string) => {
+        setVisibleSubMenus((prev) => ({ ...prev, [key]: { visible: true, label } }));
+    };
+    const closeSubMenu = (key: string) => {
+        setVisibleSubMenus((prev) => {
+            if (!(key in prev)) return prev;
+            const next = { ...prev };
+            delete next[key];
+            return next;
+        });
+    };
+
+    // Highlighting (hoveredItems) and the submenu's anchor rect only — NOT
+    // open/close, which is each row's own hover controller's job now.
     const handleMouseEnterItem = (
         event: MouseEvent,
         parentKey: string | null,
@@ -141,35 +196,10 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
 
         const key = parentKey ? `${parentKey}-${index}` : `${index}`;
 
-        setVisibleSubMenus((prev) => {
-            const updatedState = { ...prev };
-            updatedState[key] = { visible: true, label: item.label };
-
-            const ancestors = key.split("-").reduce((acc: string[], part, idx) => {
-                if (idx === 0) return [part];
-                return [...acc, `${acc[idx - 1]}-${part}`];
-            }, []);
-
-            ancestors.forEach((ancestorKey) => {
-                if (updatedState[ancestorKey]) {
-                    updatedState[ancestorKey].visible = true;
-                }
-            });
-
-            for (const pkey in updatedState) {
-                if (!ancestors.includes(pkey) && pkey !== key) {
-                    updatedState[pkey].visible = false;
-                }
-            }
-
-            return updatedState;
-        });
-
         const newHoveredItems = key.split("-").reduce((acc: string[], part, idx) => {
             if (idx === 0) return [part];
             return [...acc, `${acc[idx - 1]}-${part}`];
         }, []);
-
         setHoveredItems(newHoveredItems);
 
         const itemRect = (event.currentTarget as HTMLElement).getBoundingClientRect();
@@ -217,9 +247,10 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
                         hoveredItems={hoveredItems()}
                         visibleSubMenus={visibleSubMenus()}
                         subMenuPosition={subMenuPosition()}
-                        setSubMenuPosition={setSubMenuPosition}
                         handleMouseEnterItem={handleMouseEnterItem}
                         handleOnClick={handleOnClick}
+                        openSubMenu={openSubMenu}
+                        closeSubMenu={closeSubMenu}
                         renderMenu={props.renderMenu}
                         renderMenuItem={props.renderMenuItem}
                     />
@@ -238,9 +269,6 @@ type MenuBodyProps = {
     hoveredItems: string[];
     visibleSubMenus: { [key: string]: any };
     subMenuPosition: SubMenuPositionMap;
-    setSubMenuPosition: (
-        updater: (prev: SubMenuPositionMap) => SubMenuPositionMap,
-    ) => void;
     handleMouseEnterItem: (
         event: MouseEvent,
         parentKey: string | null,
@@ -248,6 +276,8 @@ type MenuBodyProps = {
         item: MenuItem
     ) => void;
     handleOnClick: (e: MouseEvent, item: MenuItem) => void;
+    openSubMenu: (key: string, label: string) => void;
+    closeSubMenu: (key: string) => void;
     renderMenu?: (subMenu: JSX.Element, props: any) => JSX.Element;
     renderMenuItem?: (item: MenuItem, props: any) => JSX.Element;
 };
@@ -270,6 +300,8 @@ const MenuBody = (props: MenuBodyProps): JSX.Element => {
         props.registerFloating(el);
     };
 
+    const peers = createPeerRegistry();
+
     return (
         <div
             class={clsx("menu", props.className, { "menu--mirrored": props.mirrored })}
@@ -282,10 +314,33 @@ const MenuBody = (props: MenuBodyProps): JSX.Element => {
                     const key = `${index()}`;
                     const isActive = () => props.hoveredItems.includes(key);
 
+                    // One hover-intent controller per row that has a submenu,
+                    // for the lifetime of this row in the list (disposed when
+                    // the row leaves the array or the whole menu unmounts).
+                    // Open/close timing (delay + safe-triangle) lives here;
+                    // rendering the submenu is still driven by visibleSubMenus
+                    // via openSubMenu/closeSubMenu, which this controller is
+                    // the only caller of for this key.
+                    const hover: SubmenuHoverController | null = item.subItems
+                        ? createSubmenuHover({
+                              onOpen: () => props.openSubMenu(key, item.label),
+                              onClose: () => props.closeSubMenu(key),
+                          })
+                        : null;
+                    if (hover) peers.register(key, hover);
+                    onCleanup(() => hover?.dispose());
+
                     const menuItemProps = {
                         class: clsx("menu-item", { active: isActive() }),
-                        onMouseEnter: (event: MouseEvent) =>
-                            props.handleMouseEnterItem(event, null, index(), item),
+                        onMouseEnter: (event: MouseEvent) => {
+                            props.handleMouseEnterItem(event, null, index(), item);
+                            // An explicit new selection at this level closes any
+                            // other open peer submenu right away — no triangle to
+                            // protect toward a row the cursor isn't heading for.
+                            peers.closeOthers(key);
+                            hover?.onTriggerEnter();
+                        },
+                        onMouseLeave: (event: MouseEvent) => hover?.onTriggerLeave(event),
                         onClick: (e: MouseEvent) => props.handleOnClick(e, item),
                     };
 
@@ -325,16 +380,18 @@ const MenuBody = (props: MenuBodyProps): JSX.Element => {
                     return (
                         <>
                             {renderedItem}
-                            <Show when={props.visibleSubMenus[key]?.visible && item.subItems}>
+                            <Show when={props.visibleSubMenus[key]?.visible && item.subItems && hover}>
                                 <SubMenu
                                     subItems={item.subItems!}
                                     parentKey={key}
                                     subMenuPosition={props.subMenuPosition}
-                                    setSubMenuPosition={props.setSubMenuPosition}
+                                    hover={hover!}
                                     visibleSubMenus={props.visibleSubMenus}
                                     hoveredItems={props.hoveredItems}
                                     handleMouseEnterItem={props.handleMouseEnterItem}
                                     handleOnClick={props.handleOnClick}
+                                    openSubMenu={props.openSubMenu}
+                                    closeSubMenu={props.closeSubMenu}
                                     renderMenu={props.renderMenu}
                                     renderMenuItem={props.renderMenuItem}
                                     mirrored={props.mirrored}
@@ -356,9 +413,8 @@ type SubMenuProps = {
     subItems: MenuItem[];
     parentKey: string;
     subMenuPosition: SubMenuPositionMap;
-    setSubMenuPosition: (
-        updater: (prev: SubMenuPositionMap) => SubMenuPositionMap,
-    ) => void;
+    /** This SubMenu's own hover controller (owned/disposed by the row that renders it). */
+    hover: SubmenuHoverController;
     visibleSubMenus: { [key: string]: any };
     hoveredItems: string[];
     handleMouseEnterItem: (
@@ -368,6 +424,8 @@ type SubMenuProps = {
         item: MenuItem
     ) => void;
     handleOnClick: (e: MouseEvent, item: MenuItem) => void;
+    openSubMenu: (key: string, label: string) => void;
+    closeSubMenu: (key: string) => void;
     renderMenu?: (subMenu: JSX.Element, props: any) => JSX.Element;
     renderMenuItem?: (item: MenuItem, props: any) => JSX.Element;
     mirrored?: boolean;
@@ -381,7 +439,14 @@ const SubMenu = (props: SubMenuProps): JSX.Element => {
     // that into left-start near the right edge, shift() pulls it back inside
     // near the bottom edge, all paintable-area aware. autoUpdate keeps it live
     // on scroll/resize (the old one-shot `flipped` flag never re-evaluated).
-    const [subStyle, setSubStyle] = createSignal("position:fixed;left:0px;top:0px");
+    //
+    // Starts `visibility:hidden` and only sheds it once computeMenuPosition
+    // resolves (styleToString's output never includes `visibility`, so the
+    // full style-string replacement below drops it) — otherwise this panel
+    // paints fully visible at the placeholder (0,0) for the frame(s) before
+    // the real position commits (SPEC_SUBMENU_POSITIONING_AND_HOVER_TIMING_
+    // 2026_08_10 §1.1, the confirmed primary cause of the upper-left flash).
+    const [subStyle, setSubStyle] = createSignal("position:fixed;left:0px;top:0px;visibility:hidden");
     let cleanupAutoUpdate: (() => void) | null = null;
     let subMenuEl: HTMLDivElement | undefined;
 
@@ -392,6 +457,11 @@ const SubMenu = (props: SubMenuProps): JSX.Element => {
 
     const registerSubMenu = (el: HTMLDivElement) => {
         subMenuEl = el;
+        // Registered immediately (not gated on positioning) — the safe-
+        // triangle test degrades gracefully on a not-yet-positioned/zero-size
+        // rect (submenu-hover.ts falls back to a plain delay) and picks up
+        // real geometry as soon as `update()` below commits it.
+        props.hover.setSubmenuEl(el);
         requestAnimationFrame(() => {
             const pos = position();
             if (!pos || !(el instanceof Element)) return;
@@ -430,22 +500,39 @@ const SubMenu = (props: SubMenuProps): JSX.Element => {
 
     onCleanup(() => cleanupAutoUpdate?.());
 
+    const peers = createPeerRegistry();
+
     const subMenu = (
         <div
             ref={registerSubMenu}
             class={clsx("menu sub-menu", { "menu--mirrored": props.mirrored })}
             style={subStyle()}
             data-pane-overlay
+            onMouseEnter={() => props.hover.onSubmenuEnter()}
+            onMouseLeave={(e) => props.hover.onSubmenuLeave(e)}
         >
             <For each={props.subItems}>
                 {(item, idx) => {
                     const newKey = `${props.parentKey}-${idx()}`;
                     const isActive = () => props.hoveredItems.includes(newKey);
 
+                    const hover: SubmenuHoverController | null = item.subItems
+                        ? createSubmenuHover({
+                              onOpen: () => props.openSubMenu(newKey, item.label),
+                              onClose: () => props.closeSubMenu(newKey),
+                          })
+                        : null;
+                    if (hover) peers.register(newKey, hover);
+                    onCleanup(() => hover?.dispose());
+
                     const menuItemProps = {
                         class: clsx("menu-item", { active: isActive() }),
-                        onMouseEnter: (event: MouseEvent) =>
-                            props.handleMouseEnterItem(event, props.parentKey, idx(), item),
+                        onMouseEnter: (event: MouseEvent) => {
+                            props.handleMouseEnterItem(event, props.parentKey, idx(), item);
+                            peers.closeOthers(newKey);
+                            hover?.onTriggerEnter();
+                        },
+                        onMouseLeave: (event: MouseEvent) => hover?.onTriggerLeave(event),
                         onClick: (e: MouseEvent) => props.handleOnClick(e, item),
                     };
 
@@ -485,16 +572,18 @@ const SubMenu = (props: SubMenuProps): JSX.Element => {
                     return (
                         <>
                             {renderedItem}
-                            <Show when={props.visibleSubMenus[newKey]?.visible && item.subItems}>
+                            <Show when={props.visibleSubMenus[newKey]?.visible && item.subItems && hover}>
                                 <SubMenu
                                     subItems={item.subItems!}
                                     parentKey={newKey}
                                     subMenuPosition={props.subMenuPosition}
-                                    setSubMenuPosition={props.setSubMenuPosition}
+                                    hover={hover!}
                                     visibleSubMenus={props.visibleSubMenus}
                                     hoveredItems={props.hoveredItems}
                                     handleMouseEnterItem={props.handleMouseEnterItem}
                                     handleOnClick={props.handleOnClick}
+                                    openSubMenu={props.openSubMenu}
+                                    closeSubMenu={props.closeSubMenu}
                                     renderMenu={props.renderMenu}
                                     renderMenuItem={props.renderMenuItem}
                                     mirrored={props.mirrored}
