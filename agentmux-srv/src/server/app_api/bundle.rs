@@ -71,11 +71,10 @@ pub(super) fn normalize_bundle_upsert_input(mut data: serde_json::Value) -> serd
     data
 }
 
-// Each handler is registered under BOTH the new `bundle.*` command and the
-// deprecated `preset.*` alias (one-release compat window, spec Phase 2). The
-// alias forwards to the same logic; remove it in Phase 4. The two
-// `register_handler` calls per fn pass explicit command constants (not a loop
-// variable) so the rpc-contract extractor can resolve every registered name.
+// The deprecated `preset.*` aliases (Phase 2's one-release compat window)
+// were retired as part of the Armory Bundle Format (ABF) UI-alignment pass —
+// `bundle.*` is the only surface now; see the ABF branding sweep this
+// change shipped alongside.
 
 fn register_bundle_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let make = |state: AppState| -> crate::backend::rpc::engine::CommandHandler {
@@ -85,7 +84,6 @@ fn register_bundle_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
         })
     };
     engine.register_handler(COMMAND_BUNDLE_LIST, make(state.clone()));
-    engine.register_handler(COMMAND_PRESET_LIST, make(state.clone()));
 }
 
 fn register_bundle_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -105,7 +103,6 @@ fn register_bundle_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
         })
     };
     engine.register_handler(COMMAND_BUNDLE_GET, make(state.clone()));
-    engine.register_handler(COMMAND_PRESET_GET, make(state.clone()));
 }
 
 fn register_bundle_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -161,7 +158,6 @@ fn register_bundle_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
         })
     };
     engine.register_handler(COMMAND_BUNDLE_UPSERT, make(state));
-    engine.register_handler(COMMAND_PRESET_UPSERT, make(state));
 }
 
 fn register_bundle_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -202,7 +198,6 @@ fn register_bundle_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
         })
     };
     engine.register_handler(COMMAND_BUNDLE_DELETE, make(state));
-    engine.register_handler(COMMAND_PRESET_DELETE, make(state));
 }
 
 fn register_bundle_self_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -220,7 +215,6 @@ fn register_bundle_self_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
         })
     };
     engine.register_handler(COMMAND_BUNDLE_SELF_GET, make(state.clone()));
-    engine.register_handler(COMMAND_PRESET_SELF_GET, make(state.clone()));
 }
 
 /// `bundle.export` — Armory Bundle Format (ABF) exporter, Phase 1 of
