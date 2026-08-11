@@ -20,14 +20,26 @@
 import type { JSX } from "solid-js";
 import type { AgentViewModel } from "../agent-model";
 import { AgentHistoryView } from "./AgentHistoryView";
+import { HISTORY_SOURCE_BLOCK_ID_META_KEY } from "../open-history-tab";
 
 export function AgentHistoryTabView({ model }: { model: AgentViewModel }): JSX.Element {
     const block = model.blockAtom;
     const outputFormat = (): string => (block()?.meta?.["agentOutputFormat"] as string) ?? "claude-stream-json";
     const agentName = (): string =>
         (block()?.meta?.["agentName"] as string) ?? (block()?.meta?.["agentId"] as string) ?? "agent";
+    // The original live block's id — openOrFocusHistoryTab stamps this at
+    // tab-open time. Falls back to this (never-launched) block's own id
+    // only if somehow absent, matching AgentHistoryView's own default.
+    const sourceBlockId = (): string | undefined => block()?.meta?.[HISTORY_SOURCE_BLOCK_ID_META_KEY] as string | undefined;
 
-    return <AgentHistoryView blockId={model.blockId} outputFormat={outputFormat} agentName={agentName} />;
+    return (
+        <AgentHistoryView
+            blockId={model.blockId}
+            sourceBlockId={sourceBlockId()}
+            outputFormat={outputFormat}
+            agentName={agentName}
+        />
+    );
 }
 
 AgentHistoryTabView.displayName = "AgentHistoryTabView";

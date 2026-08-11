@@ -31,6 +31,15 @@ import { pushNotification, WOS } from "@/app/store/global";
  *  conversation's own launch meta. */
 export const HISTORY_TAB_FOR_META_KEY = "agent:historyTabFor";
 
+/** Block-meta key carrying the ORIGINAL live block's id — the history
+ *  tab's own block is never actually launched, so it has no local output
+ *  of its own; `AgentHistoryView` reads transcripts through this id
+ *  instead of its own (`sourceBlockId` — see that component's doc
+ *  comment), so the backend's own-block fallback path (when the global
+ *  transcript zone lookup itself comes up empty) can't silently land on
+ *  an empty block. codex P1 on PR #2539. */
+export const HISTORY_SOURCE_BLOCK_ID_META_KEY = "agent:historySourceBlockId";
+
 /** True if `blockId` is (or has ever been opened as) a history-tab block
  *  for `agentId`. Reads persisted meta directly (WOS store), not a
  *  reactive block atom — this runs outside any component's reactive scope
@@ -40,7 +49,31 @@ function isHistoryTabFor(blockId: string, agentId: string): boolean {
     return meta?.[HISTORY_TAB_FOR_META_KEY] === agentId;
 }
 
+// In-flight opens, keyed by `${currentBlockId}|${agentId}`. Without this,
+// two near-simultaneous calls (a double-click, or the link row and the
+// context menu entry both firing before the first `pane.open` RPC
+// resolves) each read the same pre-RPC blockStack, both miss the
+// not-yet-created tab, and both push a duplicate — violating the
+// open-OR-focus guarantee. codex P2 / reagent P2 on PR #2539. A second
+// call while the first is still in flight AWAITS THE SAME PROMISE instead
+// of re-running the body, so it does no work of its own and can't race.
+const inFlightOpens = new Map<string, Promise<void>>();
+
 export async function openOrFocusHistoryTab(opts: { currentBlockId: string; agentId: string }): Promise<void> {
+    const key = `${opts.currentBlockId}|${opts.agentId}`;
+    const inFlight = inFlightOpens.get(key);
+    if (inFlight) return inFlight;
+
+    const promise = openOrFocusHistoryTabImpl(opts);
+    inFlightOpens.set(key, promise);
+    try {
+        await promise;
+    } finally {
+        inFlightOpens.delete(key);
+    }
+}
+
+async function openOrFocusHistoryTabImpl(opts: { currentBlockId: string; agentId: string }): Promise<void> {
     const { currentBlockId, agentId } = opts;
     const layoutModel = getLayoutModelForStaticTab();
     const node = layoutModel.getNodeByBlockId(currentBlockId);
@@ -71,6 +104,7 @@ export async function openOrFocusHistoryTab(opts: { currentBlockId: string; agen
                     view: "agent",
                     agentId,
                     [HISTORY_TAB_FOR_META_KEY]: agentId,
+                    [HISTORY_SOURCE_BLOCK_ID_META_KEY]: currentBlockId,
                     agentOutputFormat: liveMeta?.["agentOutputFormat"],
                     agentName: liveMeta?.["agentName"],
                 },

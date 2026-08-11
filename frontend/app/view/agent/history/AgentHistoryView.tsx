@@ -54,14 +54,34 @@ const HISTORY_FILTER: FilterState = {
 };
 
 export interface AgentHistoryViewProps {
-    /** The live pane's block id — used for the transcript reads (they
-     *  resolve the agent's global zone via this block's meta). */
+    /** This reader's OWN block id — used only as the layout-slot identity
+     *  (`${blockId}:history`) so concurrently-open history tabs (even for
+     *  the same agent) never collide on layout state. NOT used for the
+     *  transcript reads — see `sourceBlockId`. */
     blockId: string;
+    /**
+     * The block id whose meta resolves the agent's GLOBAL transcript zone
+     * for the RPC reads (`agent:session:read`'s backend, `global_output_source`
+     * in blockfile.rs, keyed off `block.meta.agentId`). Must be a block that
+     * has actually run the agent — when the global zone lookup itself comes
+     * up empty, the backend falls back to reading that exact block's own
+     * LOCAL per-channel output, so a never-launched block (like the history
+     * tab's own, per `openOrFocusHistoryTab`) would silently read as empty
+     * in that fallback case even though the live conversation has full
+     * local data. Defaults to `blockId` for standalone/test callers that
+     * don't distinguish the two. codex P1 on PR #2539.
+     */
+    sourceBlockId?: string;
     outputFormat: Accessor<string>;
     agentName?: Accessor<string>;
 }
 
 export function AgentHistoryView(props: AgentHistoryViewProps) {
+    // See the doc comment on `sourceBlockId` above — this is the id every
+    // RPC read below targets. `blockId` itself is reserved for the layout
+    // key only.
+    const readBlockId = props.sourceBlockId ?? props.blockId;
+
     // The accumulated RAW LINES (+ parallel stamps), reparsed wholesale
     // into nodes on every page load. Wholesale — not per-page with an id
     // dedup — because ClaudeCodeStreamParser generates counter-based ids
@@ -129,7 +149,7 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
         (async () => {
             try {
                 const countResp = await RpcApi.BlockfileLineCountCommand(TabRpcClient, {
-                    block_id: props.blockId,
+                    block_id: readBlockId,
                     filename: "output",
                 }, { timeout: 5000 });
                 if (!mounted) return;
@@ -142,7 +162,7 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
 
                 const offset = Math.max(0, total - HISTORY_PAGE);
                 const resp = await RpcApi.BlockfileReadRangeCommand(TabRpcClient, {
-                    block_id: props.blockId,
+                    block_id: readBlockId,
                     filename: "output",
                     offset,
                     limit: total - offset,
@@ -172,7 +192,7 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
         try {
             const newOffset = Math.max(0, currentOffset - HISTORY_PAGE);
             const resp = await RpcApi.BlockfileReadRangeCommand(TabRpcClient, {
-                block_id: props.blockId,
+                block_id: readBlockId,
                 filename: "output",
                 offset: newOffset,
                 limit: currentOffset - newOffset,
