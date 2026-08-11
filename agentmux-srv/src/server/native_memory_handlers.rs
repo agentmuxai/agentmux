@@ -323,11 +323,22 @@ const MAX_MEMORY_FILE_BYTES: u64 = 10 * 1024 * 1024;
 /// missing directory (never written, or wiped) is not an error, matching
 /// `list`'s own treatment. A per-file upsert failure is logged and
 /// swallowed (non-fatal), same as `list`.
+///
+/// Returns the filenames of any file whose real on-disk size exceeded
+/// [`MAX_MEMORY_FILE_BYTES`] — reagent P2, PR #2527: `list`'s original
+/// inline version of this logic silently truncates via
+/// `take(MAX_MEMORY_FILE_BYTES)` with no signal that it happened, so an
+/// export→import round trip through `bundle.export_for_agent` could
+/// permanently lose the tail of a large file with no warning anywhere.
+/// This function still truncates the same way (the cap itself is
+/// unchanged — still generous for any legitimate memory file), but now
+/// reports which files it happened to, so a caller that surfaces
+/// warnings (like `bundle.export_for_agent`) can tell the user.
 pub(crate) fn refresh_memory_mirror_from_live_fs(
     agent_id: &str,
     memory_dir: &std::path::Path,
     id_store: &crate::backend::storage::store::Store,
-) -> Result<(), String> {
+) -> Result<Vec<String>, String> {
     let mirrored_meta: std::collections::HashMap<String, (i64, i64)> = id_store
         .agent_native_memory_list_meta(agent_id)
         .unwrap_or_default()
@@ -337,10 +348,11 @@ pub(crate) fn refresh_memory_mirror_from_live_fs(
 
     let entries = match std::fs::read_dir(memory_dir) {
         Ok(e) => e,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(e) => return Err(format!("refresh_memory_mirror_from_live_fs: read_dir: {e}")),
     };
 
+    let mut truncated_files: Vec<String> = Vec::new();
     for entry in entries {
         let entry = entry.map_err(|e| format!("refresh_memory_mirror_from_live_fs: read_dir entry: {e}"))?;
         let name = entry.file_name().to_string_lossy().into_owned();
@@ -369,6 +381,9 @@ pub(crate) fn refresh_memory_mirror_from_live_fs(
         let unchanged_since_last_mirror = mirrored_meta.get(&name) == Some(&(size_bytes as i64, modified_at));
         if unchanged_since_last_mirror {
             continue;
+        }
+        if size_bytes > MAX_MEMORY_FILE_BYTES {
+            truncated_files.push(name.clone());
         }
         let full_content_read = {
             use std::io::Read;
@@ -399,7 +414,7 @@ pub(crate) fn refresh_memory_mirror_from_live_fs(
             }
         }
     }
-    Ok(())
+    Ok(truncated_files)
 }
 
 /// Resolve the live memory directory for an agent identified by its

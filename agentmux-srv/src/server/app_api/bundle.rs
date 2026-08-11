@@ -436,12 +436,21 @@ async fn bundle_export_for_agent_impl(
     if let Some(memory_dir) =
         crate::server::native_memory_handlers::memory_dir_for_agent_by_id(wstore, &agent)
     {
-        if let Err(e) = crate::server::native_memory_handlers::refresh_memory_mirror_from_live_fs(
+        match crate::server::native_memory_handlers::refresh_memory_mirror_from_live_fs(
             &agent.id,
             &memory_dir,
             id_store,
         ) {
-            handler_warnings.push(format!("native memory refresh failed (exporting mirror as-is): {e}"));
+            Ok(truncated) => {
+                // reagent P2, PR #2527: surface truncation instead of
+                // silently exporting/importing a partial file.
+                for filename in truncated {
+                    handler_warnings.push(format!(
+                        "{filename}: exceeds the native-memory size limit and was truncated; the exported copy is incomplete"
+                    ));
+                }
+            }
+            Err(e) => handler_warnings.push(format!("native memory refresh failed (exporting mirror as-is): {e}")),
         }
     }
     match id_store.agent_native_memory_list_meta(&agent.id) {
@@ -552,6 +561,25 @@ async fn bundle_import_for_agent_impl(
     let import_lock = bundle_import_for_agent_lock(&agent.id);
     let _import_guard = import_lock.lock().await;
 
+    // reagent P0, PR #2527: the "zero existing memory" guard below only
+    // consults db_agent_native_memory (the mirror) — a live file that was
+    // written autonomously but never viewed through the Stash Memory tab
+    // is NOT in the mirror yet, so the check would pass and the write
+    // loop further down would silently overwrite it via fs::rename. Same
+    // class of bug bundle.export_for_agent already had to guard against
+    // (see refresh_memory_mirror_from_live_fs's own doc comment) — the
+    // fix is the same: refresh from the live FS before trusting the
+    // mirror's row count. A missing/unresolvable working directory is not
+    // an error here (nothing to refresh from); the emptiness check below
+    // still runs against whatever the mirror already has.
+    let memory_dir = crate::server::native_memory_handlers::memory_dir_for_agent_by_id(wstore, &agent);
+    let mut warnings: Vec<String> = Vec::new();
+    if let Some(dir) = &memory_dir {
+        if let Err(e) = crate::server::native_memory_handlers::refresh_memory_mirror_from_live_fs(&agent.id, dir, id_store) {
+            warnings.push(format!("native memory refresh failed (checking mirror as-is): {e}"));
+        }
+    }
+
     // Reject BEFORE any parsing/decoding work — a target with existing
     // memory is a hard stop, not something worth spending
     // decompression/parse cost on first.
@@ -571,7 +599,7 @@ async fn bundle_import_for_agent_impl(
     let parsed = bi::parse_bundle_import(&resolved.files)
         .map_err(|e| format!("bundle.import_for_agent: {e}"))?;
 
-    let mut warnings = resolved.intake_warnings;
+    warnings.extend(resolved.intake_warnings);
     // reagent P1, PR #2527: parse_bundle_import unconditionally warns
     // that components.memory is "present but ignored" (correct for
     // bundle.import/.preview/.commit, which really do ignore it) — but
@@ -580,6 +608,23 @@ async fn bundle_import_for_agent_impl(
     // literal that could drift) stops every successful memory-bearing
     // import from falsely claiming its memory was ignored.
     warnings.extend(parsed.warnings.iter().filter(|w| w.as_str() != bi::MEMORY_COMPONENT_IGNORED_WARNING).cloned());
+
+    // reagent P2, PR #2527: this RPC exists specifically to transfer
+    // memory — if the manifest actually has a memory component but this
+    // agent has no resolvable working directory (and therefore no memory
+    // dir to write into), failing fast here (before any skill/bundle
+    // writes) is correct; silently succeeding with
+    // memory_files_written: 0 would drop the one thing the caller asked
+    // for. A bundle with NO memory component is unaffected — that's a
+    // normal bundle.import_for_agent call that just happens not to need
+    // a memory dir.
+    let manifest_memory_paths = resolved_memory_paths(&resolved.files);
+    if !manifest_memory_paths.is_empty() && memory_dir.is_none() {
+        return Err(format!(
+            "bundle.import_for_agent: agent {} has no working directory configured; cannot import its memory",
+            req.agent_id
+        ));
+    }
 
     // Normal bundle components, exactly as bundle.import creates them —
     // a memory-bearing import still creates a reusable bundle row
@@ -591,6 +636,15 @@ async fn bundle_import_for_agent_impl(
     // aborts the whole RPC).
     let now = now_ms();
     let mut imported_skill_ids: Vec<String> = Vec::new();
+    // reagent P2, PR #2527: mirrors bundle.import's own rollback_skills
+    // closure — without it, a later failure (the bundle upsert below)
+    // leaves already-created global skill rows orphaned with no way for
+    // the caller to know cleanup may be needed.
+    let rollback_skills = |ids: &[String]| -> Vec<String> {
+        ids.iter()
+            .filter_map(|id| wstore.skill_delete(id).err().map(|e| format!("{id}: {e}")))
+            .collect()
+    };
     for skill in &parsed.skills {
         let row = crate::backend::storage::Skill {
             id: uuid::Uuid::new_v4().to_string(),
@@ -608,7 +662,18 @@ async fn bundle_import_for_agent_impl(
             Err(e) if e.to_string().contains("already exists") => {
                 warnings.push(format!("skill \"{}\" already exists; skipped", skill.slug));
             }
-            Err(e) => return Err(format!("bundle.import_for_agent: failed to create skill \"{}\": {e}", skill.slug)),
+            Err(e) => {
+                let rollback_errors = rollback_skills(&imported_skill_ids);
+                let mut msg = format!("bundle.import_for_agent: failed to create skill \"{}\": {e}", skill.slug);
+                if !rollback_errors.is_empty() {
+                    msg.push_str(&format!(
+                        "; additionally, rollback of {} previously-created skill(s) failed and may have left orphaned global skill row(s): {}",
+                        rollback_errors.len(),
+                        rollback_errors.join("; ")
+                    ));
+                }
+                return Err(msg);
+            }
         }
     }
     let memory = crate::backend::storage::store::Memory {
@@ -633,9 +698,18 @@ async fn bundle_import_for_agent_impl(
         created_at: now,
         updated_at: now,
     };
-    id_store
-        .bundle_memory_upsert(&memory)
-        .map_err(|e| format!("bundle.import_for_agent: {e}"))?;
+    if let Err(e) = id_store.bundle_memory_upsert(&memory) {
+        let rollback_errors = rollback_skills(&imported_skill_ids);
+        let mut msg = format!("bundle.import_for_agent: {e}");
+        if !rollback_errors.is_empty() {
+            msg.push_str(&format!(
+                "; additionally, rollback of {} previously-created skill(s) failed and may have left orphaned global skill row(s): {}",
+                rollback_errors.len(),
+                rollback_errors.join("; ")
+            ));
+        }
+        return Err(msg);
+    }
 
     // Memory files: write through the SAME dual-write path
     // agent:memory:write_file uses (live FS via memory_dir_for_cwd, then
@@ -643,20 +717,13 @@ async fn bundle_import_for_agent_impl(
     // this content visible in Stash while invisible to the actual
     // running agent (see the spec's revision note).
     let mut memory_files_written = 0usize;
-    let memory_dir = crate::server::native_memory_handlers::memory_dir_for_agent_by_id(wstore, &agent);
-    match &memory_dir {
-        None => warnings.push(format!(
-            "agent {} has no working directory configured; memory files not written",
-            req.agent_id
-        )),
-        Some(memory_dir) => {
-            if let Err(e) = std::fs::create_dir_all(memory_dir) {
-                warnings.push(format!("native memory: mkdir failed: {e}"));
-            }
+    if let Some(memory_dir) = &memory_dir {
+        if let Err(e) = std::fs::create_dir_all(memory_dir) {
+            warnings.push(format!("native memory: mkdir failed: {e}"));
         }
     }
     if let Some(memory_dir) = memory_dir {
-        for path in resolved_memory_paths(&resolved.files) {
+        for path in manifest_memory_paths {
             let Some(filename) = path.strip_prefix("memory/") else { continue };
             if crate::server::native_memory_handlers::validate_memory_filename(filename).is_err() {
                 warnings.push(format!("memory/{filename}: not a valid memory filename; skipped"));
@@ -2412,6 +2479,98 @@ mod export_import_for_agent_tests {
         assert_eq!(
             state.id_store.agent_native_memory_read("agent-1", "MEMORY.md").unwrap(),
             Some("already here".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn import_for_agent_rejects_a_target_with_an_unmirrored_live_memory_file() {
+        // reagent P0, PR #2527: a file written directly to the live FS
+        // (never viewed through Stash, so never mirrored) must still be
+        // detected by the "zero existing memory" guard -- otherwise the
+        // write loop would silently overwrite it via fs::rename.
+        let state = test_state();
+        let config_dir = tempfile::tempdir().unwrap();
+        make_agent(&state, "agent-1", "/work/proj", config_dir.path());
+
+        let memory_dir = config_dir.path().join("projects").join("-work-proj").join("memory");
+        std::fs::create_dir_all(&memory_dir).unwrap();
+        std::fs::write(memory_dir.join("MEMORY.md"), "Never mirrored, but real.").unwrap();
+        // Confirm the premise: nothing in the mirror yet.
+        assert!(state.id_store.agent_native_memory_list_meta("agent-1").unwrap().is_empty());
+
+        let files = abf_files_with_memory("Be helpful.", "MEMORY.md", "Would-be overwrite.");
+        let err = bundle_import_for_agent_impl(&state.id_store, &state.wstore, ImportForAgentReq {
+            agent_id: "agent-1".to_string(),
+            file_path: None,
+            zip_base64: None,
+            files: Some(files),
+        }).await.unwrap_err();
+        assert!(err.contains("already has"));
+
+        // The live file must survive untouched.
+        assert_eq!(
+            std::fs::read_to_string(memory_dir.join("MEMORY.md")).unwrap(),
+            "Never mirrored, but real."
+        );
+    }
+
+    #[tokio::test]
+    async fn import_for_agent_fails_fast_when_agent_has_no_working_directory_but_bundle_has_memory() {
+        // reagent P2, PR #2527: must fail BEFORE creating any skill/bundle
+        // rows, not silently succeed with memory_files_written: 0 -- this
+        // RPC exists specifically to transfer memory.
+        let state = test_state();
+        let mut def: crate::backend::storage::AgentDefinition = serde_json::from_value(serde_json::json!({
+            "id": "agent-no-workdir",
+            "slug": "agent-no-workdir",
+            "name": "agent-no-workdir",
+            "icon": "robot",
+            "provider": "claude",
+            "description": "test agent",
+            "working_directory": "",
+            "created_at": 1,
+        }))
+        .unwrap();
+        state.wstore.agent_def_insert(&mut def).unwrap();
+
+        let files = abf_files_with_memory("Be helpful.", "MEMORY.md", "Some fact.");
+        let err = bundle_import_for_agent_impl(&state.id_store, &state.wstore, ImportForAgentReq {
+            agent_id: "agent-no-workdir".to_string(),
+            file_path: None,
+            zip_base64: None,
+            files: Some(files),
+        }).await.unwrap_err();
+        assert!(err.contains("no working directory"));
+
+        // Nothing should have been created.
+        assert!(state.id_store.bundle_memory_list().unwrap().iter().all(|b| b.is_blank));
+    }
+
+    #[tokio::test]
+    async fn export_for_agent_warns_when_a_memory_file_is_truncated() {
+        // reagent P2, PR #2527: a file over the native-memory size cap
+        // must be flagged, not silently exported partial with no signal.
+        let state = test_state();
+        let config_dir = tempfile::tempdir().unwrap();
+        make_agent(&state, "agent-1", "/work/proj", config_dir.path());
+        make_bundle(&state, "bundle-1", "Be helpful.");
+
+        let memory_dir = config_dir.path().join("projects").join("-work-proj").join("memory");
+        std::fs::create_dir_all(&memory_dir).unwrap();
+        // One byte over the 10 MiB cap.
+        let oversized = "x".repeat(10 * 1024 * 1024 + 1);
+        std::fs::write(memory_dir.join("MEMORY.md"), &oversized).unwrap();
+
+        let result = bundle_export_for_agent_impl(&state.id_store, &state.wstore, ExportForAgentReq {
+            bundle_id: "bundle-1".to_string(),
+            agent_id: "agent-1".to_string(),
+            format: String::new(),
+        }).await.unwrap();
+
+        let warnings: Vec<&str> = result["warnings"].as_array().unwrap().iter().map(|w| w.as_str().unwrap()).collect();
+        assert!(
+            warnings.iter().any(|w| w.contains("MEMORY.md") && w.contains("truncated")),
+            "expected a truncation warning, got: {warnings:?}"
         );
     }
 
