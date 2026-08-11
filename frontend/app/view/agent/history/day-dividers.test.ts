@@ -56,4 +56,32 @@ describe("injectDayDividers (§4.4)", () => {
     it("empty input → empty output", () => {
         expect(injectDayDividers([])).toEqual([]);
     });
+
+    // Live-reproduced crash (SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md):
+    // a real transcript's node timestamps aren't guaranteed strictly
+    // monotonic (subagent transcript merges, tool-call-start vs. log-flush
+    // stamps, retries) — a day visited, left, then revisited must not
+    // produce the SAME `day-<key>` id twice. Two rows with an identical id
+    // is a duplicate key in the virtualized list's `<Key by={r=>r.nodeId}>`,
+    // which crashed `reconcileArrays` ("replaceChild: node not a child")
+    // once real, large-volume history started loading.
+    it("never emits the same day id twice, even if the day sequence goes back and forward again (non-monotonic timestamps)", () => {
+        const out = injectDayDividers([
+            md("a", day(2026, 8, 10)),
+            md("b", day(2026, 8, 11)),
+            md("c", day(2026, 8, 10)), // back to Aug 10 — must NOT re-divide
+            md("d", day(2026, 8, 11)), // forward to Aug 11 — must NOT re-divide either
+        ]);
+        const dividerIds = out.filter((n) => n.type === "day_divider").map((n) => n.id);
+        expect(dividerIds).toEqual(["day-2026-08-10", "day-2026-08-11"]);
+        // No duplicate ids anywhere in the output, full stop — the
+        // property <Key> actually depends on.
+        const allIds = out.map((n) => n.id);
+        expect(new Set(allIds).size).toBe(allIds.length);
+        // The revisited-day node itself still renders, just without a
+        // second boundary marker in front of it.
+        expect(out.map((n) => n.type)).toEqual([
+            "day_divider", "markdown", "day_divider", "markdown", "markdown", "markdown",
+        ]);
+    });
 });
