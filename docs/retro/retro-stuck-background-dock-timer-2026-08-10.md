@@ -72,7 +72,7 @@ The original design (`BashParams.run_in_background`'s own doc comment) assumed t
 - **codex, P1:** the fix checked `result.stdout` only. `claude-translator.ts`'s `buildToolResults` falls back to a plain `{ content: string }` shape (instead of the structured `{ stdout, stderr, interrupted }` sibling) when Claude omits a terminal-shaped `tool_use_result` or returns multiple `tool_result` blocks. A stdout-only check would reject a **genuinely** detached launch whose acceptance text arrived that way — dropping it from the dock entirely instead of just misclassifying it, which is worse than the bug being fixed. Fixed by adding a `resultText()` helper that checks both fields.
 - **reagent, P0:** the branch was stacked on top of an unrelated, already-merged PR's own branch (`agenta/close-2368-held-error-line-regression-test`) rather than being cut fresh from current `origin/main` — which had since advanced through a `v0.55.3` release. Merging as-is would have reverted `package.json`/`Cargo.toml`/`VERSION_HISTORY.md` back to `0.55.2` and duplicated an already-merged test, risking a duplicate-definition conflict. Fixed by rebuilding the branch from a fresh `origin/main` checkout and cherry-picking just the two genuinely-new commits, then force-pushing over the same PR branch (see "Process lesson" below).
 
-**Review round 2:** clean on both gates. Merged as `9d21c2b4c`.
+**Review round 2:** clean on both gates. Merged as `8e70f9ddb` (the squash-merge commit — `9d21c2b4c` was the branch's own pre-merge head, not the commit that actually landed on `main`).
 
 ---
 
@@ -98,10 +98,12 @@ The fix pattern, worth repeating whenever a new branch is cut mid-session:
 
 ```bash
 git fetch origin main
-git log origin/main..HEAD --oneline   # should be empty (or only YOUR new commits) before you push
+git merge-base --is-ancestor origin/main HEAD && echo "OK: based on current main" || echo "STALE"
 ```
 
-If it isn't empty of *someone else's* history, rebuild from a fresh branch and cherry-pick just the new commits rather than trying to rebase through it — cherry-pick + force-push to the same PR branch name preserves the open PR and its review thread.
+`git log origin/main..HEAD --oneline` is **not** sufficient on its own here (caught by codex reviewing this very retro, P2): it lists commits reachable from `HEAD` but not from `origin/main`, which is exactly this PR's own new commits *even when the base is stale* — a stale base's older history is still an ancestor of the current `origin/main` in the common case (a fast-forward release), so it's silently excluded from the diff either way. The count looks identical whether the branch is fresh or stale; it doesn't prove anything about the base. `git merge-base --is-ancestor origin/main HEAD` checks ancestry directly — it only succeeds if every commit on current `origin/main` is actually in `HEAD`'s history, which is the actual property "not stale" means.
+
+If it fails, rebuild from a fresh branch and cherry-pick just the new commits rather than trying to rebase through it — cherry-pick + force-push to the same PR branch name preserves the open PR and its review thread.
 
 This exact check is now baked into how this session drives every subsequent PR.
 
