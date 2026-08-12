@@ -724,6 +724,37 @@ pub(super) async fn handle_reactive_supervisor_decision(
         }
     };
 
+    // Entitlement gate (reagentx P1 on PR #2557): a Nudge must not deliver
+    // unless the target has actually opted in via `auto_continue_enabled`.
+    // `Handler` (backend::reactive) has no `Store` access by design — this
+    // check belongs at the HTTP boundary where `state.wstore` is available,
+    // not inside `record_supervisor_decision`. Decline never delivers
+    // anything, so it isn't gated.
+    if matches!(action, SupervisorAction::Nudge(_)) {
+        let opted_in = state
+            .wstore
+            .agent_def_list()
+            .ok()
+            .and_then(|defs| {
+                defs.into_iter()
+                    .find(|d| d.name.eq_ignore_ascii_case(&req.target_agent))
+            })
+            .map(|d| d.auto_continue_enabled != 0)
+            .unwrap_or(false);
+        if !opted_in {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(json!({
+                    "error": format!(
+                        "target agent '{}' has not opted in to auto_continue_enabled",
+                        req.target_agent
+                    )
+                })),
+            )
+                .into_response();
+        }
+    }
+
     let reason = req.reason.unwrap_or_default();
     let request_id = req
         .request_id

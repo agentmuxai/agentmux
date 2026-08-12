@@ -51,8 +51,21 @@ impl RateLimiter {
 struct NudgeCounterState {
     /// The target's `AgentRegistration::registration_nonce` as of the last
     /// nudge — a respawn (new nonce) resets the counter, since "consecutive"
-    /// only makes sense within one continuous run.
+    /// only makes sense within one continuous run. Real nonces are ≥ 1
+    /// (persistent-controller spawns only — `persistent::next_registration_
+    /// nonce`); PTY/shell and HTTP-register paths always register with 0
+    /// ("not recorded"), so nonce alone can't detect a respawn for them —
+    /// `block_id` below covers that case instead.
     registration_nonce: u64,
+    /// The target's block id as of the last nudge. A PTY/shell-registered
+    /// agent that's closed and relaunched gets a fresh block id (a new
+    /// pane), which nonce (always 0 for these paths) can't see — comparing
+    /// block_id catches that respawn case reagent flagged as a P1 gap
+    /// (nonce-only reset never fires for PTY agents). Doesn't help detect a
+    /// respawn that reuses the same pane/block id (e.g. a one-shot
+    /// SubprocessController that re-registers every turn in-place) — that
+    /// case still relies on `NUDGE_COOLDOWN_RESET_MS` alone, same as before.
+    block_id: String,
     count: u32,
     last_nudge_at_ms: u64,
 }
@@ -579,10 +592,19 @@ impl Handler {
     /// reached"`) and `Err` is returned so the calling agent's MCP
     /// tool-call result surfaces the refusal directly — a signal for it to
     /// stop nudging and escalate to a human via an ordinary jekt instead of
-    /// retrying. The counter resets when the target's
-    /// `registration_nonce` changes (a respawn — "consecutive" only makes
-    /// sense within one continuous run) or after `NUDGE_COOLDOWN_RESET_MS`
-    /// of inactivity.
+    /// retrying. The counter resets when the target's `registration_nonce`
+    /// or `block_id` changes (a respawn — "consecutive" only makes sense
+    /// within one continuous run; see `NudgeCounterState`'s field docs for
+    /// why both signals are needed) or after `NUDGE_COOLDOWN_RESET_MS` of
+    /// inactivity.
+    ///
+    /// Does NOT check the target's `auto_continue_enabled` opt-in itself —
+    /// `Handler` has no `Store` access by design (this module doesn't
+    /// depend on `backend::storage`). That gate lives at the HTTP boundary,
+    /// in `handle_reactive_supervisor_decision`
+    /// (`server/reactive.rs`), which has `AppState::wstore`. Any other
+    /// caller of this method directly is responsible for its own
+    /// entitlement check first.
     pub fn record_supervisor_decision(
         &mut self,
         target_agent: &str,
@@ -622,6 +644,14 @@ impl Handler {
                 })
             }
             SupervisorAction::Nudge(message) => {
+                // Bound `nudge_counters`' growth (reagentx P2 on PR #2557):
+                // an entry idle past the cooldown window is about to be
+                // treated as stale on next use anyway, so dropping it here
+                // is behavior-neutral — just reclaims memory instead of
+                // accumulating one entry per distinct target agent forever.
+                self.nudge_counters
+                    .retain(|_, v| now.saturating_sub(v.last_nudge_at_ms) <= NUDGE_COOLDOWN_RESET_MS);
+
                 let current_nonce = self
                     .agent_info
                     .get(&target_key)
@@ -629,13 +659,23 @@ impl Handler {
                     .unwrap_or(0);
                 let entry = self.nudge_counters.entry(target_key).or_insert(NudgeCounterState {
                     registration_nonce: current_nonce,
+                    block_id: block_id.clone(),
                     count: 0,
                     last_nudge_at_ms: 0,
                 });
+                // registration_nonce only distinguishes a respawn for
+                // persistent-controller agents (real nonces, ≥ 1);
+                // PTY/shell/HTTP-register paths always register with 0, so
+                // block_id is the fallback signal for those (reagentx P1 on
+                // PR #2557 — nonce alone never fired for them, leaving a
+                // respawned PTY agent stuck behind its prior run's
+                // exhausted ceiling for up to the full cooldown window).
                 let stale = entry.registration_nonce != current_nonce
+                    || entry.block_id != block_id
                     || now.saturating_sub(entry.last_nudge_at_ms) > NUDGE_COOLDOWN_RESET_MS;
                 if stale {
                     entry.registration_nonce = current_nonce;
+                    entry.block_id = block_id.clone();
                     entry.count = 0;
                 }
 
