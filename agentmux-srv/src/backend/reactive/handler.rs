@@ -43,6 +43,32 @@ impl RateLimiter {
     }
 }
 
+// ---- Supervisor nudge-ceiling tracking ----
+
+/// Per-target-agent consecutive-nudge tracking for the Warden Supervisor
+/// guardrail. Keyed on the target agent's lowercased name in
+/// `Handler::nudge_counters`.
+struct NudgeCounterState {
+    /// The target's `AgentRegistration::registration_nonce` as of the last
+    /// nudge — a respawn (new nonce) resets the counter, since "consecutive"
+    /// only makes sense within one continuous run.
+    registration_nonce: u64,
+    count: u32,
+    last_nudge_at_ms: u64,
+}
+
+/// Max consecutive auto-continue nudges a Supervisor may send to the same
+/// target agent (within one registration / cooldown window) before
+/// `record_supervisor_decision` refuses and forces a decline instead. Bounds
+/// a runaway auto-continue loop — see
+/// docs/analysis/ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md.
+pub(super) const MAX_CONSECUTIVE_AUTO_CONTINUES: u32 = 5;
+
+/// Gap since the last nudge after which the consecutive counter resets, on
+/// the theory that a long-idle target has effectively started a new work
+/// session even without a fresh `registration_nonce`.
+pub(super) const NUDGE_COOLDOWN_RESET_MS: u64 = 30 * 60 * 1000;
+
 // ---- Handler ----
 
 /// Core reactive messaging handler.
@@ -61,6 +87,10 @@ pub struct Handler {
     audit_log: Vec<AuditLogEntry>,
     rate_limiter: RateLimiter,
     include_source_in_message: bool,
+    /// Warden Supervisor consecutive-nudge ceiling state, keyed on the
+    /// target agent's lowercased name. In-memory only (same lifecycle as
+    /// `audit_log`) — not persisted across a restart.
+    nudge_counters: HashMap<String, NudgeCounterState>,
 }
 
 impl Handler {
@@ -76,6 +106,7 @@ impl Handler {
             audit_log: Vec::with_capacity(AUDIT_LOG_MAX),
             rate_limiter: RateLimiter::new(RATE_LIMIT_MAX),
             include_source_in_message: false,
+            nudge_counters: HashMap::new(),
         }
     }
 
@@ -243,7 +274,22 @@ impl Handler {
     /// Sends `message\r` as a single payload (required for text display),
     /// then spawns 3 delayed `\r` sends at 200ms intervals as separate
     /// PTY writes to ensure submission. See `specs/jekt-inject-timing.md`.
-    pub fn inject_message(&mut self, mut req: InjectionRequest) -> InjectionResponse {
+    pub fn inject_message(&mut self, req: InjectionRequest) -> InjectionResponse {
+        self.inject_message_inner(req, None, None)
+    }
+
+    /// Shared delivery path behind both `inject_message` (ordinary jekt,
+    /// `outcome`/`reason` always `None`) and `record_supervisor_decision`'s
+    /// `Nudge` arm (`outcome: Some("nudge_sent")`, `reason` the Supervisor's
+    /// stated reasoning) — every audit-log write below carries these
+    /// through instead of the two call sites duplicating sanitize/deliver
+    /// logic.
+    fn inject_message_inner(
+        &mut self,
+        mut req: InjectionRequest,
+        outcome: Option<&str>,
+        reason: Option<&str>,
+    ) -> InjectionResponse {
         let now = now_unix_millis();
 
         // Generate request ID if missing
@@ -292,8 +338,8 @@ impl Handler {
                     false,
                     Some(&err),
                     &request_id,
-                    None,
-                    None,
+                    outcome,
+                    reason,
                 );
                 return InjectionResponse {
                     success: false,
@@ -370,8 +416,8 @@ impl Handler {
                         true,
                         None,
                         &request_id,
-                        None,
-                        None,
+                        outcome,
+                        reason,
                     );
                     return InjectionResponse {
                         success: true,
@@ -403,8 +449,8 @@ impl Handler {
                         false,
                         Some(&e),
                         &request_id,
-                        None,
-                        None,
+                        outcome,
+                        reason,
                     );
                     return InjectionResponse {
                         success: false,
@@ -431,8 +477,8 @@ impl Handler {
                     false,
                     Some(&err),
                     &request_id,
-                    None,
-                    None,
+                    outcome,
+                    reason,
                 );
                 return InjectionResponse {
                     success: false,
@@ -472,8 +518,8 @@ impl Handler {
                 false,
                 Some(&e),
                 &request_id,
-                None,
-                None,
+                outcome,
+                reason,
             );
             return InjectionResponse {
                 success: false,
@@ -506,8 +552,8 @@ impl Handler {
             true,
             None,
             &request_id,
-            None,
-            None,
+            outcome,
+            reason,
         );
 
         InjectionResponse {
@@ -517,6 +563,114 @@ impl Handler {
             error: None,
             timestamp: now,
             effective_tier: Some(effective_tier.to_string()),
+        }
+    }
+
+    /// Record a Warden Supervisor watcher agent's decision about
+    /// `target_agent`. A `Nudge` is delivered through the same path
+    /// `inject_message` uses (`inject_message_inner`) and audited with
+    /// `outcome: "nudge_sent"`; a `Decline` sends nothing and is audited
+    /// directly with `outcome: "nudge_declined"`.
+    ///
+    /// Enforces the consecutive-nudge ceiling
+    /// (`MAX_CONSECUTIVE_AUTO_CONTINUES`): if this nudge would exceed it,
+    /// the decision is forced to a decline (audited with
+    /// `outcome: "nudge_declined"`, `reason: "consecutive-nudge ceiling
+    /// reached"`) and `Err` is returned so the calling agent's MCP
+    /// tool-call result surfaces the refusal directly — a signal for it to
+    /// stop nudging and escalate to a human via an ordinary jekt instead of
+    /// retrying. The counter resets when the target's
+    /// `registration_nonce` changes (a respawn — "consecutive" only makes
+    /// sense within one continuous run) or after `NUDGE_COOLDOWN_RESET_MS`
+    /// of inactivity.
+    pub fn record_supervisor_decision(
+        &mut self,
+        target_agent: &str,
+        action: SupervisorAction,
+        reason: &str,
+        request_id: &str,
+        source_agent: Option<&str>,
+    ) -> Result<InjectionResponse, String> {
+        let now = now_unix_millis();
+        let target_key = target_agent.to_lowercase();
+        let block_id = self
+            .agent_to_block
+            .get(&target_key)
+            .cloned()
+            .unwrap_or_default();
+
+        match action {
+            SupervisorAction::Decline => {
+                self.log_audit(
+                    source_agent,
+                    target_agent,
+                    &block_id,
+                    "",
+                    true,
+                    None,
+                    request_id,
+                    Some("nudge_declined"),
+                    Some(reason),
+                );
+                Ok(InjectionResponse {
+                    success: true,
+                    request_id: request_id.to_string(),
+                    block_id: if block_id.is_empty() { None } else { Some(block_id) },
+                    error: None,
+                    timestamp: now,
+                    effective_tier: None,
+                })
+            }
+            SupervisorAction::Nudge(message) => {
+                let current_nonce = self
+                    .agent_info
+                    .get(&target_key)
+                    .map(|info| info.registration_nonce)
+                    .unwrap_or(0);
+                let entry = self.nudge_counters.entry(target_key).or_insert(NudgeCounterState {
+                    registration_nonce: current_nonce,
+                    count: 0,
+                    last_nudge_at_ms: 0,
+                });
+                let stale = entry.registration_nonce != current_nonce
+                    || now.saturating_sub(entry.last_nudge_at_ms) > NUDGE_COOLDOWN_RESET_MS;
+                if stale {
+                    entry.registration_nonce = current_nonce;
+                    entry.count = 0;
+                }
+
+                if entry.count >= MAX_CONSECUTIVE_AUTO_CONTINUES {
+                    let ceiling_reason = "consecutive-nudge ceiling reached".to_string();
+                    self.log_audit(
+                        source_agent,
+                        target_agent,
+                        &block_id,
+                        "",
+                        true,
+                        None,
+                        request_id,
+                        Some("nudge_declined"),
+                        Some(&ceiling_reason),
+                    );
+                    return Err(ceiling_reason);
+                }
+
+                entry.count += 1;
+                entry.last_nudge_at_ms = now;
+
+                let req = InjectionRequest {
+                    target_agent: target_agent.to_string(),
+                    message,
+                    source_agent: source_agent.map(|s| s.to_string()),
+                    request_id: Some(request_id.to_string()),
+                    priority: Some("normal".to_string()),
+                    wait_for_idle: false,
+                    jekt_tier: Some(super::types::JektTier::Coord),
+                    delivery_tier: Some("host".to_string()),
+                    forward_hops: 0,
+                };
+                Ok(self.inject_message_inner(req, Some("nudge_sent"), Some(reason)))
+            }
         }
     }
 
@@ -684,6 +838,21 @@ impl ReactiveHandler {
 
     pub fn get_audit_log(&self, limit: usize) -> Vec<AuditLogEntry> {
         self.inner.lock().unwrap().get_audit_log(limit)
+    }
+
+    /// See the inner [`Handler::record_supervisor_decision`].
+    pub fn record_supervisor_decision(
+        &self,
+        target_agent: &str,
+        action: SupervisorAction,
+        reason: &str,
+        request_id: &str,
+        source_agent: Option<&str>,
+    ) -> Result<InjectionResponse, String> {
+        self.inner
+            .lock()
+            .unwrap()
+            .record_supervisor_decision(target_agent, action, reason, request_id, source_agent)
     }
 }
 

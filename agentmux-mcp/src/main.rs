@@ -142,6 +142,21 @@ const GET_AGENT_TRANSCRIPT_TOOL: &str = r#"{
   }
 }"#;
 
+const SUPERVISOR_NUDGE_TOOL: &str = r#"{
+  "name": "SupervisorNudge",
+  "description": "For a Warden Supervisor watcher agent: record a decision about a target agent that just ended its turn, after inspecting it with GetAgentTranscript. action=\"nudge\" delivers `message` to the target as an ordinary jekt telling it to continue, and logs the decision. action=\"decline\" sends nothing and just logs that you chose not to nudge (e.g. the target isn't opted in, or looks genuinely done/blocked, not merely pausing to ask). A nudge that would exceed the server-side consecutive-nudge ceiling is refused (HTTP 429/tool error) — treat that as a signal to stop nudging this target and escalate to a human via SendMessage instead of retrying.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "target_agent": { "type": "string", "description": "Name of the agent this decision is about (its AGENTMUX_AGENT_ID value)" },
+      "action":       { "type": "string", "enum": ["nudge", "decline"], "description": "Whether to nudge the target to continue or decline to" },
+      "message":      { "type": "string", "description": "Required when action is \"nudge\" — the message delivered to the target as a jekt" },
+      "reason":       { "type": "string", "description": "Your stated reasoning for this decision, recorded in the audit log" }
+    },
+    "required": ["target_agent", "action"]
+  }
+}"#;
+
 const SET_ACTIVE_TAB_TOOL: &str = r#"{
   "name": "SetActiveTab",
   "description": "Switch the active (foreground) tab to the given tab_id within its workspace. Get tab ids from Layout(query:\"tabs\") or Layout(query:\"layout\").",
@@ -514,6 +529,8 @@ async fn main() {
                     serde_json::from_str(DISCOVER_AGENTS_TOOL).expect("static json");
                 let get_agent_transcript: Value =
                     serde_json::from_str(GET_AGENT_TRANSCRIPT_TOOL).expect("static json");
+                let supervisor_nudge: Value =
+                    serde_json::from_str(SUPERVISOR_NUDGE_TOOL).expect("static json");
                 let whoami: Value = serde_json::from_str(WHOAMI_TOOL).expect("static json");
                 let layout: Value = serde_json::from_str(LAYOUT_TOOL).expect("static json");
                 let set_name: Value = serde_json::from_str(SET_NAME_TOOL).expect("static json");
@@ -542,7 +559,7 @@ async fn main() {
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, open_editor, open_media, send_message, discover_agents, get_agent_transcript, whoami, layout, set_name, set_active_tab, new_tab, focus_window, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, memory_list, memory_read, memory_write, preset_list, preset_get, identity_accounts, identity_validate] }
+                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, open_editor, open_media, send_message, discover_agents, get_agent_transcript, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, memory_list, memory_read, memory_write, preset_list, preset_get, identity_accounts, identity_validate] }
                 })
             }
             "tools/call" => {
@@ -1108,6 +1125,73 @@ async fn call_tool(
                 .json()
                 .await
                 .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+
+            Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
+        }
+        "SupervisorNudge" => {
+            let target_agent = arguments
+                .get("target_agent")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: target_agent"))?;
+            let action = arguments
+                .get("action")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: action"))?;
+            if action != "nudge" && action != "decline" {
+                anyhow::bail!("invalid action: {action} (expected \"nudge\" or \"decline\")");
+            }
+            let message = arguments.get("message").and_then(|v| v.as_str());
+            if action == "nudge" && message.map(|m| m.is_empty()).unwrap_or(true) {
+                anyhow::bail!("message is required when action is \"nudge\"");
+            }
+            let reason = arguments.get("reason").and_then(|v| v.as_str());
+
+            if local_url.is_empty() || auth_key.is_empty() {
+                anyhow::bail!(
+                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+                     Is this agent pane opened via AgentMux?"
+                );
+            }
+
+            let source_agent = std::env::var("AGENTMUX_AGENT_ID")
+                .ok()
+                .filter(|s| !s.is_empty());
+
+            let url = format!(
+                "{}/agentmux/reactive/supervisor-decision",
+                local_url.trim_end_matches('/')
+            );
+            let body = json!({
+                "target_agent": target_agent,
+                "action": action,
+                "message": message,
+                "reason": reason,
+                "source_agent": source_agent,
+            });
+
+            let resp = client
+                .post(&url)
+                .header("X-AuthKey", auth_key)
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+
+            let status = resp.status();
+            let result: Value = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+
+            if !status.is_success() {
+                let err = result
+                    .get("error")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown error");
+                anyhow::bail!("supervisor decision rejected: HTTP {status} — {err}");
+            }
 
             Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
         }
