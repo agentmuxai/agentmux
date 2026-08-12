@@ -902,10 +902,9 @@ mod tests {
     /// production) and browses for it with a SEPARATE, independent
     /// `mdns_sd::ServiceDaemon` — mirroring what a real peer's browse-side
     /// would see. This is the one test in this module that touches the real
-    /// network stack (multicast on 5353); it's slow (~3s) and, like any mDNS
-    /// test, has a small flakiness ceiling on a hostile CI network — but it's
-    /// the only way to catch a registration bug that a browse-only or
-    /// probe-only unit test can't reach.
+    /// network stack (multicast on 5353) — it's slow (~3s) but it's the only
+    /// way to catch a registration bug that a browse-only or probe-only unit
+    /// test can't reach.
     ///
     /// This test is the reason the `""` (empty string) IP passed to
     /// `ServiceInfo::new` in `start()` was found to be broken: mdns-sd's own
@@ -919,7 +918,38 @@ mod tests {
     /// synchronous validation for this (it just enqueues a `Command::
     /// Register` and returns `Ok`), so `start()` logged "LAN discovery
     /// started" successfully every time despite never actually working.
+    ///
+    /// IGNORED by default (opt in with `cargo test -- --ignored`) —
+    /// confirmed environment-fragile in two independent, unrelated ways, not
+    /// just "flaky CI networking":
+    ///
+    /// 1. GitHub Actions' `macos-latest` runner doesn't support UDP
+    ///    multicast at all: `mDNSResponder` is disabled there
+    ///    (actions/runner-images#9628) and macOS 15+ runners separately lack
+    ///    the "Local Network" permission sandboxed processes need for
+    ///    multicast (actions/runner-images discussion #170669). Confirmed
+    ///    deterministic (3/3 nightly runs), not intermittent.
+    /// 2. Fails on real macOS hardware too, outside any CI — reproduced with
+    ///    a minimal from-scratch `mdns-sd` program (no AgentMux code at all)
+    ///    on a dev machine with several active VPN/tunnel interfaces: two
+    ///    `ServiceDaemon`s in the *same process*, both sharing port 5353
+    ///    with the OS's own `mDNSResponder`, and the browse side received
+    ///    zero packets — not even `ServiceFound`. The OS-level `dns-sd`
+    ///    CLI (two separate *processes*) discovers the identical
+    ///    registration instantly on the same machine, so this isn't a
+    ///    broken network or firewall; it's specific to same-process
+    ///    multi-`ServiceDaemon` port-5353 sharing in this crate.
+    ///
+    /// Both failure modes are outside this codebase's control (GitHub's
+    /// runner sandboxing; mdns-sd's own same-process daemon behavior), so
+    /// this stays a real, valuable, manually-run integration check —
+    /// exactly how the bug above was actually caught — rather than
+    /// something CI can gate on. See
+    /// docs/retro/retro-macos-ci-mdns-multicast-unsupported-2026-08-12.md.
     #[tokio::test]
+    #[ignore = "environment-fragile: real multicast, not gateable in GH Actions macOS CI \
+                (no multicast support there) or reliably on multi-interface dev machines \
+                (same-process ServiceDaemon port-5353 sharing) — see retro doc"]
     async fn a_registered_instance_is_discoverable_by_an_independent_mdns_client() {
         let event_bus = Arc::new(crate::backend::eventbus::EventBus::new());
         let instance_id = format!("test-{}", std::process::id());
