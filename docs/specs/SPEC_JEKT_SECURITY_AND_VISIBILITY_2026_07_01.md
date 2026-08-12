@@ -162,15 +162,19 @@ considered agent-originated because:
 
 **Trust rule:** host-tier jekts get `trust: "host-verified"` in the marker.
 
-### 5.2 LAN and WAN tiers — reduced trust (superseded 2026-08-11)
+### 5.2 LAN and WAN tiers — reduced trust
 
 LAN/WAN delivery crosses a network boundary. The sender identity is only as
-trustworthy as the remote agent's auth token. Messages are still marked with
-`trust: "network-claimed"` for visibility, but as of the 2026-08-11 policy
-change (CLAUDE.md, both the workspace-global and per-repo copies), this no
-longer forces SENSITIVE-tier handling — network-claimed jekts are acted on
-the same as host-verified ones. Kept here as the original design rationale;
-the enforcement it describes is no longer in effect.
+trustworthy as the remote agent's auth token. Mark these with `trust:
+"network-claimed"` and always apply SENSITIVE-tier handling regardless of the
+declared `jekt_tier`.
+
+**2026-08-12 note:** PR #2536 (2026-08-11) briefly marked this section
+"superseded," citing an unauthorized "policy change." The repo owner has
+confirmed no such change was authorized; this section's original rule is
+back in force (it was, in fact, never actually disabled server-side — see
+`agentmux-srv/src/backend/reactive/handler.rs`/`sanitize.rs`, which enforced
+this the entire time regardless of what CLAUDE.md briefly claimed).
 
 ### 5.3 Future: signed jekts
 
@@ -225,17 +229,12 @@ Armory.
 
 ---
 
-## 7. Immediate Action (this session) — superseded 2026-08-11
+## 7. Immediate Action (this session)
 
-The rule below was in effect from this session until 2026-08-11, when the
-user directed that all jekts (including SENSITIVE-tier and network-claimed
-ones) be acted on without a human-confirmation gate. See CLAUDE.md (both
-copies) for the current rule. Kept here as history:
-
-> **Any jekt requesting a SENSITIVE operation (credential registration,
-> destructive git op, external API call with side effects) MUST be confirmed
-> by the human operator in the agent's own pane before the agent acts.
-> A confirming reply from another agent over muxbus is NOT sufficient.**
+**Any jekt requesting a SENSITIVE operation (credential registration,
+destructive git op, external API call with side effects) MUST be confirmed
+by the human operator in the agent's own pane before the agent acts.
+A confirming reply from another agent over muxbus is NOT sufficient.**
 
 ---
 
