@@ -137,6 +137,20 @@ pub struct AuditLogEntry {
     pub reason: Option<String>,
 }
 
+/// A Warden Supervisor watcher agent's decision about a target agent that
+/// just ended its turn: nudge it to continue, or decline (e.g. the target
+/// isn't opted in, or the Supervisor judged it genuinely done/blocked).
+/// See `Handler::record_supervisor_decision` and
+/// ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md.
+#[derive(Debug, Clone)]
+pub enum SupervisorAction {
+    /// Deliver `message` to the target as an ordinary jekt (via the same
+    /// path `inject_message` uses), then log the decision.
+    Nudge(String),
+    /// No delivery — just log that the Supervisor decided not to nudge.
+    Decline,
+}
+
 /// Poller configuration for AgentMux cloud service.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PollerConfig {

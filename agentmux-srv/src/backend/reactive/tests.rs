@@ -659,6 +659,140 @@ fn test_handler_audit_log_ring_buffer() {
     assert_eq!(log[0].request_id, "req-109");
 }
 
+// -- Warden Supervisor decision tests --
+
+/// A `Decline` decision must log exactly one audit entry (`nudge_declined`)
+/// and must not attempt any delivery — no input sender is configured at
+/// all, so a delivery attempt would panic/error, not just be a no-op.
+#[test]
+fn test_record_supervisor_decision_decline_logs_one_entry_no_delivery() {
+    let mut handler = Handler::new();
+    handler.register_agent("agent1", "block1", None).unwrap();
+
+    let resp = handler
+        .record_supervisor_decision(
+            "agent1",
+            SupervisorAction::Decline,
+            "target looks genuinely done, not just pausing",
+            "req-1",
+            Some("warden-supervisor"),
+        )
+        .expect("decline never fails");
+
+    assert!(resp.success);
+    assert_eq!(resp.block_id.as_deref(), Some("block1"));
+
+    let log = handler.get_audit_log(10);
+    assert_eq!(log.len(), 1);
+    assert_eq!(log[0].outcome.as_deref(), Some("nudge_declined"));
+    assert_eq!(
+        log[0].reason.as_deref(),
+        Some("target looks genuinely done, not just pausing")
+    );
+}
+
+/// `MAX_CONSECUTIVE_AUTO_CONTINUES` nudges to the same target succeed; the
+/// next one is refused with the ceiling error and logs a `nudge_declined`
+/// entry instead of attempting delivery.
+#[tokio::test]
+async fn test_record_supervisor_decision_nudge_ceiling() {
+    let mut handler = Handler::new();
+    handler.set_input_sender(Arc::new(|_block_id: &str, _data: &[u8]| Ok(())));
+    handler.register_agent("agent1", "block1", None).unwrap();
+
+    for i in 0..MAX_CONSECUTIVE_AUTO_CONTINUES {
+        let resp = handler
+            .record_supervisor_decision(
+                "agent1",
+                SupervisorAction::Nudge("keep going".to_string()),
+                "still making progress",
+                &format!("req-{i}"),
+                Some("warden-supervisor"),
+            )
+            .unwrap_or_else(|e| panic!("nudge {i} should not hit the ceiling yet: {e}"));
+        assert!(resp.success);
+    }
+
+    let err = handler
+        .record_supervisor_decision(
+            "agent1",
+            SupervisorAction::Nudge("keep going".to_string()),
+            "still making progress",
+            "req-over",
+            Some("warden-supervisor"),
+        )
+        .expect_err("the next nudge must be refused");
+    assert_eq!(err, "consecutive-nudge ceiling reached");
+
+    let log = handler.get_audit_log(20);
+    let ceiling_entry = log
+        .iter()
+        .find(|e| e.request_id == "req-over")
+        .expect("the declined attempt must still be audited");
+    assert_eq!(ceiling_entry.outcome.as_deref(), Some("nudge_declined"));
+    assert_eq!(
+        ceiling_entry.reason.as_deref(),
+        Some("consecutive-nudge ceiling reached")
+    );
+    // Every prior nudge must have actually been delivered (nudge_sent), not
+    // silently declined early.
+    let sent_count = log.iter().filter(|e| e.outcome.as_deref() == Some("nudge_sent")).count();
+    assert_eq!(sent_count as u32, MAX_CONSECUTIVE_AUTO_CONTINUES);
+}
+
+/// A respawn (new `registration_nonce`) resets the consecutive-nudge
+/// counter — "consecutive" only makes sense within one continuous run, so a
+/// fresh spawn of the same agent name must not inherit the prior run's
+/// nudge count.
+#[tokio::test]
+async fn test_record_supervisor_decision_nudge_ceiling_resets_on_new_registration_nonce() {
+    let mut handler = Handler::new();
+    handler.set_input_sender(Arc::new(|_block_id: &str, _data: &[u8]| Ok(())));
+    handler
+        .register_agent_with_nonce("agent1", "block1", None, 1)
+        .unwrap();
+
+    for i in 0..MAX_CONSECUTIVE_AUTO_CONTINUES {
+        handler
+            .record_supervisor_decision(
+                "agent1",
+                SupervisorAction::Nudge("keep going".to_string()),
+                "still making progress",
+                &format!("req-{i}"),
+                Some("warden-supervisor"),
+            )
+            .unwrap_or_else(|e| panic!("nudge {i} should not hit the ceiling yet: {e}"));
+    }
+    assert!(
+        handler
+            .record_supervisor_decision(
+                "agent1",
+                SupervisorAction::Nudge("keep going".to_string()),
+                "still making progress",
+                "req-over",
+                Some("warden-supervisor"),
+            )
+            .is_err(),
+        "ceiling must be hit before the respawn"
+    );
+
+    // Respawn: same agent name, new nonce.
+    handler
+        .register_agent_with_nonce("agent1", "block1", None, 2)
+        .unwrap();
+
+    let resp = handler
+        .record_supervisor_decision(
+            "agent1",
+            SupervisorAction::Nudge("keep going".to_string()),
+            "fresh run, target paused again",
+            "req-after-respawn",
+            Some("warden-supervisor"),
+        )
+        .expect("a fresh registration_nonce must reset the ceiling");
+    assert!(resp.success);
+}
+
 // -- Poller tests --
 
 #[test]

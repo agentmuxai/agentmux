@@ -8,7 +8,7 @@ use axum::{
 };
 use serde_json::json;
 
-use crate::backend::reactive::InjectionRequest;
+use crate::backend::reactive::{InjectionRequest, SupervisorAction};
 use crate::backend::reactive::registry as agent_registry;
 use crate::backend::subagent_watcher;
 use crate::backend::base;
@@ -660,4 +660,88 @@ pub(super) async fn handle_reactive_transcript(
         "truncated": truncated,
     }))
     .into_response()
+}
+
+#[derive(serde::Deserialize)]
+pub(super) struct SupervisorDecisionRequest {
+    target_agent: String,
+    /// "nudge" | "decline".
+    action: String,
+    /// Required when `action == "nudge"` — the message delivered to
+    /// `target_agent` as an ordinary jekt.
+    #[serde(default)]
+    message: Option<String>,
+    #[serde(default)]
+    reason: Option<String>,
+    #[serde(default)]
+    request_id: Option<String>,
+    /// The calling Supervisor agent's own identity — same shape as
+    /// `InjectRequest::source_agent` (`SendMessage`/`Loop`). `None` for
+    /// callers that omit it (e.g. cron-driven).
+    #[serde(default)]
+    source_agent: Option<String>,
+}
+
+/// `POST /agentmux/reactive/supervisor-decision` — a Warden Supervisor
+/// watcher agent's decision about a target agent it just polled (see
+/// `GetAgentTranscript`). `action: "nudge"` delivers `message` to
+/// `target_agent` through the same path `SendMessage`/`Loop` use and audits
+/// it as a Supervisor-originated entry; `action: "decline"` sends nothing
+/// and just audits the decision. A nudge that would exceed the
+/// consecutive-nudge ceiling is refused with HTTP 429 — the calling agent
+/// should treat that as a signal to stop and escalate to a human instead of
+/// retrying.
+pub(super) async fn handle_reactive_supervisor_decision(
+    State(state): State<AppState>,
+    Json(req): Json<SupervisorDecisionRequest>,
+) -> Response {
+    if req.target_agent.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "missing target_agent"})),
+        )
+            .into_response();
+    }
+
+    let action = match req.action.as_str() {
+        "nudge" => {
+            let Some(message) = req.message.filter(|m| !m.is_empty()) else {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "message is required when action is \"nudge\""})),
+                )
+                    .into_response();
+            };
+            SupervisorAction::Nudge(message)
+        }
+        "decline" => SupervisorAction::Decline,
+        other => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": format!("unknown action: {other} (expected \"nudge\" or \"decline\")")})),
+            )
+                .into_response();
+        }
+    };
+
+    let reason = req.reason.unwrap_or_default();
+    let request_id = req
+        .request_id
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+    match state.reactive_handler.record_supervisor_decision(
+        &req.target_agent,
+        action,
+        &reason,
+        &request_id,
+        req.source_agent.as_deref(),
+    ) {
+        Ok(resp) => Json(serde_json::to_value(&resp).unwrap_or_default()).into_response(),
+        Err(e) => (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(json!({"error": e})),
+        )
+            .into_response(),
+    }
 }

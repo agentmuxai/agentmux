@@ -401,6 +401,97 @@ async fn reactive_transcript_unknown_agent_is_404() {
 }
 
 #[tokio::test]
+async fn reactive_supervisor_decision_missing_target_agent_is_rejected() {
+    // `target_agent` is a required field on `SupervisorDecisionRequest`, so
+    // an omitted key fails at axum's Json extractor (422), before the
+    // handler's own empty-string check (400) ever runs.
+    let app = test_router();
+    let body = serde_json::json!({"action": "decline"});
+    let req = Request::builder()
+        .method("POST")
+        .uri("/agentmux/reactive/supervisor-decision")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn reactive_supervisor_decision_empty_target_agent_is_400() {
+    let app = test_router();
+    let body = serde_json::json!({"target_agent": "", "action": "decline"});
+    let req = Request::builder()
+        .method("POST")
+        .uri("/agentmux/reactive/supervisor-decision")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn reactive_supervisor_decision_unknown_action_is_400() {
+    let app = test_router();
+    let body = serde_json::json!({"target_agent": "some-agent", "action": "maybe"});
+    let req = Request::builder()
+        .method("POST")
+        .uri("/agentmux/reactive/supervisor-decision")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn reactive_supervisor_decision_nudge_without_message_is_400() {
+    let app = test_router();
+    let body = serde_json::json!({"target_agent": "some-agent", "action": "nudge"});
+    let req = Request::builder()
+        .method("POST")
+        .uri("/agentmux/reactive/supervisor-decision")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn reactive_supervisor_decision_decline_succeeds_for_unregistered_target() {
+    // Decline never attempts delivery, so it succeeds even for a target
+    // that isn't (or is no longer) registered — matching a Supervisor
+    // deciding not to nudge an agent it can no longer see.
+    let app = test_router();
+    let body = serde_json::json!({
+        "target_agent": "supervisor-decision-test-decline-target-http",
+        "action": "decline",
+        "reason": "target looks done"
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/agentmux/reactive/supervisor-decision")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(json["success"].as_bool().unwrap());
+}
+
+#[tokio::test]
 async fn reactive_poller_status() {
     let app = test_router();
     let req = Request::builder()
