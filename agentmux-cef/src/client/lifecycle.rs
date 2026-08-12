@@ -97,7 +97,23 @@ impl AgentMuxHandler {
         // unexpected races) fall back to a generated UUID label
         // with FullInstance defaults.
         // Phase H.2.b — reducer-aware emptiness check with fallback.
-        let pending = if self.state.browsers_is_empty() {
+        let pending = if is_popup {
+            // An OAuth popup is created by CEF via on_before_popup returning
+            // false — it has NO `EnqueuePendingWindowCreation` entry of its own.
+            // It must therefore NOT run the shared DequeuePendingWindowCreation
+            // below: doing so would consume a *concurrent* legitimate
+            // window/pane/pool's queued entry, leaving that real creation to
+            // fall back to a synthesized random-UUID FullInstance and lose its
+            // true kind/parent_instance_id (reagent P1 round 3 on #2545).
+            // Synthesize a popup-labelled entry locally instead; the `is_popup`
+            // gates below route it away from all top-level/FullInstance
+            // treatment regardless of this label.
+            crate::state::PendingWindowCreation {
+                label: format!("popup-{}", uuid::Uuid::new_v4()),
+                kind: WindowKind::FullInstance,
+                parent_instance_id: None,
+            }
+        } else if self.state.browsers_is_empty() {
             crate::state::PendingWindowCreation {
                 label: "main".to_string(),
                 kind: WindowKind::FullInstance,
