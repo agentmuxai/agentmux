@@ -56,6 +56,16 @@ impl AgentMuxHandler {
         };
         tracing::info!("Browser created (total: {})", self.browser_list.len() + 1);
 
+        // The popup allowed by on_before_popup (auth/GIS sign-in) is the next
+        // browser created on this pane's handler — record its id so do_close
+        // can close its hosting Views window (the stray-blank-window fix).
+        if self.pending_popup {
+            self.pending_popup = false;
+            let mut b = browser.clone();
+            self.popup_browser_ids.insert(b.identifier());
+            tracing::info!(popup_id = b.identifier(), "tagged browser-pane auth popup for managed close");
+        }
+
         // Phase 1 diagnostic tracing — find the exact line that silences the
         // UI thread under concurrent window creation. See
         // docs/specs/SPEC_HOST_WINDOW_CREATION_RUNNER_2026-05-02.md.
@@ -474,7 +484,7 @@ impl AgentMuxHandler {
         }
     }
 
-    pub(crate) fn do_close(&mut self, _browser: Option<&mut Browser>) -> bool {
+    pub(crate) fn do_close(&mut self, browser: Option<&mut Browser>) -> bool {
         debug_assert_ne!(currently_on(ThreadId::UI), 0);
 
         // Close-cascade diagnostics (window-lifecycle-leak retro round 3,
@@ -485,6 +495,25 @@ impl AgentMuxHandler {
             "do_close fired; browser_list.len()={}",
             self.browser_list.len()
         ));
+
+        // Auth popup (OAuth/GIS) tearing down (its own window.close(), or the
+        // opener closing it after the postMessage hand-off): close the
+        // top-level Views window CEF created to host it. Nothing else closes a
+        // popup's window when its browser dies, so without this the window
+        // lingers blank ("stray Sign In window"; reagent P1 on PR #2545). The
+        // pane and main window are untouched — this browser is a distinct
+        // popup, not the pane's own frame.
+        if let Some(b) = browser {
+            let id = b.identifier();
+            if self.popup_browser_ids.remove(&id) {
+                if let Some(view) = browser_view_get_for_browser(Some(b)) {
+                    if let Some(mut win) = view.window() {
+                        tracing::info!(popup_id = id, "closing hosting Views window for auth popup on do_close");
+                        win.close();
+                    }
+                }
+            }
+        }
 
         if self.browser_list.len() == 1 {
             self.is_closing = true;
@@ -567,6 +596,10 @@ impl AgentMuxHandler {
                 url = %url,
                 "browser-pane popup — allowing native CEF popup so the auth handshake (opener/postMessage/cookies) completes in the pane",
             );
+            // Tag the browser about to be created (next on_after_created on this
+            // handler) as a popup, so do_close can close its Views window and
+            // it doesn't linger blank after the auth completes.
+            self.pending_popup = true;
             return false; // allow CEF to create the popup browser
         }
 
@@ -692,6 +725,10 @@ impl AgentMuxHandler {
         // accumulate one stale entry per closed browser over a session.
         self.crash_history.remove(&browser.identifier());
         self.memory_pause_history.remove(&browser.identifier());
+        // Defensive: drop any popup tag (do_close normally consumes it and
+        // closes the window; this prevents a stale id if a popup ever tears
+        // down without do_close firing).
+        self.popup_browser_ids.remove(&browser.identifier());
 
         // Unregister browser from the reducer's `browsers` map and get its
         // label. Phase H.2.d — legacy `state.browsers.lock().remove` removed;
