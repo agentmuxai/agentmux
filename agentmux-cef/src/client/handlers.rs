@@ -183,6 +183,8 @@ wrap_drag_handler! {
 // trigger the built-in action; the key still reaches JavaScript.
 // ---------------------------------------------------------------------------
 
+/// CEF event flag: Shift key is held (cef_types.h `EVENTFLAG_SHIFT_DOWN`).
+const EVENTFLAG_SHIFT_DOWN: u32 = 1 << 1;
 /// CEF event flag: Ctrl key is held.
 const EVENTFLAG_CONTROL_DOWN: u32 = 1 << 2;
 /// CEF event flag: Alt key is held (cef_types.h `EVENTFLAG_ALT_DOWN`).
@@ -221,7 +223,16 @@ enum BrowserPaneShortcut {
 /// they depend on browser-pane tabs, which don't exist yet (see the issue's
 /// own sequencing note). Ctrl+F (in-page find) is also deferred: it needs a
 /// find-bar UI (input + match-count display), not just an intercepted key.
-fn browser_pane_shortcut_for(ctrl: bool, alt: bool, vk: i32) -> Option<BrowserPaneShortcut> {
+///
+/// `shift` must be false to match: codex P2 on #2548 — without this,
+/// Ctrl+Shift+R (Chromium's hard-reload chord) was silently downgraded to a
+/// plain cached reload, and Ctrl+Shift+L was hijacked as focus-address too.
+/// Requiring shift-up leaves those shifted chords alone (falls through to
+/// CEF's normal handling) instead of guessing what they should do.
+fn browser_pane_shortcut_for(ctrl: bool, alt: bool, shift: bool, vk: i32) -> Option<BrowserPaneShortcut> {
+    if shift {
+        return None;
+    }
     if ctrl && !alt {
         match vk {
             VK_L => Some(BrowserPaneShortcut::FocusAddress),
@@ -265,11 +276,26 @@ fn run_browser_pane_shortcut(
 
     match shortcut {
         BrowserPaneShortcut::FocusAddress => {
-            crate::events::emit_event_from_state(
-                &state,
-                "browser-pane-shortcut",
-                &serde_json::json!({ "block_id": block_id, "action": "focus-address" }),
-            );
+            // codex P2 on #2548: emit_event_from_state always targets "main" —
+            // wrong when the pane was torn off into a floating window, since
+            // that window's own BrowserNavBar (not main's) owns the matching
+            // listener. Route to the pane's actual owning window instead.
+            match state.browser_pane_window_label(&block_id) {
+                Some(label) => {
+                    crate::events::emit_event_to_window(
+                        &state,
+                        &label,
+                        "browser-pane-shortcut",
+                        &serde_json::json!({ "block_id": block_id, "action": "focus-address" }),
+                    );
+                }
+                None => {
+                    tracing::warn!(
+                        "[browser-pane-shortcut] no owning window label for block_id={}",
+                        block_id
+                    );
+                }
+            }
         }
         BrowserPaneShortcut::Reload => state.browser_panes.reload(&block_id, &state),
         BrowserPaneShortcut::GoBack => state.browser_panes.go_back(&block_id, &state),
@@ -314,11 +340,12 @@ fn handle_pre_key_event(
     // KEYUP, which would otherwise double-fire (e.g. two reloads per press).
     if ev.type_ == KeyEventType::RAWKEYDOWN {
         let alt = (ev.modifiers & EVENTFLAG_ALT_DOWN) != 0;
+        let shift = (ev.modifiers & EVENTFLAG_SHIFT_DOWN) != 0;
         #[cfg(target_os = "macos")]
         let pane_primary_mod = (ev.modifiers & EVENTFLAG_COMMAND_DOWN) != 0;
         #[cfg(not(target_os = "macos"))]
         let pane_primary_mod = ctrl;
-        if let Some(shortcut) = browser_pane_shortcut_for(pane_primary_mod, alt, ev.windows_key_code) {
+        if let Some(shortcut) = browser_pane_shortcut_for(pane_primary_mod, alt, shift, ev.windows_key_code) {
             if run_browser_pane_shortcut(inner, browser, shortcut) {
                 return 1;
             }
@@ -630,7 +657,7 @@ mod browser_pane_shortcut_tests {
     #[test]
     fn ctrl_l_focuses_address_bar() {
         assert_eq!(
-            browser_pane_shortcut_for(true, false, VK_L),
+            browser_pane_shortcut_for(true, false, false, VK_L),
             Some(BrowserPaneShortcut::FocusAddress)
         );
     }
@@ -638,7 +665,7 @@ mod browser_pane_shortcut_tests {
     #[test]
     fn ctrl_r_reloads() {
         assert_eq!(
-            browser_pane_shortcut_for(true, false, VK_R),
+            browser_pane_shortcut_for(true, false, false, VK_R),
             Some(BrowserPaneShortcut::Reload)
         );
     }
@@ -646,7 +673,7 @@ mod browser_pane_shortcut_tests {
     #[test]
     fn alt_left_goes_back() {
         assert_eq!(
-            browser_pane_shortcut_for(false, true, VK_LEFT),
+            browser_pane_shortcut_for(false, true, false, VK_LEFT),
             Some(BrowserPaneShortcut::GoBack)
         );
     }
@@ -654,15 +681,15 @@ mod browser_pane_shortcut_tests {
     #[test]
     fn alt_right_goes_forward() {
         assert_eq!(
-            browser_pane_shortcut_for(false, true, VK_RIGHT),
+            browser_pane_shortcut_for(false, true, false, VK_RIGHT),
             Some(BrowserPaneShortcut::GoForward)
         );
     }
 
     #[test]
     fn plain_keypress_without_modifier_is_not_a_shortcut() {
-        assert_eq!(browser_pane_shortcut_for(false, false, VK_L), None);
-        assert_eq!(browser_pane_shortcut_for(false, false, VK_LEFT), None);
+        assert_eq!(browser_pane_shortcut_for(false, false, false, VK_L), None);
+        assert_eq!(browser_pane_shortcut_for(false, false, false, VK_LEFT), None);
     }
 
     #[test]
@@ -670,13 +697,13 @@ mod browser_pane_shortcut_tests {
         // Ctrl+Alt+L / Ctrl+Alt+Left are not reserved shortcuts — only plain
         // Ctrl+<key> and plain Alt+<key> are matched, so a page/site binding
         // Ctrl+Alt+<key> for its own purposes isn't hijacked.
-        assert_eq!(browser_pane_shortcut_for(true, true, VK_L), None);
-        assert_eq!(browser_pane_shortcut_for(true, true, VK_LEFT), None);
+        assert_eq!(browser_pane_shortcut_for(true, true, false, VK_L), None);
+        assert_eq!(browser_pane_shortcut_for(true, true, false, VK_LEFT), None);
     }
 
     #[test]
     fn unrelated_key_is_not_a_shortcut() {
-        assert_eq!(browser_pane_shortcut_for(true, false, VK_P), None);
+        assert_eq!(browser_pane_shortcut_for(true, false, false, VK_P), None);
     }
 
     #[test]
@@ -686,7 +713,18 @@ mod browser_pane_shortcut_tests {
         // deliberate, not an oversight, until that dependency lands.
         const VK_T: i32 = 0x54;
         const VK_W: i32 = 0x57;
-        assert_eq!(browser_pane_shortcut_for(true, false, VK_T), None);
-        assert_eq!(browser_pane_shortcut_for(true, false, VK_W), None);
+        assert_eq!(browser_pane_shortcut_for(true, false, false, VK_T), None);
+        assert_eq!(browser_pane_shortcut_for(true, false, false, VK_W), None);
+    }
+
+    #[test]
+    fn shift_held_excludes_plain_shortcuts() {
+        // codex P2 on #2548: Ctrl+Shift+R is Chromium's hard-reload chord and
+        // Ctrl+Shift+L isn't a shortcut at all — neither should be silently
+        // downgraded/hijacked into the plain Ctrl+R/Ctrl+L actions.
+        assert_eq!(browser_pane_shortcut_for(true, false, true, VK_R), None);
+        assert_eq!(browser_pane_shortcut_for(true, false, true, VK_L), None);
+        assert_eq!(browser_pane_shortcut_for(false, true, true, VK_LEFT), None);
+        assert_eq!(browser_pane_shortcut_for(false, true, true, VK_RIGHT), None);
     }
 }
