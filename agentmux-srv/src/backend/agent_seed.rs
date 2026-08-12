@@ -197,6 +197,7 @@ pub fn seed_agents(wstore: &Arc<Store>) -> Result<SeedReport, StoreError> {
             container_name: String::new(),
             use_ambient_login: 0,
             model_vendor_base_url: String::new(), // manifest doesn't declare this yet
+            auto_continue_enabled: 0,
         };
         wstore.agent_def_insert(&mut agent)?;
 
@@ -445,6 +446,7 @@ fn reseed_if_needed(
             container_name: String::new(),
             use_ambient_login: 0,
             model_vendor_base_url: String::new(), // manifest doesn't declare this yet
+            auto_continue_enabled: 0,
         };
 
         if let Some(existing_agent) = existing_map.get(agent_def.id.as_str()) {
@@ -553,6 +555,7 @@ mod tests {
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
         };
         wstore.agent_def_insert(&mut def).unwrap();
