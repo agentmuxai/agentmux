@@ -1,5 +1,18 @@
 # AgentMux Version History
 
+## 0.55.6 — 2026-08-11
+
+- fix(agent-pane): progress bar renders above the tab strip, not overlapping the content region
+- fix(agent-pane): tab strip floats over the conversation instead of reserving a row
+- fix(agent): failed tool calls hold open; stop mass-collapsing on hidden pane
+- feat(agent-pane): Agent History as a pane tab; composer draft preservation; scrolling link row
+- fix(agent): require true position 0/end before composer history recall, not just visual first/last line
+- fix(dev): stop go-task from shadowing task dev TITLE=... overrides
+- fix(agent-pane): Agent History tab crash + missing styling
+- fix(clipboard): code block copy silently wrote empty text to clipboard
+- fix(agent-pane): flicker on tab switch — spinner fades before content paints
+
+
 ## 0.55.5 — 2026-08-11
 
 - fix(agent): seed shell drawer's term:zoom before construct, eliminate open jerk
