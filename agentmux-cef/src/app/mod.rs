@@ -368,12 +368,19 @@ wrap_browser_view_delegate! {
             } else {
                 RuntimeStyle::ALLOY
             };
-            // OAuth sign-in popup (non-DevTools): give it an explicit tall,
-            // centered window — a portrait-ish shape suits a sign-in form, and
-            // it's ~2x the height of the default popup (per user request). Uses
-            // the primary monitor's work area; falls back to the delegate's
-            // default sizing when the work area can't be resolved (macOS/Linux
-            // stubs). DevTools keeps its default sizing.
+            // OAuth sign-in popup (non-DevTools): a tall, centered, portrait-ish
+            // window suits a sign-in form. NOTE: this Views-delegate path only
+            // sizes an **Alloy/Views-hosted** popup. Under the shipping **Chrome
+            // runtime**, CEF creates and owns the popup window itself and this
+            // `on_popup_browser_view_created` callback does not fire for it, so
+            // the sizing below is currently inert on the shipping build (the
+            // popup comes up at CEF's default size). Sizing the Chrome-runtime
+            // popup needs a different hook (the CEF `on_before_popup`
+            // window_info out-param, not exposed by the current cef-rs wrapper)
+            // — tracked as a follow-up ("circle back on login-window sizing").
+            // The bounds are still computed/passed so the Alloy path (and a
+            // future Chrome-sizing hook) get correct geometry. macOS/Linux
+            // return None from get_monitor_work_area (stubs) → default sizing.
             let initial_bounds = if is_devtools == 0 {
                 get_monitor_work_area(0, 0).map(|(wx, wy, ww, wh)| {
                     let w = (ww as f64 * 0.55).round() as i32;

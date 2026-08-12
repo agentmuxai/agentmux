@@ -514,12 +514,18 @@ impl AgentMuxHandler {
         ));
 
         // Auth popup (OAuth/GIS) tearing down (its own window.close(), or the
-        // opener closing it after the postMessage hand-off): close the
-        // top-level Views window CEF created to host it. Nothing else closes a
-        // popup's window when its browser dies, so without this the window
-        // lingers blank ("stray Sign In window"; reagent P1 on PR #2545). The
-        // pane and main window are untouched — this browser is a distinct
-        // popup, not the pane's own frame.
+        // opener closing it after the postMessage hand-off).
+        //
+        // Under the shipping **Chrome runtime**, CEF owns the popup's window
+        // and closes it itself — there's no AgentMux Views window, so
+        // `.window()` is None and this is a clean no-op (confirmed live via the
+        // [oauth-popup] trace: step 2 `on_popup_browser_view_created` never
+        // fires and the popup closes on its own). The explicit close is the
+        // belt-and-suspenders path for an **Alloy/Views-hosted** popup (other
+        // runtimes / future) where CEF does NOT auto-close the window and it
+        // would otherwise linger blank ("stray Sign In window"; reagent P1 on
+        // PR #2545). Either way the pane and main window are untouched — this
+        // browser is a distinct popup, not the pane's own frame.
         if let Some(b) = browser {
             let id = b.identifier();
             if self.popup_browser_ids.remove(&id) {
@@ -528,14 +534,14 @@ impl AgentMuxHandler {
                         tracing::info!(
                             target: "oauth-popup",
                             popup_id = id,
-                            "[oauth-popup] step 4/4: do_close — auth popup tearing down, closing its own Views window",
+                            "[oauth-popup] step 4/4: do_close — closing the popup's own Views window (Alloy/Views path)",
                         );
                         win.close();
                     }
-                    None => tracing::warn!(
+                    None => tracing::info!(
                         target: "oauth-popup",
                         popup_id = id,
-                        "[oauth-popup] step 4/4: do_close — auth popup has no resolvable Views window to close (may already be gone)",
+                        "[oauth-popup] step 4/4: do_close — Chrome-runtime popup closes itself; nothing to do",
                     ),
                 }
             }
