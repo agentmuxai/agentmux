@@ -1,0 +1,96 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Warden rail/pane chrome — same structure as armory-view.scss, ported for
+// consistency (Warden is the "active governance" counterpart to Armory's
+// resource management). Deliberately does NOT redefine .bundle-manager-rail/
+// -rail-item/-section/-pane/-tab-bar — those base rules live only in
+// armory-view.scss and are reused here by class-name convention, matching
+// how Armory's own AccountsManager/SkillManager/McpManager children already
+// reuse them without a local import (armory-view.scss's own doc comment).
+// This is safe because block-registry.ts statically imports every view's
+// barrel (including Armory's) up front, so armory-view.scss is always part
+// of the bundle by the time any pane renders — not because these classes
+// are Warden-local. Only the responsive breakpoints below are duplicated
+// (query names must differ per @container name), everything else is a
+// deliberate shared-by-convention reuse, not an oversight.
+
+// Container wrapper — carries container-type so that .warden-view (a
+// descendant) can be targeted by @container warden queries. A container
+// element cannot respond to its own container query, only its descendants
+// can.
+//
+// NOTE: putting container-type on a scrolling element produced a real
+// resize feedback loop in the previous single-page Warden layout (content
+// growth toggles the auto scrollbar, which changes inline size, which
+// re-evaluates the container query, which reflows content — observed live
+// as a burst of ResizeObserver loop errors). .warden-container itself does
+// not scroll (each manager pane owns its own overflow), so that hazard
+// does not apply here — see docs/retro/retro-warden-pane-black-render-2026-07-27.md
+// for the original investigation this hardening came from.
+.warden-container {
+    width: 100%;
+    height: 100%;
+    container-type: inline-size;
+    container-name: warden;
+}
+
+.warden-view {
+    display: flex;
+    flex-direction: row;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+}
+
+// Note: shared manager-content classes (.warden-manager-summary,
+// .warden-section-stub, .warden-manager-body/-error/-table/-mono/-dim/
+// -footnote) do NOT live here — they're in warden-shared/warden-manager-
+// chrome.scss, explicitly imported by every manager that uses them. Unlike
+// .bundle-manager-* (reused by convention, matching Armory's own established
+// pattern — see the file-header comment above), these classes have no such
+// precedent forcing implicit-only reuse, so every consumer imports them
+// explicitly (reagent P2, PR #2553 — some managers imported the shared
+// chrome stylesheet and some silently relied on it loading transitively via
+// a sibling import; fixed by requiring the explicit import everywhere).
+
+// ── Responsive container queries ─────────────────────────────────────────────
+// Identical breakpoints to armory-view.scss's @container armory rules —
+// query name swapped to warden, everything else verbatim.
+
+// sm: compress outer rail to icon-only (48px)
+@container warden (max-width: 767px) {
+    .bundle-manager-rail {
+        flex: 0 0 48px;
+        padding: 8px 4px;
+
+        span { display: none; }
+    }
+
+    .bundle-manager-rail-item {
+        justify-content: center;
+        padding: 10px 0;
+
+        i { width: auto; }
+    }
+}
+
+// xs: hide rail, show bottom tab bar, switch to column layout
+@container warden (max-width: 479px) {
+    .warden-view {
+        flex-direction: column;
+    }
+
+    .bundle-manager-rail {
+        display: none;
+    }
+
+    .bundle-manager-tab-bar {
+        display: flex;
+    }
+
+    .bundle-manager-section {
+        flex: 1 1 auto;
+        min-height: 0;
+    }
+}
