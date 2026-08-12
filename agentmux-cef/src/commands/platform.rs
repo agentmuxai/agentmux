@@ -569,9 +569,58 @@ pub fn is_external_http_url(url: &str) -> bool {
     !matches!(host, "127.0.0.1" | "localhost" | "0.0.0.0" | "")
 }
 
+/// Schemes a browser pane is allowed to *navigate* to. Everything web-ish
+/// (pages, inline content, devtools, websockets) plus the loopback app origin.
+/// Anything else is a non-web protocol whose navigation Chromium would, by
+/// default, hand to the OS shell (`ShellExecute` on Windows) — which can launch
+/// an OS-registered handler, and if that handler is elevated, raise a **UAC**
+/// prompt. `on_before_browse` blocks navigations to disallowed schemes for
+/// browser panes so embedded web content can never reach an OS protocol handler
+/// (see docs/reports/REPORT_BROWSER_PANE_GOOGLE_LOGIN_INSTANCE_EXIT_AND_UAC_2026_08_11.md).
+const PANE_ALLOWED_NAV_SCHEMES: &[&str] = &[
+    "http", "https", "about", "data", "blob", "ws", "wss", "devtools",
+    "chrome-devtools", "chrome",
+];
+
+/// The scheme of `url` (lowercased) if it has one — the run of
+/// `[a-z0-9+.-]` before the first `:`, per RFC 3986. Returns `None` for a
+/// scheme-relative or relative URL (no valid scheme → resolves against the
+/// current http(s) origin, always safe).
+fn url_scheme(url: &str) -> Option<String> {
+    let trimmed = url.trim();
+    let colon = trimmed.find(':')?;
+    let scheme = &trimmed[..colon];
+    if scheme.is_empty() {
+        return None;
+    }
+    let mut chars = scheme.chars();
+    // First char must be a letter; the rest letters/digits/+/-/. (RFC 3986).
+    let first_ok = chars.next().map(|c| c.is_ascii_alphabetic()).unwrap_or(false);
+    let rest_ok = scheme
+        .chars()
+        .skip(1)
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'));
+    if first_ok && rest_ok {
+        Some(scheme.to_ascii_lowercase())
+    } else {
+        None
+    }
+}
+
+/// True if a browser pane must NOT be allowed to navigate to `url` because its
+/// scheme is a non-web external protocol that Chromium would hand to the OS
+/// shell. A relative/scheme-less URL, or one of `PANE_ALLOWED_NAV_SCHEMES`, is
+/// allowed (returns false).
+pub fn is_disallowed_pane_nav_scheme(url: &str) -> bool {
+    match url_scheme(url) {
+        None => false, // relative / scheme-less — resolves against current origin
+        Some(scheme) => !PANE_ALLOWED_NAV_SCHEMES.contains(&scheme.as_str()),
+    }
+}
+
 #[cfg(test)]
 mod external_url_tests {
-    use super::is_external_http_url;
+    use super::{is_disallowed_pane_nav_scheme, is_external_http_url};
 
     #[test]
     fn external_sites_are_external() {
@@ -594,6 +643,40 @@ mod external_url_tests {
         assert!(!is_external_http_url("data:text/html,hi"));
         assert!(!is_external_http_url("blob:abc"));
         assert!(!is_external_http_url("vscode://file/x"));
+    }
+
+    #[test]
+    fn web_schemes_are_allowed_pane_nav() {
+        for u in [
+            "https://claude.ai/login",
+            "http://127.0.0.1:5173/",
+            "about:blank",
+            "data:text/html,hi",
+            "blob:https://x/abc",
+            "devtools://devtools/bundled/x.html",
+            "/relative/path",
+            "//scheme-relative/path",
+            "?just=query",
+        ] {
+            assert!(!is_disallowed_pane_nav_scheme(u), "should allow: {u}");
+        }
+    }
+
+    #[test]
+    fn non_web_external_schemes_are_blocked_pane_nav() {
+        // These are the OS-handoff schemes that can raise a UAC prompt.
+        for u in [
+            "ms-cxh://x",
+            "microsoft-edge://x",
+            "tel:+15551234",
+            "mailto:a@b.com",
+            "vscode://file/x",
+            "steam://run/1",
+            "callto:foo",
+            "custom-installer://elevate",
+        ] {
+            assert!(is_disallowed_pane_nav_scheme(u), "should block: {u}");
+        }
     }
 }
 

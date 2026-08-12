@@ -548,6 +548,22 @@ wrap_request_handler! {
     }
 
     impl RequestHandler {
+        // External-protocol / OS-handoff guard. See
+        // AgentMuxHandler::on_before_browse — cancels browser-pane navigations
+        // to non-web schemes so embedded content can't reach an OS protocol
+        // handler (and, on Windows, a UAC prompt).
+        fn on_before_browse(
+            &self,
+            browser: Option<&mut Browser>,
+            frame: Option<&mut Frame>,
+            request: Option<&mut Request>,
+            user_gesture: ::std::os::raw::c_int,
+            is_redirect: ::std::os::raw::c_int,
+        ) -> ::std::os::raw::c_int {
+            let mut inner = self.inner.lock();
+            inner.on_before_browse(browser, frame, request, user_gesture, is_redirect)
+        }
+
         fn on_render_process_terminated(
             &self,
             browser: Option<&mut Browser>,

@@ -526,7 +526,7 @@ impl AgentMuxHandler {
         browser: Option<&mut Browser>,
         _frame: Option<&mut Frame>,
         target_url: Option<&CefString>,
-        _target_disposition: WindowOpenDisposition,
+        target_disposition: WindowOpenDisposition,
     ) -> bool {
         let url = target_url.map(|s| s.to_string()).unwrap_or_default();
         if url.is_empty() {
@@ -534,21 +534,50 @@ impl AgentMuxHandler {
             return true;
         }
 
-        // External links from the app UI (Help pane's "Report Bugs & Issues",
-        // docs, Discord, …) must open in the SYSTEM browser — never navigate
-        // the current frame. Navigating the app's own window to an external
-        // origin replaces the whole AgentMux UI with that site and tears down
-        // the host bridge: the window comes back bridge-dead on "Can't
-        // reconnect" (the window.api init race), which is exactly the lock-out
-        // this fixes. Browser panes are exempt — for them, following a link IS
-        // the point, so they keep in-pane navigation.
+        // A real popup window (`window.open` with popup features) rather than a
+        // `target="_blank"` link (which arrives as a tab disposition). OAuth /
+        // Google Identity Services sign-in, payment, and similar handshake
+        // windows use these — they postMessage a result back to their opener
+        // and then call `window.close()` when done.
+        let is_popup_window = {
+            let d = target_disposition.get_raw();
+            d == WindowOpenDisposition::NEW_POPUP.get_raw()
+                || d == WindowOpenDisposition::NEW_WINDOW.get_raw()
+        };
+
+        let is_external = crate::commands::platform::is_external_http_url(&url);
+
+        // Route to the SYSTEM browser (never navigate the current frame) when:
+        //
+        //  * **App UI → external site** (Help pane's "Report Bugs & Issues",
+        //    docs, Discord, …). Navigating the app's own window to an external
+        //    origin replaces the whole AgentMux UI and tears down the host
+        //    bridge — the window comes back bridge-dead on "Can't reconnect".
+        //
+        //  * **Browser pane → external popup window** (OAuth/GIS/payment).
+        //    Collapsing such a popup into the pane's own frame is the bug in
+        //    docs/reports/REPORT_BROWSER_PANE_GOOGLE_LOGIN_INSTANCE_EXIT_AND_UAC_2026_08_11.md:
+        //    (a) it breaks the opener↔popup postMessage handshake the login
+        //    relies on, and (b) the popup's normal closing `window.close()`
+        //    then destroys the ENTIRE pane, which trips the last-window quit
+        //    watchdog and exits the app. Ordinary `target="_blank"` links in a
+        //    pane (tab dispositions) still navigate in-pane — for them
+        //    following a link IS the point, and they don't self-close.
+        //
         // `open_url_in_default_browser` only spawns a child process (rundll32 /
         // open / xdg-open); it never re-enters CEF or `self.inner`, so calling
         // it inline here (under the handler lock) cannot deadlock the way an
         // inline `load_url` would.
-        if !self.is_browser_pane && crate::commands::platform::is_external_http_url(&url) {
+        let route_to_system_browser =
+            is_external && (!self.is_browser_pane || is_popup_window);
+        if route_to_system_browser {
             match crate::commands::platform::open_url_in_default_browser(&url) {
-                Ok(()) => tracing::info!(url = %url, "external link opened in system browser"),
+                Ok(()) => tracing::info!(
+                    url = %url,
+                    is_browser_pane = %self.is_browser_pane,
+                    is_popup_window = %is_popup_window,
+                    "external popup/link opened in system browser",
+                ),
                 Err(e) => tracing::warn!(
                     url = %url,
                     error = %e,
@@ -572,6 +601,44 @@ impl AgentMuxHandler {
             "popup intercepted — deferred navigation of current frame",
         );
         true // cancel the top-level popup creation
+    }
+
+    /// External-protocol guard (RequestHandler::on_before_browse). Returns 1 to
+    /// CANCEL the navigation, 0 to allow.
+    ///
+    /// Chromium's default handling of a navigation to a scheme it doesn't own
+    /// (a non-web external protocol) is to hand it to the OS shell —
+    /// `ShellExecute` on Windows — which launches the OS-registered handler for
+    /// that scheme. If that handler is an elevated target, Windows raises a
+    /// **UAC** prompt. We never want embedded web content — a browser pane
+    /// loading arbitrary sites especially — to reach an OS protocol handler
+    /// this way (see the report). For panes we cancel any navigation whose
+    /// scheme isn't web-ish (`is_disallowed_pane_nav_scheme`). The main app
+    /// client is served from loopback http and is left unrestricted so no
+    /// internal (devtools/app) navigation regresses.
+    pub(crate) fn on_before_browse(
+        &mut self,
+        _browser: Option<&mut Browser>,
+        _frame: Option<&mut Frame>,
+        request: Option<&mut Request>,
+        _user_gesture: ::std::os::raw::c_int,
+        _is_redirect: ::std::os::raw::c_int,
+    ) -> ::std::os::raw::c_int {
+        if !self.is_browser_pane {
+            return 0; // main app client — never gated
+        }
+        let url = request
+            .as_ref()
+            .map(|r| CefString::from(&r.url()).to_string())
+            .unwrap_or_default();
+        if crate::commands::platform::is_disallowed_pane_nav_scheme(&url) {
+            tracing::warn!(
+                url = %url,
+                "on_before_browse: blocked browser-pane navigation to a non-web external scheme (OS-handoff / UAC guard)",
+            );
+            return 1; // cancel — do not let CEF hand this to the OS shell
+        }
+        0
     }
 
     /// Post `quit_message_loop()` back to the UI thread from a background
