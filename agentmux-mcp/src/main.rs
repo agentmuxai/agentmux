@@ -129,6 +129,19 @@ const DISCOVER_AGENTS_TOOL: &str = r#"{
   }
 }"#;
 
+const GET_AGENT_TRANSCRIPT_TOOL: &str = r#"{
+  "name": "GetAgentTranscript",
+  "description": "Read the tail of a registered agent's session transcript by name, plus whether it currently has a turn in flight (turn_active). For a Warden Supervisor watcher agent polling other agents on its own interval to decide whether to nudge a stalled one to continue. Returns JSON: {agent, block_id, turn_active, lines: [...], truncated}. Read-only, best-effort — does not deliver anything to the target.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "agent":     { "type": "string", "description": "Name of the target agent (its AGENTMUX_AGENT_ID value)" },
+      "max_lines": { "type": "integer", "description": "Max number of recent transcript lines to return (default 100, server-capped at 500)" }
+    },
+    "required": ["agent"]
+  }
+}"#;
+
 const SET_ACTIVE_TAB_TOOL: &str = r#"{
   "name": "SetActiveTab",
   "description": "Switch the active (foreground) tab to the given tab_id within its workspace. Get tab ids from Layout(query:\"tabs\") or Layout(query:\"layout\").",
@@ -499,6 +512,8 @@ async fn main() {
                 let send_message: Value = serde_json::from_str(SEND_MESSAGE_TOOL).expect("static json");
                 let discover_agents: Value =
                     serde_json::from_str(DISCOVER_AGENTS_TOOL).expect("static json");
+                let get_agent_transcript: Value =
+                    serde_json::from_str(GET_AGENT_TRANSCRIPT_TOOL).expect("static json");
                 let whoami: Value = serde_json::from_str(WHOAMI_TOOL).expect("static json");
                 let layout: Value = serde_json::from_str(LAYOUT_TOOL).expect("static json");
                 let set_name: Value = serde_json::from_str(SET_NAME_TOOL).expect("static json");
@@ -527,7 +542,7 @@ async fn main() {
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, open_editor, open_media, send_message, discover_agents, whoami, layout, set_name, set_active_tab, new_tab, focus_window, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, memory_list, memory_read, memory_write, preset_list, preset_get, identity_accounts, identity_validate] }
+                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, open_editor, open_media, send_message, discover_agents, get_agent_transcript, whoami, layout, set_name, set_active_tab, new_tab, focus_window, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, memory_list, memory_read, memory_write, preset_list, preset_get, identity_accounts, identity_validate] }
                 })
             }
             "tools/call" => {
@@ -1042,6 +1057,51 @@ async fn call_tool(
                 let status = resp.status();
                 let text = resp.text().await.unwrap_or_default();
                 anyhow::bail!("discovery failed: HTTP {status} — {text}");
+            }
+
+            let result: Value = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+
+            Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
+        }
+        "GetAgentTranscript" => {
+            let agent = arguments
+                .get("agent")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: agent"))?;
+            let max_lines = arguments.get("max_lines").and_then(|v| v.as_u64());
+
+            if local_url.is_empty() || auth_key.is_empty() {
+                anyhow::bail!(
+                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+                     Is this agent pane opened via AgentMux?"
+                );
+            }
+
+            let url = format!(
+                "{}/agentmux/reactive/transcript",
+                local_url.trim_end_matches('/')
+            );
+            let mut query: Vec<(&str, String)> = vec![("agent", agent.to_string())];
+            if let Some(n) = max_lines {
+                query.push(("max_lines", n.to_string()));
+            }
+
+            let resp = client
+                .get(&url)
+                .header("X-AuthKey", auth_key)
+                .query(&query)
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("transcript fetch failed: HTTP {status} — {text}");
             }
 
             let result: Value = resp

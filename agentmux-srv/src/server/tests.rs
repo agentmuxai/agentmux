@@ -377,6 +377,30 @@ async fn reactive_agents_returns_empty_list() {
 }
 
 #[tokio::test]
+async fn reactive_transcript_missing_agent_param_is_400() {
+    let app = test_router();
+    let req = Request::builder()
+        .uri("/agentmux/reactive/transcript")
+        .header("X-AuthKey", "test-secret-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn reactive_transcript_unknown_agent_is_404() {
+    let app = test_router();
+    let req = Request::builder()
+        .uri("/agentmux/reactive/transcript?agent=nonexistent-agent")
+        .header("X-AuthKey", "test-secret-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn reactive_poller_status() {
     let app = test_router();
     let req = Request::builder()

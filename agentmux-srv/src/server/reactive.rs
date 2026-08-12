@@ -579,3 +579,85 @@ pub(super) async fn handle_reactive_poller_status(
     let status = state.poller.status();
     Json(serde_json::to_value(&status).unwrap_or(json!({})))
 }
+
+/// Server-side ceiling on `max_lines` — protects a Supervisor's transcript
+/// pull (and this route in general) from an unbounded read of a huge
+/// session file. Callers wanting more must paginate some other way; this
+/// route is a "recent tail" primitive, not a full-history export.
+const TRANSCRIPT_MAX_LINES_CAP: usize = 500;
+
+#[derive(serde::Deserialize)]
+pub(super) struct TranscriptQuery {
+    agent: String,
+    #[serde(default = "default_transcript_max_lines")]
+    max_lines: usize,
+}
+fn default_transcript_max_lines() -> usize {
+    100
+}
+
+/// `GET /agentmux/reactive/transcript?agent=<name>&max_lines=<n>` — read the
+/// tail of a registered agent's session output, for a Warden Supervisor
+/// watcher agent to inspect on its own poll interval (v1 is pull/poll, not
+/// push — see
+/// docs/analysis/ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md).
+pub(super) async fn handle_reactive_transcript(
+    State(state): State<AppState>,
+    Query(params): Query<TranscriptQuery>,
+) -> Response {
+    if params.agent.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "missing agent param"})),
+        )
+            .into_response();
+    }
+    let Some(reg) = state.reactive_handler.get_agent(&params.agent) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "agent not found"})),
+        )
+            .into_response();
+    };
+    let block_id = reg.block_id.clone();
+
+    let (raw_bytes, _total_line_count) = match crate::backend::session_archive::read_session_output(
+        &state.wstore,
+        &state.filestore,
+        &block_id,
+    ) {
+        Ok(v) => v,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("read_session_output: {e}")})),
+            )
+                .into_response();
+        }
+    };
+
+    let text = String::from_utf8_lossy(&raw_bytes);
+    let all_lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+    let requested = params.max_lines.min(TRANSCRIPT_MAX_LINES_CAP).max(1);
+    let truncated = all_lines.len() > requested;
+    let lines: Vec<String> = all_lines
+        .iter()
+        .rev()
+        .take(requested)
+        .rev()
+        .map(|l| l.to_string())
+        .collect();
+
+    let turn_active = crate::backend::blockcontroller::get_block_controller_status(&block_id)
+        .map(|s| s.turn_active)
+        .unwrap_or(false);
+
+    Json(json!({
+        "agent": reg.agent_id,
+        "block_id": block_id,
+        "turn_active": turn_active,
+        "lines": lines,
+        "truncated": truncated,
+    }))
+    .into_response()
+}

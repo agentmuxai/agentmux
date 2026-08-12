@@ -294,6 +294,10 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/agentmux/reactive/poller/status",
             get(reactive::handle_reactive_poller_status),
+        )
+        .route(
+            "/agentmux/reactive/transcript",
+            get(reactive::handle_reactive_transcript),
         );
 
     // MessageBus routes (authed, localhost-only)
