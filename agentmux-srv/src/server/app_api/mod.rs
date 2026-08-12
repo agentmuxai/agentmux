@@ -446,6 +446,7 @@ pub(crate) async fn agent_define_core(
         container_name: String::new(), // assigned by ContainerManager on first spawn
         use_ambient_login: 0,
         model_vendor_base_url: cmd_model_vendor_base_url.clone(),
+        auto_continue_enabled: 0,
     };
 
     // Atomic check-then-insert.
@@ -1974,6 +1975,7 @@ mod identity_self_accounts_tests {
             container_name: String::new(),
             use_ambient_login: 0,
             model_vendor_base_url: String::new(),
+            auto_continue_enabled: 0,
         };
         state.wstore.agent_def_insert(&mut def).unwrap();
 
@@ -2046,6 +2048,7 @@ mod identity_self_accounts_tests {
             container_name: String::new(),
             use_ambient_login: 0,
             model_vendor_base_url: String::new(),
+            auto_continue_enabled: 0,
         };
         state.wstore.agent_def_insert(&mut def).unwrap();
         state.wstore.identity_upsert(&sample_account("acct-good", "claude")).unwrap();

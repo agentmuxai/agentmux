@@ -86,6 +86,7 @@ mod resolve_vendor_env_override_tests {
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            auto_continue_enabled: 0,
             model_vendor_base_url: model_vendor_base_url.to_string(),
         }
     }
@@ -845,6 +846,7 @@ mod write_agent_config_files_tests {
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
         }
     }

@@ -130,6 +130,10 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // Not settable via this RPC yet — only `agent.define`
                     // (the App-API/MCP path) can set a model vendor override.
                     model_vendor_base_url: String::new(),
+                    // Opt-in required, same fail-by-default posture as
+                    // use_ambient_login above. Toggled from the Warden
+                    // Supervisor panel (not this RPC) once that ships.
+                    auto_continue_enabled: 0,
                 };
                 wstore.agent_def_insert(&mut agent).map_err(|e| format!("createagent: {e}"))?;
                 // Assign the agent its display color at creation
@@ -230,6 +234,10 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // above, so a UI-driven save never silently wipes a
                     // vendor override set via `agent.define`.
                     model_vendor_base_url: old.model_vendor_base_url.clone(),
+                    // Not carried by CommandUpdateAgentDefinitionData yet —
+                    // always preserve; the Warden Supervisor panel gets its
+                    // own dedicated toggle path.
+                    auto_continue_enabled: old.auto_continue_enabled,
                 };
                 let found = wstore.agent_def_update(&mut agent).map_err(|e| format!("updateagent: {e}"))?;
                 if !found {
@@ -427,6 +435,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     container_name: String::new(),
                     use_ambient_login: 0,
                     model_vendor_base_url: String::new(),
+                    auto_continue_enabled: 0,
                 };
                 wstore.agent_def_insert(&mut agent).map_err(|e| format!("importagentfromclaw: {e}"))?;
 
@@ -564,6 +573,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         container_name: String::new(),
                         use_ambient_login: 0,
                         model_vendor_base_url: String::new(),
+                        auto_continue_enabled: 0,
                     };
 
                     if let Err(e) = wstore.agent_def_insert(&mut agent) {
