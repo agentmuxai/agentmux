@@ -491,6 +491,113 @@ async fn reactive_supervisor_decision_decline_succeeds_for_unregistered_target()
     assert!(json["success"].as_bool().unwrap());
 }
 
+/// reagentx P1 on PR #2557: a Nudge must not deliver unless the target
+/// has actually opted in via `auto_continue_enabled`. An agent with no
+/// matching `AgentDefinition` at all (never opted in — the default) must
+/// be refused with 403, not silently attempted.
+#[tokio::test]
+async fn reactive_supervisor_decision_nudge_rejected_when_not_opted_in() {
+    let app = test_router();
+    let body = serde_json::json!({
+        "target_agent": "supervisor-nudge-test-not-opted-in",
+        "action": "nudge",
+        "message": "keep going",
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/agentmux/reactive/supervisor-decision")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(json["error"].as_str().unwrap().contains("auto_continue_enabled"));
+}
+
+/// The same gate must actively check the flag's value, not just presence
+/// of a definition row — `auto_continue_enabled: 0` (the default) is
+/// still a rejection.
+#[tokio::test]
+async fn reactive_supervisor_decision_nudge_rejected_when_opted_out() {
+    let state = test_state();
+    let mut def: crate::backend::storage::AgentDefinition = serde_json::from_value(serde_json::json!({
+        "id": "def-supervisor-nudge-opted-out",
+        "slug": "supervisor-nudge-opted-out-slug",
+        "name": "supervisor-nudge-test-opted-out",
+        "icon": "robot",
+        "provider": "claude",
+        "description": "test agent",
+        "created_at": 1,
+        "auto_continue_enabled": 0,
+    }))
+    .expect("definition fixture");
+    state.wstore.agent_def_insert(&mut def).expect("insert definition");
+
+    let app = build_router(state);
+    let body = serde_json::json!({
+        "target_agent": "supervisor-nudge-test-opted-out",
+        "action": "nudge",
+        "message": "keep going",
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/agentmux/reactive/supervisor-decision")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+}
+
+/// An opted-in target's Nudge must pass the entitlement gate (i.e. NOT get
+/// refused with 403) — whatever happens next is ordinary delivery
+/// machinery (in this hermetic test harness, delivery itself fails because
+/// no input sender is wired into the shared global reactive handler, which
+/// is a test-environment gap unrelated to the gate this test targets).
+#[tokio::test]
+async fn reactive_supervisor_decision_nudge_passes_gate_when_opted_in() {
+    let state = test_state();
+    let mut def: crate::backend::storage::AgentDefinition = serde_json::from_value(serde_json::json!({
+        "id": "def-supervisor-nudge-opted-in",
+        "slug": "supervisor-nudge-opted-in-slug",
+        "name": "supervisor-nudge-test-opted-in",
+        "icon": "robot",
+        "provider": "claude",
+        "description": "test agent",
+        "created_at": 1,
+        "auto_continue_enabled": 1,
+    }))
+    .expect("definition fixture");
+    state.wstore.agent_def_insert(&mut def).expect("insert definition");
+
+    let app = build_router(state);
+    let body = serde_json::json!({
+        "target_agent": "supervisor-nudge-test-opted-in",
+        "action": "nudge",
+        "message": "keep going",
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/agentmux/reactive/supervisor-decision")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_ne!(
+        resp.status(),
+        StatusCode::FORBIDDEN,
+        "an opted-in target must not be blocked by the entitlement gate"
+    );
+}
+
 #[tokio::test]
 async fn reactive_poller_status() {
     let app = test_router();

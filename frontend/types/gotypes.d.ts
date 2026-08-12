@@ -836,6 +836,12 @@ declare global {
          * AgentDefinition.use_ambient_login.
          */
         use_ambient_login?: number;
+        /**
+         * Per-agent opt-in letting a Warden Supervisor watcher agent
+         * auto-continue this agent's session on turn-end (0/1). Omit to
+         * preserve the stored value. See AgentDefinition.auto_continue_enabled.
+         */
+        auto_continue_enabled?: number;
     };
 
     // CommandDeleteAgentDefinitionData

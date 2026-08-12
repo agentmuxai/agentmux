@@ -234,10 +234,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // above, so a UI-driven save never silently wipes a
                     // vendor override set via `agent.define`.
                     model_vendor_base_url: old.model_vendor_base_url.clone(),
-                    // Not carried by CommandUpdateAgentDefinitionData yet —
-                    // always preserve; the Warden Supervisor panel gets its
-                    // own dedicated toggle path.
-                    auto_continue_enabled: old.auto_continue_enabled,
+                    // Preserve the auto-continue opt-in when the caller omits
+                    // the field (Option — most callers only edit name/icon/
+                    // accounts). The Warden Supervisor panel sends Some(0|1)
+                    // to flip it, same shape as use_ambient_login above.
+                    auto_continue_enabled: cmd.auto_continue_enabled.unwrap_or(old.auto_continue_enabled),
                 };
                 let found = wstore.agent_def_update(&mut agent).map_err(|e| format!("updateagent: {e}"))?;
                 if !found {

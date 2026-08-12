@@ -434,6 +434,14 @@ pub struct CommandUpdateAgentDefinitionData {
     /// carry it. SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md §2.3.
     #[serde(default)]
     pub use_ambient_login: Option<i64>,
+    /// Per-agent opt-in letting a Warden Supervisor watcher agent
+    /// auto-continue this agent's session on turn-end (0/1). `None`
+    /// (omitted) preserves the stored value — callers that only edit
+    /// name/icon/accounts don't carry it. Toggled from the Warden
+    /// Supervisor panel. See
+    /// docs/analysis/ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md.
+    #[serde(default)]
+    pub auto_continue_enabled: Option<i64>,
 }
 
 /// Input for deleteagent

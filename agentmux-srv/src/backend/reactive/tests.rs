@@ -793,6 +793,61 @@ async fn test_record_supervisor_decision_nudge_ceiling_resets_on_new_registratio
     assert!(resp.success);
 }
 
+/// PTY/shell and HTTP-register paths always register with
+/// `registration_nonce: 0` ("not recorded") — nonce equality alone can
+/// never detect a respawn for them (0 == 0 every time). A relaunch into a
+/// new pane (new block_id) must still reset the ceiling — this is the P1
+/// reagentx flagged on PR #2557 (nonce-only reset silently never fired for
+/// the common PTY case).
+#[tokio::test]
+async fn test_record_supervisor_decision_nudge_ceiling_resets_on_new_block_id_when_nonce_is_zero() {
+    let mut handler = Handler::new();
+    handler.set_input_sender(Arc::new(|_block_id: &str, _data: &[u8]| Ok(())));
+    // register_agent (not _with_nonce) always passes nonce 0 — the PTY/HTTP
+    // register path this test is guarding.
+    handler.register_agent("agent1", "block1", None).unwrap();
+
+    for i in 0..MAX_CONSECUTIVE_AUTO_CONTINUES {
+        handler
+            .record_supervisor_decision(
+                "agent1",
+                SupervisorAction::Nudge("keep going".to_string()),
+                "still making progress",
+                &format!("req-{i}"),
+                Some("warden-supervisor"),
+            )
+            .unwrap_or_else(|e| panic!("nudge {i} should not hit the ceiling yet: {e}"));
+    }
+    assert!(
+        handler
+            .record_supervisor_decision(
+                "agent1",
+                SupervisorAction::Nudge("keep going".to_string()),
+                "still making progress",
+                "req-over",
+                Some("warden-supervisor"),
+            )
+            .is_err(),
+        "ceiling must be hit before the relaunch"
+    );
+
+    // Relaunch: same agent name, closed and reopened in a NEW pane — a
+    // different block_id, still nonce 0 (PTY path never records a real
+    // nonce).
+    handler.register_agent("agent1", "block2", None).unwrap();
+
+    let resp = handler
+        .record_supervisor_decision(
+            "agent1",
+            SupervisorAction::Nudge("keep going".to_string()),
+            "fresh run in a new pane, target paused again",
+            "req-after-relaunch",
+            Some("warden-supervisor"),
+        )
+        .expect("a new block_id must reset the ceiling even though nonce stayed 0");
+    assert!(resp.success);
+}
+
 // -- Poller tests --
 
 #[test]
