@@ -54,4 +54,14 @@ pub enum BrowserKind {
     /// Browser pane child window. `block_id` correlates with the
     /// `HostState.browser_panes` entry.
     Pane { block_id: String },
+    /// A transient OAuth/OIDC sign-in popup (`window.open` from a browser pane
+    /// to an authorization endpoint — see `on_before_popup`). CEF owns its
+    /// window; we track it only to close that window when the auth browser
+    /// tears down. Does NOT keep the instance alive (`is_live_user_window`
+    /// counts only `TopLevel { is_pool: false }`), so it's excluded from the
+    /// last-window quit gate by type — the register/unregister of a popup
+    /// during its close never perturbs the watchdog. Skips the full-window
+    /// treatment (focus-restore / OS-close-routing / floater-cascade hooks,
+    /// launcher FullInstance registration) a real top-level window gets.
+    Popup,
 }

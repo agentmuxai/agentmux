@@ -368,9 +368,24 @@ wrap_browser_view_delegate! {
             } else {
                 RuntimeStyle::ALLOY
             };
+            // OAuth sign-in popup (non-DevTools): give it an explicit tall,
+            // centered window — a portrait-ish shape suits a sign-in form, and
+            // it's ~2x the height of the default popup (per user request). Uses
+            // the primary monitor's work area; falls back to the delegate's
+            // default sizing when the work area can't be resolved (macOS/Linux
+            // stubs). DevTools keeps its default sizing.
+            let initial_bounds = if is_devtools == 0 {
+                get_monitor_work_area(0, 0).map(|(wx, wy, ww, wh)| {
+                    let w = (ww as f64 * 0.55).round() as i32;
+                    let h = (wh as f64 * 0.95).round() as i32;
+                    (wx + (ww - w) / 2, wy + (wh - h) / 2, w, h)
+                })
+            } else {
+                None
+            };
             let mut window_delegate = AgentMuxWindowDelegate::new(
                 RefCell::new(popup_browser_view.cloned()),
-                None,
+                initial_bounds,
                 frameless,
                 runtime_style,
                 None, // popup (DevTools etc.) — don't register; not pane-host

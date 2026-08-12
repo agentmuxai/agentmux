@@ -59,12 +59,19 @@ impl AgentMuxHandler {
         // Each OAuth popup allowed by on_before_popup is created (as the next
         // browser(s) on this pane's handler) — record its id so do_close can
         // close its hosting Views window (the stray-blank-window fix). Counter,
-        // not a bool, so two popups in flight both get tagged.
-        if self.pending_popups > 0 {
+        // not a bool, so two popups in flight both get tagged. `is_popup` then
+        // routes it away from the full-window treatment below (classified as
+        // BrowserKind::Popup, excluded from the quit watchdog by type, and
+        // skipping the focus-restore / OS-close-routing / floater-cascade hooks
+        // and launcher FullInstance registration a real top-level gets — that
+        // OS-close-routing hook was also what prevented the popup's own window
+        // from closing cleanly).
+        let is_popup = self.pending_popups > 0;
+        if is_popup {
             self.pending_popups -= 1;
             let mut b = browser.clone();
             self.popup_browser_ids.insert(b.identifier());
-            tracing::info!(popup_id = b.identifier(), "tagged browser-pane auth popup for managed close");
+            tracing::info!(popup_id = b.identifier(), "tagged browser-pane auth popup (managed close, excluded from quit gate)");
         }
 
         // Phase 1 diagnostic tracing — find the exact line that silences the
@@ -162,7 +169,11 @@ impl AgentMuxHandler {
         // them BY TYPE (invariant FP-LIFE) instead of a `floating-pool-` string
         // check that missed direct `floating-<uuid>` floaters. Check `floating-`
         // BEFORE `window-pool-` (a `floating-pool-` label also starts `floating-`).
-        let kind = if let Some(rest) = label.strip_prefix("browser-pane-") {
+        let kind = if is_popup {
+            // Transient OAuth sign-in popup — CEF owns its window; excluded
+            // from the last-window quit gate by type.
+            crate::state::BrowserKind::Popup
+        } else if let Some(rest) = label.strip_prefix("browser-pane-") {
             let block_id = rest
                 .rfind('-')
                 .map(|i| rest[..i].to_string())
@@ -208,7 +219,7 @@ impl AgentMuxHandler {
         // **caller-side parallel write** — drag/window/window_pool
         // no longer write meta themselves. Single canonical
         // mutation site here. (codex P1 PR #592 round-2.)
-        if is_top_level_window {
+        if is_top_level_window && !is_popup {
             let mut metas = self.state.window_meta.lock();
             metas.insert(
                 label.clone(),
@@ -256,7 +267,7 @@ impl AgentMuxHandler {
                 // (window-reactivate-focus-restore spec §5.1.3). Observes
                 // WM_ACTIVATE only; all messages pass through to CEF.
                 // Install on every top-level — both `main` and Subwindow.
-                if is_top_level_window {
+                if is_top_level_window && !is_popup {
                     unsafe { install_top_level_focus_restore_hook(hwnd); }
                 }
 
@@ -269,7 +280,7 @@ impl AgentMuxHandler {
                 // main's OS-close feeds the tuned WRR last-window quit
                 // sequence (Pillar 2), which owns process shutdown. Not
                 // floaters: their outer-popup wndproc close works (#1957).
-                if is_top_level_window && label.starts_with("window-") {
+                if is_top_level_window && !is_popup && label.starts_with("window-") {
                     unsafe {
                         super::wndproc::install_window_close_routing_hook(
                             &self.state,
@@ -286,6 +297,7 @@ impl AgentMuxHandler {
                 // closing or minimizing any main window cascades to its floaters.
                 #[cfg(target_os = "windows")]
                 if is_top_level_window
+                    && !is_popup
                     && pending_kind == WindowKind::FullInstance
                     && !label.starts_with("window-pool-")
                     && !label.starts_with("floating-pool-")
@@ -320,7 +332,7 @@ impl AgentMuxHandler {
         // in `host_counts_snapshot` (state.rs) so the launcher mirror's
         // windows count stays in sync with the host count on all platforms.
         // No-op if launcher IPC isn't connected (`task dev` mode).
-        if is_top_level_window && !label.starts_with("window-pool-") && !label.starts_with("floating-pool-") {
+        if is_top_level_window && !is_popup && !label.starts_with("window-pool-") && !label.starts_with("floating-pool-") {
             // Phase B.5 (window_meta step d) — kind/parent come
             // from the pending entry we popped at the top of this
             // fn, not a window_meta lookup.
