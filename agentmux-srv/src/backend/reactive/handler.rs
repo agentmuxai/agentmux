@@ -292,6 +292,8 @@ impl Handler {
                     false,
                     Some(&err),
                     &request_id,
+                    None,
+                    None,
                 );
                 return InjectionResponse {
                     success: false,
@@ -368,6 +370,8 @@ impl Handler {
                         true,
                         None,
                         &request_id,
+                        None,
+                        None,
                     );
                     return InjectionResponse {
                         success: true,
@@ -399,6 +403,8 @@ impl Handler {
                         false,
                         Some(&e),
                         &request_id,
+                        None,
+                        None,
                     );
                     return InjectionResponse {
                         success: false,
@@ -425,6 +431,8 @@ impl Handler {
                     false,
                     Some(&err),
                     &request_id,
+                    None,
+                    None,
                 );
                 return InjectionResponse {
                     success: false,
@@ -464,6 +472,8 @@ impl Handler {
                 false,
                 Some(&e),
                 &request_id,
+                None,
+                None,
             );
             return InjectionResponse {
                 success: false,
@@ -496,6 +506,8 @@ impl Handler {
             true,
             None,
             &request_id,
+            None,
+            None,
         );
 
         InjectionResponse {
@@ -520,7 +532,10 @@ impl Handler {
         entries
     }
 
-    /// Add an entry to the audit ring buffer.
+    /// Add an entry to the audit ring buffer. `outcome`/`reason` are `None`
+    /// for every ordinary jekt injection (all current call sites) — only
+    /// Warden Supervisor decisions (see `record_supervisor_decision`) ever
+    /// set them.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn log_audit(
         &mut self,
@@ -531,6 +546,8 @@ impl Handler {
         success: bool,
         error_message: Option<&str>,
         request_id: &str,
+        outcome: Option<&str>,
+        reason: Option<&str>,
     ) {
         let entry = AuditLogEntry {
             timestamp: now_unix_millis(),
@@ -542,6 +559,8 @@ impl Handler {
             success,
             error_message: error_message.map(|s| s.to_string()),
             request_id: request_id.to_string(),
+            outcome: outcome.map(|s| s.to_string()),
+            reason: reason.map(|s| s.to_string()),
         };
 
         if self.audit_log.len() >= AUDIT_LOG_MAX {
