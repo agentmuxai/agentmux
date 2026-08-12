@@ -81,7 +81,16 @@ fn write_clipboard_text(text: &str) -> Result<(), String> {
             return Err("Failed to open clipboard".into());
         }
         EmptyClipboard();
-        SetClipboardData(CF_UNICODETEXT as u32, hmem);
+        // SetClipboardData returns NULL on failure — must be checked. On
+        // success the system takes ownership of hmem; on failure it's still
+        // ours to free (previously leaked here too).
+        let result = SetClipboardData(CF_UNICODETEXT as u32, hmem);
+        if result.is_null() {
+            let err = std::io::Error::last_os_error();
+            CloseClipboard();
+            GlobalFree(hmem);
+            return Err(format!("SetClipboardData failed: {}", err));
+        }
         CloseClipboard();
         Ok(())
     }
