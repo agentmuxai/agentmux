@@ -1,0 +1,52 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Host-specific rules only — the shared table/text primitives live in
+// warden-shared/warden-manager-chrome.scss (imported by this component's
+// .tsx alongside this file).
+
+.warden-host-state {
+    display: inline-block;
+    text-transform: uppercase;
+    font-size: 0.7em;
+    letter-spacing: 0.05em;
+    padding: 2px 6px;
+    border-radius: 0;
+
+    &--active {
+        background: rgba(34, 197, 94, 0.15);
+        color: #22c55e;
+    }
+
+    &--idle {
+        background: var(--border-color);
+        opacity: 0.7;
+    }
+}
+
+.warden-host-actions {
+    text-align: right;
+    width: 24px;
+}
+
+.warden-host-deregister {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--main-text-color);
+    opacity: 0.4;
+    cursor: default;
+    width: 20px;
+    height: 20px;
+    border-radius: 0;
+    font-size: 1em;
+    line-height: 1;
+    padding: 0;
+    transition: opacity 100ms ease, background 100ms ease, border-color 100ms ease;
+
+    &:hover {
+        opacity: 1;
+        background: rgba(239, 68, 68, 0.1);
+        border-color: rgba(239, 68, 68, 0.3);
+        color: #ef4444;
+    }
+}
