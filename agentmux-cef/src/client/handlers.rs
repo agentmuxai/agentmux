@@ -535,10 +535,12 @@ wrap_load_handler! {
 }
 
 // ---------------------------------------------------------------------------
-// RequestHandler — render-process termination (white-screen recovery)
+// RequestHandler — render-process termination, external-protocol guard, auth
 // ---------------------------------------------------------------------------
 //
-// We only override `on_render_process_terminated` here. Everything else
+// Overrides here: `on_before_browse` (external-protocol / OS-handoff guard for
+// browser panes), `on_render_process_terminated` (white-screen recovery), and
+// `auth_credentials` (HTTP Basic/Digest → BrowserAuthModal). Everything else
 // inherits the default (no-op) implementations from the cef-rs trait.
 // See SPEC_GRACEFUL_CRASH_HANDLING_2026_04_13.md (PR 1).
 
@@ -548,6 +550,22 @@ wrap_request_handler! {
     }
 
     impl RequestHandler {
+        // External-protocol / OS-handoff guard. See
+        // AgentMuxHandler::on_before_browse — cancels browser-pane navigations
+        // to non-web schemes so embedded content can't reach an OS protocol
+        // handler (and, on Windows, a UAC prompt).
+        fn on_before_browse(
+            &self,
+            browser: Option<&mut Browser>,
+            frame: Option<&mut Frame>,
+            request: Option<&mut Request>,
+            user_gesture: ::std::os::raw::c_int,
+            is_redirect: ::std::os::raw::c_int,
+        ) -> ::std::os::raw::c_int {
+            let mut inner = self.inner.lock();
+            inner.on_before_browse(browser, frame, request, user_gesture, is_redirect)
+        }
+
         fn on_render_process_terminated(
             &self,
             browser: Option<&mut Browser>,

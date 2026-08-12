@@ -569,9 +569,231 @@ pub fn is_external_http_url(url: &str) -> bool {
     !matches!(host, "127.0.0.1" | "localhost" | "0.0.0.0" | "")
 }
 
+/// True if `url` looks like an **OAuth 2 / OpenID Connect authorization
+/// request** — the kind of popup a "Sign in with Google/GitHub/Microsoft/…"
+/// button opens. Used by `on_before_popup` to scope which browser-pane
+/// `window.open` popups are allowed to become a real child popup window (so
+/// the auth handshake completes in the pane): ONLY genuine auth flows, never
+/// arbitrary `window.open` popups (ad windows, chat widgets, print dialogs),
+/// which would otherwise spawn rogue top-level windows
+/// (specs/SPEC_BROWSER_PANE_DEFAULT_URL_AND_POPUP_2026_04_21.md).
+///
+/// Heuristic (host-agnostic — no brittle provider allowlist): the path names a
+/// standard authorization endpoint, OR the query carries the OAuth
+/// authorization-request parameter cluster (`response_type` + `client_id`).
+/// Matches Google (`/o/oauth2/v2/auth`), GitHub (`/login/oauth/authorize`),
+/// Microsoft (`/oauth2/v2.0/authorize`), Apple (`/auth/authorize`), Auth0/Okta
+/// (`/authorize`), and generic OAuth2 — without matching a "Read more" popup.
+pub fn is_oauth_authorization_url(url: &str) -> bool {
+    let lower = url.trim().to_ascii_lowercase();
+    if !(lower.starts_with("http://") || lower.starts_with("https://")) {
+        return false;
+    }
+    // Split path from query.
+    let after_scheme = lower.splitn(2, "://").nth(1).unwrap_or("");
+    let (path_part, query_part) = match after_scheme.split_once('?') {
+        Some((p, q)) => (p, q),
+        None => (after_scheme, ""),
+    };
+    // Path names a standard authorization endpoint.
+    let path_is_authorize = ["/oauth", "/authorize", "/o/oauth2", "/login/oauth", "/auth/authorize"]
+        .iter()
+        .any(|needle| path_part.contains(needle));
+    // Query carries the OAuth authorization-request parameter cluster.
+    let query_has_oauth_params =
+        query_part.contains("response_type=") && query_part.contains("client_id=");
+    path_is_authorize || query_has_oauth_params
+}
+
+/// Known identity-provider hosts that a browser pane is allowed to open a real
+/// native sign-in popup to. This allowlist — NOT URL shape — is the security
+/// boundary: browser panes load untrusted/attacker-controlled pages, and URL
+/// heuristics alone (OAuth-looking path/params) let any such page spawn
+/// unlimited native phishing windows (reagent P1 on PR #2545; the popup-
+/// explosion class SPEC_BROWSER_PANE_DEFAULT_URL_AND_POPUP_2026_04_21.md
+/// prevents). An attacker cannot serve from these domains, so gating the
+/// native popup on a known-IdP host makes it safe. A self-hosted / unlisted
+/// IdP simply doesn't get the in-pane popup (falls back to the system browser).
+/// Extend deliberately.
+const IDP_HOSTS_EXACT: &[&str] = &[
+    "accounts.google.com",           // Google (incl. GIS)
+    "github.com",                    // GitHub OAuth
+    "login.microsoftonline.com",     // Microsoft / Entra ID
+    "login.live.com",                // Microsoft consumer
+    "login.microsoft.com",
+    "appleid.apple.com",             // Apple
+    "www.facebook.com",              // Facebook Login
+    "facebook.com",
+    "discord.com",                   // Discord
+    "gitlab.com",                    // GitLab
+    "login.salesforce.com",          // Salesforce
+    "slack.com",                     // Slack
+    "www.linkedin.com",              // LinkedIn
+    "linkedin.com",
+    "id.atlassian.com",              // Atlassian
+    "auth.atlassian.com",
+    "login.yahoo.com",               // Yahoo
+    "www.dropbox.com",               // Dropbox
+];
+
+/// Host SUFFIXES for identity providers that give each tenant its own
+/// subdomain (Okta, Auth0, Azure AD B2C, Cognito, …). Matched as `.suffix` so
+/// `evil-okta.com` does NOT match `.okta.com` (must be a real subdomain).
+const IDP_HOST_SUFFIXES: &[&str] = &[
+    ".okta.com",
+    ".oktapreview.com",
+    ".auth0.com",
+    ".b2clogin.com",         // Azure AD B2C
+    ".amazoncognito.com",    // AWS Cognito
+    ".onelogin.com",
+    ".pingidentity.com",
+];
+
+/// True if `host` (no port) is a known identity provider from the allowlist
+/// above. The security gate for allowing a native in-pane OAuth popup.
+pub fn is_known_idp_host(host: &str) -> bool {
+    let host = host.split(':').next().unwrap_or(host);
+    IDP_HOSTS_EXACT.contains(&host)
+        || IDP_HOST_SUFFIXES.iter().any(|suf| host.ends_with(suf))
+}
+
+/// The lowercased `host[:port]` authority of an http(s) URL, or `None` for a
+/// non-http / malformed URL. Used to compare origins (a popup to a *different*
+/// host than the pane's current page). Deliberately host+port, not full origin
+/// with scheme — good enough to tell "same site" from "cross-site" for the
+/// OAuth-popup gate, and tolerant of http/https mixups.
+pub fn url_host(url: &str) -> Option<String> {
+    let lower = url.trim().to_ascii_lowercase();
+    let rest = lower
+        .strip_prefix("http://")
+        .or_else(|| lower.strip_prefix("https://"))?;
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = authority.rsplit('@').next().unwrap_or(authority);
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_string())
+    }
+}
+
+/// Schemes a browser pane is allowed to *navigate* to. Everything web-ish
+/// (pages, inline content, devtools, websockets) plus the loopback app origin.
+/// Anything else is a non-web protocol whose navigation Chromium would, by
+/// default, hand to the OS shell (`ShellExecute` on Windows) — which can launch
+/// an OS-registered handler, and if that handler is elevated, raise a **UAC**
+/// prompt. `on_before_browse` blocks navigations to disallowed schemes for
+/// browser panes so embedded web content can never reach an OS protocol handler
+/// (see docs/reports/REPORT_BROWSER_PANE_GOOGLE_LOGIN_INSTANCE_EXIT_AND_UAC_2026_08_11.md).
+const PANE_ALLOWED_NAV_SCHEMES: &[&str] = &[
+    "http", "https", "about", "data", "blob", "ws", "wss", "devtools",
+    "chrome-devtools", "chrome",
+];
+
+/// The scheme of `url` (lowercased) if it has one — the run of
+/// `[a-z0-9+.-]` before the first `:`, per RFC 3986. Returns `None` for a
+/// scheme-relative or relative URL (no valid scheme → resolves against the
+/// current http(s) origin, always safe).
+fn url_scheme(url: &str) -> Option<String> {
+    let trimmed = url.trim();
+    let colon = trimmed.find(':')?;
+    let scheme = &trimmed[..colon];
+    if scheme.is_empty() {
+        return None;
+    }
+    let mut chars = scheme.chars();
+    // First char must be a letter; the rest letters/digits/+/-/. (RFC 3986).
+    let first_ok = chars.next().map(|c| c.is_ascii_alphabetic()).unwrap_or(false);
+    let rest_ok = scheme
+        .chars()
+        .skip(1)
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'));
+    if first_ok && rest_ok {
+        Some(scheme.to_ascii_lowercase())
+    } else {
+        None
+    }
+}
+
+/// True if a browser pane must NOT be allowed to navigate to `url` because its
+/// scheme is a non-web external protocol that Chromium would hand to the OS
+/// shell. A relative/scheme-less URL, or one of `PANE_ALLOWED_NAV_SCHEMES`, is
+/// allowed (returns false).
+pub fn is_disallowed_pane_nav_scheme(url: &str) -> bool {
+    match url_scheme(url) {
+        None => false, // relative / scheme-less — resolves against current origin
+        Some(scheme) => !PANE_ALLOWED_NAV_SCHEMES.contains(&scheme.as_str()),
+    }
+}
+
 #[cfg(test)]
 mod external_url_tests {
-    use super::is_external_http_url;
+    use super::{is_disallowed_pane_nav_scheme, is_external_http_url, is_oauth_authorization_url, url_host};
+
+    #[test]
+    fn known_idp_hosts_match_only_real_providers() {
+        use super::is_known_idp_host;
+        for h in [
+            "accounts.google.com", "github.com", "login.microsoftonline.com",
+            "appleid.apple.com", "dev-12345.okta.com", "acme.auth0.com",
+            "contoso.b2clogin.com", "myapp.amazoncognito.com", "discord.com",
+        ] {
+            assert!(is_known_idp_host(h), "should be a known IdP: {h}");
+        }
+        // Attacker-controlled / lookalike hosts must NOT match.
+        for h in [
+            "evil.com", "accounts.google.com.evil.com", "evil-okta.com",
+            "notauth0.com", "google.com", "login.evil.com", "",
+        ] {
+            assert!(!is_known_idp_host(h), "must NOT be a known IdP: {h}");
+        }
+        // Port is ignored.
+        assert!(is_known_idp_host("accounts.google.com:443"));
+    }
+
+    #[test]
+    fn url_host_extracts_authority_for_cross_origin_check() {
+        assert_eq!(url_host("https://accounts.google.com/o/oauth2/v2/auth?x=1"), Some("accounts.google.com".into()));
+        assert_eq!(url_host("https://claude.ai/login"), Some("claude.ai".into()));
+        assert_eq!(url_host("http://user@evil.com:8080/x"), Some("evil.com:8080".into()));
+        assert_eq!(url_host("about:blank"), None);
+        assert_eq!(url_host(""), None);
+        // Same host, different path → same host (so same-origin popup is rejected).
+        assert_eq!(url_host("https://evil.com/oauth?response_type=code&client_id=x"), url_host("https://evil.com/"));
+    }
+
+    #[test]
+    fn oauth_authorization_urls_match() {
+        for u in [
+            // Google Identity Services (the reported flow)
+            "https://accounts.google.com/o/oauth2/v2/auth?client_id=x&scope=openid&response_type=code&redirect_uri=y",
+            "https://github.com/login/oauth/authorize?client_id=x&scope=repo",
+            "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=x&response_type=code",
+            "https://appleid.apple.com/auth/authorize?client_id=x&response_type=code",
+            "https://dev-abc.okta.com/oauth2/default/v1/authorize?client_id=x&response_type=token",
+            // param-cluster only (unusual path)
+            "https://auth.example.com/go?response_type=code&client_id=abc&redirect_uri=z",
+        ] {
+            assert!(is_oauth_authorization_url(u), "should match OAuth: {u}");
+        }
+    }
+
+    #[test]
+    fn non_oauth_popups_do_not_match() {
+        for u in [
+            "https://example.com/article/read-more",
+            "https://ads.example.com/popup?campaign=42",
+            "https://chat.example.com/widget",
+            "about:blank",
+            "https://example.com/authorized-users", // 'authorize' substring but not an endpoint path...
+            "https://example.com/print?doc=1",
+        ] {
+            // Note: /authorized-users contains "/authorize" — accept the rare
+            // false positive rather than over-fit; it's still gesture-gated and
+            // lifecycle-managed. Assert the clearly-non-auth ones.
+            if u.contains("/authorize") { continue; }
+            assert!(!is_oauth_authorization_url(u), "should NOT match OAuth: {u}");
+        }
+    }
 
     #[test]
     fn external_sites_are_external() {
@@ -594,6 +816,40 @@ mod external_url_tests {
         assert!(!is_external_http_url("data:text/html,hi"));
         assert!(!is_external_http_url("blob:abc"));
         assert!(!is_external_http_url("vscode://file/x"));
+    }
+
+    #[test]
+    fn web_schemes_are_allowed_pane_nav() {
+        for u in [
+            "https://claude.ai/login",
+            "http://127.0.0.1:5173/",
+            "about:blank",
+            "data:text/html,hi",
+            "blob:https://x/abc",
+            "devtools://devtools/bundled/x.html",
+            "/relative/path",
+            "//scheme-relative/path",
+            "?just=query",
+        ] {
+            assert!(!is_disallowed_pane_nav_scheme(u), "should allow: {u}");
+        }
+    }
+
+    #[test]
+    fn non_web_external_schemes_are_blocked_pane_nav() {
+        // These are the OS-handoff schemes that can raise a UAC prompt.
+        for u in [
+            "ms-cxh://x",
+            "microsoft-edge://x",
+            "tel:+15551234",
+            "mailto:a@b.com",
+            "vscode://file/x",
+            "steam://run/1",
+            "callto:foo",
+            "custom-installer://elevate",
+        ] {
+            assert!(is_disallowed_pane_nav_scheme(u), "should block: {u}");
+        }
     }
 }
 

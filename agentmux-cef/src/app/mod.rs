@@ -368,9 +368,38 @@ wrap_browser_view_delegate! {
             } else {
                 RuntimeStyle::ALLOY
             };
+            // OAuth sign-in popup (non-DevTools): a tall, centered, portrait-ish
+            // window suits a sign-in form. NOTE: this Views-delegate path only
+            // sizes an **Alloy/Views-hosted** popup. Under the shipping **Chrome
+            // runtime**, CEF creates and owns the popup window itself and this
+            // `on_popup_browser_view_created` callback does not fire for it, so
+            // the sizing below is currently inert on the shipping build (the
+            // popup comes up at CEF's default size). Sizing the Chrome-runtime
+            // popup needs a different hook (the CEF `on_before_popup`
+            // window_info out-param, not exposed by the current cef-rs wrapper)
+            // — tracked as a follow-up ("circle back on login-window sizing").
+            // The bounds are still computed/passed so the Alloy path (and a
+            // future Chrome-sizing hook) get correct geometry. macOS/Linux
+            // return None from get_monitor_work_area (stubs) → default sizing.
+            let initial_bounds = if is_devtools == 0 {
+                get_monitor_work_area(0, 0).map(|(wx, wy, ww, wh)| {
+                    let w = (ww as f64 * 0.55).round() as i32;
+                    let h = (wh as f64 * 0.95).round() as i32;
+                    (wx + (ww - w) / 2, wy + (wh - h) / 2, w, h)
+                })
+            } else {
+                None
+            };
+            if is_devtools == 0 {
+                tracing::info!(
+                    target: "oauth-popup",
+                    ?initial_bounds,
+                    "[oauth-popup] step 2/4: on_popup_browser_view_created — creating tall frameless popup window",
+                );
+            }
             let mut window_delegate = AgentMuxWindowDelegate::new(
                 RefCell::new(popup_browser_view.cloned()),
-                None,
+                initial_bounds,
                 frameless,
                 runtime_style,
                 None, // popup (DevTools etc.) — don't register; not pane-host
