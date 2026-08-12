@@ -8,6 +8,8 @@
 
 import type { JSX } from "solid-js";
 
+import "@/app/view/warden-shared/warden-manager-chrome.scss";
+
 export const WardenInternetStub = (): JSX.Element => (
     <div class="warden-manager-body">
         <div class="warden-section-stub">

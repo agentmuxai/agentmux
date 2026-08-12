@@ -43,30 +43,16 @@
     overflow: hidden;
 }
 
-// ── Shared manager chrome ──────────────────────────────────────────────
-// Small utility classes every Warden manager (Host/LAN/Internet/Audit/
-// Supervisor) reuses, migrated from the original single-page warden.scss's
-// per-section header/stub styling.
-
-.warden-manager-summary {
-    margin: 0 0 var(--space-2);
-    opacity: 0.7;
-    font-size: 0.9em;
-}
-
-.warden-section-stub {
-    font-size: 0.9em;
-    opacity: 0.6;
-    line-height: 1.5;
-
-    code {
-        font-family: monospace;
-        font-size: 0.95em;
-        padding: 1px 4px;
-        border-radius: 0;
-        background: var(--border-color);
-    }
-}
+// Note: shared manager-content classes (.warden-manager-summary,
+// .warden-section-stub, .warden-manager-body/-error/-table/-mono/-dim/
+// -footnote) do NOT live here — they're in warden-shared/warden-manager-
+// chrome.scss, explicitly imported by every manager that uses them. Unlike
+// .bundle-manager-* (reused by convention, matching Armory's own established
+// pattern — see the file-header comment above), these classes have no such
+// precedent forcing implicit-only reuse, so every consumer imports them
+// explicitly (reagent P2, PR #2553 — some managers imported the shared
+// chrome stylesheet and some silently relied on it loading transitively via
+// a sibling import; fixed by requiring the explicit import everywhere).
 
 // ── Responsive container queries ─────────────────────────────────────────────
 // Identical breakpoints to armory-view.scss's @container armory rules —
