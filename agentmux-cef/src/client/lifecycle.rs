@@ -544,7 +544,14 @@ impl AgentMuxHandler {
         // browser is a distinct popup, not the pane's own frame.
         if let Some(b) = browser {
             let id = b.identifier();
-            if self.popup_browser_ids.remove(&id) {
+            // CHECK membership only — do NOT remove here. do_close fires before
+            // on_before_close for the same browser, and on_before_close relies
+            // on the id still being present to tell a popup's own self-close
+            // (was_popup=true → no cascade) apart from the PANE closing
+            // (was_popup=false → cascade-close remaining popups). Removing here
+            // made a self-closing popup look like the pane and force-close a
+            // sibling in-progress popup (reagent P1 round 4 on #2545).
+            if self.popup_browser_ids.contains(&id) {
                 match browser_view_get_for_browser(Some(b)).and_then(|v| v.window()) {
                     Some(mut win) => {
                         tracing::info!(
@@ -813,9 +820,10 @@ impl AgentMuxHandler {
         // accumulate one stale entry per closed browser over a session.
         self.crash_history.remove(&browser.identifier());
         self.memory_pause_history.remove(&browser.identifier());
-        // Defensive: drop any popup tag (do_close normally consumes it and
-        // closes the window; this prevents a stale id if a popup ever tears
-        // down without do_close firing).
+        // Remove this browser's popup tag HERE (not in do_close — do_close only
+        // checks membership). `closing_was_popup` then reliably distinguishes a
+        // popup's own self-close (true) from the PANE closing (false), which the
+        // cascade below depends on.
         let closing_id = browser.identifier();
         let closing_was_popup = self.popup_browser_ids.remove(&closing_id);
 
