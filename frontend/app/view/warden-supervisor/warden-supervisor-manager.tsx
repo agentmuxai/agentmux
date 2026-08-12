@@ -11,6 +11,8 @@
 
 import type { JSX } from "solid-js";
 
+import "@/app/view/warden-shared/warden-manager-chrome.scss";
+
 export const WardenSupervisorManager = (): JSX.Element => (
     <div class="warden-manager-body">
         <p class="warden-manager-summary">Opt-in continuation nudging for stalled agents</p>

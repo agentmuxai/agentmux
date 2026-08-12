@@ -1,11 +1,33 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Shared visual primitives for Warden managers that render a data table
-// (Host, LAN) — split out of the original single-page warden.scss, where
-// LAN's markup reused Host's `.warden-host-*` classes by name even though
-// they're not Host-specific. Named generically here since both managers
-// import it. Imported by warden-host-manager.tsx and warden-lan-manager.tsx.
+// Shared visual primitives for every Warden manager — split out of the
+// original single-page warden.scss, where LAN's markup reused Host's
+// `.warden-host-*` classes by name even though they're not Host-specific.
+// Named generically here. Every manager component that uses any class
+// below MUST explicitly `import` this file — no implicit/transitive
+// reliance (reagent P2, PR #2553: some managers imported it and some
+// silently relied on it loading via a sibling's import instead).
+
+.warden-manager-summary {
+    margin: 0 0 var(--space-2);
+    opacity: 0.7;
+    font-size: 0.9em;
+}
+
+.warden-section-stub {
+    font-size: 0.9em;
+    opacity: 0.6;
+    line-height: 1.5;
+
+    code {
+        font-family: monospace;
+        font-size: 0.95em;
+        padding: 1px 4px;
+        border-radius: 0;
+        background: var(--border-color);
+    }
+}
 
 .warden-manager-body {
     display: flex;

@@ -14,6 +14,7 @@ import { useTick } from "@/app/hook/useTick";
 import { ageMs, formatAge, WARDEN_REFRESH_MS } from "@/app/view/warden-shared/warden-shared";
 import { fetchWardenAudit, WARDEN_AUDIT_LIMIT, type AuditEntry } from "./warden-audit-shared";
 
+import "@/app/view/warden-shared/warden-manager-chrome.scss";
 import "./warden-audit-manager.scss";
 
 export const WardenAuditManager = (): JSX.Element => {
