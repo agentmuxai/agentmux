@@ -548,6 +548,93 @@ fn test_handler_audit_log() {
     assert!(!log[0].success);
 }
 
+/// Ordinary jekt injections (the only path that runs today) always leave
+/// `outcome`/`reason` unset — those fields exist only for Warden Supervisor
+/// entries, added via `log_audit`'s two new trailing params.
+#[test]
+fn test_handler_audit_log_ordinary_jekt_has_no_outcome() {
+    let mut handler = Handler::new();
+    handler.register_agent("agent1", "block1", None).unwrap();
+    handler.inject_message(InjectionRequest {
+        target_agent: "agent1".to_string(),
+        message: "test".to_string(),
+        source_agent: Some("src".to_string()),
+        request_id: Some("req-1".to_string()),
+        priority: None,
+        wait_for_idle: false,
+        jekt_tier: None,
+        delivery_tier: None,
+        forward_hops: 0,
+    });
+
+    let log = handler.get_audit_log(10);
+    assert_eq!(log.len(), 1);
+    assert!(log[0].outcome.is_none());
+    assert!(log[0].reason.is_none());
+}
+
+/// `log_audit`'s new outcome/reason params, when set, land in the
+/// resulting entry — this is the path `record_supervisor_decision` (a
+/// follow-up PR) will call.
+#[test]
+fn test_log_audit_stores_outcome_and_reason_when_provided() {
+    let mut handler = Handler::new();
+    handler.log_audit(
+        None,
+        "agent1",
+        "block1",
+        "continue",
+        true,
+        None,
+        "req-1",
+        Some("nudge_sent"),
+        Some("agent paused asking for permission to continue"),
+    );
+
+    let log = handler.get_audit_log(10);
+    assert_eq!(log.len(), 1);
+    assert_eq!(log[0].outcome.as_deref(), Some("nudge_sent"));
+    assert_eq!(
+        log[0].reason.as_deref(),
+        Some("agent paused asking for permission to continue"),
+    );
+}
+
+/// `AuditLogEntry`'s new fields must round-trip through serde and, per the
+/// struct's `skip_serializing_if` convention (matching `source_agent`/
+/// `error_message`), be OMITTED from the JSON entirely when `None` — a
+/// back-compat guard for any existing consumer of the audit JSON shape.
+#[test]
+fn test_audit_log_entry_outcome_field_serde_roundtrip() {
+    let with_outcome = AuditLogEntry {
+        timestamp: 1,
+        source_agent: None,
+        target_agent: "agent1".to_string(),
+        block_id: "block1".to_string(),
+        message_hash: "hash".to_string(),
+        message_length: 0,
+        success: true,
+        error_message: None,
+        request_id: "req-1".to_string(),
+        outcome: Some("nudge_declined".to_string()),
+        reason: Some("consecutive-nudge ceiling reached".to_string()),
+    };
+    let json = serde_json::to_value(&with_outcome).unwrap();
+    assert_eq!(json["outcome"], "nudge_declined");
+    assert_eq!(json["reason"], "consecutive-nudge ceiling reached");
+    let round_tripped: AuditLogEntry = serde_json::from_value(json).unwrap();
+    assert_eq!(round_tripped.outcome.as_deref(), Some("nudge_declined"));
+
+    let without_outcome = AuditLogEntry {
+        outcome: None,
+        reason: None,
+        ..with_outcome
+    };
+    let json = serde_json::to_value(&without_outcome).unwrap();
+    assert!(json.get("outcome").is_none(), "outcome must be omitted, not null, when None");
+    assert!(json.get("reason").is_none(), "reason must be omitted, not null, when None");
+}
+
 #[test]
 fn test_handler_audit_log_ring_buffer() {
     let mut handler = Handler::new();
@@ -561,6 +648,8 @@ fn test_handler_audit_log_ring_buffer() {
             true,
             None,
             &format!("req-{}", i),
+            None,
+            None,
         );
     }
 
