@@ -414,6 +414,7 @@ mod recent_sessions_tests {
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
         };
         let mut def_mut = def.clone();
@@ -731,6 +732,7 @@ mod recent_sessions_tests {
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
         };
         wstore.agent_def_insert(&mut tpl).unwrap();
@@ -762,6 +764,7 @@ mod recent_sessions_tests {
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
+            auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
         };
         wstore.agent_def_insert(&mut user_a).unwrap();

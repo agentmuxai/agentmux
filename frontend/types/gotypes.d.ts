@@ -336,6 +336,15 @@ declare global {
          * yet — see `agent_define_core`'s `validate_vendor_base_url`.
          */
         model_vendor_base_url?: string;
+        /**
+         * Per-agent opt-in: when non-zero, a running Warden Supervisor
+         * watcher agent is permitted to auto-continue this agent's session
+         * on turn-end (subject to a server-side consecutive-nudge ceiling).
+         * 0 (default) = opt-in required, same fail-by-default posture as
+         * use_ambient_login. Schema v17. Toggled from the Warden Supervisor
+         * panel.
+         */
+        auto_continue_enabled?: number;
     };
 
     // ── v6: identity, instance, junction ────────────────────────────────────

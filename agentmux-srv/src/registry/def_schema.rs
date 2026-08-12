@@ -129,6 +129,14 @@ pub struct DefinitionRecordV1 {
     /// the container_* fields — no envelope bump.
     #[serde(default)]
     pub use_ambient_login: i64,
+    /// Per-agent opt-in letting a Warden Supervisor watcher agent
+    /// auto-continue this agent's session on turn-end (mirrors the SQLite
+    /// v17 column —
+    /// docs/analysis/ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md).
+    /// Additive under `#[serde(default)]`, same as `use_ambient_login` —
+    /// no envelope bump.
+    #[serde(default)]
+    pub auto_continue_enabled: i64,
     /// System-prompt / mcp / env / soul / startup blobs (db_agent_content),
     /// embedded so a cross-channel agent launches with its instructions.
     #[serde(default)]
@@ -214,6 +222,7 @@ mod tests {
                 container_volumes: "[]".to_string(),
                 container_name: String::new(),
                 use_ambient_login: 0,
+                auto_continue_enabled: 0,
                 content: Vec::new(),
                 skills: Vec::new(),
             },

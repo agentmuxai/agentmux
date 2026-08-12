@@ -86,6 +86,7 @@ const DEF_COLUMNS: &[(&str, &str)] = &[
     ("container_volumes", "'[]'"),
     ("container_name", "''"),
     ("use_ambient_login", "0"),
+    ("auto_continue_enabled", "0"),
 ];
 
 /// Outcome stats — surfaced in the srv log.
@@ -295,6 +296,7 @@ fn read_user_definitions(db: &Path) -> Result<Vec<(DefinitionRecord, i64)>, rusq
                 container_volumes: row.get(23)?,
                 container_name: row.get(24)?,
                 use_ambient_login: row.get(25)?,
+                auto_continue_enabled: row.get(26)?,
                 content: Vec::new(),
                 skills: Vec::new(),
             })

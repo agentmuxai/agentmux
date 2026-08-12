@@ -305,6 +305,7 @@ mod tests {
                 container_volumes: "[]".to_string(),
                 container_name: String::new(),
                 use_ambient_login: 0,
+                auto_continue_enabled: 0,
                 content: Vec::new(),
                 skills: Vec::new(),
             },

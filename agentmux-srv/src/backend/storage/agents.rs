@@ -128,6 +128,15 @@ pub struct AgentDefinition {
     /// (known limitation, not wired into the registry mirror).
     #[serde(default)]
     pub model_vendor_base_url: String,
+    /// Per-agent opt-in: when non-zero, a running Warden Supervisor watcher
+    /// agent is permitted to auto-continue this agent's session on
+    /// turn-end (subject to a server-side consecutive-nudge ceiling).
+    /// Default 0 = opt-in required, same fail-by-default posture as
+    /// `use_ambient_login`. Schema v17. Toggled from the Warden Supervisor
+    /// panel. See
+    /// docs/analysis/ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md.
+    #[serde(default)]
+    pub auto_continue_enabled: i64,
 }
 
 /// Derive a filesystem-safe slug from a display name. Lowercase,
@@ -310,7 +319,7 @@ impl Store {
                     agent_type, environment, agent_bus_id, is_seeded,
                     accounts, parent_id, branch_label, updated_at,
                     user_hidden, container_image, container_volumes, container_name,
-                    use_ambient_login, model_vendor_base_url
+                    use_ambient_login, model_vendor_base_url, auto_continue_enabled
              FROM db_agent_definitions
              WHERE is_seeded = 0 AND parent_id = ?1
              ORDER BY updated_at DESC, created_at DESC",
@@ -371,7 +380,7 @@ impl Store {
                     agent_type, environment, agent_bus_id, is_seeded,
                     accounts, parent_id, branch_label, updated_at,
                     user_hidden, container_image, container_volumes, container_name,
-                    use_ambient_login, model_vendor_base_url
+                    use_ambient_login, model_vendor_base_url, auto_continue_enabled
              FROM db_agent_definitions
              WHERE id = ?1",
         )?;
@@ -393,7 +402,7 @@ impl Store {
                         agent_type, environment, agent_bus_id, is_seeded,
                         accounts, parent_template_id, branch_label, updated_at,
                         user_hidden, container_image, container_volumes, container_name,
-                        use_ambient_login, model_vendor_base_url
+                        use_ambient_login, model_vendor_base_url, auto_continue_enabled
                  FROM db_agents
                  ORDER BY updated_at DESC, created_at ASC",
             )?;
@@ -573,9 +582,9 @@ impl Store {
              idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id,
              is_seeded, accounts, parent_id, branch_label, updated_at, user_hidden,
              container_image, container_volumes, container_name, use_ambient_login,
-             model_vendor_base_url)
+             model_vendor_base_url, auto_continue_enabled)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                     ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)",
+                     ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)",
             params![
                 agent.id,
                 agent.slug,
@@ -613,6 +622,7 @@ impl Store {
                 agent.container_name,
                 agent.use_ambient_login,
                 agent.model_vendor_base_url,
+                agent.auto_continue_enabled,
             ],
         )?;
         // Persist the stamped updated_at before we leave the lock so the
@@ -738,7 +748,7 @@ impl Store {
                         agent_type, environment, agent_bus_id, is_seeded,
                         accounts, parent_id, branch_label, updated_at,
                         user_hidden, container_image, container_volumes, container_name,
-                        use_ambient_login, model_vendor_base_url
+                        use_ambient_login, model_vendor_base_url, auto_continue_enabled
                  FROM db_agent_definitions
                  WHERE (lower(trim(name)) = ?1 OR slug = ?2)
                    AND is_seeded = 0
@@ -788,10 +798,10 @@ impl Store {
                     idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id,
                     is_seeded, accounts, parent_id, branch_label, updated_at, user_hidden,
                     container_image, container_volumes, container_name, use_ambient_login,
-                    model_vendor_base_url)
+                    model_vendor_base_url, auto_continue_enabled)
                  VALUES
                    (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                    ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)",
+                    ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)",
                 params![
                     agent.id, agent.slug, agent.name, agent.icon, agent.provider,
                     agent.description, agent.working_directory, agent.shell,
@@ -804,6 +814,7 @@ impl Store {
                     agent.container_image, agent.container_volumes, agent.container_name,
                     agent.use_ambient_login,
                     agent.model_vendor_base_url,
+                    agent.auto_continue_enabled,
                 ],
             )?;
             agent.created_at
@@ -911,7 +922,8 @@ impl Store {
                  restart_on_crash=?9, idle_timeout_minutes=?10,
                  agent_type=?11, environment=?12, agent_bus_id=?13, accounts=?14, updated_at=?15,
                  container_image=?17, container_volumes=?18, container_name=?19,
-                 use_ambient_login=?20, branch_label=?21, model_vendor_base_url=?22
+                 use_ambient_login=?20, branch_label=?21, model_vendor_base_url=?22,
+                 auto_continue_enabled=?23
                  WHERE id=?16",
                 params![
                     agent.name,
@@ -936,6 +948,7 @@ impl Store {
                     agent.use_ambient_login,
                     agent.branch_label,
                     agent.model_vendor_base_url,
+                    agent.auto_continue_enabled,
                 ],
             )?
         };
@@ -2132,6 +2145,7 @@ fn map_agent_definition_row(row: &rusqlite::Row) -> rusqlite::Result<AgentDefini
         container_name: row.get(24)?,
         use_ambient_login: row.get(25)?,
         model_vendor_base_url: row.get(26)?,
+        auto_continue_enabled: row.get(27)?,
     })
 }
 

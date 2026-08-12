@@ -110,7 +110,13 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 7;
 ///        variant into a running agent is explicitly out of scope for this
 ///        version (per that spec's non-goals) — this column only makes the
 ///        data storable/exportable/importable.
-pub const OBJECT_SCHEMA_VERSION: i64 = 16;
+///   v17 — auto_continue_enabled on both db_agent_definitions and db_agents:
+///        per-agent opt-in letting a Warden Supervisor watcher agent
+///        auto-continue this agent's session on turn-end (subject to a
+///        server-side consecutive-nudge ceiling). Defaults to 0 (opt-in
+///        required — fail-by-default, same posture as use_ambient_login).
+///        See docs/analysis/ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md.
+pub const OBJECT_SCHEMA_VERSION: i64 = 17;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -247,7 +253,8 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             container_volumes    TEXT NOT NULL DEFAULT '[]',
             container_name       TEXT NOT NULL DEFAULT '',
             use_ambient_login    INTEGER NOT NULL DEFAULT 0,
-            model_vendor_base_url TEXT NOT NULL DEFAULT ''
+            model_vendor_base_url TEXT NOT NULL DEFAULT '',
+            auto_continue_enabled INTEGER NOT NULL DEFAULT 0
         );
         CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_definitions_slug
             ON db_agent_definitions(slug);
@@ -432,7 +439,11 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
 
             -- Redirects this agent's harness at a non-default model vendor
             -- backend (schema v15) — see db_agent_definitions' column doc.
-            model_vendor_base_url TEXT NOT NULL DEFAULT ''
+            model_vendor_base_url TEXT NOT NULL DEFAULT '',
+
+            -- Warden Supervisor auto-continue opt-in (schema v17) — see
+            -- db_agent_definitions' column doc.
+            auto_continue_enabled INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_agents_is_template
             ON db_agents(is_template);
@@ -625,6 +636,11 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         // object of {provider_id: content} variants, additive to the
         // existing flat `instructions` column.
         "ALTER TABLE db_bundles ADD COLUMN instructions_by_provider TEXT NOT NULL DEFAULT '{}'",
+        // v17: Warden Supervisor auto-continue opt-in (fail-by-default,
+        // same posture as use_ambient_login) — see
+        // ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md.
+        "ALTER TABLE db_agent_definitions ADD COLUMN auto_continue_enabled INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE db_agents ADD COLUMN auto_continue_enabled INTEGER NOT NULL DEFAULT 0",
     ] {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();
@@ -1165,6 +1181,20 @@ mod tests {
 
         assert!(column_exists(&conn, "db_agent_definitions", "model_vendor_base_url"));
         assert!(column_exists(&conn, "db_agents", "model_vendor_base_url"));
+    }
+
+    #[test]
+    fn test_object_schema_has_auto_continue_enabled_on_both_tables() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        run_object_schema(&conn).unwrap();
+        // Second pass: the ALTER TABLE array's duplicate-column guard must
+        // not error when the column already exists (fresh installs get it
+        // via CREATE TABLE; the ALTER is for upgrading pre-v17 databases).
+        run_object_schema(&conn).unwrap();
+
+        assert!(column_exists(&conn, "db_agent_definitions", "auto_continue_enabled"));
+        assert!(column_exists(&conn, "db_agents", "auto_continue_enabled"));
     }
 
     #[test]
